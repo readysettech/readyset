@@ -39,6 +39,7 @@ async-stream = "0.3.2"
 parking_lot = "0.11.2"
 indicatif = "0.16"
 prometheus-parse = "0.2.2"
+mysql = "22.0"
 
 # local dependencies
 noria = { path = "../noria/noria" }
@@ -50,6 +51,7 @@ noria-client = { path = "../noria-client" }
 noria-server = { path = "../noria/server" }
 noria-mysql = { path = "../noria-mysql" }
 readyset-logging = { path = "../readyset-logging" }
+noria-client-test-helpers = { path = "../noria-client/test-helpers", features = ["mysql"] }
 
 [lib]
 path = "src/lib.rs"

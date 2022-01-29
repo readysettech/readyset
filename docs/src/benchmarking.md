@@ -11,39 +11,58 @@
 Benchmarks are all executed as subcommands on the `benchmarks` binary.
 The complete set of benchmarks can be seen with `cargo run --bin benchmarks -- --help`.
 
-### Running benchmarks from specs
+### Specifying a ReadySet deployment
+
+Benchmarks are run against any deployment that is compatible with MySQL,
+for ReadySet that is done by running a MySQL adapter. A deployment is
+specified by the `target` and `setup` MySQL connection strings.
+
+These can be specified in several ways:
+ * Through the `--target-conn-str` and `--setup-conn-str` in the format,
+   `mysql://<username>:<pass>@<hostname>:<port>`. This requires that a
+ * By passing a YAML file of deployment parameters, `--deployment
+   <path_to_yaml>`. See `//benchmarks/src/yaml/deployments` for
+   example deployment files, `local.yaml` may be used for the default
+   local ReadySet dev deployment.
+ * By specifying `--local`. This runs a noria-server and noria-mysql
+   adapter in the benchmarking process. This does not include an
+   upstream database and some benchmarks may not work.
+ * By specifying `--local-with-mysql mysql://<username>:<pass>@<hostname>:<port>`.
+   This runs a noria-server and noria-mysql adapter in the benchmarking
+   process with an external MySQL deployment as upstream.
+
+> `--target-conn-str`, `--setup-conn-str` and the YAML file require that
+> a deployment that accepts MySQL queries exists at the addresses the 
+> target and setup connection strings refer to. For a ReadySet
+> deployment this typically means that the upstream MySQL database lives
+> at `--setup-conn-str`, a noria-mysql instance can be accessed via
+> `--target-conn-str`, and atleast one noria-server instance is running.
+> See [Running ReadySet](./running-readyset.md) for more information on
+> how to run a local ReadySet deployment.
+
+### Specifying a benchmark to execute
+There are several ways to specify the benchmark to be execute:
+ * Through using a subcommand and its arguments. `cargo run --bin
+   benchmarks -- <deployment parameters> <benchmark> <benchmark args>`
+ * By passing a YAML file of benchmark parameters, `--benchmark
+   <path_to_yaml>`. See `//benchmarks/src/yaml/benchmarks` for
+   example benchmark files. 
+
+### Additional Arguments 
+ * `--skip-setup`: Run a benhmark without performing setup. Setup will fail if the MySQL database
+                   already includes any of the tables.
+ * `--iterations <N>`: Run a benchmark N times and calculate aggregates over the benchmark results.
+                       Not supported by all benchmarks.
+
+<!-- TODO(justin): Add more useful examples -->
+### Example commands
 ```
 # From the root of the ReadySet repo.
 cargo run --bin benchmarks -- --iterations 10 --benchmark benchmarks/src/yaml/benchmarks/read_benchmark_irl_small.yaml \
     --deployment benchmarks/src/yaml/deployments/local.yaml
 ```
 
-The `--deployment` and `--benchmark` arguments can be used to pass in YAML that completely
-define the deployment we are executing the benchmarks against, and the benchmark we are
-running.
-
-See `//benchmarks/src/yaml` for existing YAML specifications.
-
-> <b>Useful Arguments</b>
->  
-> * `--skip-setup`: Run a benhmark without performing setup. Setup will fail if the MySQL database
->                   already includes any of the tables.
-> * `--iterations <N>`: Run a benchmark N times and calculate aggregates over the benchmark results.
->                       Not supported by all benchmarks.
-
-### Specifying your own benchmark parameters.
-
-```
-cargo run --bin benchmarks -- <benchmark> <benchmark params>
-```
-
-**Deployment Parameters**
-
-Benchmarks require specifying the parameters of the deployment we are testing, such as (1) the readyset-adapter
-connection string, (2) the mysql database connection string, (3) optional prometheus parameters.
-
-**Benchmark Parameters**
-
+### Writing new benchmarks specifications
 Each benchmark may specify a unique set of parameters. Run `cargo run --bin benchmarks -- <benchmark> --help`
 for the set of benchmark parameters.
 
@@ -53,8 +72,6 @@ for the set of benchmark parameters.
 > and how to generate queries in the benchmark, respectively. See: 
 >  * `DistributionAnnotation` docs for the complete annotation spec format.
 >  * `//benchmarks/src/data/irl` for examples on how to annotate schemas and query specs.
-
-### Creating a new benchmark specification.
 
 Executing any benchmark outputs a benchmark specification at the start of the run that can be copied to
 a file. The argument `--only-to-spec <file>` may be used to write the benchmark spec to a file instead

@@ -7,11 +7,15 @@ use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::MetricKindMask;
 use mysql_async::prelude::Queryable;
 use noria::status::{ReadySetStatus, SnapshotStatus};
+use noria_server::Handle;
 use std::convert::TryFrom;
 use std::io::Write;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::warn;
+
+use noria_client_test_helpers::mysql_helpers::MySQLAdapter;
+use noria_client_test_helpers::setup_like_prod_with_handle;
 
 use benchmarks::benchmark::{Benchmark, BenchmarkControl, BenchmarkResults, DeploymentParameters};
 use benchmarks::benchmark_histogram;
@@ -66,6 +70,23 @@ struct BenchmarkRunner {
     /// file.
     #[clap(long, value_hint = ValueHint::FilePath)]
     results_file: Option<PathBuf>,
+
+    /// Runs the benchmarks against a noria adapter and server run in the same process. Note that
+    /// some of the benchmarks with certain schemas may not work without an upstream database.
+    /// When using `--local` benchmark results may vary based on compiler optimizations, using
+    /// `--release` will drastically improve results.
+    ///
+    /// If this argument is passed, the deployment parameter is ignored.
+    #[clap(long)]
+    local: bool,
+
+    /// Runs the benchmarks against a noria adapter and server run in the same process with the
+    /// provided external upstream MySQL database. When using `--local` benchmark results may vary
+    /// based on compiler optimizations, using `--release` will drastically improve results.
+    ///
+    /// If this argument is passed, the deployment parameter is ignored.
+    #[clap(long)]
+    local_with_mysql: Option<String>,
 }
 
 impl BenchmarkRunner {
@@ -142,14 +163,49 @@ impl BenchmarkRunner {
         Some((handle, tx))
     }
 
+    pub async fn start_local(&self, mysql_addr: Option<String>) -> (DeploymentParameters, Handle) {
+        let (mysql_opts, handle) = setup_like_prod_with_handle::<MySQLAdapter>(
+            noria_client::BackendBuilder::new().require_authentication(false),
+            mysql_addr.clone(),
+            true, // wait_for_backend
+        )
+        .await;
+
+        let target_conn_str = format!(
+            "mysql://{}:{}",
+            mysql_opts.ip_or_hostname(),
+            mysql_opts.tcp_port()
+        );
+
+        let setup_conn_str = mysql_addr.unwrap_or_else(|| target_conn_str.clone());
+
+        (
+            DeploymentParameters {
+                target_conn_str,
+                setup_conn_str,
+                ..Default::default()
+            },
+            handle,
+        )
+    }
+
     pub async fn run(mut self) -> anyhow::Result<()> {
         if let Some(f) = &self.benchmark {
             self.benchmark_cmd = Some(serde_yaml::from_str(&std::fs::read_to_string(f)?)?);
         }
 
-        if let Some(f) = &self.deployment {
+        let mut handle = None;
+        if self.local_with_mysql.is_some() {
+            let (params, h) = self.start_local(self.local_with_mysql.clone()).await;
+            handle = Some(h);
+            self.deployment_params = params;
+        } else if self.local {
+            let (params, h) = self.start_local(None).await;
+            handle = Some(h);
+            self.deployment_params = params;
+        } else if let Some(f) = &self.deployment {
             self.deployment_params = serde_yaml::from_str(&std::fs::read_to_string(f)?)?;
-        }
+        };
 
         // After this point deployment_params and benchmark_cmd are guaranteed to be Some.
         let cmd_as_yaml = serde_yaml::to_string(&self.benchmark_cmd.as_ref().unwrap())?;
@@ -245,6 +301,11 @@ impl BenchmarkRunner {
                 .send()
                 .await?
                 .error_for_status()?;
+        }
+
+        if let Some(h) = handle.as_mut() {
+            h.shutdown();
+            h.wait_done().await;
         }
 
         Ok(())
