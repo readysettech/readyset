@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use anyhow::bail;
 use clap::{AppSettings, Parser, ValueHint};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::MetricKindMask;
@@ -189,23 +190,70 @@ impl BenchmarkRunner {
         )
     }
 
+    /// Warn if deployment parameters are overwritten by `--local` or `--deployment`.
+    pub fn warn_if_deployment_params(&self, reason: &str) {
+        let params = &self.deployment_params;
+        if !params.target_conn_str.is_empty()
+            || !params.setup_conn_str.is_empty()
+            || params.instance_label.as_str() != "local"
+        {
+            warn!(
+                "--target-conn-str, --setup-conn-str, or --instance-label were provided but will \
+                be overwritten by --{}",
+                reason
+            );
+        }
+
+        if params.prometheus_push_gateway.is_some() || params.prometheus_endpoint.is_some() {
+            warn!(
+                "--prometheus-push-gateway or --prometheus-endpoint were provided but will be \
+                overwritten by --{}",
+                reason
+            );
+        }
+    }
+
+    /// Log if benchmark parameters are overwritten by `--benchmark`.
+    pub fn warn_if_benchmark_params(&self) {
+        if self.benchmark_cmd.is_some() {
+            warn!("A benchmark subcommand was provided by will be overwritten by --benchmark");
+        }
+    }
+
     pub async fn run(mut self) -> anyhow::Result<()> {
         if let Some(f) = &self.benchmark {
+            self.warn_if_benchmark_params();
             self.benchmark_cmd = Some(serde_yaml::from_str(&std::fs::read_to_string(f)?)?);
         }
 
-        let mut handle = None;
-        if self.local_with_mysql.is_some() {
+        let (params, mut handle) = if self.local_with_mysql.is_some() {
+            self.warn_if_deployment_params("local-with-mysql");
             let (params, h) = self.start_local(self.local_with_mysql.clone()).await;
-            handle = Some(h);
-            self.deployment_params = params;
+            (params, Some(h))
         } else if self.local {
+            self.warn_if_deployment_params("local");
             let (params, h) = self.start_local(None).await;
-            handle = Some(h);
-            self.deployment_params = params;
+            (params, Some(h))
         } else if let Some(f) = &self.deployment {
-            self.deployment_params = serde_yaml::from_str(&std::fs::read_to_string(f)?)?;
+            // Verify that the deployment is passed through some method.
+            self.warn_if_deployment_params("deployment");
+            (serde_yaml::from_str(&std::fs::read_to_string(f)?)?, None)
+        } else {
+            // --target-conn-str and --setup-conn-str are required unless one of the other methods
+            // are passed. Since these are used in benchmarks and must always have a value, these
+            // cannot be checked by clap.
+            if self.deployment_params.target_conn_str.is_empty()
+                || self.deployment_params.setup_conn_str.is_empty()
+            {
+                bail!(
+                    "If --local, --local-with-mysql, --deployment are not supplied, passing \
+                  deployment state through --target-conn-str and --setup-conn-str are required"
+                );
+            }
+
+            (self.deployment_params.clone(), None)
         };
+        self.deployment_params = params;
 
         // After this point deployment_params and benchmark_cmd are guaranteed to be Some.
         let cmd_as_yaml = serde_yaml::to_string(&self.benchmark_cmd.as_ref().unwrap())?;
