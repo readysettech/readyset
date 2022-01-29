@@ -5,6 +5,7 @@ use std::time::Instant;
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
+use metrics::Unit;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
@@ -93,35 +94,59 @@ impl BenchmarkControl for MigrationBenchmark {
         Ok(BenchmarkResults::from(&[
             (
                 "migrate latency p50",
-                us_to_ms(hist_create.value_at_quantile(0.5)),
+                (
+                    us_to_ms(hist_create.value_at_quantile(0.5)),
+                    Unit::Milliseconds,
+                ),
             ),
             (
                 "migrate latency p90",
-                us_to_ms(hist_create.value_at_quantile(0.9)),
+                (
+                    us_to_ms(hist_create.value_at_quantile(0.9)),
+                    Unit::Milliseconds,
+                ),
             ),
             (
                 "migrate latency p99",
-                us_to_ms(hist_create.value_at_quantile(0.99)),
+                (
+                    us_to_ms(hist_create.value_at_quantile(0.99)),
+                    Unit::Milliseconds,
+                ),
             ),
             (
                 "migrate latency p99.99",
-                us_to_ms(hist_create.value_at_quantile(0.9999)),
+                (
+                    us_to_ms(hist_create.value_at_quantile(0.9999)),
+                    Unit::Milliseconds,
+                ),
             ),
             (
                 "unmigrate latency p50",
-                us_to_ms(hist_drop.value_at_quantile(0.5)),
+                (
+                    us_to_ms(hist_drop.value_at_quantile(0.5)),
+                    Unit::Milliseconds,
+                ),
             ),
             (
                 "unmigrate latency p90",
-                us_to_ms(hist_drop.value_at_quantile(0.9)),
+                (
+                    us_to_ms(hist_drop.value_at_quantile(0.9)),
+                    Unit::Milliseconds,
+                ),
             ),
             (
                 "unmigrate latency p99",
-                us_to_ms(hist_drop.value_at_quantile(0.99)),
+                (
+                    us_to_ms(hist_drop.value_at_quantile(0.99)),
+                    Unit::Milliseconds,
+                ),
             ),
             (
                 "unmigrate latency p99.99",
-                us_to_ms(hist_drop.value_at_quantile(0.9999)),
+                (
+                    us_to_ms(hist_drop.value_at_quantile(0.9999)),
+                    Unit::Milliseconds,
+                ),
             ),
         ]))
     }

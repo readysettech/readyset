@@ -5,6 +5,7 @@ use std::time::Instant;
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
+use metrics::Unit;
 use mysql_async::prelude::Queryable;
 use mysql_async::Row;
 use serde::{Deserialize, Serialize};
@@ -119,19 +120,19 @@ impl CacheHitBenchmark {
         results.append(&[
             (
                 &format!("{} {}", query_type, "latency p50"),
-                us_to_ms(hist.value_at_quantile(0.5)),
+                (us_to_ms(hist.value_at_quantile(0.5)), Unit::Milliseconds),
             ),
             (
                 &format!("{} {}", query_type, "latency p90"),
-                us_to_ms(hist.value_at_quantile(0.9)),
+                (us_to_ms(hist.value_at_quantile(0.9)), Unit::Milliseconds),
             ),
             (
                 &format!("{} {}", query_type, "latency p99"),
-                us_to_ms(hist.value_at_quantile(0.99)),
+                (us_to_ms(hist.value_at_quantile(0.99)), Unit::Milliseconds),
             ),
             (
                 &format!("{} {}", query_type, "latency p99.99"),
-                us_to_ms(hist.value_at_quantile(0.9999)),
+                (us_to_ms(hist.value_at_quantile(0.9999)), Unit::Milliseconds),
             ),
         ]);
 

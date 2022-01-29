@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
+use metrics::Unit;
 use mysql_async::prelude::Queryable;
 use mysql_async::Row;
 use rand::{thread_rng, Rng};
@@ -240,39 +241,63 @@ impl MultithreadBenchmark for ReadWriteBenchmark {
 
         // This benchmark returns the last seen benchmark results.
         *benchmark_results = BenchmarkResults::from(&[
-            ("read qps", read_qps),
+            ("read qps", (read_qps, Unit::Count)),
             (
                 "read latency p50",
-                us_to_ms(read_hist.value_at_quantile(0.5)),
+                (
+                    us_to_ms(read_hist.value_at_quantile(0.5)),
+                    Unit::Milliseconds,
+                ),
             ),
             (
                 "read latency p90",
-                us_to_ms(read_hist.value_at_quantile(0.9)),
+                (
+                    us_to_ms(read_hist.value_at_quantile(0.9)),
+                    Unit::Milliseconds,
+                ),
             ),
             (
                 "read latency p99",
-                us_to_ms(read_hist.value_at_quantile(0.99)),
+                (
+                    us_to_ms(read_hist.value_at_quantile(0.99)),
+                    Unit::Milliseconds,
+                ),
             ),
             (
                 "read latency p99.99",
-                us_to_ms(read_hist.value_at_quantile(0.9999)),
+                (
+                    us_to_ms(read_hist.value_at_quantile(0.9999)),
+                    Unit::Milliseconds,
+                ),
             ),
-            ("update qps", update_qps),
+            ("update qps", (update_qps, Unit::Count)),
             (
                 "update latency p50",
-                us_to_ms(update_hist.value_at_quantile(0.5)),
+                (
+                    us_to_ms(update_hist.value_at_quantile(0.5)),
+                    Unit::Milliseconds,
+                ),
             ),
             (
                 "update latency p90",
-                us_to_ms(update_hist.value_at_quantile(0.9)),
+                (
+                    us_to_ms(update_hist.value_at_quantile(0.9)),
+                    Unit::Milliseconds,
+                ),
             ),
             (
                 "update latency p99",
-                us_to_ms(update_hist.value_at_quantile(0.99)),
+                (
+                    us_to_ms(update_hist.value_at_quantile(0.99)),
+                    Unit::Milliseconds,
+                ),
             ),
             (
                 "update latency p99.99",
-                us_to_ms(update_hist.value_at_quantile(0.9999)),
+                (
+                    us_to_ms(update_hist.value_at_quantile(0.9999)),
+                    Unit::Milliseconds,
+                ),
             ),
         ]);
 

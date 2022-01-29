@@ -4,6 +4,7 @@ use crate::{benchmark_counter, benchmark_histogram};
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
+use metrics::Unit;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Instant;
@@ -59,7 +60,7 @@ impl BenchmarkControl for ScaleConnections {
             if i == 0 || i == self.num_connections || i == self.num_connections / 2 {
                 results.append(&[(
                     &format!("connect @ {}", i),
-                    connection_time.as_secs_f64() * 1000.0,
+                    (connection_time.as_secs_f64() * 1000.0, Unit::Seconds),
                 )]);
             }
 

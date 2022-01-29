@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
+use metrics::Unit;
 use mysql_async::prelude::Queryable;
 use mysql_async::Row;
 use noria::metrics::recorded;
@@ -376,11 +377,23 @@ impl MultithreadBenchmark for EvictionBenchmark {
 
         // This benchmark returns the last seen benchmark results.
         *benchmark_results = BenchmarkResults::from(&[
-            ("qps", qps),
-            ("latency p50", us_to_ms(hist.value_at_quantile(0.5))),
-            ("latency p90", us_to_ms(hist.value_at_quantile(0.9))),
-            ("latency p99", us_to_ms(hist.value_at_quantile(0.99))),
-            ("latency p99.99", us_to_ms(hist.value_at_quantile(0.9999))),
+            ("qps", (qps, Unit::Count)),
+            (
+                "latency p50",
+                (us_to_ms(hist.value_at_quantile(0.5)), Unit::Milliseconds),
+            ),
+            (
+                "latency p90",
+                (us_to_ms(hist.value_at_quantile(0.9)), Unit::Milliseconds),
+            ),
+            (
+                "latency p99",
+                (us_to_ms(hist.value_at_quantile(0.99)), Unit::Milliseconds),
+            ),
+            (
+                "latency p99.99",
+                (us_to_ms(hist.value_at_quantile(0.9999)), Unit::Milliseconds),
+            ),
         ]);
 
         Ok(())

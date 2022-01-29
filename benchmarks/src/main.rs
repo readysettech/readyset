@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -9,13 +8,12 @@ use metrics_util::MetricKindMask;
 use mysql_async::prelude::Queryable;
 use noria::status::{ReadySetStatus, SnapshotStatus};
 use std::convert::TryFrom;
+use std::io::Write;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::warn;
 
-use benchmarks::benchmark::{
-    Benchmark, BenchmarkControl, BenchmarkOutput, BenchmarkResults, DeploymentParameters,
-};
+use benchmarks::benchmark::{Benchmark, BenchmarkControl, BenchmarkResults, DeploymentParameters};
 use benchmarks::benchmark_histogram;
 
 const PUSH_GATEWAY_PUSH_INTERVAL: Duration = Duration::from_secs(5);
@@ -64,9 +62,8 @@ struct BenchmarkRunner {
     #[clap(long)]
     wait_for_snapshot: bool,
 
-    /// A file to write the set of benchmark results to.
-    ///
-    /// Will overwite any existing data in the file.
+    /// A file to write the human-readable set of benchmark results to. Results are appended to the
+    /// file.
     #[clap(long, value_hint = ValueHint::FilePath)]
     results_file: Option<PathBuf>,
 }
@@ -219,13 +216,15 @@ impl BenchmarkRunner {
         let results = BenchmarkResults::aggregate(&results);
         println!("{}", results);
 
-        let output = BenchmarkOutput::new(
-            self.benchmark_cmd.unwrap(),
-            self.deployment_params.clone(),
-            results,
-        );
+        // Write human-readable outputs if specified.
         if let Some(f) = self.results_file {
-            fs::write(f, serde_yaml::to_string(&output)?)?;
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(f)?;
+            file.write_all(&serde_yaml::to_vec(&self.benchmark_cmd)?)?;
+            file.write_all(&serde_yaml::to_vec(&self.deployment_params)?)?;
+            file.write_all(format!("{}", results).as_bytes())?;
         }
 
         if let Some((handle, tx)) = importer {

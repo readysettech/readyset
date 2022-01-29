@@ -122,7 +122,7 @@ impl DeploymentParameters {
 /// distributions across multiple benchmark iterations.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BenchmarkResults {
-    results: HashMap<String, f64>,
+    results: HashMap<String, (f64, String)>,
 }
 
 impl BenchmarkResults {
@@ -132,7 +132,7 @@ impl BenchmarkResults {
         }
     }
 
-    pub fn from<T>(results: &[(&str, T)]) -> Self
+    pub fn from<T>(results: &[(&str, (T, metrics::Unit))]) -> Self
     where
         T: fmt::Display + Clone,
         f64: From<T>,
@@ -140,18 +140,26 @@ impl BenchmarkResults {
         Self {
             results: results
                 .iter()
-                .map(|(k, v)| (k.to_string(), v.clone().into()))
+                .map(|(k, v)| {
+                    (
+                        k.to_string(),
+                        (v.0.clone().into(), v.1.as_canonical_label().to_string()),
+                    )
+                })
                 .collect(),
         }
     }
 
-    pub fn append<T>(&mut self, results: &[(&str, T)])
+    pub fn append<T>(&mut self, results: &[(&str, (T, metrics::Unit))])
     where
         T: fmt::Display + Clone,
         f64: From<T>,
     {
         for (k, v) in results {
-            self.results.insert(k.to_string(), v.clone().into());
+            self.results.insert(
+                k.to_string(),
+                (v.0.clone().into(), v.1.as_canonical_label().to_string()),
+            );
         }
     }
 
@@ -167,7 +175,7 @@ impl BenchmarkResults {
             // Iterating over the set of keys that are in the map.
             #[allow(clippy::unwrap_used)]
             self.results
-                .insert(format!("{} {}", p, k), *self.results.get(k).unwrap());
+                .insert(format!("{} {}", p, k), self.results.get(k).unwrap().clone());
             self.results.remove(k);
         }
 
@@ -207,17 +215,21 @@ impl BenchmarkResults {
         let keys = results[0].results.keys().clone();
         for k in keys {
             let mut values: Vec<_> = results.iter().map(|r| r.results.get(k).unwrap()).collect();
-            values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            values.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
             let len = values.len();
 
-            agg.results.insert(k.clone() + " min", *values[0]);
+            let metric_units = values[0].1.clone();
+            agg.results.insert(k.clone() + " min", values[0].clone());
             agg.results
-                .insert(k.clone() + " max", *values[values.len() - 1]);
+                .insert(k.clone() + " max", values[values.len() - 1].clone());
             agg.results
-                .insert(k.clone() + " median", *values[values.len() / 2]);
+                .insert(k.clone() + " median", values[values.len() / 2].clone());
             agg.results.insert(
                 k.clone() + " mean",
-                values.into_iter().sum::<f64>() / len as f64,
+                (
+                    values.into_iter().map(|t| t.0).sum::<f64>() / len as f64,
+                    metric_units,
+                ),
             );
         }
 
@@ -234,7 +246,11 @@ impl Default for BenchmarkResults {
 impl fmt::Display for BenchmarkResults {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for key in self.results.keys().sorted() {
-            writeln!(f, "{}: {}", key, self.results[key])?;
+            writeln!(
+                f,
+                "{}: {} {}",
+                key, self.results[key].0, self.results[key].1
+            )?;
         }
         Ok(())
     }
@@ -242,6 +258,8 @@ impl fmt::Display for BenchmarkResults {
 
 /// The formatted benchmark parameters and results for serialization
 /// to a file.
+// TODO(justin): use this struct for serializing and deserializing baselines.
+#[allow(dead_code)]
 #[derive(Serialize, Deserialize)]
 pub struct BenchmarkOutput {
     benchmark: Benchmark,

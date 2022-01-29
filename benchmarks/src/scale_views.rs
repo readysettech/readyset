@@ -13,6 +13,7 @@ use anyhow::{bail, Result};
 use async_trait::async_trait;
 use clap::Parser;
 use itertools::Itertools;
+use metrics::Unit;
 use mysql_async::prelude::Queryable;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -123,11 +124,11 @@ impl BenchmarkControl for ScaleViews {
                 results.append(&[
                     (
                         &format!("connect @ view {}", i),
-                        connection_time.as_secs_f64() * 1000.0,
+                        (connection_time.as_secs_f64() * 1000.0, Unit::Seconds),
                     ),
                     (
                         &format!("prepare @ view {}", i),
-                        connection_time.as_secs_f64() * 1000.0,
+                        (connection_time.as_secs_f64() * 1000.0, Unit::Seconds),
                     ),
                 ]);
             }
