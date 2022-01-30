@@ -113,8 +113,8 @@ steps:
   - label: 'Run test flakiness check'
     key: flaky-finder
     command:
-    - 'echo +++ Running flaky-finder'
-    - flaky-finder -j1 -r5 --continue "cargo --locked test --all --exclude clustertest --exclude aggressive_eviction -- --nocapture --skip integration_serial"
+    - 'echo +++ Running detect_flake'
+    - detect_flake -t1 -r5 -i --command "cargo --locked test --all --exclude clustertest --exclude aggressive_eviction -- --nocapture --skip integration_serial"
     depends_on:
     - build-image
     plugins:
