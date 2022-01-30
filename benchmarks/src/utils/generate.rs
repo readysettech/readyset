@@ -3,6 +3,7 @@
 
 use super::spec::{DatabaseGenerationSpec, DatabaseSchema, TableGenerationSpec};
 
+use crate::utils::path::benchmark_path;
 use anyhow::{Context, Result};
 use clap::{Parser, ValueHint};
 use futures::StreamExt;
@@ -37,7 +38,7 @@ pub struct DataGenerator {
 impl DataGenerator {
     pub async fn install(&self, conn_str: &str) -> anyhow::Result<()> {
         let mut conn = DatabaseURL::from_str(conn_str)?.connect().await?;
-        let ddl = std::fs::read_to_string(self.schema.as_path())?;
+        let ddl = std::fs::read_to_string(benchmark_path(self.schema.clone())?.as_path())?;
         conn.query_drop(ddl).await
     }
 
@@ -90,7 +91,7 @@ impl DataGenerator {
 
         let old_size = Self::adjust_mysql_vars(&db_url).await;
 
-        let schema = DatabaseSchema::try_from((self.schema.clone(), user_vars))?;
+        let schema = DatabaseSchema::try_from((benchmark_path(self.schema.clone())?, user_vars))?;
         let database_spec = DatabaseGenerationSpec::new(schema);
         let status = parallel_load(db_url.clone(), database_spec.clone()).await;
 

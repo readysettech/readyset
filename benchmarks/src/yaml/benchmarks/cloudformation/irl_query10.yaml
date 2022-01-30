@@ -1,13 +1,13 @@
 ---
 QueryBenchmark:
   query:
-    query: src/data/irl/irl_query10.sql
+    query: irl/irl_query10.sql
     query_spec_file: ~
     query_spec: ~
   target_qps: ~
   threads: 32
   data_generator:
-    schema: src/data/irl/irl_db.sql
+    schema: irl/irl_db.sql
     var_overrides: {}
   run_for:
     secs: 120

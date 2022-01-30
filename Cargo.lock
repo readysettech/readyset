@@ -805,6 +805,7 @@ dependencies = [
  "tracing",
  "url",
  "vec1",
+ "walkdir",
  "zipf",
 ]
 

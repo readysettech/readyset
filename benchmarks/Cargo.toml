@@ -40,6 +40,7 @@ parking_lot = "0.11.2"
 indicatif = "0.16"
 prometheus-parse = "0.2.2"
 mysql = "22.0"
+walkdir = "2.3"
 
 # local dependencies
 noria = { path = "../noria/noria" }

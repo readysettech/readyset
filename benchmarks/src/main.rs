@@ -220,13 +220,20 @@ impl BenchmarkRunner {
         }
     }
 
-    pub async fn run(mut self) -> anyhow::Result<()> {
+    pub async fn initialize_from_args(&mut self) -> anyhow::Result<Option<Handle>> {
         if let Some(f) = &self.benchmark {
             self.warn_if_benchmark_params();
+
+            if !f.exists() {
+                bail!(
+                    "Benchmark YAML file does not exist, {}",
+                    f.to_str().unwrap()
+                );
+            }
             self.benchmark_cmd = Some(serde_yaml::from_str(&std::fs::read_to_string(f)?)?);
         }
 
-        let (params, mut handle) = if self.local_with_mysql.is_some() {
+        let (params, handle) = if self.local_with_mysql.is_some() {
             self.warn_if_deployment_params("local-with-mysql");
             let (params, h) = self.start_local(self.local_with_mysql.clone()).await;
             (params, Some(h))
@@ -237,6 +244,13 @@ impl BenchmarkRunner {
         } else if let Some(f) = &self.deployment {
             // Verify that the deployment is passed through some method.
             self.warn_if_deployment_params("deployment");
+            if !f.exists() {
+                bail!(
+                    "Deployment YAML file does not exist, {}",
+                    f.to_str().unwrap()
+                );
+            }
+
             (serde_yaml::from_str(&std::fs::read_to_string(f)?)?, None)
         } else {
             // --target-conn-str and --setup-conn-str are required unless one of the other methods
@@ -255,7 +269,15 @@ impl BenchmarkRunner {
         };
         self.deployment_params = params;
 
-        // After this point deployment_params and benchmark_cmd are guaranteed to be Some.
+        Ok(handle)
+    }
+
+    pub async fn run(mut self) -> anyhow::Result<()> {
+        // Initializes `DeploymentParameters` and `Benchmark` from the set of arguments passed by
+        // the user. These arguments need not be passed by the arguments in the flattened structs
+        // directly, and instead may be passed via YAML or via arguments like `--local`.
+        let mut handle = self.initialize_from_args().await?;
+
         let cmd_as_yaml = serde_yaml::to_string(&self.benchmark_cmd.as_ref().unwrap())?;
         let deployment_as_yaml = serde_yaml::to_string(&self.deployment_params)?;
         let identifier = format!("{}\n{}\n", cmd_as_yaml, deployment_as_yaml);

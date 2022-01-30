@@ -1,10 +1,10 @@
 ---
 CacheHitBenchmark:
   query:
-    query: src/data/fastly/fastly_read_query.sql
+    query: fastly/fastly_read_query.sql
     query_spec_file: ~
     query_spec: ~
   data_generator:
-    schema: src/data/fastly/fastly_db_tiny.sql
+    schema: fastly/fastly_db_tiny.sql
     var_overrides: {}
   num_queries_each: 5

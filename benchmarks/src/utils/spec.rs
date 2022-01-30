@@ -192,7 +192,7 @@ impl DatabaseSchema {
 impl TryFrom<PathBuf> for DatabaseSchema {
     type Error = anyhow::Error;
     fn try_from(path: PathBuf) -> anyhow::Result<Self> {
-        let ddl = read_to_string(&path).with_context(|| "Failed to read fastly schema file")?;
+        let ddl = read_to_string(&path).with_context(|| "Failed to read schema file")?;
         DatabaseSchema::new(&ddl, HashMap::new())
     }
 }
@@ -200,7 +200,7 @@ impl TryFrom<PathBuf> for DatabaseSchema {
 impl TryFrom<(PathBuf, HashMap<String, String>)> for DatabaseSchema {
     type Error = anyhow::Error;
     fn try_from(p: (PathBuf, HashMap<String, String>)) -> anyhow::Result<Self> {
-        let ddl = read_to_string(&p.0).with_context(|| "Failed to read fastly schema file")?;
+        let ddl = read_to_string(&p.0).with_context(|| "Failed to read schema file")?;
         DatabaseSchema::new(&ddl, p.1)
     }
 }
