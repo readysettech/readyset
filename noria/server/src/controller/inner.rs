@@ -20,7 +20,7 @@ use noria::status::{ReadySetStatus, SnapshotStatus};
 use noria::{RecipeSpec, WorkerDescriptor};
 use noria_errors::{ReadySetError, ReadySetResult};
 use reqwest::Url;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
@@ -267,12 +267,21 @@ impl Leader {
                         let pairs = querystring::querify(query);
                         if let Some((_, worker)) = &pairs.into_iter().find(|(k, _)| *k == "w") {
                             ds.nodes_on_worker(Some(&worker.parse()?))
+                                .into_iter()
+                                .flat_map(|(_, ni)| ni)
+                                .collect::<Vec<_>>()
                         } else {
                             ds.nodes_on_worker(None)
+                                .into_iter()
+                                .flat_map(|(_, ni)| ni)
+                                .collect::<Vec<_>>()
                         }
                     } else {
                         // all data-flow nodes
                         ds.nodes_on_worker(None)
+                            .into_iter()
+                            .flat_map(|(_, ni)| ni)
+                            .collect::<Vec<_>>()
                     };
                     return_serialized!(&nodes
                         .into_iter()
@@ -519,7 +528,12 @@ impl Leader {
 
         if ds.workers.len() >= self.quorum && self.pending_recovery {
             self.pending_recovery = false;
-            ds.recover().await?;
+            let domain_nodes = ds
+                .domain_nodes
+                .iter()
+                .map(|(k, v)| (*k, v.values().copied().collect::<HashSet<_>>()))
+                .collect::<HashMap<_, _>>();
+            ds.recover(&domain_nodes).await?;
             info!("Finished restoring graph configuration");
         }
 
@@ -536,26 +550,22 @@ impl Leader {
         let ds = writer.as_mut();
 
         // first, translate from the affected workers to affected data-flow nodes
-        let mut affected_nodes = HashSet::new();
+        let mut affected_nodes = HashMap::new();
         for wi in failed {
             warn!(worker = ?wi, "handling failure of worker");
-            affected_nodes.extend(ds.get_failed_nodes(&wi));
+            let mut domain_nodes_on_worker = ds.nodes_on_worker(Some(&wi));
+            for (domain_index, node_indices) in domain_nodes_on_worker.drain() {
+                ds.domains.remove(&domain_index);
+                ds.materializations.remove_nodes(&node_indices);
+                affected_nodes
+                    .entry(domain_index)
+                    .or_insert_with(|| HashSet::new())
+                    .extend(node_indices);
+            }
             ds.workers.remove(&wi);
         }
 
-        // then, figure out which queries are affected (and thus must be removed and added again in
-        // a migration)
-        let affected_queries = ds.recipe.queries_for_nodes(affected_nodes);
-        let (recovery, mut original) = ds.recipe.make_recovery(affected_queries);
-
-        // activate recipe
-        ds.apply_recipe(recovery).await?;
-
-        // somewhat awkward, but we must replace the stale `SqlIncorporator` state in `original`
-        original.set_sql_inc(ds.recipe.sql_inc().clone());
-
-        // back to original recipe, which should add the query again
-        ds.apply_recipe(original).await?;
+        ds.recover(&affected_nodes).await?;
 
         self.dataflow_state_handle
             .commit(writer, &self.authority)

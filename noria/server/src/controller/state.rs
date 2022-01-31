@@ -16,6 +16,7 @@ use crate::controller::domain_handle::DomainHandle;
 use crate::controller::migrate::materialization::Materializations;
 use crate::controller::migrate::scheduling::Scheduler;
 use crate::controller::migrate::{routing, DomainMigrationPlan, Migration};
+use crate::controller::recipe::changelist::ChangeList;
 use crate::controller::recipe::{Recipe, Schema};
 use crate::controller::{
     schema, ControllerState, DomainPlacementRestriction, NodeRestrictionKey, Worker,
@@ -54,6 +55,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::SocketAddr;
 use std::ops::Deref;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 use std::{cell, time};
@@ -568,64 +570,32 @@ impl DataflowState {
         graphviz(&self.ingredients, detailed, &self.materializations)
     }
 
-    pub(super) fn get_failed_nodes(&self, lost_worker: &WorkerIdentifier) -> HashSet<NodeIndex> {
-        // Find nodes directly impacted by worker failure.
-        let mut nodes: Vec<NodeIndex> = self.nodes_on_worker(Some(lost_worker));
-
-        // Add any other downstream nodes.
-        let mut failed_nodes = HashSet::new();
-        while let Some(node) = nodes.pop() {
-            failed_nodes.insert(node);
-
-            // If any of the nodes are reader nodes, also add the NodeIndex of the parent MIR node.
-            // The query expression related to the reader is assigned the parent MIR node index.
-            if let Some(r) = self.ingredients[node].as_reader() {
-                failed_nodes.insert(r.is_for());
-            }
-
-            for child in self
-                .ingredients
-                .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
-            {
-                if !nodes.contains(&child) {
-                    nodes.push(child);
-                }
-            }
-        }
-
-        failed_nodes
-    }
-
     /// List data-flow nodes, on a specific worker if `worker` specified.
-    pub(super) fn nodes_on_worker(&self, worker: Option<&WorkerIdentifier>) -> Vec<NodeIndex> {
-        // NOTE(malte): this traverses all graph vertices in order to find those assigned to a
-        // domain. We do this to avoid keeping separate state that may get out of sync, but it
-        // could become a performance bottleneck in the future (e.g., when recovering large
-        // graphs).
-        let domain_nodes = |i: DomainIndex| -> Vec<NodeIndex> {
-            #[allow(clippy::indexing_slicing)] // indices come from graph
-            self.ingredients
-                .node_indices()
-                .filter(|&ni| ni != self.source)
-                .filter(|&ni| !self.ingredients[ni].is_dropped())
-                .filter(|&ni| self.ingredients[ni].domain() == i)
-                .collect()
-        };
-
-        if let Some(worker) = worker {
-            self.domains
-                .values()
-                .filter(|dh| dh.assigned_to_worker(worker))
-                .fold(Vec::new(), |mut acc, dh| {
-                    acc.extend(domain_nodes(dh.index()));
-                    acc
-                })
-        } else {
-            self.domains.values().fold(Vec::new(), |mut acc, dh| {
-                acc.extend(domain_nodes(dh.index()));
+    pub(super) fn nodes_on_worker(
+        &self,
+        worker_opt: Option<&WorkerIdentifier>,
+    ) -> HashMap<DomainIndex, HashSet<NodeIndex>> {
+        self.domains
+            .values()
+            .filter(|dh| {
+                // Either we need all the nodes, because no worker was specified.
+                worker_opt.is_none() ||
+                // Or we need the domains that belong to the specified worker.
+                worker_opt
+                    .filter(|w| dh.assigned_to_worker(w))
+                    .is_some()
+            })
+            // Accumulate nodes by domain index.
+            .fold(HashMap::new(), |mut acc, dh| {
+                acc.entry(dh.index()).or_default().extend(
+                    self.domain_nodes
+                        .get(&dh.index())
+                        .map(|nm| nm.values())
+                        .into_iter()
+                        .flatten(),
+                );
                 acc
             })
-        }
     }
 
     /// Returns a struct containing the set of all replication offsets within the system, including
@@ -1261,11 +1231,12 @@ impl DataflowState {
 
     pub(super) async fn apply_recipe(
         &mut self,
-        mut new: Recipe,
+        changelist: ChangeList,
     ) -> Result<ActivationResult, ReadySetError> {
-        new.clone_config_from(&self.recipe);
-        let old_recipe = self.recipe.clone();
-        let r = self.migrate(|mig| new.activate(mig, old_recipe)).await?;
+        // I hate this, but there's no way around for now, as migrations
+        // are super entangled with the recipe and the graph.
+        let mut new = self.recipe.clone();
+        let r = self.migrate(|mig| new.activate(mig, changelist)).await?;
 
         match r {
             Ok(ref ra) => {
@@ -1344,15 +1315,9 @@ impl DataflowState {
             }
         }
 
-        let mut new = self.recipe.clone();
-        let add_txt = add_txt_spec.recipe;
+        let changelist = ChangeList::from_str(add_txt_spec.recipe)?;
 
-        if let Err(e) = new.extend(add_txt) {
-            error!(error = %e, "failed to extend recipe");
-            return Err(e);
-        }
-
-        match self.apply_recipe(new).await {
+        match self.apply_recipe(changelist).await {
             Ok(x) => {
                 if let Some(offset) = &add_txt_spec.replication_offset {
                     offset.try_max_into(&mut self.schema_replication_offset)?
@@ -1370,10 +1335,11 @@ impl DataflowState {
     ) -> Result<ActivationResult, ReadySetError> {
         let r_txt = r_txt_spec.recipe;
 
-        match Recipe::from_str(r_txt) {
-            Ok(r) => {
-                let new = self.recipe.clone().replace(r);
-                match self.apply_recipe(new).await {
+        let mut remove_all = self.recipe.remove_all();
+        match ChangeList::from_str(r_txt) {
+            Ok(cl) => {
+                remove_all.extend(cl);
+                match self.apply_recipe(remove_all).await {
                     Ok(x) => {
                         self.schema_replication_offset =
                             r_txt_spec.replication_offset.as_deref().cloned();
@@ -1390,10 +1356,12 @@ impl DataflowState {
     }
 
     pub(super) async fn remove_query(&mut self, query_name: &str) -> ReadySetResult<()> {
-        let mut new = self.recipe.clone();
-        new.remove_query(query_name);
+        let changelist = match self.recipe.remove_query(query_name) {
+            None => return Ok(()),
+            Some(changelist) => changelist,
+        };
 
-        if let Err(error) = self.apply_recipe(new).await {
+        if let Err(error) = self.apply_recipe(changelist).await {
             error!(%error, "Failed to apply recipe");
             return Err(error);
         }
@@ -1416,16 +1384,14 @@ impl DataflowState {
     /// [`crate::controller::migrate::assignment::assign`] must hold as well.
     ///  - `self.remap` and `self.node_restrictions` must be valid.
     /// - All the other fields should be empty or `[Default::default()]`.
-    pub(super) async fn recover(&mut self) -> ReadySetResult<()> {
-        invariant!(
-            self.domains.is_empty(),
-            "there shouldn't be any domain if we are recovering"
-        );
+    pub(super) async fn recover(
+        &mut self,
+        domain_nodes: &HashMap<DomainIndex, HashSet<NodeIndex>>,
+    ) -> ReadySetResult<()> {
         let mut dmp = DomainMigrationPlan::new(self);
-        let domain_nodes = self
-            .domain_nodes
+        let domain_nodes = domain_nodes
             .iter()
-            .map(|(idx, nm)| (*idx, nm.values().map(|&n| (n, true)).collect::<Vec<_>>()))
+            .map(|(idx, nm)| (*idx, nm.iter().map(|&n| (n, true)).collect::<Vec<_>>()))
             .collect::<HashMap<_, _>>();
         {
             let mut scheduler = Scheduler::new(self, &None)?;

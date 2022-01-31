@@ -2,21 +2,24 @@ use crate::controller::sql::SqlIncorporator;
 use crate::controller::Migration;
 use crate::{ReadySetResult, ReuseConfigType};
 
-use nom_sql::{parser as sql_parser, Dialect, SqlQuery};
+use nom_sql::{Dialect, SqlQuery};
 use noria::ActivationResult;
 use petgraph::graph::NodeIndex;
 use tracing::{debug, error, warn};
 
+use crate::controller::recipe::changelist::{Change, SqlExpression};
+use changelist::ChangeList;
 use nom_sql::CreateTableStatement;
 use noria_errors::{internal, internal_err, ReadySetError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::fmt::{self, Display};
 use std::str;
 use std::vec::Vec;
 
 use super::sql;
+
+pub(crate) mod changelist;
 
 /// The canonical SQL dialect used for central Noria server recipes. All direct clients of
 /// noria-server must use this dialect for their SQL recipes, and all adapters and client libraries
@@ -29,9 +32,9 @@ type QueryID = u64;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 // crate viz for tests
 pub(crate) struct Recipe {
-    /// SQL queries represented in the recipe. Value tuple is (name, query, public).
+    /// SQL queries represented in the recipe..
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
-    expressions: HashMap<QueryID, (Option<String>, SqlQuery, bool)>,
+    expressions: HashMap<QueryID, SqlExpression>,
     /// Addition order for the recipe expressions
     expression_order: Vec<QueryID>,
     /// Aliases assigned to read query and CreateTable expressions. Each alias maps
@@ -50,29 +53,6 @@ pub(crate) struct Recipe {
     /// NOTE: this is an Option so that we can call [`Option::take`] on it, but will
     /// never actually be None externally.
     inc: Option<SqlIncorporator>,
-}
-
-impl Display for Recipe {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for query_id in &self.expression_order {
-            let (name, query, public) = &self.expressions[query_id];
-            if *public {
-                write!(f, "query")?;
-            }
-            if let Some(name) = name {
-                if *public {
-                    write!(f, " ")?;
-                }
-                write!(f, "{}", name)?;
-            }
-            if *public || name.is_some() {
-                write!(f, ": ")?;
-            }
-            writeln!(f, "{};", query)?;
-        }
-
-        Ok(())
-    }
 }
 
 unsafe impl Send for Recipe {}
@@ -102,59 +82,6 @@ fn hash_query(q: &SqlQuery) -> QueryID {
     h.finish()
 }
 
-#[inline]
-fn ident(input: &str) -> nom::IResult<&str, &str> {
-    use nom::InputTakeAtPosition;
-    input.split_at_position_complete(|chr| {
-        !(chr.is_ascii() && (nom::character::is_alphanumeric(chr as u8) || chr == '_'))
-    })
-}
-
-fn query_prefix(input: &str) -> nom::IResult<&str, (bool, Option<&str>)> {
-    use nom::branch::alt;
-    use nom::bytes::complete::tag_no_case;
-    use nom::character::complete::{char, multispace0, space1};
-    use nom::combinator::opt;
-    use nom::sequence::{pair, terminated};
-    let (input, public) = opt(pair(
-        alt((tag_no_case("query"), tag_no_case("view"))),
-        space1,
-    ))(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, name) = opt(terminated(ident, multispace0))(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, _) = char(':')(input)?;
-    let (input, _) = multispace0(input)?;
-    Ok((input, (public.is_some(), name)))
-}
-
-fn query_expr(input: &str) -> nom::IResult<&str, (bool, Option<&str>, SqlQuery)> {
-    use nom::character::complete::multispace0;
-    use nom::combinator::opt;
-    let (input, prefix) = opt(query_prefix)(input)?;
-    // NOTE: some massaging since nom_sql operates on &[u8], not &str
-    let (input, expr) = match sql_parser::sql_query(CANONICAL_DIALECT)(input.as_bytes()) {
-        Ok((i, e)) => Ok((std::str::from_utf8(i).unwrap(), e)),
-        Err(nom::Err::Incomplete(n)) => Err(nom::Err::Incomplete(n)),
-        Err(nom::Err::Error((i, e))) => Err(nom::Err::Error((std::str::from_utf8(i).unwrap(), e))),
-        Err(nom::Err::Failure((i, e))) => {
-            Err(nom::Err::Error((std::str::from_utf8(i).unwrap(), e)))
-        }
-    }?;
-    let (input, _) = multispace0(input)?;
-    Ok((
-        input,
-        match prefix {
-            None => (false, None, expr),
-            Some((public, name)) => (public, name, expr),
-        },
-    ))
-}
-
-fn query_exprs(input: &str) -> nom::IResult<&str, Vec<(bool, Option<&str>, SqlQuery)>> {
-    nom::multi::many1(query_expr)(input)
-}
-
 #[allow(unused)]
 impl Recipe {
     /// Get the id associated with an alias
@@ -163,11 +90,7 @@ impl Recipe {
     }
     /// Get the SqlQuery associated with a query ID
     pub(crate) fn expression(&self, id: &QueryID) -> Option<&SqlQuery> {
-        self.expressions.get(id).map(|expr| &expr.1)
-    }
-    /// Return active aliases for expressions
-    fn aliases(&self) -> Vec<&str> {
-        self.aliases.keys().map(String::as_str).collect()
+        self.expressions.get(id).map(|expr| &expr.query)
     }
 
     /// Creates a blank recipe. This is useful for bootstrapping, e.g., in interactive
@@ -246,10 +169,9 @@ impl Recipe {
     }
 
     pub(in crate::controller) fn resolve_alias(&self, alias: &str) -> Option<&str> {
-        self.aliases.get(alias).map(|qid| {
-            let (ref internal_qn, _, _) = self.expressions[qid];
-            internal_qn.as_ref().unwrap().as_str()
-        })
+        self.aliases
+            .get(alias)
+            .map(|qid| self.expressions[qid].name.as_ref().unwrap().as_str())
     }
 
     /// Obtains the `NodeIndex` for the node corresponding to a named query or a write type.
@@ -288,103 +210,15 @@ impl Recipe {
         }
     }
 
-    /// Remove comments from queries and aggregate lines into singular queries
-    pub(crate) fn clean_queries(recipe_text: &str) -> Vec<String> {
-        recipe_text
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("--"))
-            .map(|l| {
-                // remove inline comments, too
-                match l.find('#') {
-                    None => l.trim(),
-                    Some(pos) => l[0..pos - 1].trim(),
-                }
-            })
-            .fold(Vec::<String>::new(), |mut acc, l| {
-                match acc.last_mut() {
-                    Some(s) if !s.ends_with(';') => {
-                        s.push(' ');
-                        s.push_str(l);
-                    }
-                    _ => acc.push(l.to_string()),
-                }
-                acc
-            })
-    }
-
-    /// Creates a recipe from a set of SQL queries in a string (e.g., read from a file).
-    /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
-    /// it.
-    // crate viz for tests
-    pub(crate) fn from_str(recipe_text: &str) -> ReadySetResult<Recipe> {
-        // parse and compute differences to current recipe
-        let parsed_queries = Recipe::parse(recipe_text)?;
-        Recipe::from_queries(parsed_queries)
-    }
-
-    /// Creates a recipe from a set of pre-parsed `SqlQuery` structures.
-    /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
-    /// it.
-    fn from_queries(qs: Vec<(Option<String>, SqlQuery, bool)>) -> ReadySetResult<Recipe> {
-        let mut aliases = HashMap::default();
-        let mut expression_order = Vec::new();
-        let mut duplicates = 0;
-        let mut expressions = HashMap::new();
-        for (mut n, q, mut is_leaf) in qs.into_iter() {
-            let qid = hash_query(&q);
-            if !expression_order.contains(&qid) {
-                expression_order.push(qid);
-            } else {
-                duplicates += 1;
-            }
-
-            match (&n, &q) {
-                // Treat views created using CREATE VIEW as leaf views too.
-                (None, SqlQuery::CreateView(query)) => {
-                    n = Some(query.name.clone());
-                    is_leaf = true;
-                }
-                // Tables are aliased by their table name.
-                (None, SqlQuery::CreateTable(query)) => {
-                    n = Some(query.table.name.clone());
-                }
-                (_, _) => {}
-            }
-
-            if let Some(ref name) = n {
-                if aliases.contains_key(name) && aliases[name] != qid {
-                    return Err(ReadySetError::RecipeInvariantViolated(format!(
-                        "Query name exists but existing query is different: {}",
-                        name
-                    )));
-                }
-                aliases.insert(name.clone(), qid);
-            }
-            expressions.insert(qid, (n, q, is_leaf));
-        }
-
-        let inc = SqlIncorporator::new();
-
-        debug!(duplicate_queries = duplicates, version = 0);
-
-        Ok(Recipe {
-            expressions,
-            expression_order,
-            aliases,
-            version: 0,
-            inc: Some(inc),
-        })
-    }
-
-    /// Activate the recipe by migrating the Soup data-flow graph wrapped in `mig` to the recipe.
-    /// This causes all necessary changes to said graph to be applied; however, it is the caller's
-    /// responsibility to call `mig.commit()` afterwards.
+    /// Iterates through the list of changes that have to be made, and updates the MIR
+    /// state accordingly.
+    /// All the MIR graph changes are added to the [`Migration`], but it's up to the caller
+    /// to call [`Migration::commit`] to also update the dataflow state.
     // crate viz for tests
     pub(crate) fn activate(
         &mut self,
         mig: &mut Migration<'_>,
-        recipe: Recipe,
+        changelist: ChangeList,
     ) -> Result<ActivationResult, ReadySetError> {
         debug!(
             num_queries = self.expressions.len(),
@@ -392,49 +226,97 @@ impl Recipe {
             version = self.version,
         );
 
-        let (added, removed) = self.compute_delta(&recipe);
-
         let mut result = ActivationResult {
             new_nodes: HashMap::default(),
             removed_leaves: Vec::default(),
-            expressions_added: added.len(),
-            expressions_removed: removed.len(),
+            expressions_added: 0,
+            expressions_removed: 0,
         };
 
-        // add new queries to the Soup graph carried by `mig`, and reflect state in the
-        // incorporator in `inc`. `NodeIndex`es for new nodes are collected in `new_nodes` to be
-        // returned to the caller (who may use them to obtain mutators and getters)
-        for qid in added {
-            let (n, q, is_leaf) = self.expressions[&qid].clone();
+        let mut to_remove = Vec::new();
+        for change in changelist.changes {
+            match change {
+                Change::Add(expr) => {
+                    // add the query
+                    let qfp = self.inc.as_mut().unwrap().add_parsed_query(
+                        expr.query.clone(),
+                        expr.name.clone(),
+                        expr.is_leaf,
+                        mig,
+                    )?;
 
-            // add the query
-            let qfp = self
-                .inc
-                .as_mut()
-                .unwrap()
-                .add_parsed_query(q, n.clone(), is_leaf, mig)?;
+                    let qid = hash_query(&expr.query);
 
-            if qfp.reused_nodes.get(0) == Some(&qfp.query_leaf) && qfp.reused_nodes.len() == 1 {
-                if let Some(ref name) = n {
-                    self.alias_query(&qfp.name, name.clone()).map_err(|_| {
-                        internal_err(
-                            "SqlIncorporator told recipe about a query it doesn't know about!",
-                        )
-                    })?;
+                    if let Some(ref name) = expr.name {
+                        if qfp.reused_nodes.get(0) == Some(&qfp.query_leaf)
+                            && qfp.reused_nodes.len() == 1
+                        {
+                            self.alias_query(&qfp.name, name.clone()).map_err(|_| {
+                                internal_err(
+                                    "SqlIncorporator told recipe about a query it doesn't know about!",
+                                )
+                            })?;
+                        }
+                        if self.aliases.contains_key(name) && self.aliases[name] != qid {
+                            return Err(ReadySetError::RecipeInvariantViolated(format!(
+                                "Query name exists but existing query is different: {}",
+                                name
+                            )));
+                        }
+                        self.aliases.insert(name.clone(), qid);
+                    }
+
+                    // If the user provided us with a query name, use that.
+                    // If not, use the name internally used by the QFP.
+                    let query_name = expr
+                        .name
+                        .as_ref()
+                        .cloned()
+                        .unwrap_or_else(|| qfp.name.clone());
+                    if self.expressions.insert(qid, expr).is_some() {
+                        // We are re-adding a query that was already there.
+                        to_remove.retain(|remove_qid| *remove_qid != qid);
+                    }
+                    self.expression_order.push(qid);
+                    result.new_nodes.insert(query_name, qfp.query_leaf);
+                    result.expressions_added += 1;
+                }
+                Change::Remove(expr) => {
+                    match expr.query {
+                        SqlQuery::DropTable(dts) => {
+                            for table in dts.tables {
+                                // As far as I know, we can't name CREATE TABLE statements, which are
+                                // being assigned the table name as query name (based on the MIR code I've seen).
+                                match self.aliases.get(&table.name) {
+                                    Some(remove_qid) => {
+                                        to_remove.push(*remove_qid);
+                                    }
+                                    None => {
+                                        if !dts.if_exists {
+                                            error!("Tried to drop table {} without IF EXISTS, but table doesn't exist.", table.name);
+                                            internal!(
+                                                "Tried to drop table {} without IF EXISTS, but table doesn't exist.",
+                                                table.name
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => to_remove.push(hash_query(&expr.query)),
+                    }
                 }
             }
-
-            // If the user provided us with a query name, use that.
-            // If not, use the name internally used by the QFP.
-            let query_name = n.unwrap_or_else(|| qfp.name.clone());
-            result.new_nodes.insert(query_name, qfp.query_leaf);
         }
 
-        result.removed_leaves = removed
+        result.expressions_removed = to_remove.len();
+        result.removed_leaves = to_remove
             .iter()
             .map(|qid| {
-                let (ref n, ref q, _) = recipe.expressions[qid];
-                Ok(match q {
+                self.expression_order.retain(|i| *i != *qid);
+                self.aliases.retain(|_, i| *i != *qid);
+                let expr = self.expressions.remove(qid).unwrap();
+                Ok(match expr.query {
                     SqlQuery::CreateTable(ref ctq) => {
                         // a base may have many dependent queries, including ones that also lost
                         // nodes; the code handling `removed_leaves` therefore needs to take care
@@ -460,7 +342,7 @@ impl Recipe {
                         .inc
                         .as_mut()
                         .unwrap()
-                        .remove_query(n.as_ref().unwrap(), mig)?,
+                        .remove_query(expr.name.as_ref().unwrap())?,
                 })
             })
             // FIXME(eta): error handling impl overhead
@@ -472,68 +354,21 @@ impl Recipe {
         Ok(result)
     }
 
-    /// Work out the delta between two recipes.
-    /// Returns two sets of `QueryID` -> `SqlQuery` mappings:
-    /// (1) those queries present in `self`, but not in `other`; and
-    /// (2) those queries present in `other` , but not in `self`.
-    fn compute_delta(&self, other: &Recipe) -> (Vec<QueryID>, Vec<QueryID>) {
-        let mut added_queries: Vec<QueryID> = Vec::new();
-        let mut removed_queries = Vec::new();
-        for qid in self.expression_order.iter() {
-            if !other.expressions.contains_key(qid) {
-                added_queries.push(*qid);
-            }
-        }
-        for qid in other.expression_order.iter() {
-            if !self.expressions.contains_key(qid) {
-                removed_queries.push(*qid);
-            }
-        }
-
-        (added_queries, removed_queries)
-    }
-
     /// Returns the query expressions in the recipe.
     // crate viz for tests
     pub(crate) fn expressions(&self) -> Vec<(Option<&String>, &SqlQuery)> {
         self.expressions
             .values()
-            .map(|&(ref n, ref q, _)| (n.as_ref(), q))
+            .map(|expr| (expr.name.as_ref(), &expr.query))
             .collect()
     }
 
-    /// Append the queries in the `additions` argument to this recipe. This will attempt to parse
-    /// `additions`, and if successful, will extend the recipe. No expressions are removed from the
-    /// recipe; use `replace` if removal of unused expressions is desired.
-    /// Consumes `self` and returns a replacement recipe.
-    // crate viz for tests
-    pub(crate) fn extend(&mut self, additions: &str) -> Result<(), ReadySetError> {
-        // parse and compute differences to current recipe
-        let add_rp = match Recipe::from_str(additions) {
-            Ok(rp) => rp,
-            Err(e) => return Err(e),
-        };
-        let (added, _) = add_rp.compute_delta(self);
-
-        // apply changes
-        for qid in added {
-            let q = add_rp.expressions[&qid].clone();
-            self.expressions.insert(qid, q);
-            self.expression_order.push(qid);
+    pub(super) fn remove_all(&self) -> ChangeList {
+        let mut changes = Vec::new();
+        for expr in self.expressions.values() {
+            changes.push(Change::Remove(expr.clone()));
         }
-
-        for (n, qid) in &add_rp.aliases {
-            if self.aliases.contains_key(n) && self.aliases[n] != *qid {
-                return Err(ReadySetError::RecipeInvariantViolated(format!(
-                    "Query name exists but existing query is different: {}",
-                    n
-                )));
-            }
-        }
-        self.aliases.extend(add_rp.aliases);
-        self.version += 1;
-
-        Ok(())
+        ChangeList { changes }
     }
 
     /// Helper method to reparent a recipe. This is needed for some of t
@@ -546,61 +381,19 @@ impl Recipe {
         self.inc = Some(new_inc);
     }
 
-    fn parse(recipe_text: &str) -> ReadySetResult<Vec<(Option<String>, SqlQuery, bool)>> {
-        let query_strings = Recipe::clean_queries(recipe_text);
-
-        let parsed_queries = query_strings.iter().fold(
-            Vec::new(),
-            |mut acc: Vec<ReadySetResult<(bool, Option<&str>, SqlQuery)>>, query| {
-                match query_exprs(query) {
-                    Result::Err(e) => {
-                        // we got a parse error
-                        acc.push(Err(ReadySetError::UnparseableQuery {
-                            query: query.clone(),
-                        }));
-                    }
-                    Result::Ok((remainder, parsed)) => {
-                        // should have consumed all input
-                        if !remainder.is_empty() {
-                            acc.push(Err(ReadySetError::UnparseableQuery {
-                                query: query.clone(),
-                            }));
-                            return acc;
-                        }
-                        acc.extend(parsed.into_iter().map(|p| Ok(p)).collect::<Vec<_>>());
-                    }
-                }
-                acc
-            },
-        );
-
-        parsed_queries
-            .into_iter()
-            .map(|pr| {
-                let (is_leaf, r, q) = pr?;
-                Ok((r.map(String::from), q, is_leaf))
-            })
-            .collect::<Result<Vec<_>, _>>()
-    }
-
     /// Remove the expression with the given alias, `qname`, from the recipe.
-    pub(super) fn remove_query(&mut self, qname: &str) -> bool {
-        let qid = self.aliases.get(qname).cloned();
-        if qid.is_none() {
-            warn!(%qname, "Query not found in expressions");
-            return false;
-        }
-        let qid = qid.unwrap();
+    pub(super) fn remove_query(&self, qname: &str) -> Option<ChangeList> {
+        let res = self.aliases.get(qname).and_then(|n| {
+            self.expressions.get(n).cloned().map(|expr| ChangeList {
+                changes: vec![Change::Remove(expr)],
+            })
+        });
 
-        self.aliases.remove(qname);
-        if self.expressions.remove(&qid).is_some() {
-            if let Some(i) = self.expression_order.iter().position(|&q| q == qid) {
-                self.expression_order.remove(i);
-                self.version += 1;
-                return true;
-            }
+        if res.is_none() {
+            warn!(%qname, "Query not found in expressions");
         }
-        false
+
+        res
     }
 
     /// Alias `query` as `alias`. Subsequent calls to `node_addr_for(alias)` will return the node
@@ -614,7 +407,7 @@ impl Recipe {
         let qid = self
             .expressions
             .iter()
-            .find(|(_, (name, _, _))| name.as_ref().map(|n| n.as_str()) == Some(query))
+            .find(|(_, expr)| expr.name.as_deref() == Some(query))
             .ok_or_else(|| "Query not found".to_string())?
             .0;
         self.aliases.insert(alias, *qid);
@@ -673,7 +466,7 @@ impl Recipe {
         for q in affected_queries {
             warn!(query = %q, "query affected by failure");
             // Remove the query from the recipe via its alias, `q`.
-            if !recovery.remove_query(&q) {
+            if recovery.remove_query(&q).is_none() {
                 warn!(query = %q, "Call to Recipe::remove_query() failed");
             }
         }
@@ -683,140 +476,5 @@ impl Recipe {
         original.next();
 
         (recovery, original)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_computes_delta() {
-        let r0 = Recipe::blank();
-        let q0 = sql_parser::parse_query(Dialect::MySQL, "SELECT a FROM b;").unwrap();
-        let q1 =
-            sql_parser::parse_query(Dialect::MySQL, "SELECT a, c FROM b WHERE x = 42;").unwrap();
-
-        let q0_id = hash_query(&q0);
-        let q1_id = hash_query(&q1);
-
-        let pq_a = vec![(None, q0.clone(), true), (None, q1, true)];
-        let r1 = Recipe::from_queries(pq_a).unwrap();
-
-        // delta from empty recipe
-        let (added, removed) = r1.compute_delta(&r0);
-        assert_eq!(added.len(), 2);
-        assert_eq!(removed.len(), 0);
-        assert_eq!(added[0], q0_id);
-        assert_eq!(added[1], q1_id);
-
-        // delta with oneself should be nothing
-        let (added, removed) = r1.compute_delta(&r1);
-        assert_eq!(added.len(), 0);
-        assert_eq!(removed.len(), 0);
-
-        // bring on a new query set
-        let q2 = sql_parser::parse_query(Dialect::MySQL, "SELECT c FROM b;").unwrap();
-        let q2_id = hash_query(&q2);
-        let pq_b = vec![(None, q0, true), (None, q2, true)];
-        let r2 = Recipe::from_queries(pq_b).unwrap();
-
-        // delta should show addition and removal
-        let (added, removed) = r2.compute_delta(&r1);
-        assert_eq!(added.len(), 1);
-        assert_eq!(removed.len(), 1);
-        assert_eq!(added[0], q2_id);
-        assert_eq!(removed[0], q1_id);
-    }
-
-    #[test]
-    fn it_replaces() {
-        let r0 = Recipe::blank();
-        assert_eq!(r0.version, 0);
-        assert_eq!(r0.expressions.len(), 0);
-
-        let r1_txt = "SELECT a FROM b;\nSELECT a, c FROM b WHERE x = 42;";
-        let r1_t = Recipe::from_str(r1_txt).unwrap();
-        let r1 = r0.replace(r1_t);
-        assert_eq!(r1.version, 1);
-        assert_eq!(r1.expressions.len(), 2);
-
-        let r2_txt = "SELECT c FROM b;\nSELECT a, c FROM b;";
-        let r2_t = Recipe::from_str(r2_txt).unwrap();
-        let r2 = r1.replace(r2_t);
-        assert_eq!(r2.version, 2);
-        assert_eq!(r2.expressions.len(), 2);
-    }
-
-    #[test]
-    fn it_handles_aliasing() {
-        let r0 = Recipe::blank();
-
-        let r1_txt = "q_0: SELECT a FROM b;\nq_1: SELECT a FROM b;";
-        let r1_t = Recipe::from_str(r1_txt).unwrap();
-        let r1 = r0.replace(r1_t);
-        assert_eq!(r1.version, 1);
-        assert_eq!(r1.expressions.len(), 1);
-        assert_eq!(r1.aliases.len(), 2);
-        assert_eq!(r1.resolve_alias("q_1"), r1.resolve_alias("q_0"));
-    }
-
-    #[test]
-    #[should_panic(expected = "Query name exists but existing query is different")]
-    fn it_avoids_spurious_aliasing() {
-        let r0 = Recipe::blank();
-
-        let r1_txt = "q_0: SELECT a FROM b;\nq_1: SELECT a, c FROM b WHERE x = 42;";
-        let r1_t = Recipe::from_str(r1_txt).unwrap();
-        let mut r1 = r0.replace(r1_t);
-        assert_eq!(r1.version, 1);
-        assert_eq!(r1.expressions.len(), 2);
-
-        let r2_txt = "q_0: SELECT a, c FROM b WHERE x = 21;\nq_1: SELECT c FROM b;";
-        // we expect this to panic, since both q_0 and q_1 already exist with a different
-        // definition
-        r1.extend(r2_txt).unwrap();
-        assert_eq!(r1.version, 2);
-        assert_eq!(r1.expressions.len(), 4);
-    }
-
-    #[test]
-    fn it_handles_multiple_statements_per_line() {
-        let r0 = Recipe::blank();
-
-        let r1_txt = "  QUERY q_0: SELECT a FROM b; QUERY q_1: SELECT x FROM y;";
-        let r1_t = Recipe::from_str(r1_txt).unwrap();
-        let r1 = r0.replace(r1_t);
-        assert_eq!(r1.expressions.len(), 2);
-    }
-
-    #[test]
-    fn it_handles_spaces() {
-        let r0 = Recipe::blank();
-
-        let r1_txt = "  QUERY q_0: SELECT a FROM b;\
-                      QUERY q_1: SELECT x FROM y;";
-        let r1_t = Recipe::from_str(r1_txt).unwrap();
-        let r1 = r0.replace(r1_t);
-        assert_eq!(r1.expressions.len(), 2);
-    }
-
-    #[test]
-    fn it_handles_missing_semicolon() {
-        let r0 = Recipe::blank();
-
-        let r1_txt = "QUERY q_0: SELECT a FROM b;\nVIEW q_1: SELECT x FROM y";
-        let r1_t = Recipe::from_str(r1_txt).unwrap();
-        let r1 = r0.replace(r1_t);
-        assert_eq!(r1.expressions.len(), 2);
-    }
-
-    #[test]
-    fn display_parses() {
-        let recipe =
-            Recipe::from_str("CREATE TABLE b (a INT);\nQUERY q_0: SELECT a FROM b;").unwrap();
-        let recipe_s = recipe.to_string();
-        let res = Recipe::from_str(&recipe_s).unwrap();
-        assert_eq!(res.expressions().len(), 2);
     }
 }

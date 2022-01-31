@@ -1190,4 +1190,17 @@ impl Materializations {
         }
         Ok(())
     }
+
+    /// Removes the materialization state for the given set of nodes.
+    /// The rest of the materialization information (such as the replay paths) is left intact.
+    ///
+    /// This is specially useful when a Worker or Domain fail, and we need to re-send the domain messages.
+    /// In such a case, we want to remove the materialization state for those nodes
+    /// but keep all the other information, in order to make a recovery.
+    pub(in crate::controller) fn remove_nodes(&mut self, nodes: &HashSet<NodeIndex>) {
+        for ni in nodes {
+            self.have.remove(ni);
+            self.redundant_partial.remove(ni);
+        }
+    }
 }
