@@ -1,10 +1,10 @@
 # ReadySet
 
-## Summary
+# Summary
 
 - [Introduction](./intro.md)
 
-## Dev Guide
+# Dev Guide
 
 - [Getting Started](./getting_started.md)
 - [Docker Configuration](./docker.md)
@@ -15,10 +15,15 @@
 - [Benchmarking your code](./benchmarking.md)
 - [Debugging your code](./debugging.md)
 
-## Ops
+# Benchmarking
+
+- [Benchmarking Code in CI](./benchmarking/ci_execution_mysql.md)
+  - [Building a Test DB for CI Benchmarking](./benchmarking/data_generation.md)
+
+# Ops
 - [DevOps Concerns](./ops.md)
 
-## ReadySet Internals
+# ReadySet Internals
 
 - [System Components](./system_components.md)
 - [Life of a Query](./query_path.md)
@@ -31,6 +36,6 @@
   - [Proptest](./proptest.md)
   - [Failure Injection](./failure_injection.md)
 
-## AWS Resources
+# AWS Resources
 
 - [EC2 Dev Machine](./ec2-dev-machine.md)

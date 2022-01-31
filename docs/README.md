@@ -1,7 +1,8 @@
 # Pre-requisites
 
-mdbook-toc
+1. mdbook-toc
+2. mdbook
 
 ```
-cargo install mdbook-toc
+cargo install mdbook-toc mdbook
 ```

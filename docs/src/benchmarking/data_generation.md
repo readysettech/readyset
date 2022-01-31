@@ -1,11 +1,11 @@
-# Data Generation for Container-Based Benchmarks in CI
+### Data Generation for Container-Based Benchmarks in CI
 
 The automation in our Buildkite pipelines that executes benchmarks using
 docker-compose depends on the source data being in a particular format. To that
 end, the goal of this README is to detail the process, step by step, so we can
 always reproduce an archive that should work on the first attempt.
 
-# Prerequisites:
+### Prerequisites:
 
 * Have an Amazon Linux 2 EC2 instance in AWS
   * Be sure to provision a system with enough disk IOPS and memory, otherwise
@@ -22,7 +22,7 @@ always reproduce an archive that should work on the first attempt.
   generator binary built already. This guide assumes you have a prebuilt binary
   that can be copied to the Linux host you've provisioned.
 
-# Generating Portable Archive for Data Generated Automatically
+### Generating Portable Archive for Data Generated Automatically
 
 1. SSH into the Amazon Linux 2 instance using the private key you specified
    during instance launch:
@@ -46,24 +46,24 @@ always reproduce an archive that should work on the first attempt.
 
 4. Create a docker-compose file to run our temporary MySQL database:
 
-    **!! VERY IMPORTANT !!**:
-      * Do NOT change `lower-case-table-names` as it could render the DB archive
-        useless in CI. The value must be 1.
+    >  **VERY IMPORTANT**:
+    >    * Do NOT change `lower-case-table-names` as it could render the DB archive
+    >      useless in CI. The value must be 1.
 
     ```
-    version: "3.8"
-    services:
-      mysql:
-        image: mysql:8.0
-        ports:
-          - 3306:3306
-        command: --authentication_policy=mysql_native_password --lower-case-table-names=1
-        environment:
-          MYSQL_DATABASE: test
-          MYSQL_HOST: 127.0.0.1
-          MYSQL_ROOT_PASSWORD: root
-        volumes:
-          - /home/ec2-user/mysql-datadir:/var/lib/mysql
+        version: "3.8"
+        services:
+          mysql:
+            image: mysql:8.0
+            ports:
+              - 3306:3306
+            command: --authentication_policy=mysql_native_password --lower-case-table-names=1
+            environment:
+              MYSQL_DATABASE: test
+              MYSQL_HOST: 127.0.0.1
+              MYSQL_ROOT_PASSWORD: root
+            volumes:
+              - /home/ec2-user/mysql-datadir:/var/lib/mysql
     ```
 
 5. Start the MySQL database as a daemon, and make sure it comes up as expected:
@@ -82,7 +82,7 @@ always reproduce an archive that should work on the first attempt.
    into it. For the next steps, we'll be using a temporary container to run the
    data_generator binary.
 
-## Pumping Synthetic Data into MySQL Container
+#### Pumping Synthetic Data into MySQL Container
 
 1. Change directories on the Linux host to wherever the data_generator binary is
    located. Presumably, this was SCPed to the host.
@@ -121,7 +121,7 @@ always reproduce an archive that should work on the first attempt.
 7. Exec into the MySQL container, and run `mysqladmin stop` to gracefully shut
    down the database. Exit the container if needed.
 
-## Building Compressed Datadir Archive
+#### Building Compressed Datadir Archive
 
 1. On the Linux host, CD to where the datadir raw files are located. Let's tar
    up the files.
@@ -130,7 +130,7 @@ always reproduce an archive that should work on the first attempt.
     tar -C $(pwd) -zcvf benchmark-datadir-<semver-here>.tgz .
     ```
 
-## New Datadir Deployment to CI:
+#### New Datadir Deployment to CI:
 
 1. After compressing the archive, you can either:
     * SCP it to your machine, and then into the

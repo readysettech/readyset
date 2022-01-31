@@ -2,9 +2,9 @@
 
 The manifest file, `Cargo.toml`, describes how to build crates within a
 package. Cargo.toml files describe binaries, libraries, package dependencies,
-compile-time feature flags, and more. See 
+compile-time feature flags, and more. See
 [Cargo.toml](https://doc.rust-lang.org/cargo/reference/manifest.html)
-for more information on the manifest format. 
+for more information on the manifest format.
 
 ## Adding dependencies to an existing package.
 Rust has a growing ecosystem of libraries we can use [crates.io](https://crates.io/).
@@ -30,7 +30,7 @@ review.
 ## Adding a new crate
 When new functionality or features make more sense as a separate crate, make sure
 you ensure a few things:
-  * Add the crate to the workspace root `Cargo.toml`. 
+  * Add the crate to the workspace root `Cargo.toml`.
   * Setup the Cargo.toml file with naming, versioning, and rust edition set to `2018`.
 
 ```toml
@@ -58,8 +58,8 @@ time to compile, and should be added as dependencies with caution. Some examples
   * noria/server
 
 
-## Cargo.lock 
-The [`Cargo.lock`](https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html) 
+## Cargo.lock
+The [`Cargo.lock`](https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html)
 file describes the state of the world at the time of a successful
 build: the exact dependencies and versions used at the time when it was
 generated. This allows us to deterministically build and test ReadySet
@@ -71,7 +71,7 @@ with reproducible dependencies and versions.
 > making changes to dependencies.
 
 When performing a build, `cargo` attempts to use the latest compatible
-version of a package according to 
+version of a package according to
 [`SemVer` compatibility](https://doc.rust-lang.org/cargo/reference/resolver.html#semver-compatibility).
 
 ## Updating git dependencies with `cargo update`
@@ -108,14 +108,14 @@ Among other things, it checks that the CL has not introduced any
 duplicate dependencies for crates. Duplicate crates will be built for every
 [SemVer incompatible](https://doc.rust-lang.org/cargo/reference/resolver.html)
 version of the crate, this can inflate the size of the ReadySet binary
-and will slow down compilation times. 
+and will slow down compilation times.
 
 > ```
 > /noria-server
 >   - zookeeper = "0.5"
 >       - reqwest = "0.10"
 >   - ...
-> 
+>
 > /noria-psql
 >   - zookeeper = **"0.6"**
 >       - reqwest = **"0.11"**
@@ -128,7 +128,7 @@ and will slow down compilation times.
 > duplicate crates**.
 
 **Tips:** Prefer versions of crates that we already use. If these crates
-require an update, we can update them all at the same time. 
+require an update, we can update them all at the same time.
 
 ### What if there is no alternative?
 If crate compatibility with the rest of the tree is not possible when
@@ -140,10 +140,3 @@ crate should be added to `skip-tree`, which skips the entire dependency
 tree originating from the crate. See
 [cargo-deny](https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html)
 for more information.
-
-
-
-
-
-
-
