@@ -80,7 +80,6 @@ impl Debug for ControllerState {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ControllerState")
             .field("config", &self.config)
-            .field("recipe_version", &self.dataflow_state.recipe.version())
             .field(
                 "schema_replication_offset",
                 &self.dataflow_state.schema_replication_offset(),
