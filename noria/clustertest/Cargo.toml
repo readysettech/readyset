@@ -29,3 +29,11 @@ clustertest-macros = { path = "./macros" }
 
 [dev-dependencies]
 serial_test = "0.5.1"
+criterion = { version = "0.3", features=['real_blackbox', 'async_tokio']}
+
+[[bench]]
+name = "clustering"
+harness = false
+
+[features]
+slow_bench = []
