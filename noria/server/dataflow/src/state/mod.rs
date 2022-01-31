@@ -76,6 +76,7 @@ pub(crate) trait State: SizeOf + Send {
     /// infromation and is thus "not useful".
     fn is_useful(&self) -> bool;
 
+    /// Returns true if this state is partially materialized
     fn is_partial(&self) -> bool;
 
     /// Inserts or removes each record into State. Records that miss all indices in partial state
@@ -100,12 +101,53 @@ pub(crate) trait State: SizeOf + Send {
         None
     }
 
-    fn mark_hole(&mut self, key: &KeyComparison, tag: Tag);
-
+    /// Mark the given `key` as a *filled hole* in the given partial `tag`, causing all lookups to
+    /// that key to return an empty non-miss result, and all writes to that key to not be dropped.
+    ///
+    /// # Invariants
+    ///
+    /// The given `tag` must identify an index with the same length as the given `key` and whose
+    /// [`IndexType`]  supports the given `key` type (eg it cannot be a [`HashMap`] index if the
+    /// `key` is a range key)
+    ///
+    /// [`HashMap`]: IndexType::HashMap
     fn mark_filled(&mut self, key: KeyComparison, tag: Tag);
 
+    /// Mark the given `key` as a *hole* in the given partial `tag`, deleting all records that were
+    /// otherwise materialized into that `key`.
+    ///
+    /// # Invariants
+    ///
+    /// The given `tag` must identify an index with the same length as the given `key` and whose
+    /// [`IndexType`]  supports the given `key` type (eg it cannot be a [`HashMap`] index if the
+    /// `key` is a range key)
+    ///
+    /// [`HashMap`]: IndexType::HashMap
+    fn mark_hole(&mut self, key: &KeyComparison, tag: Tag);
+
+    /// Lookup all rows in this state where the values at the given `columns` match the given `key`.
+    ///
+    /// # Invariants
+    ///
+    /// * The length of `columns` must match the length of `key`
+    /// * There must be a [`HashMap`] [`Index`] on the given `columns` that was previously created
+    ///   via [`make_key`]
+    ///
+    /// [`HashMap`]: IndexType::HashMap
+    /// [`make_key`]: State::make_key
     fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a>;
 
+    /// Lookup all rows in this state where the values at the given `columns` are within the range
+    /// specified by the given `key`
+    ///
+    /// # Invariants
+    ///
+    /// * The length of `columns` must match the length of `key`
+    /// * There must be a [`BTreeMap`] [`Index`] on the given `columns` that was previously created
+    ///   via [`make_key`]
+    ///
+    /// [`BTreeMap`]: IndexType::BTreeMap
+    /// [`make_key`]: State::make_key
     fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a>;
 
     /// Lookup all the rows matching the given `key` in the weak index for the given set of
@@ -131,6 +173,8 @@ pub(crate) trait State: SizeOf + Send {
         None
     }
 
+    /// Return (a potentially inaccurate estimate of) the number of rows materialized into this
+    /// state
     fn rows(&self) -> usize;
 
     /// Return a copy of all records. Panics if the state is only partially materialized.
@@ -144,6 +188,7 @@ pub(crate) trait State: SizeOf + Send {
     /// to evict from and the number of bytes evicted.
     fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<(&Index, u64)>;
 
+    /// Remove all rows from this state
     fn clear(&mut self);
 }
 
