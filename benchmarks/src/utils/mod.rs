@@ -1,8 +1,14 @@
 use anyhow::Result;
+use mysql_async::prelude::Queryable;
+use mysql_async::ServerError;
+use noria::status::{ReadySetStatus, SnapshotStatus};
+use noria::ReadySetResult;
+use std::convert::TryFrom;
 use std::future::Future;
 use std::num::ParseIntError;
 use std::str::FromStr;
 use std::time::Duration;
+use tracing::info;
 
 pub mod generate;
 pub mod multi_thread;
@@ -57,6 +63,36 @@ macro_rules! make_key {
             labels
         )
     }};
+}
+
+/// Waits for the back-end to return that it is ready to process queries.
+pub async fn readyset_ready(target: &str) -> ReadySetResult<()> {
+    info!("Waiting for the target database to be ready...");
+    let opts = mysql_async::Opts::from_url(target).unwrap();
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+
+    loop {
+        let res = conn.query("SHOW READYSET STATUS").await;
+        if let Err(mysql_async::Error::Server(ServerError { code, .. })) = res {
+            // If it is a syntax error, this is not a ReadySet adapter and does not support this
+            // syntax.
+            if code == 1064 {
+                info!("Database ready!");
+                break;
+            }
+        }
+
+        let res: Vec<mysql_async::Row> = res?;
+        let status = ReadySetStatus::try_from(res)?;
+        if status.snapshot_status == SnapshotStatus::Completed {
+            info!("Database ready!");
+            break;
+        }
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    Ok(())
 }
 
 #[macro_export]

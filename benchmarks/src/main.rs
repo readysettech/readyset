@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -6,11 +7,7 @@ use anyhow::bail;
 use clap::{AppSettings, Parser, ValueHint};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::MetricKindMask;
-use mysql_async::prelude::Queryable;
-use noria::status::{ReadySetStatus, SnapshotStatus};
 use noria_server::Handle;
-use std::convert::TryFrom;
-use std::io::Write;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::warn;
@@ -20,6 +17,7 @@ use noria_client_test_helpers::setup_like_prod_with_handle;
 
 use benchmarks::benchmark::{Benchmark, BenchmarkControl, BenchmarkResults, DeploymentParameters};
 use benchmarks::benchmark_histogram;
+use benchmarks::utils::readyset_ready;
 
 const PUSH_GATEWAY_PUSH_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -62,13 +60,8 @@ struct BenchmarkRunner {
     #[clap(long, value_hint = ValueHint::AnyPath, required(true))]
     benchmark: Option<PathBuf>,
 
-    /// Treats the target database as a ReadySet database, and polls on snapshot completion
-    /// before beginning `benchmark`.
-    #[clap(long)]
-    wait_for_snapshot: bool,
-
-    /// A file to write the human-readable set of benchmark results to. Results are appended to the
-    /// file.
+    /// A file to append the set of benchmark results to, creates the file if it has not yet been
+    /// created.
     #[clap(long, value_hint = ValueHint::FilePath)]
     results_file: Option<PathBuf>,
 
@@ -164,11 +157,14 @@ impl BenchmarkRunner {
         Some((handle, tx))
     }
 
+    // Creates a local deployment that may include an external upstream database. This does not
+    // mutate the upstream database when --skip-setup is passed.
     pub async fn start_local(&self, mysql_addr: Option<String>) -> (DeploymentParameters, Handle) {
         let (mysql_opts, handle) = setup_like_prod_with_handle::<MySQLAdapter>(
             noria_client::BackendBuilder::new().require_authentication(false),
             mysql_addr.clone(),
             true, // wait_for_backend
+            false,
         )
         .await;
 
@@ -300,30 +296,14 @@ impl BenchmarkRunner {
         let importer = self.start_metric_readers();
 
         // Check that ReadySet has completed snapshotting via the readyset status.
-        // TODO(justin): Abstract this functionality as it is generally useful for tests.
-        if self.wait_for_snapshot {
-            println!("Waiting for snapshotting to complete...");
-            let opts =
-                mysql_async::Opts::from_url(&self.deployment_params.target_conn_str).unwrap();
-            let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-
-            loop {
-                let res: Vec<mysql_async::Row> = conn.query("SHOW READYSET STATUS").await.unwrap();
-                let status = ReadySetStatus::try_from(res)?;
-                if status.snapshot_status == SnapshotStatus::Completed {
-                    println!("Snapshotting finished!");
-                    break;
-                }
-
-                tokio::time::sleep(Duration::from_millis(500)).await;
-            }
-        }
+        readyset_ready(&self.deployment_params.target_conn_str).await?;
 
         let mut results = Vec::new();
         for i in 0..self.iterations {
             if self.iterations > 1 {
                 println!("Iteration: {} ---------------------------", i);
                 benchmark_cmd.reset(&self.deployment_params).await?;
+                readyset_ready(&self.deployment_params.target_conn_str).await?;
             }
             let start_time = Instant::now();
             let result = benchmark_cmd.benchmark(&self.deployment_params).await?;

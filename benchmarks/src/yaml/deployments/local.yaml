@@ -1,5 +1,5 @@
 ---
 instance_label: local
 prometheus_push_gateway: ~
-target_conn_str: "mysql://127.0.0.1:3307"
+target_conn_str: "mysql://root:noria@127.0.0.1:3306/test"
 setup_conn_str: "mysql://root:noria@127.0.0.1:3306/test"
