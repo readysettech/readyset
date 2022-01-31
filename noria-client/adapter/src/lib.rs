@@ -153,7 +153,7 @@ pub struct Options {
     region: Option<String>,
 
     /// Enable recording and exposing Prometheus metrics
-    #[clap(long)]
+    #[clap(long, env = "PROMETHEUS_METRICS")]
     prometheus_metrics: bool,
 
     /// Enable logging queries and execution metrics in prometheus. This creates a
@@ -162,7 +162,7 @@ pub struct Options {
     query_log: bool,
 
     /// Enables logging ad-hoc queries in the query log. Useful for testing.
-    #[clap(long, hide = true, requires = "query-log")]
+    #[clap(long, hide = true, env = "QUERY_LOG_AD_HOC", requires = "query-log")]
     query_log_ad_hoc: bool,
 
     /// Use the AWS EC2 metadata service to determine the external address of this noria adapter's
