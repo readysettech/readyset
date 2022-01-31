@@ -1,7 +1,5 @@
 # ReadySet
 
-# Summary
-
 - [Introduction](./intro.md)
 
 # Dev Guide
