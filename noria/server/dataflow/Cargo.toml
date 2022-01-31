@@ -41,7 +41,7 @@ vec1 = "1.6.0"
 maplit = "1.0.2"
 derivative = "2.2.0"
 dataflow_expression = { path = "expression" }
-criterion = { version = "0.3", features=['real_blackbox'], optional = true }
+criterion = { version = "0.3", features=['real_blackbox', 'async_tokio'], optional = true }
 test-strategy = "0.1.1"
 thiserror = "1.0.26"
 proptest = "1.0.0"
