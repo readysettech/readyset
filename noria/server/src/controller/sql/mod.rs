@@ -635,11 +635,7 @@ impl SqlIncorporator {
         Ok((qfp, mir))
     }
 
-    pub(super) fn remove_query(
-        &mut self,
-        query_name: &str,
-        _mig: &Migration<'_>,
-    ) -> ReadySetResult<Option<NodeIndex>> {
+    pub(super) fn remove_query(&mut self, query_name: &str) -> ReadySetResult<Option<NodeIndex>> {
         let nodeid = self
             .leaf_addresses
             .remove(query_name)
