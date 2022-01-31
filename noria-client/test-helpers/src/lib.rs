@@ -67,6 +67,7 @@ where
         wait_for_backend,
         query_status_cache,
         MigrationMode::InRequestPath,
+        true,
     )
     .await
 }
@@ -94,6 +95,7 @@ pub async fn setup_like_prod_with_handle<A>(
     backend_builder: BackendBuilder,
     fallback: Option<String>,
     wait_for_backend: bool,
+    recreate_database: bool,
 ) -> (A::ConnectionOpts, Handle)
 where
     A: Adapter + 'static,
@@ -106,6 +108,7 @@ where
         wait_for_backend,
         query_status_cache,
         MigrationMode::OutOfBand, // Must use CREATE CACHED QUERY to migrate queries.
+        recreate_database,
     )
     .await
 }
@@ -119,6 +122,7 @@ pub async fn setup_inner<A>(
     wait_for_backend: bool,
     query_status_cache: Arc<QueryStatusCache>,
     mode: MigrationMode,
+    recreate_database: bool,
 ) -> (A::ConnectionOpts, Handle)
 where
     A: Adapter + 'static,
@@ -128,7 +132,7 @@ where
         readyset_logging::init_test_logging();
     }
 
-    if fallback.is_some() {
+    if fallback.is_some() && recreate_database {
         A::recreate_database().await;
     }
 

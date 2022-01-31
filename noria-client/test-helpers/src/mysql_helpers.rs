@@ -113,6 +113,7 @@ pub async fn query_cache_setup(
         true,
         query_status_cache,
         migration_mode,
+        true, // recreate ddatabase.
     )
     .await
 }
