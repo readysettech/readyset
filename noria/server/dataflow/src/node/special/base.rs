@@ -271,6 +271,8 @@ impl Base {
             _ => return self.process_unkeyed(ops),
         };
 
+        let mut failed_ops = Vec::new();
+
         let mut n_ops = ops.len();
         // Sort all of the operations lexicographically by key types, all unkeyed operations will move
         // to the front of the vector (which can only be `SetReplicationOffset`), for the rest of the operations
@@ -381,7 +383,7 @@ impl Base {
                             }
                         }
                     }
-                    op => warn!(?op, "Base ignoring operation"),
+                    op => failed_ops.push(op),
                 }
             }
 
@@ -409,6 +411,10 @@ impl Base {
             self.fix(r);
         }
 
+        if !failed_ops.is_empty() {
+            warn_of_failed_ops(failed_ops);
+        }
+
         Ok(BaseWrite {
             records: results.into(),
             replication_offset,
@@ -428,6 +434,29 @@ impl Base {
             HashMap::new()
         }
     }
+}
+
+fn warn_of_failed_ops(ops: Vec<TableOperation>) {
+    let insert_cnt = ops
+        .iter()
+        .filter(|op| matches!(op, TableOperation::Insert(_)))
+        .fold(0usize, |s, _| s + 1);
+    let delete_cnt = ops
+        .iter()
+        .filter(|op| {
+            matches!(
+                op,
+                TableOperation::DeleteRow { .. } | TableOperation::DeleteByKey { .. }
+            )
+        })
+        .fold(0usize, |s, _| s + 1);
+    let update_cnt = ops
+        .iter()
+        .filter(|op| matches!(op, TableOperation::Update { .. }))
+        .fold(0usize, |s, _| s + 1);
+
+    warn!(inserts = %insert_cnt, deletes = %delete_cnt, updates = %update_cnt,
+         "Failed to apply some table operations");
 }
 
 #[cfg(test)]
