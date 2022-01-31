@@ -3155,7 +3155,6 @@ async fn recipe_activates() {
     let mut g = start_simple("recipe_activates").await;
     g.migrate(|mig| {
         let mut r = Recipe::blank();
-        assert_eq!(r.version(), 0);
         assert_eq!(r.expressions().len(), 0);
 
         let cl_txt = "CREATE TABLE b (a text, c text, x text);\n";

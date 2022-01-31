@@ -13,7 +13,6 @@ use nom_sql::CreateTableStatement;
 use noria_errors::{internal, internal_err, ReadySetError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::str;
 use std::vec::Vec;
 
@@ -41,18 +40,8 @@ pub(crate) struct Recipe {
     /// to a `QueryId` in the expressions of the recipe.
     aliases: HashMap<String, QueryID>,
 
-    /// Recipe revision.
-    // We are skipping this field, since in the near future when we recover using the [`DataflowState`]
-    // as source of truth, we won't need a list of [`Recipes`] anymore.
-    // Thus, we don't need to version them.
-    #[serde(skip)]
-    version: usize,
-
     /// Maintains lower-level state, but not the graph itself. Lazily initialized.
-    ///
-    /// NOTE: this is an Option so that we can call [`Option::take`] on it, but will
-    /// never actually be None externally.
-    inc: Option<SqlIncorporator>,
+    inc: SqlIncorporator,
 }
 
 unsafe impl Send for Recipe {}
@@ -63,7 +52,6 @@ impl PartialEq for Recipe {
         self.expressions == other.expressions
             && self.expression_order == other.expression_order
             && self.aliases == other.aliases
-            && self.version == other.version
     }
 }
 
@@ -100,12 +88,12 @@ impl Recipe {
             expressions: HashMap::default(),
             expression_order: Vec::default(),
             aliases: HashMap::default(),
-            version: 0,
-            inc: Some(SqlIncorporator::new()),
+            inc: SqlIncorporator::new(),
         }
     }
 
     /// Creates a new blank recipe with the given SQL configuration and MIR configuration
+    // crate viz for tests
     pub(crate) fn with_config(sql_config: sql::Config, mir_config: sql::mir::Config) -> Self {
         let mut res = Recipe::blank();
         res.set_sql_config(sql_config);
@@ -113,59 +101,37 @@ impl Recipe {
         res
     }
 
-    /// Creates a blank recipe with config taken from `other`
-    pub(crate) fn blank_with_config_from(other: &Recipe) -> Recipe {
-        let mut res = Recipe::blank();
-        res.clone_config_from(other);
-        res
-    }
-
-    /// Creates a blank recipe with the given `version`, and config taken from `other`
-    pub(super) fn with_version_and_config_from(version: usize, other: &Recipe) -> Recipe {
-        let mut res = Recipe {
-            version,
-            ..Self::blank()
-        };
-        res.clone_config_from(other);
-        res
-    }
-
-    /// Clone the MIR and SQL configuration from `other` into `self`
-    pub(crate) fn clone_config_from(&mut self, other: &Recipe) {
-        self.set_sql_config(other.sql_config().clone());
-        self.set_mir_config(other.mir_config().clone());
-    }
-
     /// Set the MIR configuration for this recipe
+    // crate viz for tests
     pub(crate) fn set_mir_config(&mut self, mir_config: sql::mir::Config) {
-        self.inc.as_mut().unwrap().set_mir_config(mir_config)
+        self.inc.set_mir_config(mir_config)
     }
 
     /// Get a shared reference to this recipe's MIR configuration
     pub(crate) fn mir_config(&self) -> &sql::mir::Config {
-        self.inc.as_ref().unwrap().mir_config()
+        self.inc.mir_config()
     }
 
     /// Set the SQL configuration for this recipe
     pub(crate) fn set_sql_config(&mut self, sql_config: sql::Config) {
-        self.inc.as_mut().unwrap().config = sql_config;
+        self.inc.config = sql_config;
     }
 
     /// Get a shared reference to this recipe's SQL configuration
     pub(crate) fn sql_config(&self) -> &sql::Config {
-        &self.inc.as_ref().unwrap().config
+        &self.inc.config
     }
 
     /// Disable node reuse.
     // crate viz for tests
     pub(crate) fn disable_reuse(&mut self) {
-        self.inc.as_mut().unwrap().disable_reuse();
+        self.inc.disable_reuse();
     }
 
     /// Enable node reuse.
     // crate viz for tests
     pub(crate) fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
-        self.inc.as_mut().unwrap().enable_reuse(reuse_type)
+        self.inc.enable_reuse(reuse_type)
     }
 
     pub(in crate::controller) fn resolve_alias(&self, alias: &str) -> Option<&str> {
@@ -176,33 +142,24 @@ impl Recipe {
 
     /// Obtains the `NodeIndex` for the node corresponding to a named query or a write type.
     pub(in crate::controller) fn node_addr_for(&self, name: &str) -> Result<NodeIndex, String> {
-        match self.inc {
-            Some(ref inc) => {
-                // `name` might be an alias for another identical query, so resolve if needed
-                let na = match self.resolve_alias(name) {
-                    None => inc.get_query_address(name),
-                    Some(internal_qn) => inc.get_query_address(internal_qn),
-                };
-                match na {
-                    None => Err(format!(
-                        "No query endpoint for \"{}\" exists at v{}.",
-                        name, self.version
-                    )),
-                    Some(na) => Ok(na),
-                }
-            }
-            None => Err("Recipe not applied".to_string()),
+        // `name` might be an alias for another identical query, so resolve if needed
+        let na = match self.resolve_alias(name) {
+            None => self.inc.get_query_address(name),
+            Some(internal_qn) => self.inc.get_query_address(internal_qn),
+        };
+        match na {
+            None => Err(format!("No query endpoint for \"{}\" exists .", name)),
+            Some(na) => Ok(na),
         }
     }
 
     /// Get schema for a base table or view in the recipe.
     pub(super) fn schema_for(&self, name: &str) -> Option<Schema> {
-        let inc = self.inc.as_ref().expect("Recipe not applied");
-        match inc.get_base_schema(name) {
+        match self.inc.get_base_schema(name) {
             None => {
                 let s = match self.resolve_alias(name) {
-                    None => inc.get_view_schema(name),
-                    Some(internal_qn) => inc.get_view_schema(internal_qn),
+                    None => self.inc.get_view_schema(name),
+                    Some(internal_qn) => self.inc.get_view_schema(internal_qn),
                 };
                 s.map(Schema::View)
             }
@@ -223,7 +180,6 @@ impl Recipe {
         debug!(
             num_queries = self.expressions.len(),
             named_queries = self.aliases.len(),
-            version = self.version,
         );
 
         let mut result = ActivationResult {
@@ -238,7 +194,7 @@ impl Recipe {
             match change {
                 Change::Add(expr) => {
                     // add the query
-                    let qfp = self.inc.as_mut().unwrap().add_parsed_query(
+                    let qfp = self.inc.add_parsed_query(
                         expr.query.clone(),
                         expr.name.clone(),
                         expr.is_leaf,
@@ -322,7 +278,7 @@ impl Recipe {
                         // nodes; the code handling `removed_leaves` therefore needs to take care
                         // not to remove bases while they still have children, or to try removing
                         // them twice.
-                        self.inc.as_mut().unwrap().remove_base(&ctq.table.name)?;
+                        self.inc.remove_base(&ctq.table.name)?;
                         match self.node_addr_for(&ctq.table.name) {
                             Ok(ni) => Some(ni),
                             Err(e) => {
@@ -338,11 +294,7 @@ impl Recipe {
                             }
                         }
                     }
-                    _ => self
-                        .inc
-                        .as_mut()
-                        .unwrap()
-                        .remove_query(expr.name.as_ref().unwrap())?,
+                    _ => self.inc.remove_query(expr.name.as_ref().unwrap())?,
                 })
             })
             // FIXME(eta): error handling impl overhead
@@ -363,6 +315,8 @@ impl Recipe {
             .collect()
     }
 
+    /// Creates a [`ChangeList`] specifying the removal
+    /// of all queries in the recipe.
     pub(super) fn remove_all(&self) -> ChangeList {
         let mut changes = Vec::new();
         for expr in self.expressions.values() {
@@ -373,12 +327,7 @@ impl Recipe {
 
     /// Helper method to reparent a recipe. This is needed for some of t
     pub(super) fn sql_inc(&self) -> &SqlIncorporator {
-        self.inc.as_ref().unwrap()
-    }
-
-    /// Helper method to reparent a recipe. This is needed for some of t
-    pub(in crate::controller) fn set_sql_inc(&mut self, new_inc: SqlIncorporator) {
-        self.inc = Some(new_inc);
+        &self.inc
     }
 
     /// Remove the expression with the given alias, `qname`, from the recipe.
@@ -412,69 +361,5 @@ impl Recipe {
             .0;
         self.aliases.insert(alias, *qid);
         Ok(())
-    }
-
-    /// Replace this recipe with a new one, retaining queries that exist in both. Any queries only
-    /// contained in `new` (but not in `self`) will be added; any contained in `self`, but not in
-    /// `new` will be removed.
-    /// Consumes `self` and returns a replacement recipe.
-    pub(super) fn replace(mut self, mut new: Recipe) -> Recipe {
-        // generate replacement recipe with correct version and lineage
-        new.version = self.version + 1;
-        // retain the old incorporator but move it to the new recipe
-        let prior_inc = self.inc.take();
-        // retain the previous `SqlIncorporator` state
-        new.inc = prior_inc;
-
-        // return new recipe as replacement for self
-        new
-    }
-
-    /// Increments the version of a recipe. Returns the new version number.
-    pub(super) fn next(&mut self) -> usize {
-        self.version += 1;
-        self.version
-    }
-
-    /// Returns the version number of this recipe.
-    // crate viz for tests
-    pub(crate) fn version(&self) -> usize {
-        self.version
-    }
-
-    /// Gets the alias of the for the expression associated with each node in `nodes`.
-    pub(super) fn queries_for_nodes(&self, nodes: HashSet<NodeIndex>) -> Vec<String> {
-        nodes
-            .iter()
-            .flat_map(|ni| {
-                self.inc
-                    .as_ref()
-                    .expect("need SQL incorporator")
-                    .get_queries_for_node(*ni)
-            })
-            .collect()
-    }
-
-    pub(super) fn make_recovery(&self, mut affected_queries: Vec<String>) -> (Recipe, Recipe) {
-        affected_queries.sort();
-        affected_queries.dedup();
-
-        let mut recovery = self.clone();
-        recovery.next();
-
-        // remove from recipe
-        for q in affected_queries {
-            warn!(query = %q, "query affected by failure");
-            // Remove the query from the recipe via its alias, `q`.
-            if recovery.remove_query(&q).is_none() {
-                warn!(query = %q, "Call to Recipe::remove_query() failed");
-            }
-        }
-
-        let mut original = self.clone();
-        original.next();
-        original.next();
-
-        (recovery, original)
     }
 }
