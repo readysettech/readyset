@@ -78,7 +78,7 @@ const READYSET_MYSQL_CLOUDFORMATION_TEMPLATE_URL: &str =
 
 /// Public cloudformation template for the MySQL Readyset stack
 const READYSET_POSTGRESQL_CLOUDFORMATION_TEMPLATE_URL: &str =
-    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-mysql-template.yaml";
+    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-postgresql-template.yaml";
 
 /// Install and configure a ReadySet cluster in AWS
 #[derive(Parser)]
