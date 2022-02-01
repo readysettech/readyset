@@ -1796,7 +1796,7 @@ impl SqlToMirConverter {
                     .collect();
 
                 let aggregates = if view_key.index_type != IndexType::HashMap {
-                    post_lookup_aggregates(qg)?
+                    post_lookup_aggregates(qg, st)?
                 } else {
                     None
                 };

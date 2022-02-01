@@ -8,7 +8,9 @@ use dataflow::post_lookup::{
 use mir::node::node_inner::MirNodeInner;
 use mir::{Column, MirNodeRef};
 use nom_sql::analysis::ReferredColumns;
-use nom_sql::{self, Expression, FunctionExpression::*};
+use nom_sql::{
+    self, Expression, FieldDefinitionExpression, FunctionExpression::*, SelectStatement,
+};
 use noria_errors::{internal, invariant, unsupported, ReadySetError};
 use std::collections::{HashMap, HashSet};
 
@@ -312,8 +314,34 @@ fn joinable_aggregate_nodes(agg_nodes: &[MirNodeRef]) -> Vec<MirNodeRef> {
 /// if the query contains no aggregates.
 pub(super) fn post_lookup_aggregates(
     qg: &QueryGraph,
+    stmt: &SelectStatement,
 ) -> ReadySetResult<Option<PostLookupAggregates<Column>>> {
-    let columns = if let Some(qgn) = qg.relations.get("computed_columns") {
+    if stmt.distinct {
+        // DISTINCT is the equivalent of grouping by all projected columns but not actually doing
+        // any aggregation function
+        return Ok(Some(PostLookupAggregates {
+            group_by: stmt
+                .fields
+                .iter()
+                .filter_map(|expr| match expr {
+                    FieldDefinitionExpression::Expression {
+                        alias: Some(alias), ..
+                    } => Some(Column::named(alias.clone())),
+                    FieldDefinitionExpression::Expression {
+                        expr: Expression::Column(col),
+                        ..
+                    } => Some(Column::from(col)),
+                    FieldDefinitionExpression::Expression { expr, .. } => {
+                        Some(Column::named(expr.to_string()))
+                    }
+                    _ => None,
+                })
+                .collect(),
+            aggregates: vec![],
+        }));
+    }
+
+    let aggregate_columns = if let Some(qgn) = qg.relations.get("computed_columns") {
         if qgn.columns.is_empty() {
             return Ok(None);
         } else {
@@ -334,7 +362,7 @@ pub(super) fn post_lookup_aggregates(
         .collect::<Vec<_>>();
 
     let mut aggregates = vec![];
-    for col in columns {
+    for col in aggregate_columns {
         aggregates.push(PostLookupAggregate {
             column: col.clone().into(),
             function: match col.function.as_deref() {
