@@ -1262,33 +1262,20 @@ impl DataflowState {
                     self.remove_leaf(leaf).await?;
                 }
 
-                // now remove bases
+                let mut nodes_to_remove: Vec<NodeIndex> = Vec::new();
+                // Now remove bases and all its children, recursively.
                 for base in removed_bases {
-                    // TODO(malte): support removing bases that still have children?
-
-                    // TODO(malte): what about domain crossings? can ingress/egress nodes be left
-                    // behind?
-                    assert_eq!(
-                        self.ingredients
-                            .neighbors_directed(base, petgraph::EdgeDirection::Outgoing)
-                            .count(),
-                        0
-                    );
-                    let name = self
-                        .ingredients
-                        .node_weight(base)
-                        .ok_or_else(|| ReadySetError::NodeNotFound {
-                            index: base.index(),
-                        })?
-                        .name();
-                    debug!(
-                        %name,
-                        node = %base.index(),
-                        "Removing base",
-                    );
-                    // now drop the (orphaned) base
-                    self.remove_nodes(vec![base].as_slice()).await?;
+                    let mut stack = vec![base];
+                    while let Some(node) = stack.pop() {
+                        nodes_to_remove.push(node);
+                        stack.extend(
+                            self.ingredients
+                                .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
+                                .filter(|ni| !self.ingredients[*ni].is_dropped()),
+                        );
+                    }
                 }
+                self.remove_nodes(nodes_to_remove.as_slice()).await?;
 
                 self.recipe = new;
             }

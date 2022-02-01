@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::str;
 use std::vec::Vec;
 
@@ -673,9 +673,19 @@ impl SqlIncorporator {
 
         let mir = self
             .base_mir_queries
-            .get(name)
+            .remove(name)
             .ok_or_else(|| internal_err(format!("tried to remove unknown base {}", name)))?;
-        self.mir_converter.remove_base(name, mir)
+        let roots = mir
+            .roots
+            .iter()
+            .map(|r| r.borrow().name.clone())
+            .collect::<HashSet<_>>();
+        self.mir_queries.retain(|_, v| {
+            !v.roots
+                .iter()
+                .any(|root| roots.contains(&root.borrow().name))
+        });
+        self.mir_converter.remove_base(name, &mir)
     }
 
     fn register_query(&mut self, query_name: &str, qg: Option<QueryGraph>, mir: &MirQuery) {

@@ -8042,3 +8042,128 @@ async fn it_recovers_fully_materialized() {
     }
     drop(g);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn simple_drop_tables() {
+    let mut g = start_simple_unsharded("simple_drop_tables").await;
+
+    let create_table = "
+        # base tables
+        CREATE TABLE table_1 (column_1 INT);
+        CREATE TABLE table_2 (column_2 INT);
+        QUERY t1: SELECT * FROM table_1;
+    ";
+    g.install_recipe(create_table).await.unwrap();
+    assert!(g.table("table_1").await.is_ok());
+    assert!(g.table("table_2").await.is_ok());
+    assert!(g.view("t1").await.is_ok());
+
+    let drop_table = "DROP TABLE table_1, table_2;";
+    // let drop_table = "CREATE TABLE table_4 (column_4 INT);";
+    g.extend_recipe(drop_table).await.unwrap();
+
+    sleep().await;
+
+    assert!(g.table("table_1").await.is_err());
+    assert!(g.table("table_2").await.is_err());
+    assert!(g.view("t1").await.is_err());
+
+    let create_new_table = "CREATE TABLE table_3 (column_3 INT);";
+    g.extend_recipe(create_new_table).await.unwrap();
+    assert!(g.table("table_3").await.is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn join_drop_tables() {
+    let mut g = start_simple_unsharded("simple_drop_tables").await;
+
+    let create_table = "
+        # base tables
+        CREATE TABLE table_1 (column_1 INT, column_2 INT);
+        CREATE TABLE table_2 (column_1 INT, column_2 INT);
+        CREATE TABLE table_3 (column_1 INT, column_2 INT);
+        QUERY t1: SELECT table_1.column_1, table_3.column_1 FROM table_1 JOIN table_3 ON table_1.column_2 = table_3.column_2;
+    ";
+    g.install_recipe(create_table).await.unwrap();
+    assert!(g.table("table_1").await.is_ok());
+    assert!(g.table("table_2").await.is_ok());
+    assert!(g.table("table_3").await.is_ok());
+    assert!(g.view("t1").await.is_ok());
+
+    let drop_table = "DROP TABLE table_1, table_2;";
+    g.extend_recipe(drop_table).await.unwrap();
+
+    sleep().await;
+
+    assert!(g.table("table_1").await.is_err());
+    assert!(g.table("table_2").await.is_err());
+    assert!(g.table("table_3").await.is_ok());
+    assert!(g.view("t1").await.is_err());
+
+    let create_new_table = "CREATE TABLE table_1 (column_1 INT);";
+    g.extend_recipe(create_new_table).await.unwrap();
+    assert!(g.table("table_1").await.is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn simple_drop_tables_with_data() {
+    let mut g = start_simple_unsharded("simple_drop_tables_with_data").await;
+
+    let create_table = "
+        # base tables
+        CREATE TABLE table_1 (column_1 INT);
+        CREATE TABLE table_2 (column_2 INT);
+        QUERY t1: SELECT * FROM table_1;
+    ";
+    g.install_recipe(create_table).await.unwrap();
+
+    let mut table_1 = g.table("table_1").await.unwrap();
+    table_1.insert(vec![11.into()]).await.unwrap();
+    table_1.insert(vec![12.into()]).await.unwrap();
+
+    let mut view = g.view("t1").await.unwrap();
+    let results = view.lookup(&[0.into()], true).await.unwrap();
+    assert!(!results.is_empty());
+    assert_eq!(results[0][0], 11.into());
+    assert_eq!(results[1][0], 12.into());
+
+    let drop_table = "DROP TABLE table_1, table_2;";
+    g.extend_recipe(drop_table).await.unwrap();
+    assert!(g.table("table_1").await.is_err());
+    assert!(g.table("table_2").await.is_err());
+    assert!(g.view("t1").await.is_err());
+
+    let recreate_table = "CREATE TABLE table_1 (column_1 INT);";
+    g.extend_recipe(recreate_table).await.unwrap();
+    assert!(g.table("table_1").await.is_ok());
+    assert!(g.view("t1").await.is_err());
+
+    let recreate_query = "QUERY t2: SELECT * FROM table_1";
+    g.extend_recipe(recreate_query).await.unwrap();
+
+    sleep().await;
+
+    let mut view = g.view("t2").await.unwrap();
+    let results = view.lookup(&[0.into()], true).await.unwrap();
+    assert!(results.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_and_drop_table() {
+    let mut g = start_simple("create_and_drop_table").await;
+    let create_table = "
+        # base tables
+        CREATE TABLE table_1 (column_1 INT);
+        CREATE TABLE table_2 (column_2 INT);
+        CREATE TABLE table_3 (column_3 INT);
+        DROP TABLE table_1, table_2;
+        CREATE TABLE table_1 (column_1 INT);
+        CREATE TABLE table_4 (column_4 INT);
+    ";
+    g.install_recipe(create_table).await.unwrap();
+
+    assert!(g.table("table_1").await.is_ok());
+    assert!(g.table("table_2").await.is_err());
+    assert!(g.table("table_3").await.is_ok());
+    assert!(g.table("table_4").await.is_ok());
+}
