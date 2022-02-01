@@ -357,18 +357,27 @@ impl State for PersistentState {
             None => deserialize_row(val),
         };
 
+        let mut hit_end = false;
         while iterator.valid() {
-            rows.push(get_value(iterator.value().unwrap()));
-
-            // Stop iterating if we hit the inclusive bound (set above). For exclusive bounds, once
-            // we hit them `iterator.valid()` will just stop returning `true`, since we configured
-            // `iterate_upper_bound` earlier.
-            if inclusive_end.iter().any(|end| {
+            // Are we currently pointing at a key that is equal to our inclusive upper bound? (Note
+            // that there may be *multiple* rows where this is the case, and we want to collect them
+            // all)
+            let at_end = inclusive_end.iter().any(|end| {
                 let key = iterator.key().unwrap();
                 key.len() >= end.len() && end == &key[..end.len()]
-            }) {
+            });
+
+            // If we previously hit the inclusive upper bound, but we're not *currently* at that
+            // bound, it means we went off the top of our range, so break out of the iteration
+            // before we add the value to the result set
+            if !at_end && hit_end {
                 break;
             }
+
+            rows.push(get_value(iterator.value().unwrap()));
+
+            // Remember if we've already hit the upper bound during iteration
+            hit_end = at_end;
 
             iterator.next();
         }
@@ -2149,6 +2158,26 @@ mod tests {
                 state.lookup_range(&[0], &RangeKey::from(&(vec1![DataType::from(3)]..))),
                 RangeLookupResult::Some((3..10).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
             );
+        }
+
+        #[test]
+        fn unbounded_inclusive_multiple_rows_in_upper_bound() {
+            let mut state = setup();
+            state.process_records(&mut vec![vec![DataType::from(3)]].into(), None, None);
+
+            assert_eq!(
+                state.lookup_range(&[0], &RangeKey::from(&(..=vec1![DataType::from(3)]))),
+                RangeLookupResult::Some(
+                    vec![
+                        vec![DataType::from(0)],
+                        vec![DataType::from(1)],
+                        vec![DataType::from(2)],
+                        vec![DataType::from(3)],
+                        vec![DataType::from(3)],
+                    ]
+                    .into()
+                )
+            )
         }
 
         #[test]
