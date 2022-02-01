@@ -23,7 +23,7 @@ main() {
     local arch="$RETVAL"
 
     case $arch in
-        x86_64-unknown-linux-gnu | x86_64-apple-darwin) ;;
+        x86_64-unknown-linux-gnu | x86_64-apple-darwin | aarch64-apple-darwin) ;;
         *)
             >&2 echo "Sorry, we don't currently have support for your system"
             >&2 echo "Detected platform: $arch"
