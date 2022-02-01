@@ -64,7 +64,9 @@
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::io::Read;
 use std::ops::Bound;
+use std::time::{Duration, Instant};
 
 use bincode::Options;
 use common::SizeOf;
@@ -278,6 +280,7 @@ impl State for PersistentState {
                 self.db
                     .flush_cf(self.db.cf_handle(PK_CF).unwrap())
                     .expect("Flush to disk failed");
+                self.db.flush().expect("Flush to disk failed");
             }
             opts.set_sync(true);
         }
@@ -431,12 +434,9 @@ impl State for PersistentState {
     fn rows(&self) -> usize {
         let db = &self.db;
         let cf = db.cf_handle(PK_CF).unwrap();
-        let total_keys = db
-            .property_int_value_cf(cf, "rocksdb.estimate-num-keys")
+        db.property_int_value_cf(cf, "rocksdb.estimate-num-keys")
             .unwrap()
-            .unwrap() as usize;
-
-        total_keys / self.indices.len()
+            .unwrap() as usize
     }
 
     fn is_useful(&self) -> bool {
@@ -693,7 +693,7 @@ impl PersistentState {
                 Ok(db) => break db,
                 _ if retry < 100 => {
                     retry += 1;
-                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    std::thread::sleep(Duration::from_millis(50));
                 }
                 err => break err.expect("Unable to open RocksDB"),
             }
@@ -843,7 +843,7 @@ impl PersistentState {
         // Flush just in case
         db.flush_cf(cf).unwrap();
         // Manually compact the newly created column family
-        db.compact_range_cf(cf, Option::<&[u8]>::None, Option::<&[u8]>::None);
+        self.compact_cf(self.indices.last().unwrap());
         // Reenable auto compactions when done
         if let Err(err) = db.set_options_cf(cf, &[("disable_auto_compactions", "false")]) {
             error!(%err, "Error setting cf options");
@@ -950,53 +950,191 @@ impl PersistentState {
         self.snapshot_mode = snapshot;
 
         if snapshot.is_enabled() {
-            let main_index = self.indices.first().cloned();
+            self.enable_snapshot_mode();
+        } else {
+            self.disable_snapshot_mode();
+        }
+    }
 
-            // Clear the data
-            while let Some(index_to_drop) = self.indices.pop() {
-                self.persist_meta();
-                self.db.drop_cf(&index_to_drop.column_family).unwrap();
-            }
-
-            // Recreate the original primary index
-            if let Some(main_index) = main_index {
-                self.db
-                    .create_cf(
-                        PK_CF,
-                        &IndexParams::from(&main_index.index)
-                            .make_rocksdb_options(&self.default_options),
-                    )
-                    .unwrap();
-                self.indices.push(main_index);
-                self.persist_meta();
-            }
-
-            self.replication_offset = None; // Remove any replication offset
+    fn enable_snapshot_mode(&mut self) {
+        let main_index = self.indices.first().cloned();
+        // Clear the data
+        while let Some(index_to_drop) = self.indices.pop() {
             self.persist_meta();
+            self.db.drop_cf(&index_to_drop.column_family).unwrap();
         }
 
-        let opts = &[(
-            "disable_auto_compactions",
-            if snapshot.is_enabled() {
-                "true"
-            } else {
-                "false"
-            },
-        )];
+        // Recreate the original primary index
+        if let Some(main_index) = main_index {
+            self.db
+                .create_cf(
+                    PK_CF,
+                    &IndexParams::from(&main_index.index)
+                        .make_rocksdb_options(&self.default_options),
+                )
+                .unwrap();
+            self.indices.push(main_index);
+        }
 
+        // Disable auto compactions for the primary index
         self.indices.first().and_then(|pi| {
             self.db.cf_handle(&pi.column_family).map(|cf| {
-                // If done snapshotting, perform a manual compaction
-                if !snapshot.is_enabled() {
-                    self.db
-                        .compact_range_cf(cf, Option::<&[u8]>::None, Option::<&[u8]>::None);
-                }
-                // Enable/disable auto compaction
-                if let Err(err) = self.db.set_options_cf(cf, opts) {
+                if let Err(err) = self
+                    .db
+                    .set_options_cf(cf, &[("disable_auto_compactions", "true")])
+                {
                     error!(%err, "Error setting cf options");
                 }
             })
         });
+
+        self.replication_offset = None; // Remove any replication offset
+        self.persist_meta();
+    }
+
+    fn disable_snapshot_mode(&mut self) {
+        let pi = match self.indices.first() {
+            Some(pi) => pi.clone(),
+            None => return,
+        };
+
+        let db = &self.db;
+        let cf = match db.cf_handle(&pi.column_family) {
+            Some(cf) => cf,
+            None => return,
+        };
+
+        // Perform a manual compaction first
+        self.compact_cf(&pi);
+        // Enable auto compactions
+        if let Err(err) = db.set_options_cf(cf, &[("disable_auto_compactions", "false")]) {
+            error!(%err, "Error setting cf options");
+        }
+    }
+
+    // Getting the current compaction progress is as easy as getting the property value
+    // for `rocksdb.num-files-at-level<N>` NOT.
+    // Essentially we have to implement a huge hack here, since the only way I could find
+    // to get accurate progress stats is from reading the DB LOG directly. This is very
+    // fragile, as it depends on the LOG format not changing, and if it does the report
+    // will be less accurate or not work at all. This is however not critical.
+    fn compaction_progress_watcher(&self) -> anyhow::Result<impl notify::Watcher> {
+        use notify::{raw_watcher, RecursiveMode, Watcher};
+        use std::fs::File;
+        use std::io::{Seek, SeekFrom};
+
+        // We open the LOG file, skip to the end, and begin watching for change events
+        // on it in order to get the latest log entries as they come
+        let log_path = self.db.path().join("LOG");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut log_watcher = raw_watcher(tx)?;
+        let table = self.name.clone();
+        let rows = self.rows();
+        let mut log_file = File::options().read(true).open(&log_path)?;
+        log_file.seek(SeekFrom::End(0))?;
+
+        log_watcher.watch(log_path, RecursiveMode::NonRecursive)?;
+
+        let mut monitor = move || -> anyhow::Result<()> {
+            const REPORT_INTERVAL: Duration = Duration::from_secs(120);
+            let mut compaction_started = false;
+            let mut buf = String::new();
+            let mut first_stage_keys = 0;
+            let mut second_stage_keys = 0;
+            let mut last_report = Instant::now();
+
+            // The thread will stop once the notifier drops
+            while rx.recv().is_ok() {
+                // When we get notified about changes to LOG, we read its latest contents
+                log_file.read_to_string(&mut buf)?;
+                for line in buf.lines() {
+                    if line.contains("Manual compaction starting") {
+                        compaction_started = true;
+                    }
+                    if !compaction_started {
+                        continue;
+                    }
+                    // As far as I can tell compaction has four stages, first files are created for the appropriate keys,
+                    // then are indexed, then moved to the correct level (zero cost in case of manual compaction),
+                    // finally old files are deleted. The final two stages are almost immediate so we don't care about logging
+                    // them. We only going to log progress for the first two stages.
+
+                    // In the first stage we have log entries of the form `Generated table #53: 3314046 keys, 268436084 bytes`
+                    // we will be looking for the number of keys in the table, it seems when we have all of the keys proccessed
+                    // is when first stage is done.
+                    if line.contains("Generated table") {
+                        // Look for number of keys
+                        let mut fields = line.split(' ').peekable();
+                        while let Some(f) = fields.next() {
+                            if fields.peek() == Some(&"keys,") {
+                                first_stage_keys += f.parse().unwrap_or(0);
+                                break;
+                            }
+                        }
+                    }
+                    // In the second stage we have log entries of the form
+                    // `Number of Keys per prefix Histogram: Count: 1313702 Average: 1.0000  StdDev: 0.00`
+                    // Here we are looking for the Count to figure out the number of keys processed in this
+                    // stage
+                    if line.contains("Number of Keys per prefix Histogram") {
+                        // Look for number of keys
+                        let mut fields = line.split(' ').peekable();
+                        while let Some(f) = fields.next() {
+                            if f == "Count:" {
+                                second_stage_keys +=
+                                    fields.peek().and_then(|f| f.parse().ok()).unwrap_or(0);
+                                break;
+                            }
+                        }
+                    }
+
+                    if last_report.elapsed() > REPORT_INTERVAL {
+                        let first_stage =
+                            format!("{:.2}%", (first_stage_keys as f64 / rows as f64) * 100.0);
+                        let second_stage =
+                            format!("{:.2}%", (second_stage_keys as f64 / rows as f64) * 100.0);
+                        info!(%table, %first_stage, %second_stage, "Compaction");
+                        last_report = Instant::now();
+                    }
+                }
+                buf.clear();
+            }
+
+            Ok(())
+        };
+
+        let table = self.name.clone();
+
+        std::thread::spawn(move || {
+            if let Err(err) = monitor() {
+                warn!(%err, %table, "Compaction monitor error");
+            }
+        });
+
+        Ok(log_watcher)
+    }
+
+    fn compact_cf(&self, index: &PersistentIndex) {
+        let db = &self.db;
+        let cf = match db.cf_handle(&index.column_family) {
+            Some(cf) => cf,
+            None => {
+                warn!(table = %self.name, cf = %index.column_family, "Column family not found");
+                return;
+            }
+        };
+
+        let _log_watcher = self.compaction_progress_watcher();
+        if let Err(err) = &_log_watcher {
+            warn!(%err, table = %self.name, "Could not start compaction monitor");
+        }
+
+        let mut opts = rocksdb::CompactOptions::default();
+        // We don't want to block other compactions happening in parallel
+        opts.set_exclusive_manual_compaction(false);
+        db.compact_range_cf_opt(cf, Option::<&[u8]>::None, Option::<&[u8]>::None, &opts);
+
+        info!(table = %self.name, cf = %index.column_family, "Compaction finished");
     }
 
     // Our RocksDB keys come in three forms, and are encoded as follows:
