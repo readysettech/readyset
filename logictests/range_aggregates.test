@@ -54,3 +54,19 @@ where id < ?
 ----
 10
 10
+
+statement ok
+create cached query as
+select distinct(val2) from t1
+where id <= ?
+
+graphviz
+
+query I valuesort
+select distinct(val2) from t1
+where id <= ?
+? = 2
+----
+1
+3
+4
