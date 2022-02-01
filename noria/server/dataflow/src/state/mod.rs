@@ -131,11 +131,25 @@ pub(crate) trait State: SizeOf + Send {
     ///
     /// * The length of `columns` must match the length of `key`
     /// * There must be a [`HashMap`] [`Index`] on the given `columns` that was previously created
-    ///   via [`make_key`]
+    ///   via [`add_key`]
     ///
     /// [`HashMap`]: IndexType::HashMap
-    /// [`make_key`]: State::make_key
+    /// [`add_key`]: State::add_key
     fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a>;
+
+    /// Lookup all rows in the index in this state specified by the given `tag` matching the given
+    /// `key`.
+    ///
+    /// # Invariants
+    ///
+    /// * There must be an index in this state identified by the given `tag` that was previously
+    ///   created via [`add_key`]
+    /// * The index identified by the given `tag` must have the same length as the given `key`
+    /// * The index identified by the given `tag` must support point lookups (currently this is true
+    ///   of all index types).
+    ///
+    /// [`add_key`]: State::add_key
+    fn lookup_in_tag<'a>(&'a self, tag: Tag, key: &KeyType) -> LookupResult<'a>;
 
     /// Lookup all rows in this state where the values at the given `columns` are within the range
     /// specified by the given `key`
@@ -144,10 +158,10 @@ pub(crate) trait State: SizeOf + Send {
     ///
     /// * The length of `columns` must match the length of `key`
     /// * There must be a [`BTreeMap`] [`Index`] on the given `columns` that was previously created
-    ///   via [`make_key`]
+    ///   via [`add_key`]
     ///
     /// [`BTreeMap`]: IndexType::BTreeMap
-    /// [`make_key`]: State::make_key
+    /// [`add_key`]: State::add_key
     fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a>;
 
     /// Lookup all the rows matching the given `key` in the weak index for the given set of
