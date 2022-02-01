@@ -349,14 +349,14 @@ where
         roots.push(
             nodes
                 .get(&(root_id.name, root_id.version))
-                .ok_or_else(|| E::custom("missing node"))?
+                .ok_or_else(|| E::custom("missing root node"))?
                 .clone(),
         )
     }
     let leaf_id = mir_query.leaf;
     let leaf = nodes
         .get(&(leaf_id.name, leaf_id.version))
-        .ok_or_else(|| E::custom("missing node"))?
+        .ok_or_else(|| E::custom("missing leaf node"))?
         .clone();
     Ok((mir_query.name, roots, leaf))
 }
