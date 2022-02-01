@@ -301,6 +301,12 @@ impl State for PersistentState {
         LookupResult::Some(self.do_lookup(index, key).into())
     }
 
+    /// Panics if called
+    #[allow(clippy::unreachable)] // this should never happen!
+    fn lookup_in_tag<'a>(&'a self, _tag: Tag, _key: &KeyType) -> LookupResult<'a> {
+        unreachable!("PersistentState can't be partial")
+    }
+
     fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a> {
         let db = &self.db;
         let index = self.index(IndexType::BTreeMap, columns);
