@@ -77,13 +77,13 @@ echo 'Beginning execution of ReadySet MySQL benchmarks'
 # --------------------------------------------
 bench_subdir='test'
 bench_file='read_benchmark_irl_small.yaml'
-project='IRL'
+project='irl'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
 
 benchmarks \
     --skip-setup \
     --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
-    --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
+    --results-file "${REPORT_SAVE_DIR}/$project.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
 
@@ -118,12 +118,12 @@ done
 # --------------------------------------------
 bench_subdir='test'
 bench_file='cache_hit_fastly_small.yaml'
-project='Fastly'
+project='fastly'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
 
 benchmarks \
     --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
-    --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
+    --results-file "${REPORT_SAVE_DIR}/$project.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
 
@@ -132,13 +132,13 @@ check_benchmark_exit_code $? "${project}" "${bench_file}"
 # --------------------------------------------
 bench_subdir='test'
 bench_file='read_benchmark_fastly_small.yaml'
-project='Fastly'
+project='fastly'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
 
 benchmarks \
     --skip-setup \
     --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
-    --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
+    --results-file "${REPORT_SAVE_DIR}/$project.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
 
@@ -147,12 +147,12 @@ check_benchmark_exit_code $? "${project}" "${bench_file}"
 # --------------------------------------------
 bench_subdir='test'
 bench_file="scale_connections_small.yaml"
-project='Internal'
+project='internal'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}"  "1"
 
 benchmarks \
     --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
-    --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
+    --results-file "${REPORT_SAVE_DIR}/$project.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
 
@@ -160,12 +160,12 @@ check_benchmark_exit_code $? "${project}" "${bench_file}"
 # It should be run last.
 bench_subdir='test'
 bench_file='scale_views_small.yaml'
-project='Internal'
+project='internal'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
 
 benchmarks \
     --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
-    --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
+    --results-file "${REPORT_SAVE_DIR}/$project.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
 
