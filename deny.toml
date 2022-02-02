@@ -180,7 +180,6 @@ deny = [
 ]
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
-    # Requires removing structopt from a binary.
     { name = "heck", version = "0.3.3" }
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
