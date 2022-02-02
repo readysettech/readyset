@@ -286,12 +286,32 @@ impl Installer {
         );
         prompt_to_continue()?;
 
+        let mut security_groups = self
+            .rds_client()
+            .await?
+            .describe_db_instances()
+            .db_instance_identifier(&db_id)
+            .send()
+            .await?
+            .db_instances
+            .into_iter()
+            .flatten()
+            .next()
+            .ok_or_else(|| anyhow!("RDS database instance {} went away", db_id))?
+            .vpc_security_groups
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|sg| sg.vpc_security_group_id)
+            .collect::<Vec<_>>();
+
+        security_groups.push(security_group);
+
         let modify_pb = spinner().with_message("Modifying RDS database instance");
         self.rds_client()
             .await?
             .modify_db_instance()
             .db_instance_identifier(&db_id)
-            .vpc_security_group_ids(security_group)
+            .set_vpc_security_group_ids(Some(security_groups))
             .apply_immediately(true)
             .send()
             .await?;
