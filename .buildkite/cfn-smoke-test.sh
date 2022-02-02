@@ -10,5 +10,7 @@ buildkite-agent artifact download "*.yaml" --step packer-cfn-template-ytt ./rend
 cd ./rendered_templates
 # cfncitestkey is provisioned and maintained by hand at the moment
 # We only capture the last line of script output since that's the only line that will contain the stack name.
-test_stack=$(../../cfn-test/create-mysql-super-stack.sh -h ${BUILDKITE_COMMIT} -k cfncitestkey | tail -1)
-aws --region us-east-2 cloudformation delete-stack --stack-name "$test_stack"
+mysql_super_stack=$(../../cfn-test/create-mysql-super-stack.sh -h ${BUILDKITE_COMMIT} -k cfncitestkey | tail -1)
+
+cd ../../../
+aws --region us-east-2 cloudformation delete-stack --stack-name "$mysql_super_stack"

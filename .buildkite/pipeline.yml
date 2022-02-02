@@ -255,14 +255,15 @@ steps:
       - build-image
     commands:
       - 'echo +++ :rust: Running cargo build'
-      - RUSTFLAGS='-D warnings' cargo build --release --bin noria-server --bin noria-mysql --bin noria-psql --bin ensure-ebs-volume --bin metrics-aggregator
-      - strip target/release/noria-server target/release/noria-mysql target/release/noria-psql target/release/ensure-ebs-volume target/release/metrics-aggregator
+      - RUSTFLAGS='-D warnings' cargo build --release --bin noria-server --bin noria-mysql --bin noria-psql --bin ensure-ebs-volume --bin metrics-aggregator --bin basic_validation_test
+      - strip target/release/noria-server target/release/noria-mysql target/release/noria-psql target/release/ensure-ebs-volume target/release/metrics-aggregator target/release/basic_validation_test
     artifact_paths:
       - target/release/noria-server
       - target/release/noria-mysql
       - target/release/noria-psql
       - target/release/ensure-ebs-volume
       - target/release/metrics-aggregator
+      - target/release/basic_validation_test
     plugins:
       - docker#v3.9.0:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'

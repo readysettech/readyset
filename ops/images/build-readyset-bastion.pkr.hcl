@@ -31,6 +31,12 @@ build {
     destination = "/tmp/"
   }
 
+  provisioner "file" {
+    source      = "${local.binaries_path}/basic_validation_test"
+    destination = "/tmp/basic_validation_test"
+  }
+
+
   provisioner "shell" {
     environment_vars = [
       "PROMETHEUS_PORT=6033"
