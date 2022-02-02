@@ -22,8 +22,6 @@ BENCHMARK_TEST_DIR=${BENCHMARK_FILE_DIR:-/usr/src/app/src/yaml/benchmarks}
 BENCHMARK_EAGER_EXIT="${BENCHMARK_EAGER_EXIT:-'enabled'}"
 REPL_AWAIT_SLEEP_DURATION=${REPL_AWAIT_SLEEP_DURATION:-120}
 
-# Benchmark duration controls, overridable from env vars in calling code
-FASTLY_READ_BENCHMARK_DURATION=${FASTLY_READ_BENCHMARK_DURATION:-120}
 # Used to calculate total duration
 BENCHMARK_START_TIME=$(date +%s)
 
@@ -115,19 +113,16 @@ for bench_path in $benchmark_files; do
     check_benchmark_exit_code $? "${project}" "${bench_name}"
 done
 
-# TODO @Marcus: Remove short circuiting once this error is mitigated:
-# Query name exists but existing query is different: q
-exit 0
-
 # --------------------------------------------
 # Fastly Small Cache Hit Benchmark
 # --------------------------------------------
+bench_subdir='test'
 bench_file='cache_hit_fastly_small.yaml'
 project='Fastly'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
 
 benchmarks \
-    --benchmark "$BENCHMARK_TEST_DIR/$bench_file" \
+    --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
     --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
@@ -135,14 +130,14 @@ check_benchmark_exit_code $? "${project}" "${bench_file}"
 # --------------------------------------------
 # Fastly Small Read Benchmark
 # --------------------------------------------
+bench_subdir='test'
 bench_file='read_benchmark_fastly_small.yaml'
 project='Fastly'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
 
 benchmarks \
-    --run-for "${FASTLY_READ_BENCHMARK_DURATION}" \
     --skip-setup \
-    --benchmark "$BENCHMARK_TEST_DIR/$bench_file" \
+    --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
     --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
@@ -150,24 +145,26 @@ check_benchmark_exit_code $? "${project}" "${bench_file}"
 # --------------------------------------------
 # Small Connection Scaling Benchmark
 # --------------------------------------------
+bench_subdir='test'
 bench_file="scale_connections_small.yaml"
 project='Internal'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}"  "1"
 
 benchmarks \
-    --benchmark "$BENCHMARK_TEST_DIR/$bench_file" \
+    --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
     --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
 
 # This benchmark creates an incredible number of views and doesn't clean them up.
 # It should be run last.
+bench_subdir='test'
 bench_file='scale_views_small.yaml'
 project='Internal'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
 
 benchmarks \
-    --benchmark "${BENCHMARK_TEST_DIR}/$bench_file" \
+    --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
     --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
@@ -176,4 +173,4 @@ check_benchmark_exit_code $? "${project}" "${bench_file}"
 
 end_time=$(date +%s)
 runtime=$((end_time-BENCHMARK_START_TIME))
-printf "All benchmarks completed successfully in a total of %s seconds." $runtime
+printf "All benchmhe_hitarks completed successfully in a total of %s seconds." $runtime
