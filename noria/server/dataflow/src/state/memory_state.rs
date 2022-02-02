@@ -338,6 +338,10 @@ impl State for MemoryState {
         self.weak_indices[columns].lookup(key).map(From::from)
     }
 
+    fn tear_down(self) -> ReadySetResult<()> {
+        Ok(())
+    }
+
     fn as_persistent(&self) -> Option<&PersistentState> {
         None
     }

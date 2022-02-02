@@ -64,6 +64,7 @@
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::fs;
 use std::io::Read;
 use std::ops::Bound;
 use std::time::{Duration, Instant};
@@ -489,6 +490,29 @@ impl State for PersistentState {
 
     fn lookup_weak<'a>(&'a self, columns: &[usize], key: &KeyType) -> Option<RecordResult<'a>> {
         self.lookup(columns, key).records()
+    }
+
+    fn tear_down(mut self) -> ReadySetResult<()> {
+        let temp_dir = self._tmpdir.take();
+        let full_path = self.db.path().to_path_buf();
+        // We have to make the drop here so that rocksdb gets closed and frees
+        // the file descriptors, so that we can remove the directory.
+        // We can't implement this logic by implementing the `Drop` trait, because
+        // otherwise we would be dropping rocksdb twice, which will make the whole thing
+        // panic.
+        drop(self);
+        if let Some(temp) = temp_dir {
+            fs::remove_dir_all(temp.path()).map_err(|e| {
+                ReadySetError::IOError(format!(
+                    "Failed to remove temporary rocksdb directory: {}",
+                    e
+                ))
+            })
+        } else {
+            fs::remove_dir_all(full_path).map_err(|e| {
+                ReadySetError::IOError(format!("Failed to remove rocksdb directory: {}", e))
+            })
+        }
     }
 }
 

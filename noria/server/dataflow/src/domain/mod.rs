@@ -1274,7 +1274,9 @@ impl Domain {
                         .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
                         .borrow_mut()
                         .remove();
-                    self.state.remove(node);
+                    if let Some(state) = self.state.remove(node) {
+                        state.tear_down()?;
+                    };
                     self.metrics.set_node_state_size(node, 0);
                     trace!(local = node.id(), "node removed");
                 }
