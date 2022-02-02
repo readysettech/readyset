@@ -233,6 +233,11 @@ impl BenchmarkRunner {
             (params, Some(h))
         } else if self.local {
             self.warn_if_deployment_params("local");
+
+            if self.skip_setup {
+                warn!("Ignoring --skip-setup as --local requires setup");
+            }
+
             let (params, h) = self.start_local(None).await;
             (params, Some(h))
         } else if let Some(f) = &self.deployment {
@@ -286,7 +291,7 @@ impl BenchmarkRunner {
         let prometheus_handle = self.init_prometheus().await?;
 
         let benchmark_cmd = self.benchmark_cmd.as_ref().unwrap();
-        if !self.skip_setup {
+        if !self.skip_setup || self.local {
             benchmark_cmd.setup(&self.deployment_params).await?;
             tokio::time::sleep(Duration::from_secs(5)).await;
         }

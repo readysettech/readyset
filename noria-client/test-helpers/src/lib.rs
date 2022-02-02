@@ -67,6 +67,7 @@ where
         query_status_cache,
         MigrationMode::InRequestPath,
         true,
+        false,
     )
     .await
 }
@@ -108,12 +109,14 @@ where
         query_status_cache,
         MigrationMode::OutOfBand, // Must use CREATE CACHED QUERY to migrate queries.
         recreate_database,
+        true, // Allow unsupported set for testing.
     )
     .await
 }
 
 /// Run noria-server and noria-mysql within the process. If using a out of process fallback
 /// database, `fallback` should be passed the connection string.
+#[allow(clippy::too_many_arguments)]
 pub async fn setup_inner<A>(
     backend_builder: BackendBuilder,
     fallback: Option<String>,
@@ -122,6 +125,7 @@ pub async fn setup_inner<A>(
     query_status_cache: Arc<QueryStatusCache>,
     mode: MigrationMode,
     recreate_database: bool,
+    allow_unsupported_set: bool,
 ) -> (A::ConnectionOpts, Handle)
 where
     A: Adapter + 'static,
@@ -180,6 +184,7 @@ where
                 .dialect(A::DIALECT)
                 .mirror_ddl(A::MIRROR_DDL)
                 .migration_mode(mode)
+                .allow_unsupported_set(allow_unsupported_set)
                 .build(noria, upstream, query_status_cache);
 
             tokio::spawn(A::run_backend(backend, s));

@@ -1772,6 +1772,13 @@ where
                     SqlQuery::Insert(q) => self.noria.handle_insert(q).await,
                     SqlQuery::Update(q) => self.noria.handle_update(q).await,
                     SqlQuery::Delete(q) => self.noria.handle_delete(q).await,
+                    // Return a empty result we are allowing unsupported set statements. Commit
+                    // messages are dropped - we do not support transactions in noria standalone.
+                    // We return an empty result set instead of an error to support test
+                    // applications.
+                    SqlQuery::Set(_) | SqlQuery::Commit(_) => {
+                        Ok(noria_connector::QueryResult::Empty)
+                    }
                     _ => {
                         error!("unsupported query");
                         unsupported!("query type unsupported");
