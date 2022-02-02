@@ -327,14 +327,15 @@ pub(crate) fn get_limit_parameters(query: &SelectStatement) -> Vec<Column> {
 }
 
 pub(crate) fn insert_statement_parameter_columns(query: &InsertStatement) -> Vec<&Column> {
-    assert_eq!(query.data.len(), 1);
     // need to find for which fields we *actually* have a parameter
-    query.data[0]
+    query
+        .data
         .iter()
-        .enumerate()
-        .filter_map(|(i, v)| match *v {
-            Literal::Placeholder(_) => Some(&query.fields.as_ref().unwrap()[i]),
-            _ => None,
+        .flat_map(|d| {
+            d.iter().enumerate().filter_map(|(i, v)| match *v {
+                Literal::Placeholder(_) => Some(&query.fields.as_ref().unwrap()[i]),
+                _ => None,
+            })
         })
         .collect()
 }
