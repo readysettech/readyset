@@ -1,0 +1,14 @@
+---
+QueryBenchmark:
+  query:
+    query: minimal/count.sql
+    query_spec_file: ~
+    query_spec: ~
+  target_qps: ~
+  threads: 32
+  data_generator:
+    schema: minimal/db.sql
+    var_overrides: {}
+  run_for:
+    secs: 15
+    nanos: 0

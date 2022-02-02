@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euf -x -o pipefail
+shopt -s nullglob # have globs expand to nothing when they don't match
 
 # The purpose of this script is to run each of our required benchmarks
 # serially, so we can get a clear picture of how Noria performs under
@@ -17,7 +18,7 @@ BENCH_LOG_SUCCESS_MSG='Benchmark completed successfully!'
 BENCH_LOG_FAILURE_MSG='Benchmark failed to execute!'
 
 # Location of YAML benchmark definitions
-BENCHMARK_FILE_DIR=${BENCHMARK_FILE_DIR:-/usr/src/app/src/yaml/benchmarks/test}
+BENCHMARK_TEST_DIR=${BENCHMARK_FILE_DIR:-/usr/src/app/src/yaml/benchmarks}
 BENCHMARK_EAGER_EXIT="${BENCHMARK_EAGER_EXIT:-'enabled'}"
 REPL_AWAIT_SLEEP_DURATION=${REPL_AWAIT_SLEEP_DURATION:-120}
 
@@ -76,13 +77,14 @@ echo 'Beginning execution of ReadySet MySQL benchmarks'
 # --------------------------------------------
 # IRL Small Read Benchmark
 # --------------------------------------------
+bench_subdir='test'
 bench_file='read_benchmark_irl_small.yaml'
 project='IRL'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
 
 benchmarks \
     --skip-setup \
-    --benchmark "$BENCHMARK_FILE_DIR/$bench_file" \
+    --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
     --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
@@ -90,6 +92,28 @@ check_benchmark_exit_code $? "${project}" "${bench_file}"
 # Binlog replication from this shouldn't bleed over into the next test.
 printf "[SLEEP] Waiting %s for binlog replication to settle in." "${REPL_AWAIT_SLEEP_DURATION}"
 sleep "${REPL_AWAIT_SLEEP_DURATION}"
+
+# --------------------------------------------
+# Minimal Benchmarks
+# --------------------------------------------
+bench_subdir='minimal'
+project='minimal'
+benchmark_files=`find $BENCHMARK_TEST_DIR/minimal -mindepth 1`
+setup_str=''
+
+for bench_path in $benchmark_files; do
+    bench_name=${bench_subdir}/$(basename $bench_path)
+    log_benchmark "${project}" "${bench_name}" "${BENCH_LOG_START_MSG}" "1"
+
+    benchmarks \
+        --benchmark $bench_path \
+        ${setup_str} \
+        --results-file "${REPORT_SAVE_DIR}/$project.log"
+
+    # Skip on every minimal benchmark after the first.
+    setup_str='--skip-setup'
+    check_benchmark_exit_code $? "${project}" "${bench_name}"
+done
 
 # TODO @Marcus: Remove short circuiting once this error is mitigated:
 # Query name exists but existing query is different: q
@@ -103,7 +127,7 @@ project='Fastly'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
 
 benchmarks \
-    --benchmark "$BENCHMARK_FILE_DIR/$bench_file" \
+    --benchmark "$BENCHMARK_TEST_DIR/$bench_file" \
     --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
@@ -118,7 +142,7 @@ log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
 benchmarks \
     --run-for "${FASTLY_READ_BENCHMARK_DURATION}" \
     --skip-setup \
-    --benchmark "$BENCHMARK_FILE_DIR/$bench_file" \
+    --benchmark "$BENCHMARK_TEST_DIR/$bench_file" \
     --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
@@ -131,7 +155,7 @@ project='Internal'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}"  "1"
 
 benchmarks \
-    --benchmark "$BENCHMARK_FILE_DIR/$bench_file" \
+    --benchmark "$BENCHMARK_TEST_DIR/$bench_file" \
     --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
@@ -143,7 +167,7 @@ project='Internal'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
 
 benchmarks \
-    --benchmark "${BENCHMARK_FILE_DIR}/$bench_file" \
+    --benchmark "${BENCHMARK_TEST_DIR}/$bench_file" \
     --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"

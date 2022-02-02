@@ -44,6 +44,11 @@ impl FromStr for DistributionAnnotation {
                 let regex = chunks.next().unwrap().trim_matches('"');
                 ColumnGenerationSpec::RandomString(regex.to_owned())
             }
+            // Creates unique groups of size `num`.
+            "group" => {
+                let num: u32 = chunks.next().unwrap().parse().unwrap();
+                ColumnGenerationSpec::UniqueRepeated(num)
+            }
             _ => bail!("Unrecognized annotation"),
         };
 

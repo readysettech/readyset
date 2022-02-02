@@ -57,7 +57,7 @@ steps:
       - echo "BENCHMARK_ARTIFACT_DIR=${BUILDKITE_BUILD_CHECKOUT_PATH}/artifacts-${BUILDKITE_COMMIT:0:7}" >> ./.buildkite/benchmark.env
       - 'echo +++ :stopwatch: Benchmark Execution'
       - ./.buildkite/orchestrate-benchmarks.sh
-      - cd "${BUILDKITE_BUILD_CHECKOUT_PATH}/artifacts-${BUILDKITE_COMMIT:0:7}" && buildkite-agent artifact upload *.log
+      - cd "${BUILDKITE_BUILD_CHECKOUT_PATH}/artifacts-${BUILDKITE_COMMIT:0:7}" && buildkite-agent artifact upload "*.log"
     agents:
       queue: benchmarks
     depends_on:
