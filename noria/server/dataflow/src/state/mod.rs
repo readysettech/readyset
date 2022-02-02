@@ -205,6 +205,11 @@ pub(crate) trait State: SizeOf + Send {
 
     /// Remove all rows from this state
     fn clear(&mut self);
+
+    /// Tear down the state, freeing any resources.
+    /// For those states that are backed by resources outside Noria, the implementation of this method
+    /// should guarantee that those resources are freed.
+    fn tear_down(self) -> ReadySetResult<()>;
 }
 
 impl SizeOf for MaterializedNodeState {
@@ -370,6 +375,13 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.clear(),
             MaterializedNodeState::Persistent(ps) => ps.clear(),
+        }
+    }
+
+    fn tear_down(self) -> ReadySetResult<()> {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.tear_down(),
+            MaterializedNodeState::Persistent(ps) => ps.tear_down(),
         }
     }
 }

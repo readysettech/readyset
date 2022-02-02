@@ -42,6 +42,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{iter, thread};
+use tempfile::TempDir;
 use test_utils::skip_with_flaky_finder;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -8132,6 +8133,71 @@ async fn simple_drop_tables_with_data() {
     assert!(g.table("table_1").await.is_err());
     assert!(g.table("table_2").await.is_err());
     assert!(g.view("t1").await.is_err());
+
+    let recreate_table = "CREATE TABLE table_1 (column_1 INT);";
+    g.extend_recipe(recreate_table).await.unwrap();
+    assert!(g.table("table_1").await.is_ok());
+    assert!(g.view("t1").await.is_err());
+
+    let recreate_query = "QUERY t2: SELECT * FROM table_1";
+    g.extend_recipe(recreate_query).await.unwrap();
+
+    sleep().await;
+
+    let mut view = g.view("t2").await.unwrap();
+    let results = view.lookup(&[0.into()], true).await.unwrap();
+    assert!(results.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn simple_drop_tables_with_persisted_data() {
+    let mut builder = Builder::for_tests();
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().to_path_buf();
+    builder.set_sharding(None);
+    builder.set_persistence(PersistenceParameters::new(
+        DurabilityMode::Permanent,
+        Some("simple_drop_tables_with_persisted_data".to_string()),
+        1,
+        Some(path.clone()),
+    ));
+    let mut g = builder.start_local().await.unwrap();
+
+    let create_table = "
+        # base tables
+        CREATE TABLE table_1 (column_1 INT);
+        CREATE TABLE table_2 (column_2 INT);
+        QUERY t1: SELECT * FROM table_1;
+    ";
+    g.install_recipe(create_table).await.unwrap();
+
+    assert!(path.exists());
+
+    let mut table_1_path = path.clone();
+    table_1_path.push("simple_drop_tables_with_persisted_data-table_1-0.db");
+    let mut table_2_path = path.clone();
+    table_2_path.push("simple_drop_tables_with_persisted_data-table_2-0.db");
+    assert!(table_1_path.exists());
+    assert!(table_2_path.exists());
+
+    let mut table_1 = g.table("table_1").await.unwrap();
+    table_1.insert(vec![11.into()]).await.unwrap();
+    table_1.insert(vec![12.into()]).await.unwrap();
+
+    let mut view = g.view("t1").await.unwrap();
+    let results = view.lookup(&[0.into()], true).await.unwrap();
+    assert!(!results.is_empty());
+    assert_eq!(results[0][0], 11.into());
+    assert_eq!(results[1][0], 12.into());
+
+    let drop_table = "DROP TABLE table_1, table_2;";
+    g.extend_recipe(drop_table).await.unwrap();
+    assert!(g.table("table_1").await.is_err());
+    assert!(g.table("table_2").await.is_err());
+    assert!(g.view("t1").await.is_err());
+
+    assert!(!table_1_path.exists());
+    assert!(!table_2_path.exists());
 
     let recreate_table = "CREATE TABLE table_1 (column_1 INT);";
     g.extend_recipe(recreate_table).await.unwrap();
