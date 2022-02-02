@@ -19,9 +19,7 @@ vec1 = "1.8.0"
 url = "2.2.2"
 hdrhistogram = "7.4"
 zipf = "7.0.0"
-structopt = "0.3.22"
 clap = { version = "3.0", features = ["derive", "env"] }
-rinfluxdb = { version = "0.1.0" }
 reqwest = { version = "0.11", features = ["stream"] }
 chrono = "0.4"
 atomic-counter = "1.0.1"

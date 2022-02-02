@@ -4,7 +4,7 @@ set -eo pipefail
 DIR="$(dirname "${0}")/.."
 
 function ensure_monitoring_stack() {
-    docker-compose -f "${DIR}/docker/monitoring/docker-compose.yml" -f "${DIR}/benchmarks/docker-compose.monitoring.override.yml" up -d
+    docker-compose -f "${DIR}/docker/monitoring/docker-compose.yml" up -d
 }
 
 function background() {

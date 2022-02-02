@@ -23,8 +23,7 @@ use std::time::{Duration, Instant};
 
 use benchmarks::utils::generate::load_to_backend;
 use benchmarks::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
-use chrono::Utc;
-use clap::{ArgGroup, Parser, ValueHint};
+use clap::{Parser, ValueHint};
 use nom_sql::SelectStatement;
 use noria::consensus::AuthorityType;
 use noria::{ControllerHandle, KeyComparison, View, ViewQuery};
@@ -35,14 +34,11 @@ use noria_client::UpstreamDatabase;
 use noria_data::DataType;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use query_generator::ColumnGenerationSpec;
-use reqwest::Url;
-use rinfluxdb::line_protocol::LineBuilder;
 use vec1::Vec1;
 
 static REPORTING_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Parser)]
-#[clap(name = "writer", group = ArgGroup::new("influx").requires_all(&["influx-host", "influx-database", "influx-user", "influx-password"]).multiple(true))]
 struct Writer {
     /// The number of rows already in the articles table. This
     /// is used as the starting article_id.
@@ -82,22 +78,6 @@ struct Writer {
     /// If `None` is provided, the experiment will run until it is interrupted.
     #[clap(long)]
     run_for: Option<u32>,
-
-    /// The InfluxDB host address.
-    #[clap(long, group = "influx")]
-    influx_host: Option<String>,
-
-    /// The InfluxDB database to write to.
-    #[clap(long, group = "influx")]
-    influx_database: Option<String>,
-
-    /// The username to authenticate to InfluxDB.
-    #[clap(long, group = "influx")]
-    influx_user: Option<String>,
-
-    /// The password to authenticate to InfluxDB.
-    #[clap(long, group = "influx")]
-    influx_password: Option<String>,
 
     /// The region used when requesting a view.
     #[clap(long)]
@@ -238,7 +218,6 @@ impl Writer {
     async fn process_updates(
         &'static self,
         receiver: Receiver<WriterThreadUpdate>,
-        http_client: reqwest::Client,
     ) -> anyhow::Result<()> {
         // Process updates from readers, calculate statistics to report. We
         // store each channel's message in a hashmap for each interval. If
@@ -251,9 +230,7 @@ impl Writer {
         loop {
             let now = Instant::now();
             if now > next_check {
-                self.process_thread_updates(&updates, &http_client)
-                    .await
-                    .unwrap();
+                self.process_thread_updates(&updates).await.unwrap();
                 updates.clear();
                 next_check = now + REPORTING_INTERVAL;
             }
@@ -263,11 +240,7 @@ impl Writer {
         }
     }
 
-    async fn process_thread_updates(
-        &self,
-        updates: &[WriterThreadUpdate],
-        http_client: &reqwest::Client,
-    ) -> anyhow::Result<()> {
+    async fn process_thread_updates(&self, updates: &[WriterThreadUpdate]) -> anyhow::Result<()> {
         let mut query_latencies: Vec<u128> = Vec::new();
         let mut db_latencies: Vec<u128> = Vec::new();
         for u in updates {
@@ -280,50 +253,10 @@ impl Writer {
             query_latencies.iter().sum::<u128>() as f64 / query_latencies.len() as f64;
         let avg_db_latency = db_latencies.iter().sum::<u128>() as f64 / db_latencies.len() as f64;
 
-        if let Some(influx_host) = &self.influx_host {
-            let timestamp = Utc::now();
-            let measurements = vec![
-                LineBuilder::new("write")
-                    .insert_field("qps", qps)
-                    .set_timestamp(timestamp)
-                    .build()
-                    .to_string(),
-                LineBuilder::new("write")
-                    .insert_field("latency", avg_latency)
-                    .set_timestamp(timestamp)
-                    .build()
-                    .to_string(),
-                LineBuilder::new("write")
-                    .insert_field("db_latency", avg_db_latency)
-                    .set_timestamp(timestamp)
-                    .build()
-                    .to_string(),
-            ];
-            let response = http_client
-                .post(Url::parse(format!("{}/write", influx_host.clone()).as_str()).unwrap())
-                .body(measurements.join("\n"))
-                .header("Content-Type", "text/plain")
-                .query(&[
-                    ("db", &self.influx_database.as_ref().unwrap().clone()),
-                    ("u", &self.influx_user.as_ref().unwrap().clone()),
-                    ("p", &self.influx_password.as_ref().unwrap().clone()),
-                ])
-                .send()
-                .await
-                .unwrap();
-            if !response.status().is_success() {
-                panic!(
-                    "Request to InfluxDB failed. Status: {} | Message: {}",
-                    response.status().as_u16(),
-                    response.text().await.unwrap()
-                )
-            }
-        } else {
-            println!(
-                "qps: {}\te2e_latency: {}\tdb_latency: {}",
-                qps, avg_latency, avg_db_latency
-            );
-        }
+        println!(
+            "qps: {}\te2e_latency: {}\tdb_latency: {}",
+            qps, avg_latency, avg_db_latency
+        );
         Ok(())
     }
 
@@ -334,8 +267,6 @@ impl Writer {
 
         let current_articles = Arc::new(AtomicUsize::new(self.article_table_rows));
         let (tx, rx): (Sender<WriterThreadUpdate>, Receiver<WriterThreadUpdate>) = mpsc::channel();
-
-        let http_client = reqwest::Client::new();
 
         // Spawn a thread for articles
         let mut threads: Vec<_> = Vec::with_capacity(self.threads as usize);
@@ -354,9 +285,7 @@ impl Writer {
                     .await
             }))
         }
-        threads.push(tokio::spawn(async move {
-            self.process_updates(rx, http_client).await
-        }));
+        threads.push(tokio::spawn(async move { self.process_updates(rx).await }));
 
         let res = futures::future::join_all(threads).await;
         for err_res in res.iter().filter(|e| e.is_err()) {

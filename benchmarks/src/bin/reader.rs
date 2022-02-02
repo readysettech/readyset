@@ -4,118 +4,102 @@ use std::time::{Duration, Instant};
 use std::{env, fs, mem};
 
 use anyhow::Result;
-use chrono::Utc;
+use clap::{ArgEnum, Parser};
 use noria::consensus::AuthorityType;
 use noria::{ControllerHandle, KeyComparison, View, ViewQuery};
 use noria_data::DataType;
 use noria_logictest::upstream::{DatabaseConnection, DatabaseURL};
 use rand::distributions::{Distribution, Uniform};
 use rand::prelude::*;
-use rinfluxdb::line_protocol::LineBuilder;
-use structopt::clap::{arg_enum, ArgGroup};
-use structopt::StructOpt;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use url::Url;
 use vec1::Vec1;
 
 static THREAD_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
 
-arg_enum! {
-    #[derive(StructOpt)]
-    enum Dist {
-        Uniform,
-        Zipf,
-    }
+#[derive(Clone, ArgEnum)]
+enum Dist {
+    Uniform,
+    Zipf,
 }
 
-#[derive(StructOpt, Clone)]
+#[derive(Parser, Clone)]
 struct NoriaClientOpts {
-    #[structopt(
+    #[clap(
         short,
         long,
-        required_if("database-type", "noria"),
+        required_if_eq("database-type", "noria"),
         env("AUTHORITY_ADDRESS"),
         default_value("127.0.0.1:2181")
     )]
     authority_address: String,
 
-    #[structopt(long, env("AUTHORITY"), required_if("database-type", "noria"), default_value("zookeeper"), possible_values = &["consul", "zookeeper"])]
+    #[clap(long, env("AUTHORITY"), required_if_eq("database-type", "noria"), default_value("zookeeper"), possible_values = &["consul", "zookeeper"])]
     authority: AuthorityType,
 
-    #[structopt(
+    #[clap(
         short,
-        required_if("database-type", "noria"),
+        required_if_eq("database-type", "noria"),
         long,
         env("NORIA_DEPLOYMENT")
     )]
     deployment: Option<String>,
 
     /// The region used when requesting a view.
-    #[structopt(long)]
+    #[clap(long)]
     target_region: Option<String>,
 
     /// The amount of time to batch a set of requests for in ms. If
     /// `batch_duration_ms` is 0, no batching is performed. Only
     /// valid for some database types.
-    #[structopt(long, default_value = "1")]
+    #[clap(long, default_value = "1")]
     batch_duration_ms: u64,
 
     /// The maximum batch size for lookup requests. Only valid
     /// for some database types.
-    #[structopt(long, default_value = "10")]
+    #[clap(long, default_value = "10")]
     batch_size: u64,
 }
 
-#[derive(StructOpt, Clone)]
+#[derive(Parser, Clone)]
 struct MySqlOpts {
     /// MySQL database connection string.
     /// Only one of MySQL database url and zooekeper url can be specified.
-    #[structopt(long, required_if("database-type", "mysql"))]
+    #[clap(long, required_if_eq("database-type", "mysql"))]
     database_url: Option<DatabaseURL>,
 
     /// The path to the parameterized query.
-    #[structopt(long, required_if("database-type", "mysql"))]
+    #[clap(long, required_if_eq("database-type", "mysql"))]
     query: Option<PathBuf>,
 
     /// Number of parameters to generate for a parameterized query.
-    #[structopt(long, required_if("database-type", "mysql"))]
+    #[clap(long, required_if_eq("database-type", "mysql"))]
     nparams: Option<usize>,
 }
 
-arg_enum! {
-    #[derive(StructOpt)]
-    enum DatabaseType {
-        Noria,
-        MySql,
-    }
+#[derive(Clone, ArgEnum)]
+enum DatabaseType {
+    Noria,
+    MySql,
 }
 
-#[derive(StructOpt)]
-#[structopt(
-    name = "reader",
-    group = ArgGroup::with_name("influx")
-        .requires_all(&["influx-host",
-                        "influx-database",
-                        "influx-user",
-                        "influx-password"])
-        .multiple(true))
-]
+#[derive(Parser)]
+#[clap(name = "reader")]
 struct Reader {
     /// The number of users in the system.
-    #[structopt(long, default_value = "10")]
+    #[clap(long, default_value = "10")]
     user_table_rows: usize,
 
     /// The index of the first user in the system, keys are generated in the range
     /// [user_offset..user_offset+user_table_rows).
-    #[structopt(long, default_value = "0")]
+    #[clap(long, default_value = "0")]
     user_offset: u64,
 
     /// The target rate at the reader issues queries at.
-    #[structopt(long)]
+    #[clap(long)]
     target_qps: Option<u64>,
 
     /// The number of threads to spawn to issue reader queries.
-    #[structopt(long, default_value = "1")]
+    #[clap(long, default_value = "1")]
     threads: u64,
 
     /// The distribution to use to generate the random user ids
@@ -124,53 +108,32 @@ struct Reader {
     ///
     /// 'zipf' - sample pattern is skewed such that 90% of accesses are for 10% of the ids (Zipf;
     /// α=1.15)
-    #[structopt(
-        long,
-        default_value = "uniform",
-        case_insensitive = true,
-        rename_all = "lower"
-    )]
+    #[clap(arg_enum, default_value = "uniform")]
     distribution: Dist,
 
     /// Override the default alpha parameter for the zipf distribution
-    #[structopt(long, required_if("distribution", "zipf"), default_value = "1.15")]
+    #[clap(long, required_if_eq("distribution", "zipf"), default_value = "1.15")]
     alpha: f64,
 
     /// The number of seconds that the experiment should be running.
     /// If `None` is provided, the experiment will run until it is interrupted.
-    #[structopt(long)]
+    #[clap(long)]
     run_for: Option<u32>,
-
-    /// The InfluxDB host address.
-    #[structopt(long, group = "influx")]
-    influx_host: Option<String>,
-
-    /// The InfluxDB database to write to.
-    #[structopt(long, group = "influx")]
-    influx_database: Option<String>,
-
-    /// The username to authenticate to InfluxDB.
-    #[structopt(long, group = "influx")]
-    influx_user: Option<String>,
-
-    /// The password to authenticate to InfluxDB.
-    #[structopt(long, group = "influx")]
-    influx_password: Option<String>,
 
     /// The type of database the client is connecting to. This determines
     /// the set of opts that should be populated. See `noria_opts` and
     /// `mysql_opts`.
-    #[structopt(long, default_value = "noria")]
+    #[clap(arg_enum, default_value = "noria")]
     database_type: DatabaseType,
 
     /// The set of options to be specified by the user to connect via a
     /// noria client.
-    #[structopt(flatten)]
+    #[clap(flatten)]
     noria_opts: NoriaClientOpts,
 
     /// The set of options to be specified by a user to connect via a
     /// mysql client.
-    #[structopt(flatten)]
+    #[clap(flatten)]
     mysql_opts: MySqlOpts,
 }
 
@@ -480,7 +443,6 @@ impl Reader {
     async fn process_updates(
         &'static self,
         mut receiver: UnboundedReceiver<ReaderThreadUpdate>,
-        http_client: reqwest::Client,
     ) -> anyhow::Result<()> {
         // Process updates from readers, calculate statistics to report. We
         // store each channel's message in a hashmap for each interval. If
@@ -493,7 +455,7 @@ impl Reader {
             let elapsed = last_check.elapsed();
             if elapsed >= THREAD_UPDATE_INTERVAL {
                 last_check = Instant::now();
-                self.process_thread_updates(&mut updates, elapsed, &http_client)
+                self.process_thread_updates(&mut updates, elapsed)
                     .await
                     .unwrap();
                 updates.clear();
@@ -511,7 +473,6 @@ impl Reader {
         &self,
         updates: &mut [Vec<u128>],
         period: Duration,
-        http_client: &reqwest::Client,
     ) -> anyhow::Result<()> {
         let mut hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
         for u in updates {
@@ -520,58 +481,14 @@ impl Reader {
             }
         }
         let qps = hist.len() as f64 / period.as_secs() as f64;
-        let percentiles = vec![
-            ("p50", hist.value_at_quantile(0.5) as f64 / 10.0),
-            ("p90", hist.value_at_quantile(0.9) as f64 / 10.0),
-            ("p99", hist.value_at_quantile(0.99) as f64 / 10.0),
-            ("p9999", hist.value_at_quantile(0.9999) as f64 / 10.0),
-        ];
-
-        if let Some(influx_host) = &self.influx_host {
-            let timestamp = Utc::now();
-            let mut measurements = vec![LineBuilder::new("read")
-                .insert_field("qps", qps)
-                .set_timestamp(timestamp)
-                .build()
-                .to_string()];
-            for (name, percentile) in percentiles {
-                measurements.push(
-                    LineBuilder::new("read")
-                        .insert_field(name, percentile)
-                        .set_timestamp(timestamp)
-                        .build()
-                        .to_string(),
-                )
-            }
-            let response = http_client
-                .post(Url::parse(format!("{}/write", influx_host.clone()).as_str()).unwrap())
-                .body(measurements.join("\n"))
-                .header("Content-Type", "text/plain")
-                .query(&[
-                    ("db", &self.influx_database.as_ref().unwrap().clone()),
-                    ("u", &self.influx_user.as_ref().unwrap().clone()),
-                    ("p", &self.influx_password.as_ref().unwrap().clone()),
-                ])
-                .send()
-                .await
-                .unwrap();
-            if !response.status().is_success() {
-                panic!(
-                    "Request to InfluxDB failed. Status: {} | Message: {}",
-                    response.status().as_u16(),
-                    response.text().await.unwrap()
-                )
-            }
-        } else {
-            println!(
-                "qps: {:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.99: {:.1} ms",
-                qps,
-                hist.value_at_quantile(0.5) as f64 / 10.0,
-                hist.value_at_quantile(0.9) as f64 / 10.0,
-                hist.value_at_quantile(0.99) as f64 / 10.0,
-                hist.value_at_quantile(0.9999) as f64 / 10.0
-            );
-        }
+        println!(
+            "qps: {:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.99: {:.1} ms",
+            qps,
+            hist.value_at_quantile(0.5) as f64 / 10.0,
+            hist.value_at_quantile(0.9) as f64 / 10.0,
+            hist.value_at_quantile(0.99) as f64 / 10.0,
+            hist.value_at_quantile(0.9999) as f64 / 10.0
+        );
         Ok(())
     }
 
@@ -580,7 +497,6 @@ impl Reader {
             .target_qps
             .map(|t| Duration::from_nanos(1000000000 / t * self.threads));
         let (tx, rx) = unbounded_channel();
-        let http_client = reqwest::Client::new();
 
         let mut threads: Vec<_> = Vec::with_capacity(self.threads as usize);
         for _ in 0..self.threads {
@@ -624,9 +540,7 @@ impl Reader {
         // The original tx channel is never used.
         drop(tx);
 
-        threads.push(tokio::spawn(async move {
-            self.process_updates(rx, http_client).await
-        }));
+        threads.push(tokio::spawn(async move { self.process_updates(rx).await }));
 
         let res = futures::future::join_all(threads).await;
         for err_res in res.iter().filter(|e| e.is_err()) {
@@ -641,6 +555,6 @@ impl Reader {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let reader: &'static mut _ = Box::leak(Box::new(Reader::from_args()));
+    let reader: &'static mut _ = Box::leak(Box::new(Reader::parse()));
     reader.run().await
 }

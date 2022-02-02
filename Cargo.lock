@@ -795,11 +795,9 @@ dependencies = [
  "rand 0.8.4",
  "readyset-logging",
  "reqwest",
- "rinfluxdb",
  "serde",
  "serde_json",
  "serde_yaml",
- "structopt",
  "thiserror",
  "tokio",
  "tracing",
@@ -5215,24 +5213,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rinfluxdb"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d3e5a6fdf3b411012a7c211198da64ced3855dbb26f87d2eb5b4f4da70503aa"
-dependencies = [
- "async-trait",
- "chrono",
- "csv",
- "itertools",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror",
- "tracing",
- "url",
-]
-
-[[package]]
 name = "ring"
 version = "0.16.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5857,30 +5837,6 @@ version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b73800bcca56045d5ab138a48cd28a96093335335deaa916f22b5749c4150c79"
 dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "structopt"
-version = "0.3.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40b9788f4202aa75c240ecc9c15c65185e6a39ccdeb0fd5d008b98825464c87c"
-dependencies = [
- "clap 2.33.3",
- "lazy_static",
- "structopt-derive",
-]
-
-[[package]]
-name = "structopt-derive"
-version = "0.4.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcb5ae327f9cc13b68763b5749770cb9e048a99bd9dfdfa58d0cf05d5f64afe0"
-dependencies = [
- "heck 0.3.3",
- "proc-macro-error",
  "proc-macro2",
  "quote",
  "syn",
