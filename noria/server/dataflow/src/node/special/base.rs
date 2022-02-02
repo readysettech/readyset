@@ -5,6 +5,7 @@ use launchpad::Indices;
 use maplit::hashmap;
 use noria::replication::ReplicationOffset;
 use noria::{Modification, Operation, TableOperation};
+use noria_data::DataTypeKind;
 use noria_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -271,7 +272,7 @@ impl Base {
             _ => return self.process_unkeyed(ops),
         };
 
-        let mut failed_ops = Vec::new();
+        let mut failed_log = FailedOpLogger::default();
 
         let mut n_ops = ops.len();
         // Sort all of the operations lexicographically by key types, all unkeyed operations will move
@@ -350,14 +351,18 @@ impl Base {
             for op in ops {
                 match op {
                     TableOperation::Insert(row) if value.is_none() => value = Some(Cow::Owned(row)),
-                    TableOperation::DeleteByKey { .. } => value = None,
+                    TableOperation::Insert(_) => {
+                        failed_log.failed_insert();
+                    }
                     TableOperation::DeleteRow { row } if value == Some(Cow::Borrowed(&row)) => {
                         // Delete the row, but only if it fully matches the current row
                         value = None;
                     }
-                    TableOperation::SetReplicationOffset(offset) => {
-                        offset.try_max_into(&mut replication_offset)?
+                    TableOperation::DeleteRow { row } => {
+                        failed_log.failed_delete(row, value.as_deref());
                     }
+                    TableOperation::DeleteByKey { .. } => value = None,
+
                     TableOperation::InsertOrUpdate { row, .. } if value.is_none() => {
                         value = Some(Cow::Owned(row))
                     }
@@ -383,7 +388,14 @@ impl Base {
                             }
                         }
                     }
-                    op => failed_ops.push(op),
+                    TableOperation::Update { .. } => {
+                        failed_log.failed_update();
+                    }
+                    TableOperation::SetSnapshotMode(_)
+                    | TableOperation::SetReplicationOffset(_)
+                    | TableOperation::InsertOrUpdate { .. } => {
+                        // This is unreachable, because all of those cases are handled above
+                    }
                 }
             }
 
@@ -411,9 +423,7 @@ impl Base {
             self.fix(r);
         }
 
-        if !failed_ops.is_empty() {
-            warn_of_failed_ops(failed_ops);
-        }
+        failed_log.warn();
 
         Ok(BaseWrite {
             records: results.into(),
@@ -436,27 +446,93 @@ impl Base {
     }
 }
 
-fn warn_of_failed_ops(ops: Vec<TableOperation>) {
-    let insert_cnt = ops
-        .iter()
-        .filter(|op| matches!(op, TableOperation::Insert(_)))
-        .fold(0usize, |s, _| s + 1);
-    let delete_cnt = ops
-        .iter()
-        .filter(|op| {
-            matches!(
-                op,
-                TableOperation::DeleteRow { .. } | TableOperation::DeleteByKey { .. }
-            )
-        })
-        .fold(0usize, |s, _| s + 1);
-    let update_cnt = ops
-        .iter()
-        .filter(|op| matches!(op, TableOperation::Update { .. }))
-        .fold(0usize, |s, _| s + 1);
+/// A helper to log information about failed table updates without leaking data
+#[derive(Default)]
+struct FailedOpLogger {
+    insert_existing: usize,
+    update_non_existing: usize,
+    delete_non_existing: usize,
+    // Maps from (column index, deleted data type, actual data type) to count for columns with
+    // different types
+    delete_type_mismatch: HashMap<(usize, Option<DataTypeKind>, Option<DataTypeKind>), usize>,
+    // Maps from (column inxed, deleted data type) to count for columns with different values
+    delete_row_data_mismatch: HashMap<(usize, DataTypeKind), usize>,
+}
 
-    warn!(inserts = %insert_cnt, deletes = %delete_cnt, updates = %update_cnt,
-         "Failed to apply some table operations");
+impl FailedOpLogger {
+    fn failed_delete(&mut self, deleted_row: Vec<DataType>, current_row: Option<&[DataType]>) {
+        use itertools::EitherOrBoth;
+
+        match current_row {
+            None => self.delete_non_existing += 1,
+            Some(row) => {
+                for (col, vals) in deleted_row.iter().zip_longest(row.iter()).enumerate() {
+                    let (del, cur) = match vals {
+                        EitherOrBoth::Both(d, c) => (Some(d), Some(c)),
+                        EitherOrBoth::Left(d) => (Some(d), None),
+                        EitherOrBoth::Right(c) => (None, Some(c)),
+                    };
+
+                    if del.map(DataTypeKind::from) != cur.map(DataTypeKind::from) {
+                        *self
+                            .delete_type_mismatch
+                            .entry((
+                                col,
+                                del.map(DataTypeKind::from),
+                                cur.map(DataTypeKind::from),
+                            ))
+                            .or_default() += 1;
+                        // Only report the first inconsistency in the row
+                        break;
+                    } else if del != cur {
+                        *self
+                            .delete_row_data_mismatch
+                            // Unwrap ok because del has to be Some in else statement
+                            .entry((col, DataTypeKind::from(del.unwrap())))
+                            .or_default() += 1;
+                        // Only report the first inconsistency in the row
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    fn failed_insert(&mut self) {
+        self.insert_existing += 1;
+    }
+
+    fn failed_update(&mut self) {
+        self.update_non_existing += 1;
+    }
+
+    fn is_empty(&self) -> bool {
+        self.insert_existing == 0
+            && self.update_non_existing == 0
+            && self.delete_non_existing == 0
+            && self.delete_type_mismatch.is_empty()
+            && self.delete_row_data_mismatch.is_empty()
+    }
+
+    fn warn(&mut self) {
+        if self.is_empty() {
+            // We got nothing to warn about
+            return;
+        }
+
+        warn!(insert = %self.insert_existing,
+              update = %self.update_non_existing,
+              delete_non_existing = %self.delete_non_existing,
+              delete_type_mismatch = %self.delete_type_mismatch.len(),
+              delete_data_mismatch = %self.delete_row_data_mismatch.len(),
+              "Table failed to apply operations");
+
+        if !self.delete_type_mismatch.is_empty() || !self.delete_row_data_mismatch.is_empty() {
+            warn!(type_mismatch = ?self.delete_type_mismatch,
+                  data_mismatch = ?self.delete_row_data_mismatch,
+                  "Table failed to apply delete operations");
+        }
+    }
 }
 
 #[cfg(test)]
