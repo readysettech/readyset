@@ -1,5 +1,5 @@
-//! Utilities to take a `DatabaseGenerationSpec` and a `DatabaseConnection`,
-//! and generate batches of data to write to the connection.
+//! Utilities to take a `DatabaseGenerationSpec` and a `DatabaseConnection`, and generate batches of
+//! data to write to the connection.
 
 use std::borrow::Borrow;
 use std::collections::HashMap;
@@ -8,10 +8,16 @@ use std::iter::repeat;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use clap::{Parser, ValueHint};
 use futures::StreamExt;
 use itertools::Itertools;
+use nom::character::complete::multispace0;
+use nom::multi::many1;
+use nom::sequence::delimited;
+use nom::IResult;
+use nom_sql::parser::{sql_query, SqlQuery};
+use nom_sql::Dialect;
 use noria_client::backend::Backend;
 use noria_logictest::upstream::DatabaseURL;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
@@ -36,11 +42,26 @@ pub struct DataGenerator {
     var_overrides: serde_json::Value,
 }
 
+fn multi_ddl(input: &[u8]) -> IResult<&[u8], Vec<SqlQuery>> {
+    many1(delimited(
+        multispace0,
+        sql_query(Dialect::MySQL),
+        multispace0,
+    ))(input)
+}
+
 impl DataGenerator {
     pub async fn install(&self, conn_str: &str) -> anyhow::Result<()> {
         let mut conn = DatabaseURL::from_str(conn_str)?.connect().await?;
         let ddl = std::fs::read_to_string(benchmark_path(self.schema.clone())?.as_path())?;
-        conn.query_drop(ddl).await
+
+        let parsed = multi_ddl(ddl.as_bytes())
+            .map_err(|e| anyhow!("Error parsing DDL {}", e.to_string()))?;
+        // This may be a multi-line DDL, if it is semi-colons terminate the statements.
+        for statement in parsed.1 {
+            conn.query_drop(statement.to_string()).await?;
+        }
+        Ok(())
     }
 
     async fn adjust_mysql_vars(db_url: &DatabaseURL) -> Option<usize> {
