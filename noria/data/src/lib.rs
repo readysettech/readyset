@@ -36,7 +36,7 @@ const MAX_SECONDS_DATETIME_OFFSET: i32 = 85_940;
 /// clone the *value* of a `DataType` without danger of contention.
 #[warn(variant_size_differences)]
 #[derive(Clone, Debug, EnumKind)]
-#[enum_kind(DataTypeKind, derive(Ord, PartialOrd))]
+#[enum_kind(DataTypeKind, derive(Ord, PartialOrd, Hash))]
 pub enum DataType {
     /// An empty value.
     None,
