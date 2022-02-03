@@ -61,6 +61,12 @@ source:
   );
   ```
 
+- Make an HTTP GET request to the `/graph` RPC endpoint in `noria-server`:
+
+  ```rust
+  curl localhost:6033/graph
+  ```
+
 All of these methods emit output in the [graphviz `dot` format][dot], and look
 like this (this is the source of the above graph):
 
