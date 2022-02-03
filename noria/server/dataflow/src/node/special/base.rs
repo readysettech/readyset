@@ -565,9 +565,10 @@ mod tests {
 
     mod process {
         use super::*;
+        use crate::state::MaterializedNodeState;
         use std::convert::TryInto;
 
-        fn test_lots_of_changes_in_same_batch(mut state: Box<dyn State>) {
+        fn test_lots_of_changes_in_same_batch(mut state: MaterializedNodeState) {
             use crate::node;
             use crate::prelude::*;
 
@@ -676,7 +677,7 @@ mod tests {
         #[test]
         fn lots_of_changes_in_same_batch() {
             let state = MemoryState::default();
-            test_lots_of_changes_in_same_batch(Box::new(state));
+            test_lots_of_changes_in_same_batch(MaterializedNodeState::Memory(state));
         }
 
         #[test]
@@ -687,7 +688,7 @@ mod tests {
                 &PersistenceParameters::default(),
             );
 
-            test_lots_of_changes_in_same_batch(Box::new(state));
+            test_lots_of_changes_in_same_batch(MaterializedNodeState::Persistent(state));
         }
 
         #[test]
@@ -696,7 +697,7 @@ mod tests {
 
             let ni = unsafe { LocalNodeIndex::make(0u32) };
 
-            let state: Box<dyn State> = Box::new(PersistentState::new(
+            let state = MaterializedNodeState::Persistent(PersistentState::new(
                 String::from("delete_row_not_in_batch"),
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
@@ -736,7 +737,7 @@ mod tests {
 
             let ni = unsafe { LocalNodeIndex::make(0u32) };
 
-            let mut state: Box<dyn State> = Box::new(PersistentState::new(
+            let mut state = MaterializedNodeState::Persistent(PersistentState::new(
                 String::from("delete_row_not_in_batch_keyed"),
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
@@ -781,7 +782,7 @@ mod tests {
 
             let ni = unsafe { LocalNodeIndex::make(0u32) };
 
-            let mut state: Box<dyn State> = Box::new(PersistentState::new(
+            let mut state = MaterializedNodeState::Persistent(PersistentState::new(
                 String::from("delete_after_key_update"),
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),

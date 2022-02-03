@@ -207,6 +207,7 @@ pub mod test {
     use crate::prelude::*;
     use crate::processing::SuggestedIndex;
 
+    use crate::state::MaterializedNodeState;
     use petgraph::graph::NodeIndex;
 
     pub(super) struct MockGraph {
@@ -264,7 +265,8 @@ pub mod test {
                 .node_weight_mut(global)
                 .unwrap()
                 .on_commit(&remap);
-            self.states.insert(local, Box::new(MemoryState::default()));
+            self.states
+                .insert(local, MaterializedNodeState::Memory(MemoryState::default()));
             self.remap.insert(global, ip);
             ip
         }
@@ -283,7 +285,8 @@ pub mod test {
             let global = self.graph.add_node(Node::new(name, fields, i));
             let local = unsafe { LocalNodeIndex::make(self.remap.len() as u32) };
             if materialized {
-                self.states.insert(local, Box::new(MemoryState::default()));
+                self.states
+                    .insert(local, MaterializedNodeState::Memory(MemoryState::default()));
             }
             for parent in parents {
                 self.graph.add_edge(parent, global, ());
@@ -390,7 +393,8 @@ pub mod test {
                 }
             }
 
-            self.states.insert(*base, Box::new(state));
+            self.states
+                .insert(*base, MaterializedNodeState::Memory(state));
         }
 
         pub fn input_raw<U: Into<Records>>(

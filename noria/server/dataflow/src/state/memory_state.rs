@@ -337,6 +337,14 @@ impl State for MemoryState {
     fn lookup_weak<'a>(&'a self, columns: &[usize], key: &KeyType) -> Option<RecordResult<'a>> {
         self.weak_indices[columns].lookup(key).map(From::from)
     }
+
+    fn as_persistent(&self) -> Option<&PersistentState> {
+        None
+    }
+
+    fn as_persistent_mut(&mut self) -> Option<&mut PersistentState> {
+        None
+    }
 }
 
 impl MemoryState {

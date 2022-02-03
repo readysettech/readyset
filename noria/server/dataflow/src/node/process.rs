@@ -3,6 +3,7 @@ use crate::node::NodeType;
 use crate::payload;
 use crate::prelude::*;
 use crate::processing::{MissLookupKey, MissReplayKey};
+use crate::state::MaterializedNodeState;
 use noria::consistency::Timestamp;
 use noria::replication::ReplicationOffset;
 use noria::{KeyComparison, PacketData, ReadySetError};
@@ -615,7 +616,7 @@ pub(crate) fn materialize(
     rs: &mut Records,
     replication_offset: Option<ReplicationOffset>,
     partial: Option<Tag>,
-    state: Option<&mut Box<dyn State>>,
+    state: Option<&mut MaterializedNodeState>,
 ) {
     // our output changed -- do we need to modify materialized state?
     if state.is_none() {

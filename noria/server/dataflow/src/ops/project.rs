@@ -297,6 +297,7 @@ mod tests {
     use Expression::{Column, Literal, Op};
 
     use crate::ops;
+    use crate::state::MaterializedNodeState;
     use std::convert::TryFrom;
 
     fn setup(materialized: bool, all: bool, add: bool) -> ops::test::MockGraph {
@@ -516,7 +517,7 @@ mod tests {
     }
 
     fn setup_query_through(
-        mut state: Box<dyn State>,
+        mut state: MaterializedNodeState,
         permutation: &[usize],
         additional: Option<Vec<DataType>>,
         expressions: Option<Vec<Expression>>,
@@ -562,7 +563,7 @@ mod tests {
 
     #[test]
     fn it_queries_through_all() {
-        let state = Box::new(MemoryState::default());
+        let state = MaterializedNodeState::Memory(MemoryState::default());
         let (p, states) = setup_query_through(state, &[0, 1, 2], None, None);
         let expected: Vec<DataType> = vec![1.into(), 2.into(), 3.into()];
         assert_query_through(p, 0, 1.into(), states, expected);
@@ -570,7 +571,7 @@ mod tests {
 
     #[test]
     fn it_queries_through_all_persistent() {
-        let state = Box::new(PersistentState::new(
+        let state = MaterializedNodeState::Persistent(PersistentState::new(
             String::from("it_queries_through_all_persistent"),
             Vec::<Box<[usize]>>::new(),
             &PersistenceParameters::default(),
@@ -583,7 +584,7 @@ mod tests {
 
     #[test]
     fn it_queries_through_some() {
-        let state = Box::new(MemoryState::default());
+        let state = MaterializedNodeState::Memory(MemoryState::default());
         let (p, states) = setup_query_through(state, &[1], None, None);
         let expected: Vec<DataType> = vec![2.into()];
         assert_query_through(p, 0, 2.into(), states, expected);
@@ -591,7 +592,7 @@ mod tests {
 
     #[test]
     fn it_queries_through_some_persistent() {
-        let state = Box::new(PersistentState::new(
+        let state = MaterializedNodeState::Persistent(PersistentState::new(
             String::from("it_queries_through_some_persistent"),
             Vec::<Box<[usize]>>::new(),
             &PersistenceParameters::default(),
@@ -605,7 +606,7 @@ mod tests {
     #[test]
     fn it_queries_through_w_literals() {
         let additional = Some(vec![DataType::Int(42)]);
-        let state = Box::new(MemoryState::default());
+        let state = MaterializedNodeState::Memory(MemoryState::default());
         let (p, states) = setup_query_through(state, &[1], additional, None);
         let expected: Vec<DataType> = vec![2.into(), 42.into()];
         assert_query_through(p, 0, 2.into(), states, expected);
@@ -614,7 +615,7 @@ mod tests {
     #[test]
     fn it_queries_through_w_literals_persistent() {
         let additional = Some(vec![DataType::Int(42)]);
-        let state = Box::new(PersistentState::new(
+        let state = MaterializedNodeState::Persistent(PersistentState::new(
             String::from("it_queries_through_w_literals"),
             Vec::<Box<[usize]>>::new(),
             &PersistenceParameters::default(),
@@ -634,7 +635,7 @@ mod tests {
             op: BinaryOperator::Add,
         }]);
 
-        let state = Box::new(MemoryState::default());
+        let state = MaterializedNodeState::Memory(MemoryState::default());
         let (p, states) = setup_query_through(state, &[1], additional, expressions);
         let expected: Vec<DataType> = vec![2.into(), (1 + 2).into(), 42.into()];
         assert_query_through(p, 0, 2.into(), states, expected);
@@ -649,7 +650,7 @@ mod tests {
             op: BinaryOperator::Add,
         }]);
 
-        let state = Box::new(PersistentState::new(
+        let state = MaterializedNodeState::Persistent(PersistentState::new(
             String::from("it_queries_through_w_arithmetic_and_literals_persistent"),
             Vec::<Box<[usize]>>::new(),
             &PersistenceParameters::default(),
@@ -672,7 +673,7 @@ mod tests {
             right: Box::new(Literal(DataType::Int(2))),
         };
 
-        let state = Box::new(PersistentState::new(
+        let state = MaterializedNodeState::Persistent(PersistentState::new(
             String::from("it_queries_nested_expressions"),
             Vec::<Box<[usize]>>::new(),
             &PersistenceParameters::default(),

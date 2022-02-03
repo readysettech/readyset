@@ -328,10 +328,9 @@ impl Ingredient for TopK {
         });
 
         let us = self.our_index.unwrap();
-        let db: &dyn State = state
+        let db = state
             .get(*us)
-            .ok_or_else(|| internal_err("topk operators must have their own state materialized"))?
-            .as_ref();
+            .ok_or_else(|| internal_err("topk operators must have their own state materialized"))?;
 
         let mut out = Vec::new();
         // the lookup key of the group currently being processed
