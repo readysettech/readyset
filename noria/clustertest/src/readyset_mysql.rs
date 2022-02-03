@@ -744,6 +744,7 @@ async fn upquery_through_failed_domain() {
 }
 
 #[clustertest]
+#[ignore] // TODO(ENG-1029): Investigate whether this requires revert
 async fn update_propagation_through_failed_domain() {
     let mut deployment = readyset_mysql("ct_update_propagation_through_failed_domain")
         .with_servers(2, ServerParams::default())
