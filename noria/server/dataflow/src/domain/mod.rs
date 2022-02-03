@@ -548,7 +548,19 @@ impl Domain {
         let tags = self
             .replay_paths_by_dst
             .get(miss_in)
-            .and_then(|indexes| indexes.get(&miss_index))
+            .and_then(|indexes| {
+                // we might be doing what is effectively a point lookup into a BTree index if we do
+                // a lookup of a double-ended range where both ends are inclusive bounds of the same
+                // value - if that happens, we still need to resolve the tag for the BTree index,
+                // not the Hash index.
+                indexes.get(&miss_index).or_else(|| {
+                    if miss_index.index_type == IndexType::HashMap {
+                        indexes.get(&Index::new(IndexType::BTreeMap, miss_columns.to_vec()))
+                    } else {
+                        None
+                    }
+                })
+            })
             .cloned()
             .unwrap_or_default();
 
