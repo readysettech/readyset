@@ -54,29 +54,58 @@ const MIN_AVAILABILITY_ZONES: usize = 3;
 const VPC_CLOUDFORMATION_TEMPLATE_URL: &str =
     "https://aws-quickstart.s3.amazonaws.com/quickstart-aws-vpc/templates/aws-vpc.template.yaml";
 
+// Macro to define this so it can be included in constants
+macro_rules! readyset_cloudformation_s3_prefix {
+    () => {
+        "installer-2022-02-17"
+    };
+}
+
+// Public cloudformation template prefix for the ReadySet stacks
+// TODO: Not needed right now but would be good to have in the future.
+// const READYSET_CLOUDFORMATION_S3_PREFIX: &str = readyset_cloudformation_s3_prefix!();
+
 /// Public cloudformation template for the VPC supplemental stack
-const VPC_SUPPLEMENTAL_CLOUDFORMATION_TEMPLATE_URL: &str =
-    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-vpc-supplemental-template.yaml";
+const VPC_SUPPLEMENTAL_CLOUDFORMATION_TEMPLATE_URL: &str = concat!(
+    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/",
+    readyset_cloudformation_s3_prefix!(),
+    "/readyset/templates/readyset-vpc-supplemental-template.yaml"
+);
 
 /// Public cloudformation template for the Consul stack
-const CONSUL_CLOUDFORMATION_TEMPLATE_URL: &str =
-    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-authority-consul-template.yaml";
+const CONSUL_CLOUDFORMATION_TEMPLATE_URL: &str = concat!(
+    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/",
+    readyset_cloudformation_s3_prefix!(),
+    "/readyset/templates/readyset-authority-consul-template.yaml"
+);
 
 /// Public cloudformation template for the MySQL RDS stack
-const RDS_MYSQL_CLOUDFORMATION_TEMPLATE_URL: &str =
-    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-rds-mysql-template.yaml";
+const RDS_MYSQL_CLOUDFORMATION_TEMPLATE_URL: &str = concat!(
+    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/",
+    readyset_cloudformation_s3_prefix!(),
+    "/readyset/templates/readyset-rds-mysql-template.yaml"
+);
 
 /// Public cloudformation template for the PostgreSQL RDS stack
-const RDS_POSTGRESQL_CLOUDFORMATION_TEMPLATE_URL: &str =
-    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-rds-mysql-template.yaml";
+const RDS_POSTGRESQL_CLOUDFORMATION_TEMPLATE_URL: &str = concat!(
+    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/",
+    readyset_cloudformation_s3_prefix!(),
+    "/readyset/templates/readyset-rds-mysql-template.yaml"
+);
 
 /// Public cloudformation template for the MySQL Readyset stack
-const READYSET_MYSQL_CLOUDFORMATION_TEMPLATE_URL: &str =
-    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-mysql-template.yaml";
+const READYSET_MYSQL_CLOUDFORMATION_TEMPLATE_URL: &str = concat!(
+    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/",
+    readyset_cloudformation_s3_prefix!(),
+    "/readyset/templates/readyset-mysql-template.yaml"
+);
 
 /// Public cloudformation template for the MySQL Readyset stack
-const READYSET_POSTGRESQL_CLOUDFORMATION_TEMPLATE_URL: &str =
-    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-postgresql-template.yaml";
+const READYSET_POSTGRESQL_CLOUDFORMATION_TEMPLATE_URL: &str = concat!(
+    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/",
+    readyset_cloudformation_s3_prefix!(),
+    "/readyset/templates/readyset-postgresql-template.yaml"
+);
 
 /// Install and configure a ReadySet cluster in AWS
 #[derive(Parser)]
