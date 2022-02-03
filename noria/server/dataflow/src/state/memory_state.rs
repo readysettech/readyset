@@ -167,6 +167,7 @@ impl State for MemoryState {
         debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
         let index = self
             .state_for(columns, IndexType::HashMap)
+            .or_else(|| self.state_for(columns, IndexType::BTreeMap))
             .expect("lookup on non-indexed column set");
         let ret = self.state[index].lookup(key);
         if ret.is_some() {
@@ -552,6 +553,24 @@ mod tests {
         let res = state.lookup_in_tag(Tag::new(1), &KeyType::Single(&1.into()));
         assert!(!res.is_missing());
         assert!(res.unwrap().is_empty());
+    }
+
+    #[test]
+    fn point_lookup_only_btree() {
+        let mut state = MemoryState::default();
+        state.add_key(Index::btree_map(vec![0]), Some(vec![Tag::new(1)]));
+        state.mark_filled(KeyComparison::from_range(&(..)), Tag::new(1));
+        state.insert(
+            vec![DataType::from(1), DataType::from(2)],
+            Some(Tag::new(1)),
+        );
+
+        let res = state.lookup(&[0], &KeyType::Single(&DataType::from(1)));
+        assert!(res.is_some());
+        assert_eq!(
+            res.unwrap(),
+            RecordResult::Owned(vec![vec![1.into(), 2.into()]])
+        );
     }
 
     #[test]
