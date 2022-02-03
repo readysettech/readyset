@@ -74,3 +74,11 @@ select x from t2 where x between ? and ? and y between ? and ?
 ----
 4
 5
+
+# between where both sides are the same
+query I nosort
+select x from t2 where x between ? and ?
+? = 2
+? = 2
+----
+2
