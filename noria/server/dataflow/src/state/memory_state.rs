@@ -1,9 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use noria::replication::ReplicationOffset;
 use noria::KeyComparison;
 use rand::{self, Rng};
+use tracing::trace;
 
 use crate::prelude::*;
 use crate::state::single_state::SingleState;
@@ -171,6 +172,9 @@ impl State for MemoryState {
         if ret.is_some() {
             return ret;
         }
+
+        trace!(?columns, ?key, "lookup missed; trying other indexes");
+
         // We missed in the index we tried to look up on, but we might have the rows
         // in an overlapping index (e.g. if we missed looking up [0, 1], [0] or [1]
         // might have the rows).
@@ -178,8 +182,39 @@ impl State for MemoryState {
         // resulting in upqueries along an overlapping replay path.
         // FIXME(eta): a lot of this could be computed at index addition time.
         for state in self.state.iter() {
-            // must be strictly less than, because otherwise it's either the same index, or
-            // we'd have to magic up datatypes out of thin air
+            // We might have another index with the same columns in another order
+            if state.columns() != columns && state.columns().len() == columns.len() {
+                // Make a map from column index -> the position in the index we're trying to do a
+                // lookup into
+                //
+                // eg if we're mapping [3, 4] to [4, 3]
+                // we get {4 => 0, 3 => 1}
+                let col_positions = state
+                    .columns()
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .map(|(idx, col)| (col, idx))
+                    .collect::<BTreeMap<_, _>>();
+                if columns.iter().all(|c| col_positions.contains_key(c)) {
+                    let mut shuffled_key = vec![&DataType::None; key.len()];
+                    for (col, key_pos) in columns.iter().enumerate() {
+                        let val = key
+                            .get(*key_pos)
+                            .expect("Columns and key must have the same len");
+                        let pos = col_positions[&col];
+                        shuffled_key[pos] = val;
+                    }
+                    let key = KeyType::from(shuffled_key);
+                    let res = state.lookup(&key);
+                    if res.is_some() {
+                        return res;
+                    }
+                }
+            }
+
+            // otherwise the length must be strictly less than, because otherwise it's either the
+            // same index, or we'd have to magic up datatypes out of thin air
             if state.columns().len() < columns.len() {
                 // For each column in `columns`, find the corresponding column in `state.key()`,
                 // if there is one, and return (its position in state.key(), its value from `key`).
@@ -517,6 +552,24 @@ mod tests {
         let res = state.lookup_in_tag(Tag::new(1), &KeyType::Single(&1.into()));
         assert!(!res.is_missing());
         assert!(res.unwrap().is_empty());
+    }
+
+    #[test]
+    fn shuffled_columns() {
+        let mut state = MemoryState::default();
+        state.add_key(Index::hash_map(vec![0, 1]), Some(vec![Tag::new(0)]));
+        state.add_key(Index::hash_map(vec![1, 0]), Some(vec![Tag::new(1)]));
+
+        state.mark_filled(KeyComparison::Equal(vec1![1.into(), 1.into()]), Tag::new(0));
+        state.insert(vec![1.into(), 1.into(), 1.into()], Some(Tag::new(0)));
+
+        let res = state.lookup(&[1, 0], &KeyType::Double((1.into(), 1.into())));
+        assert!(res.is_some());
+        let rows = res.unwrap();
+        assert_eq!(
+            rows,
+            RecordResult::Owned(vec![vec![1.into(), 1.into(), 1.into()]])
+        );
     }
 
     mod lookup_range {
