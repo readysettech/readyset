@@ -35,7 +35,7 @@ use crate::node::NodeProcessingResult;
 use crate::payload::{ReplayPieceContext, SourceSelection};
 use crate::prelude::*;
 use crate::processing::ColumnMiss;
-use crate::state::RangeLookupResult;
+use crate::state::{MaterializedNodeState, RangeLookupResult};
 use crate::{DomainRequest, Readers};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1390,7 +1390,10 @@ impl Domain {
                 match state {
                     InitialState::PartialLocal { strict, weak } => {
                         if !self.state.contains_key(node) {
-                            self.state.insert(node, Box::new(MemoryState::default()));
+                            self.state.insert(
+                                node,
+                                MaterializedNodeState::Memory(MemoryState::default()),
+                            );
                         }
                         let state = self.state.get_mut(node).unwrap();
                         for (index, tags) in strict {
@@ -1408,7 +1411,10 @@ impl Domain {
                     }
                     InitialState::IndexedLocal { strict, weak } => {
                         if !self.state.contains_key(node) {
-                            self.state.insert(node, Box::new(MemoryState::default()));
+                            self.state.insert(
+                                node,
+                                MaterializedNodeState::Memory(MemoryState::default()),
+                            );
                         }
                         let state = self.state.get_mut(node).unwrap();
                         for index in strict {
@@ -1828,7 +1834,7 @@ impl Domain {
                 node_ref.borrow_mut().purge = purge;
 
                 if !index.is_empty() {
-                    let mut s: Box<dyn State> = {
+                    let mut s = {
                         match (
                             node_ref.borrow().get_base(),
                             &self.persistence_parameters.mode,
@@ -1845,13 +1851,13 @@ impl Domain {
                                     self.shard.unwrap_or(0),
                                 );
 
-                                Box::new(PersistentState::new(
+                                MaterializedNodeState::Persistent(PersistentState::new(
                                     base_name,
                                     base.all_unique_keys(),
                                     &self.persistence_parameters,
                                 ))
                             }
-                            _ => Box::new(MemoryState::default()),
+                            _ => MaterializedNodeState::Memory(MemoryState::default()),
                         }
                     };
                     for idx in index {
@@ -2223,7 +2229,7 @@ impl Domain {
     /// and a set of the misses
     fn do_lookup_iter<'a>(
         &self,
-        state: &'a dyn State,
+        state: &'a MaterializedNodeState,
         cols: &[usize],
         mut keys: HashSet<KeyComparison>,
     ) -> ReadySetResult<StateLookupResult<'a>> {
@@ -2269,7 +2275,7 @@ impl Domain {
 
     fn do_lookup<'a>(
         &self,
-        state: &'a dyn State,
+        state: &'a MaterializedNodeState,
         cols: &[usize],
         keys: HashSet<KeyComparison>,
     ) -> ReadySetResult<StateLookupResult<'a>> {
@@ -2327,7 +2333,7 @@ impl Domain {
             records,
             found_keys,
             replay_keys,
-        } = self.do_lookup(state.as_ref(), &index.columns, keys)?;
+        } = self.do_lookup(state, &index.columns, keys)?;
 
         let records = records
             .into_iter()

@@ -22,7 +22,7 @@ pub use crate::node_map::NodeMap;
 pub(crate) use crate::state::{
     LookupResult, MemoryState, PersistentState, RecordResult, Row, Rows, State,
 };
-pub(crate) type StateMap = NodeMap<Box<dyn State>>;
+pub(crate) type StateMap = NodeMap<MaterializedNodeState>;
 pub type DomainNodes = NodeMap<cell::RefCell<Node>>;
 pub(crate) type ReplicaAddr = (DomainIndex, usize);
 
@@ -36,6 +36,7 @@ pub use noria::internal::*;
 pub use petgraph::graph::NodeIndex;
 pub type Graph = petgraph::Graph<Node, Edge>;
 pub use crate::processing::{ColumnRef, ColumnSource};
+use crate::state::MaterializedNodeState;
 pub use crate::DurabilityMode;
 pub use crate::PersistenceParameters;
 pub use noria_errors::*;

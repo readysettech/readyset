@@ -37,7 +37,14 @@ pub(crate) struct StateEvicted<'a> {
 }
 
 /// The state of an individual, non-reader node in the graph
-///
+pub(crate) enum MaterializedNodeState {
+    /// The state that stores all the materialized rows in-memory.
+    Memory(MemoryState),
+    /// The state that stores all the materialized rows in a persistent
+    /// storage.
+    Persistent(PersistentState),
+}
+
 /// The [`State`] trait is the interface to the state of a non-reader node in the graph, containing
 /// all rows that have been materialized from the output of that node. States have multiple *keys*,
 /// each of which is an index providing efficient lookup of the rows based on a subset of the
@@ -97,9 +104,7 @@ pub(crate) trait State: SizeOf + Send {
     ///
     ///  See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
     /// more information about replication offsets.
-    fn replication_offset(&self) -> Option<&ReplicationOffset> {
-        None
-    }
+    fn replication_offset(&self) -> Option<&ReplicationOffset>;
 
     /// Mark the given `key` as a *filled hole* in the given partial `tag`, causing all lookups to
     /// that key to return an empty non-miss result, and all writes to that key to not be dropped.
@@ -178,14 +183,10 @@ pub(crate) trait State: SizeOf + Send {
     fn lookup_weak<'a>(&'a self, columns: &[usize], key: &KeyType) -> Option<RecordResult<'a>>;
 
     /// If the internal type is a `PersistentState` return a reference to itself
-    fn as_persistent(&self) -> Option<&PersistentState> {
-        None
-    }
+    fn as_persistent(&self) -> Option<&PersistentState>;
 
     /// If the internal type is a `PersistentState` return a mutable reference to itself
-    fn as_persistent_mut(&mut self) -> Option<&mut PersistentState> {
-        None
-    }
+    fn as_persistent_mut(&mut self) -> Option<&mut PersistentState>;
 
     /// Return (a potentially inaccurate estimate of) the number of rows materialized into this
     /// state
@@ -204,6 +205,173 @@ pub(crate) trait State: SizeOf + Send {
 
     /// Remove all rows from this state
     fn clear(&mut self);
+}
+
+impl SizeOf for MaterializedNodeState {
+    fn deep_size_of(&self) -> u64 {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.deep_size_of(),
+            MaterializedNodeState::Persistent(ps) => ps.deep_size_of(),
+        }
+    }
+
+    fn size_of(&self) -> u64 {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.size_of(),
+            MaterializedNodeState::Persistent(ps) => ps.size_of(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.is_empty(),
+            MaterializedNodeState::Persistent(ps) => ps.is_empty(),
+        }
+    }
+}
+
+impl State for MaterializedNodeState {
+    fn add_key(&mut self, index: Index, tags: Option<Vec<Tag>>) {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.add_key(index, tags),
+            MaterializedNodeState::Persistent(ps) => ps.add_key(index, tags),
+        }
+    }
+
+    fn add_weak_key(&mut self, index: Index) {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.add_weak_key(index),
+            MaterializedNodeState::Persistent(ps) => ps.add_weak_key(index),
+        }
+    }
+
+    fn is_useful(&self) -> bool {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.is_useful(),
+            MaterializedNodeState::Persistent(ps) => ps.is_useful(),
+        }
+    }
+
+    fn is_partial(&self) -> bool {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.is_partial(),
+            MaterializedNodeState::Persistent(ps) => ps.is_partial(),
+        }
+    }
+
+    fn process_records(
+        &mut self,
+        records: &mut Records,
+        partial_tag: Option<Tag>,
+        replication_offset: Option<ReplicationOffset>,
+    ) {
+        match self {
+            MaterializedNodeState::Memory(ms) => {
+                ms.process_records(records, partial_tag, replication_offset)
+            }
+            MaterializedNodeState::Persistent(ps) => {
+                ps.process_records(records, partial_tag, replication_offset)
+            }
+        }
+    }
+
+    fn replication_offset(&self) -> Option<&ReplicationOffset> {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.replication_offset(),
+            MaterializedNodeState::Persistent(ps) => ps.replication_offset(),
+        }
+    }
+
+    fn mark_filled(&mut self, key: KeyComparison, tag: Tag) {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.mark_filled(key, tag),
+            MaterializedNodeState::Persistent(ps) => ps.mark_filled(key, tag),
+        }
+    }
+
+    fn mark_hole(&mut self, key: &KeyComparison, tag: Tag) {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.mark_hole(key, tag),
+            MaterializedNodeState::Persistent(ps) => ps.mark_hole(key, tag),
+        }
+    }
+
+    fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a> {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.lookup(columns, key),
+            MaterializedNodeState::Persistent(ps) => ps.lookup(columns, key),
+        }
+    }
+
+    fn lookup_in_tag<'a>(&'a self, tag: Tag, key: &KeyType) -> LookupResult<'a> {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.lookup_in_tag(tag, key),
+            MaterializedNodeState::Persistent(ps) => ps.lookup_in_tag(tag, key),
+        }
+    }
+
+    fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a> {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.lookup_range(columns, key),
+            MaterializedNodeState::Persistent(ps) => ps.lookup_range(columns, key),
+        }
+    }
+
+    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &KeyType) -> Option<RecordResult<'a>> {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.lookup_weak(columns, key),
+            MaterializedNodeState::Persistent(ps) => ps.lookup_weak(columns, key),
+        }
+    }
+
+    fn as_persistent(&self) -> Option<&PersistentState> {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.as_persistent(),
+            MaterializedNodeState::Persistent(ps) => ps.as_persistent(),
+        }
+    }
+
+    fn as_persistent_mut(&mut self) -> Option<&mut PersistentState> {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.as_persistent_mut(),
+            MaterializedNodeState::Persistent(ps) => ps.as_persistent_mut(),
+        }
+    }
+
+    fn rows(&self) -> usize {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.rows(),
+            MaterializedNodeState::Persistent(ps) => ps.rows(),
+        }
+    }
+
+    fn cloned_records(&self) -> Vec<Vec<DataType>> {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.cloned_records(),
+            MaterializedNodeState::Persistent(ps) => ps.cloned_records(),
+        }
+    }
+
+    fn evict_bytes(&mut self, bytes: usize) -> Option<StateEvicted> {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.evict_bytes(bytes),
+            MaterializedNodeState::Persistent(ps) => ps.evict_bytes(bytes),
+        }
+    }
+
+    fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<(&Index, u64)> {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.evict_keys(tag, keys),
+            MaterializedNodeState::Persistent(ps) => ps.evict_keys(tag, keys),
+        }
+    }
+
+    fn clear(&mut self) {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.clear(),
+            MaterializedNodeState::Persistent(ps) => ps.clear(),
+        }
+    }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq)]
