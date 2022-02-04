@@ -82,3 +82,10 @@ select x from t2 where x between ? and ?
 ? = 2
 ----
 2
+
+# swapped-range between (degenerate, but we shouldn't blow up)
+query I nosort
+select x from t2 where x between ? and ?
+? = 2
+? = 1
+----
