@@ -1,4 +1,6 @@
 version: "3.8"
+volumes:
+  readyset-server-state:
 services:
   consul:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/consul
@@ -37,12 +39,15 @@ services:
       REPLICATION_URL: mysql://root:noria@mysql/solidus
       PROMETHEUS_METRICS: 1
       FORBID_FULL_MATERIALIZATION: 1
+      DB_DIR: /state
     links:
       - mysql
       - consul
     depends_on:
       mysql:
         condition: service_healthy
+    volumes:
+      - readyset-server-state:/state
     healthcheck:
       test: ["CMD", "curl", "--fail", "127.0.0.1:6033/prometheus"]
       interval: 10s
