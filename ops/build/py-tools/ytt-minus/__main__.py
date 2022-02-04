@@ -25,14 +25,14 @@ def parse_packer_manifest(packer_manifest_contents):
 
 def template_variable_sub(text_file_lines, variable_dict):
     # Match strings with pattern #@ {<variable>}
-    variable_match = re.compile('(?<=#@).*{(.*?)}+')
-    variable_match_full_pattern = re.compile('(#@).*{(.*?)}+')
+    variable_match = re.compile('(?<=#@).*{(.*?)}+$')
+    variable_match_full_pattern = re.compile(':(.*) (#@).*{(.*?)}+$')
 
     def template_line(text_file_line):
         match = re.search(variable_match, text_file_line)
         if match is not None:
             match_term = match.group(1)
-            replaced = re.sub(variable_match_full_pattern, variable_dict[match_term], text_file_line)
+            replaced = re.sub(variable_match_full_pattern, ": " + variable_dict[match_term], text_file_line)
             print( f'Replaced {text_file_line} with {replaced}')
         else:
             replaced = text_file_line

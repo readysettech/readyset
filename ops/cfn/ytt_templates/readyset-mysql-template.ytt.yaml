@@ -199,17 +199,17 @@ Parameters:
 Mappings:
   AWSAMIRegionMap:
     us-east-1:
-      READYSETMYSQLADAPTER: #@ {readyset_mysql_adapter_us_east_1}
-      READYSETSERVER: #@ {readyset_server_us_east_1}
-      READYSETMONITOR: #@ {readyset_monitor_us_east_1}
+      READYSETMYSQLADAPTER: ami-xxxxxxxxxxxxxxxxx #@ {readyset_mysql_adapter_us_east_1}
+      READYSETSERVER: ami-xxxxxxxxxxxxxxxxx #@ {readyset_server_us_east_1}
+      READYSETMONITOR: ami-xxxxxxxxxxxxxxxxx #@ {readyset_monitor_us_east_1}
     us-east-2:
-      READYSETMYSQLADAPTER: #@ {readyset_mysql_adapter_us_east_2}
-      READYSETSERVER: #@ {readyset_server_us_east_2}
-      READYSETMONITOR: #@ {readyset_monitor_us_east_2}
+      READYSETMYSQLADAPTER: ami-xxxxxxxxxxxxxxxxx #@ {readyset_mysql_adapter_us_east_2}
+      READYSETSERVER: ami-xxxxxxxxxxxxxxxxx #@ {readyset_server_us_east_2}
+      READYSETMONITOR: ami-xxxxxxxxxxxxxxxxx #@ {readyset_monitor_us_east_2}
     us-west-2:
-      READYSETMYSQLADAPTER: #@ {readyset_mysql_adapter_us_west_2}
-      READYSETSERVER: #@ {readyset_server_us_west_2}
-      READYSETMONITOR: #@ {readyset_monitor_us_west_2}
+      READYSETMYSQLADAPTER: ami-xxxxxxxxxxxxxxxxx #@ {readyset_mysql_adapter_us_west_2}
+      READYSETSERVER: ami-xxxxxxxxxxxxxxxxx #@ {readyset_server_us_west_2}
+      READYSETMONITOR: ami-xxxxxxxxxxxxxxxxx #@ {readyset_monitor_us_west_2}
 
 Resources:
   ReadySetMySQLAdapterRole:

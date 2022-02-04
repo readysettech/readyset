@@ -100,11 +100,11 @@ Parameters:
 Mappings:
   AWSAMIRegionMap:
     us-east-1:
-      READYSETBASTION: #@ {readyset_bastion_us_east_1}
+      READYSETBASTION: ami-xxxxxxxxxxxxxxxxx #@ {readyset_bastion_us_east_1}
     us-east-2:
-      READYSETBASTION: #@ {readyset_bastion_us_east_2}
+      READYSETBASTION: ami-xxxxxxxxxxxxxxxxx #@ {readyset_bastion_us_east_2}
     us-west-2:
-      READYSETBASTION: #@ {readyset_bastion_us_west_2}
+      READYSETBASTION: ami-xxxxxxxxxxxxxxxxx #@ {readyset_bastion_us_west_2}
 
 Conditions:
   2BastionCondition: !Or

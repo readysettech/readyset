@@ -74,11 +74,11 @@ Parameters:
 Mappings:
   AWSAMIRegionMap:
     us-east-1:
-      READYSETAUTHORITYCONSUL: #@ {readyset_authority_consul_us_east_1}
+      READYSETAUTHORITYCONSUL: ami-xxxxxxxxxxxxxxxxx #@ {readyset_authority_consul_us_east_1}
     us-east-2:
-      READYSETAUTHORITYCONSUL: #@ {readyset_authority_consul_us_east_2}
+      READYSETAUTHORITYCONSUL: ami-xxxxxxxxxxxxxxxxx #@ {readyset_authority_consul_us_east_2}
     us-west-2:
-      READYSETAUTHORITYCONSUL: #@ {readyset_authority_consul_us_west_2}
+      READYSETAUTHORITYCONSUL: ami-xxxxxxxxxxxxxxxxx #@ {readyset_authority_consul_us_west_2}
 
 Resources:
   ConsulJoinManagedPolicy:
