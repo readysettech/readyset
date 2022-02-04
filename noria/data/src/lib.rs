@@ -1,7 +1,7 @@
 #![feature(total_cmp)]
 
 use bytes::BytesMut;
-use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone};
+use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
 use enum_kinds::EnumKind;
 use itertools::Itertools;
 use nom_sql::{Double, Float, Literal, SqlType};
@@ -18,8 +18,10 @@ use std::{fmt, mem};
 
 mod serde;
 mod text;
+mod timestamp;
 
 pub use crate::text::{Text, TinyText};
+pub use crate::timestamp::TimestampTz;
 
 /// DateTime offsets must be bigger than -86_000 seconds and smaller than 86_000 (not inclusive in
 /// either case), and we don't care about seconds, so our maximum offset is gonna be
@@ -57,7 +59,7 @@ pub enum DataType {
     /// A timestamp for date/time types.
     Timestamp(NaiveDateTime),
     /// A timestamp with time zone.
-    TimestampTz(Arc<DateTime<FixedOffset>>),
+    TimestampTz(TimestampTz),
     /// A time duration
     /// NOTE: [`MysqlTime`] is from -838:59:59 to 838:59:59 whereas Postgres time is from 00:00:00 to 24:00:00
     Time(Arc<MysqlTime>),
@@ -95,7 +97,9 @@ impl fmt::Display for DataType {
             DataType::Float(n, _) => write!(f, "{}", n),
             DataType::Double(n, _) => write!(f, "{}", n),
             DataType::Timestamp(ts) => write!(f, "{}", ts.format("%c")),
-            DataType::TimestampTz(ref ts) => write!(f, "{}", ts.format(TIMESTAMP_TZ_FORMAT)),
+            DataType::TimestampTz(ref ts) => {
+                write!(f, "{}", ts.to_chrono().format(TIMESTAMP_TZ_FORMAT))
+            }
             DataType::Time(ref t) => {
                 write!(f, "{}", t)
             }
@@ -195,7 +199,6 @@ impl DataType {
             DataType::Text(ref text) => DataType::Text(text.as_str().into()),
             DataType::ByteArray(ref bytes) => DataType::ByteArray(Arc::new(bytes.as_ref().clone())),
             DataType::BitVector(ref bits) => DataType::from(bits.as_ref().clone()),
-            DataType::TimestampTz(ref ts) => DataType::from(*ts.as_ref()),
             ref dt => dt.clone(),
         }
     }
@@ -258,7 +261,7 @@ impl DataType {
             DataType::TinyText(ref tt) => !tt.as_bytes().is_empty(),
             DataType::Timestamp(ref dt) => *dt != NaiveDate::from_ymd(0, 0, 0).and_hms(0, 0, 0),
             DataType::TimestampTz(ref dt) => {
-                *dt.as_ref()
+                dt.to_chrono()
                     != FixedOffset::west(0)
                         .from_utc_datetime(&NaiveDate::from_ymd(0, 0, 0).and_hms(0, 0, 0))
             }
@@ -538,13 +541,13 @@ impl DataType {
             }
             (_, Some(Timestamp), DateTime(_)) => Ok(Cow::Borrowed(self)),
             (Self::TimestampTz(ref ts), Some(Timestamp), Text | Tinytext | Mediumtext | Varchar(_)) => {
-                Ok(Cow::Owned(ts.format(TIMESTAMP_TZ_FORMAT).to_string().into()))
+                Ok(Cow::Owned(ts.to_chrono().format(TIMESTAMP_TZ_FORMAT).to_string().into()))
             }
             (Self::TimestampTz(ref ts), Some(Timestamp), Date) => {
-                Ok(Cow::Owned(Self::Timestamp(ts.date().naive_utc().and_hms(0, 0, 0))))
+                Ok(Cow::Owned(Self::Timestamp(ts.to_chrono().date().naive_utc().and_hms(0, 0, 0))))
             }
             (Self::TimestampTz(ref ts), Some(Timestamp), Time) => {
-                Ok(Cow::Owned(Self::Time(Arc::new(ts.time().into()))))
+                Ok(Cow::Owned(Self::Time(Arc::new(ts.to_chrono().time().into()))))
             }
             (_, Some(Int(_)), Bigint(_) | BigSerial) => Ok(Cow::Owned(DataType::Int(i64::try_from(self)?))),
             (Self::Float(f, _), Some(Float), Tinyint(_) | Smallint(_) | Int(_)) => {
@@ -869,7 +872,7 @@ impl PartialEq for DataType {
                 #[allow(clippy::unwrap_used)]
                 let a = <&str>::try_from(self).unwrap();
                 chrono::DateTime::<FixedOffset>::parse_from_str(a, TIMESTAMP_TZ_FORMAT)
-                    .map(|other_dt| dt.as_ref().eq(&other_dt))
+                    .map(|other_dt| dt.to_chrono().eq(&other_dt))
                     .unwrap_or(false)
             }
             (&DataType::Text(..) | &DataType::TinyText(..), &DataType::Time(ref t)) => {
@@ -931,9 +934,7 @@ impl PartialEq for DataType {
                 &DataType::Text(..) | &DataType::TinyText(..),
             ) => other == self,
             (&DataType::Timestamp(tsa), &DataType::Timestamp(tsb)) => tsa == tsb,
-            (&DataType::TimestampTz(ref tsa), &DataType::TimestampTz(ref tsb)) => {
-                tsa.as_ref() == tsb.as_ref()
-            }
+            (&DataType::TimestampTz(tsa), &DataType::TimestampTz(tsb)) => tsa == tsb,
             (&DataType::Time(ref ta), &DataType::Time(ref tb)) => ta.as_ref() == tb.as_ref(),
             (&DataType::ByteArray(ref array_a), &DataType::ByteArray(ref array_b)) => {
                 array_a.as_ref() == array_b.as_ref()
@@ -1001,7 +1002,7 @@ impl Ord for DataType {
                 #[allow(clippy::unwrap_used)]
                 let a: &str = <&str>::try_from(self).unwrap();
                 chrono::DateTime::<FixedOffset>::parse_from_str(a, TIMESTAMP_TZ_FORMAT)
-                    .map(|dt| dt.cmp(other_dt.as_ref()))
+                    .map(|dt| dt.cmp(&other_dt.to_chrono()))
                     .unwrap_or(Ordering::Greater)
             }
             (&DataType::Text(..) | &DataType::TinyText(..), &DataType::Time(ref other_t)) => {
@@ -1058,7 +1059,9 @@ impl Ord for DataType {
                 other.cmp(self).reverse()
             }
             (&DataType::Timestamp(tsa), &DataType::Timestamp(ref tsb)) => tsa.cmp(tsb),
-            (&DataType::TimestampTz(ref tsa), &DataType::TimestampTz(ref tsb)) => tsa.cmp(tsb),
+            (&DataType::TimestampTz(ref tsa), &DataType::TimestampTz(ref tsb)) => {
+                tsa.to_chrono().cmp(&tsb.to_chrono())
+            }
             (&DataType::Time(ref ta), &DataType::Time(ref tb)) => ta.cmp(tb),
 
             // Convert ints to f32 and cmp against Float.
@@ -1144,9 +1147,8 @@ impl Hash for DataType {
                 t.hash(state)
             }
             DataType::Timestamp(ts) => ts.hash(state),
-            DataType::TimestampTz(ref ts) => {
-                ts.as_ref().hash(state);
-                ts.offset().fix().hash(state)
+            DataType::TimestampTz(ts) => {
+                ts.hash(state);
             }
             DataType::Time(ref t) => t.hash(state),
             DataType::ByteArray(ref array) => array.hash(state),
@@ -1483,7 +1485,7 @@ impl<'a> TryFrom<&'a DataType> for NaiveDateTime {
 
 impl From<DateTime<FixedOffset>> for DataType {
     fn from(dt: DateTime<FixedOffset>) -> Self {
-        DataType::TimestampTz(Arc::new(dt))
+        DataType::TimestampTz(dt.into())
     }
 }
 
@@ -1492,7 +1494,7 @@ impl<'a> TryFrom<&'a DataType> for DateTime<FixedOffset> {
 
     fn try_from(data: &'a DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::TimestampTz(ref dt) => Ok(*dt.as_ref()),
+            DataType::TimestampTz(dt) => Ok(dt.to_chrono()),
             _ => Err(Self::Error::DataTypeConversionError {
                 val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
@@ -2000,7 +2002,7 @@ impl ToSql for DataType {
             }
             (Self::Timestamp(x), &Type::DATE) => x.date().to_sql(ty, out),
             (Self::Timestamp(x), _) => x.to_sql(ty, out),
-            (Self::TimestampTz(ref ts), _) => ts.as_ref().to_sql(ty, out),
+            (Self::TimestampTz(ref ts), _) => ts.to_chrono().to_sql(ty, out),
             (Self::Time(x), _) => NaiveTime::from(**x).to_sql(ty, out),
             (Self::ByteArray(ref array), _) => array.as_ref().to_sql(ty, out),
             (Self::BitVector(ref bits), _) => bits.as_ref().to_sql(ty, out),
@@ -2322,6 +2324,26 @@ mod tests {
     use launchpad::{eq_laws, hash_laws, ord_laws};
     use proptest::prelude::*;
     use test_strategy::proptest;
+
+    #[test]
+    fn test_size_and_alignment() {
+        assert_eq!(std::mem::size_of::<DataType>(), 16);
+
+        let timestamp_tz = DataType::from(
+            FixedOffset::west(18_000)
+                .from_utc_datetime(&NaiveDateTime::from_timestamp(0, 42_000_000)),
+        );
+
+        match &timestamp_tz {
+            DataType::TimestampTz(ts) => {
+                // Make sure datetime is properly aligned to 4 bytes within embedded timestamptz
+                assert!(std::mem::align_of::<chrono::NaiveDateTime>() <= 4);
+                let ts_ptr = std::ptr::addr_of!(ts.datetime) as usize;
+                assert_eq!(ts_ptr & 0x3, 0);
+            }
+            _ => panic!(),
+        }
+    }
 
     fn non_numeric() -> impl Strategy<Value = DataType> {
         any::<DataType>().prop_filter("Numeric DataType", |dt| !matches!(dt, DataType::Numeric(_)))

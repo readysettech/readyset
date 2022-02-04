@@ -21,6 +21,12 @@ fn serde(c: &mut Criterion) {
     let short_bytes = DataType::ByteArray(string.as_bytes().to_vec().into());
     let long_bytes = DataType::ByteArray(long_string.as_bytes().to_vec().into());
 
+    let timestamp_tz = DataType::from(chrono::TimeZone::from_utc_datetime(
+        &chrono::FixedOffset::west(18_000),
+        &chrono::NaiveDateTime::from_timestamp(0, 42_000_000),
+    ));
+    let timestamp = DataType::Timestamp(chrono::NaiveDateTime::from_timestamp(0, 42_000_000));
+
     let mut temp_storage = Vec::with_capacity(500);
 
     group.bench_function("Serialize TinyText", |b| {
@@ -90,6 +96,34 @@ fn serde(c: &mut Criterion) {
 
     group.bench_function("Deserialize long ByteArray", |b| {
         let t = bincode::options().serialize(&long_bytes).unwrap();
+        b.iter(|| bincode::options().deserialize::<DataType>(&t).unwrap())
+    });
+
+    group.bench_function("Serialize TimestampTz", |b| {
+        b.iter(|| {
+            bincode::options()
+                .serialize_into(&mut temp_storage, &timestamp_tz)
+                .unwrap();
+            temp_storage.clear();
+        })
+    });
+
+    group.bench_function("Deserialize TimestampTz", |b| {
+        let t = bincode::options().serialize(&timestamp_tz).unwrap();
+        b.iter(|| bincode::options().deserialize::<DataType>(&t).unwrap())
+    });
+
+    group.bench_function("Serialize Timestamp", |b| {
+        b.iter(|| {
+            bincode::options()
+                .serialize_into(&mut temp_storage, &timestamp)
+                .unwrap();
+            temp_storage.clear();
+        })
+    });
+
+    group.bench_function("Deserialize Timestamp", |b| {
+        let t = bincode::options().serialize(&timestamp).unwrap();
         b.iter(|| bincode::options().deserialize::<DataType>(&t).unwrap())
     });
 }
