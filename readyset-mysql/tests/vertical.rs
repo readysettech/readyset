@@ -575,6 +575,7 @@ impl Operations {
 
 impl Operations {
     async fn run(self, query: &str, tables: &HashMap<&str, Table>) -> TestCaseResult {
+        readyset_tracing::init_test_logging();
         readyset_client_test_helpers::mysql_helpers::recreate_database("vertical").await;
         let mut mysql = mysql_async::Conn::new(
             mysql_async::OptsBuilder::default()
@@ -838,6 +839,36 @@ vertical_tests! {
             schema: [id: i32, author_id: i32, score: i32],
             primary_key: 0,
             key_columns: [2],
+        )
+    );
+
+    compound_range(
+        "SELECT id, name, score, age FROM posts WHERE score > ? and age > ?";
+        "posts" => (
+            "CREATE TABLE posts (id INT, name TEXT, score INT, age INT, PRIMARY KEY (id))",
+            schema: [id: i32, name: String, score: i32, age: i32],
+            primary_key: 0,
+            key_columns: [2, 3],
+        )
+    );
+
+    mixed_range(
+        "SELECT id, name, score FROM posts WHERE name = ? AND score > ?";
+        "posts" => (
+            "CREATE TABLE posts (id INT, name TEXT, score INT, PRIMARY KEY (id))",
+            schema: [id: i32, name: String, score: i32],
+            primary_key: 0,
+            key_columns: [1, 2],
+        )
+    );
+
+    between(
+        "SELECT id, name, score FROM posts WHERE score BETWEEN ? AND ?";
+        "posts" => (
+            "CREATE TABLE posts (id INT, name TEXT, score INT, PRIMARY KEY (id))",
+            schema: [id: i32, name: String, score: i32],
+            primary_key: 0,
+            key_columns: [2, 2],
         )
     );
 }
