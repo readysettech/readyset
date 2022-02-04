@@ -90,6 +90,7 @@ steps:
   - label: ':arrow_up: Run vertical tests'
     key: vertical-tests
     command: .buildkite/vertical_tests.sh
+    timeout_in_minutes: 240
     depends_on:
     - build-image
     plugins:
@@ -115,6 +116,7 @@ steps:
     command:
     - 'echo +++ Running detect_flake'
     - detect_flake -t1 -r5 -i --command "cargo --locked test --all --exclude clustertest --exclude aggressive_eviction -- --nocapture --skip integration_serial"
+    timeout_in_minutes: 240
     depends_on:
     - build-image
     plugins:
