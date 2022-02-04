@@ -2,10 +2,11 @@ use mysql_async::prelude::*;
 use noria_client::BackendBuilder;
 use noria_client_test_helpers::mysql_helpers::MySQLAdapter;
 use noria_client_test_helpers::{self, sleep};
+use noria_server::Handle;
 
 use serial_test::serial;
 
-async fn setup() -> mysql_async::Opts {
+async fn setup() -> (mysql_async::Opts, Handle) {
     noria_client_test_helpers::setup::<MySQLAdapter>(
         BackendBuilder::new().require_authentication(false),
         true,
@@ -18,7 +19,8 @@ async fn setup() -> mysql_async::Opts {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn create_table() {
-    let mut conn = mysql_async::Conn::new(setup().await).await.unwrap();
+    let (opts, _handle) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE Cats (id int, PRIMARY KEY(id))")
         .await
@@ -41,7 +43,8 @@ async fn create_table() {
 #[serial]
 #[ignore] // alter table not supported yet
 async fn add_column() {
-    let mut conn = mysql_async::Conn::new(setup().await).await.unwrap();
+    let (opts, _handle) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE Cats (id int, PRIMARY KEY(id))")
         .await
@@ -77,7 +80,8 @@ async fn add_column() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn json_column_insert_read() {
-    let mut conn = mysql_async::Conn::new(setup().await).await.unwrap();
+    let (opts, _handle) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, data JSON)")
         .await
@@ -103,7 +107,8 @@ async fn json_column_insert_read() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn json_column_partial_update() {
-    let mut conn = mysql_async::Conn::new(setup().await).await.unwrap();
+    let (opts, _handle) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, data JSON)")
         .await
@@ -129,7 +134,8 @@ async fn json_column_partial_update() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn range_query() {
-    let mut conn = mysql_async::Conn::new(setup().await).await.unwrap();
+    let (opts, _handle) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE cats (id int PRIMARY KEY, cuteness int)")
         .await
@@ -150,7 +156,8 @@ async fn range_query() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn aggregate_in() {
-    let mut conn = mysql_async::Conn::new(setup().await).await.unwrap();
+    let (opts, _handle) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE cats (id int PRIMARY KEY, cuteness int)")
         .await
         .unwrap();
@@ -172,7 +179,8 @@ async fn aggregate_in() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn set_autocommit() {
-    let mut conn = mysql_async::Conn::new(setup().await).await.unwrap();
+    let (opts, _handle) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     // We do not support SET autocommit = 0;
     assert!(conn
         .query_drop("SET @@SESSION.autocommit = 1;")

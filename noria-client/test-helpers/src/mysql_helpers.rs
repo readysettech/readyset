@@ -8,6 +8,7 @@ use crate::Adapter;
 use msql_srv::MysqlIntermediary;
 use noria_client::backend::{BackendBuilder, MigrationMode};
 use noria_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
+use noria_server::Handle;
 
 pub async fn recreate_database<N>(dbname: N)
 where
@@ -82,7 +83,7 @@ impl Adapter for MySQLAdapter {
 
 // Initializes a Noria worker and starts processing MySQL queries against it.
 // If `partial` is `false`, disables partial queries.
-pub async fn setup(partial: bool) -> mysql_async::Opts {
+pub async fn setup(partial: bool) -> (mysql_async::Opts, Handle) {
     crate::setup::<MySQLAdapter>(
         BackendBuilder::new()
             .require_authentication(false)
@@ -98,7 +99,7 @@ pub async fn query_cache_setup(
     query_status_cache: std::sync::Arc<noria_client::query_status_cache::QueryStatusCache>,
     fallback: bool,
     migration_mode: MigrationMode,
-) -> mysql_async::Opts {
+) -> (mysql_async::Opts, Handle) {
     crate::setup_inner::<MySQLAdapter>(
         BackendBuilder::new()
             .require_authentication(false)

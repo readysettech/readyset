@@ -28,16 +28,13 @@ async fn last_query_destination(conn: &mut Conn) -> QueryDestination {
 #[serial]
 async fn in_request_path_query_with_fallback() {
     let query_status_cache = Arc::new(QueryStatusCache::new());
-    let mut conn = Conn::new(
-        query_cache_setup(
-            query_status_cache.clone(),
-            true, // fallback enabled
-            MigrationMode::InRequestPath,
-        )
-        .await,
+    let (opts, _handle) = query_cache_setup(
+        query_status_cache.clone(),
+        true, // fallback enabled
+        MigrationMode::InRequestPath,
     )
-    .await
-    .unwrap();
+    .await;
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (a INT, b INT)")
         .await
         .unwrap();
@@ -77,16 +74,14 @@ async fn in_request_path_query_with_fallback() {
 #[serial]
 async fn in_request_path_query_without_fallback() {
     let query_status_cache = Arc::new(QueryStatusCache::new());
-    let mut conn = Conn::new(
-        query_cache_setup(
-            query_status_cache.clone(),
-            false, // fallback disabled
-            MigrationMode::InRequestPath,
-        )
-        .await,
+    let (opts, _handle) = query_cache_setup(
+        query_status_cache.clone(),
+        false, // fallback disabled
+        MigrationMode::InRequestPath,
     )
-    .await
-    .unwrap();
+    .await;
+
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (a INT, b INT)")
         .await
         .unwrap();
@@ -109,16 +104,14 @@ async fn in_request_path_query_without_fallback() {
 #[serial]
 async fn out_of_band_query_with_fallback() {
     let query_status_cache = Arc::new(QueryStatusCache::new());
-    let mut conn = Conn::new(
-        query_cache_setup(
-            query_status_cache.clone(),
-            true, // fallback enabled
-            MigrationMode::OutOfBand,
-        )
-        .await,
+    let (opts, _handle) = query_cache_setup(
+        query_status_cache.clone(),
+        true, // fallback enabled
+        MigrationMode::OutOfBand,
     )
-    .await
-    .unwrap();
+    .await;
+
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (a INT, b INT)")
         .await
         .unwrap();
@@ -163,7 +156,7 @@ async fn out_of_band_query_with_fallback() {
 #[serial]
 async fn in_request_path_prep_exec_with_fallback() {
     let query_status_cache = Arc::new(QueryStatusCache::new());
-    let opts = query_cache_setup(
+    let (opts, _handle) = query_cache_setup(
         query_status_cache.clone(),
         true, // fallback enabled
         MigrationMode::InRequestPath,
@@ -240,16 +233,14 @@ async fn in_request_path_prep_exec_with_fallback() {
 #[serial]
 async fn in_request_path_prep_without_fallback() {
     let query_status_cache = Arc::new(QueryStatusCache::new());
-    let mut conn = Conn::new(
-        query_cache_setup(
-            query_status_cache.clone(),
-            false, // fallback disabled
-            MigrationMode::InRequestPath,
-        )
-        .await,
+    let (opts, _handle) = query_cache_setup(
+        query_status_cache.clone(),
+        false, // fallback disabled
+        MigrationMode::InRequestPath,
     )
-    .await
-    .unwrap();
+    .await;
+
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (a INT, b INT)")
         .await
         .unwrap();
@@ -272,16 +263,14 @@ async fn in_request_path_prep_without_fallback() {
 #[serial]
 async fn out_of_band_prep_exec_with_fallback() {
     let query_status_cache = Arc::new(QueryStatusCache::new());
-    let mut conn = Conn::new(
-        query_cache_setup(
-            query_status_cache.clone(),
-            true, // fallback enabled
-            MigrationMode::OutOfBand,
-        )
-        .await,
+    let (opts, _handle) = query_cache_setup(
+        query_status_cache.clone(),
+        true, // fallback enabled
+        MigrationMode::OutOfBand,
     )
-    .await
-    .unwrap();
+    .await;
+
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (a INT, b INT)")
         .await
         .unwrap();
@@ -369,16 +358,14 @@ async fn out_of_band_prep_exec_with_fallback() {
 #[serial]
 async fn in_request_path_rewritten_query_without_fallback() {
     let query_status_cache = Arc::new(QueryStatusCache::new());
-    let mut conn = Conn::new(
-        query_cache_setup(
-            query_status_cache.clone(),
-            false, // fallback disabled
-            MigrationMode::InRequestPath,
-        )
-        .await,
+    let (opts, _handle) = query_cache_setup(
+        query_status_cache.clone(),
+        false, // fallback disabled
+        MigrationMode::InRequestPath,
     )
-    .await
-    .unwrap();
+    .await;
+
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (a INT, b INT)")
         .await
         .unwrap();
@@ -403,16 +390,14 @@ async fn in_request_path_rewritten_query_without_fallback() {
 #[serial]
 async fn out_of_band_rewritten_query_without_fallback() {
     let query_status_cache = Arc::new(QueryStatusCache::new());
-    let mut conn = Conn::new(
-        query_cache_setup(
-            query_status_cache.clone(),
-            false, // fallback disabled
-            MigrationMode::OutOfBand,
-        )
-        .await,
+    let (opts, _handle) = query_cache_setup(
+        query_status_cache.clone(),
+        false, // fallback disabled
+        MigrationMode::OutOfBand,
     )
-    .await
-    .unwrap();
+    .await;
+
+    let mut conn = Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE t (a INT, b INT)")
         .await
         .unwrap();
