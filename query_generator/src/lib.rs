@@ -312,8 +312,6 @@ fn uniform_random_value(min: &DataType, max: &DataType) -> DataType {
     match (min, max) {
         (DataType::Int(i), DataType::Int(j)) => rng.gen_range(*i..*j).into(),
         (DataType::UnsignedInt(i), DataType::UnsignedInt(j)) => rng.gen_range(*i..*j).into(),
-        (DataType::UnsignedBigInt(i), DataType::UnsignedBigInt(j)) => rng.gen_range(*i..*j).into(),
-        (DataType::BigInt(i), DataType::BigInt(j)) => rng.gen_range(*i..*j).into(),
         (_, _) => unimplemented!("DataTypes unsupported for random uniform value generation"),
     }
 }
@@ -798,8 +796,6 @@ impl ZipfianGenerator {
         let num_elements: u64 = match (&min, &max) {
             (DataType::Int(i), DataType::Int(j)) => (j - i) as u64,
             (DataType::UnsignedInt(i), DataType::UnsignedInt(j)) => (j - i) as u64,
-            (DataType::UnsignedBigInt(i), DataType::UnsignedBigInt(j)) => (j - i) as u64,
-            (DataType::BigInt(i), DataType::BigInt(j)) => (j - i) as u64,
             (_, _) => unimplemented!("DataTypes unsupported for discrete zipfian value generation"),
         };
 
@@ -816,10 +812,8 @@ impl ZipfianGenerator {
         let offset = self.dist.sample(&mut rng);
 
         match self.min {
-            DataType::Int(i) => DataType::Int(i + offset as i32),
-            DataType::UnsignedInt(i) => DataType::UnsignedInt(i + offset as u32),
-            DataType::UnsignedBigInt(i) => DataType::UnsignedBigInt(i + offset as u64),
-            DataType::BigInt(i) => DataType::BigInt(i + offset as i64),
+            DataType::Int(i) => DataType::Int(i + offset as i64),
+            DataType::UnsignedInt(i) => DataType::UnsignedInt(i + offset as u64),
             _ => unimplemented!("DataType unsupported for discrete zipfian value generation."),
         }
     }

@@ -107,7 +107,7 @@ impl Writer {
                 "author_id".into(),
                 ColumnGenerationSpec::Uniform(
                     DataType::UnsignedInt(0),
-                    DataType::UnsignedInt(self.author_table_rows as u32),
+                    DataType::UnsignedInt(self.author_table_rows as _),
                 ),
             ),
         ]);
@@ -136,7 +136,7 @@ impl Writer {
                 "article_id".into(),
                 ColumnGenerationSpec::Uniform(
                     DataType::UnsignedInt(0),
-                    DataType::UnsignedInt(num_articles as u32),
+                    DataType::UnsignedInt(num_articles as _),
                 ),
             ),
         ]);

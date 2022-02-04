@@ -212,7 +212,7 @@ impl Writer {
                 "author_id".into(),
                 ColumnGenerationSpec::Uniform(
                     DataType::UnsignedInt(0),
-                    DataType::UnsignedInt(self.author_table_rows as u32),
+                    DataType::UnsignedInt(self.author_table_rows as _),
                 ),
             ),
         ]);
@@ -223,9 +223,7 @@ impl Writer {
 
     async fn read_article(&self, article: usize, view: &mut View) -> anyhow::Result<()> {
         let vq = ViewQuery {
-            key_comparisons: vec![KeyComparison::Equal(Vec1::new(DataType::Int(
-                article as i32,
-            )))],
+            key_comparisons: vec![KeyComparison::Equal(Vec1::new(DataType::Int(article as _)))],
             block: true,
             filters: vec![],
             timestamp: None,

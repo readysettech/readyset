@@ -241,9 +241,8 @@ impl wal::TupleData {
                             "f" => false as _,
                             _ => return Err(WalError::BoolParseError),
                         }),
-                        PGType::INT2 | PGType::INT4 => DataType::Int(str.parse()?),
+                        PGType::INT2 | PGType::INT4 | PGType::INT8 => DataType::Int(str.parse()?),
                         PGType::OID => DataType::UnsignedInt(str.parse()?),
-                        PGType::INT8 => DataType::BigInt(str.parse()?),
                         PGType::FLOAT4 => str.parse::<f32>()?.try_into()?,
                         PGType::FLOAT8 => str.parse::<f64>()?.try_into()?,
                         PGType::NUMERIC => Decimal::from_str(str.as_ref())

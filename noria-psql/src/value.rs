@@ -33,10 +33,13 @@ impl TryFrom<Value> for ps::Value {
             (Type::VARCHAR, DataType::TinyText(t)) => Ok(ps::Value::Varchar(t.as_str().into())),
 
             (Type::INT2, DataType::Int(v)) => Ok(ps::Value::Smallint(v as _)),
-            (Type::INT4, DataType::Int(v)) => Ok(ps::Value::Int(v)),
-            (Type::INT8, DataType::BigInt(v)) => Ok(ps::Value::Bigint(v)),
-            (Type::INT8, DataType::UnsignedBigInt(v)) => Ok(ps::Value::Bigint(v as _)),
+            (Type::INT4, DataType::Int(v)) => Ok(ps::Value::Int(v as _)),
             (Type::INT8, DataType::Int(v)) => Ok(ps::Value::Bigint(v as _)),
+
+            (Type::INT2, DataType::UnsignedInt(v)) => Ok(ps::Value::Smallint(v as _)),
+            (Type::INT4, DataType::UnsignedInt(v)) => Ok(ps::Value::Int(v as _)),
+            (Type::INT8, DataType::UnsignedInt(v)) => Ok(ps::Value::Bigint(v as _)),
+
             (Type::FLOAT4, DataType::Float(f, _)) => Ok(ps::Value::Float(f)),
             (Type::FLOAT8, DataType::Double(f, _)) => Ok(ps::Value::Double(f)),
             (Type::NUMERIC, DataType::Double(f, _)) => Ok(ps::Value::Numeric(

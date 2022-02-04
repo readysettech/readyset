@@ -39,21 +39,7 @@ async fn write_column<W: AsyncWrite + Unpin>(
                 rw.write_col(i as isize)
             }
         }
-        DataType::BigInt(i) => {
-            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                rw.write_col(i as usize)
-            } else {
-                rw.write_col(i as isize)
-            }
-        }
         DataType::UnsignedInt(i) => {
-            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                rw.write_col(i as usize)
-            } else {
-                rw.write_col(i as isize)
-            }
-        }
-        DataType::UnsignedBigInt(i) => {
             if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
                 rw.write_col(i as usize)
             } else {

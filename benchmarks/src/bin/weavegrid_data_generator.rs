@@ -45,7 +45,7 @@ impl DataGenerator {
                 "utility_id".into(),
                 ColumnGenerationSpec::Uniform(
                     DataType::UnsignedInt(0),
-                    DataType::UnsignedInt(self.table_rows as u32),
+                    DataType::UnsignedInt(self.table_rows as _),
                 ),
             ),
         ]);
@@ -57,7 +57,7 @@ impl DataGenerator {
                 "user_id".into(),
                 ColumnGenerationSpec::Uniform(
                     DataType::UnsignedInt(0),
-                    DataType::UnsignedInt(self.table_rows as u32),
+                    DataType::UnsignedInt(self.table_rows as _),
                 ),
             ),
         ]);
@@ -72,7 +72,7 @@ impl DataGenerator {
                 "utility_id".into(),
                 ColumnGenerationSpec::Uniform(
                     DataType::UnsignedInt(0),
-                    DataType::UnsignedInt(self.table_rows as u32),
+                    DataType::UnsignedInt(self.table_rows as _),
                 ),
             ),
         ]);
@@ -84,7 +84,7 @@ impl DataGenerator {
                 "registration_id".into(),
                 ColumnGenerationSpec::Uniform(
                     DataType::UnsignedInt(0),
-                    DataType::UnsignedInt(self.table_rows as u32),
+                    DataType::UnsignedInt(self.table_rows as _),
                 ),
             ),
         ]);
@@ -99,7 +99,7 @@ impl DataGenerator {
                 "vehicle_id".into(),
                 ColumnGenerationSpec::Uniform(
                     DataType::UnsignedInt(0),
-                    DataType::UnsignedInt(self.table_rows as u32),
+                    DataType::UnsignedInt(self.table_rows as _),
                 ),
             ),
         ]);

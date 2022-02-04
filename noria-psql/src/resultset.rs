@@ -172,7 +172,7 @@ mod tests {
     #[test]
     fn iterate_resultset() {
         let results = vec![Results::new(
-            vec![vec![DataType::BigInt(10)]],
+            vec![vec![DataType::Int(10)]],
             Arc::new(["col1".to_string()]),
         )];
         let schema = SelectSchema(cl::SelectSchema {
@@ -199,12 +199,12 @@ mod tests {
     fn iterate_resultset_with_multiple_results() {
         let results = vec![
             Results::new(
-                vec![vec![DataType::BigInt(10)]],
+                vec![vec![DataType::Int(10)]],
                 Arc::new(["col1".to_string()]),
             ),
             Results::new(Vec::<Vec<DataType>>::new(), Arc::new(["col1".to_string()])),
             Results::new(
-                vec![vec![DataType::BigInt(11)], vec![DataType::BigInt(12)]],
+                vec![vec![DataType::Int(11)], vec![DataType::Int(12)]],
                 Arc::new(["col1".to_string()]),
             ),
         ];
@@ -280,14 +280,14 @@ mod tests {
         let results = vec![Results::new(
             vec![
                 vec![
-                    DataType::BigInt(10),
-                    DataType::BigInt(99),
+                    DataType::Int(10),
+                    DataType::Int(99),
                     DataType::Text("abcdef".into()),
                     DataType::Int(0),
                 ],
                 vec![
-                    DataType::BigInt(11),
-                    DataType::BigInt(99),
+                    DataType::Int(11),
+                    DataType::Int(99),
                     DataType::Text("ghijkl".into()),
                     DataType::Int(0),
                 ],

@@ -346,7 +346,7 @@ impl NoriaExecutor {
             // for each query from the query start times.
             let keys: Vec<_> = batch
                 .iter()
-                .map(|k| KeyComparison::Equal(Vec1::new(DataType::Int(k.key[0] as i32))))
+                .map(|k| KeyComparison::Equal(Vec1::new(DataType::Int(k.key[0] as _))))
                 .collect();
 
             let vq = ViewQuery {

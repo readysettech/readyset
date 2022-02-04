@@ -120,7 +120,6 @@ mod tests {
         let s = "this needs to be longer than 14 chars to make it be a Text";
         let txt: DataType = DataType::from(s);
         let shrt = DataType::Int(5);
-        let long = DataType::BigInt(5);
         let time = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
 
         let rec = vec![
@@ -139,7 +138,6 @@ mod tests {
             txt.size_of() + 8 + (s.len() as u64)
         );
         assert_eq!(size_of_val(&shrt), 16);
-        assert_eq!(size_of_val(&long), 16);
         assert_eq!(size_of_val(&time), 16);
         assert_eq!(size_of_val(&time) as u64, time.size_of());
         assert_eq!(time.deep_size_of(), 16); // DataType + inline NaiveDateTime

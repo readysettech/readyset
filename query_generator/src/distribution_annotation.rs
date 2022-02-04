@@ -26,13 +26,13 @@ impl FromStr for DistributionAnnotation {
 
         let spec = match chunks.next().unwrap().to_ascii_lowercase().as_str() {
             "uniform" => {
-                let from: i32 = chunks.next().unwrap().parse().unwrap();
-                let to: i32 = chunks.next().unwrap().parse().unwrap();
+                let from: i64 = chunks.next().unwrap().parse().unwrap();
+                let to: i64 = chunks.next().unwrap().parse().unwrap();
                 ColumnGenerationSpec::Uniform(DataType::Int(from), DataType::Int(to))
             }
             "zipf" => {
-                let from: i32 = chunks.next().unwrap().parse().unwrap();
-                let to: i32 = chunks.next().unwrap().parse().unwrap();
+                let from: i64 = chunks.next().unwrap().parse().unwrap();
+                let to: i64 = chunks.next().unwrap().parse().unwrap();
                 let alpha: f64 = chunks.next().unwrap().parse().unwrap();
                 ColumnGenerationSpec::Zipfian {
                     min: DataType::Int(from),

@@ -72,10 +72,6 @@ impl serde::ser::Serialize for DataType {
             ),
             DataType::Int(v) => serialize_variant(serializer, Field::Int, &i128::from(*v)),
             DataType::UnsignedInt(v) => serialize_variant(serializer, Field::Int, &i128::from(*v)),
-            DataType::BigInt(v) => serialize_variant(serializer, Field::Int, &i128::from(*v)),
-            DataType::UnsignedBigInt(v) => {
-                serialize_variant(serializer, Field::Int, &i128::from(*v))
-            }
             DataType::Float(f, prec) => {
                 let mut tv = serialize_tuple(serializer, Field::Float, 2)?;
                 tv.serialize_field(f)?;
