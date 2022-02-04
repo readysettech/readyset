@@ -310,7 +310,7 @@ impl Expression {
                     let param_cast = try_cast_or_none!(param, &SqlType::Date);
                     Ok(Cow::Owned(DataType::Int(day_of_week(
                         &(NaiveDate::try_from(param_cast.as_ref())?),
-                    ) as i32)))
+                    ) as i64)))
                 }
                 BuiltinFunction::IfNull(arg1, arg2) => {
                     let param1 = arg1.eval(record)?;
@@ -327,7 +327,7 @@ impl Expression {
                     Ok(Cow::Owned(DataType::UnsignedInt(month(
                         &(NaiveDate::try_from(non_null!(param_cast))?),
                     )
-                        as u32)))
+                        as u64)))
                 }
                 BuiltinFunction::Timediff(arg1, arg2) => {
                     let param1 = arg1.eval(record)?;
@@ -383,8 +383,6 @@ impl Expression {
                     let rnd_prec = match non_null!(param2) {
                         DataType::Int(inner) => *inner as i32,
                         DataType::UnsignedInt(inner) => *inner as i32,
-                        DataType::BigInt(inner) => *inner as i32,
-                        DataType::UnsignedBigInt(inner) => *inner as i32,
                         DataType::Float(f, _) => f.round() as i32,
                         DataType::Double(f, _) => f.round() as i32,
                         DataType::Numeric(ref d) => {
@@ -418,7 +416,7 @@ impl Expression {
                                 // rounded int.
                                 let rounded = (($real / base.powf(-rnd_prec as $real_type)).round()
                                     * base.powf(-rnd_prec as $real_type))
-                                    as i32;
+                                    as i64;
                                 Ok(Cow::Owned(DataType::Int(rounded)))
                             }
                         }};
@@ -428,20 +426,12 @@ impl Expression {
                         DataType::Float(float, prec) => round!(float, prec, f32),
                         DataType::Double(double, prec) => round!(double, prec, f64),
                         DataType::Int(val) => {
-                            let rounded = integer_rnd(*val as i128, rnd_prec) as i32;
+                            let rounded = integer_rnd(*val as i128, rnd_prec) as i64;
                             Ok(Cow::Owned(DataType::Int(rounded)))
                         }
-                        DataType::BigInt(val) => {
-                            let rounded = integer_rnd(*val as i128, rnd_prec) as i64;
-                            Ok(Cow::Owned(DataType::BigInt(rounded)))
-                        }
                         DataType::UnsignedInt(val) => {
-                            let rounded = integer_rnd(*val as i128, rnd_prec) as u32;
-                            Ok(Cow::Owned(DataType::UnsignedInt(rounded)))
-                        }
-                        DataType::UnsignedBigInt(val) => {
                             let rounded = integer_rnd(*val as i128, rnd_prec) as u64;
-                            Ok(Cow::Owned(DataType::UnsignedBigInt(rounded)))
+                            Ok(Cow::Owned(DataType::UnsignedInt(rounded)))
                         }
                         _ => Err(ReadySetError::ProjectExpressionBuiltInFunctionError {
                             function: "round".to_string(),
@@ -482,20 +472,7 @@ impl Expression {
                             Ok(Some($sql_type))
                         }
                     }
-                    Expression::Literal(DataType::BigInt(p)) => {
-                        if p < 0 {
-                            // Precision is negative, which means that we will be returning a rounded Int.
-                            Ok(Some(SqlType::Int(None)))
-                        } else {
-                            // Precision is positive so we will continue to return a Real.
-                            Ok(Some($sql_type))
-                        }
-                    }
                     Expression::Literal(DataType::UnsignedInt(_)) => {
-                        // Precision is positive so we will continue to return a Real.
-                        Ok(Some($sql_type))
-                    }
-                    Expression::Literal(DataType::UnsignedBigInt(_)) => {
                         // Precision is positive so we will continue to return a Real.
                         Ok(Some($sql_type))
                     }
@@ -547,10 +524,6 @@ impl Expression {
                     Expression::Literal(DataType::UnsignedInt(_)) => {
                         Ok(Some(SqlType::UnsignedInt(None)))
                     }
-                    Expression::Literal(DataType::UnsignedBigInt(_)) => {
-                        Ok(Some(SqlType::UnsignedBigint(None)))
-                    }
-                    Expression::Literal(DataType::BigInt(_)) => Ok(Some(SqlType::Bigint(None))),
                     Expression::Literal(DataType::Int(_)) => Ok(Some(SqlType::Int(None))),
                     _ => e1.sql_type(parent_column_type),
                 },

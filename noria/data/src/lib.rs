@@ -40,14 +40,10 @@ const MAX_SECONDS_DATETIME_OFFSET: i32 = 85_940;
 pub enum DataType {
     /// An empty value.
     None,
-    /// A signed 32-bit numeric value.
-    Int(i32),
-    /// An unsigned 32-bit numeric value.
-    UnsignedInt(u32),
-    /// A signed 64-bit numeric value.
-    BigInt(i64),
-    /// An unsigned signed 64-bit numeric value.
-    UnsignedBigInt(u64),
+    /// A signed integer used to store every SQL integer type up to 64 bits.
+    Int(i64),
+    /// An unsigned integer used to store every unsigned SQL integer type up to 64 bits.
+    UnsignedInt(u64),
     /// A floating point 32-bit real value. The second field holds the input precision, which is useful for
     /// supporting DECIMAL, as well as characteristics of how FLOAT and DOUBLE behave in MySQL.
     Float(f32, u8),
@@ -96,8 +92,6 @@ impl fmt::Display for DataType {
             }
             DataType::Int(n) => write!(f, "{}", n),
             DataType::UnsignedInt(n) => write!(f, "{}", n),
-            DataType::BigInt(n) => write!(f, "{}", n),
-            DataType::UnsignedBigInt(n) => write!(f, "{}", n),
             DataType::Float(n, _) => write!(f, "{}", n),
             DataType::Double(n, _) => write!(f, "{}", n),
             DataType::Timestamp(ts) => write!(f, "{}", ts.format("%c")),
@@ -154,10 +148,8 @@ impl DataType {
             ),
             DataType::Float(..) => DataType::Float(f32::MIN, u8::MAX),
             DataType::Double(..) => DataType::Double(f64::MIN, u8::MAX),
-            DataType::Int(_) => DataType::Int(i32::min_value()),
+            DataType::Int(_) => DataType::Int(i64::min_value()),
             DataType::UnsignedInt(_) => DataType::UnsignedInt(0),
-            DataType::BigInt(_) => DataType::BigInt(i64::min_value()),
-            DataType::UnsignedBigInt(_) => DataType::UnsignedInt(0),
             DataType::Time(_) => DataType::Time(Arc::new(MysqlTime::min_value())),
             DataType::ByteArray(_) => DataType::ByteArray(Arc::new(Vec::new())),
             DataType::Numeric(_) => DataType::from(Decimal::MIN),
@@ -181,10 +173,8 @@ impl DataType {
             ),
             DataType::Float(..) => DataType::Float(f32::MAX, u8::MAX),
             DataType::Double(..) => DataType::Double(f64::MIN, u8::MAX),
-            DataType::Int(_) => DataType::Int(i32::max_value()),
-            DataType::UnsignedInt(_) => DataType::UnsignedInt(u32::max_value()),
-            DataType::BigInt(_) => DataType::BigInt(i64::max_value()),
-            DataType::UnsignedBigInt(_) => DataType::UnsignedBigInt(u64::max_value()),
+            DataType::Int(_) => DataType::Int(i64::max_value()),
+            DataType::UnsignedInt(_) => DataType::UnsignedInt(u64::max_value()),
             DataType::Time(_) => DataType::Time(Arc::new(MysqlTime::max_value())),
             DataType::Numeric(_) => DataType::from(Decimal::MAX),
             DataType::TinyText(_)
@@ -217,7 +207,7 @@ impl DataType {
 
     /// Checks if this value is of an integral data type (i.e., can be converted into integral types).
     pub fn is_integer(&self) -> bool {
-        matches!(*self, DataType::Int(_) | DataType::BigInt(_))
+        matches!(*self, DataType::Int(_) | DataType::UnsignedInt(_))
     }
 
     /// Checks if this value is of a real data type (i.e., can be converted into `f32` or `f64`).
@@ -262,8 +252,6 @@ impl DataType {
             DataType::None | DataType::Max => false,
             DataType::Int(x) => x != 0,
             DataType::UnsignedInt(x) => x != 0,
-            DataType::BigInt(x) => x != 0,
-            DataType::UnsignedBigInt(x) => x != 0,
             DataType::Float(f, _) => f != 0.0,
             DataType::Double(f, _) => f != 0.0,
             DataType::Text(ref t) => !t.as_str().is_empty(),
@@ -326,10 +314,8 @@ impl DataType {
         use SqlType::*;
         match self {
             Self::None | Self::Max => None,
-            Self::Int(_) => Some(Int(None)),
-            Self::UnsignedInt(_) => Some(UnsignedInt(None)),
-            Self::BigInt(_) => Some(Bigint(None)),
-            Self::UnsignedBigInt(_) => Some(UnsignedBigint(None)),
+            Self::Int(_) => Some(Bigint(None)),
+            Self::UnsignedInt(_) => Some(UnsignedBigint(None)),
             Self::Float(_, _) => Some(Float),
             Self::Double(_, _) => Some(Real),
             Self::Text(_) => Some(Text),
@@ -432,12 +418,12 @@ impl DataType {
             | (_, Some(Bigint(_)), Bigint(_) | BigSerial)
             | (_, Some(UnsignedInt(_)), UnsignedInt(_))
             | (_, Some(UnsignedBigint(_)), UnsignedBigint(_)) => Ok(Cow::Borrowed(self)),
-            (_, Some(Int(_)), Tinyint(_)) => convert_numeric!(self, i32, i8),
-            (_, Some(Int(_)), UnsignedTinyint(_)) => convert_numeric!(self, i32, u8),
-            (_, Some(Int(_)), UnsignedInt(_)) => convert_numeric!(self, i32, u32),
-            (_, Some(Int(_)), Smallint(_)) => convert_numeric!(self, i32, i16),
-            (_, Some(Int(_)), UnsignedSmallint(_)) => convert_numeric!(self, i32, u16),
-            (_, Some(Int(_)), UnsignedBigint(_)) => convert_numeric!(self, i32, u64),
+            (_, Some(Int(_)), Tinyint(_)) => convert_numeric!(self, i64, i8),
+            (_, Some(Int(_)), UnsignedTinyint(_)) => convert_numeric!(self, i64, u8),
+            (_, Some(Int(_)), UnsignedInt(_)) => convert_numeric!(self, i64, u32),
+            (_, Some(Int(_)), Smallint(_)) => convert_numeric!(self, i64, i16),
+            (_, Some(Int(_)), UnsignedSmallint(_)) => convert_numeric!(self, i64, u16),
+            (_, Some(Int(_)), UnsignedBigint(_)) => convert_numeric!(self, i64, u64),
             (_, Some(Bigint(_)), Tinyint(_)) => convert_numeric!(self, i64, i8),
             (_, Some(Bigint(_)), UnsignedTinyint(_)) => convert_numeric!(self, i64, u8),
             (_, Some(Bigint(_)), Smallint(_)) => convert_numeric!(self, i64, i16),
@@ -447,8 +433,6 @@ impl DataType {
             (_, Some(Bigint(_)), UnsignedBigint(_)) => convert_numeric!(self, i64, u64),
             (Self::Int(n), _, Bool) => convert_boolean!(*n),
             (Self::UnsignedInt(n), _, Bool) => convert_boolean!(*n),
-            (Self::BigInt(n), _, Bool) => convert_boolean!(*n),
-            (Self::UnsignedBigInt(n), _, Bool) => convert_boolean!(*n),
             (_, Some(Float), Float | Real) => Ok(Cow::Borrowed(self)),
             (_, Some(Real), Double) => Ok(Cow::Borrowed(self)),
             (_, Some(Numeric(_)), Numeric(_)) => Ok(Cow::Borrowed(self)),
@@ -562,12 +546,12 @@ impl DataType {
             (Self::TimestampTz(ref ts), Some(Timestamp), Time) => {
                 Ok(Cow::Owned(Self::Time(Arc::new(ts.time().into()))))
             }
-            (_, Some(Int(_)), Bigint(_) | BigSerial) => Ok(Cow::Owned(DataType::BigInt(i64::try_from(self)?))),
+            (_, Some(Int(_)), Bigint(_) | BigSerial) => Ok(Cow::Owned(DataType::Int(i64::try_from(self)?))),
             (Self::Float(f, _), Some(Float), Tinyint(_) | Smallint(_) | Int(_)) => {
-                Ok(Cow::Owned(DataType::Int(f.round() as i32)))
+                Ok(Cow::Owned(DataType::Int(f.round() as i64)))
             }
             (Self::Float(f, _), Some(_), Bigint(_) | BigSerial) => {
-                Ok(Cow::Owned(DataType::BigInt(f.round() as i64)))
+                Ok(Cow::Owned(DataType::Int(f.round() as i64)))
             }
             (Self::Float(f, prec), Some(_), Double) => {
                 Ok(Cow::Owned(DataType::Double(*f as f64, *prec)))
@@ -586,14 +570,12 @@ impl DataType {
                 Some(Float),
                 UnsignedTinyint(_) | UnsignedSmallint(_) | UnsignedInt(_),
             ) => Ok(Cow::Owned(DataType::UnsignedInt(
-                u32::try_from(f.round() as i32).map_err(|e| {
+                u64::try_from(f.round() as i32).map_err(|e| {
                     mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
                 })?,
             ))),
             (Self::Double(f, _), Some(Real), Tinyint(_) | Smallint(_) | Int(_) | Serial) => Ok(Cow::Owned(
-                DataType::Int(i32::try_from(f.round() as i64).map_err(|e| {
-                    mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
-                })?),
+                DataType::Int(f.round() as i64)
             )),
             (Self::Double(f, prec), Some(_), Float) => {
                 let float = *f as f32;
@@ -617,24 +599,24 @@ impl DataType {
                 ))
                 .map(|d| Cow::Owned(DataType::from(d))),
             (Self::Double(f, _), Some(_), Bigint(_) | BigSerial) => {
-                Ok(Cow::Owned(DataType::BigInt(f.round() as i64)))
+                Ok(Cow::Owned(DataType::Int(f.round() as i64)))
             }
             (
                 Self::Double(f, _),
                 Some(Real),
                 UnsignedTinyint(_) | UnsignedSmallint(_) | UnsignedInt(_),
             ) => Ok(Cow::Owned(DataType::UnsignedInt(
-                u32::try_from(f.round() as i64).map_err(|e| {
+                u64::try_from(f.round() as i64).map_err(|e| {
                     mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
                 })?,
             ))),
             (Self::Double(f, _), Some(Real), UnsignedBigint(_)) => Ok(Cow::Owned(
-                DataType::UnsignedBigInt(u64::try_from(f.round() as i64).map_err(|e| {
+                DataType::UnsignedInt(u64::try_from(f.round() as i64).map_err(|e| {
                     mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
                 })?),
             )),
             (Self::Numeric(d), Some(Numeric(_)), Tinyint(_) | Smallint(_) | Int(_) | Serial) => d
-                .to_i32()
+                .to_i64()
                 .ok_or_else(|| mk_err(
                     format!(
                         "Could not convert numeric to int due to overflow. Numeric value: {}",
@@ -671,13 +653,13 @@ impl DataType {
                     ),
                     None,
                 ))
-                .map(|i| Cow::Owned(DataType::BigInt(i))),
+                .map(|i| Cow::Owned(DataType::Int(i))),
             (
                 Self::Numeric(d),
                 Some(Numeric(_)),
                 UnsignedTinyint(_) | UnsignedSmallint(_) | UnsignedInt(_),
             ) => d
-                .to_u32()
+                .to_u64()
                 .ok_or_else(|| mk_err(
                     format!(
                         "Could not convert numeric to unsigned int due to overflow. Numeric value: {}",
@@ -690,12 +672,12 @@ impl DataType {
                 .to_u64()
                 .ok_or_else(|| mk_err(
                     format!(
-                        "Could not convert numeric to unsigned big int due to overflow. Numeric value: {}",
+                        "Could not convert numeric to unsigned  int due to overflow. Numeric value: {}",
                         d
                     ),
                     None,
                 ))
-                .map(|i| Cow::Owned(DataType::UnsignedBigInt(i))),
+                .map(|i| Cow::Owned(DataType::UnsignedInt(i))),
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Tinyint(_)) => {
                 <&str>::try_from(self)?
                     .parse::<i8>()
@@ -898,26 +880,14 @@ impl PartialEq for DataType {
                     .map(|other_t: MysqlTime| t.as_ref().eq(&other_t))
                     .unwrap_or(false)
             }
-            (&DataType::BigInt(a), &DataType::BigInt(b)) => a == b,
-            (&DataType::UnsignedBigInt(a), &DataType::UnsignedBigInt(b)) => a == b,
             (&DataType::Int(a), &DataType::Int(b)) => a == b,
             (&DataType::UnsignedInt(a), &DataType::UnsignedInt(b)) => a == b,
-            (&DataType::UnsignedBigInt(..), &DataType::Int(..))
-            | (&DataType::UnsignedBigInt(..), &DataType::UnsignedInt(..))
-            | (&DataType::UnsignedBigInt(..), &DataType::BigInt(..))
-            | (&DataType::UnsignedInt(..), &DataType::Int(..))
-            | (&DataType::UnsignedInt(..), &DataType::BigInt(..))
-            | (&DataType::UnsignedInt(..), &DataType::UnsignedBigInt(..))
-            | (&DataType::BigInt(..), &DataType::Int(..))
-            | (&DataType::BigInt(..), &DataType::UnsignedInt(..))
-            | (&DataType::BigInt(..), &DataType::UnsignedBigInt(..))
-            | (&DataType::Int(..), &DataType::UnsignedInt(..))
-            | (&DataType::Int(..), &DataType::UnsignedBigInt(..))
-            | (&DataType::Int(..), &DataType::BigInt(..)) => {
-                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+            (&DataType::UnsignedInt(..), &DataType::Int(..))
+            | (&DataType::Int(..), &DataType::UnsignedInt(..)) => {
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int and UnsignedInt
                 #[allow(clippy::unwrap_used)]
                 let a: i128 = <i128>::try_from(self).unwrap();
-                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int and UnsignedInt
                 #[allow(clippy::unwrap_used)]
                 let b: i128 = <i128>::try_from(other).unwrap();
                 a == b
@@ -1045,26 +1015,14 @@ impl Ord for DataType {
                 &DataType::Time(_) | &DataType::Timestamp(_) | &DataType::TimestampTz(_),
                 &DataType::Text(..) | &DataType::TinyText(..),
             ) => other.cmp(self).reverse(),
-            (&DataType::BigInt(a), &DataType::BigInt(ref b)) => a.cmp(b),
-            (&DataType::UnsignedBigInt(a), &DataType::UnsignedBigInt(ref b)) => a.cmp(b),
             (&DataType::Int(a), &DataType::Int(b)) => a.cmp(&b),
             (&DataType::UnsignedInt(a), &DataType::UnsignedInt(b)) => a.cmp(&b),
-            (&DataType::BigInt(..), &DataType::Int(..))
-            | (&DataType::Int(..), &DataType::BigInt(..))
-            | (&DataType::BigInt(..), &DataType::UnsignedInt(..))
-            | (&DataType::UnsignedInt(..), &DataType::BigInt(..))
-            | (&DataType::BigInt(..), &DataType::UnsignedBigInt(..))
-            | (&DataType::UnsignedBigInt(..), &DataType::BigInt(..))
-            | (&DataType::UnsignedBigInt(..), &DataType::UnsignedInt(..))
-            | (&DataType::UnsignedInt(..), &DataType::UnsignedBigInt(..))
-            | (&DataType::Int(..), &DataType::UnsignedBigInt(..))
-            | (&DataType::UnsignedBigInt(..), &DataType::Int(..))
-            | (&DataType::UnsignedInt(..), &DataType::Int(..))
+            (&DataType::UnsignedInt(..), &DataType::Int(..))
             | (&DataType::Int(..), &DataType::UnsignedInt(..)) => {
-                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int and UnsignedInt
                 #[allow(clippy::unwrap_used)]
                 let a: i128 = <i128>::try_from(self).unwrap();
-                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+                // this unwrap should be safe because no error path in try_from for i128 (&i128 on Int and UnsignedInt
                 #[allow(clippy::unwrap_used)]
                 let b: i128 = <i128>::try_from(other).unwrap();
                 a.cmp(&b)
@@ -1105,10 +1063,8 @@ impl Ord for DataType {
 
             // Convert ints to f32 and cmp against Float.
             (&DataType::Int(..), &DataType::Float(b, ..))
-            | (&DataType::UnsignedInt(..), &DataType::Float(b, ..))
-            | (&DataType::BigInt(..), &DataType::Float(b, ..))
-            | (&DataType::UnsignedBigInt(..), &DataType::Float(b, ..)) => {
-                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+            | (&DataType::UnsignedInt(..), &DataType::Float(b, ..)) => {
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int and UnsignedInt
                 #[allow(clippy::unwrap_used)]
                 let a = <i128>::try_from(self).unwrap();
 
@@ -1116,10 +1072,8 @@ impl Ord for DataType {
             }
             // Convert ints to double and cmp against Real.
             (&DataType::Int(..), &DataType::Double(b, ..))
-            | (&DataType::UnsignedInt(..), &DataType::Double(b, ..))
-            | (&DataType::BigInt(..), &DataType::Double(b, ..))
-            | (&DataType::UnsignedBigInt(..), &DataType::Double(b, ..)) => {
-                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+            | (&DataType::UnsignedInt(..), &DataType::Double(b, ..)) => {
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int and UnsignedInt
                 #[allow(clippy::unwrap_used)]
                 let a: i128 = <i128>::try_from(self).unwrap();
 
@@ -1127,39 +1081,31 @@ impl Ord for DataType {
             }
             // Convert ints to f32 and cmp against Float.
             (&DataType::Int(..), &DataType::Numeric(ref b))
-            | (&DataType::UnsignedInt(..), &DataType::Numeric(ref b))
-            | (&DataType::BigInt(..), &DataType::Numeric(ref b))
-            | (&DataType::UnsignedBigInt(..), &DataType::Numeric(ref b)) => {
-                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+            | (&DataType::UnsignedInt(..), &DataType::Numeric(ref b)) => {
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int and UnsignedInt
                 #[allow(clippy::unwrap_used)]
                 let a: i128 = <i128>::try_from(self).unwrap();
 
                 Decimal::from(a).cmp(b)
             }
             (&DataType::Float(a, ..), &DataType::Int(..))
-            | (&DataType::Float(a, ..), &DataType::UnsignedInt(..))
-            | (&DataType::Float(a, ..), &DataType::BigInt(..))
-            | (&DataType::Float(a, ..), &DataType::UnsignedBigInt(..)) => {
-                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+            | (&DataType::Float(a, ..), &DataType::UnsignedInt(..)) => {
+                // this unwrap should be safe because no error path in try_from for i128 (&i128)  on Int and UnsignedInt
                 #[allow(clippy::unwrap_used)]
                 let b: i128 = <i128>::try_from(other).unwrap();
 
                 a.total_cmp(&(b as f32))
             }
             (&DataType::Double(a, ..), &DataType::Int(..))
-            | (&DataType::Double(a, ..), &DataType::UnsignedInt(..))
-            | (&DataType::Double(a, ..), &DataType::BigInt(..))
-            | (&DataType::Double(a, ..), &DataType::UnsignedBigInt(..)) => {
-                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+            | (&DataType::Double(a, ..), &DataType::UnsignedInt(..)) => {
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int and UnsignedInt
                 #[allow(clippy::unwrap_used)]
                 let b: i128 = <i128>::try_from(other).unwrap();
 
                 a.total_cmp(&(b as f64))
             }
             (&DataType::Numeric(_), &DataType::Int(..))
-            | (&DataType::Numeric(_), &DataType::UnsignedInt(..))
-            | (&DataType::Numeric(_), &DataType::BigInt(..))
-            | (&DataType::Numeric(_), &DataType::UnsignedBigInt(..)) => other.cmp(self).reverse(),
+            | (&DataType::Numeric(_), &DataType::UnsignedInt(..)) => other.cmp(self).reverse(),
             (&DataType::ByteArray(ref array_a), &DataType::ByteArray(ref array_b)) => {
                 array_a.cmp(array_b)
             }
@@ -1181,18 +1127,8 @@ impl Hash for DataType {
         match *self {
             DataType::None => {}
             DataType::Max => 1i64.hash(state),
-            DataType::Int(..) | DataType::BigInt(..) => {
-                // this unwrap should be safe because no error path in try_from for i64 (&i64) on Int and BigInt
-                #[allow(clippy::unwrap_used)]
-                let n: i64 = <i64>::try_from(self).unwrap();
-                n.hash(state)
-            }
-            DataType::UnsignedInt(..) | DataType::UnsignedBigInt(..) => {
-                // this unwrap should be safe because no error path in try_from for u64 (&u64) on UnsignedInt and UnsignedBigInt
-                #[allow(clippy::unwrap_used)]
-                let n: u64 = <u64>::try_from(self).unwrap();
-                n.hash(state)
-            }
+            DataType::Int(n) => n.hash(state),
+            DataType::UnsignedInt(n) => n.hash(state),
             DataType::Float(f, p) => {
                 f.to_bits().hash(state);
                 p.hash(state);
@@ -1236,14 +1172,10 @@ impl TryFrom<i128> for DataType {
     type Error = ReadySetError;
 
     fn try_from(s: i128) -> Result<Self, Self::Error> {
-        if s >= std::i32::MIN.into() && s <= std::i32::MAX.into() {
-            Ok(DataType::Int(s as i32))
-        } else if s >= std::u32::MIN.into() && s <= std::u32::MAX.into() {
-            Ok(DataType::UnsignedInt(s as u32))
-        } else if s >= std::i64::MIN.into() && s <= std::i64::MAX.into() {
-            Ok(DataType::BigInt(s as i64))
+        if s >= std::i64::MIN.into() && s <= std::i64::MAX.into() {
+            Ok(DataType::Int(s as i64))
         } else if s >= std::u64::MIN.into() && s <= std::u64::MAX.into() {
-            Ok(DataType::UnsignedBigInt(s as u64))
+            Ok(DataType::UnsignedInt(s as u64))
         } else {
             Err(Self::Error::DataTypeConversionError {
                 val: s.to_string(),
@@ -1257,13 +1189,13 @@ impl TryFrom<i128> for DataType {
 
 impl From<i64> for DataType {
     fn from(s: i64) -> Self {
-        DataType::BigInt(s)
+        DataType::Int(s)
     }
 }
 
 impl From<u64> for DataType {
     fn from(s: u64) -> Self {
-        DataType::UnsignedBigInt(s)
+        DataType::UnsignedInt(s)
     }
 }
 
@@ -1293,19 +1225,19 @@ impl From<u16> for DataType {
 
 impl From<i32> for DataType {
     fn from(s: i32) -> Self {
-        DataType::Int(s)
+        DataType::Int(s as _)
     }
 }
 
 impl From<u32> for DataType {
     fn from(s: u32) -> Self {
-        DataType::UnsignedInt(s)
+        DataType::UnsignedInt(s as _)
     }
 }
 
 impl From<usize> for DataType {
     fn from(s: usize) -> Self {
-        DataType::UnsignedBigInt(s as u64)
+        DataType::UnsignedInt(s as u64)
     }
 }
 
@@ -1356,8 +1288,6 @@ impl<'a> TryFrom<&'a DataType> for Decimal {
         match dt {
             DataType::Int(i) => Ok(Decimal::from(*i)),
             DataType::UnsignedInt(i) => Ok(Decimal::from(*i)),
-            DataType::BigInt(i) => Ok(Decimal::from(*i)),
-            DataType::UnsignedBigInt(i) => Ok(Decimal::from(*i)),
             DataType::Float(value, _) => {
                 Decimal::from_f32(*value).ok_or(Self::Error::DataTypeConversionError {
                     val: format!("{:?}", dt),
@@ -1485,10 +1415,8 @@ impl TryFrom<DataType> for Literal {
     fn try_from(dt: DataType) -> Result<Self, Self::Error> {
         match dt {
             DataType::None => Ok(Literal::Null),
-            DataType::Int(i) => Ok(Literal::Integer(i as _)),
+            DataType::Int(i) => Ok(Literal::Integer(i)),
             DataType::UnsignedInt(i) => Ok(Literal::Integer(i as _)),
-            DataType::BigInt(i) => Ok(Literal::Integer(i)),
-            DataType::UnsignedBigInt(i) => Ok(Literal::Integer(i as _)),
             DataType::Float(value, precision) => Ok(Literal::Float(Float { value, precision })),
             DataType::Double(value, precision) => Ok(Literal::Double(Double { value, precision })),
             DataType::Text(_) => Ok(Literal::String(String::try_from(dt)?)),
@@ -1691,8 +1619,6 @@ impl TryFrom<&'_ DataType> for i128 {
 
     fn try_from(data: &'_ DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::BigInt(s) => Ok(i128::from(s)),
-            DataType::UnsignedBigInt(s) => Ok(i128::from(s)),
             DataType::Int(s) => Ok(i128::from(s)),
             DataType::UnsignedInt(s) => Ok(i128::from(s)),
             _ => Err(Self::Error::DataTypeConversionError {
@@ -1710,7 +1636,7 @@ impl TryFrom<&'_ DataType> for i64 {
 
     fn try_from(data: &'_ DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::UnsignedBigInt(s) => {
+            DataType::UnsignedInt(s) => {
                 if s as i128 >= std::i64::MIN.into() && s as i128 <= std::i64::MAX.into() {
                     Ok(s as i64)
                 } else {
@@ -1718,13 +1644,11 @@ impl TryFrom<&'_ DataType> for i64 {
                         val: format!("{:?}", data),
                         src_type: "DataType".to_string(),
                         target_type: "i64".to_string(),
-                        details: "Out of bounds".to_string(),
+                        details: format!("Out of bounds {}", s),
                     })
                 }
             }
-            DataType::BigInt(s) => Ok(s),
-            DataType::Int(s) => Ok(i64::from(s)),
-            DataType::UnsignedInt(s) => Ok(i64::from(s)),
+            DataType::Int(s) => Ok(s),
             _ => Err(Self::Error::DataTypeConversionError {
                 val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
@@ -1748,20 +1672,7 @@ impl TryFrom<&'_ DataType> for u64 {
 
     fn try_from(data: &'_ DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::UnsignedBigInt(s) => Ok(s),
-            DataType::BigInt(s) => {
-                if s as i128 >= std::u64::MIN.into() && s as i128 <= std::u64::MAX.into() {
-                    Ok(s as u64)
-                } else {
-                    Err(Self::Error::DataTypeConversionError {
-                        val: format!("{:?}", data),
-                        src_type: "DataType".to_string(),
-                        target_type: "u64".to_string(),
-                        details: "Out of bounds".to_string(),
-                    })
-                }
-            }
-            DataType::UnsignedInt(s) => Ok(u64::from(s)),
+            DataType::UnsignedInt(s) => Ok(s),
             DataType::Int(s) => {
                 if s as i128 >= std::u64::MIN.into() && s as i128 <= std::u64::MAX.into() {
                     Ok(s as u64)
@@ -1774,6 +1685,7 @@ impl TryFrom<&'_ DataType> for u64 {
                     })
                 }
             }
+
             _ => Err(Self::Error::DataTypeConversionError {
                 val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
@@ -1797,30 +1709,6 @@ impl TryFrom<&'_ DataType> for i32 {
 
     fn try_from(data: &'_ DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::UnsignedBigInt(s) => {
-                if s as i128 >= std::i32::MIN.into() && s as i128 <= std::i32::MAX.into() {
-                    Ok(s as i32)
-                } else {
-                    Err(Self::Error::DataTypeConversionError {
-                        val: format!("{:?}", data),
-                        src_type: "DataType".to_string(),
-                        target_type: "i32".to_string(),
-                        details: "out of bounds".to_string(),
-                    })
-                }
-            }
-            DataType::BigInt(s) => {
-                if s as i128 >= std::i32::MIN.into() && s as i128 <= std::i32::MAX.into() {
-                    Ok(s as i32)
-                } else {
-                    Err(Self::Error::DataTypeConversionError {
-                        val: format!("{:?}", data),
-                        src_type: "DataType".to_string(),
-                        target_type: "i32".to_string(),
-                        details: "out of bounds".to_string(),
-                    })
-                }
-            }
             DataType::UnsignedInt(s) => {
                 if s as i128 >= std::i32::MIN.into() && s as i128 <= std::i32::MAX.into() {
                     Ok(s as i32)
@@ -1833,7 +1721,19 @@ impl TryFrom<&'_ DataType> for i32 {
                     })
                 }
             }
-            DataType::Int(s) => Ok(s),
+            DataType::Int(s) => {
+                if s as i128 >= std::i32::MIN.into() && s as i128 <= std::i32::MAX.into() {
+                    Ok(s as i32)
+                } else {
+                    Err(Self::Error::DataTypeConversionError {
+                        val: format!("{:?}", data),
+                        src_type: "DataType".to_string(),
+                        target_type: "i32".to_string(),
+                        details: "out of bounds".to_string(),
+                    })
+                }
+            }
+
             _ => Err(Self::Error::DataTypeConversionError {
                 val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
@@ -1856,7 +1756,7 @@ impl TryFrom<&'_ DataType> for u32 {
 
     fn try_from(data: &'_ DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::UnsignedBigInt(s) => {
+            DataType::UnsignedInt(s) => {
                 if s as i128 >= std::u32::MIN.into() && s as i128 <= std::u32::MAX.into() {
                     Ok(s as u32)
                 } else {
@@ -1868,19 +1768,6 @@ impl TryFrom<&'_ DataType> for u32 {
                     })
                 }
             }
-            DataType::BigInt(s) => {
-                if s as i128 >= std::u32::MIN.into() && s as i128 <= std::u32::MAX.into() {
-                    Ok(s as u32)
-                } else {
-                    Err(Self::Error::DataTypeConversionError {
-                        val: format!("{:?}", data),
-                        src_type: "DataType".to_string(),
-                        target_type: "u32".to_string(),
-                        details: "out of bounds".to_string(),
-                    })
-                }
-            }
-            DataType::UnsignedInt(s) => Ok(s),
             DataType::Int(s) => {
                 if s as i128 >= std::u32::MIN.into() && s as i128 <= std::u32::MAX.into() {
                     Ok(s as u32)
@@ -1926,8 +1813,6 @@ impl TryFrom<&'_ DataType> for f32 {
             }),
             DataType::UnsignedInt(i) => Ok(i as f32),
             DataType::Int(i) => Ok(i as f32),
-            DataType::UnsignedBigInt(i) => Ok(i as f32),
-            DataType::BigInt(i) => Ok(i as f32),
             _ => Err(Self::Error::DataTypeConversionError {
                 val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
@@ -1959,10 +1844,8 @@ impl TryFrom<&'_ DataType> for f64 {
                 target_type: "f32".to_string(),
                 details: "".to_string(),
             }),
-            DataType::UnsignedInt(i) => Ok(f64::from(i)),
-            DataType::Int(i) => Ok(f64::from(i)),
-            DataType::UnsignedBigInt(i) => Ok(i as f64),
-            DataType::BigInt(i) => Ok(i as f64),
+            DataType::UnsignedInt(i) => Ok(i as f64),
+            DataType::Int(i) => Ok(i as f64),
             _ => Err(Self::Error::DataTypeConversionError {
                 val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
@@ -2075,11 +1958,10 @@ impl ToSql for DataType {
         match (self, ty) {
             (Self::None | Self::Max, _) => None::<i8>.to_sql(ty, out),
             (Self::Int(x), &Type::INT2) => (*x as i16).to_sql(ty, out),
+            (Self::Int(x), &Type::INT4) => (*x as i32).to_sql(ty, out),
             (Self::Int(x), _) => x.to_sql(ty, out),
             (Self::UnsignedInt(x), &Type::BOOL) => (*x != 0).to_sql(ty, out),
-            (Self::UnsignedInt(x), _) => x.to_sql(ty, out),
-            (Self::BigInt(x), _) => x.to_sql(ty, out),
-            (Self::UnsignedBigInt(x), _) => (*x as i64).to_sql(ty, out),
+            (Self::UnsignedInt(x), _) => (*x as i64).to_sql(ty, out),
             (Self::Float(x, _), _) => x.to_sql(ty, out),
             (Self::Double(x, _), _) => x.to_sql(ty, out),
             (Self::Numeric(d), _) => d.to_sql(ty, out),
@@ -2242,10 +2124,8 @@ impl TryFrom<&DataType> for mysql_common::value::Value {
 
         match dt {
             DataType::None | DataType::Max => Ok(Value::NULL),
-            DataType::Int(val) => Ok(Value::Int(i64::from(*val))),
-            DataType::UnsignedInt(val) => Ok(Value::UInt(u64::from(*val))),
-            DataType::BigInt(val) => Ok(Value::Int(*val)),
-            DataType::UnsignedBigInt(val) => Ok(Value::UInt(*val)),
+            DataType::Int(val) => Ok(Value::Int(*val)),
+            DataType::UnsignedInt(val) => Ok(Value::UInt(*val)),
             DataType::Float(val, _) => Ok(Value::Float(*val)),
             DataType::Double(val, _) => Ok(Value::Double(*val)),
             DataType::Numeric(_) => {
@@ -2278,26 +2158,14 @@ macro_rules! arithmetic_operation (
             (&DataType::None, _) | (_, &DataType::None) => DataType::None,
             (&DataType::Int(a), &DataType::Int(b)) => (a $op b).into(),
             (&DataType::UnsignedInt(a), &DataType::UnsignedInt(b)) => (a $op b).into(),
-            (&DataType::BigInt(a), &DataType::BigInt(b)) => (a $op b).into(),
-            (&DataType::UnsignedBigInt(a), &DataType::UnsignedBigInt(b)) => (a $op b).into(),
 
-            (&DataType::Int(a), &DataType::BigInt(b)) => (i64::from(a) $op b).into(),
-            (&DataType::BigInt(a), &DataType::Int(b)) => (a $op i64::from(b)).into(),
-            (&DataType::Int(a), &DataType::UnsignedBigInt(b)) => DataType::try_from(i128::from(a) $op i128::from(b))?,
-            (&DataType::UnsignedBigInt(a), &DataType::Int(b)) => DataType::try_from(i128::from(a) $op i128::from(b))?,
-            (&DataType::BigInt(a), &DataType::UnsignedBigInt(b)) => DataType::try_from(i128::from(a) $op i128::from(b))?,
-            (&DataType::UnsignedBigInt(a), &DataType::BigInt(b)) => DataType::try_from(i128::from(a) $op i128::from(b))?,
-            (&DataType::UnsignedBigInt(a), &DataType::UnsignedInt(b)) => (a $op u64::from(b)).into(),
-            (&DataType::UnsignedInt(a), &DataType::UnsignedBigInt(b)) => (u64::from(a) $op b).into(),
+            (&DataType::UnsignedInt(a), &DataType::Int(b)) => DataType::try_from(i128::from(a) $op i128::from(b))?,
+            (&DataType::Int(a), &DataType::UnsignedInt(b)) => DataType::try_from(i128::from(a) $op i128::from(b))?,
 
             (first @ &DataType::Int(..), second @ &DataType::Float(..)) |
-            (first @ &DataType::BigInt(..), second @ &DataType::Float(..)) |
             (first @ &DataType::UnsignedInt(..), second @ &DataType::Float(..)) |
-            (first @ &DataType::UnsignedBigInt(..), second @ &DataType::Float(..)) |
             (first @ &DataType::Float(..), second @ &DataType::Int(..)) |
-            (first @ &DataType::Float(..), second @ &DataType::BigInt(..)) |
             (first @ &DataType::Float(..), second @ &DataType::UnsignedInt(..)) |
-            (first @ &DataType::Float(..), second @ &DataType::UnsignedBigInt(..)) |
             (first @ &DataType::Float(..), second @ &DataType::Float(..)) |
             (first @ &DataType::Float(..), second @ &DataType::Double(..)) |
             (first @ &DataType::Float(..), second @ &DataType::Numeric(..)) => {
@@ -2307,13 +2175,9 @@ macro_rules! arithmetic_operation (
             }
 
             (first @ &DataType::Int(..), second @ &DataType::Double(..)) |
-            (first @ &DataType::BigInt(..), second @ &DataType::Double(..)) |
             (first @ &DataType::UnsignedInt(..), second @ &DataType::Double(..)) |
-            (first @ &DataType::UnsignedBigInt(..), second @ &DataType::Double(..)) |
             (first @ &DataType::Double(..), second @ &DataType::Int(..)) |
-            (first @ &DataType::Double(..), second @ &DataType::BigInt(..)) |
             (first @ &DataType::Double(..), second @ &DataType::UnsignedInt(..)) |
-            (first @ &DataType::Double(..), second @ &DataType::UnsignedBigInt(..)) |
             (first @ &DataType::Double(..), second @ &DataType::Double(..)) |
             (first @ &DataType::Double(..), second @ &DataType::Float(..)) |
             (first @ &DataType::Double(..), second @ &DataType::Numeric(..)) => {
@@ -2323,13 +2187,9 @@ macro_rules! arithmetic_operation (
             }
 
             (first @ &DataType::Int(..), second @ &DataType::Numeric(..)) |
-            (first @ &DataType::BigInt(..), second @ &DataType::Numeric(..)) |
             (first @ &DataType::UnsignedInt(..), second @ &DataType::Numeric(..)) |
-            (first @ &DataType::UnsignedBigInt(..), second @ &DataType::Numeric(..)) |
             (first @ &DataType::Numeric(..), second @ &DataType::Int(..)) |
-            (first @ &DataType::Numeric(..), second @ &DataType::BigInt(..)) |
             (first @ &DataType::Numeric(..), second @ &DataType::UnsignedInt(..)) |
-            (first @ &DataType::Numeric(..), second @ &DataType::UnsignedBigInt(..)) |
             (first @ &DataType::Numeric(..), second @ &DataType::Numeric(..)) => {
                 let a: Decimal = Decimal::try_from(first)
                     .map_err(|e| ReadySetError::DataTypeConversionError {
@@ -2438,10 +2298,8 @@ impl Arbitrary for DataType {
         prop_oneof![
             Just(None),
             Just(Max),
-            any::<i32>().prop_map(Int),
-            any::<u32>().prop_map(UnsignedInt),
-            any::<i64>().prop_map(BigInt),
-            any::<u64>().prop_map(UnsignedBigInt),
+            any::<i64>().prop_map(Int),
+            any::<u64>().prop_map(UnsignedInt),
             any::<(f32, u8)>().prop_map(|(f, p)| Float(f, p)),
             any::<(f64, u8)>().prop_map(|(f, p)| Double(f, p)),
             any::<String>().prop_map(|s| DataType::from(s.replace('\0', ""))),
@@ -2643,13 +2501,13 @@ mod tests {
         let a = Value::Int(-5);
         let a_dt = DataType::try_from(a);
         assert!(a_dt.is_ok());
-        assert_eq!(a_dt.unwrap(), DataType::BigInt(-5));
+        assert_eq!(a_dt.unwrap(), DataType::Int(-5));
 
         // Test Value::Float.
         let a = Value::UInt(5);
         let a_dt = DataType::try_from(a);
         assert!(a_dt.is_ok());
-        assert_eq!(a_dt.unwrap(), DataType::UnsignedBigInt(5));
+        assert_eq!(a_dt.unwrap(), DataType::UnsignedInt(5));
 
         // Test Value::Float.
         let initial_float: f32 = 8.99;
@@ -2766,16 +2624,10 @@ mod tests {
         assert_arithmetic!(+, Decimal::new(15, 1), Decimal::new(25, 1), Decimal::new(40, 1));
         assert_arithmetic!(+, Decimal::new(15, 1), 2.5_f32, Decimal::new(40, 1));
         assert_arithmetic!(+, Decimal::new(15, 1), 2.5_f64, Decimal::new(40, 1));
+        assert_eq!((&DataType::Int(1) + &DataType::Int(2)).unwrap(), 3.into());
+        assert_eq!((&DataType::from(1) + &DataType::Int(2)).unwrap(), 3.into());
         assert_eq!(
-            (&DataType::BigInt(1) + &DataType::BigInt(2)).unwrap(),
-            3.into()
-        );
-        assert_eq!(
-            (&DataType::from(1) + &DataType::BigInt(2)).unwrap(),
-            3.into()
-        );
-        assert_eq!(
-            (&DataType::BigInt(2) + &DataType::try_from(1).unwrap()).unwrap(),
+            (&DataType::Int(2) + &DataType::try_from(1).unwrap()).unwrap(),
             3.into()
         );
     }
@@ -2799,17 +2651,14 @@ mod tests {
         assert_arithmetic!(-, Decimal::new(35, 1), 2.0_f64, Decimal::new(15, 1));
         assert_arithmetic!(-, Decimal::new(35, 1), Decimal::new(20, 1), Decimal::new(15, 1));
         assert_eq!(
-            (&DataType::BigInt(1) - &DataType::BigInt(2)).unwrap(),
+            (&DataType::Int(1) - &DataType::Int(2)).unwrap(),
             (-1).into()
         );
         assert_eq!(
-            (&DataType::from(1) - &DataType::BigInt(2)).unwrap(),
+            (&DataType::from(1) - &DataType::Int(2)).unwrap(),
             (-1).into()
         );
-        assert_eq!(
-            (&DataType::BigInt(2) - &DataType::from(1)).unwrap(),
-            1.into()
-        );
+        assert_eq!((&DataType::Int(2) - &DataType::from(1)).unwrap(), 1.into());
     }
 
     #[test]
@@ -2827,18 +2676,9 @@ mod tests {
         assert_arithmetic!(*, 3.5_f64, 2.0_f32, 7.0_f64);
         assert_arithmetic!(*, 3.5_f64, 2.0_f64, 7.0_f64);
         assert_arithmetic!(*, 3.5_f64, Decimal::new(20, 1), Decimal::new(70, 1));
-        assert_eq!(
-            (&DataType::BigInt(1) * &DataType::BigInt(2)).unwrap(),
-            2.into()
-        );
-        assert_eq!(
-            (&DataType::from(1) * &DataType::BigInt(2)).unwrap(),
-            2.into()
-        );
-        assert_eq!(
-            (&DataType::BigInt(2) * &DataType::from(1)).unwrap(),
-            2.into()
-        );
+        assert_eq!((&DataType::Int(1) * &DataType::Int(2)).unwrap(), 2.into());
+        assert_eq!((&DataType::from(1) * &DataType::Int(2)).unwrap(), 2.into());
+        assert_eq!((&DataType::Int(2) * &DataType::from(1)).unwrap(), 2.into());
     }
 
     #[test]
@@ -2856,18 +2696,9 @@ mod tests {
         assert_arithmetic!(/, 3.5_f64, 2.0_f32, 1.75_f64);
         assert_arithmetic!(/, 3.5_f64, 2.0_f64, 1.75_f64);
         assert_arithmetic!(/, 3.5_f64, Decimal::new(20, 1), Decimal::new(175, 2));
-        assert_eq!(
-            (&DataType::BigInt(4) / &DataType::BigInt(2)).unwrap(),
-            2.into()
-        );
-        assert_eq!(
-            (&DataType::from(4) / &DataType::BigInt(2)).unwrap(),
-            2.into()
-        );
-        assert_eq!(
-            (&DataType::BigInt(4) / &DataType::from(2)).unwrap(),
-            2.into()
-        );
+        assert_eq!((&DataType::Int(4) / &DataType::Int(2)).unwrap(), 2.into());
+        assert_eq!((&DataType::from(4) / &DataType::Int(2)).unwrap(), 2.into());
+        assert_eq!((&DataType::Int(4) / &DataType::from(2)).unwrap(), 2.into());
     }
 
     #[test]
@@ -2893,7 +2724,6 @@ mod tests {
                 .from_utc_datetime(&NaiveDateTime::from_timestamp(0, 42_000_000)),
         );
         let int = DataType::Int(5);
-        let big_int = DataType::BigInt(5);
         let bytes = DataType::ByteArray(Arc::new(vec![0, 8, 39, 92, 100, 128]));
         // bits = 000000000000100000100111010111000110010010000000
         let bits = DataType::BitVector(Arc::new(BitVec::from_bytes(&[0, 8, 39, 92, 100, 128])));
@@ -2913,7 +2743,6 @@ mod tests {
             "TimestampTz(1969-12-31T19:00:00.042-05:00)"
         );
         assert_eq!(format!("{:?}", int), "Int(5)");
-        assert_eq!(format!("{:?}", big_int), "BigInt(5)");
         assert_eq!(
             format!("{:?}", bytes),
             "ByteArray([0, 8, 39, 92, 100, 128])"
@@ -2939,7 +2768,6 @@ mod tests {
                 .from_utc_datetime(&NaiveDateTime::from_timestamp(0, 42_000_000)),
         );
         let int = DataType::Int(5);
-        let big_int = DataType::BigInt(5);
         let bytes = DataType::ByteArray(Arc::new(vec![0, 8, 39, 92, 100, 128]));
         // bits = 000000000000100000100111010111000110010010000000
         let bits = DataType::BitVector(Arc::new(BitVec::from_bytes(&[0, 8, 39, 92, 100, 128])));
@@ -2953,7 +2781,6 @@ mod tests {
         assert_eq!(format!("{}", timestamp), "Thu Jan  1 00:00:00 1970");
         assert_eq!(format!("{}", timestamp_tz), "1969-12-31 18:30:00 -05:30");
         assert_eq!(format!("{}", int), "5");
-        assert_eq!(format!("{}", big_int), "5");
         assert_eq!(format!("{}", bytes), "E'\\x0008275c6480'");
         assert_eq!(
             format!("{}", bits),
@@ -2992,12 +2819,8 @@ mod tests {
         );
         let shrt = DataType::Int(5);
         let shrt6 = DataType::Int(6);
-        let long = DataType::BigInt(5);
-        let long6 = DataType::BigInt(6);
         let ushrt = DataType::UnsignedInt(5);
         let ushrt6 = DataType::UnsignedInt(6);
-        let ulong = DataType::UnsignedBigInt(5);
-        let ulong6 = DataType::UnsignedBigInt(6);
         let bytes = DataType::ByteArray(Arc::new("hi".as_bytes().to_vec()));
         let bytes2 = DataType::ByteArray(Arc::new(vec![0, 8, 39, 92, 101, 128]));
         let bits = DataType::BitVector(Arc::new(BitVec::from_bytes("hi".as_bytes())));
@@ -3007,9 +2830,7 @@ mod tests {
         assert_eq!(f(&txt2), f(&txt2));
         assert_eq!(f(&text), f(&text));
         assert_eq!(f(&shrt), f(&shrt));
-        assert_eq!(f(&long), f(&long));
         assert_eq!(f(&ushrt), f(&ushrt));
-        assert_eq!(f(&ulong), f(&ulong));
         assert_eq!(f(&float), f(&float));
         assert_eq!(f(&float_from_real), f(&float_from_real));
         assert_eq!(f(&double), f(&double));
@@ -3023,18 +2844,8 @@ mod tests {
         // coercion
         assert_eq!(f(&txt1), f(&txt2));
         assert_eq!(f(&txt2), f(&txt1));
-        assert_eq!(f(&shrt), f(&long));
-        assert_eq!(f(&long), f(&shrt));
         assert_eq!(f(&ushrt), f(&shrt));
         assert_eq!(f(&shrt), f(&ushrt));
-        assert_eq!(f(&ulong), f(&long));
-        assert_eq!(f(&long), f(&ulong));
-        assert_eq!(f(&shrt), f(&ulong));
-        assert_eq!(f(&ulong), f(&shrt));
-        assert_eq!(f(&ushrt), f(&long));
-        assert_eq!(f(&long), f(&ushrt));
-        assert_eq!(f(&ushrt), f(&ulong));
-        assert_eq!(f(&ulong), f(&ushrt));
 
         // negation
         assert_ne!(f(&txt1), f(&txt12));
@@ -3046,9 +2857,7 @@ mod tests {
         assert_ne!(f(&txt1), f(&numeric));
         assert_ne!(f(&txt1), f(&time));
         assert_ne!(f(&txt1), f(&shrt));
-        assert_ne!(f(&txt1), f(&long));
         assert_ne!(f(&txt1), f(&ushrt));
-        assert_ne!(f(&txt1), f(&ulong));
         assert_ne!(f(&txt1), f(&bytes));
         assert_ne!(f(&txt1), f(&bits));
         assert_ne!(f(&txt1), f(&timestamp_tz));
@@ -3062,9 +2871,7 @@ mod tests {
         assert_ne!(f(&txt2), f(&numeric));
         assert_ne!(f(&txt2), f(&time));
         assert_ne!(f(&txt2), f(&shrt));
-        assert_ne!(f(&txt2), f(&long));
         assert_ne!(f(&txt2), f(&ushrt));
-        assert_ne!(f(&txt2), f(&ulong));
         assert_ne!(f(&txt2), f(&bytes));
         assert_ne!(f(&txt2), f(&bits));
         assert_ne!(f(&txt2), f(&timestamp_tz));
@@ -3079,9 +2886,7 @@ mod tests {
         assert_ne!(f(&text), f(&numeric));
         assert_ne!(f(&text), f(&time));
         assert_ne!(f(&text), f(&shrt));
-        assert_ne!(f(&text), f(&long));
         assert_ne!(f(&text), f(&ushrt));
-        assert_ne!(f(&text), f(&ulong));
         assert_ne!(f(&text), f(&bytes));
         assert_ne!(f(&text), f(&bits));
         assert_ne!(f(&text), f(&timestamp_tz));
@@ -3116,21 +2921,11 @@ mod tests {
         assert_ne!(f(&double), f(&shrt));
         assert_ne!(f(&double_from_real), f(&shrt));
         assert_ne!(f(&numeric), f(&shrt));
-        assert_ne!(f(&float), f(&long));
-        assert_ne!(f(&float_from_real), f(&long));
-        assert_ne!(f(&double), f(&long));
-        assert_ne!(f(&double_from_real), f(&long));
-        assert_ne!(f(&numeric), f(&long));
         assert_ne!(f(&float), f(&ushrt));
         assert_ne!(f(&float_from_real), f(&ushrt));
         assert_ne!(f(&double), f(&ushrt));
         assert_ne!(f(&double_from_real), f(&ushrt));
         assert_ne!(f(&numeric), f(&ushrt));
-        assert_ne!(f(&float), f(&ulong));
-        assert_ne!(f(&float_from_real), f(&ulong));
-        assert_ne!(f(&double), f(&ulong));
-        assert_ne!(f(&double_from_real), f(&ulong));
-        assert_ne!(f(&numeric), f(&ulong));
 
         assert_ne!(f(&time), f(&time2));
         assert_ne!(f(&time), f(&txt1));
@@ -3138,9 +2933,7 @@ mod tests {
         assert_ne!(f(&time), f(&text));
         assert_ne!(f(&time), f(&float_from_real));
         assert_ne!(f(&time), f(&shrt));
-        assert_ne!(f(&time), f(&long));
         assert_ne!(f(&time), f(&ushrt));
-        assert_ne!(f(&time), f(&ulong));
         assert_ne!(f(&time), f(&bytes));
         assert_ne!(f(&time), f(&bits));
         assert_ne!(f(&time), f(&timestamp_tz));
@@ -3151,19 +2944,8 @@ mod tests {
         assert_ne!(f(&shrt), f(&text));
         assert_ne!(f(&shrt), f(&float_from_real));
         assert_ne!(f(&shrt), f(&time));
-        assert_ne!(f(&shrt), f(&long6));
         assert_ne!(f(&shrt), f(&bytes));
         assert_ne!(f(&shrt), f(&bits));
-
-        assert_ne!(f(&long), f(&long6));
-        assert_ne!(f(&long), f(&txt1));
-        assert_ne!(f(&long), f(&txt2));
-        assert_ne!(f(&long), f(&text));
-        assert_ne!(f(&long), f(&float_from_real));
-        assert_ne!(f(&long), f(&time));
-        assert_ne!(f(&long), f(&shrt6));
-        assert_ne!(f(&long), f(&bytes));
-        assert_ne!(f(&long), f(&timestamp_tz));
 
         assert_ne!(f(&ushrt), f(&ushrt6));
         assert_ne!(f(&ushrt), f(&txt1));
@@ -3171,28 +2953,11 @@ mod tests {
         assert_ne!(f(&ushrt), f(&text));
         assert_ne!(f(&ushrt), f(&float_from_real));
         assert_ne!(f(&ushrt), f(&time));
-        assert_ne!(f(&ushrt), f(&ulong6));
         assert_ne!(f(&ushrt), f(&shrt6));
-        assert_ne!(f(&ushrt), f(&long6));
         assert_ne!(f(&ushrt), f(&bytes));
         assert_ne!(f(&ushrt), f(&bits));
         assert_ne!(f(&ushrt), f(&timestamp_tz));
 
-        assert_ne!(f(&ulong), f(&ulong6));
-        assert_ne!(f(&ulong), f(&txt1));
-        assert_ne!(f(&ulong), f(&txt2));
-        assert_ne!(f(&ulong), f(&text));
-        assert_ne!(f(&ulong), f(&float_from_real));
-        assert_ne!(f(&ulong), f(&time));
-        assert_ne!(f(&ulong), f(&ushrt6));
-        assert_ne!(f(&ulong), f(&shrt6));
-        assert_ne!(f(&ulong), f(&long6));
-        assert_ne!(f(&ulong), f(&bytes));
-        assert_ne!(f(&ulong), f(&bits));
-        assert_ne!(f(&ulong), f(&timestamp_tz));
-
-        assert_ne!(f(&bytes), f(&ulong));
-        assert_ne!(f(&bytes), f(&ulong6));
         assert_ne!(f(&bytes), f(&txt1));
         assert_ne!(f(&bytes), f(&txt2));
         assert_ne!(f(&bytes), f(&text));
@@ -3200,13 +2965,10 @@ mod tests {
         assert_ne!(f(&bytes), f(&time));
         assert_ne!(f(&bytes), f(&ushrt6));
         assert_ne!(f(&bytes), f(&shrt6));
-        assert_ne!(f(&bytes), f(&long6));
         assert_ne!(f(&bytes), f(&bits));
         assert_ne!(f(&bytes), f(&timestamp_tz));
         assert_ne!(f(&bytes), f(&bytes2));
 
-        assert_ne!(f(&bits), f(&ulong));
-        assert_ne!(f(&bits), f(&ulong6));
         assert_ne!(f(&bits), f(&txt1));
         assert_ne!(f(&bits), f(&txt2));
         assert_ne!(f(&bits), f(&text));
@@ -3214,12 +2976,9 @@ mod tests {
         assert_ne!(f(&bits), f(&time));
         assert_ne!(f(&bits), f(&ushrt6));
         assert_ne!(f(&bits), f(&shrt6));
-        assert_ne!(f(&bits), f(&long6));
         assert_ne!(f(&bits), f(&timestamp_tz));
         assert_ne!(f(&bits), f(&bits2));
 
-        assert_ne!(f(&timestamp_tz), f(&ulong));
-        assert_ne!(f(&timestamp_tz), f(&ulong6));
         assert_ne!(f(&timestamp_tz), f(&txt1));
         assert_ne!(f(&timestamp_tz), f(&txt2));
         assert_ne!(f(&timestamp_tz), f(&text));
@@ -3227,7 +2986,6 @@ mod tests {
         assert_ne!(f(&timestamp_tz), f(&time));
         assert_ne!(f(&timestamp_tz), f(&ushrt6));
         assert_ne!(f(&timestamp_tz), f(&shrt6));
-        assert_ne!(f(&timestamp_tz), f(&long6));
         assert_ne!(f(&timestamp_tz), f(&bits));
         assert_ne!(f(&timestamp_tz), f(&bytes));
         assert_ne!(f(&timestamp_tz), f(&timestamp_tz2));
@@ -3235,23 +2993,17 @@ mod tests {
 
     #[test]
     fn data_type_conversion() {
-        let int_i32_min = DataType::Int(std::i32::MIN);
-        let int_u32_min = DataType::Int(std::u32::MIN as i32);
-        let int_i32_max = DataType::Int(std::i32::MAX);
-        let uint_u32_min = DataType::UnsignedInt(std::u32::MIN);
-        let uint_i32_max = DataType::UnsignedInt(std::i32::MAX as u32);
-        let uint_u32_max = DataType::UnsignedInt(std::u32::MAX);
-        let bigint_i64_min = DataType::BigInt(std::i64::MIN);
-        let bigint_i32_min = DataType::BigInt(std::i32::MIN as i64);
-        let bigint_u32_min = DataType::BigInt(std::u32::MIN as i64);
-        let bigint_i32_max = DataType::BigInt(std::i32::MAX as i64);
-        let bigint_u32_max = DataType::BigInt(std::u32::MAX as i64);
-        let bigint_i64_max = DataType::BigInt(std::i64::MAX);
-        let ubigint_u32_min = DataType::UnsignedBigInt(std::u32::MIN as u64);
-        let ubigint_i32_max = DataType::UnsignedBigInt(std::i32::MAX as u64);
-        let ubigint_u32_max = DataType::UnsignedBigInt(std::u32::MAX as u64);
-        let ubigint_i64_max = DataType::UnsignedBigInt(std::i64::MAX as u64);
-        let ubigint_u64_max = DataType::UnsignedBigInt(std::u64::MAX);
+        let bigint_i64_min = DataType::Int(std::i64::MIN);
+        let bigint_i32_min = DataType::Int(std::i32::MIN as i64);
+        let bigint_u32_min = DataType::Int(std::u32::MIN as i64);
+        let bigint_i32_max = DataType::Int(std::i32::MAX as i64);
+        let bigint_u32_max = DataType::Int(std::u32::MAX as i64);
+        let bigint_i64_max = DataType::Int(std::i64::MAX);
+        let ubigint_u32_min = DataType::UnsignedInt(std::u32::MIN as u64);
+        let ubigint_i32_max = DataType::UnsignedInt(std::i32::MAX as u64);
+        let ubigint_u32_max = DataType::UnsignedInt(std::u32::MAX as u64);
+        let ubigint_i64_max = DataType::UnsignedInt(std::i64::MAX as u64);
+        let ubigint_u64_max = DataType::UnsignedInt(std::u64::MAX);
 
         fn _data_type_conversion_test_eq_i32(d: &DataType) {
             assert_eq!(
@@ -3305,27 +3057,12 @@ mod tests {
         _data_type_conversion_test_eq_i64(&bigint_i64_min);
         _data_type_conversion_test_eq_i128(&bigint_i64_min);
 
-        _data_type_conversion_test_eq_u32_panic(&int_i32_min);
-        _data_type_conversion_test_eq_u64_panic(&int_i32_min);
-        _data_type_conversion_test_eq_i32(&int_i32_min);
-        _data_type_conversion_test_eq_i64(&int_i32_min);
-        _data_type_conversion_test_eq_i128(&int_i32_min);
         _data_type_conversion_test_eq_u32_panic(&bigint_i32_min);
         _data_type_conversion_test_eq_u64_panic(&bigint_i32_min);
         _data_type_conversion_test_eq_i32(&bigint_i32_min);
         _data_type_conversion_test_eq_i64(&bigint_i32_min);
         _data_type_conversion_test_eq_i128(&bigint_i32_min);
 
-        _data_type_conversion_test_eq_i32(&int_u32_min);
-        _data_type_conversion_test_eq_i64(&int_u32_min);
-        _data_type_conversion_test_eq_u32(&int_u32_min);
-        _data_type_conversion_test_eq_u64(&int_u32_min);
-        _data_type_conversion_test_eq_i128(&int_u32_min);
-        _data_type_conversion_test_eq_i32(&uint_u32_min);
-        _data_type_conversion_test_eq_i64(&uint_u32_min);
-        _data_type_conversion_test_eq_u32(&uint_u32_min);
-        _data_type_conversion_test_eq_u64(&uint_u32_min);
-        _data_type_conversion_test_eq_i128(&uint_u32_min);
         _data_type_conversion_test_eq_i32(&bigint_u32_min);
         _data_type_conversion_test_eq_i64(&bigint_u32_min);
         _data_type_conversion_test_eq_u32(&bigint_u32_min);
@@ -3337,16 +3074,6 @@ mod tests {
         _data_type_conversion_test_eq_u64(&ubigint_u32_min);
         _data_type_conversion_test_eq_i128(&ubigint_u32_min);
 
-        _data_type_conversion_test_eq_i32(&int_i32_max);
-        _data_type_conversion_test_eq_i64(&int_i32_max);
-        _data_type_conversion_test_eq_u32(&int_i32_max);
-        _data_type_conversion_test_eq_u64(&int_i32_max);
-        _data_type_conversion_test_eq_i128(&int_i32_max);
-        _data_type_conversion_test_eq_i32(&uint_i32_max);
-        _data_type_conversion_test_eq_i64(&uint_i32_max);
-        _data_type_conversion_test_eq_u32(&uint_i32_max);
-        _data_type_conversion_test_eq_u64(&uint_i32_max);
-        _data_type_conversion_test_eq_i128(&uint_i32_max);
         _data_type_conversion_test_eq_i32(&bigint_i32_max);
         _data_type_conversion_test_eq_i64(&bigint_i32_max);
         _data_type_conversion_test_eq_u32(&bigint_i32_max);
@@ -3358,11 +3085,6 @@ mod tests {
         _data_type_conversion_test_eq_u64(&ubigint_i32_max);
         _data_type_conversion_test_eq_i128(&ubigint_i32_max);
 
-        _data_type_conversion_test_eq_i32_panic(&uint_u32_max);
-        _data_type_conversion_test_eq_i64(&uint_u32_max);
-        _data_type_conversion_test_eq_u32(&uint_u32_max);
-        _data_type_conversion_test_eq_u64(&uint_u32_max);
-        _data_type_conversion_test_eq_i128(&uint_u32_max);
         _data_type_conversion_test_eq_i32_panic(&bigint_u32_max);
         _data_type_conversion_test_eq_i64(&bigint_u32_max);
         _data_type_conversion_test_eq_u32(&bigint_u32_max);
@@ -3450,12 +3172,8 @@ mod tests {
         );
         let shrt = DataType::Int(5);
         let shrt6 = DataType::Int(6);
-        let long = DataType::BigInt(5);
-        let long6 = DataType::BigInt(6);
         let ushrt = DataType::UnsignedInt(5);
         let ushrt6 = DataType::UnsignedInt(6);
-        let ulong = DataType::UnsignedBigInt(5);
-        let ulong6 = DataType::UnsignedBigInt(6);
         let bytes = DataType::ByteArray(Arc::new("hi".as_bytes().to_vec()));
         let bytes2 = DataType::ByteArray(Arc::new(vec![0, 8, 39, 92, 101, 128]));
         let bits = DataType::BitVector(Arc::new(BitVec::from_bytes("hi".as_bytes())));
@@ -3467,8 +3185,6 @@ mod tests {
         assert_eq!(text.cmp(&text), Ordering::Equal);
         assert_eq!(shrt.cmp(&shrt), Ordering::Equal);
         assert_eq!(ushrt.cmp(&ushrt), Ordering::Equal);
-        assert_eq!(long.cmp(&long), Ordering::Equal);
-        assert_eq!(ulong.cmp(&ulong), Ordering::Equal);
         assert_eq!(float.cmp(&float), Ordering::Equal);
         assert_eq!(float_from_real.cmp(&float_from_real), Ordering::Equal);
         assert_eq!(double.cmp(&double), Ordering::Equal);
@@ -3482,14 +3198,6 @@ mod tests {
         // coercion
         assert_eq!(txt1.cmp(&txt2), Ordering::Equal);
         assert_eq!(txt2.cmp(&txt1), Ordering::Equal);
-        assert_eq!(shrt.cmp(&long), Ordering::Equal);
-        assert_eq!(shrt.cmp(&ulong), Ordering::Equal);
-        assert_eq!(ushrt.cmp(&long), Ordering::Equal);
-        assert_eq!(ushrt.cmp(&ulong), Ordering::Equal);
-        assert_eq!(long.cmp(&shrt), Ordering::Equal);
-        assert_eq!(long.cmp(&ushrt), Ordering::Equal);
-        assert_eq!(ulong.cmp(&shrt), Ordering::Equal);
-        assert_eq!(ulong.cmp(&ushrt), Ordering::Equal);
 
         // negation
         assert_ne!(txt1.cmp(&txt12), Ordering::Equal);
@@ -3502,8 +3210,6 @@ mod tests {
         assert_ne!(txt1.cmp(&time), Ordering::Equal);
         assert_ne!(txt1.cmp(&shrt), Ordering::Equal);
         assert_ne!(txt1.cmp(&ushrt), Ordering::Equal);
-        assert_ne!(txt1.cmp(&long), Ordering::Equal);
-        assert_ne!(txt1.cmp(&ulong), Ordering::Equal);
         assert_ne!(txt1.cmp(&bytes), Ordering::Equal);
         assert_ne!(txt1.cmp(&bits), Ordering::Equal);
         assert_ne!(txt1.cmp(&timestamp_tz), Ordering::Equal);
@@ -3518,8 +3224,6 @@ mod tests {
         assert_ne!(txt2.cmp(&time), Ordering::Equal);
         assert_ne!(txt2.cmp(&shrt), Ordering::Equal);
         assert_ne!(txt2.cmp(&ushrt), Ordering::Equal);
-        assert_ne!(txt2.cmp(&long), Ordering::Equal);
-        assert_ne!(txt2.cmp(&ulong), Ordering::Equal);
         assert_ne!(txt2.cmp(&bytes), Ordering::Equal);
         assert_ne!(txt2.cmp(&bits), Ordering::Equal);
         assert_ne!(txt2.cmp(&timestamp_tz), Ordering::Equal);
@@ -3535,8 +3239,6 @@ mod tests {
         assert_ne!(text.cmp(&time), Ordering::Equal);
         assert_ne!(text.cmp(&shrt), Ordering::Equal);
         assert_ne!(text.cmp(&ushrt), Ordering::Equal);
-        assert_ne!(text.cmp(&long), Ordering::Equal);
-        assert_ne!(text.cmp(&ulong), Ordering::Equal);
         assert_ne!(text.cmp(&bytes), Ordering::Equal);
         assert_ne!(text.cmp(&bits), Ordering::Equal);
         assert_ne!(text.cmp(&timestamp_tz), Ordering::Equal);
@@ -3580,16 +3282,6 @@ mod tests {
         assert_ne!(double.cmp(&ushrt), Ordering::Equal);
         assert_ne!(double_from_real.cmp(&ushrt), Ordering::Equal);
         assert_ne!(numeric.cmp(&ushrt), Ordering::Equal);
-        assert_ne!(float.cmp(&long), Ordering::Equal);
-        assert_ne!(float_from_real.cmp(&long), Ordering::Equal);
-        assert_ne!(double.cmp(&long), Ordering::Equal);
-        assert_ne!(double_from_real.cmp(&long), Ordering::Equal);
-        assert_ne!(numeric.cmp(&long), Ordering::Equal);
-        assert_ne!(float.cmp(&ulong), Ordering::Equal);
-        assert_ne!(float_from_real.cmp(&ulong), Ordering::Equal);
-        assert_ne!(double.cmp(&ulong), Ordering::Equal);
-        assert_ne!(double_from_real.cmp(&ulong), Ordering::Equal);
-        assert_ne!(numeric.cmp(&ulong), Ordering::Equal);
         assert_ne!(float.cmp(&bytes), Ordering::Equal);
         assert_ne!(float_from_real.cmp(&bytes), Ordering::Equal);
         assert_ne!(double.cmp(&bytes), Ordering::Equal);
@@ -3606,8 +3298,6 @@ mod tests {
         assert_ne!(time.cmp(&numeric), Ordering::Equal);
         assert_ne!(time.cmp(&shrt), Ordering::Equal);
         assert_ne!(time.cmp(&ushrt), Ordering::Equal);
-        assert_ne!(time.cmp(&long), Ordering::Equal);
-        assert_ne!(time.cmp(&ulong), Ordering::Equal);
         assert_ne!(time.cmp(&bytes), Ordering::Equal);
         assert_ne!(time.cmp(&bits), Ordering::Equal);
         assert_ne!(time.cmp(&timestamp_tz), Ordering::Equal);
@@ -3623,8 +3313,6 @@ mod tests {
         assert_ne!(shrt.cmp(&double_from_real), Ordering::Equal);
         assert_ne!(shrt.cmp(&numeric), Ordering::Equal);
         assert_ne!(shrt.cmp(&time), Ordering::Equal);
-        assert_ne!(shrt.cmp(&long6), Ordering::Equal);
-        assert_ne!(shrt.cmp(&ulong6), Ordering::Equal);
         assert_ne!(shrt.cmp(&bytes), Ordering::Equal);
         assert_ne!(shrt.cmp(&bits), Ordering::Equal);
         assert_ne!(shrt.cmp(&timestamp_tz), Ordering::Equal);
@@ -3640,48 +3328,10 @@ mod tests {
         assert_ne!(ushrt.cmp(&double_from_real), Ordering::Equal);
         assert_ne!(ushrt.cmp(&numeric), Ordering::Equal);
         assert_ne!(ushrt.cmp(&time), Ordering::Equal);
-        assert_ne!(ushrt.cmp(&long6), Ordering::Equal);
-        assert_ne!(ushrt.cmp(&ulong6), Ordering::Equal);
         assert_ne!(ushrt.cmp(&bytes), Ordering::Equal);
         assert_ne!(ushrt.cmp(&bits), Ordering::Equal);
         assert_ne!(ushrt.cmp(&timestamp_tz), Ordering::Equal);
 
-        assert_ne!(long.cmp(&long6), Ordering::Equal);
-        assert_ne!(long.cmp(&ulong6), Ordering::Equal);
-        assert_ne!(long.cmp(&txt1), Ordering::Equal);
-        assert_ne!(long.cmp(&txt2), Ordering::Equal);
-        assert_ne!(long.cmp(&text), Ordering::Equal);
-        assert_ne!(long.cmp(&float), Ordering::Equal);
-        assert_ne!(long.cmp(&float_from_real), Ordering::Equal);
-        assert_ne!(long.cmp(&double), Ordering::Equal);
-        assert_ne!(long.cmp(&double_from_real), Ordering::Equal);
-        assert_ne!(long.cmp(&numeric), Ordering::Equal);
-        assert_ne!(long.cmp(&time), Ordering::Equal);
-        assert_ne!(long.cmp(&shrt6), Ordering::Equal);
-        assert_ne!(long.cmp(&ushrt6), Ordering::Equal);
-        assert_ne!(long.cmp(&bytes), Ordering::Equal);
-        assert_ne!(long.cmp(&bits), Ordering::Equal);
-        assert_ne!(long.cmp(&timestamp_tz), Ordering::Equal);
-
-        assert_ne!(ulong.cmp(&long6), Ordering::Equal);
-        assert_ne!(ulong.cmp(&ulong6), Ordering::Equal);
-        assert_ne!(ulong.cmp(&txt1), Ordering::Equal);
-        assert_ne!(ulong.cmp(&txt2), Ordering::Equal);
-        assert_ne!(ulong.cmp(&text), Ordering::Equal);
-        assert_ne!(ulong.cmp(&float), Ordering::Equal);
-        assert_ne!(ulong.cmp(&float_from_real), Ordering::Equal);
-        assert_ne!(ulong.cmp(&double), Ordering::Equal);
-        assert_ne!(ulong.cmp(&double_from_real), Ordering::Equal);
-        assert_ne!(ulong.cmp(&numeric), Ordering::Equal);
-        assert_ne!(ulong.cmp(&time), Ordering::Equal);
-        assert_ne!(ulong.cmp(&shrt6), Ordering::Equal);
-        assert_ne!(ulong.cmp(&ushrt6), Ordering::Equal);
-        assert_ne!(ulong.cmp(&bytes), Ordering::Equal);
-        assert_ne!(ulong.cmp(&bits), Ordering::Equal);
-        assert_ne!(ulong.cmp(&timestamp_tz), Ordering::Equal);
-
-        assert_ne!(bytes.cmp(&long6), Ordering::Equal);
-        assert_ne!(bytes.cmp(&ulong), Ordering::Equal);
         assert_ne!(bytes.cmp(&txt1), Ordering::Equal);
         assert_ne!(bytes.cmp(&txt2), Ordering::Equal);
         assert_ne!(bytes.cmp(&text), Ordering::Equal);
@@ -3696,8 +3346,6 @@ mod tests {
         assert_ne!(bytes.cmp(&bits), Ordering::Equal);
         assert_ne!(bytes.cmp(&timestamp_tz), Ordering::Equal);
 
-        assert_ne!(bits.cmp(&long6), Ordering::Equal);
-        assert_ne!(bits.cmp(&ulong), Ordering::Equal);
         assert_ne!(bits.cmp(&txt1), Ordering::Equal);
         assert_ne!(bits.cmp(&txt2), Ordering::Equal);
         assert_ne!(bits.cmp(&text), Ordering::Equal);
@@ -3712,8 +3360,6 @@ mod tests {
         assert_ne!(bits.cmp(&timestamp_tz), Ordering::Equal);
         assert_ne!(bits.cmp(&bits2), Ordering::Equal);
 
-        assert_ne!(timestamp_tz.cmp(&long6), Ordering::Equal);
-        assert_ne!(timestamp_tz.cmp(&ulong), Ordering::Equal);
         assert_ne!(timestamp_tz.cmp(&txt1), Ordering::Equal);
         assert_ne!(timestamp_tz.cmp(&txt2), Ordering::Equal);
         assert_ne!(timestamp_tz.cmp(&text), Ordering::Equal);

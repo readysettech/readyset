@@ -253,10 +253,10 @@ impl TableDescription {
                             Ok(noria_data::DataType::from(row.try_get::<&str>(i)?))
                         }
                         Type::CHAR => Ok(row.try_get::<i8>(i)?.into()),
-                        Type::INT2 => Ok((row.try_get::<i16>(i)? as i32).into()),
-                        Type::INT4 => Ok(noria_data::DataType::Int(row.try_get(i)?)),
-                        Type::INT8 => Ok(noria_data::DataType::BigInt(row.try_get(i)?)),
-                        Type::OID => Ok(noria_data::DataType::UnsignedInt(row.try_get(i)?)),
+                        Type::INT2 => Ok((row.try_get::<i16>(i)? as i64).into()),
+                        Type::INT4 => Ok((row.try_get::<i32>(i)? as i64).into()),
+                        Type::INT8 => Ok((row.try_get::<i64>(i)? as i64).into()),
+                        Type::OID => Ok((row.try_get::<u32>(i)? as u64).into()),
                         Type::TIMESTAMP => Ok(noria_data::DataType::Timestamp(row.try_get(i)?)),
                         Type::TIMESTAMPTZ => Ok(noria_data::DataType::from(
                             row.try_get::<DateTime<FixedOffset>>(i)?,

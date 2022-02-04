@@ -1338,8 +1338,8 @@ impl NoriaConnector {
                 .get_noria_view(name, region.as_deref(), view_failed)
                 .await?;
 
-            if (offset.is_some() && !matches!(offset, Some(DataType::BigInt(0))))
-                || matches!(limit, Some(DataType::BigInt(0)))
+            if (offset.is_some() && !matches!(offset, Some(DataType::Int(0))))
+                || matches!(limit, Some(DataType::Int(0)))
             {
                 short_circuit_empty_resultset(getter).await
             } else {

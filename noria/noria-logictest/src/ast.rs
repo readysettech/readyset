@@ -362,10 +362,8 @@ impl TryFrom<DataType> for Value {
     fn try_from(value: DataType) -> Result<Self, Self::Error> {
         match value {
             DataType::None | DataType::Max => Ok(Value::Null),
-            DataType::Int(i) => Ok(Value::Integer(i.into())),
-            DataType::UnsignedInt(u) => Ok(Value::Integer(u.into())),
-            DataType::BigInt(bi) => Ok(Value::Integer(bi)),
-            DataType::UnsignedBigInt(bu) => Ok(Value::Integer(bu.try_into()?)),
+            DataType::Int(i) => Ok(Value::Integer(i)),
+            DataType::UnsignedInt(u) => Ok(Value::Integer(u.try_into()?)),
             DataType::Float(f, _) => Ok(f.into()),
             DataType::Double(f, _) => Ok(f.into()),
             DataType::Text(_) | DataType::TinyText(_) => Ok(Value::Text(value.try_into()?)),

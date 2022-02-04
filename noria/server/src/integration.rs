@@ -367,7 +367,7 @@ async fn broad_recursing_upquery() {
         .perform_all((0..n).map(|i| {
             vec![
                 DataType::Int(i),
-                DataType::Int(i % nshards as i32),
+                DataType::Int(i % nshards as i64),
                 DataType::Int(1),
             ]
         }))
@@ -380,7 +380,7 @@ async fn broad_recursing_upquery() {
     let rows = reader.lookup(&[DataType::Int(1)], true).await.unwrap();
     assert_eq!(rows.len(), n as usize);
     for i in 0..n {
-        assert!(rows.iter().any(|row| get_col!(row, "base_col", i32) == i));
+        assert!(rows.iter().any(|row| get_col!(row, "base_col", i64) == i));
     }
 }
 

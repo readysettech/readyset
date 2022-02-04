@@ -12,7 +12,7 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 const MAX_ALLOWED_PACKET_VARIABLE_NAME: &str = "max_allowed_packet";
-const MAX_ALLOWED_PACKET_DEFAULT: DataType = DataType::UnsignedInt(67108864u32);
+const MAX_ALLOWED_PACKET_DEFAULT: DataType = DataType::UnsignedInt(67108864);
 
 /// MySQL flavor of [`QueryHandler`].
 pub struct MySqlQueryHandler;
