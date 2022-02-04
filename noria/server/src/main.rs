@@ -186,7 +186,7 @@ struct Opts {
     max_concurrent_replays: Option<usize>,
 
     /// Directory in which to store replicated table data. If not specified, defaults to the current working directory.
-    #[clap(long)]
+    #[clap(long, env = "DB_DIR")]
     db_dir: Option<PathBuf>,
 }
 
