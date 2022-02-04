@@ -152,6 +152,7 @@ impl TestBuilder {
         let mut builder = Builder::for_tests();
         builder.set_allow_topk(true);
         builder.set_allow_paginate(true);
+        builder.set_allow_mixed_comparisons(true);
         if !self.partial {
             builder.disable_partial();
         }
