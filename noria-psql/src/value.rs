@@ -50,7 +50,7 @@ impl TryFrom<Value> for ps::Value {
             (Type::TEXT, DataType::TinyText(t)) => Ok(ps::Value::Text(t.as_str().into())),
             (Type::TIMESTAMP, DataType::Timestamp(v)) => Ok(ps::Value::Timestamp(v)),
             (Type::TIMESTAMPTZ, DataType::TimestampTz(v)) => {
-                Ok(ps::Value::TimestampTz(*v.as_ref()))
+                Ok(ps::Value::TimestampTz(v.to_chrono()))
             }
             (Type::DATE, DataType::Timestamp(v)) => Ok(ps::Value::Date(v.date())),
             (Type::TIME, DataType::Time(t)) => Ok(ps::Value::Time((*t.as_ref()).into())),
