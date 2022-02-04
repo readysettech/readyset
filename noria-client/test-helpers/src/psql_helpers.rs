@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use noria_server::Handle;
 use std::env;
 use tokio::net::TcpStream;
 use tokio_postgres::NoTls;
@@ -8,7 +9,7 @@ use noria_client::backend::BackendBuilder;
 use noria_client::Backend;
 use noria_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 
-pub async fn setup_w_fallback() -> tokio_postgres::Config {
+pub async fn setup_w_fallback() -> (tokio_postgres::Config, Handle) {
     crate::setup::<PostgreSQLAdapter>(
         BackendBuilder::new().require_authentication(false),
         true,
@@ -18,7 +19,7 @@ pub async fn setup_w_fallback() -> tokio_postgres::Config {
     .await
 }
 
-pub async fn setup(partial: bool) -> tokio_postgres::Config {
+pub async fn setup(partial: bool) -> (tokio_postgres::Config, Handle) {
     crate::setup::<PostgreSQLAdapter>(
         BackendBuilder::new().require_authentication(false),
         false,

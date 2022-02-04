@@ -8,7 +8,8 @@ use noria_client_test_helpers::sleep;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mirror_reads_with_supported_query() {
-    let mut conn = mysql_async::Conn::new(setup(true).await).await.unwrap();
+    let (opts, _handle) = setup(true).await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE Cats(id int PRIMARY KEY, name VARCHAR(255))")
         .await
@@ -29,7 +30,8 @@ async fn mirror_reads_with_supported_query() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore] // waiting on fallback for prepared statements
 async fn mirror_reads_with_unsupported_query() {
-    let mut conn = mysql_async::Conn::new(setup(true).await).await.unwrap();
+    let (opts, _handle) = setup(true).await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
     conn.query_drop("CREATE TABLE Cats(id int PRIMARY KEY, name VARCHAR(255))")
         .await

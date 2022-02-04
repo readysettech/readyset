@@ -8,7 +8,7 @@ use common::connect;
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn create_table() {
-    let config = setup_w_fallback().await;
+    let (config, _handle) = setup_w_fallback().await;
     let client = connect(config).await;
 
     client
@@ -37,7 +37,7 @@ async fn create_table() {
 #[serial]
 #[ignore] // needs proper detection of reads vs writes through fallback
 async fn prepare_execute_fallback() {
-    let config = setup_w_fallback().await;
+    let (config, _handle) = setup_w_fallback().await;
     let client = connect(config).await;
 
     client

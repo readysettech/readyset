@@ -561,10 +561,8 @@ impl<const K: usize> Operations<K> {
         )
         .await
         .unwrap();
-        let mut noria =
-            mysql_async::Conn::new(noria_client_test_helpers::mysql_helpers::setup(true).await)
-                .await
-                .unwrap();
+        let (opts, _handle) = noria_client_test_helpers::mysql_helpers::setup(true).await;
+        let mut noria = mysql_async::Conn::new(opts).await.unwrap();
 
         for table in tables.values() {
             mysql.query_drop(table.create_statement).await.unwrap();

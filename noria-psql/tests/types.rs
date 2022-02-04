@@ -1,11 +1,12 @@
 use noria_client::backend::BackendBuilder;
 use noria_client_test_helpers;
 use noria_client_test_helpers::psql_helpers::PostgreSQLAdapter;
+use noria_server::Handle;
 
 mod common;
 use common::connect;
 
-async fn setup() -> tokio_postgres::Config {
+async fn setup() -> (tokio_postgres::Config, Handle) {
     noria_client_test_helpers::setup::<PostgreSQLAdapter>(
         BackendBuilder::new().require_authentication(false),
         true,
@@ -37,7 +38,7 @@ mod types {
         V: ToSql + Sync + PartialEq,
         for<'a> V: FromSql<'a>,
     {
-        let config = setup().await;
+        let (config, _handle) = setup().await;
         let client = connect(config).await;
 
         sleep().await;

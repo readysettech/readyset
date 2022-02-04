@@ -3927,6 +3927,7 @@ dependencies = [
  "noria-client-test-helpers",
  "noria-data",
  "noria-errors",
+ "noria-server",
  "paste 1.0.6",
  "proptest",
  "serial_test",
