@@ -15,7 +15,7 @@ use futures_util::{
     future, future::TryFutureExt, ready, stream::futures_unordered::FuturesUnordered,
     stream::StreamExt, stream::TryStreamExt,
 };
-use launchpad::intervals::BoundPair;
+use launchpad::intervals::{cmp_start_end, BoundPair};
 use nom_sql::{BinaryOperator, ColumnSpecification};
 use nom_sql::{Column, SqlType};
 use noria_data::DataType;
@@ -350,6 +350,31 @@ impl KeyComparison {
             }
             (start, end) => KeyComparison::Range((start.cloned(), end.cloned())),
         }
+    }
+
+    /// Returns true if this KeyComparison represents a range where the upper bound is less than the
+    /// lower bound
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use noria::KeyComparison;
+    /// use noria_data::DataType;
+    /// use vec1::vec1;
+    ///
+    /// let not_reversed =
+    ///     KeyComparison::from_range(&(vec1![DataType::from(0)]..=vec1![DataType::from(1)]));
+    /// assert!(!not_reversed.is_reversed_range());
+    ///
+    /// let reversed =
+    ///     KeyComparison::from_range(&(vec1![DataType::from(1)]..=vec1![DataType::from(0)]));
+    /// assert!(reversed.is_reversed_range());
+    /// ```
+    pub fn is_reversed_range(&self) -> bool {
+        cmp_start_end(
+            <Self as RangeBounds<Vec1<DataType>>>::start_bound(self),
+            <Self as RangeBounds<Vec1<DataType>>>::end_bound(self),
+        ) == Ordering::Greater
     }
 
     /// Returns the shard key(s) that the given cell in this [`KeyComparison`] must target, given

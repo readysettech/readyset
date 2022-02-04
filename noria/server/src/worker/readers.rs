@@ -456,6 +456,11 @@ fn do_lookup(
             })
             .map(|r| r.0)
     } else {
+        if key.is_reversed_range() {
+            warn!("Reader received lookup for range with start bound above end bound; returning empty result set");
+            return Ok(SerializedReadReplyBatch::empty());
+        }
+
         reader
             .try_find_range_and(&key, |r| r.into_iter().cloned().collect::<Vec<_>>())
             .map(|(rs, _)| {
