@@ -194,7 +194,6 @@ skip-tree = [
     { name = "prettytable-rs", version = "0.8.0" },
     { name = "handlebars", version = "4.1" },
     { name = "fail", version = "0.5.0" },
-    { name = "jemalloc-ctl", version = "0.3.3" },
     { name = "rust_decimal", version = "1.17.0" },
     { name = "prometheus-http-query", version = "0.3.0" },
     { name = "mysql_common", version = "0.28.0" },

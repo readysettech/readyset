@@ -7,7 +7,7 @@ edition = "2018"
 build = "src/build.rs"
 
 [target.'cfg(not(target_env="msvc"))'.dependencies]
-jemallocator = "0.3"
+tikv-jemallocator = "0.4"
 
 [dependencies]
 clap = { version = "3.0", features = ["derive","env"] }
