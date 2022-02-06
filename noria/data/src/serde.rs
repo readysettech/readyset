@@ -279,8 +279,9 @@ impl<'de> Deserialize<'de> for DataType {
                     // We deserialize the NaiveDateTime by extracting nsecs from the top 64 bits of the encoded i128, and secs from the low 64 bits
                     (Field::Timestamp, variant) => VariantAccess::newtype_variant::<u128>(variant)
                         .map(|r| NaiveDateTime::from_timestamp(r as _, (r >> 64) as _).into()),
-                    (Field::Time, variant) => VariantAccess::newtype_variant::<MysqlTime>(variant)
-                        .map(|v| DataType::Time(Arc::new(v))),
+                    (Field::Time, variant) => {
+                        VariantAccess::newtype_variant::<MysqlTime>(variant).map(DataType::Time)
+                    }
                     (Field::ByteArray, variant) => {
                         VariantAccess::newtype_variant::<ByteBuf>(variant)
                             .map(|v| DataType::ByteArray(Arc::new(v.into_vec())))

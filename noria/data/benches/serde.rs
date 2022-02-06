@@ -1,6 +1,7 @@
 use std::convert::TryInto;
 
 use criterion::{criterion_group, criterion_main, Criterion};
+use mysql_time::MysqlTime;
 
 criterion_group!(benches, serde);
 criterion_main!(benches);
@@ -26,6 +27,8 @@ fn serde(c: &mut Criterion) {
         &chrono::NaiveDateTime::from_timestamp(0, 42_000_000),
     ));
     let timestamp = DataType::Timestamp(chrono::NaiveDateTime::from_timestamp(0, 42_000_000));
+
+    let time: DataType = MysqlTime::from_hmsus(false, 10, 30, 24, 100).into();
 
     let mut temp_storage = Vec::with_capacity(500);
 
@@ -124,6 +127,20 @@ fn serde(c: &mut Criterion) {
 
     group.bench_function("Deserialize Timestamp", |b| {
         let t = bincode::options().serialize(&timestamp).unwrap();
+        b.iter(|| bincode::options().deserialize::<DataType>(&t).unwrap())
+    });
+
+    group.bench_function("Serialize Time", |b| {
+        b.iter(|| {
+            bincode::options()
+                .serialize_into(&mut temp_storage, &time)
+                .unwrap();
+            temp_storage.clear();
+        })
+    });
+
+    group.bench_function("Deserialize Time", |b| {
+        let t = bincode::options().serialize(&time).unwrap();
         b.iter(|| bincode::options().deserialize::<DataType>(&t).unwrap())
     });
 }

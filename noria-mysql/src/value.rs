@@ -1,5 +1,4 @@
 use std::convert::{TryFrom, TryInto};
-use std::sync::Arc;
 
 use msql_srv::{Value, ValueInner};
 use mysql_common::chrono::NaiveDate;
@@ -21,14 +20,14 @@ pub(crate) fn mysql_value_to_datatype(value: Value) -> ReadySetResult<DataType> 
                 details: format!("{:?}", e),
             }
         })?),
-        ValueInner::Time(_) => DataType::Time(Arc::new(value.try_into().map_err(|e| {
+        ValueInner::Time(_) => DataType::Time(value.try_into().map_err(|e| {
             ReadySetError::DataTypeConversionError {
                 val: format!("{:?}", value.into_inner()),
                 src_type: "ValueInner::Time".to_string(),
                 target_type: "Datatype::Time".to_string(),
                 details: format!("{:?}", e),
             }
-        })?)),
+        })?),
         ValueInner::Date(_) => DataType::Timestamp(
             NaiveDate::try_from(value)
                 .map_err(|e| ReadySetError::DataTypeConversionError {

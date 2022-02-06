@@ -4,7 +4,6 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Formatter;
 use std::ops::{Add, Sub};
-use std::sync::Arc;
 
 use chrono::{Datelike, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
@@ -355,7 +354,7 @@ impl Expression {
                             &(MysqlTime::try_from(time_param2.as_ref())?),
                         )
                     };
-                    Ok(Cow::Owned(DataType::Time(Arc::new(time))))
+                    Ok(Cow::Owned(DataType::Time(time)))
                 }
                 BuiltinFunction::Addtime(arg1, arg2) => {
                     let param1 = arg1.eval(record)?;
@@ -371,10 +370,10 @@ impl Expression {
                             &(MysqlTime::try_from(time_param2.as_ref())?),
                         ))))
                     } else {
-                        Ok(Cow::Owned(DataType::Time(Arc::new(addtime_times(
+                        Ok(Cow::Owned(DataType::Time(addtime_times(
                             &(MysqlTime::try_from(time_param1.as_ref())?),
                             &(MysqlTime::try_from(time_param2.as_ref())?),
-                        )))))
+                        ))))
                     }
                 }
                 BuiltinFunction::Round(arg1, arg2) => {
@@ -598,7 +597,6 @@ fn addtime_times(time1: &MysqlTime, time2: &MysqlTime) -> MysqlTime {
 #[cfg(test)]
 mod tests {
     use std::convert::TryInto;
-    use std::sync::Arc;
 
     use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
     use test_strategy::proptest;
@@ -858,9 +856,7 @@ mod tests {
         );
         assert_eq!(
             expr.eval(&[param1.into(), param2.into()]).unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
-                false, 47, 0, 0, 0
-            ))))
+            Cow::Owned(DataType::Time(MysqlTime::from_hmsus(false, 47, 0, 0, 0)))
         );
         assert_eq!(
             expr.eval(&[
@@ -868,9 +864,7 @@ mod tests {
                 param2.to_string().try_into().unwrap()
             ])
             .unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
-                false, 47, 0, 0, 0
-            ))))
+            Cow::Owned(DataType::Time(MysqlTime::from_hmsus(false, 47, 0, 0, 0)))
         );
         let param1 = NaiveDateTime::new(
             NaiveDate::from_ymd(2003, 10, 12),
@@ -882,9 +876,7 @@ mod tests {
         );
         assert_eq!(
             expr.eval(&[param1.into(), param2.into()]).unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
-                true, 49, 0, 0, 0
-            ))))
+            Cow::Owned(DataType::Time(MysqlTime::from_hmsus(true, 49, 0, 0, 0)))
         );
         assert_eq!(
             expr.eval(&[
@@ -892,9 +884,7 @@ mod tests {
                 param2.to_string().try_into().unwrap()
             ])
             .unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
-                true, 49, 0, 0, 0
-            ))))
+            Cow::Owned(DataType::Time(MysqlTime::from_hmsus(true, 49, 0, 0, 0)))
         );
         let param2 = NaiveTime::from_hms(4, 13, 33);
         assert_eq!(
@@ -912,9 +902,7 @@ mod tests {
         let param1 = NaiveTime::from_hms(5, 13, 33);
         assert_eq!(
             expr.eval(&[param1.into(), param2.into()]).unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
-                true, 1, 0, 0, 0
-            ))))
+            Cow::Owned(DataType::Time(MysqlTime::from_hmsus(true, 1, 0, 0, 0)))
         );
         assert_eq!(
             expr.eval(&[
@@ -922,41 +910,39 @@ mod tests {
                 param2.to_string().try_into().unwrap()
             ])
             .unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
-                true, 1, 0, 0, 0
-            ))))
+            Cow::Owned(DataType::Time(MysqlTime::from_hmsus(true, 1, 0, 0, 0)))
         );
         let param1 = "not a date nor time";
         let param2 = "01:00:00.4";
         assert_eq!(
             expr.eval(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
                 .unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+            Cow::Owned(DataType::Time(MysqlTime::from_hmsus(
                 false, 1, 0, 0, 400_000
-            ))))
+            )))
         );
         assert_eq!(
             expr.eval(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
                 .unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+            Cow::Owned(DataType::Time(MysqlTime::from_hmsus(
                 true, 1, 0, 0, 400_000
-            ))))
+            )))
         );
 
         let param2 = "10000.4";
         assert_eq!(
             expr.eval(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
                 .unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+            Cow::Owned(DataType::Time(MysqlTime::from_hmsus(
                 false, 1, 0, 0, 400_000
-            ))))
+            )))
         );
         assert_eq!(
             expr.eval(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
                 .unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+            Cow::Owned(DataType::Time(MysqlTime::from_hmsus(
                 true, 1, 0, 0, 400_000
-            ))))
+            )))
         );
 
         let param2: f32 = 3.57;
@@ -966,9 +952,9 @@ mod tests {
                 DataType::try_from(param2).unwrap()
             ])
             .unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_microseconds(
+            Cow::Owned(DataType::Time(MysqlTime::from_microseconds(
                 (-param2 * 1_000_000_f32) as i64
-            ))))
+            )))
         );
 
         let param2: f64 = 3.57;
@@ -978,9 +964,9 @@ mod tests {
                 DataType::try_from(param2).unwrap()
             ])
             .unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_microseconds(
+            Cow::Owned(DataType::Time(MysqlTime::from_microseconds(
                 (-param2 * 1_000_000_f64) as i64
-            ))))
+            )))
         );
     }
 
@@ -1051,9 +1037,9 @@ mod tests {
         let param1 = MysqlTime::from_hmsus(true, 10, 12, 44, 123_000);
         assert_eq!(
             expr.eval(&[param2.into(), param1.into()]).unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+            Cow::Owned(DataType::Time(MysqlTime::from_hmsus(
                 true, 7, 1, 9, 123_000
-            ))))
+            )))
         );
         assert_eq!(
             expr.eval(&[
@@ -1061,41 +1047,41 @@ mod tests {
                 param1.to_string().try_into().unwrap()
             ])
             .unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+            Cow::Owned(DataType::Time(MysqlTime::from_hmsus(
                 true, 7, 1, 9, 123_000
-            ))))
+            )))
         );
         let param1 = "not a date nor time";
         let param2 = "01:00:00.4";
         assert_eq!(
             expr.eval(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
                 .unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+            Cow::Owned(DataType::Time(MysqlTime::from_hmsus(
                 true, 1, 0, 0, 400_000
-            ))))
+            )))
         );
         assert_eq!(
             expr.eval(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
                 .unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+            Cow::Owned(DataType::Time(MysqlTime::from_hmsus(
                 true, 1, 0, 0, 400_000
-            ))))
+            )))
         );
 
         let param2 = "10000.4";
         assert_eq!(
             expr.eval(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
                 .unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+            Cow::Owned(DataType::Time(MysqlTime::from_hmsus(
                 true, 1, 0, 0, 400_000
-            ))))
+            )))
         );
         assert_eq!(
             expr.eval(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
                 .unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+            Cow::Owned(DataType::Time(MysqlTime::from_hmsus(
                 true, 1, 0, 0, 400_000
-            ))))
+            )))
         );
 
         let param2: f32 = 3.57;
@@ -1105,9 +1091,9 @@ mod tests {
                 DataType::try_from(param2).unwrap()
             ])
             .unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_microseconds(
+            Cow::Owned(DataType::Time(MysqlTime::from_microseconds(
                 (param2 * 1_000_000_f32) as i64
-            ))))
+            )))
         );
 
         let param2: f64 = 3.57;
@@ -1117,9 +1103,9 @@ mod tests {
                 DataType::try_from(param2).unwrap()
             ])
             .unwrap(),
-            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_microseconds(
+            Cow::Owned(DataType::Time(MysqlTime::from_microseconds(
                 (param2 * 1_000_000_f64) as i64
-            ))))
+            )))
         );
     }
 
