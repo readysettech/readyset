@@ -862,8 +862,8 @@ impl From<Size0Error> for ReadySetError {
     }
 }
 
-impl From<jemalloc_ctl::Error> for ReadySetError {
-    fn from(err: jemalloc_ctl::Error) -> Self {
+impl From<tikv_jemalloc_ctl::Error> for ReadySetError {
+    fn from(err: tikv_jemalloc_ctl::Error) -> Self {
         Self::JemallocCtlError(err.to_string())
     }
 }
