@@ -369,7 +369,7 @@ impl TryFrom<DataType> for Value {
             DataType::Text(_) | DataType::TinyText(_) => Ok(Value::Text(value.try_into()?)),
             DataType::Timestamp(ts) => Ok(Value::Date(ts)),
             DataType::TimestampTz(ref ts) => Ok(Value::Date(ts.to_chrono().naive_utc())),
-            DataType::Time(t) => Ok(Value::Time(*t)),
+            DataType::Time(t) => Ok(Value::Time(t)),
             DataType::ByteArray(t) => Ok(Value::ByteArray(t.as_ref().clone())),
             DataType::Numeric(ref d) => Ok(Value::Numeric(*d.as_ref())),
             DataType::BitVector(ref b) => Ok(Value::BitVector(b.as_ref().clone())),

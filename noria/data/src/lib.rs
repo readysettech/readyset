@@ -62,7 +62,7 @@ pub enum DataType {
     TimestampTz(TimestampTz),
     /// A time duration
     /// NOTE: [`MysqlTime`] is from -838:59:59 to 838:59:59 whereas Postgres time is from 00:00:00 to 24:00:00
-    Time(Arc<MysqlTime>),
+    Time(MysqlTime),
     //NOTE(Fran): Using an `Arc` to keep the `DataType` type 16 bytes long
     /// A byte array
     ByteArray(Arc<Vec<u8>>),
@@ -154,7 +154,7 @@ impl DataType {
             DataType::Double(..) => DataType::Double(f64::MIN, u8::MAX),
             DataType::Int(_) => DataType::Int(i64::min_value()),
             DataType::UnsignedInt(_) => DataType::UnsignedInt(0),
-            DataType::Time(_) => DataType::Time(Arc::new(MysqlTime::min_value())),
+            DataType::Time(_) => DataType::Time(MysqlTime::min_value()),
             DataType::ByteArray(_) => DataType::ByteArray(Arc::new(Vec::new())),
             DataType::Numeric(_) => DataType::from(Decimal::MIN),
             DataType::BitVector(_) => DataType::from(BitVec::new()),
@@ -179,7 +179,7 @@ impl DataType {
             DataType::Double(..) => DataType::Double(f64::MIN, u8::MAX),
             DataType::Int(_) => DataType::Int(i64::max_value()),
             DataType::UnsignedInt(_) => DataType::UnsignedInt(u64::max_value()),
-            DataType::Time(_) => DataType::Time(Arc::new(MysqlTime::max_value())),
+            DataType::Time(_) => DataType::Time(MysqlTime::max_value()),
             DataType::Numeric(_) => DataType::from(Decimal::MAX),
             DataType::TinyText(_)
             | DataType::Text(_)
@@ -265,7 +265,7 @@ impl DataType {
                     != FixedOffset::west(0)
                         .from_utc_datetime(&NaiveDate::from_ymd(0, 0, 0).and_hms(0, 0, 0))
             }
-            DataType::Time(ref t) => **t != MysqlTime::from_microseconds(0),
+            DataType::Time(ref t) => *t != MysqlTime::from_microseconds(0),
             DataType::ByteArray(ref array) => !array.is_empty(),
             DataType::Numeric(ref d) => !d.is_zero(),
             DataType::BitVector(ref bits) => !bits.is_empty(),
@@ -507,9 +507,9 @@ impl DataType {
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Time) => {
                 match <&str>::try_from(self)?.parse() {
-                    Ok(t) => Ok(Cow::Owned(Self::Time(Arc::new(t)))),
+                    Ok(t) => Ok(Cow::Owned(Self::Time(t))),
                     Err(mysql_time::ConvertError::ParseError) => {
-                        Ok(Cow::Owned(Self::Time(Arc::new(Default::default()))))
+                        Ok(Cow::Owned(Self::Time(Default::default())))
                     }
                     Err(e) => Err(mk_err(
                         "Could not parse value as time".to_owned(),
@@ -520,7 +520,6 @@ impl DataType {
             (_, Some(Int(_) | Bigint(_) | Real | Float), Time) => {
                 MysqlTime::try_from(<f64>::try_from(self)?)
                     .map_err(|e| mk_err("Could not parse value as time".to_owned(), Some(e.into())))
-                    .map(Arc::new)
                     .map(Self::Time)
                     .map(Cow::Owned)
             }
@@ -534,7 +533,7 @@ impl DataType {
                 Ok(Cow::Owned(Self::Timestamp(ts.date().and_hms(0, 0, 0))))
             }
             (Self::Timestamp(ts), Some(Timestamp), Time) => {
-                Ok(Cow::Owned(Self::Time(Arc::new(ts.time().into()))))
+                Ok(Cow::Owned(Self::Time(ts.time().into())))
             }
             (Self::Timestamp(ts), Some(Timestamp), TimestampTz) => {
                 Ok(Cow::Owned(Self::from(FixedOffset::west(0).from_utc_datetime(ts))))
@@ -547,7 +546,7 @@ impl DataType {
                 Ok(Cow::Owned(Self::Timestamp(ts.to_chrono().date().naive_utc().and_hms(0, 0, 0))))
             }
             (Self::TimestampTz(ref ts), Some(Timestamp), Time) => {
-                Ok(Cow::Owned(Self::Time(Arc::new(ts.to_chrono().time().into()))))
+                Ok(Cow::Owned(Self::Time(ts.to_chrono().time().into())))
             }
             (_, Some(Int(_)), Bigint(_) | BigSerial) => Ok(Cow::Owned(DataType::Int(i64::try_from(self)?))),
             (Self::Float(f, _), Some(Float), Tinyint(_) | Smallint(_) | Int(_)) => {
@@ -880,7 +879,7 @@ impl PartialEq for DataType {
                 #[allow(clippy::unwrap_used)]
                 let a = <&str>::try_from(self).unwrap();
                 a.parse()
-                    .map(|other_t: MysqlTime| t.as_ref().eq(&other_t))
+                    .map(|other_t: MysqlTime| t.eq(&other_t))
                     .unwrap_or(false)
             }
             (&DataType::Int(a), &DataType::Int(b)) => a == b,
@@ -935,7 +934,7 @@ impl PartialEq for DataType {
             ) => other == self,
             (&DataType::Timestamp(tsa), &DataType::Timestamp(tsb)) => tsa == tsb,
             (&DataType::TimestampTz(tsa), &DataType::TimestampTz(tsb)) => tsa == tsb,
-            (&DataType::Time(ref ta), &DataType::Time(ref tb)) => ta.as_ref() == tb.as_ref(),
+            (&DataType::Time(ref ta), &DataType::Time(ref tb)) => ta == tb,
             (&DataType::ByteArray(ref array_a), &DataType::ByteArray(ref array_b)) => {
                 array_a.as_ref() == array_b.as_ref()
             }
@@ -1010,7 +1009,7 @@ impl Ord for DataType {
                 // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
                 #[allow(clippy::unwrap_used)]
                 let a = <&str>::try_from(self).unwrap().parse();
-                a.map(|t: MysqlTime| t.cmp(other_t.as_ref()))
+                a.map(|t: MysqlTime| t.cmp(other_t))
                     .unwrap_or(Ordering::Greater)
             }
             (
@@ -1440,13 +1439,13 @@ impl TryFrom<DataType> for Literal {
 
 impl From<NaiveTime> for DataType {
     fn from(t: NaiveTime) -> Self {
-        DataType::Time(Arc::new(t.into()))
+        DataType::Time(t.into())
     }
 }
 
 impl From<MysqlTime> for DataType {
     fn from(t: MysqlTime) -> Self {
-        DataType::Time(Arc::new(t))
+        DataType::Time(t)
     }
 }
 
@@ -1527,7 +1526,7 @@ impl<'a> TryFrom<&'a DataType> for MysqlTime {
 
     fn try_from(data: &'a DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::Time(ref mysql_time) => Ok(*mysql_time.as_ref()),
+            DataType::Time(ref mysql_time) => Ok(*mysql_time),
             _ => Err(Self::Error::DataTypeConversionError {
                 val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
@@ -1940,13 +1939,13 @@ impl TryFrom<&mysql_common::value::Value> for DataType {
                 Ok(DataType::None)
             }
             Value::Time(neg, days, hours, minutes, seconds, microseconds) => {
-                Ok(DataType::Time(Arc::new(MysqlTime::from_hmsus(
+                Ok(DataType::Time(MysqlTime::from_hmsus(
                     !neg,
                     <u16>::try_from(*hours as u32 + days * 24u32).unwrap_or(u16::MAX),
                     *minutes,
                     *seconds,
                     (*microseconds).into(),
-                ))))
+                )))
             }
         }
     }
@@ -2004,7 +2003,7 @@ impl ToSql for DataType {
             (Self::Timestamp(x), &Type::DATE) => x.date().to_sql(ty, out),
             (Self::Timestamp(x), _) => x.to_sql(ty, out),
             (Self::TimestampTz(ref ts), _) => ts.to_chrono().to_sql(ty, out),
-            (Self::Time(x), _) => NaiveTime::from(**x).to_sql(ty, out),
+            (Self::Time(x), _) => NaiveTime::from(*x).to_sql(ty, out),
             (Self::ByteArray(ref array), _) => array.as_ref().to_sql(ty, out),
             (Self::BitVector(ref bits), _) => bits.as_ref().to_sql(ty, out),
         }
@@ -2307,10 +2306,7 @@ impl Arbitrary for DataType {
             any::<(f64, u8)>().prop_map(|(f, p)| Double(f, p)),
             any::<String>().prop_map(|s| DataType::from(s.replace('\0', ""))),
             arbitrary_naive_date_time().prop_map(Timestamp),
-            arbitrary_duration()
-                .prop_map(MysqlTime::new)
-                .prop_map(Arc::new)
-                .prop_map(Time),
+            arbitrary_duration().prop_map(MysqlTime::new).prop_map(Time),
             any::<Vec<u8>>().prop_map(|b| DataType::ByteArray(Arc::new(b))),
             arbitrary_decimal().prop_map(DataType::from),
         ]
@@ -2563,7 +2559,7 @@ mod tests {
         assert!(a_dt.is_ok());
         assert_eq!(
             a_dt.unwrap(),
-            DataType::Time(Arc::new(MysqlTime::from_microseconds(0)))
+            DataType::Time(MysqlTime::from_microseconds(0))
         )
     }
 

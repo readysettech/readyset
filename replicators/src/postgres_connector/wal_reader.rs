@@ -310,7 +310,7 @@ impl wal::TupleData {
                             }
                             .and_hms(0, 0, 0)
                         }),
-                        PGType::TIME => DataType::Time(Arc::new(MysqlTime::from_str(&str)?)),
+                        PGType::TIME => DataType::Time(MysqlTime::from_str(&str)?),
                         PGType::BIT | PGType::VARBIT => {
                             let mut bits = BitVec::with_capacity(str.len());
                             for c in str.chars() {

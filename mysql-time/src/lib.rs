@@ -1,4 +1,3 @@
-use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
@@ -13,9 +12,7 @@ use mysql_common::value::convert::{ConvIr, FromValue, FromValueError};
 use mysql_common::value::Value;
 use proptest::arbitrary::Arbitrary;
 use proptest::strategy::Strategy;
-use serde::de;
-use serde::de::{MapAccess, SeqAccess, Visitor};
-use serde::ser::{Serialize, SerializeStruct, Serializer};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 const MICROSECS_IN_SECOND: i64 = 1_000_000;
@@ -39,15 +36,18 @@ pub enum ConvertError {
 }
 
 /// MySQL's TIME type implementation.
-/// Internally, this uses a [`chrono::Duration`], which allows for negative durations.
-/// This struct ensures that the inner [`chrono::Duration`] is at all times within
+/// Internally, this uses an `i64` to store the nano value of the time, which maps
+/// 1:1 to a [`chrono::Duration`] which allows for negative durations. All operations
+/// internally are performed on a [`chrono::Duration`], with conversion to and from
+/// that type as needed.
+/// This struct ensures that the inner `i64` is at all times within
 /// the MySQL's TIME range, which is `-838:59:59` to `838:59:59`.
 /// Following the MySQL's TIME behavior, this struct also allows to be constructed with
 /// an invalid [`chrono::Duration`] (for example, one that surpasses or falls below the
 /// allowed range), in which case it is "truncated" to the closest range limit.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct MysqlTime {
-    duration: Duration,
+    nanos: i64,
 }
 
 impl MysqlTime {
@@ -87,7 +87,9 @@ impl MysqlTime {
         if secs < (-MAX_MYSQL_TIME_SECONDS) {
             return MysqlTime::min_value();
         }
-        MysqlTime { duration }
+        MysqlTime {
+            nanos: duration.num_nanoseconds().expect("Limit checked above"),
+        }
     }
 
     /// Creates a new [`MysqlTime`] from the given `hour`, `minutes`, `seconds`
@@ -230,7 +232,7 @@ impl MysqlTime {
     /// assert_eq!(pos_mysql_time.is_positive(), true);
     /// ```
     pub fn is_positive(&self) -> bool {
-        self.duration >= Duration::zero()
+        self.nanos.is_positive()
     }
 
     /// Returns the `hour` from this [`MysqlTime`]
@@ -244,7 +246,7 @@ impl MysqlTime {
     /// assert_eq!(mysql_time.hour(), 2);
     /// ```
     pub fn hour(&self) -> u16 {
-        self.duration
+        self.duration()
             .num_hours()
             .abs()
             .try_into()
@@ -262,7 +264,7 @@ impl MysqlTime {
     /// assert_eq!(mysql_time.minutes(), 23);
     /// ```
     pub fn minutes(&self) -> u8 {
-        (self.duration.num_minutes().abs() % 60)
+        (self.duration().num_minutes().abs() % 60)
             .try_into()
             .unwrap_or(59)
             .min(59)
@@ -279,7 +281,7 @@ impl MysqlTime {
     /// assert_eq!(mysql_time.seconds(), 58);
     /// ```
     pub fn seconds(&self) -> u8 {
-        (self.duration.num_seconds().abs() % 60)
+        (self.duration().num_seconds().abs() % 60)
             .try_into()
             .unwrap_or(59)
             .min(59)
@@ -296,11 +298,15 @@ impl MysqlTime {
     /// assert_eq!(mysql_time.microseconds(), 829313);
     /// ```
     pub fn microseconds(&self) -> u32 {
-        self.duration
+        self.duration()
             .num_microseconds()
             .map(|us| (us.abs() % MICROSECS_IN_SECOND) as u32)
             .unwrap_or(0)
             .max(0)
+    }
+
+    fn duration(&self) -> Duration {
+        Duration::nanoseconds(self.nanos)
     }
 }
 
@@ -372,13 +378,7 @@ impl Hash for MysqlTime {
 
 impl From<MysqlTime> for Duration {
     fn from(t: MysqlTime) -> Self {
-        t.duration
-    }
-}
-
-impl Borrow<Duration> for MysqlTime {
-    fn borrow(&self) -> &Duration {
-        &self.duration
+        Duration::nanoseconds(t.nanos)
     }
 }
 
@@ -637,7 +637,7 @@ impl Sub for MysqlTime {
     type Output = MysqlTime;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        MysqlTime::new(self.duration.sub(rhs.duration))
+        MysqlTime::new(self.duration().sub(rhs.duration()))
     }
 }
 
@@ -645,7 +645,7 @@ impl Add for MysqlTime {
     type Output = MysqlTime;
 
     fn add(self, rhs: Self) -> Self::Output {
-        MysqlTime::new(self.duration.add(rhs.duration))
+        MysqlTime::new(self.duration().add(rhs.duration()))
     }
 }
 
@@ -653,167 +653,7 @@ impl Add<NaiveDateTime> for MysqlTime {
     type Output = NaiveDateTime;
 
     fn add(self, rhs: NaiveDateTime) -> Self::Output {
-        rhs.add(self.duration)
-    }
-}
-
-impl Serialize for MysqlTime {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut state = serializer.serialize_struct("MysqlTime", 5)?;
-        state.serialize_field::<bool>("is_positive", &self.is_positive())?;
-        state.serialize_field::<u16>("hour", &self.hour())?;
-        state.serialize_field::<u8>("minutes", &self.minutes())?;
-        state.serialize_field::<u8>("seconds", &self.seconds())?;
-        state.serialize_field::<u32>("microseconds", &self.microseconds())?;
-        state.end()
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for MysqlTime {
-    fn deserialize<D>(deserializer: D) -> Result<MysqlTime, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        enum Field {
-            IsPositive,
-            Hour,
-            Minutes,
-            Seconds,
-            Microseconds,
-        }
-        struct FieldVisitor;
-        impl<'de> serde::de::Visitor<'de> for FieldVisitor {
-            type Value = Field;
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("`is_positive`, `hour`, `minutes`, `seconds` or `microseconds`")
-            }
-
-            fn visit_str<E>(self, val: &str) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                match val {
-                    "is_positive" => Ok(Field::IsPositive),
-                    "hour" => Ok(Field::Hour),
-                    "minutes" => Ok(Field::Minutes),
-                    "seconds" => Ok(Field::Seconds),
-                    "microseconds" => Ok(Field::Microseconds),
-                    _ => Err(serde::de::Error::unknown_field(val, FIELDS)),
-                }
-            }
-        }
-        impl<'de> serde::Deserialize<'de> for Field {
-            #[inline]
-            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                serde::Deserializer::deserialize_identifier(deserializer, FieldVisitor)
-            }
-        }
-
-        struct MysqlTimeVisitor;
-
-        impl<'de> Visitor<'de> for MysqlTimeVisitor {
-            type Value = MysqlTime;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("struct Duration")
-            }
-
-            fn visit_seq<V>(self, mut seq: V) -> Result<MysqlTime, V::Error>
-            where
-                V: SeqAccess<'de>,
-            {
-                let is_positive = seq
-                    .next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                let hour = seq
-                    .next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
-                let minutes = seq
-                    .next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(2, &self))?;
-                let seconds = seq
-                    .next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(3, &self))?;
-                let microseconds: u32 = seq
-                    .next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(4, &self))?;
-                Ok(MysqlTime::from_hmsus(
-                    is_positive,
-                    hour,
-                    minutes,
-                    seconds,
-                    microseconds as u64,
-                ))
-            }
-
-            fn visit_map<V>(self, mut map: V) -> Result<MysqlTime, V::Error>
-            where
-                V: MapAccess<'de>,
-            {
-                let mut is_positive = None;
-                let mut hour = None;
-                let mut minutes = None;
-                let mut seconds = None;
-                let mut microseconds = None;
-                while let Some(key) = map.next_key()? {
-                    match key {
-                        Field::IsPositive => {
-                            if is_positive.is_some() {
-                                return Err(de::Error::duplicate_field("is_positive"));
-                            }
-                            is_positive = Some(map.next_value()?);
-                        }
-                        Field::Hour => {
-                            if hour.is_some() {
-                                return Err(de::Error::duplicate_field("hour"));
-                            }
-                            hour = Some(map.next_value()?);
-                        }
-                        Field::Minutes => {
-                            if minutes.is_some() {
-                                return Err(de::Error::duplicate_field("minutes"));
-                            }
-                            minutes = Some(map.next_value()?);
-                        }
-                        Field::Seconds => {
-                            if seconds.is_some() {
-                                return Err(de::Error::duplicate_field("seconds"));
-                            }
-                            seconds = Some(map.next_value()?);
-                        }
-                        Field::Microseconds => {
-                            if microseconds.is_some() {
-                                return Err(de::Error::duplicate_field("microseconds"));
-                            }
-                            microseconds = Some(map.next_value()?);
-                        }
-                    }
-                }
-                let is_positive =
-                    is_positive.ok_or_else(|| de::Error::missing_field("is_positive"))?;
-                let hour = hour.ok_or_else(|| de::Error::missing_field("hour"))?;
-                let minutes = minutes.ok_or_else(|| de::Error::missing_field("minutes"))?;
-                let seconds = seconds.ok_or_else(|| de::Error::missing_field("seconds"))?;
-                let microseconds =
-                    microseconds.ok_or_else(|| de::Error::missing_field("microseconds"))?;
-                Ok(MysqlTime::from_hmsus(
-                    is_positive,
-                    hour,
-                    minutes,
-                    seconds,
-                    microseconds,
-                ))
-            }
-        }
-
-        const FIELDS: &[&str] = &["is_positive", "hour", "minutes", "seconds", "microseconds"];
-        deserializer.deserialize_struct("MysqlTime", FIELDS, MysqlTimeVisitor)
+        rhs.add(self.duration())
     }
 }
 
@@ -833,7 +673,6 @@ mod tests {
     use launchpad::arbitrary::{
         arbitrary_duration, arbitrary_naive_date_time, arbitrary_naive_time,
     };
-    use serde_test::{assert_tokens, Token};
     use test_strategy::proptest;
 
     use super::*;
@@ -841,11 +680,14 @@ mod tests {
     macro_rules! assert_valid {
         ($mysql_time:expr,$duration:expr) => {
             if $duration > MAX_MYSQL_TIME_SECONDS {
-                assert_eq!($mysql_time.duration.num_seconds(), MAX_MYSQL_TIME_SECONDS);
+                assert_eq!($mysql_time.duration().num_seconds(), MAX_MYSQL_TIME_SECONDS);
             } else if $duration < -MAX_MYSQL_TIME_SECONDS {
-                assert_eq!($mysql_time.duration.num_seconds(), -MAX_MYSQL_TIME_SECONDS);
+                assert_eq!(
+                    $mysql_time.duration().num_seconds(),
+                    -MAX_MYSQL_TIME_SECONDS
+                );
             } else {
-                assert_eq!($mysql_time.duration.num_seconds(), $duration);
+                assert_eq!($mysql_time.duration().num_seconds(), $duration);
             }
         };
     }
@@ -939,32 +781,6 @@ mod tests {
 
         assert!(mysql_time2 < mysql_time3);
         assert!(mysql_time1 < mysql_time3)
-    }
-
-    #[proptest]
-    fn serde(#[strategy(arbitrary_duration())] duration: Duration) {
-        let mysql_time = MysqlTime::new(duration);
-
-        assert_tokens(
-            &mysql_time,
-            &[
-                Token::Struct {
-                    name: "MysqlTime",
-                    len: 5,
-                },
-                Token::Str("is_positive"),
-                Token::Bool(mysql_time.is_positive()),
-                Token::Str("hour"),
-                Token::U16(mysql_time.hour()),
-                Token::Str("minutes"),
-                Token::U8(mysql_time.minutes()),
-                Token::Str("seconds"),
-                Token::U8(mysql_time.seconds()),
-                Token::Str("microseconds"),
-                Token::U32(mysql_time.microseconds()),
-                Token::StructEnd,
-            ],
-        );
     }
 
     #[proptest]

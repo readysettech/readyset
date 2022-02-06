@@ -66,7 +66,7 @@ async fn write_column<W: AsyncWrite + Unpin>(
             }
         },
         DataType::Timestamp(ts) => rw.write_col(ts),
-        DataType::Time(ref t) => rw.write_col(t.as_ref()),
+        DataType::Time(ref t) => rw.write_col(t),
         DataType::ByteArray(ref bytes) => rw.write_col(bytes.as_ref()),
         DataType::Numeric(_) => unimplemented!("MySQL does not implement the type NUMERIC"),
         // These types are PostgreSQL specific

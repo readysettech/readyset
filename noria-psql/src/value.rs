@@ -54,7 +54,7 @@ impl TryFrom<Value> for ps::Value {
                 Ok(ps::Value::TimestampTz(v.to_chrono()))
             }
             (Type::DATE, DataType::Timestamp(v)) => Ok(ps::Value::Date(v.date())),
-            (Type::TIME, DataType::Time(t)) => Ok(ps::Value::Time((*t.as_ref()).into())),
+            (Type::TIME, DataType::Time(t)) => Ok(ps::Value::Time((t).into())),
             (Type::BOOL, DataType::UnsignedInt(v)) => Ok(ps::Value::Bool(v != 0)),
             (Type::BOOL, DataType::Int(v)) => Ok(ps::Value::Bool(v != 0)),
             (Type::BYTEA, DataType::ByteArray(b)) => Ok(ps::Value::ByteArray(
