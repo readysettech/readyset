@@ -9,7 +9,7 @@ The following components are present in this stack
 
 | Service | Port | User | Password | Tools configured |
 |------|---------|------|---------|---------|
-| Grafana | 3000 | admin | admin | <ul><li>'Experiments' dashboard</li><li>InfluxDB datasource</li></ul> |
+| Grafana | 4000 | -- | -- | <ul><li>'Experiments' dashboard</li><li>InfluxDB datasource</li></ul> |
 | InfluxDB | 8086 | username | password | <ul><li>'test' database</li></ul>|
 | Prometheus | 9090 | | | |
 
@@ -25,5 +25,5 @@ If you want to add more initialization scripts to InfluxDB (i.e, to create more 
 
 ### Prometheus
 Prometheus's config lives in `prometheus/prometheus.yml`. 
-By default, prometheus only pulls metrisc from "localhost:6033/prometheus", the default prometheus endpoint
+By default, prometheus only pulls metrics from "localhost:6033/prometheus", the default prometheus endpoint
 for noria-server.

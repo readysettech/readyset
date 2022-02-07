@@ -32,6 +32,7 @@ services:
     volumes:
       - ./grafana/dashboards:/var/lib/grafana/dashboards
       - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/config/grafana.ini:/etc/grafana/grafana.ini
   vector:
     image: timberio/vector:0.16.1-debian
     network_mode: "host"
