@@ -1136,7 +1136,8 @@ mod tests {
         // bits = 000000000000100000100111010111000110010010000000
         let bits = BitVec::from_bytes(&[0, 8, 39, 92, 100, 128]);
         let mut buf = BytesMut::new();
-        // 48 bits divided into groups of 8 (a byte) = 6 bytes, plus one u32 (4 bytes) to hold the size = 10 bytes
+        // 48 bits divided into groups of 8 (a byte) = 6 bytes, plus one u32 (4 bytes) to hold the
+        // size = 10 bytes
         buf.put_i32(10); // size
         bits.to_sql(&Type::BIT, &mut buf).unwrap(); // add value
         assert_eq!(

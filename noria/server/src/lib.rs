@@ -93,26 +93,26 @@
 //!
 //! However, it also has some drawbacks:
 //!
-//!  - We no longer get thread specialization, and thus may reduce cache utilization efficiency.
-//!    In the case where there are more nodes than threads, this would likely have been an issue
+//!  - We no longer get thread specialization, and thus may reduce cache utilization efficiency. In
+//!    the case where there are more nodes than threads, this would likely have been an issue
 //!    regardless.
-//!  - If multiple domains need to issue upqueries to some shared ancestor, they now need to
-//!    locally re-materialize that state, which causes duplication, and thus memory overhead.
+//!  - If multiple domains need to issue upqueries to some shared ancestor, they now need to locally
+//!    re-materialize that state, which causes duplication, and thus memory overhead.
 //!
 //! # Core components
 //!
 //! If you're going to hack on Noria, there are some files, modules, and types that you should
 //! know:
 //!
-//!  - `Leader` in `src/controller/inner.rs`, which is held by a *single* worker, and
-//!    "owns" the currently executing data-flow graph. If a client wishes to add or modify queries,
-//!    create new handles to base tables or views, or inspect the current data-flow, they end up
-//!    interfacing with a `Leader`.
-//!  - `Migration` in `src/controller/migrate/mod.rs`, which orchestrates any changes to the
-//!    running data-flow. This includes drawing domain boundaries, setting up sharding, and
-//!    deciding what nodes should have materialized state. This planning process is split into many
-//!    files in the same directory, but the primary entry point is `Migration::commit`, which may
-//!    be worth reading top-to-bottom.
+//!  - `Leader` in `src/controller/inner.rs`, which is held by a *single* worker, and "owns" the
+//!    currently executing data-flow graph. If a client wishes to add or modify queries, create new
+//!    handles to base tables or views, or inspect the current data-flow, they end up interfacing
+//!    with a `Leader`.
+//!  - `Migration` in `src/controller/migrate/mod.rs`, which orchestrates any changes to the running
+//!    data-flow. This includes drawing domain boundaries, setting up sharding, and deciding what
+//!    nodes should have materialized state. This planning process is split into many files in the
+//!    same directory, but the primary entry point is `Migration::commit`, which may be worth
+//!    reading top-to-bottom.
 //!  - `Packet` in `dataflow/src/payload.rs`, which holds all the possible messages that a domain
 //!    may receive. Of particular note are `Packet::Message`, the packet type for inter-domain
 //!    updates; `Packet::Input`, the packet type for client writes to base tables (see also
@@ -269,8 +269,8 @@
 //! `dataflow/src/ops/join.rs`. It's a little complicated, but trust that it does basically what
 //! you'd expect a join to do:
 //!
-//!  - query the other side of the join by looking up the join key in the materialization we
-//!    have for that other ancestor (this is an upquery).
+//!  - query the other side of the join by looking up the join key in the materialization we have
+//!    for that other ancestor (this is an upquery).
 //!  - look for anything that matches the join column(s) on the current record.
 //!  - emit the carthesian product of those records with the one we received.
 //!

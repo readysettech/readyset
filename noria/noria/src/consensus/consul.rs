@@ -54,14 +54,14 @@
 //! between.
 //!
 //! This is possible becasue of the following:
-//! * We may only perform writes to *any* version of the dataflow state if and only if we are
-//!   the leader. This follows from  [^1].
-//! * The dataflow state referred to in `/state` is always immutable while it is in `/state,
-//!   leaders may never perform writes to that state. This follows from [^2]
+//! * We may only perform writes to *any* version of the dataflow state if and only if we are the
+//!   leader. This follows from  [^1].
+//! * The dataflow state referred to in `/state` is always immutable while it is in `/state, leaders
+//!   may never perform writes to that state. This follows from [^2]
 //! * If we update /state to a new version, we have successfully written all the chunks to the
 //!   `/state/<version>/` prefix. Guaranteed by Step 6 only being performed if Step 5 succeeds.
-//! * Each version is associated with the number of chunks in the version. That way we know how
-//!   many chunks to read from `/state/version`.
+//! * Each version is associated with the number of chunks in the version. That way we know how many
+//!   chunks to read from `/state/version`.
 //!
 //! *What if we read /state and then hang?*
 //! `/state` cannot change while we are the leader; if we lose leadership, we cannot perform writes
@@ -581,8 +581,8 @@ impl ConsulAuthority {
         // Create futures for each of the consul chunk writes.
         let num_chunks = chunked.0.len();
         let state_value = if num_chunks > 1 {
-            // The version will not exist for the first controller write, in that case, use the default
-            // version.
+            // The version will not exist for the first controller write, in that case, use the
+            // default version.
             let new_version = match version {
                 Some(StateValue::Version(v)) => next_state_version(&v.version),
                 Some(StateValue::Data(_)) | None => StateVersion::default().version,

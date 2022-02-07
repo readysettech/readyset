@@ -657,8 +657,8 @@ impl Arbitrary for KeyComparison {
         let bound = || {
             any_with::<Bound<Vec<DataType>>>(((1..100).into(), ())).prop_map(|bound| {
                 #[allow(clippy::unwrap_used)]
-                // This is only used for testing, so we allow calling `unwrap()`, and because we know
-                // we are generating vectors of length 1 and beyond.
+                // This is only used for testing, so we allow calling `unwrap()`, and because we
+                // know we are generating vectors of length 1 and beyond.
                 bound.map(|k| Vec1::try_from_vec(k).unwrap())
             })
         };
@@ -666,8 +666,8 @@ impl Arbitrary for KeyComparison {
         prop_oneof![
             any_with::<Vec<DataType>>(((1..100).into(), ())).prop_map(|k| {
                 #[allow(clippy::unwrap_used)]
-                // This is only used for testing, so we allow calling `unwrap()`, and because we know
-                // we are generating vectors of length 1 and beyond.
+                // This is only used for testing, so we allow calling `unwrap()`, and because we
+                // know we are generating vectors of length 1 and beyond.
                 KeyComparison::try_from(k).unwrap()
             }),
             (bound(), bound()).prop_map(KeyComparison::Range)
@@ -694,7 +694,8 @@ pub enum ReadQuery {
         target: (NodeIndex, String, usize),
     },
     /// Read all keys from a leaf view (for debugging)
-    /// TODO(alex): queries with this value are not totally implemented, and might not actually work
+    /// TODO(alex): queries with this value are not totally implemented, and might not actually
+    /// work
     Keys {
         /// Where to read from
         target: (NodeIndex, String, usize),
@@ -773,7 +774,8 @@ impl ViewBuilder {
                     (vr, num_replicas as u32 * 100 / vr.shards.len() as u32)
                 })
                 .max_by_key(|p| p.1) // Take replica with the highest percent.
-                // We know there is at least one element in the iterator, so this `unwrap()` is safe.
+                // We know there is at least one element in the iterator, so this `unwrap()` is
+                // safe.
                 .unwrap()
                 .0
         } else {

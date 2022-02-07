@@ -131,8 +131,8 @@ impl fmt::Display for BuiltinFunction {
 /// - Literals replaced with their corresponding [`DataType`]
 /// - [Column references](nom_sql::Column) resolved into column indices in the parent node.
 /// - Function calls resolved, and arities checked
-/// - Desugaring x IN (y, z, ...) to `x = y OR x = z OR ...`
-///   and x NOT IN (y, z, ...) to `x != y AND x = z AND ...`
+/// - Desugaring x IN (y, z, ...) to `x = y OR x = z OR ...` and x NOT IN (y, z, ...) to `x != y AND
+///   x = z AND ...`
 ///
 /// During forward processing of dataflow, instances of these expressions are
 /// [evaluated](Expression::eval) by both projection nodes and filter nodes.
@@ -464,7 +464,8 @@ impl Expression {
                     // Precision should always be coercable to a DataType::Int.
                     Expression::Literal(DataType::Int(p)) => {
                         if p < 0 {
-                            // Precision is negative, which means that we will be returning a rounded Int.
+                            // Precision is negative, which means that we will be returning a
+                            // rounded Int.
                             Ok(Some(SqlType::Int(None)))
                         } else {
                             // Precision is positive so we will continue to return a Real.
@@ -477,7 +478,8 @@ impl Expression {
                     }
                     Expression::Literal(DataType::Double(f, _)) => {
                         if f.is_sign_negative() {
-                            // Precision is negative, which means that we will be returning a rounded Int.
+                            // Precision is negative, which means that we will be returning a
+                            // rounded Int.
                             Ok(Some(SqlType::Int(None)))
                         } else {
                             // Precision is positive so we will continue to return a Real.
@@ -486,7 +488,8 @@ impl Expression {
                     }
                     Expression::Literal(DataType::Float(f, _)) => {
                         if f.is_sign_negative() {
-                            // Precision is negative, which means that we will be returning a rounded Int.
+                            // Precision is negative, which means that we will be returning a
+                            // rounded Int.
                             Ok(Some(SqlType::Int(None)))
                         } else {
                             // Precision is positive so we will continue to return a Real.
@@ -495,7 +498,7 @@ impl Expression {
                     }
                     _ => $e1.sql_type(parent_column_type),
                 }
-            }
+            };
         }
         // TODO(grfn): Throughout this whole function we basically just assume everything
         // typechecks, which isn't great - but when we actually have a typechecker it'll be

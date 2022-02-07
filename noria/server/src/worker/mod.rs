@@ -296,8 +296,9 @@ impl Worker {
                     .insert((idx, shard), state_size);
 
                 let replica = Replica::new(domain, listener, local_rx, req_rx, self.coord.clone());
-                // Each domain is single threaded in nature, so we spawn each one in a separate thread, so
-                // we can avoid running blocking operations on the multi threaded tokio runtime
+                // Each domain is single threaded in nature, so we spawn each one in a separate
+                // thread, so we can avoid running blocking operations on the multi
+                // threaded tokio runtime
                 let runtime = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .max_blocking_threads(1)
@@ -313,8 +314,9 @@ impl Worker {
                     .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
                     .spawn(move || {
                         // The runtime will run until the abort signal is sent.
-                        // This will happen either if the DomainHandle is dropped (and error is recieved)
-                        // or an actual signal is sent on the channel
+                        // This will happen either if the DomainHandle is dropped (and error is
+                        // recieved) or an actual signal is sent on the
+                        // channel
                         let _ = runtime.block_on(domain_abort_rx);
                         runtime.shutdown_background();
                     })?;
@@ -453,8 +455,8 @@ async fn do_eviction(
         Some(limit) => {
             if used >= limit {
                 // we are! time to evict.
-                // add current state sizes (could be out of date, as packet sent below is not necessarily
-                // received immediately)
+                // add current state sizes (could be out of date, as packet sent below is not
+                // necessarily received immediately)
                 let (mut sizes, total_reported) = {
                     let state_sizes = state_sizes.lock().await;
                     let mut total_reported = 0;

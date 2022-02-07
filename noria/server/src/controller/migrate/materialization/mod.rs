@@ -766,8 +766,10 @@ impl Materializations {
                                     if self.partial.contains(&node) {
                                         'outer: for parent_index in &self.have[&node] {
                                             // is this node partial over some of the child's partial
-                                            // columns, but not others? if so, we run into really sad
-                                            // situations where the parent could miss in its state despite
+                                            // columns, but not others? if so, we run into really
+                                            // sad
+                                            // situations where the parent could miss in its state
+                                            // despite
                                             // the child having state present for that key.
 
                                             // Are the indexes the same type?
@@ -797,18 +799,23 @@ impl Materializations {
                                                         )
                                                     });
                                             if let Some(not_shared) = unshared {
-                                                // This might be fine if we also have the child's index in
-                                                // the parent, since then the overlapping index logic in
+                                                // This might be fine if we also have the child's
+                                                // index in
+                                                // the parent, since then the overlapping index
+                                                // logic in
                                                 // `MemoryState::lookup` will save us.
                                                 for other_idx in &self.have[&node] {
                                                     if *other_idx == child_index {
-                                                        // Looks like we have the necessary index, so we'll
+                                                        // Looks like we have the necessary index,
+                                                        // so we'll
                                                         // be okay.
                                                         continue 'outer;
                                                     }
                                                 }
-                                                // If we get here, we've somehow managed to not index the
-                                                // parent by the same key as the child, which really should
+                                                // If we get here, we've somehow managed to not
+                                                // index the
+                                                // parent by the same key as the child, which really
+                                                // should
                                                 // never happen.
                                                 // This code should probably just be taken out soon.
                                                 println!("{}", graphviz(graph, true, self));
@@ -1197,8 +1204,8 @@ impl Materializations {
     /// Removes the materialization state for the given set of nodes.
     /// The rest of the materialization information (such as the replay paths) is left intact.
     ///
-    /// This is specially useful when a Worker or Domain fail, and we need to re-send the domain messages.
-    /// In such a case, we want to remove the materialization state for those nodes
+    /// This is specially useful when a Worker or Domain fail, and we need to re-send the domain
+    /// messages. In such a case, we want to remove the materialization state for those nodes
     /// but keep all the other information, in order to make a recovery.
     pub(in crate::controller) fn remove_nodes(&mut self, nodes: &HashSet<NodeIndex>) {
         for ni in nodes {

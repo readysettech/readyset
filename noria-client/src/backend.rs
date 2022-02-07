@@ -417,7 +417,8 @@ where
     timestamp_client: Option<TimestampClient>,
 
     /// If set to `true`, all DDL changes will be mirrored to both the upstream db (if present) and
-    /// noria. Otherwise, DDL changes will only go to the upstream if configured, or noria otherwise
+    /// noria. Otherwise, DDL changes will only go to the upstream if configured, or noria
+    /// otherwise
     mirror_ddl: bool,
 
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
@@ -546,7 +547,8 @@ pub enum PrepareResult<DB: UpstreamDatabase> {
     Both(noria_connector::PrepareResult, UpstreamPrepare<DB>),
 }
 
-// Sadly rustc is very confused when trying to derive Clone for UpstreamPrepare, so have to do it manually
+// Sadly rustc is very confused when trying to derive Clone for UpstreamPrepare, so have to do it
+// manually
 impl<DB: UpstreamDatabase> Clone for PrepareResult<DB> {
     fn clone(&self) -> Self {
         match self {
@@ -613,12 +615,13 @@ where
 
 /// TODO: The ideal approach for query handling is as follows:
 /// 1. If we know we can't support a query, send it to fallback.
-/// 2. If we think we can support a query, try to send it to Noria. If that hits an error that should be retried, retry.
-///    If not, try fallback without dropping the connection inbetween.
-/// 3. If that fails and we got a MySQL error code, send that back to the client and keep the connection open. This is a real correctness bug.
-/// 4. If we got another kind of error that is retryable from fallback, retry.
-/// 5. If we got a non-retry related error that's not a MySQL error code already, convert it to the most appropriate MySQL error code and write
-///    that back to the caller without dropping the connection.
+/// 2. If we think we can support a query, try to send it to Noria. If that hits an error that
+/// should be retried, retry.    If not, try fallback without dropping the connection inbetween.
+/// 3. If that fails and we got a MySQL error code, send that back to the client and keep the
+/// connection open. This is a real correctness bug. 4. If we got another kind of error that is
+/// retryable from fallback, retry. 5. If we got a non-retry related error that's not a MySQL error
+/// code already, convert it to the most appropriate MySQL error code and write    that back to the
+/// caller without dropping the connection.
 impl<DB, Handler> Backend<DB, Handler>
 where
     DB: 'static + UpstreamDatabase,
@@ -726,8 +729,8 @@ where
     /// Prepares query against Noria. If an upstream database exists, the prepare is mirrored to
     /// the upstream database.
     ///
-    /// This function may perform a migration, and update a queries migration state, if InRequestPath
-    /// mode is enabled or of not upstream is set
+    /// This function may perform a migration, and update a queries migration state, if
+    /// InRequestPath mode is enabled or of not upstream is set
     async fn mirror_prepare(
         &mut self,
         select_meta: &PrepareSelectMeta,
@@ -1069,12 +1072,14 @@ where
         }
     }
 
-    /// Attempts to migrate a query on noria, after it was marked as Succesful in the cache. If the migration
-    /// is succesful, the cached entry is marked as such and will attempt to resolve noria first in the future
+    /// Attempts to migrate a query on noria, after it was marked as Succesful in the cache. If the
+    /// migration is succesful, the cached entry is marked as such and will attempt to resolve
+    /// noria first in the future
     ///
     /// # Panics
     ///
-    /// If the cached entry is not of kind `PrepareResult::Upstream` or is not in the `MigrationState::Pending` state
+    /// If the cached entry is not of kind `PrepareResult::Upstream` or is not in the
+    /// `MigrationState::Pending` state
     async fn update_noria_prepare(
         noria: &mut NoriaConnector,
         cached_entry: &mut CachedPreparedStatement<DB>,
@@ -1169,7 +1174,8 @@ where
         let ticket = self.ticket.clone();
 
         if cached_statement.migration_state == MigrationState::Pending {
-            // We got a statement with a pending migration, we want to check if migration is finished by now
+            // We got a statement with a pending migration, we want to check if migration is
+            // finished by now
             let new_migration_state = self.query_status_cache.query_migration_state(
                 cached_statement
                     .rewritten
@@ -1227,7 +1233,8 @@ where
             .map(|e| e.caused_by_view_not_found())
             .unwrap_or_default()
         {
-            // This can happen during cascade execution if the noria query was removed from another connection
+            // This can happen during cascade execution if the noria query was removed from another
+            // connection
             Self::invalidate_prepared_cache_entry(&mut cached_statement.prep);
         }
 
@@ -1631,8 +1638,8 @@ where
         }
 
         let res = {
-            // Upstream reads are tried when noria reads produce an error. Upstream writes are done by
-            // default when the upstream connector is present.
+            // Upstream reads are tried when noria reads produce an error. Upstream writes are done
+            // by default when the upstream connector is present.
             if let Some(ref mut upstream) = self.upstream {
                 match parsed_query {
                     SqlQuery::Select(_) => unreachable!("read path returns prior"),
@@ -1649,8 +1656,8 @@ where
                                 let (query_result, identifier) =
                                     upstream.handle_ryw_write(query).await?;
 
-                                // TODO(andrew): Move table name to table index conversion to timestamp service
-                                // https://app.clubhouse.io/readysettech/story/331
+                                // TODO(andrew): Move table name to table index conversion to
+                                // timestamp service https://app.clubhouse.io/readysettech/story/331
                                 let index = self.noria.node_index_of(t.name.as_str()).await?;
                                 let affected_tables = vec![WriteKey::TableIndex(index)];
 
@@ -1721,8 +1728,9 @@ where
             } else {
                 // Interacting directly with Noria writer (No RYW support)
                 //
-                // TODO(andrew, justin): Do we want RYW support with the NoriaConnector? Currently, no.
-                // TODO: Implement event execution metrics for Noria without upstream.
+                // TODO(andrew, justin): Do we want RYW support with the NoriaConnector? Currently,
+                // no. TODO: Implement event execution metrics for Noria without
+                // upstream.
                 event.destination = Some(QueryDestination::Noria);
                 let _t = event.start_noria_timer();
 

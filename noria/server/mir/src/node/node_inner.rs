@@ -54,10 +54,10 @@ pub enum MirNodeInner {
     /// types of Aggregation or Extremum. For any group of aggregates, we will make N-1
     /// JoinAggregates to join them all back together. The first JoinAggregates will join the first
     /// two aggregates together. The next JoinAggregates will join that JoinAggregates node to the
-    /// next aggregate in the list, so on and so forth. Each aggregate will share identical group_by
-    /// columns which are deduplicated at every join, so by the end we have every unique column (the
-    /// actual aggregate columns) from each aggregate node, and a single version of each group_by
-    /// column in the final join.
+    /// next aggregate in the list, so on and so forth. Each aggregate will share identical
+    /// group_by columns which are deduplicated at every join, so by the end we have every
+    /// unique column (the actual aggregate columns) from each aggregate node, and a single
+    /// version of each group_by column in the final join.
     JoinAggregates,
     /// on left column, on right column, emit columns
     LeftJoin {
@@ -111,7 +111,8 @@ pub enum MirNodeInner {
         limit: Option<usize>,
         /// Optional set of expression columns requested in the original query
         returned_cols: Option<Vec<Column>>,
-        /// Row of default values to send back, for example if we're aggregating and no rows are found
+        /// Row of default values to send back, for example if we're aggregating and no rows are
+        /// found
         default_row: Option<Vec<DataType>>,
         /// Aggregates to perform in the reader on result sets for keys after performing the lookup
         aggregates: Option<PostLookupAggregates<Column>>,

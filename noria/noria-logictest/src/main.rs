@@ -390,7 +390,8 @@ impl Verify {
         let mut tasks = FuturesUnordered::new();
 
         let max_tasks = if self.replication_url.is_some() {
-            // Can not parallelize tests when binlog is enabled, because each test reuses the same db
+            // Can not parallelize tests when binlog is enabled, because each test reuses the same
+            // db
             1
         } else {
             self.tasks
@@ -473,7 +474,8 @@ impl Verify {
             }));
 
             if tasks.len() >= max_tasks {
-                // We want to limit the number of concurrent tests, so we wait for one of the current tasks to finish first
+                // We want to limit the number of concurrent tests, so we wait for one of the
+                // current tasks to finish first
                 tasks.select_next_some().await.unwrap();
             }
         }

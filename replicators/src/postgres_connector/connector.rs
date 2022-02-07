@@ -10,18 +10,19 @@ use super::wal_reader::{WalEvent, WalReader};
 use super::{PostgresPosition, PUBLICATION_NAME, REPLICATION_SLOT};
 use crate::noria_adapter::{Connector, ReplicationAction};
 
-/// A connector that connects to a PostgreSQL server and starts reading WAL from the "noria" replication slot
-/// with the "noria" publication.
+/// A connector that connects to a PostgreSQL server and starts reading WAL from the "noria"
+/// replication slot with the "noria" publication.
 ///
 /// The server must be configured with `wal_level` set to `logical`.
 ///
 /// The connector user must have the following permissions:
 /// `REPLICATION` - to be able to create a replication slot.
-/// `SELECT` - In order to be able to copy the initial table data, the role used for the replication connection must have the
-///            `SELECT` privilege on the published tables (or be a superuser).
-/// `CREATE` - To create a publication, the user must have the CREATE privilege in the database.
-///            To add tables to a publication, the user must have ownership rights on the table. To create a publication that
-///            publishes all tables automatically, the user must be a superuser.
+/// `SELECT` - In order to be able to copy the initial table data, the role used for the replication
+/// connection must have the            `SELECT` privilege on the published tables (or be a
+/// superuser). `CREATE` - To create a publication, the user must have the CREATE privilege in the
+/// database.            To add tables to a publication, the user must have ownership rights on the
+/// table. To create a publication that            publishes all tables automatically, the user must
+/// be a superuser.
 pub struct PostgresWalConnector {
     /// This is the underlying (regular) PostgreSQL client
     client: pgsql::Client,
@@ -40,12 +41,13 @@ pub struct PostgresWalConnector {
 /// The decoded response to `IDENTIFY_SYSTEM`
 #[derive(Debug)]
 pub struct ServerIdentity {
-    /// The unique system identifier identifying the cluster. This can be used to check that the base
-    /// backup used to initialize the standby came from the same cluster.
+    /// The unique system identifier identifying the cluster. This can be used to check that the
+    /// base backup used to initialize the standby came from the same cluster.
     pub id: String,
     /// Current timeline ID. Also useful to check that the standby is consistent with the master.
     pub timeline: i8,
-    /// Current WAL flush location. Useful to get a known location in the write-ahead log where streaming can start.
+    /// Current WAL flush location. Useful to get a known location in the write-ahead log where
+    /// streaming can start.
     pub xlogpos: String,
     /// Database connected to or null.
     pub dbname: Option<String>,
@@ -69,8 +71,8 @@ pub struct CreatedSlot {
 }
 
 impl PostgresWalConnector {
-    /// Connects to postgres and if needed creates a new replication slot for itself with an exported
-    /// snapshot.
+    /// Connects to postgres and if needed creates a new replication slot for itself with an
+    /// exported snapshot.
     pub async fn connect<S: AsRef<str>>(
         mut config: pgsql::Config,
         dbname: S,
@@ -124,7 +126,8 @@ impl PostgresWalConnector {
         let _ = self.drop_replication_slot(REPLICATION_SLOT).await;
 
         match self.create_replication_slot(REPLICATION_SLOT).await {
-            Ok(slot) => self.snapshot_name = slot.snapshot_name, // Created a new slot, everything is good
+            Ok(slot) => self.snapshot_name = slot.snapshot_name, /* Created a new slot, */
+            // everything is good
             Err(err)
                 if err.to_string().contains("replication slot")
                     && err.to_string().contains("already exists") =>
@@ -159,12 +162,13 @@ impl PostgresWalConnector {
         }
     }
 
-    /// Requests the server to identify itself. Server replies with a result set of a single row, containing four fields:
-    /// systemid (text) - The unique system identifier identifying the cluster. This can be used to check that the base
-    ///                   backup used to initialize the standby came from the same cluster.
-    /// timeline (int4) - Current timeline ID. Also useful to check that the standby is consistent with the master.
-    /// xlogpos (text) - Current WAL flush location. Useful to get a known location in the write-ahead log where streaming can start.
-    /// dbname (text) - Database connected to or null.
+    /// Requests the server to identify itself. Server replies with a result set of a single row,
+    /// containing four fields: systemid (text) - The unique system identifier identifying the
+    /// cluster. This can be used to check that the base                   backup used to
+    /// initialize the standby came from the same cluster. timeline (int4) - Current timeline
+    /// ID. Also useful to check that the standby is consistent with the master. xlogpos (text)
+    /// - Current WAL flush location. Useful to get a known location in the write-ahead log where
+    /// streaming can start. dbname (text) - Database connected to or null.
     async fn identify_system(&mut self) -> ReadySetResult<ServerIdentity> {
         let row = self.one_row_query("IDENTIFY_SYSTEM", 4).await?;
         // We know we have 4 valid columns because `one_row_query` checks that, so can unwrap here
@@ -194,13 +198,15 @@ impl PostgresWalConnector {
     /// Creates a new replication slot on the primary.
     /// The command format for PostgreSQL is as follows:
     ///
-    /// `CREATE_REPLICATION_SLOT slot_name [ TEMPORARY ] { PHYSICAL [ RESERVE_WAL ] | LOGICAL output_plugin [ EXPORT_SNAPSHOT | NOEXPORT_SNAPSHOT | USE_SNAPSHOT ] }`
+    /// `CREATE_REPLICATION_SLOT slot_name [ TEMPORARY ] { PHYSICAL [ RESERVE_WAL ] | LOGICAL
+    /// output_plugin [ EXPORT_SNAPSHOT | NOEXPORT_SNAPSHOT | USE_SNAPSHOT ] }`
     ///
     /// We use the following options:
     /// No `TEMPORARY` - we want the slot to persist when connection to primary is down
     /// `LOGICAL` - we are using logical streaming replication
     /// `pgoutput` - the plugin to use for logical decoding, always available from PG > 10
-    /// `EXPORT_SNAPSHOT` -  we want the operation to export a snapshot that can be then used for replication
+    /// `EXPORT_SNAPSHOT` -  we want the operation to export a snapshot that can be then used for
+    /// replication
     async fn create_replication_slot(&mut self, name: &str) -> ReadySetResult<CreatedSlot> {
         let query = format!(
             "CREATE_REPLICATION_SLOT {} LOGICAL pgoutput EXPORT_SNAPSHOT",
@@ -238,10 +244,11 @@ impl PostgresWalConnector {
             pgsql::codec::FrontendMessage::Raw(query),
         ))?;
 
-        // On success, server responds with a CopyBothResponse message, and then starts to stream WAL to the frontend.
-        // The messages inside the CopyBothResponse messages are of the same format documented for START_REPLICATION ... PHYSICAL,
-        // including two CommandComplete messages.
-        // The output plugin associated with the selected slot is used to process the output for streaming.
+        // On success, server responds with a CopyBothResponse message, and then starts to stream
+        // WAL to the frontend. The messages inside the CopyBothResponse messages are of the
+        // same format documented for START_REPLICATION ... PHYSICAL, including two
+        // CommandComplete messages. The output plugin associated with the selected slot is
+        // used to process the output for streaming.
         match wal.next().await? {
             pgsql::Message::CopyBothResponse(_) => {}
             _ => {
@@ -299,8 +306,8 @@ impl PostgresWalConnector {
             .map(|_| ())
     }
 
-    /// Perform a simple query that expects a singe row in response, check that the response is indeed
-    /// one row, and contains exatly `n_cols` columns, then return that row
+    /// Perform a simple query that expects a singe row in response, check that the response is
+    /// indeed one row, and contains exatly `n_cols` columns, then return that row
     async fn one_row_query(
         &mut self,
         query: &str,
@@ -370,8 +377,8 @@ impl Connector for PostgresWalConnector {
                 None => self.next_event().await?,
             };
 
-            // Check if next event is for another table, in which case we have to flush the events accumulated for this table
-            // and store the next event in `peek`.
+            // Check if next event is for another table, in which case we have to flush the events
+            // accumulated for this table and store the next event in `peek`.
             match &event {
                 WalEvent::Insert { table, .. }
                 | WalEvent::DeleteRow { table, .. }
@@ -405,7 +412,8 @@ impl Connector for PostgresWalConnector {
                 }
                 WalEvent::Commit => {
                     if !actions.is_empty() {
-                        // On commit we flush, because there is no knowing when the next commit is comming
+                        // On commit we flush, because there is no knowing when the next commit is
+                        // comming
                         return Ok((
                             ReplicationAction::TableAction {
                                 table: cur_table,

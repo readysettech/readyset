@@ -239,8 +239,9 @@ impl Recipe {
                     match expr.query {
                         SqlQuery::DropTable(dts) => {
                             for table in dts.tables {
-                                // As far as I know, we can't name CREATE TABLE statements, which are
-                                // being assigned the table name as query name (based on the MIR code I've seen).
+                                // As far as I know, we can't name CREATE TABLE statements, which
+                                // are being assigned the table name
+                                // as query name (based on the MIR code I've seen).
                                 match self.aliases.get(&table.name) {
                                     Some(remove_qid) => {
                                         to_remove.push(*remove_qid);

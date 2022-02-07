@@ -634,7 +634,8 @@ impl DataflowState {
                             })?;
                             #[allow(clippy::indexing_slicing)] // internal invariant
                             let table_name = self.ingredients[*ni].name();
-                            acc.tables.insert(table_name.to_owned(), offset); // TODO min of all shards
+                            acc.tables.insert(table_name.to_owned(), offset); // TODO min of all
+                                                                              // shards
                         }
                     }
                     Ok(acc)
@@ -773,10 +774,10 @@ impl DataflowState {
         // Now we look for the reader nodes of each of the query nodes.
         let mut new_readers = HashMap::new();
         for (query_name, node_index) in node_indexes {
-            // The logic to find the reader nodes is the same as [`self::find_view_for(NodeIndex,&str)`],
-            // but we perform some extra operations here.
-            // TODO(Fran): In the future we should try to find a good abstraction to avoid
-            // duplicating the logic.
+            // The logic to find the reader nodes is the same as
+            // [`self::find_view_for(NodeIndex,&str)`], but we perform some extra
+            // operations here. TODO(Fran): In the future we should try to find a good
+            // abstraction to avoid duplicating the logic.
             let mut bfs = Bfs::new(&self.ingredients, node_index);
             while let Some(child_index) = bfs.next(&self.ingredients) {
                 #[allow(clippy::indexing_slicing)] // just came out of self.ingredients
@@ -1369,8 +1370,8 @@ impl DataflowState {
     /// - Each node must have a Domain associated with it (and thus also have a [`LocalNodeIndex`]
     /// and any other associated information).
     /// - `self.domain_nodes` must be valid. This means that all the nodes in `self.ingredients`
-    /// (except for `self.source`) must belong to a domain; and there must not be any overlap between
-    /// the nodes owned by each domain. All the invariants for Domain assigment from
+    /// (except for `self.source`) must belong to a domain; and there must not be any overlap
+    /// between the nodes owned by each domain. All the invariants for Domain assigment from
     /// [`crate::controller::migrate::assignment::assign`] must hold as well.
     ///  - `self.remap` and `self.node_restrictions` must be valid.
     /// - All the other fields should be empty or `[Default::default()]`.
@@ -1419,11 +1420,12 @@ impl DataflowState {
 /// This allows any thread to freely get a read-only view of the dataflow state without having
 /// to worry about other threads attemting to modify it.
 ///
-/// The choice of using [`tokio::sync::RwLock`] instead of [`std::sync::RwLock`] or [`parking_lot::RwLock`]
-/// was made in order to ensure that:
+/// The choice of using [`tokio::sync::RwLock`] instead of [`std::sync::RwLock`] or
+/// [`parking_lot::RwLock`] was made in order to ensure that:
 /// 1. The read lock does not starve writers attempting to modify the dataflow state, as the lock is
 /// fair and will block reader threads if there are writers waiting for the lock.
-/// 2. To ensure that the read lock can be used by multiple threads, since the lock is `Send` and `Sync`.
+/// 2. To ensure that the read lock can be used by multiple threads, since the lock is `Send` and
+/// `Sync`.
 ///
 /// ## Writes
 /// Writes are performed by following a couple of steps:
@@ -1444,13 +1446,13 @@ impl DataflowState {
 /// 1. Writes don't starve readers: when we start a write operation, we take a read lock
 /// for the [`DataflowStateReader`] in order to make a copy of a state. In doing so, we ensure that
 /// readers can continue to read the state: no modification has been made yet.
-/// Writers can also perform all their computing/modifications (which can be pretty expensive time-wise),
-/// and only then the changes can be committed by swapping the old state for the new one, which
-/// is the only time readers are forced to wait.
+/// Writers can also perform all their computing/modifications (which can be pretty expensive
+/// time-wise), and only then the changes can be committed by swapping the old state for the new
+/// one, which is the only time readers are forced to wait.
 /// 2. If a write operation fails, the state is not modified.
-/// TODO(fran): Even though the state is not modified here, we might have sent messages to other workers/domains.
-///   It is worth looking into a better way of handling that (if it's even necessary).
-///   Such a mechanism was never in place to begin with.
+/// TODO(fran): Even though the state is not modified here, we might have sent messages to other
+/// workers/domains.   It is worth looking into a better way of handling that (if it's even
+/// necessary).   Such a mechanism was never in place to begin with.
 /// 3. Writes are transactional: if there is an instance of [`DataflowStateWriter`] in
 /// existence, then all the other writes must wait. This guarantees that the operations performed
 /// to the dataflow state are executed transactionally.
@@ -1462,10 +1464,10 @@ impl DataflowState {
 /// which only allows reference access to the dataflow state.
 ///
 /// ## Modifying the state
-/// To get write and read access to the dataflow state, the [`DataflowState::write`] method must be used.
-/// This method returns a write guard to another wrapper structure, [`DataflowStateWriter`] which will
-/// allow to get a reference or mutable reference to a [`DataflowState`], which starts off as a copy
-/// of the actual dataflow state.
+/// To get write and read access to the dataflow state, the [`DataflowState::write`] method must be
+/// used. This method returns a write guard to another wrapper structure, [`DataflowStateWriter`]
+/// which will allow to get a reference or mutable reference to a [`DataflowState`], which starts
+/// off as a copy of the actual dataflow state.
 ///
 /// Once all the computations/modifications are done, the [`DataflowStateWriter`] must be passed on
 /// to the [`DataflowStateWriter::commit`] to be committed and destroyed.
@@ -1548,9 +1550,9 @@ impl DataflowStateHandle {
 }
 
 /// A read-only wrapper around the dataflow state.
-/// This struct implements [`Deref`] in order to provide read-only access to the inner [`DataflowState`].
-/// No implementation of [`DerefMut`] is provided, nor any other way of accessing the inner
-/// [`DataflowState`] in a mutable way.
+/// This struct implements [`Deref`] in order to provide read-only access to the inner
+/// [`DataflowState`]. No implementation of [`DerefMut`] is provided, nor any other way of accessing
+/// the inner [`DataflowState`] in a mutable way.
 pub(super) struct DataflowStateReader {
     state: DataflowState,
 }
@@ -1577,9 +1579,10 @@ impl Deref for DataflowStateReader {
 /// A read and write wrapper around the dataflow state.
 /// This struct implements [`Deref`] to provide read-only access to the inner [`DataflowState`],
 /// as well as [`DerefMut`] to allow mutability.
-/// To commit the modifications made to the [`DataflowState`], use the [`DataflowStateHandle::commit`] method.
-/// Dropping this struct without calling [`DataflowStateHandle::commit`] will cause the modifications
-/// to be discarded, and the lock preventing other writer threads to acquiring an instance to be released.
+/// To commit the modifications made to the [`DataflowState`], use the
+/// [`DataflowStateHandle::commit`] method. Dropping this struct without calling
+/// [`DataflowStateHandle::commit`] will cause the modifications to be discarded, and the lock
+/// preventing other writer threads to acquiring an instance to be released.
 pub(super) struct DataflowStateWriter<'handle> {
     state: DataflowState,
     _guard: MutexGuard<'handle, ()>,
@@ -1608,11 +1611,11 @@ struct PersistableDataflowState {
 // makes [`DataflowState`] not [`Send`].
 // Because [`DataflowStateReader`] holds a [`DataflowState`] instance, the compiler does not
 // automatically implement [`Send`] for it. But here is what the compiler does not know:
-// 1. Only the [`DataflowStateHandle`] can instantiate and hold an instance of [`DataflowStateReader`].
-// 2. Only the [`DataflowStateHandle`] is able to get a mutable reference of the [`DataflowStateReader`].
-// 2. The [`DataflowStateReader`] held by the [`DataflowStateHandle`] is behind a
-// [`tokio::sync::RwLock`], which is only acquired as write in the [`DataflowStateHandle::commit`]
-// method.
+// 1. Only the [`DataflowStateHandle`] can instantiate and hold an instance of
+// [`DataflowStateReader`]. 2. Only the [`DataflowStateHandle`] is able to get a mutable reference
+// of the [`DataflowStateReader`]. 2. The [`DataflowStateReader`] held by the
+// [`DataflowStateHandle`] is behind a [`tokio::sync::RwLock`], which is only acquired as write in
+// the [`DataflowStateHandle::commit`] method.
 //
 // Those three conditions guarantee that there are no concurrent modifications to the underlying
 // dataflow state.

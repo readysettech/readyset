@@ -460,8 +460,8 @@ mod tests {
         use crate::node::MirNode;
         use crate::Column;
 
-        // tests the simple case where the child column has no alias, therefore mapping to the parent
-        // column with the same name
+        // tests the simple case where the child column has no alias, therefore mapping to the
+        // parent column with the same name
         #[test]
         fn with_no_alias() {
             let cspec = |n: &str| -> (ColumnSpecification, Option<usize>) {
@@ -557,9 +557,10 @@ mod tests {
             assert_eq!(2, idx);
         }
 
-        // tests the case where the child column is named the same thing as a parent column BUT has an alias.
-        // Typically, this alias would map to a different parent column however for testing purposes
-        // that column is missing here to ensure it will not match with the wrong column.
+        // tests the case where the child column is named the same thing as a parent column BUT has
+        // an alias. Typically, this alias would map to a different parent column however
+        // for testing purposes that column is missing here to ensure it will not match with
+        // the wrong column.
         #[test]
         fn with_alias_to_parent_column() {
             let c1 = Column {

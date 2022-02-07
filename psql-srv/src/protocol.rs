@@ -67,8 +67,8 @@ pub struct Protocol {
 
     /// A prepared statement allows a frontend to specify the general form of a SQL statement while
     /// leaving some values absent, but parameterized so that they can be provided later. This
-    /// `HashMap` contains metadata about prepared statements that the frontend has requested, keyed
-    /// by the prepared statement's name.
+    /// `HashMap` contains metadata about prepared statements that the frontend has requested,
+    /// keyed by the prepared statement's name.
     prepared_statements: HashMap<String, PreparedStatementData>,
 
     /// A portal is a combination of a prepared statement and a list of values provided by the
@@ -115,16 +115,15 @@ impl Protocol {
     ///
     /// * `message` - The message that has been received from the frontend.
     /// * `backend` - A `Backend` that handles the SQL statements supplied by the frontend. The
-    ///     `Protocol`'s job is to extract SQL statements from frontend messages, supply these SQL
-    ///     statements to the backend, and forward the backend's responses back to the frontend
-    ///     using appropriate messages.
-    /// * `channel` - A `Channel` representing a connection to the frontend. The channel is not
-    ///     read from or written to within this function, but `channel` is provided so that its
-    ///     codec state can be updated when the protocol state changes. (The codec state must be
-    ///     synchronized with the frontend/backend protocol state in order to parse some types of
-    ///     frontend messages.)
+    ///   `Protocol`'s job is to extract SQL statements from frontend messages, supply these SQL
+    ///   statements to the backend, and forward the backend's responses back to the frontend using
+    ///   appropriate messages.
+    /// * `channel` - A `Channel` representing a connection to the frontend. The channel is not read
+    ///   from or written to within this function, but `channel` is provided so that its codec state
+    ///   can be updated when the protocol state changes. (The codec state must be synchronized with
+    ///   the frontend/backend protocol state in order to parse some types of frontend messages.)
     /// * returns - A `Response` representing a sequence of `BackendMessage`s to return to the
-    ///     frontend, otherwise an `Error` if a failure occurs.
+    ///   frontend, otherwise an `Error` if a failure occurs.
     pub async fn on_request<B: Backend, C: AsyncRead + AsyncWrite + Unpin>(
         &mut self,
         message: FrontendMessage,
@@ -324,8 +323,8 @@ impl Protocol {
                     res
                 }
 
-                // A request to directly execute a complete SQL statement, without creating a prepared
-                // statement.
+                // A request to directly execute a complete SQL statement, without creating a
+                // prepared statement.
                 Query { query } => {
                     let response = backend.on_query(query.borrow()).await?;
                     if let Select { schema, resultset } = response {
@@ -402,7 +401,7 @@ impl Protocol {
     /// An error handler producing an `ErrorResponse` message.
     ///
     /// * `error` - an `Error` that has occurred while communicating with the frontend or handling
-    ///     one of the frontend's requests.
+    ///   one of the frontend's requests.
     /// * returns - A `Response` containing an `ErrorResponse` message to send to the frontend.
     pub async fn on_error<B: Backend>(
         &mut self,

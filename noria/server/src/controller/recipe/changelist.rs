@@ -109,8 +109,8 @@ mod parse {
     use nom_sql::{parser as sql_parser, Dialect, SqlQuery};
 
     /// The canonical SQL dialect used for central Noria server recipes. All direct clients of
-    /// noria-server must use this dialect for their SQL recipes, and all adapters and client libraries
-    /// must translate into this dialect as part of handling requests from users
+    /// noria-server must use this dialect for their SQL recipes, and all adapters and client
+    /// libraries must translate into this dialect as part of handling requests from users
     pub const CANONICAL_DIALECT: Dialect = Dialect::MySQL;
 
     #[inline]
@@ -259,8 +259,10 @@ impl FromStr for ChangeList {
                                 SqlQuery::DropTable(_) | SqlQuery::DropCachedQuery(_) => {
                                     changes.push(Change::Remove(c));
                                 }
-                                // TODO(fran): I've added this as a separate clause, since I'm not sure if we should
-                                //  be ignoring other SqlTypes, or even creating a more distinctions (like updates, maybe?)
+                                // TODO(fran): I've added this as a separate clause, since I'm not
+                                // sure if we should  be ignoring
+                                // other SqlTypes, or even creating a more distinctions (like
+                                // updates, maybe?)
                                 _ => changes.push(Change::Add(c)),
                             }
                             changes

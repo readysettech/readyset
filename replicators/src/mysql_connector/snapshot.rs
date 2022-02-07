@@ -53,7 +53,8 @@ async fn create_for_table<Q: Queryable>(
     let query = format!("show create {} `{}`", kind.kind(), table_name);
     match kind {
         TableKind::View => {
-            // For SHOW CREATE VIEW the format is the name of the view, the create DDL, character_set_client and collation_connection
+            // For SHOW CREATE VIEW the format is the name of the view, the create DDL,
+            // character_set_client and collation_connection
             let r: Option<(String, String, String, String)> = q.query_first(query).await?;
             Ok(r.ok_or("Empty response for SHOW CREATE VIEW")?.1)
         }
@@ -100,16 +101,19 @@ impl MySqlReplicator {
         // lock on all of them to prevent DDL changes.
         // This is easy to do: simply use the tables from within a transaction:
         // https://dev.mysql.com/doc/refman/8.0/en/metadata-locking.html
-        // >> To ensure transaction serializability, the server must not permit one session to perform
-        // >> a data definition language (DDL) statement on a table that is used in an uncompleted explicitly
-        // >> or implicitly started transaction in another session. The server achieves this by acquiring
-        // >> metadata locks on tables used within a transaction and deferring release of those locks until
-        // >> the transaction ends. A metadata lock on a table prevents changes to the table's structure.
-        // >> This locking approach has the implication that a table that is being used by a transaction within
-        // >> one session cannot be used in DDL statements by other sessions until the transaction ends.
-        // >> This principle applies not only to transactional tables, but also to nontransactional tables.
+        // >> To ensure transaction serializability, the server must not permit one session to
+        // perform >> a data definition language (DDL) statement on a table that is used in
+        // an uncompleted explicitly >> or implicitly started transaction in another
+        // session. The server achieves this by acquiring >> metadata locks on tables used
+        // within a transaction and deferring release of those locks until
+        // >> the transaction ends. A metadata lock on a table prevents changes to the table's
+        // structure. >> This locking approach has the implication that a table that is
+        // being used by a transaction within >> one session cannot be used in DDL
+        // statements by other sessions until the transaction ends. >> This principle
+        // applies not only to transactional tables, but also to nontransactional tables.
         for tables in tables.chunks(20) {
-            // There is a default limit of 61 tables per join, so we chunk into smaller joins just in case
+            // There is a default limit of 61 tables per join, so we chunk into smaller joins just
+            // in case
             let metalock = format!("SELECT 1 FROM `{}` LIMIT 0", tables.iter().join("`,`"));
             tx.query_drop(metalock).await?;
         }
@@ -276,7 +280,8 @@ impl MySqlReplicator {
     /// * `noria`: The target Noria deployment
     /// * `replication_offsets`: The set of replication offsets for already-snapshotted tables and
     ///   the schema
-    /// * `install_recipe`: Replicate and install the recipe (`CREATE TABLE` ...; `CREATE VIEW` ...;) in addition to the rows
+    /// * `install_recipe`: Replicate and install the recipe (`CREATE TABLE` ...; `CREATE VIEW`
+    ///   ...;) in addition to the rows
     pub async fn snapshot_to_noria(
         mut self,
         noria: &mut noria::ControllerHandle,

@@ -1,36 +1,38 @@
 //! A word of warning.
 //! Sadly, since today we don't have a centralized MIR graph (we should strive to try to use a
-//! petgraph::Graph or similar solution), the MIR nodes all have references to their parent and child
-//! nodes.
-//! This means that automatic serde implementation (by means of using `#[derive(Serialize, Deserialize)]`
-//! is not possible, because we would run into a stack overflow when the serializing algorithm starts
-//! resolving the references, getting into a never ending loop (parent -> child -> parent -> child...).
-//! Because of that, we are forced to implement our own serialization and deserialization.
+//! petgraph::Graph or similar solution), the MIR nodes all have references to their parent and
+//! child nodes.
+//! This means that automatic serde implementation (by means of using `#[derive(Serialize,
+//! Deserialize)]` is not possible, because we would run into a stack overflow when the serializing
+//! algorithm starts resolving the references, getting into a never ending loop (parent -> child ->
+//! parent -> child...). Because of that, we are forced to implement our own serialization and
+//! deserialization.
 //!
 //! First and foremost, we will replace those [`MirNodeRef`]s with the identifiers of each node,
 //! namely the [`MirNode::name`] and [`MirNode::from_version`] fields.
 //! Secondly, we will skip serdes for the [`MirNode::children`] and [`MirNode::ancestors`] fields,
 //! which will have to be added afterwards (since, again, they are references).
-//! A note here: we don't do the same for the [`MirNodeRef`] that might be present in some [`MirNodeInner`],
-//! which derives the [`Serialize`] and [`Deserialize`] implementations.
-//! We let those fields be serialized as [`MirNode`]s, even if that's not very efficient (we can improve
-//! this later). We are guaranteed that we won't be entering an infinite loop, since we are skipping the
-//! serdes of the `children` and `ancestors` nodes in the [`MirNode`] fields.
-//! This relies heavily on the fact that we SHOULD NEVER EVER HAVE circular references in the [`MirNodeInner`]
-//! node reference fields.
+//! A note here: we don't do the same for the [`MirNodeRef`] that might be present in some
+//! [`MirNodeInner`], which derives the [`Serialize`] and [`Deserialize`] implementations.
+//! We let those fields be serialized as [`MirNode`]s, even if that's not very efficient (we can
+//! improve this later). We are guaranteed that we won't be entering an infinite loop, since we are
+//! skipping the serdes of the `children` and `ancestors` nodes in the [`MirNode`] fields.
+//! This relies heavily on the fact that we SHOULD NEVER EVER HAVE circular references in the
+//! [`MirNodeInner`] node reference fields.
 //!
 //! Then, we will have the following foreign fields in the serialized structure:
 //! - all_nodes: This is a map (conceptually at least, since the keys are not strings and we have to
-//! serialize it as a vector in the end), which has the tuple (name, version) as keys (the ids of the nodes),
-//! and the [`MirNode`] (with empty children and ancestors fields) as the values.
+//! serialize it as a vector in the end), which has the tuple (name, version) as keys (the ids of
+//! the nodes), and the [`MirNode`] (with empty children and ancestors fields) as the values.
 //! This contains ALL the nodes, meaning we have to traverse the whole graph, starting from the ones
 //! defined in the [`SqlToMirConverter::nodes`] fields. This will be our source of truth upon
 //! deserialization.
-//! - children: Another (conceptual) map, again with the tuple (name, version) as keys, and the list of
+//! - children: Another (conceptual) map, again with the tuple (name, version) as keys, and the list
+//!   of
 //! children ids as values.
 //!
-//! Also, the [`SqlToMirConverter::nodes`] field gets serialized as a vector of tuples (name, version).
-//! For deserialization, read the comments in the [`Deserialize`] impl.
+//! Also, the [`SqlToMirConverter::nodes`] field gets serialized as a vector of tuples (name,
+//! version). For deserialization, read the comments in the [`Deserialize`] impl.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -321,8 +323,8 @@ impl<'de> serde::Deserialize<'de> for SqlToMirConverter {
 // the actual parent node and each children node, and we call `add_child` on the parent node and
 // `add_ancestor` on the child node, cloning the references.
 // Finally, we iterate the `nodes` map and we make sure to correctly set all the references in
-// any possible [`MirNodeInner`], by taking the [`MirNodeRef`] that they store, getting the real [`MirNodeRef`]
-// from the `all_nodes` using the (name, version), and replacing the references.
+// any possible [`MirNodeInner`], by taking the [`MirNodeRef`] that they store, getting the real
+// [`MirNodeRef`] from the `all_nodes` using the (name, version), and replacing the references.
 /// Takes the serialized fields that describe the [`SqlToMirConverter`] and
 /// creates an instance of it (thus effectively deserializing it).
 fn deserialize_into_sql_to_mir_converter<E>(
@@ -337,12 +339,14 @@ fn deserialize_into_sql_to_mir_converter<E>(
 where
     E: serde::de::Error,
 {
-    // Convert the `all_nodes` vector back into a map and transforming the [`MirNode`]s into [`MirNodeRef`]s. Check.
+    // Convert the `all_nodes` vector back into a map and transforming the [`MirNode`]s into
+    // [`MirNodeRef`]s. Check.
     let all_nodes = all_nodes
         .drain(0..)
         .map(|(id, node)| (id, Rc::new(RefCell::new(node))))
         .collect::<HashMap<_, _>>();
-    // Convert the `nodes` vector back into a map, getting the [`MirNodeRef`]s from the `all_nodes` map. Check.
+    // Convert the `nodes` vector back into a map, getting the [`MirNodeRef`]s from the `all_nodes`
+    // map. Check.
     let mut new_nodes = HashMap::new();
     for id in nodes.drain(0..) {
         let node = all_nodes

@@ -20,8 +20,8 @@
 //!
 //! This is split into two stages: the planning stage, where parts of the [`Leader`] are
 //! cloned, and the list of new domains to spin up and messages to send to new and existing domains
-//! is built (via the [`DomainMigrationPlan`]). If this completes without failing, a [`MigrationPlan`]
-//! is created and then applied to the running [`Leader`].
+//! is built (via the [`DomainMigrationPlan`]). If this completes without failing, a
+//! [`MigrationPlan`] is created and then applied to the running [`Leader`].
 //!
 //! A failure during the planning stage is inconsequential, as no part of the running controller
 //! is mutated. A failure during the apply stage currently might leave the cluster in an
@@ -846,8 +846,8 @@ impl<'dataflow> Migration<'dataflow> {
             // etc.
             // println!("{}", dataflow_state.ingredients);
 
-            // Since we are looping, we need to keep the dataflow_state.domain_nodes as it was before
-            // the loop.
+            // Since we are looping, we need to keep the dataflow_state.domain_nodes as it was
+            // before the loop.
             // This is not ideal, as we need to clone this each time.
             // TODO(fran): Can we remove the loop and make the modifications in-place?
             //   Even if we don't care about performance, this loop is very hard to reason about.

@@ -147,10 +147,11 @@ impl Display for Type {
 /// Result set sorting mode of a query
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum SortMode {
-    /// nosort - the default value. In nosort mode, the results appear in exactly the order in which
-    /// they were received from the database engine. The nosort mode should only be used on queries
-    /// that have an ORDER BY clause or which only have a single row of result, since otherwise the
-    /// order of results is undefined and might vary from one database engine to another.
+    /// nosort - the default value. In nosort mode, the results appear in exactly the order in
+    /// which they were received from the database engine. The nosort mode should only be used
+    /// on queries that have an ORDER BY clause or which only have a single row of result,
+    /// since otherwise the order of results is undefined and might vary from one database
+    /// engine to another.
     NoSort,
 
     /// The "rowsort" mode gathers all output from the database engine then sorts it by rows on the
@@ -730,13 +731,13 @@ pub enum Record {
     Statement(Statement),
     Query(Query),
 
-    /// The "hash-threshold" record sets a limit on the number of values that can appear in a result
-    /// set. If the number of values exceeds this, then instead of recording each individual value
-    /// in the full test script, an MD5 hash of all values is computed in stored. This makes the
-    /// full test scripts much shorter, but at the cost of obscuring the results. If the
-    /// hash-threshold is 0, then results are never hashed. A hash-threshold of 10 or 20 is
-    /// recommended. During debugging, it is advantage to set the hash-threshold to zero so that all
-    /// results can be seen.
+    /// The "hash-threshold" record sets a limit on the number of values that can appear in a
+    /// result set. If the number of values exceeds this, then instead of recording each
+    /// individual value in the full test script, an MD5 hash of all values is computed in
+    /// stored. This makes the full test scripts much shorter, but at the cost of obscuring the
+    /// results. If the hash-threshold is 0, then results are never hashed. A hash-threshold of
+    /// 10 or 20 is recommended. During debugging, it is advantage to set the hash-threshold to
+    /// zero so that all results can be seen.
     HashThreshold(usize),
 
     /// Stop testing and halt immediately. Useful when debugging.

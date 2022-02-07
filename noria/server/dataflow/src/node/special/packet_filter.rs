@@ -87,8 +87,9 @@ impl PacketFilter {
 
         match packet {
             Packet::Message { data, .. } => {
-                // If the packet is an update, we must check what keys the target node has previously requested.
-                // Based on that, we'll filter the records from the Packet.
+                // If the packet is an update, we must check what keys the target node has
+                // previously requested. Based on that, we'll filter the records
+                // from the Packet.
                 if node_keys.keys.is_empty() {
                     // If no keys were previously requested by the target node, then that
                     // means that all packets must be dropped until it requests some keys.

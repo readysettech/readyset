@@ -77,7 +77,8 @@ impl ProcessedQueryParams {
 /// condition
 #[derive(Debug, PartialEq, Eq, Clone)]
 struct RewrittenIn {
-    /// The index in the parameters of the query of the first rewritten parameter for this condition
+    /// The index in the parameters of the query of the first rewritten parameter for this
+    /// condition
     first_param_index: usize,
 
     /// The list of placeholders in the IN list itself

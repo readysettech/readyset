@@ -434,16 +434,18 @@ impl Ingredient for TopK {
                         let mut found = false;
                         current.retain(|CurrentRecord { row, is_new, .. }| {
                             if found {
-                                // we've already removed one copy of this row, don't need to do any more
+                                // we've already removed one copy of this row, don't need to do any
+                                // more
                                 return true;
                             }
                             if **row == *r {
                                 found = true;
-                                // is_new = we received a positive and a negative for the same value in
-                                // one batch
+                                // is_new = we received a positive and a negative for the same value
+                                // in one batch
                                 // [note: topk-record-ordering]
-                                // Note that since we sort records, and positive records compare less
-                                // than negative records, we'll always get the positive first and the
+                                // Note that since we sort records, and positive records compare
+                                // less than negative records, we'll
+                                // always get the positive first and the
                                 // negative second
                                 if !is_new {
                                     out.push(Record::Negative(r.clone()))

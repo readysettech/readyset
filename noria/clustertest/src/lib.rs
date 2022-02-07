@@ -4,13 +4,11 @@
 //! adding new servers, replicating readers.
 //!
 //! This makes this framework well suited for:
-//!   * Testing fault tolerance and failure recovery behavior. Clustertests can
-//!     easily introduce faults via
-//!     [`kill_server`](DeploymentHandle::kill_server) and
-//!     mimic failure recovery via [`start_server`](DeploymentHandle::start_server).
-//!   * Testing behavior that is localized to specific workers. Each worker in
-//!     a deployment can be queried for metrics separately via [`MetricsClient`]
-//!     which can be checked in clustertests.
+//!   * Testing fault tolerance and failure recovery behavior. Clustertests can easily introduce
+//!     faults via [`kill_server`](DeploymentHandle::kill_server) and mimic failure recovery via
+//!     [`start_server`](DeploymentHandle::start_server).
+//!   * Testing behavior that is localized to specific workers. Each worker in a deployment can be
+//!     queried for metrics separately via [`MetricsClient`] which can be checked in clustertests.
 //!
 //! # Preparing to run clustertests
 //! Clustertests require external resources in order to run: a MySQL server, an authority (consul)
@@ -124,8 +122,7 @@
 //! for example:
 //!   * the number of noria-server instances to create,
 //!     [`with_servers`](DeploymentBuilder::with_servers).
-//!   * whether to use an upstream
-//!     database, [`deploy_mysql`](DeploymentBuilder::deploy_mysql).
+//!   * whether to use an upstream database, [`deploy_mysql`](DeploymentBuilder::deploy_mysql).
 //!   * whether to deploy an adapter,
 //!     [`deploy_mysql_adapter`](DeploymentBuilder::deploy_mysql_adapter).
 //!   * The parameters used to build a server, [`ServerParams`].

@@ -46,11 +46,13 @@ pub enum DataType {
     Int(i64),
     /// An unsigned integer used to store every unsigned SQL integer type up to 64 bits.
     UnsignedInt(u64),
-    /// A floating point 32-bit real value. The second field holds the input precision, which is useful for
-    /// supporting DECIMAL, as well as characteristics of how FLOAT and DOUBLE behave in MySQL.
+    /// A floating point 32-bit real value. The second field holds the input precision, which is
+    /// useful for supporting DECIMAL, as well as characteristics of how FLOAT and DOUBLE
+    /// behave in MySQL.
     Float(f32, u8),
-    /// A floating point 64-bit real value. The second field holds the input precision, which is useful for
-    /// supporting DECIMAL, as well as characteristics of how FLOAT and DOUBLE behave in MySQL.
+    /// A floating point 64-bit real value. The second field holds the input precision, which is
+    /// useful for supporting DECIMAL, as well as characteristics of how FLOAT and DOUBLE
+    /// behave in MySQL.
     Double(f64, u8),
     /// A reference-counted string-like value.
     Text(Text),
@@ -61,7 +63,8 @@ pub enum DataType {
     /// A timestamp with time zone.
     TimestampTz(TimestampTz),
     /// A time duration
-    /// NOTE: [`MysqlTime`] is from -838:59:59 to 838:59:59 whereas Postgres time is from 00:00:00 to 24:00:00
+    /// NOTE: [`MysqlTime`] is from -838:59:59 to 838:59:59 whereas Postgres time is from 00:00:00
+    /// to 24:00:00
     Time(MysqlTime),
     //NOTE(Fran): Using an `Arc` to keep the `DataType` type 16 bytes long
     /// A byte array
@@ -77,8 +80,8 @@ pub enum DataType {
     /// This is a special value, as it cannot ever be constructed by user supplied values, and
     /// always returns an error when encountered during expression evaluation. Its only use is as
     /// the upper bound in a range query
-    // NOTE: when adding new DataType variants, make sure to always keep Max last - we use the order
-    // of the variants to compare
+    // NOTE: when adding new DataType variants, make sure to always keep Max last - we use the
+    // order of the variants to compare
     Max,
 }
 
@@ -140,7 +143,7 @@ impl DataType {
     pub fn min_value(other: &Self) -> Self {
         match other {
             DataType::None => DataType::None,
-            DataType::Text(_) | DataType::TinyText(_) => DataType::TinyText("".try_into().unwrap()), // Safe because fits in length
+            DataType::Text(_) | DataType::TinyText(_) => DataType::TinyText("".try_into().unwrap()), /* Safe because fits in length */
             DataType::Timestamp(_) => DataType::Timestamp(NaiveDateTime::new(
                 chrono::naive::MIN_DATE,
                 NaiveTime::from_hms(0, 0, 0),
@@ -208,7 +211,8 @@ impl DataType {
         matches!(*self, DataType::None)
     }
 
-    /// Checks if this value is of an integral data type (i.e., can be converted into integral types).
+    /// Checks if this value is of an integral data type (i.e., can be converted into integral
+    /// types).
     pub fn is_integer(&self) -> bool {
         matches!(*self, DataType::Int(_) | DataType::UnsignedInt(_))
     }
@@ -272,8 +276,9 @@ impl DataType {
         }
     }
 
-    /// Checks if the given DataType::Double or DataType::Float is equal to another DataType::Double or DataType::Float (respectively)
-    /// under an acceptable error margin. If None is supplied, we use f32::EPSILON or f64::EPSILON, accordingly.
+    /// Checks if the given DataType::Double or DataType::Float is equal to another DataType::Double
+    /// or DataType::Float (respectively) under an acceptable error margin. If None is supplied,
+    /// we use f32::EPSILON or f64::EPSILON, accordingly.
     pub fn equal_under_error_margin(&self, other: &DataType, error_margin: Option<f64>) -> bool {
         macro_rules! numeric_comparison {
             ($self_num:expr, $other_num:expr, $error_margin:expr, $epsilon:expr) => {
@@ -850,16 +855,19 @@ impl PartialEq for DataType {
             (&DataType::TinyText(ref a), &DataType::TinyText(ref b)) => a == b,
             (&DataType::Text(..), &DataType::TinyText(..))
             | (&DataType::TinyText(..), &DataType::Text(..)) => {
-                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                // this unwrap should be safe because no error path in try_from for &str on Text or
+                // TinyText
                 #[allow(clippy::unwrap_used)]
                 let a: &str = <&str>::try_from(self).unwrap();
-                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                // this unwrap should be safe because no error path in try_from for &str on Text or
+                // TinyText
                 #[allow(clippy::unwrap_used)]
                 let b: &str = <&str>::try_from(other).unwrap();
                 a == b
             }
             (&DataType::Text(..) | &DataType::TinyText(..), &DataType::Timestamp(dt)) => {
-                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                // this unwrap should be safe because no error path in try_from for &str on Text or
+                // TinyText
                 #[allow(clippy::unwrap_used)]
                 let a = <&str>::try_from(self).unwrap();
                 NaiveDateTime::parse_from_str(a, TIMESTAMP_FORMAT)
@@ -867,7 +875,8 @@ impl PartialEq for DataType {
                     .unwrap_or(false)
             }
             (&DataType::Text(..) | &DataType::TinyText(..), &DataType::TimestampTz(ref dt)) => {
-                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                // this unwrap should be safe because no error path in try_from for &str on Text or
+                // TinyText
                 #[allow(clippy::unwrap_used)]
                 let a = <&str>::try_from(self).unwrap();
                 chrono::DateTime::<FixedOffset>::parse_from_str(a, TIMESTAMP_TZ_FORMAT)
@@ -875,7 +884,8 @@ impl PartialEq for DataType {
                     .unwrap_or(false)
             }
             (&DataType::Text(..) | &DataType::TinyText(..), &DataType::Time(ref t)) => {
-                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                // this unwrap should be safe because no error path in try_from for &str on Text or
+                // TinyText
                 #[allow(clippy::unwrap_used)]
                 let a = <&str>::try_from(self).unwrap();
                 a.parse()
@@ -886,10 +896,12 @@ impl PartialEq for DataType {
             (&DataType::UnsignedInt(a), &DataType::UnsignedInt(b)) => a == b,
             (&DataType::UnsignedInt(..), &DataType::Int(..))
             | (&DataType::Int(..), &DataType::UnsignedInt(..)) => {
-                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int and UnsignedInt
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on
+                // Int and UnsignedInt
                 #[allow(clippy::unwrap_used)]
                 let a: i128 = <i128>::try_from(self).unwrap();
-                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int and UnsignedInt
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on
+                // Int and UnsignedInt
                 #[allow(clippy::unwrap_used)]
                 let b: i128 = <i128>::try_from(other).unwrap();
                 a == b
@@ -978,16 +990,19 @@ impl Ord for DataType {
             (&DataType::TinyText(ref a), &DataType::TinyText(ref b)) => a.as_str().cmp(b.as_str()),
             (&DataType::Text(..), &DataType::TinyText(..))
             | (&DataType::TinyText(..), &DataType::Text(..)) => {
-                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                // this unwrap should be safe because no error path in try_from for &str on Text or
+                // TinyText
                 #[allow(clippy::unwrap_used)]
                 let a: &str = <&str>::try_from(self).unwrap();
-                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                // this unwrap should be safe because no error path in try_from for &str on Text or
+                // TinyText
                 #[allow(clippy::unwrap_used)]
                 let b: &str = <&str>::try_from(other).unwrap();
                 a.cmp(b)
             }
             (&DataType::Text(..) | &DataType::TinyText(..), &DataType::Timestamp(ref other_dt)) => {
-                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                // this unwrap should be safe because no error path in try_from for &str on Text or
+                // TinyText
                 #[allow(clippy::unwrap_used)]
                 let a: &str = <&str>::try_from(self).unwrap();
                 NaiveDateTime::parse_from_str(a, TIMESTAMP_FORMAT)
@@ -998,7 +1013,8 @@ impl Ord for DataType {
                 &DataType::Text(..) | &DataType::TinyText(..),
                 &DataType::TimestampTz(ref other_dt),
             ) => {
-                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                // this unwrap should be safe because no error path in try_from for &str on Text or
+                // TinyText
                 #[allow(clippy::unwrap_used)]
                 let a: &str = <&str>::try_from(self).unwrap();
                 chrono::DateTime::<FixedOffset>::parse_from_str(a, TIMESTAMP_TZ_FORMAT)
@@ -1006,7 +1022,8 @@ impl Ord for DataType {
                     .unwrap_or(Ordering::Greater)
             }
             (&DataType::Text(..) | &DataType::TinyText(..), &DataType::Time(ref other_t)) => {
-                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                // this unwrap should be safe because no error path in try_from for &str on Text or
+                // TinyText
                 #[allow(clippy::unwrap_used)]
                 let a = <&str>::try_from(self).unwrap().parse();
                 a.map(|t: MysqlTime| t.cmp(other_t))
@@ -1020,10 +1037,12 @@ impl Ord for DataType {
             (&DataType::UnsignedInt(a), &DataType::UnsignedInt(b)) => a.cmp(&b),
             (&DataType::UnsignedInt(..), &DataType::Int(..))
             | (&DataType::Int(..), &DataType::UnsignedInt(..)) => {
-                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int and UnsignedInt
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on
+                // Int and UnsignedInt
                 #[allow(clippy::unwrap_used)]
                 let a: i128 = <i128>::try_from(self).unwrap();
-                // this unwrap should be safe because no error path in try_from for i128 (&i128 on Int and UnsignedInt
+                // this unwrap should be safe because no error path in try_from for i128 (&i128 on
+                // Int and UnsignedInt
                 #[allow(clippy::unwrap_used)]
                 let b: i128 = <i128>::try_from(other).unwrap();
                 a.cmp(&b)
@@ -1067,7 +1086,8 @@ impl Ord for DataType {
             // Convert ints to f32 and cmp against Float.
             (&DataType::Int(..), &DataType::Float(b, ..))
             | (&DataType::UnsignedInt(..), &DataType::Float(b, ..)) => {
-                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int and UnsignedInt
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on
+                // Int and UnsignedInt
                 #[allow(clippy::unwrap_used)]
                 let a = <i128>::try_from(self).unwrap();
 
@@ -1076,7 +1096,8 @@ impl Ord for DataType {
             // Convert ints to double and cmp against Real.
             (&DataType::Int(..), &DataType::Double(b, ..))
             | (&DataType::UnsignedInt(..), &DataType::Double(b, ..)) => {
-                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int and UnsignedInt
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on
+                // Int and UnsignedInt
                 #[allow(clippy::unwrap_used)]
                 let a: i128 = <i128>::try_from(self).unwrap();
 
@@ -1085,7 +1106,8 @@ impl Ord for DataType {
             // Convert ints to f32 and cmp against Float.
             (&DataType::Int(..), &DataType::Numeric(ref b))
             | (&DataType::UnsignedInt(..), &DataType::Numeric(ref b)) => {
-                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int and UnsignedInt
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on
+                // Int and UnsignedInt
                 #[allow(clippy::unwrap_used)]
                 let a: i128 = <i128>::try_from(self).unwrap();
 
@@ -1093,7 +1115,8 @@ impl Ord for DataType {
             }
             (&DataType::Float(a, ..), &DataType::Int(..))
             | (&DataType::Float(a, ..), &DataType::UnsignedInt(..)) => {
-                // this unwrap should be safe because no error path in try_from for i128 (&i128)  on Int and UnsignedInt
+                // this unwrap should be safe because no error path in try_from for i128 (&i128)  on
+                // Int and UnsignedInt
                 #[allow(clippy::unwrap_used)]
                 let b: i128 = <i128>::try_from(other).unwrap();
 
@@ -1101,7 +1124,8 @@ impl Ord for DataType {
             }
             (&DataType::Double(a, ..), &DataType::Int(..))
             | (&DataType::Double(a, ..), &DataType::UnsignedInt(..)) => {
-                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int and UnsignedInt
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on
+                // Int and UnsignedInt
                 #[allow(clippy::unwrap_used)]
                 let b: i128 = <i128>::try_from(other).unwrap();
 
@@ -1141,7 +1165,8 @@ impl Hash for DataType {
                 p.hash(state);
             }
             DataType::Text(..) | DataType::TinyText(..) => {
-                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                // this unwrap should be safe because no error path in try_from for &str on Text or
+                // TinyText
                 #[allow(clippy::unwrap_used)]
                 let t: &str = <&str>::try_from(self).unwrap();
                 t.hash(state)

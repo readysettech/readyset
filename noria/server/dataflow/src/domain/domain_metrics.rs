@@ -2,7 +2,6 @@
 //! This module contains a struct that aggregates all the metrics collected for a domain.
 //! To make the metrics performant, it holds handles to all the required metrics for
 //! fast operations, wherever possible.
-//!
 
 use std::collections::BTreeMap;
 use std::convert::TryInto;

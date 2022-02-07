@@ -114,8 +114,8 @@ impl State for MemoryState {
                 //  - if the incoming record is a normal message (i.e., partial.is_none()), then we
                 //    need to be careful. since this materialization is partial, it may be that we
                 //    haven't yet replayed this `r`'s key, in which case we shouldn't forward that
-                //    record! if all of our indices have holes for this record, there's no need for us
-                //    to forward it. it would just be wasted work.
+                //    record! if all of our indices have holes for this record, there's no need for
+                //    us to forward it. it would just be wasted work.
                 //
                 //    XXX: we could potentially save come computation here in joins by not forcing
                 //    `right` to backfill the lookup key only to then throw the record away
@@ -282,8 +282,9 @@ impl State for MemoryState {
         self.state[0].values().flat_map(fix).collect()
     }
 
-    /// Evicts `bytes` by evicting random keys from the state. The key are first evicted from the strongly
-    /// referenced `state`, then they are removed from the weakly referenced `weak_indices`.
+    /// Evicts `bytes` by evicting random keys from the state. The key are first evicted from the
+    /// strongly referenced `state`, then they are removed from the weakly referenced
+    /// `weak_indices`.
     fn evict_bytes(&mut self, bytes: usize) -> Option<StateEvicted> {
         let mut rng = rand::thread_rng();
         let state_index = rng.gen_range(0, self.state.len());

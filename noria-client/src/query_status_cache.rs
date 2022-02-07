@@ -347,7 +347,8 @@ impl QueryStatusCache {
         match self.inner.get_mut(q) {
             Some(mut s) if s.migration_state != MigrationState::Unsupported => {
                 // Once a query is determined to be unsupported, there is currently no going back.
-                // In the future when we can support this in the query path this check should change.
+                // In the future when we can support this in the query path this check should
+                // change.
                 s.migration_state = m;
             }
             None => {

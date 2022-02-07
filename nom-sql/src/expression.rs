@@ -67,7 +67,8 @@ pub enum FunctionExpression {
 }
 
 impl FunctionExpression {
-    /// Returns an iterator over all the direct arguments passed to the given function call expression
+    /// Returns an iterator over all the direct arguments passed to the given function call
+    /// expression
     pub fn arguments(&self) -> impl Iterator<Item = &Expression> {
         match self {
             FunctionExpression::Avg { expr: arg, .. }
@@ -404,8 +405,8 @@ enum TokenTree {
     PgsqlCast(Box<TokenTree>, SqlType),
 }
 
-// no_and_or variants of `infix`, `rest`, and `token_tree` allow parsing (binary op) expressions in the
-// right-hand side of a BETWEEN, eg:
+// no_and_or variants of `infix`, `rest`, and `token_tree` allow parsing (binary op) expressions in
+// the right-hand side of a BETWEEN, eg:
 //     foo between (1 + 2) and 3 + 5
 // should parse the same as:
 //     foo between (1 + 2) and (3 + 5)

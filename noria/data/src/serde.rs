@@ -42,7 +42,8 @@ where
     S: serde::ser::Serializer,
     T: ?Sized + serde::Serialize,
 {
-    // The compiler should be able to inline the constant name here, so no lookups are done at runtime
+    // The compiler should be able to inline the constant name here, so no lookups are done at
+    // runtime
     let variant_name = Field::VARIANTS[variant as usize];
     serializer.serialize_newtype_variant("DataType", variant as _, variant_name, value)
 }
@@ -56,7 +57,8 @@ fn serialize_tuple<S>(
 where
     S: serde::ser::Serializer,
 {
-    // The compiler should be able to inline the constant name here, so no lookups are done at runtime
+    // The compiler should be able to inline the constant name here, so no lookups are done at
+    // runtime
     let variant_name = Field::VARIANTS[variant as usize];
     serializer.serialize_tuple_variant("DataType", variant as _, variant_name, len)
 }
@@ -93,8 +95,9 @@ impl serde::ser::Serialize for DataType {
                 serialize_variant(serializer, Field::Text, Bytes::new(v.as_bytes()))
             }
             DataType::Timestamp(v) => {
-                // We serialize the NaiveDateTime as seconds in the low 64 bits of u128 and subsec nanos in the high 64 bits
-                // NOTE: don't be tempted to remove the intermediate step of casting to u64, as it will propagate the sign bit
+                // We serialize the NaiveDateTime as seconds in the low 64 bits of u128 and subsec
+                // nanos in the high 64 bits NOTE: don't be tempted to remove the
+                // intermediate step of casting to u64, as it will propagate the sign bit
                 let ts =
                     v.timestamp() as u64 as u128 + ((v.timestamp_subsec_nanos() as u128) << 64);
                 serialize_variant(serializer, Field::Timestamp, &ts)
@@ -276,7 +279,8 @@ impl<'de> Deserialize<'de> for DataType {
                             TextOrTinyText::Text(t) => DataType::Text(t),
                         })
                     }
-                    // We deserialize the NaiveDateTime by extracting nsecs from the top 64 bits of the encoded i128, and secs from the low 64 bits
+                    // We deserialize the NaiveDateTime by extracting nsecs from the top 64 bits of
+                    // the encoded i128, and secs from the low 64 bits
                     (Field::Timestamp, variant) => VariantAccess::newtype_variant::<u128>(variant)
                         .map(|r| NaiveDateTime::from_timestamp(r as _, (r >> 64) as _).into()),
                     (Field::Time, variant) => {

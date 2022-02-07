@@ -38,8 +38,8 @@ pub enum TriggerEndpoint {
     None,
     /// This domain is the start of the replay path
     Start(Index),
-    /// This domain is the end of the replay path, with the indicated source domain and how to query
-    /// that domain's shards
+    /// This domain is the end of the replay path, with the indicated source domain and how to
+    /// query that domain's shards
     End(SourceSelection, DomainIndex),
     /// The replay path is contained entirely within this domain
     Local(Index),
@@ -203,7 +203,6 @@ pub enum DomainRequest {
 #[allow(clippy::large_enum_variant)]
 pub enum Packet {
     // Data messages
-    //
     /// A write received to the base table
     Input {
         inner: LocalOrNot<PacketData>,
@@ -241,11 +240,9 @@ pub enum Packet {
 
     //
     // Internal control
-    //
     Finish(Tag, LocalNodeIndex),
 
     // Control messages
-    //
     /// Ask domain (nicely) to replay a particular set of keys.
     RequestPartialReplay {
         tag: Tag,

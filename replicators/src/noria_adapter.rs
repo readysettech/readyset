@@ -52,7 +52,6 @@ pub(crate) trait Connector {
     /// * `until` - an optional position in the binlog to stop at, even if no actionable
     /// occured. In that case the action [`ReplicationAction::LogPosition`] is returned.
     /// Currently this is only used by MySQL replicator while catching up on replication.
-    ///
     async fn next_action(
         &mut self,
         last_pos: &ReplicationOffset,
@@ -74,8 +73,8 @@ pub struct NoriaAdapter {
     /// at startup and maintained during replication.
     ///
     /// Since some tables may have lagged behind others due to failed snapshotting, we start
-    /// replication at the *minimum* replication offset, but ignore any replication events that come
-    /// before the offset for that table
+    /// replication at the *minimum* replication offset, but ignore any replication events that
+    /// come before the offset for that table
     replication_offsets: ReplicationOffsets,
 }
 
@@ -220,7 +219,8 @@ impl NoriaAdapter {
                 // need to catch up to the just-snapshotted tables. We discard
                 // replication events for offsets < the replication offset of that table, so we can
                 // do this "catching up" by just starting replication at the old offset.
-                // Note that at the very least we will always have the schema offset for the minumum.
+                // Note that at the very least we will always have the schema offset for the
+                // minumum.
                 let pos: BinlogPosition = replication_offsets
                     .min_present_offset()?
                     .expect("Minimal offset must be present after snapshot")

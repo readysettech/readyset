@@ -20,7 +20,8 @@ const DEFAULT_SERVER_ID: u32 = u32::MAX - 55;
 
 /// A connector that connects to a MySQL server and starts reading binlogs from a given position.
 ///
-/// The server must be configured with `binlog_format` set to `row` and `binlog_row_image` set to `full`.
+/// The server must be configured with `binlog_format` set to `row` and `binlog_row_image` set to
+/// `full`.
 ///
 /// The connector user may optionally have the following permissions:
 /// * `BACKUP_ADMIN` - (optional) to perform LOCK INSTANCE FOR BACKUP, not available on RDS
@@ -50,13 +51,15 @@ pub struct MySqlBinlogConnector {
 
 impl PartialOrd for BinlogPosition {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        // The log files are sequentially numbered using a .NNNNNN suffix. The index file has a suffix of .index.
-        // All files share a common basename. The default binary log file-naming basename is "HOSTNAME-bin".
+        // The log files are sequentially numbered using a .NNNNNN suffix. The index file has a
+        // suffix of .index. All files share a common basename. The default binary log
+        // file-naming basename is "HOSTNAME-bin".
         if self.binlog_file == other.binlog_file {
             return self.position.partial_cmp(&other.position);
         }
 
-        // This implementation assumes proper binlog filename format, and will return None on an invalid format.
+        // This implementation assumes proper binlog filename format, and will return None on an
+        // invalid format.
         let (basename, suffix) = self.binlog_file.rsplit_once('.')?;
         let (other_basename, other_suffix) = other.binlog_file.rsplit_once('.')?;
 
@@ -124,9 +127,10 @@ impl From<&ReplicationOffset> for BinlogPosition {
         let suffix = (val.offset >> 64) as u32;
         let position = val.offset as u32;
 
-        // To get the binlog filename back we use `replication_log_name` as the basename and append the suffix
-        // which is encoded in bits 64:123 of `offset`, and format it as a zero padded decimal integer with
-        // `suffix_len` characters (encoded in the top 5 bits of the offset)
+        // To get the binlog filename back we use `replication_log_name` as the basename and append
+        // the suffix which is encoded in bits 64:123 of `offset`, and format it as a zero
+        // padded decimal integer with `suffix_len` characters (encoded in the top 5 bits of
+        // the offset)
         BinlogPosition {
             binlog_file: format!("{0}.{1:02$}", val.replication_log_name, suffix, suffix_len),
             position,
@@ -211,8 +215,8 @@ impl MySqlBinlogConnector {
     /// Get the next raw binlog event
     async fn next_event(&mut self) -> mysql::Result<binlog::events::Event> {
         let packet = self.connection.read_packet().await?;
-        // TODO: byte 0 of packet should be zero, unless EOF is reached, however we should never get one
-        // without the NON_BLOCKING SQL flag set
+        // TODO: byte 0 of packet should be zero, unless EOF is reached, however we should never get
+        // one without the NON_BLOCKING SQL flag set
         assert_eq!(packet.get(0), Some(&0));
         let event = self.reader.read(&packet[1..])?;
         assert!(Self::validate_event_checksum(&event)); // TODO: definitely should never fail a CRC check, but what to do if we do?
@@ -248,13 +252,15 @@ impl MySqlBinlogConnector {
             {
                 EventType::ROTATE_EVENT => {
                     // Written when mysqld switches to a new binary log file.
-                    // This occurs when someone issues a FLUSH LOGS statement or the current binary log file becomes too large.
-                    // The maximum size is determined by max_binlog_size.
+                    // This occurs when someone issues a FLUSH LOGS statement or the current binary
+                    // log file becomes too large. The maximum size is
+                    // determined by max_binlog_size.
                     let ev: events::RotateEvent = binlog_event.read_event()?;
 
                     self.next_position = BinlogPosition {
                         binlog_file: ev.name().to_string(),
-                        // This should never happen, but better to panic than to get the wrong position
+                        // This should never happen, but better to panic than to get the wrong
+                        // position
                         position: u32::try_from(ev.position()).unwrap(),
                     };
 
@@ -274,7 +280,8 @@ impl MySqlBinlogConnector {
                         .is_none()
                     {
                         // If the query does not affect the schema, just keep going
-                        // TODO: Transactions begin with the `BEGIN` queries, but we do not currently support those
+                        // TODO: Transactions begin with the `BEGIN` queries, but we do not
+                        // currently support those
                         continue;
                     }
 
@@ -287,14 +294,17 @@ impl MySqlBinlogConnector {
                 }
 
                 EventType::TABLE_MAP_EVENT => {
-                    // Used for row-based binary logging. This event precedes each row operation event.
-                    // It maps a table definition to a number, where the table definition consists of
-                    // database and table names and column definitions. The purpose of this event is to
-                    // enable replication when a table has different definitions on the master and slave.
-                    // Row operation events that belong to the same transaction may be grouped into
-                    // sequences, in which case each such sequence of events begins with a sequence of
+                    // Used for row-based binary logging. This event precedes each row operation
+                    // event. It maps a table definition to a number, where the
+                    // table definition consists of database and table names and
+                    // column definitions. The purpose of this event is to
+                    // enable replication when a table has different definitions on the master and
+                    // slave. Row operation events that belong to the same
+                    // transaction may be grouped into sequences, in which case
+                    // each such sequence of events begins with a sequence of
                     // TABLE_MAP_EVENT events: one per table used by events in the sequence.
-                    // Those events are implicitly handled by our lord and saviour `binlog::EventStreamReader`
+                    // Those events are implicitly handled by our lord and saviour
+                    // `binlog::EventStreamReader`
                 }
 
                 EventType::WRITE_ROWS_EVENT => {
@@ -313,7 +323,8 @@ impl MySqlBinlogConnector {
                     let mut inserted_rows = Vec::new();
 
                     for row in ev.rows(tme) {
-                        // For each row in the event we produce a vector of Noria types that represent that row
+                        // For each row in the event we produce a vector of Noria types that
+                        // represent that row
                         inserted_rows.push(noria::TableOperation::Insert(binlog_row_to_noria_row(
                             &row?.1.ok_or("Missing data in WRITE_ROWS_EVENT")?,
                             tme,
@@ -394,7 +405,8 @@ impl MySqlBinlogConnector {
                     let mut deleted_rows = Vec::new();
 
                     for row in ev.rows(tme) {
-                        // For each row in the event we produce a vector of Noria types that represent that row
+                        // For each row in the event we produce a vector of Noria types that
+                        // represent that row
                         deleted_rows.push(noria::TableOperation::DeleteRow {
                             row: binlog_row_to_noria_row(
                                 &row?.0.ok_or("Missing data in DELETE_ROWS_EVENT")?,
@@ -413,17 +425,23 @@ impl MySqlBinlogConnector {
                     ));
                 }
 
-                EventType::WRITE_ROWS_EVENT_V1 => unimplemented!(), // The V1 event numbers are used from 5.1.16 until mysql-5.6.
-                EventType::UPDATE_ROWS_EVENT_V1 => unimplemented!(), // The V1 event numbers are used from 5.1.16 until mysql-5.6.
-                EventType::DELETE_ROWS_EVENT_V1 => unimplemented!(), // The V1 event numbers are used from 5.1.16 until mysql-5.6.
-
+                EventType::WRITE_ROWS_EVENT_V1 => unimplemented!(), /* The V1 event numbers are */
+                // used from 5.1.16 until
+                // mysql-5.6.
+                EventType::UPDATE_ROWS_EVENT_V1 => unimplemented!(), /* The V1 event numbers are */
+                // used from 5.1.16 until
+                // mysql-5.6.
+                EventType::DELETE_ROWS_EVENT_V1 => unimplemented!(), /* The V1 event numbers are */
+                // used from 5.1.16 until
+                // mysql-5.6.
                 EventType::GTID_EVENT => {
                     // GTID stands for Global Transaction IDentifier It is composed of two parts:
                     // SID for Source Identifier, and GNO for Group Number. The basic idea is to
-                    // Associate an identifier, the Global Transaction IDentifier or GTID, to every transaction.
-                    // When a transaction is copied to a slave, re-executed on the slave, and written to the
-                    // slave's binary log, the GTID is preserved.  When a slave connects to a master, the slave
-                    // uses GTIDs instead of (file, offset)
+                    // Associate an identifier, the Global Transaction IDentifier or GTID, to every
+                    // transaction. When a transaction is copied to a slave,
+                    // re-executed on the slave, and written to the
+                    // slave's binary log, the GTID is preserved.  When a slave connects to a
+                    // master, the slave uses GTIDs instead of (file, offset)
                     // See also https://dev.mysql.com/doc/refman/8.0/en/replication-mode-change-online-concepts.html
                     let ev: events::GtidEvent = binlog_event.read_event()?;
                     self.current_gtid = Some(ev.gno());
@@ -478,7 +496,8 @@ impl MySqlBinlogConnector {
                 _ => {}
             }
 
-            // We didn't get an actionable event, but we still need to check that we haven't reached the until limit
+            // We didn't get an actionable event, but we still need to check that we haven't reached
+            // the until limit
             if let Some(limit) = until {
                 let limit = BinlogPosition::try_from(limit).expect("Valid binlog limit");
                 if self.next_position >= limit {
@@ -510,17 +529,20 @@ fn binlog_val_to_noria_val(
     match (col_kind, meta) {
         (ColumnType::MYSQL_TYPE_TIMESTAMP2, &[0]) => {
             //https://github.com/blackbeam/rust_mysql_common/blob/408effed435c059d80a9e708bcfa5d974527f476/src/binlog/value.rs#L144
-            // When meta is 0, `mysql_common` encodes this value as number of seconds (since UNIX EPOCH)
+            // When meta is 0, `mysql_common` encodes this value as number of seconds (since UNIX
+            // EPOCH)
             let epoch = String::from_utf8_lossy(buf).parse::<i64>().unwrap(); // Can unwrap because we know the format is integer
             if epoch == 0 {
-                // The 0 epoch is reserved for the '0000-00-00 00:00:00' timestamp, which we currently set to None
+                // The 0 epoch is reserved for the '0000-00-00 00:00:00' timestamp, which we
+                // currently set to None
                 return Ok(DataType::None);
             }
             let time = chrono::naive::NaiveDateTime::from_timestamp(epoch, 0);
             Ok(time.try_into().unwrap()) // Can unwarp because we know maps derectly to noria type
         }
         (ColumnType::MYSQL_TYPE_TIMESTAMP2, _) => {
-            // When meta is anything else, `mysql_common` encodes this value as number of seconds.microseconds (since UNIX EPOCH)
+            // When meta is anything else, `mysql_common` encodes this value as number of
+            // seconds.microseconds (since UNIX EPOCH)
             let s = String::from_utf8_lossy(buf);
             let (secs, usecs) = s.split_once('.').unwrap(); // safe to unwrap because format is fixed
             let secs = secs.parse::<i64>().unwrap();

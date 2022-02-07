@@ -309,8 +309,8 @@ impl KeyedState {
             KeyedState::SexBTree(ref mut map) => map.insert_range(
                 <(DataType, _, _, _, _, _) as MakeKey<_>>::from_range(&range),
             ),
-            // This is unwieldy, but allowing callers to insert the wrong length of Vec into us would
-            // be very bad!
+            // This is unwieldy, but allowing callers to insert the wrong length of Vec into us
+            // would be very bad!
             KeyedState::MultiBTree(ref mut map, len)
                 if (into_bound_endpoint(range.0.as_ref()).map_or(true, |x| x.len() == *len)
                     && into_bound_endpoint(range.1.as_ref()).map_or(true, |x| x.len() == *len)) =>
@@ -459,9 +459,9 @@ impl KeyedState {
                 m.swap_remove_index(index).map(|(k, rs)| (rs, k))
             }
 
-            // TODO(grfn): This way of evicting (which also happens in reader_map) is pretty icky - we
-            // have to iterate the sequence of keys, *and* we have to clone out the keys themselves! we
-            // should find a better way to do that.
+            // TODO(grfn): This way of evicting (which also happens in reader_map) is pretty icky -
+            // we have to iterate the sequence of keys, *and* we have to clone out the
+            // keys themselves! we should find a better way to do that.
             // https://app.clubhouse.io/readysettech/story/154
             KeyedState::SingleBTree(ref mut m) if !m.is_empty() => {
                 let index = seed % m.len();
@@ -519,9 +519,10 @@ impl KeyedState {
             KeyedState::QuadBTree(ref mut m) => m.remove(&MakeKey::from_key(key)),
             KeyedState::QuinBTree(ref mut m) => m.remove(&MakeKey::from_key(key)),
             KeyedState::SexBTree(ref mut m) => m.remove(&MakeKey::from_key(key)),
-            // FIXME(eta): this clones unnecessarily, given we could make PartialMap do the Borrow thing.
-            // That requres making the unbounded-interval-tree crate do that as well, though, and that's painful.
-            // (also everything else in here clones -- I do wonder what the perf impacts of that are)
+            // FIXME(eta): this clones unnecessarily, given we could make PartialMap do the Borrow
+            // thing. That requres making the unbounded-interval-tree crate do that as
+            // well, though, and that's painful. (also everything else in here clones --
+            // I do wonder what the perf impacts of that are)
             KeyedState::MultiBTree(ref mut m, _) => m.remove(&key.to_owned()),
 
             KeyedState::SingleHash(ref mut m) => m.remove(&(key[0])),

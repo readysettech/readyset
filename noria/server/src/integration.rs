@@ -1501,8 +1501,8 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
 
     sleep().await;
 
-    // Create a new controller with the same authority store, and make sure that it recovers to the same
-    // state that the other one had.
+    // Create a new controller with the same authority store, and make sure that it recovers to the
+    // same state that the other one had.
     let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
         authority_store,
     )));
@@ -1570,8 +1570,8 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
     }
     sleep().await;
 
-    // Create a new controller with the same authority store, and make sure that it recovers to the same
-    // state that the other one had.
+    // Create a new controller with the same authority store, and make sure that it recovers to the
+    // same state that the other one had.
     let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
         authority_store,
     )));
@@ -2198,8 +2198,9 @@ async fn replay_during_replay() {
             // we need three bases:
             //
             //  - a will be the left side of the left join
-            //  - u1 and u2 will be joined together with a regular one-to-one join to produce a partial
-            //    view (remember, we need to miss in the source of the replay, so it must be partial).
+            //  - u1 and u2 will be joined together with a regular one-to-one join to produce a
+            //    partial view (remember, we need to miss in the source of the replay, so it must be
+            //    partial).
             let a = mig.add_base("a", &["a"], Base::new().with_default_values(vec![1.into()]));
             let u1 = mig.add_base(
                 "u1",
@@ -3478,7 +3479,8 @@ async fn remove_query() {
 macro_rules! get {
     ($private:ident, $public:ident, $uid:expr, $aid:expr) => {{
         // combine private and public results
-        // also, there's currently a bug where MIR doesn't guarantee the order of parameters, so we try both O:)
+        // also, there's currently a bug where MIR doesn't guarantee the order of parameters, so we
+        // try both O:)
         let private_uid_aid = $private
             .lookup(&[$uid.into(), $aid.try_into().unwrap()], true)
             .await
@@ -3488,12 +3490,18 @@ macro_rules! get {
             .lookup(&[$aid.try_into().unwrap(), $uid.into()], true)
             .await
             .unwrap();
-        let v: Vec<_> = private_uid_aid.chain(private_aid_uid)
-            .chain($public.lookup(&[$aid.try_into().unwrap()], true).await.unwrap())
+        let v: Vec<_> = private_uid_aid
+            .chain(private_aid_uid)
+            .chain(
+                $public
+                    .lookup(&[$aid.try_into().unwrap()], true)
+                    .await
+                    .unwrap(),
+            )
             .collect();
         eprintln!("check {} as {}: {:?}", $aid, $uid, v);
         v
-    }}
+    }};
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -5305,8 +5313,8 @@ async fn multiple_aggregate_sum_sharded() {
     assert_eq!(res, vec![(1, 3), (5, 7), (12, 8)]);
 }
 
-// multiple_aggregate_same_col_sharded tests multiple aggregators of different types operating on the same
-// column in a sharded environment.
+// multiple_aggregate_same_col_sharded tests multiple aggregators of different types operating on
+// the same column in a sharded environment.
 #[tokio::test(flavor = "multi_thread")]
 async fn multiple_aggregate_same_col_sharded() {
     let mut g = start_simple("multiple_aggregate_same_col_sharded").await;
@@ -5391,9 +5399,9 @@ async fn multiple_aggregate_over_two() {
     assert_eq!(res, vec![(1, 1., 1, 1), (5, 2.5, 2, 4), (12, 6.0, 2, 7)]);
 }
 
-// multiple_aggregate_over_two_sharded tests the case of more than two aggregate functions being used in
-// the same select query. This effectively tests our ability to appropriately generate multiple
-// MirNodeInner::JoinAggregates nodes and join them all together correctly in a sharded
+// multiple_aggregate_over_two_sharded tests the case of more than two aggregate functions being
+// used in the same select query. This effectively tests our ability to appropriately generate
+// multiple MirNodeInner::JoinAggregates nodes and join them all together correctly in a sharded
 // environment.
 #[tokio::test(flavor = "multi_thread")]
 async fn multiple_aggregate_over_two_sharded() {
@@ -5479,9 +5487,9 @@ async fn multiple_aggregate_with_expressions() {
     assert_eq!(res, vec![(1, 5.), (5, 12.5), (12, 30.0)]);
 }
 
-// multiple_aggregate_with_expressions_sharded tests multiple aggregates involving arithmetic expressions
-// that would modify the output of the resulting columns. This tests that when we join aggregates
-// that we are ignoring projection nodes appropriately in a sharded environment
+// multiple_aggregate_with_expressions_sharded tests multiple aggregates involving arithmetic
+// expressions that would modify the output of the resulting columns. This tests that when we join
+// aggregates that we are ignoring projection nodes appropriately in a sharded environment
 #[tokio::test(flavor = "multi_thread")]
 async fn multiple_aggregate_with_expressions_sharded() {
     let mut g = start_simple("multiple_aggregate_with_expressions_sharded").await;

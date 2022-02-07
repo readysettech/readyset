@@ -8,10 +8,10 @@
 //!       domains that contain a reader node can run on that worker
 //! 2. Migrations can optionally [be restricted to a single worker][worker] - if so, all
 //!    shards of all domains within the migration will be scheduled to that worker, *if* it's valid
-//! 3. Otherwise, for each shard in the domain (which is just the list of natural numbers from 0 to the
-//!    number of shards exclusive) we either:
-//!    a. Run the domain shard on the worker matching its [placement restrictions][], if it has any, or
-//!    b. If the domain contains base tables, run it on the worker running the smallest number of
+//! 3. Otherwise, for each shard in the domain (which is just the list of natural numbers from 0 to
+//! the    number of shards exclusive) we either:
+//!    a. Run the domain shard on the worker matching its [placement restrictions][], if it has any,
+//! or    b. If the domain contains base tables, run it on the worker running the smallest number of
 //!       other base tables, or otherwise
 //!    c. Run it on the worker that has the smallest number of domain shards scheduled onto it
 //!
