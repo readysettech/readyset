@@ -230,25 +230,7 @@ where
                 let group = get_group_values(&group_by, group_rs.peek().unwrap());
 
                 let rs = {
-                    let lookup_key = KeyType::from(&group[..]);
-                    // Note [self-lookup-uses-tag]
-                    // ---------------------------
-                    // If we're processing a replay, it's important that we use the tag of that
-                    // replay to select the index to look up into, rather than just using the column
-                    // indices. If we just use the column indices, then we could select a HashMap
-                    // index for a range replay, meaning we'd miss in the lookup even though we're
-                    // processing a replay, since the hole is only marked filled in the BTreeMap
-                    // index (the index matching the replay's key)!
-                    //
-                    // The issue this fixes is covered by //logictests/range_aggregates.test
-                    let lookup_result = match (replay.tag(), replay.key()) {
-                        (Some(tag), Some(key)) if key == this.out_key => {
-                            db.lookup_in_tag(tag, &lookup_key)
-                        }
-                        _ => db.lookup(&this.out_key, &lookup_key),
-                    };
-
-                    match lookup_result {
+                    match db.lookup(&this.out_key[..], &KeyType::from(&group[..])) {
                         LookupResult::Some(rs) => {
                             if replay.is_partial() {
                                 lookups.push(Lookup {
