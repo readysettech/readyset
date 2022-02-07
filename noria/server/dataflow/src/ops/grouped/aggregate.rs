@@ -176,7 +176,7 @@ impl GroupedOperation for Aggregator {
         &self,
         current: Option<&DataType>,
         diffs: &mut dyn Iterator<Item = Self::Diff>,
-    ) -> ReadySetResult<DataType> {
+    ) -> ReadySetResult<Option<DataType>> {
         let apply_count = |curr: DataType, diff: Self::Diff| -> ReadySetResult<DataType> {
             if diff.positive {
                 &curr + &DataType::Int(1)
@@ -220,10 +220,12 @@ impl GroupedOperation for Aggregator {
                 }
             };
 
-        diffs.fold(
-            Ok(current.unwrap_or(&DataType::Int(0)).deep_clone()),
-            apply_diff,
-        )
+        diffs
+            .fold(
+                Ok(current.unwrap_or(&DataType::Int(0)).deep_clone()),
+                apply_diff,
+            )
+            .map(Some)
     }
 
     fn description(&self, detailed: bool) -> String {
