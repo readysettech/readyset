@@ -59,11 +59,15 @@ pub trait GroupedOperation: fmt::Debug + Clone {
 
     /// Given the given `current` value, and a number of changes for a group (`diffs`), compute the
     /// updated group value.
+    ///
+    /// A return value of [`None`] indicates that the operator has lost the ability to construct
+    /// state for the operator, and needs to start from the beginning (eg, an `extremum` had the
+    /// extreme value deleted).
     fn apply(
         &self,
         current: Option<&DataType>,
         diffs: &mut dyn Iterator<Item = Self::Diff>,
-    ) -> ReadySetResult<DataType>;
+    ) -> ReadySetResult<Option<DataType>>;
 
     fn description(&self, detailed: bool) -> String;
 
@@ -270,9 +274,9 @@ where
                 });
 
                 // new is the result of applying all diffs for the group to the current value
-                let new = match this.inner.apply(current.as_deref(), &mut diffs as &mut _) {
-                    Ok(v) => v,
-                    Err(ReadySetError::GroupedStateLost) => {
+                let new = match this.inner.apply(current.as_deref(), &mut diffs as &mut _)? {
+                    Some(v) => v,
+                    None => {
                         // we lost the grouped state, so we need to start afresh.
                         // let's query the parent for ALL records in this group, and then feed them
                         // through, starting with a blank `current` value.
@@ -331,9 +335,10 @@ where
                             .into_iter()
                             .map(|x| this.inner.to_diff(&x, true))
                             .collect::<ReadySetResult<Vec<_>>>()?;
-                        this.inner.apply(None, &mut diffs.into_iter())?
+                        this.inner
+                            .apply(None, &mut diffs.into_iter())?
+                            .unwrap_or_else(|| this.inner.empty_value().unwrap_or(DataType::None))
                     }
-                    Err(e) => return Err(e),
                 };
                 match current {
                     Some(ref current) if new == **current => {

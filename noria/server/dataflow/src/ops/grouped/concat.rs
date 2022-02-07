@@ -119,7 +119,7 @@ impl GroupedOperation for GroupConcat {
         &self,
         current: Option<&DataType>,
         diffs: &mut dyn Iterator<Item = Self::Diff>,
-    ) -> ReadySetResult<DataType> {
+    ) -> ReadySetResult<Option<DataType>> {
         let current: Option<&str> = current
             .filter(|dt| matches!(dt, &DataType::Text(..) | &DataType::TinyText(..)))
             .and_then(|dt| <&str>::try_from(dt).ok());
@@ -140,7 +140,7 @@ impl GroupedOperation for GroupConcat {
             }
             // if state doesn't match, need to recreate it
             Some(_) => {
-                return Err(ReadySetError::GroupedStateLost);
+                return Ok(None);
             }
             // if we're recreating or this is the first record for the group, make a new state
             None => LastState::default(),
@@ -179,7 +179,7 @@ impl GroupedOperation for GroupConcat {
         }
         prev_state.string_repr = out_str.clone();
         self.last_state.borrow_mut().insert(group, prev_state);
-        Ok(out_str.into())
+        Ok(Some(out_str.into()))
     }
 
     fn description(&self, detailed: bool) -> String {

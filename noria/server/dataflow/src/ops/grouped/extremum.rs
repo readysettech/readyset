@@ -96,7 +96,7 @@ impl GroupedOperation for ExtremumOperator {
         &self,
         current: Option<&DataType>,
         diffs: &mut dyn Iterator<Item = Self::Diff>,
-    ) -> ReadySetResult<DataType> {
+    ) -> ReadySetResult<Option<DataType>> {
         // Extreme values are those that are at least as extreme as the current min/max (if any).
         // let mut is_extreme_value : Box<dyn Fn(i64) -> bool> = Box::new(|_|true);
         let mut extreme_values: Vec<DataType> = vec![];
@@ -132,7 +132,7 @@ impl GroupedOperation for ExtremumOperator {
             Extremum::Max => extreme_values.into_iter().max(),
         };
 
-        extreme.ok_or(ReadySetError::GroupedStateLost)
+        Ok(extreme)
     }
 
     fn description(&self, detailed: bool) -> String {

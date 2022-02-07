@@ -471,11 +471,6 @@ pub enum ReadySetError {
         shard: usize,
     },
 
-    /// A `GroupedOperation` has insufficient state to produce the next result, and must have all
-    /// of its state replayed through it to continue.
-    #[error("Grouped operation lost state")]
-    GroupedStateLost,
-
     /// A dataflow ingredient received a record of the wrong length
     #[error("Record of invalid length received")]
     InvalidRecordLength,

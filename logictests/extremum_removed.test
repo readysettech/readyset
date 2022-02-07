@@ -16,3 +16,19 @@ query I valuesort
 select max(id) from t1 where value = 2;
 ----
 3
+
+# Delete all the rest of the rows
+
+statement ok
+delete from t1 where id = 3;
+
+statement ok
+delete from t1 where id = 2;
+
+statement ok
+delete from t1 where id = 1;
+
+query I valuesort
+select max(id) from t1 where value = 2;
+----
+NULL
