@@ -111,8 +111,9 @@ async fn main() {
             .unwrap();
 
         // now for the benchmark itself.
-        // we want to alternately read article 1 and 2, knowing that reading one will purge the other.
-        // we first "warm up" by reading both to ensure all other necessary state is present.
+        // we want to alternately read article 1 and 2, knowing that reading one will purge the
+        // other. we first "warm up" by reading both to ensure all other necessary state is
+        // present.
         let one = 1.into();
         let two = 2.into();
         assert_eq!(

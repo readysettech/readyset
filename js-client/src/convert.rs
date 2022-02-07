@@ -120,7 +120,8 @@ where
             let s = String::try_from(d).or_else(|e| cx.throw_error(e.to_string()))?;
             Ok(cx.string(s).upcast::<JsValue>())
         }
-        // NOTE: making a js date object from the naive timestamp *assuming* it was created in the *UTC* timezone
+        // NOTE: making a js date object from the naive timestamp *assuming* it was created in the
+        // *UTC* timezone
         DataType::Timestamp(t) => Ok(cx
             .date(t.timestamp_millis() as f64)
             .or_else(|e| cx.throw_error(e.to_string()))?
@@ -298,8 +299,8 @@ where
             js_param.downcast_or_throw::<JsBoolean, _>(cx)?.value(cx),
         ))
     } else if js_param.is_a::<JsDate, _>(cx) {
-        // NOTE: a neon developer confirmed the `value` function on a JsDate always gives milliseconds in UTC
-        // because it returns the ECMAScript *time value* defined here: https://262.ecma-international.org/11.0/#sec-time-values-and-time-range
+        // NOTE: a neon developer confirmed the `value` function on a JsDate always gives
+        // milliseconds in UTC because it returns the ECMAScript *time value* defined here: https://262.ecma-international.org/11.0/#sec-time-values-and-time-range
         let millis = js_param.downcast_or_throw::<JsDate, _>(cx)?.value(cx);
         if f64::is_nan(millis) {
             return cx.throw_error("Date input must be a valid javascript date");

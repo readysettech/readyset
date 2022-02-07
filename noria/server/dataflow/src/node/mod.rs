@@ -369,8 +369,8 @@ impl Node {
         }
     }
 
-    /// If this node is a [`special::Sharder`], return a mutable reference to that sharder, otherwise
-    /// return None
+    /// If this node is a [`special::Sharder`], return a mutable reference to that sharder,
+    /// otherwise return None
     pub fn as_mut_sharder(&mut self) -> Option<&mut special::Sharder> {
         match &mut self.inner {
             NodeType::Sharder(r) => Some(r),

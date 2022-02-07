@@ -356,7 +356,8 @@ impl Ingredient for Join {
                                             None
                                         }
                                     }) {
-                                        // since we didn't hit the case above, we know that the message
+                                        // since we didn't hit the case above, we know that the
+                                        // message
                                         // *isn't* from left.
                                         return Ok(*r);
                                     }

@@ -382,8 +382,8 @@ pub enum ColumnSource {
     /// generated columns on this node will terminate at this node.
     ///
     /// **NOTE:** A miss on these columns will result in a call to [`Ingredient::handle_upquery`].
-    /// You MUST read and understand the API docs for that function before returning this from a new
-    /// ingredient implementation.
+    /// You MUST read and understand the API docs for that function before returning this from a
+    /// new ingredient implementation.
     GeneratedFromColumns(Vec1<ColumnRef>),
     /// This column has no clear mapping to a set of parent columns; misses on this column require
     /// a full replay from all base tables reachable through the given parents to resolve.

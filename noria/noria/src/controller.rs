@@ -349,7 +349,8 @@ impl ControllerHandle {
         self.request_view(request)
     }
 
-    /// Obtain a `View` from the given pool of workers, that allows you to query the given external view.
+    /// Obtain a `View` from the given pool of workers, that allows you to query the given external
+    /// view.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn view_from_workers<'a>(

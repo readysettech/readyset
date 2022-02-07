@@ -180,16 +180,16 @@
 //! # Value storage
 //!
 //! The values for each key in the map are stored in [`refs::Values`]. Conceptually, each `Values`
-//! is a _bag_ or _multiset_; it can store multiple copies of the same value. `reader_map` applies some
-//! cleverness in an attempt to reduce unnecessary allocations and keep the cost of operations on
-//! even large value-bags small. For small bags, `Values` uses the `smallvec` crate. This avoids
+//! is a _bag_ or _multiset_; it can store multiple copies of the same value. `reader_map` applies
+//! some cleverness in an attempt to reduce unnecessary allocations and keep the cost of operations
+//! on even large value-bags small. For small bags, `Values` uses the `smallvec` crate. This avoids
 //! allocation entirely for single-element bags, and uses a `Vec` if the bag is relatively small.
-//! For large bags, `Values` uses the `hashbag` crate, which enables `reader_map` to efficiently look up
-//! and remove specific elements in the value bag. For bags larger than one element, but smaller
-//! than the threshold for moving to `hashbag`, we use `smallvec` to avoid unnecessary hashing.
-//! Operations such as `Fit` and `Replace` will automatically switch back to the inline storage if
-//! possible. This is ideal for maps that mostly use one element per key, as it can improvate
-//! memory locality with less indirection.
+//! For large bags, `Values` uses the `hashbag` crate, which enables `reader_map` to efficiently
+//! look up and remove specific elements in the value bag. For bags larger than one element, but
+//! smaller than the threshold for moving to `hashbag`, we use `smallvec` to avoid unnecessary
+//! hashing. Operations such as `Fit` and `Replace` will automatically switch back to the inline
+//! storage if possible. This is ideal for maps that mostly use one element per key, as it can
+//! improvate memory locality with less indirection.
 #![warn(
     missing_docs,
     rust_2018_idioms,

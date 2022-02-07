@@ -115,8 +115,8 @@ fn do_flatten_conditional(
     })
 }
 
-// Takes a tree of conditional expressions for a DELETE/UPDATE statement and returns a list of all the
-// keys that should be mutated.
+// Takes a tree of conditional expressions for a DELETE/UPDATE statement and returns a list of all
+// the keys that should be mutated.
 // Panics if given a WHERE-clause containing other keys than the primary.
 // DELETE FROM a WHERE key = 1 OR key = 2 -> Some([[1], [2]])
 // DELETE FROM a WHERE key = 1 OR key = 2 AND key = 3 -> None // Bogus query

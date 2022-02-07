@@ -127,7 +127,8 @@ impl DatabaseSchema {
                                 .map(str::trim)
                                 .and_then(|s| s.split(char::is_whitespace).next())
                             {
-                                // We have a length indicated using the ROWS= directive, it can be a var or a number
+                                // We have a length indicated using the ROWS= directive, it can be a
+                                // var or a number
                                 if let Some(var) = val.strip_prefix('@') {
                                     user_vars[var]
                                         .parse::<usize>()

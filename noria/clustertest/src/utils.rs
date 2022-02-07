@@ -65,8 +65,8 @@ where
 /// Returns true when a prepare and execute returns the expected results,
 /// [`EventuallyConsistentResults::expected`]. This function returns false if:
 ///   - The `timeout` is reached without the expected result being yielded.
-///   - The query returns a value that is neither [`EventuallyConsistentResults::expected`]
-///     nor in the [`EventuallyConsistentResults::intermediate`] list.
+///   - The query returns a value that is neither [`EventuallyConsistentResults::expected`] nor in
+///     the [`EventuallyConsistentResults::intermediate`] list.
 ///   - A query to the connection returns an error.
 ///
 /// This function should be used in place of sleeping and executing a query after

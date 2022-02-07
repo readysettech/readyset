@@ -207,7 +207,8 @@ pub struct Options {
     #[clap(long, hide = true, env = "CONTROLLER_TIMEOUT", default_value = "5000")]
     controller_request_timeout_ms: u64,
 
-    /// Specifies the maximum continous failure time for any given query, in seconds, before entering into a fallback recovery mode.
+    /// Specifies the maximum continous failure time for any given query, in seconds, before
+    /// entering into a fallback recovery mode.
     #[clap(
         long,
         hide = true,

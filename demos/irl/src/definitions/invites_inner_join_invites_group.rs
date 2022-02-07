@@ -6,9 +6,10 @@ use crate::get;
 #[allow(dead_code)]
 pub struct InvitesInnerJoinInvitesGroup {
     // All columns from `invites`
-    id: i64,                                          // int unsigned NOT NULL AUTO_INCREMENT,
-    user_id: i64,                                     // int DEFAULT NULL,
-    key: String,                 // varchar(8) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+    id: i64,      // int unsigned NOT NULL AUTO_INCREMENT,
+    user_id: i64, // int DEFAULT NULL,
+    key: String,  /* varchar(8) COLLATE utf8mb4_unicode_ci
+                   * DEFAULT NULL, */
     title: String, // varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
     start_date: String, // datetime DEFAULT NULL,
     date: String,  // datetime DEFAULT NULL,

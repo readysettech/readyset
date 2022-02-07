@@ -17,33 +17,34 @@ impl CountStarRewrite for SqlQuery {
     ) -> ReadySetResult<SqlQuery> {
         use nom_sql::FunctionExpression::*;
 
-        let rewrite_count_star =
-            |f: &mut FunctionExpression, tables: &Vec<Table>| -> ReadySetResult<_> {
-                invariant!(!tables.is_empty());
-                if *f == CountStar {
-                    let bogo_table = &tables[0];
-                    // unwrap: We've already checked that all the tables referenced in the query exist
-                    let mut schema_iter = write_schemas.get(&bogo_table.name).unwrap().iter();
-                    // The columns in the write_schemas map are actually columns as seen from the
-                    // current mir node. In this case, we've already passed star expansion, which
-                    // means the list of columns in the passed in write_schemas map contains all
-                    // columns for the table in question. This means that we are garaunteed to have
-                    // at least one result in this columns list, and can simply choose the first
-                    // column.
-                    let bogo_column = schema_iter.next().unwrap();
+        let rewrite_count_star = |f: &mut FunctionExpression,
+                                  tables: &Vec<Table>|
+         -> ReadySetResult<_> {
+            invariant!(!tables.is_empty());
+            if *f == CountStar {
+                let bogo_table = &tables[0];
+                // unwrap: We've already checked that all the tables referenced in the query exist
+                let mut schema_iter = write_schemas.get(&bogo_table.name).unwrap().iter();
+                // The columns in the write_schemas map are actually columns as seen from the
+                // current mir node. In this case, we've already passed star expansion, which
+                // means the list of columns in the passed in write_schemas map contains all
+                // columns for the table in question. This means that we are garaunteed to have
+                // at least one result in this columns list, and can simply choose the first
+                // column.
+                let bogo_column = schema_iter.next().unwrap();
 
-                    *f = Count {
-                        expr: Box::new(Expression::Column(Column {
-                            name: bogo_column.clone(),
-                            table: Some(bogo_table.name.clone()),
-                            function: None,
-                        })),
-                        distinct: false,
-                        count_nulls: true,
-                    };
-                }
-                Ok(())
-            };
+                *f = Count {
+                    expr: Box::new(Expression::Column(Column {
+                        name: bogo_column.clone(),
+                        table: Some(bogo_table.name.clone()),
+                        function: None,
+                    })),
+                    distinct: false,
+                    count_nulls: true,
+                };
+            }
+            Ok(())
+        };
 
         Ok(match self {
             SqlQuery::Select(mut sq) => {

@@ -30,12 +30,11 @@
 //!   which allows us to do queries across ranges covering multiple keys. To avoid having to encode
 //!   the length of the index (really the enum variant tag for [`KeyType`]) in the key itself, this
 //!   custom key comparator is built dynamically based on the number of columns in the index, up to
-//!   a maximum of 6 (since past that point we use [`KeyType::Multi`]).
-//!   Note that since we currently don't have the ability to do zero-copy deserialization of
-//!   [`DataType`], deserializing for the custom comparator currently requires copying any string
-//!   values just to compare them. If we are able to make [`DataType`] enable zero-copy
-//!   deserialization (by adding a lifetime parameter) this would likely speed up rather
-//!   significantly.
+//!   a maximum of 6 (since past that point we use [`KeyType::Multi`]). Note that since we currently
+//!   don't have the ability to do zero-copy deserialization of [`DataType`], deserializing for the
+//!   custom comparator currently requires copying any string values just to compare them. If we are
+//!   able to make [`DataType`] enable zero-copy deserialization (by adding a lifetime parameter)
+//!   this would likely speed up rather significantly.
 //!
 //! Since RocksDB requires that we always provide the same set of options (including the name of the
 //! custom comparator, if any) when re-opening column families, we have to be careful to always
@@ -105,7 +104,8 @@ const PK_CF: &str = "0";
 // Maximum rows per WriteBatch when building new indices for existing rows.
 const INDEX_BATCH_SIZE: usize = 10_000;
 
-/// Load the metadata from the database, stored in the `DEFAULT_CF` column family under the `META_KEY`
+/// Load the metadata from the database, stored in the `DEFAULT_CF` column family under the
+/// `META_KEY`
 fn get_meta(db: &rocksdb::DB) -> PersistentMeta<'static> {
     db.get_pinned(META_KEY)
         .unwrap()
@@ -195,7 +195,8 @@ pub struct PersistentState {
     name: String,
     default_options: rocksdb::Options,
     db: rocksdb::DB,
-    // The lookup indices stored for this table. The first element is always considered the primary index
+    // The lookup indices stored for this table. The first element is always considered the primary
+    // index
     indices: Vec<PersistentIndex>,
     // The list of all the indices that are defined as unique in the schema for this table
     unique_keys: Vec<Box<[usize]>>,
@@ -207,8 +208,8 @@ pub struct PersistentState {
     // With DurabilityMode::DeleteOnExit,
     // RocksDB files are stored in a temporary directory.
     _tmpdir: Option<TempDir>,
-    /// When set to true [`SnapshotMode::SnapshotModeEnabled`] compaction will be disabled and writes will
-    /// bypass WAL and fsync
+    /// When set to true [`SnapshotMode::SnapshotModeEnabled`] compaction will be disabled and
+    /// writes will bypass WAL and fsync
     pub(crate) snapshot_mode: SnapshotMode,
 }
 
@@ -274,10 +275,10 @@ impl State for PersistentState {
                 // therefore perform a flush before handling the next write.
                 //
                 // See: https://github.com/facebook/rocksdb/wiki/RocksDB-FAQhttps://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
-                // Q: After a write following option.disableWAL=true, I write another record with options.sync=true,
-                //    will it persist the previous write too?
-                // A: No. After the program crashes, writes with option.disableWAL=true will be lost, if they are not flushed
-                //    to SST files.
+                // Q: After a write following option.disableWAL=true, I write another record with
+                // options.sync=true,    will it persist the previous write too?
+                // A: No. After the program crashes, writes with option.disableWAL=true will be
+                // lost, if they are not flushed    to SST files.
                 self.db
                     .flush_cf(self.db.cf_handle(PK_CF).unwrap())
                     .expect("Flush to disk failed");
@@ -570,7 +571,8 @@ struct IndexParams {
     /// The number of columns that we're indexing on, if that number is between 1 and 6, or None if
     /// the number is greater than 6
     ///
-    /// The "6" limit corresponds to the upper limit on the variants of [`KeyType`] and [`RangeKey`]
+    /// The "6" limit corresponds to the upper limit on the variants of [`KeyType`] and
+    /// [`RangeKey`]
     ///
     /// # Invariants
     ///
@@ -767,8 +769,8 @@ impl PersistentState {
 
             let index_params = IndexParams::new(IndexType::HashMap, columns.len());
 
-            // add the index to the meta first so even if we fail before we fully reindex we still have
-            // the information about the column family
+            // add the index to the meta first so even if we fail before we fully reindex we still
+            // have the information about the column family
             let persistent_index = PersistentIndex {
                 column_family: PK_CF.to_string(),
                 index: Index::hash_map(columns.to_vec()),
@@ -1079,13 +1081,16 @@ impl PersistentState {
                     if !compaction_started {
                         continue;
                     }
-                    // As far as I can tell compaction has four stages, first files are created for the appropriate keys,
-                    // then are indexed, then moved to the correct level (zero cost in case of manual compaction),
-                    // finally old files are deleted. The final two stages are almost immediate so we don't care about logging
-                    // them. We only going to log progress for the first two stages.
+                    // As far as I can tell compaction has four stages, first files are created for
+                    // the appropriate keys, then are indexed, then moved to the
+                    // correct level (zero cost in case of manual compaction),
+                    // finally old files are deleted. The final two stages are almost immediate so
+                    // we don't care about logging them. We only going to log
+                    // progress for the first two stages.
 
-                    // In the first stage we have log entries of the form `Generated table #53: 3314046 keys, 268436084 bytes`
-                    // we will be looking for the number of keys in the table, it seems when we have all of the keys proccessed
+                    // In the first stage we have log entries of the form `Generated table #53:
+                    // 3314046 keys, 268436084 bytes` we will be looking for the
+                    // number of keys in the table, it seems when we have all of the keys proccessed
                     // is when first stage is done.
                     if line.contains("Generated table") {
                         // Look for number of keys
@@ -1098,9 +1103,9 @@ impl PersistentState {
                         }
                     }
                     // In the second stage we have log entries of the form
-                    // `Number of Keys per prefix Histogram: Count: 1313702 Average: 1.0000  StdDev: 0.00`
-                    // Here we are looking for the Count to figure out the number of keys processed in this
-                    // stage
+                    // `Number of Keys per prefix Histogram: Count: 1313702 Average: 1.0000  StdDev:
+                    // 0.00` Here we are looking for the Count to figure out the
+                    // number of keys processed in this stage
                     if line.contains("Number of Keys per prefix Histogram") {
                         // Look for number of keys
                         let mut fields = line.split(' ').peekable();
@@ -1273,7 +1278,8 @@ impl PersistentState {
                 batch.put_cf(cf, &serialized_key, &serialized_pk);
             } else {
                 let serialized_key = Self::serialize_secondary(&key, &serialized_pk);
-                // TODO: Since the primary key is already serialized in here, no reason to store it as value again
+                // TODO: Since the primary key is already serialized in here, no reason to store it
+                // as value again
                 batch.put_cf(cf, &serialized_key, &serialized_pk);
             };
         }
@@ -1384,8 +1390,8 @@ impl PersistentState {
                 while iter.key().map(|k| k.starts_with(&prefix)).unwrap_or(false) {
                     let val = match &mut iter_primary {
                         Some(iter_primary) => {
-                            // If we have a primary iterator, it means this is a secondary index and we need
-                            // to lookup by the primary key next
+                            // If we have a primary iterator, it means this is a secondary index and
+                            // we need to lookup by the primary key next
                             iter_primary.seek(iter.value().unwrap());
                             deserialize_row(iter_primary.value().unwrap())
                         }

@@ -317,8 +317,9 @@ impl<'a> Plan<'a> {
                 // at this union, all the given paths share a suffix
                 // make all of the paths use a single identifier from that point on
 
-                // paths contains a set of `pi` from above, which are generated from `paths.iter().enumerate()`
-                // we have one assigned_tag for each `pi` by construction.
+                // paths contains a set of `pi` from above, which are generated from
+                // `paths.iter().enumerate()` we have one assigned_tag for each `pi`
+                // by construction.
                 #[allow(clippy::indexing_slicing)]
                 let tag_all_as = assigned_tags[paths[0]];
                 paths.into_iter().map(move |pi| ((union, pi), tag_all_as))
@@ -328,8 +329,9 @@ impl<'a> Plan<'a> {
         // inform domains about replay paths
         let mut tags = Vec::new();
         for (pi, path) in paths.into_iter().enumerate() {
-            // paths contains a set of `pi` from above, which are generated from `paths.iter().enumerate()`
-            // we have one assigned_tag for each `pi` by construction.
+            // paths contains a set of `pi` from above, which are generated from
+            // `paths.iter().enumerate()` we have one assigned_tag for each `pi` by
+            // construction.
             #[allow(clippy::indexing_slicing)]
             let tag = assigned_tags[pi];
             // TODO(eta): figure out a way to check partial replay path idempotency
@@ -538,9 +540,11 @@ impl<'a> Plan<'a> {
                             let lookup_key_index_to_shard = match src_sharding {
                                 Sharding::Random(..) => None,
                                 Sharding::ByColumn(c, _) => {
-                                    // we want to check the source of the key column. If the source node
-                                    // is sharded by that column, we are able to ONLY look at a single
-                                    // shard on the source. Otherwise, we need to check all of the shards.
+                                    // we want to check the source of the key column. If the source
+                                    // node is sharded by that
+                                    // column, we are able to ONLY look at a single
+                                    // shard on the source. Otherwise, we need to check all of the
+                                    // shards.
                                     let key_column_source = &first_domain_node_key.1;
                                     match key_column_source {
                                         Some(source_index) => {
@@ -550,15 +554,20 @@ impl<'a> Plan<'a> {
                                                     // the source node is sharded by the key column.
                                                     Some(0)
                                                 } else {
-                                                    // the node is sharded by a different column than
-                                                    // the key column, so we need to go ahead and query all
+                                                    // the node is sharded by a different column
+                                                    // than
+                                                    // the key column, so we need to go ahead and
+                                                    // query all
                                                     // shards. BUMMER.
                                                     None
                                                 }
                                             } else {
-                                                // we're using a compound key to look up into a node that's
-                                                // sharded by a single column. if the sharding key is one
-                                                // of the lookup keys, then we indeed only need to look at
+                                                // we're using a compound key to look up into a node
+                                                // that's
+                                                // sharded by a single column. if the sharding key
+                                                // is one
+                                                // of the lookup keys, then we indeed only need to
+                                                // look at
                                                 // one shard, otherwise we need to ask all
                                                 source_index
                                                     .columns
@@ -567,8 +576,10 @@ impl<'a> Plan<'a> {
                                             }
                                         }
                                         // This means the key column has no provenance in
-                                        // the source. This could be because it comes from multiple columns.
-                                        // Or because the node is fully materialized so replays are not necessary.
+                                        // the source. This could be because it comes from multiple
+                                        // columns.
+                                        // Or because the node is fully materialized so replays are
+                                        // not necessary.
                                         None => None,
                                     }
                                 }
@@ -581,20 +592,20 @@ impl<'a> Plan<'a> {
                                 //
                                 // if we are sharded:
                                 //
-                                //  - if there is a shuffle above us, a shard merger + sharder
-                                //    above us will ensure that we hear the replay response.
+                                //  - if there is a shuffle above us, a shard merger + sharder above
+                                //    us will ensure that we hear the replay response.
                                 //
                                 //  - if there is not, we are sharded by the same column as the
-                                //    source. this also means that the replay key in the
-                                //    destination is the sharding key of the destination. to see
-                                //    why, consider the case where the destination is sharded by x.
-                                //    the source must also be sharded by x for us to be in this
-                                //    case. we also know that the replay lookup key on the source
-                                //    must be x since lookup_on_shard_key == true. since no shuffle
-                                //    was introduced, src.x must resolve to dst.x assuming x is not
-                                //    aliased in dst. because of this, it should be the case that
-                                //    KeyShard == SameShard; if that were not the case, the value
-                                //    in dst.x should never have reached dst in the first place.
+                                //    source. this also means that the replay key in the destination
+                                //    is the sharding key of the destination. to see why, consider
+                                //    the case where the destination is sharded by x. the source
+                                //    must also be sharded by x for us to be in this case. we also
+                                //    know that the replay lookup key on the source must be x since
+                                //    lookup_on_shard_key == true. since no shuffle was introduced,
+                                //    src.x must resolve to dst.x assuming x is not aliased in dst.
+                                //    because of this, it should be the case that KeyShard ==
+                                //    SameShard; if that were not the case, the value in dst.x
+                                //    should never have reached dst in the first place.
                                 SourceSelection::KeyShard {
                                     key_i_to_shard: i,
                                     nshards: shards,
@@ -843,8 +854,8 @@ impl<'a> Plan<'a> {
                 .neighbors_directed(ingress, petgraph::Incoming)
                 .find(|&n| self.graph[n].is_egress());
             let egress = match egress_opt {
-                // If an ingress node does not have an incoming egress node, that means this reader domain
-                // is behind a shard merger.
+                // If an ingress node does not have an incoming egress node, that means this reader
+                // domain is behind a shard merger.
                 // We skip the packet filter setup for now.
                 // TODO(fran): Implement packet filtering for shard mergers (https://readysettech.atlassian.net/browse/ENG-183).
                 None => return Ok(()),

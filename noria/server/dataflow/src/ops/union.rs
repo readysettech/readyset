@@ -24,8 +24,8 @@ use crate::processing::{ColumnRef, ColumnSource, SuggestedIndex};
 pub enum DuplicateMode {
     /// "Bag" (aka multi-set) union mode.
     ///
-    /// For each distinct row in either parent this returns a number of duplicates of that row equal
-    /// to the maximum number of duplicates of that row per parent.
+    /// For each distinct row in either parent this returns a number of duplicates of that row
+    /// equal to the maximum number of duplicates of that row per parent.
     ///
     /// For example, a bag union of the bags `{1, 2, 3, 3, 3}` and `{3, 4, 5}` is equal to `{1, 2,
     /// 3, 3, 3, 4, 5}`
@@ -181,8 +181,8 @@ impl PartialOrd for BufferedReplayKey {
 pub struct Union {
     emit: Emit,
 
-    /// State for implementing [`DuplicateMode::BagUnion`]. If this is None, then the duplicate mode
-    /// is [`DuplicateMode::UnionAll`]
+    /// State for implementing [`DuplicateMode::BagUnion`]. If this is None, then the duplicate
+    /// mode is [`DuplicateMode::UnionAll`]
     bag_union_state: Option<BagUnionState>,
 
     /// This is a map from (Tag, LocalNodeIndex) to ColumnList
@@ -580,8 +580,8 @@ impl Ingredient for Union {
                 // straightforward is not. let's walk through what we know first:
                 //
                 //  - we know that there is only exactly one full replay going on
-                //  - we know that the target domain buffers any messages not tagged as
-                //    replays once it has seen the *first* replay
+                //  - we know that the target domain buffers any messages not tagged as replays once
+                //    it has seen the *first* replay
                 //  - we know that the target domain will apply all bufferd messages after it sees
                 //    last = true
                 //
@@ -1280,7 +1280,8 @@ mod tests {
                     assert!(
                         rows.contains(&Record::Positive(vec![1.into(), "b".try_into().unwrap()]))
                     );
-                    // assert!(!rows.contains(&Record::Positive(vec![1.into(), "c".try_into().unwrap()])));
+                    // assert!(!rows.contains(&Record::Positive(vec![1.into(),
+                    // "c".try_into().unwrap()])));
                     assert!(
                         rows.contains(&Record::Positive(vec![1.into(), "d".try_into().unwrap()]))
                     );

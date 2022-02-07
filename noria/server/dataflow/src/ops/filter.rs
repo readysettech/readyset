@@ -104,7 +104,8 @@ impl Ingredient for Filter {
                                 match filter(&(*data)) {
                                     Ok(true) => Some(Ok(data)),
                                     Err(e) => {
-                                        // If we got an error, we need to combine this result as part of the
+                                        // If we got an error, we need to combine this result as
+                                        // part of the
                                         // iterator, so a caller can deal with the error.
                                         Some(Err(e))
                                     }

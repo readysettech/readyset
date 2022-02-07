@@ -72,7 +72,8 @@ impl TryFrom<pgsql::Row> for ColumnEntry {
     type Error = pgsql::Error;
 
     fn try_from(row: pgsql::Row) -> Result<Self, Self::Error> {
-        // Postgres is sending full type names for column types, but noria doesn't handle them properly yet
+        // Postgres is sending full type names for column types, but noria doesn't handle them
+        // properly yet
         let definition = match row.try_get(1)? {
             "timestamp without time zone" => "timestamp".to_string(),
             val if val.starts_with("character varying") => {
@@ -365,7 +366,8 @@ impl<'a> PostgresReplicator<'a> {
 
         for view in view_list {
             let create_view = view.get_create_view(&self.transaction).await?;
-            // Postgres returns a postgres style CREATE statement, but Noria only accepts MySQL style
+            // Postgres returns a postgres style CREATE statement, but Noria only accepts MySQL
+            // style
             let view = match nom_sql::parse_query(nom_sql::Dialect::PostgreSQL, &create_view) {
                 Ok(v) => v.to_string(),
                 Err(err) => {

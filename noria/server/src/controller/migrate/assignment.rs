@@ -158,13 +158,14 @@ pub fn assign(dataflow_state: &mut DataflowState, new_nodes: &[NodeIndex]) -> Re
                         friendly_base.sharded_by().shards().unwrap_or(1),
                     );
 
-                    // TODO(fran): Is it possible that to have a scneario in which we have two nodes N1 and N2
-                    //  with shards N1S1, N1S2 and N2S1, N2S2 and N2S3 where:
+                    // TODO(fran): Is it possible that to have a scneario in which we have two nodes
+                    // N1 and N2  with shards N1S1, N1S2 and N2S1, N2S2 and N2S3
+                    // where:
                     //   - N1S1 is compatible with N2S2
                     //   - N1S2 is compatible with N2S3
                     //   - Any other combination is incompatible
-                    //  There is a valid combination there, by leaving N2S1 into it's own domain, but
-                    //  we are not contemplating that here.
+                    //  There is a valid combination there, by leaving N2S1 into it's own domain,
+                    // but  we are not contemplating that here.
                     let compatible = |new_node: &Node, existing_node: &Node| {
                         for i in 0..num_shards {
                             let new_node_key = NodeRestrictionKey {

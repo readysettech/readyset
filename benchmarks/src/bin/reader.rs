@@ -105,7 +105,8 @@ struct Reader {
     #[structopt(long, default_value = "10")]
     user_table_rows: usize,
 
-    /// The index of the first user in the system, keys are generated in the range [user_offset..user_offset+user_table_rows).
+    /// The index of the first user in the system, keys are generated in the range
+    /// [user_offset..user_offset+user_table_rows).
     #[structopt(long, default_value = "0")]
     user_offset: u64,
 
@@ -121,7 +122,8 @@ struct Reader {
     ///
     /// 'uniform' - samples uniformly in the range [0..user_table_rows)
     ///
-    /// 'zipf' - sample pattern is skewed such that 90% of accesses are for 10% of the ids (Zipf; α=1.15)
+    /// 'zipf' - sample pattern is skewed such that 90% of accesses are for 10% of the ids (Zipf;
+    /// α=1.15)
     #[structopt(
         long,
         default_value = "uniform",
@@ -449,7 +451,8 @@ impl Reader {
                 let remaining_interval = t.checked_duration_since(now).unwrap_or_default();
                 // TODO(justin): Handle throttling when there is batching.
                 if remaining_interval > *query_interval.as_ref().unwrap() / 10 {
-                    // Sleep for 1/2 of the remaining interval so we don't miss the desired send time
+                    // Sleep for 1/2 of the remaining interval so we don't miss the desired send
+                    // time
                     tokio::time::sleep(remaining_interval / 2).await;
                     continue;
                 }

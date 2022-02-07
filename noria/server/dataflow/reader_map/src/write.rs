@@ -175,9 +175,9 @@ where
         self.add_op(Operation::Add(k, Aliased::from(v)))
     }
 
-    /// Add the list of `records` to the value-set, which are assumed to have a key part of the `range`.
-    /// The `range` is then also inserted to the underlying interval tree, to keep track
-    /// of which intervals are covered by the evmap.
+    /// Add the list of `records` to the value-set, which are assumed to have a key part of the
+    /// `range`. The `range` is then also inserted to the underlying interval tree, to keep
+    /// track of which intervals are covered by the evmap.
     ///
     /// The update value-set will only be visible to readers after the next call to `refresh()`.
     pub fn insert_range<R>(&mut self, records: Vec<(K, V)>, range: R) -> &mut Self

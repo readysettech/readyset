@@ -269,7 +269,8 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
         SqlType::MacAddr => {
             let mut bytes = [0_u8; 6];
             rng.fill(&mut bytes);
-            // We know the length and format of the bytes, so this should always be parsable as a `MacAddress`.
+            // We know the length and format of the bytes, so this should always be parsable as a
+            // `MacAddress`.
             #[allow(clippy::unwrap_used)]
             DataType::from(
                 MacAddress::from_bytes(&bytes[..])
@@ -280,7 +281,8 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
         SqlType::Uuid => {
             let mut bytes = [0_u8, 16];
             rng.fill(&mut bytes);
-            // We know the length and format of the bytes, so this should always be parsable as a `UUID`.
+            // We know the length and format of the bytes, so this should always be parsable as a
+            // `UUID`.
             #[allow(clippy::unwrap_used)]
             DataType::from(uuid::Uuid::from_slice(&bytes[..]).unwrap().to_string())
         }
@@ -374,7 +376,8 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
             let b3: u8 = ((idx >> 8) & 0xff) as u8;
             let b4: u8 = (idx & 0xff) as u8;
             let bytes = [b1, b2, b3, b4, u8::MIN, u8::MAX];
-            // We know the length and format of the bytes, so this should always be parsable as a `MacAddress`.
+            // We know the length and format of the bytes, so this should always be parsable as a
+            // `MacAddress`.
             #[allow(clippy::unwrap_used)]
             DataType::from(
                 MacAddress::from_bytes(&bytes[..])
@@ -388,7 +391,8 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
             bytes[1] = ((idx >> 16) & 0xff) as u8;
             bytes[2] = ((idx >> 8) & 0xff) as u8;
             bytes[3] = (idx & 0xff) as u8;
-            // We know the length and format of the bytes, so this should always be parsable as a `UUID`.
+            // We know the length and format of the bytes, so this should always be parsable as a
+            // `UUID`.
             #[allow(clippy::unwrap_used)]
             DataType::from(uuid::Uuid::from_slice(&bytes[..]).unwrap().to_string())
         }
@@ -625,7 +629,7 @@ impl ColumnGenerator {
     fn into_unique(self) -> Self {
         match self {
             ColumnGenerator::Constant(_) => panic!("Can't make unique over Constant"),
-            u @ ColumnGenerator::Unique(_) | u @ ColumnGenerator::NonRepeating(_) => u, //nothing to do
+            u @ ColumnGenerator::Unique(_) | u @ ColumnGenerator::NonRepeating(_) => u, /* nothing to do */
             u @ ColumnGenerator::Uniform(_)
             | u @ ColumnGenerator::Zipfian(_)
             | u @ ColumnGenerator::Random(_)
@@ -890,7 +894,8 @@ pub struct ColumnDataGeneration {
     pub generator: ColumnGenerator,
     /// Values per column that should be present in that column at least some of the time.
     ///
-    /// This is used to ensure that queries that filter on constant values get at least some results
+    /// This is used to ensure that queries that filter on constant values get at least some
+    /// results
     expected_values: HashSet<DataType>,
 }
 
@@ -1084,8 +1089,8 @@ impl TableSpec {
             .unwrap_or_else(|| self.fresh_column_with_type(col_type))
     }
 
-    /// Returns the name of *some* column in this table with the given type but different than the one
-    /// specified, potentially generating a new column if necessary
+    /// Returns the name of *some* column in this table with the given type but different than the
+    /// one specified, potentially generating a new column if necessary
     pub fn some_column_with_type_different_than(
         &mut self,
         col_type: SqlType,
@@ -2824,8 +2829,8 @@ pub struct GenerateOpts {
     #[clap(long, default_value = "2")]
     pub subquery_depth: usize,
 
-    /// Range of operations to be used in a single query, represented as either a single number or a
-    /// Rust-compatible range
+    /// Range of operations to be used in a single query, represented as either a single number or
+    /// a Rust-compatible range
     ///
     /// If not specified, queries will all contain a number of operations equal to the length of
     /// `operations`.

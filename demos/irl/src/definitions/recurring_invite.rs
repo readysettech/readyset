@@ -17,7 +17,8 @@ pub struct RecurringInvite {
     created_at: String,              // timestamp NULL DEFAULT NULL,
     updated_at: String,              // timestamp NULL DEFAULT NULL,
     is_deleted: i64,                 // tinyint NOT NULL DEFAULT '0',
-    timezone: String, // varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'America/Los_Angeles',
+    timezone: String,                /* varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT
+                                      * 'America/Los_Angeles', */
     interval: i64,    // tinyint NOT NULL DEFAULT '1',
     by_month: String, // varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
 }

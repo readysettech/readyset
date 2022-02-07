@@ -261,7 +261,8 @@ impl Base {
         })
     }
 
-    /// Compute the deltas required to apply the list of the provided `TableOperation` to the base table
+    /// Compute the deltas required to apply the list of the provided `TableOperation` to the base
+    /// table
     pub(in crate::node) fn process(
         &mut self,
         our_index: LocalNodeIndex,
@@ -277,9 +278,9 @@ impl Base {
         let mut failed_log = FailedOpLogger::default();
 
         let mut n_ops = ops.len();
-        // Sort all of the operations lexicographically by key types, all unkeyed operations will move
-        // to the front of the vector (which can only be `SetReplicationOffset`), for the rest of the operations
-        // it will group them by their key value.
+        // Sort all of the operations lexicographically by key types, all unkeyed operations will
+        // move to the front of the vector (which can only be `SetReplicationOffset`), for
+        // the rest of the operations it will group them by their key value.
         ops.sort_by(|a, b| key_of(key_cols, a).cmp(key_of(key_cols, b)));
         let mut ops = ops.into_iter().peekable();
 
@@ -288,7 +289,8 @@ impl Base {
         let mut set_snapshot_mode: Option<SetSnapshotMode> = None;
 
         while let Some(op) = ops.peek() {
-            // Process all of the `SetReplicationOffset` and `SetSnapshotMode` ops, then proceed to the keyed operations as usual
+            // Process all of the `SetReplicationOffset` and `SetSnapshotMode` ops, then proceed to
+            // the keyed operations as usual
             match op {
                 TableOperation::SetReplicationOffset(offset) => {
                     offset.try_max_into(&mut replication_offset)?;
@@ -317,8 +319,8 @@ impl Base {
         // Group the operations by their key, so we can process each group independently
         let ops = ops.group_by(|op| key_of(key_cols, op).cloned().collect::<Vec<_>>());
         let mut results = Vec::with_capacity(n_ops);
-        /// [`TouchedKey`] indicates if the given key was previously deleted or inserted as part of the current batch that
-        /// was not yet persisted to the base node.
+        /// [`TouchedKey`] indicates if the given key was previously deleted or inserted as part of
+        /// the current batch that was not yet persisted to the base node.
         enum TouchedKey<'a> {
             Deleted,
             Inserted(Cow<'a, [DataType]>),
@@ -326,16 +328,18 @@ impl Base {
         let mut touched_keys: HashMap<Vec<DataType>, TouchedKey> = HashMap::new();
 
         for (key, ops) in &ops {
-            // It is not enough to check the persisted value for the key, as it may have been changed in previous iteration,
-            // therefore we have to check it was not changed in one of the outstanding records
+            // It is not enough to check the persisted value for the key, as it may have been
+            // changed in previous iteration, therefore we have to check it was not
+            // changed in one of the outstanding records
             let stored_value = if snapshot_mode.is_enabled() {
                 // In snapshot mode don't check the currently store values as it doesn't matter for
                 // correctness but imposes a heavy toll on batched writes
                 None
             } else {
                 match touched_keys.get(&key) {
-                    Some(TouchedKey::Inserted(row)) => Some(row.clone()), // Row was added in previous iteration
-                    Some(TouchedKey::Deleted) => None, // Row was deleted previously
+                    Some(TouchedKey::Inserted(row)) => Some(row.clone()), /* Row was added in previous iteration */
+                    Some(TouchedKey::Deleted) => None,                    /* Row was deleted */
+                    // previously
                     None => match db.lookup(key_cols, &KeyType::from(&key)) {
                         LookupResult::Missing => internal!(),
                         LookupResult::Some(rows) if rows.is_empty() => None,
@@ -347,7 +351,8 @@ impl Base {
                 }
             };
 
-            // Current value for the given key following the operations that were already applied to it
+            // Current value for the given key following the operations that were already applied to
+            // it
             let mut value = stored_value.clone();
 
             for op in ops {
@@ -403,7 +408,8 @@ impl Base {
 
             // Finished processing operations for this key
             if stored_value != value {
-                // If the stored value and the new computed value differ we need to update the stored value
+                // If the stored value and the new computed value differ we need to update the
+                // stored value
                 if let Some(row) = stored_value {
                     // First delete the existing value, if any
                     touched_keys.insert(key, TouchedKey::Deleted); // We don't remove here so we know not to look in db

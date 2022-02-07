@@ -1652,8 +1652,8 @@ mod tests {
             use crate::common::Literal;
 
             let qstring = "SELECT NULL, 1, \"foo\", CURRENT_TIME FROM users;";
-            // TODO: doesn't support selecting literals without a FROM clause, which is still valid SQL
-            //        let qstring = "SELECT NULL, 1, \"foo\";";
+            // TODO: doesn't support selecting literals without a FROM clause, which is still valid
+            // SQL        let qstring = "SELECT NULL, 1, \"foo\";";
 
             let res = selection(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(
@@ -1780,8 +1780,8 @@ mod tests {
             use crate::common::Literal;
 
             let qstring = "SELECT NULL, 1, 'foo', CURRENT_TIME FROM users;";
-            // TODO: doesn't support selecting literals without a FROM clause, which is still valid SQL
-            //        let qstring = "SELECT NULL, 1, \"foo\";";
+            // TODO: doesn't support selecting literals without a FROM clause, which is still valid
+            // SQL        let qstring = "SELECT NULL, 1, \"foo\";";
 
             let res = selection(Dialect::PostgreSQL)(qstring.as_bytes());
             assert_eq!(

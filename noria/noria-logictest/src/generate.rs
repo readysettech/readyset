@@ -419,8 +419,8 @@ pub struct GenerateOpts {
     #[clap(long)]
     pub include_deletes: bool,
 
-    /// How many rows to delete in between queries. Ignored if `--include-deletes` is not specified.
-    /// Defaults to half of --rows-per-table, rounded down
+    /// How many rows to delete in between queries. Ignored if `--include-deletes` is not
+    /// specified. Defaults to half of --rows-per-table, rounded down
     #[clap(long)]
     pub rows_to_delete: Option<usize>,
 }

@@ -180,8 +180,8 @@ pub enum ReadySetError {
     },
 
     /// An expression appears in either the select list, HAVING condition, or ORDER BY list that is
-    /// not either named in the GROUP BY clause or is functionally dependent on (uniquely determined
-    /// by) GROUP BY columns.
+    /// not either named in the GROUP BY clause or is functionally dependent on (uniquely
+    /// determined by) GROUP BY columns.
     ///
     /// cf <https://dev.mysql.com/doc/refman/8.0/en/sql-mode.html#sqlmode_only_full_group_by>
     #[error(
@@ -189,8 +189,8 @@ pub enum ReadySetError {
              columns in the GROUP BY clause"
     )]
     ExpressionNotInGroupBy {
-        /// A string representation (via [`.to_string()`](ToString::to_string)) of the expression in
-        /// question
+        /// A string representation (via [`.to_string()`](ToString::to_string)) of the expression
+        /// in question
         expression: String,
         /// A name for where the expression appears in the query (eg "ORDER BY")
         position: String,
@@ -406,7 +406,8 @@ pub enum ReadySetError {
     #[error("Node {0} not found in domain")]
     NoSuchNode(usize),
 
-    /// An operation that is valid on only one type of node was made on a node that is not that type
+    /// An operation that is valid on only one type of node was made on a node that is not that
+    /// type
     #[error("Node {node_index} is not of type {expected_type}")]
     InvalidNodeType {
         /// The index of the node in question
@@ -450,15 +451,16 @@ pub enum ReadySetError {
 
     /// An attempt was made to compare replication offsets from different logs.
     ///
-    /// See the documentation for [`ReplicationOffset`](noria::ReplicationOffset) for why this might
-    /// happen
+    /// See the documentation for [`ReplicationOffset`](noria::ReplicationOffset) for why this
+    /// might happen
     #[error(
         "Cannot compare replication offsets from different logs: expected {0}, but got {1} \
              (did the replication log name change?)"
     )]
     ReplicationOffsetLogDifferent(String, String),
 
-    /// An error that was encountered in the mysql_async crate during snapshot/binlog replication proccess
+    /// An error that was encountered in the mysql_async crate during snapshot/binlog replication
+    /// proccess
     #[error("Error during replication: {0}")]
     ReplicationFailed(String),
 

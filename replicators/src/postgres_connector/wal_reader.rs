@@ -118,8 +118,8 @@ impl WalReader {
                     if let Some((name, mapping)) = relations.get(&relation_id) {
                         // We only ever going to have a `key_tuple` *OR* `old_tuple` *OR* neither
                         if let Some(old_tuple) = old_tuple {
-                            // This happens when there is no key defined for the table and `REPLICA IDENTITY`
-                            // is set to `FULL`
+                            // This happens when there is no key defined for the table and `REPLICA
+                            // IDENTITY` is set to `FULL`
                             return Ok((
                                 WalEvent::UpdateRow {
                                     table: name.clone(),
@@ -143,8 +143,9 @@ impl WalReader {
                                 end,
                             ));
                         } else {
-                            // This happens when the update is not modifying the key column and therefore
-                            // it is possible to extract the key value from the tuple as is
+                            // This happens when the update is not modifying the key column and
+                            // therefore it is possible to extract the
+                            // key value from the tuple as is
                             return Ok((
                                 WalEvent::UpdateByKey {
                                     table: name.clone(),
@@ -168,8 +169,8 @@ impl WalReader {
                     if let Some((name, mapping)) = relations.get(&relation_id) {
                         // We only ever going to have a `key_tuple` *OR* `old_tuple`
                         if let Some(old_tuple) = old_tuple {
-                            // This happens when there is no key defined for the table and `REPLICA IDENTITY`
-                            // is set to `FULL`
+                            // This happens when there is no key defined for the table and `REPLICA
+                            // IDENTITY` is set to `FULL`
                             return Ok((
                                 WalEvent::DeleteRow {
                                     table: name.clone(),
@@ -235,7 +236,8 @@ impl wal::TupleData {
                 wal::TupleEntry::Null => ret.push(DataType::None),
                 wal::TupleEntry::Unchanged => return Err(WalError::ToastNotSupported),
                 wal::TupleEntry::Text(text) => {
-                    // WAL delivers all entries as text, and it is up to us to parse to the proper Noria type
+                    // WAL delivers all entries as text, and it is up to us to parse to the proper
+                    // Noria type
                     let str = String::from_utf8_lossy(&text);
 
                     let val = match spec.data_type {
@@ -257,17 +259,19 @@ impl wal::TupleData {
                         | PGType::CHAR
                         | PGType::MACADDR
                         | PGType::UUID => DataType::from(str.as_ref()),
-                        // JSONB might rearrange the json value (like the order of the keys in an object
-                        // for example), vs JSON that keeps the text as-is.
-                        // So, in order to get the same values, we parse the json into a
-                        // serde_json::Value and then convert it back to String. ♪ ┏(・o･)┛ ♪
+                        // JSONB might rearrange the json value (like the order of the keys in an
+                        // object for example), vs JSON that keeps the text
+                        // as-is. So, in order to get the same values, we
+                        // parse the json into a serde_json::Value and then
+                        // convert it back to String. ♪ ┏(・o･)┛ ♪
                         PGType::JSONB => serde_json::from_str::<serde_json::Value>(str.as_ref())
                             .map_err(|e| WalError::JsonParseError(e.to_string()))
                             .map(|v| DataType::from(v.to_string()))?,
                         PGType::TIMESTAMP => DataType::Timestamp({
                             // If there is a dot, there is a microseconds field attached
                             if let Some((time, micro)) = &str.split_once('.') {
-                                // The usec format in WAL is super dumb, it is actually skipping the trailing zeroes, and not the leading zeroes ...
+                                // The usec format in WAL is super dumb, it is actually skipping the
+                                // trailing zeroes, and not the leading zeroes ...
                                 NaiveDateTime::parse_from_str(time, noria_data::TIMESTAMP_FORMAT)?
                                     + Duration::microseconds(
                                         micro.parse::<i64>()? * 10i64.pow(6 - micro.len() as u32),

@@ -54,7 +54,8 @@ struct Opts {
     #[clap(long, env = "AUTO_GROW_VOLUME")]
     auto_grow_volume: bool,
 
-    /// Maximum size in gigabytes to grow the volume to. Ignored unless --auto-grow-volume is passed
+    /// Maximum size in gigabytes to grow the volume to. Ignored unless --auto-grow-volume is
+    /// passed
     #[clap(long, env = "MAX_VOLUME_SIZE_GB")]
     max_volume_size: Option<i32>,
 
@@ -428,7 +429,8 @@ impl Opts {
             .await
     }
 
-    /// Convenience function to construct a Filter for the [configured volume tag](Opts::volume_tag_key)
+    /// Convenience function to construct a Filter for the [configured volume
+    /// tag](Opts::volume_tag_key)
     fn volume_tag_filter(&self) -> Filter {
         filter(
             format!("tag:{}", self.volume_tag_key),
@@ -441,7 +443,8 @@ impl Opts {
         tag(&self.volume_tag_key, &self.volume_tag_value)
     }
 
-    /// Convenience function to construct a Filter for the [configured instance tag](Opts::instance_tag_key)
+    /// Convenience function to construct a Filter for the [configured instance
+    /// tag](Opts::instance_tag_key)
     fn instance_tag_filter(&self) -> Filter {
         filter(
             format!("tag:{}", self.instance_tag_key),

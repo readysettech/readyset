@@ -82,10 +82,10 @@ impl ZookeeperAuthority {
                 {
                     // HACK(fran): Currently, the Zookeeper::connect method won't fail if Zookeeper
                     // is not available.
-                    // To workaround that, we make a call to zk.exists just to try to reach Zookeeper.
-                    // The downside of this, is that the zk.exists call might take longer than the duration
-                    // specified in Zookeeper::connect.
-                    // For more information, see https://github.com/bonifaido/rust-zookeeper/issues/64.
+                    // To workaround that, we make a call to zk.exists just to try to reach
+                    // Zookeeper. The downside of this, is that the zk.exists
+                    // call might take longer than the duration specified in
+                    // Zookeeper::connect. For more information, see https://github.com/bonifaido/rust-zookeeper/issues/64.
                     Ok(zk) => zk
                         .exists("/", false)
                         .await

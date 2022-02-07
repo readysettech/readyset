@@ -10,12 +10,14 @@ use serde_json::map::Entry;
 use sha2::Digest;
 use tracing::{event, Level};
 
-/// Translate the Rust's env::consts::OS into the GOOS environment variable used for Go cross compiling
+/// Translate the Rust's env::consts::OS into the GOOS environment variable used for Go cross
+/// compiling
 fn goos() -> &'static str {
     env::consts::OS
 }
 
-/// Translate the Rust env::consts::ARCH into the GOARCH environment variable used for Go cross compiling
+/// Translate the Rust env::consts::ARCH into the GOARCH environment variable used for Go cross
+/// compiling
 fn goarch() -> &'static str {
     match env::consts::ARCH {
         "x86_64" => "amd64",

@@ -341,13 +341,14 @@ where
         }
 
         if self.col == 0 {
-            // We want to preallocate at least *some* capacity for the row, otherwise the incremental
-            // writes cause a whole lot of reallocations. Since Vec usually reallocates with exponential
-            // growth even small responses require at least a few reallocs unless we reserve some capacity.
-            // The specific size chosen seem safe enough for most rows, and in the worst case will require
+            // We want to preallocate at least *some* capacity for the row, otherwise the
+            // incremental writes cause a whole lot of reallocations. Since Vec usually
+            // reallocates with exponential growth even small responses require at least
+            // a few reallocs unless we reserve some capacity. The specific size chosen
+            // seem safe enough for most rows, and in the worst case will require
             // significantly fewer reallocations.
-            // NOTE: we could reserver an exact number of bytes if desired in the future by computing a bound
-            // on each column size
+            // NOTE: we could reserver an exact number of bytes if desired in the future by
+            // computing a bound on each column size
             self.row_data.reserve(DEFAULT_ROW_CAPACITY);
         }
 

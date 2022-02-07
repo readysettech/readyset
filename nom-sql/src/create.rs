@@ -494,8 +494,9 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
                 };
 
                 if field.constraints.contains(&ColumnConstraint::PrimaryKey) {
-                    // If there is a row that was defined with the PRIMARY KEY constraint, then it will be the primary key
-                    // there can only be one such key, but we don't check this is the case
+                    // If there is a row that was defined with the PRIMARY KEY constraint, then it
+                    // will be the primary key there can only be one such key,
+                    // but we don't check this is the case
                     primary_key.replace(TableKey::PrimaryKey {
                         name: None,
                         columns: vec![column.clone()],
@@ -592,7 +593,8 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
     }
 }
 
-// Parse the optional CREATE VIEW parameters and discard, ideally we would want to check user permissions
+// Parse the optional CREATE VIEW parameters and discard, ideally we would want to check user
+// permissions
 pub fn create_view_params(i: &[u8]) -> IResult<&[u8], ()> {
     /*
     [ALGORITHM = {UNDEFINED | MERGE | TEMPTABLE}]
@@ -652,7 +654,8 @@ pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Creat
        [WITH [CASCADED | LOCAL] CHECK OPTION]
     */
     // Sample query:
-    // CREATE ALGORITHM=UNDEFINED DEFINER=`mysqluser`@`%` SQL SECURITY DEFINER VIEW `myquery2` AS SELECT * FROM employees
+    // CREATE ALGORITHM=UNDEFINED DEFINER=`mysqluser`@`%` SQL SECURITY DEFINER VIEW `myquery2` AS
+    // SELECT * FROM employees
 
     move |i| {
         let (remaining_input, (_, _, _, _, _, name_slice, _, _, _, def, _)) = tuple((

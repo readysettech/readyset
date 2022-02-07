@@ -784,7 +784,8 @@ mod tests {
             ],]
         );
 
-        // indexing (left, middle, right) should replay (left, middle) from left and (right) from right
+        // indexing (left, middle, right) should replay (left, middle) from left and (right) from
+        // right
         let mut paths = replay_paths_for_nonstop(
             &g,
             ColumnRef {

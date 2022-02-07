@@ -29,14 +29,15 @@ use serde::{Deserialize, Serialize};
 pub struct NodeMap<T> {
     /// The number of items in the Map.
     ///
-    /// This will always be equivalent to the number of elements in `self.contents` that are `Some`.
+    /// This will always be equivalent to the number of elements in `self.contents` that are
+    /// `Some`.
     len: usize,
 
     /// The actual elements in the Map.
     ///
     /// Note that this is a *sparse array* for efficient (O(1)) and cache-friendly lookup. The
-    /// indices in this vector are (numeric) [`LocalNodeIndex`]es, and the values are `Some(x)` if a
-    /// value is present, or `None` if there is no value for that node.
+    /// indices in this vector are (numeric) [`LocalNodeIndex`]es, and the values are `Some(x)` if
+    /// a value is present, or `None` if there is no value for that node.
     contents: Vec<Option<T>>,
 }
 

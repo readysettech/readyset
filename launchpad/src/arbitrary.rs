@@ -96,7 +96,8 @@ pub fn arbitrary_systemtime() -> impl Strategy<Value = SystemTime> {
 /// Strategy to generate an arbitrary [`MacAddress`].
 pub fn arbitrary_mac_address() -> impl Strategy<Value = MacAddress> {
     any::<[u8; 6]>().prop_map(|bytes| {
-        // We know the length and format of the bytes, so this should always be parsable as a `MacAddress`.
+        // We know the length and format of the bytes, so this should always be parsable as a
+        // `MacAddress`.
         #[allow(clippy::unwrap_used)]
         MacAddress::from_bytes(&bytes[..]).unwrap()
     })

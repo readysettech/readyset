@@ -1,19 +1,20 @@
 //! A word of warning.
 //! Sadly, since today we don't have a centralized MIR graph (we should strive to try to use a
-//! petgraph::Graph or similar solution), the MIR nodes all have references to their parent and child
-//! nodes. This affects the [`SqlIncorporator`], because the [`MirQuery`] structs hold those references.
-//! This means that automatic serde implementation (by means of using `#[derive(Serialize, Deserialize)]`
-//! is not possible, because we would run into a stack overflow when the serializing algorithm starts
-//! resolving the references, getting into a never ending loop (parent -> child -> parent -> child...).
-//! Because of that, we are forced to implement our own serialization and deserialization.
+//! petgraph::Graph or similar solution), the MIR nodes all have references to their parent and
+//! child nodes. This affects the [`SqlIncorporator`], because the [`MirQuery`] structs hold those
+//! references. This means that automatic serde implementation (by means of using
+//! `#[derive(Serialize, Deserialize)]` is not possible, because we would run into a stack overflow
+//! when the serializing algorithm starts resolving the references, getting into a never ending loop
+//! (parent -> child -> parent -> child...). Because of that, we are forced to implement our own
+//! serialization and deserialization.
 //!
 //! Unlike the serde implementation of [`SqlToMirConverter`], the structure is maintained, but only
 //! the `mir_query` and `base_mir_queries` where slightly changed, by replaced the [`MirQuery`] type
 //! with [`SerializableMirQuery`].
 //!
-//! Since serializing here means changing the [`MirNodeRef`] into just the identifiers of the [`MirNode`]s,
-//! these changes require that we have access to the real [`MirNodeRef`]s upon deserialization.
-//! Those should be available through the [`SqlToMirConverter::nodes()`] method.
+//! Since serializing here means changing the [`MirNodeRef`] into just the identifiers of the
+//! [`MirNode`]s, these changes require that we have access to the real [`MirNodeRef`]s upon
+//! deserialization. Those should be available through the [`SqlToMirConverter::nodes()`] method.
 use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;

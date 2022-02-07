@@ -1086,13 +1086,15 @@ mod tests {
         let mut buf = BytesMut::new();
         put_binary_value(DataValue::Bit(bits.clone()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
-        // 48 bits divided into groups of 8 (a byte) = 6 bytes, plus one u32 (4 bytes) to hold the size = 10 bytes
+        // 48 bits divided into groups of 8 (a byte) = 6 bytes, plus one u32 (4 bytes) to hold the
+        // size = 10 bytes
         exp.put_i32(10); // size
         bits.to_sql(&Type::BIT, &mut exp).unwrap(); // add value
         assert_eq!(buf, exp);
 
         let mut exp = BytesMut::new();
-        // 48 bits divided into groups of 8 (a byte) = 6 bytes, plus one u32 (4 bytes) to hold the size = 10 bytes
+        // 48 bits divided into groups of 8 (a byte) = 6 bytes, plus one u32 (4 bytes) to hold the
+        // size = 10 bytes
         exp.put_i32(10); // size
         bits.to_sql(&Type::VARBIT, &mut exp).unwrap(); // add value
         let mut buf = BytesMut::new();

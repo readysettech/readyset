@@ -577,10 +577,10 @@ fn make_grouped_node(
     invariant!(!group_col_indx.is_empty());
 
     let na = match kind {
-        // This is the product of an incomplete refactor. It simplifies MIR to consider Group_Concat to
-        // be an aggregation, however once we are in dataflow land the logic has not been merged yet.
-        // For this reason, we need to pattern match for a groupconcat aggregation before we pattern
-        // match for a generic aggregation.
+        // This is the product of an incomplete refactor. It simplifies MIR to consider Group_Concat
+        // to be an aggregation, however once we are in dataflow land the logic has not been
+        // merged yet. For this reason, we need to pattern match for a groupconcat
+        // aggregation before we pattern match for a generic aggregation.
         GroupedNodeType::Aggregation(Aggregation::GroupConcat { separator: sep }) => {
             let gc = GroupConcat::new(parent_na, over_col_indx, group_col_indx, sep)?;
             mig.add_ingredient(String::from(name), column_names.as_slice(), gc)
@@ -856,8 +856,8 @@ fn make_latest_node(
 /// - Literals being replaced with their corresponding [`DataType`]
 /// - [Column references](nom_sql::Column) being resolved into column indices in the parent node.
 /// - Function calls being resolved to built-in functions, and arities checked
-/// - Desugaring x IN (y, z, ...) to `x = y OR x = z OR ...`
-///   and x NOT IN (y, z, ...) to `x != y AND x != z AND ...`
+/// - Desugaring x IN (y, z, ...) to `x = y OR x = z OR ...` and x NOT IN (y, z, ...) to `x != y AND
+///   x != z AND ...`
 /// - Replacing NEG with (expr * -1)
 /// - Replacing NOT with (expr != 1)
 fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<DataflowExpression> {

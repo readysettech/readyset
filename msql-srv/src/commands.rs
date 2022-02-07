@@ -176,9 +176,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_handles_list_fields() {
-        // mysql_list_fields (CommandByte::COM_FIELD_LIST / 0x04) has been deprecated in mysql 5.7 and will be removed
-        // in a future version. The mysql command line tool issues one of these commands after
-        // switching databases with USE <DB>.
+        // mysql_list_fields (CommandByte::COM_FIELD_LIST / 0x04) has been deprecated in mysql 5.7
+        // and will be removed in a future version. The mysql command line tool issues one
+        // of these commands after switching databases with USE <DB>.
         let data = &[
             0x21, 0x00, 0x00, 0x00, 0x04, 0x73, 0x65, 0x6c, 0x65, 0x63, 0x74, 0x20, 0x40, 0x40,
             0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x5f, 0x63, 0x6f, 0x6d, 0x6d, 0x65, 0x6e,

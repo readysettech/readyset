@@ -6,10 +6,13 @@ use crate::get;
 #[allow(dead_code)]
 pub struct OrganizationInnerJoinExternalAccounts {
     // All columns from `organizations`
-    id: i64,                // int unsigned NOT NULL AUTO_INCREMENT,
-    name: String, // varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-    alpha_two_code: String, // varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-    state_province: String, // varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+    id: i64, // int unsigned NOT NULL AUTO_INCREMENT,
+    name: String, /* varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+              * DEFAULT NULL, */
+    alpha_two_code: String, /* varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                             * DEFAULT NULL, */
+    state_province: String, /* varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                             * DEFAULT NULL, */
     domains: String, // varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
     country: String, // varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
     created_at: String, // timestamp NULL DEFAULT NULL,

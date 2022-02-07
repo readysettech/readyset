@@ -584,8 +584,8 @@ impl SqlToMirConverter {
         // We assume here that an earlier rewrite pass has coalesced all primary key definitions in
         // the TableKey structure.
 
-        // For our unique keys, we want the very first key to be the primary key if present, as it will be used
-        // as the primary index.
+        // For our unique keys, we want the very first key to be the primary key if present, as it
+        // will be used as the primary index.
         // TODO: failing that we want to index on a unique integer key, failing that on whatever.
 
         let (primary_key, unique_keys) = match keys {
@@ -971,8 +971,8 @@ impl SqlToMirConverter {
                 // aliases to the columns that represent it going forward (viz., the left-side join
                 // column)
                 l_col.add_alias(&r_col);
-                // add the alias to all instances of `l_col` in `fields` (there might be more than one
-                // if `l_col` is explicitly projected multiple times)
+                // add the alias to all instances of `l_col` in `fields` (there might be more than
+                // one if `l_col` is explicitly projected multiple times)
                 fields = fields
                     .into_iter()
                     .filter_map(|mut f| {

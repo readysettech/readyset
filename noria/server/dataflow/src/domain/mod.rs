@@ -467,8 +467,9 @@ pub struct Domain {
     replay_paths_by_dst: NodeMap<HashMap<Index, Vec<Tag>>>,
 
     /// Set of nodes and columns which are "generated" by that node, meaning those columns do not
-    /// appear unchanged in exactly one of that node's parents. If a  If a (node, cols) pair appears
-    /// in this set, then misses on those columns require the use of [`Ingredient::handle_upquery`]
+    /// appear unchanged in exactly one of that node's parents. If a  If a (node, cols) pair
+    /// appears in this set, then misses on those columns require the use of
+    /// [`Ingredient::handle_upquery`]
     generated_columns: HashSet<(LocalNodeIndex, Vec<usize>)>,
 
     concurrent_replays: usize,
@@ -1051,18 +1052,18 @@ impl Domain {
                 // ways:
                 //
                 //  - some downstream view is partial over the join key. some time in the past, it
-                //    requested a replay of key k. that replay produced *no* rows from the side
-                //    that was replayed. this in turn means that no lookup was performed on the
-                //    other side of the join, and so k wasn't replayed to that other side (which
-                //    then still has a hole!). in that case, any subsequent write with k in the
-                //    join column from the replay side will miss in the other side.
+                //    requested a replay of key k. that replay produced *no* rows from the side that
+                //    was replayed. this in turn means that no lookup was performed on the other
+                //    side of the join, and so k wasn't replayed to that other side (which then
+                //    still has a hole!). in that case, any subsequent write with k in the join
+                //    column from the replay side will miss in the other side.
                 //  - some downstream view is partial over a column that is *not* the join key. in
                 //    the past, it replayed some key k, which means that we aren't allowed to drop
                 //    any write with k in that column. now, a write comes along with k in that
                 //    replay column, but with some hitherto unseen key z in the join column. if the
-                //    replay of k never caused a lookup of z in the other side of the join, then
-                //    the other side will have a hole. thus, we end up in the situation where we
-                //    need to forward a write through the join, but we miss.
+                //    replay of k never caused a lookup of z in the other side of the join, then the
+                //    other side will have a hole. thus, we end up in the situation where we need to
+                //    forward a write through the join, but we miss.
                 //
                 // unfortunately, we can't easily distinguish between the case where we have to
                 // evict and the case where we don't (at least not currently), so we *always* need
@@ -2366,10 +2367,11 @@ impl Domain {
                 src,
                 &index.columns,
                 // NOTE:
-                // `replay_keys` are tuples of (replay_key, miss_key), where `replay_key` is the key we're trying
-                // to replay and `miss_key` is the part of it we missed on.
-                // This is only relevant for range queries; for non-range queries the two are the same.
-                // Assuming they were the same for range queries was a whole bug that eta had to spend like 2
+                // `replay_keys` are tuples of (replay_key, miss_key), where `replay_key` is the
+                // key we're trying to replay and `miss_key` is the part of it we
+                // missed on. This is only relevant for range queries; for
+                // non-range queries the two are the same. Assuming they were the
+                // same for range queries was a whole bug that eta had to spend like 2
                 // hours tracking down, only to find it was as simple as this.
                 replay_keys,
                 single_shard,
@@ -2523,7 +2525,8 @@ impl Domain {
                                     // relevant later.
                                     let total_keys = tag_keys.len();
                                     if !keys_for_this_tag.is_empty() {
-                                        // If we get here, the `hole` requires the `keys_for_this_tag`
+                                        // If we get here, the `hole` requires the
+                                        // `keys_for_this_tag`
                                         // to be filled before it gets filled.
                                         remapped_keys_to_holes.push((
                                             keys_for_this_tag,
@@ -2591,7 +2594,8 @@ impl Domain {
                                 // note that we need to use the partial_keys column IDs from the
                                 // *start* of the path here, as the records haven't been processed
                                 // yet
-                                // We already know it's a partial replay path, so it must have a partial key
+                                // We already know it's a partial replay path, so it must have a
+                                // partial key
                                 #[allow(clippy::unwrap_used)]
                                 let partial_keys = path.first().partial_index.as_ref().unwrap();
                                 data.retain(|r| {
@@ -2686,8 +2690,9 @@ impl Domain {
                         // are we about to fill a hole?
                         if target && (holes_for_remap.is_empty() || segment.node != dst) {
                             if let Some(backfill_keys) = &backfill_keys {
-                                // mark the state for the key being replayed as *not* a hole otherwise
-                                // we'll just end up with the same "need replay" response that
+                                // mark the state for the key being replayed as *not* a hole
+                                // otherwise we'll just end up with
+                                // the same "need replay" response that
                                 // triggered this replay initially.
                                 if let Some(state) = self.state.get_mut(segment.node) {
                                     for key in backfill_keys.iter() {
@@ -3049,7 +3054,8 @@ impl Domain {
                                     // there.
                                     evict_tags.retain(|tag| {
                                         #[allow(clippy::indexing_slicing)]
-                                        // tag came from an internal data structure that guarantees it exists
+                                        // tag came from an internal data structure that guarantees
+                                        // it exists
                                         tag_match(&self.replay_paths[tag], pn)
                                     });
 
@@ -3240,8 +3246,8 @@ impl Domain {
             self.finished_partial_replay(tag, finished_partial)?;
         }
 
-        // While the are still misses, we iterate over the array, each time draining it from elements that
-        // can be batched into a single call to `on_replay_misses`
+        // While the are still misses, we iterate over the array, each time draining it from
+        // elements that can be batched into a single call to `on_replay_misses`
         while let Some(next_replay) = need_replay.get(0).cloned() {
             let misses: HashSet<_> = need_replay
                 .drain_filter(|rep| next_replay.can_combine(rep))
@@ -3379,8 +3385,9 @@ impl Domain {
             } else {
                 // must be a full replay
                 // NOTE: node is now ready, in the sense that it shouldn't ignore all updates since
-                // replaying_to is still set, "normal" dispatch calls will continue to be buffered, but
-                // this allows finish_replay to dispatch into the node by overriding replaying_to.
+                // replaying_to is still set, "normal" dispatch calls will continue to be buffered,
+                // but this allows finish_replay to dispatch into the node by
+                // overriding replaying_to.
                 self.not_ready.remove(&ni);
                 self.delayed_for_self
                     .push_back(Box::new(Packet::Finish(tag, ni)));
@@ -3539,7 +3546,8 @@ impl Domain {
                         #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
                         state[target.node].evict_keys(*tag, &keys[..]);
                         #[allow(clippy::unwrap_used)]
-                        // we can only evict from partial replay paths, so we must have a partial key
+                        // we can only evict from partial replay paths, so we must have a partial
+                        // key
                         trigger_downstream_evictions(
                             target.partial_index.as_ref().unwrap(),
                             &keys[..],
@@ -3642,7 +3650,8 @@ impl Domain {
                     let mut n = candidates.len();
                     // rev to start with the smallest of the n domains
                     for (_, size) in candidates.iter_mut().rev() {
-                        // TODO: should this be evenly divided, or weighted by the size of the domains?
+                        // TODO: should this be evenly divided, or weighted by the size of the
+                        // domains?
                         let share = (num_bytes + n - 1) / n;
                         // we're only willing to evict at most half the state in each node
                         // unless this is the only node left to evict from
@@ -3866,8 +3875,8 @@ impl Domain {
         }
 
         self.handle(packet, executor)?;
-        // After we handle an external packet, the domain may have accumulated a bunch of packets to itself
-        // we need to process them all next;
+        // After we handle an external packet, the domain may have accumulated a bunch of packets to
+        // itself we need to process them all next;
         while let Some(message) = self.delayed_for_self.pop_front() {
             trace!("handling local transmission");
             self.handle(message, executor)?;

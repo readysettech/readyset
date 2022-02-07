@@ -302,8 +302,9 @@ impl Leader {
                         .collect::<Vec<_>>())
                 }
                 (&Method::POST, "/table_builder") => {
-                    // NOTE(eta): there is DELIBERATELY no `?` after the `table_builder` call, because
-                    //            the receiving end expects a `ReadySetResult` to be serialized.
+                    // NOTE(eta): there is DELIBERATELY no `?` after the `table_builder` call,
+                    // because            the receiving end expects a
+                    // `ReadySetResult` to be serialized.
                     let body = bincode::deserialize(&body)?;
                     let ds = futures::executor::block_on(self.dataflow_state_handle.read());
                     check_quorum!(ds);
@@ -587,8 +588,8 @@ impl Leader {
         // TODO(fran): I feel like this is a little bit hacky. It is true that
         //   if we have more than 1 node (we know there's always going to be _at least_ 1,
         //   namely the `self.source` node) then that means we are recovering; but maybe
-        //   we can be more explicit and store a `recovery` flag in the persisted [`ControllerState`]
-        //   itself.
+        //   we can be more explicit and store a `recovery` flag in the persisted
+        // [`ControllerState`]   itself.
         let pending_recovery = state.dataflow_state.ingredients.node_indices().count() > 1;
 
         let dataflow_state_handle = DataflowStateHandle::new(state.dataflow_state);

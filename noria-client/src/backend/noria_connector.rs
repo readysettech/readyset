@@ -625,7 +625,8 @@ impl NoriaConnector {
                 let schema = putter
                     .schema()
                     .ok_or_else(|| internal_err(format!("no schema for table '{}'", table)))?;
-                // unwrap: safe because we always pass in Some(params) so don't hit None path of coerce_params
+                // unwrap: safe because we always pass in Some(params) so don't hit None path of
+                // coerce_params
                 let coerced_params =
                     utils::coerce_params(Some(params), &SqlQuery::Insert(q.clone()), schema)
                         .unwrap()
@@ -1147,7 +1148,8 @@ impl NoriaConnector {
         trace!("update::update");
         mutator.update(key, updates).await?;
         trace!("update::complete");
-        // TODO: return meaningful fields for (num_rows_updated, last_inserted_id) rather than hardcoded (1,0)
+        // TODO: return meaningful fields for (num_rows_updated, last_inserted_id) rather than
+        // hardcoded (1,0)
         Ok(QueryResult::Update {
             num_rows_updated: 1,
             last_inserted_id: 0,
@@ -1184,7 +1186,8 @@ impl NoriaConnector {
         trace!("delete::delete");
         mutator.delete(key).await?;
         trace!("delete::complete");
-        // TODO: return meaningful fields for (num_rows_deleted, last_inserted_id) rather than hardcoded (1,0)
+        // TODO: return meaningful fields for (num_rows_deleted, last_inserted_id) rather than
+        // hardcoded (1,0)
         Ok(QueryResult::Delete {
             num_rows_deleted: 1,
         })
@@ -1591,7 +1594,7 @@ async fn do_read<'a>(
         data,
         select_schema: SelectSchema {
             use_bogo,
-            schema: Cow::Borrowed(getter.schema().unwrap().schema(SchemaType::ReturnedSchema)), // Safe because we already unwrapped above
+            schema: Cow::Borrowed(getter.schema().unwrap().schema(SchemaType::ReturnedSchema)), /* Safe because we already unwrapped above */
             columns: Cow::Borrowed(getter.columns()),
         },
     })

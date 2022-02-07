@@ -1,8 +1,8 @@
 use anyhow::Result;
 
 /// Commands that just interact with Terraform on disk and do not assume we are going through
-/// Buildkite. These commands would be used by admins hopefully only in emergencies and otherwise
-/// rely upon our CI tools to run these.
+/// Buildkite. These commands would be used by admins hopefully only in emergencies and
+/// otherwise rely upon our CI tools to run these.
 use crate::{substrate, terraform};
 
 pub(crate) fn validate(root_module: &substrate::RootModule) -> Result<()> {

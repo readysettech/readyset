@@ -231,9 +231,10 @@ impl SqlIncorporator {
                 {
                     use self::query_graph::OutputColumn;
 
-                    // the signatures match, but this comparison has only given us an inexact result:
-                    // we know that both queries mention the same columns, but not that they
-                    // actually do the same comparisons or have the same literals. Hence, we need
+                    // the signatures match, but this comparison has only given us an inexact
+                    // result: we know that both queries mention the same
+                    // columns, but not that they actually do the same
+                    // comparisons or have the same literals. Hence, we need
                     // to scan the predicates here and ensure that for each predicate in the
                     // incoming QG, we have a matching predicate in the existing one.
                     // Since `qg.relations.predicates` only contains comparisons between columns
@@ -2218,7 +2219,8 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok());
-            // note: the FunctionExpression isn't a sumfilter because it takes the hash before merging
+            // note: the FunctionExpression isn't a sumfilter because it takes the hash before
+            // merging
             let f = Box::new(FunctionExpression::Sum {
                 expr: Box::new(Expression::Column(Column::from("votes.sign"))),
                 distinct: false,

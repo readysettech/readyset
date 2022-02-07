@@ -66,8 +66,8 @@ impl ReplicationOffset {
 /// Set of replication offsets for the entire system
 #[derive(Default, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct ReplicationOffsets {
-    /// Replication offset for the database schema, set as part of the controller metadata stored in
-    /// the authority
+    /// Replication offset for the database schema, set as part of the controller metadata stored
+    /// in the authority
     pub schema: Option<ReplicationOffset>,
 
     /// Replication offset for each individual table, if any.

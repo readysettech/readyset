@@ -73,10 +73,11 @@ impl<'a> MissSet<'a> {
 impl NodeProcessingResult {
     /// Returns a vector of the unique contents of `misses`, by only the columns that were missed on
     pub(crate) fn unique_misses(&self) -> Vec<&Miss> {
-        // Since a list of misses can be rather long, performing a sort on all the misses can be rather expensive.
-        // On the other hand the misses will likely belong to only a handful of queries (or even just one) and
-        // thus share the same parameters in most cases. Therefore we simply perform multiple passes over the
-        // vector removing all the entries that share the same characteristics each time. In most cases a single pass
+        // Since a list of misses can be rather long, performing a sort on all the misses can be
+        // rather expensive. On the other hand the misses will likely belong to only a
+        // handful of queries (or even just one) and thus share the same parameters in most
+        // cases. Therefore we simply perform multiple passes over the vector removing all
+        // the entries that share the same characteristics each time. In most cases a single pass
         // will suffice.
         let mut misses = self.misses.iter();
 
@@ -158,9 +159,10 @@ impl Node {
                             s.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
                         }
 
-                        // When a replay originates at a base node, we replay the data *through* that
-                        // same base node because its column set may have changed. However, this replay
-                        // through the base node itself should *NOT* update the materialization,
+                        // When a replay originates at a base node, we replay the data *through*
+                        // that same base node because its column set may
+                        // have changed. However, this replay through the
+                        // base node itself should *NOT* update the materialization,
                         // because otherwise it would duplicate each record in the base table every
                         // time a replay happens!
                         //

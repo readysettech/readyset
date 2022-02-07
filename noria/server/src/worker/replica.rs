@@ -324,16 +324,18 @@ impl Replica {
         // Every established connection goes here
         let mut connections: tokio_stream::StreamMap<u64, DualTcpStream> = Default::default();
         // A cache of established connections to other Replicas we may send messages to
-        // sadly have to use Mutex here to make it possible to pass a mutable reference to outputs to an async
-        // function
+        // sadly have to use Mutex here to make it possible to pass a mutable reference to outputs
+        // to an async function
         let outputs = Mutex::new(Outputs::default());
         let failed = Mutex::new(HashSet::new());
 
-        // Will only ever hold a single future that handles sending packets, wrap it for convenience into FuturesUnordered
-        // in general we don't want to drop the future for send_packets until it finished, otherwise some packets might get
-        // lost. So the solution for that is to do a `pin_mut` on a `Fuse` future (which requires first issuing a fake call)
-        // and then keeping it updated once `Fuse` reports `terminated`, or instead simply using `FuturesUnordered` with one
-        // entry, and adding the next future when it is empty.
+        // Will only ever hold a single future that handles sending packets, wrap it for convenience
+        // into FuturesUnordered in general we don't want to drop the future for
+        // send_packets until it finished, otherwise some packets might get lost. So the
+        // solution for that is to do a `pin_mut` on a `Fuse` future (which requires first issuing a
+        // fake call) and then keeping it updated once `Fuse` reports `terminated`, or
+        // instead simply using `FuturesUnordered` with one entry, and adding the next
+        // future when it is empty.
         let mut send_packets = futures::stream::FuturesUnordered::new();
         let span = self.span();
 

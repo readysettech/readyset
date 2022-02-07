@@ -6,32 +6,40 @@ use crate::get;
 #[allow(dead_code)]
 pub struct SuggestedInvite {
     // All columns from `suggested_invites`
-    id: i64,                                // int unsigned NOT NULL AUTO_INCREMENT,
-    name: String, // varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-    priority: i64, // int DEFAULT '0',
-    date: String, // date DEFAULT NULL,
-    filter_id: i64, // int DEFAULT NULL,
+    id: i64, // int unsigned NOT NULL AUTO_INCREMENT,
+    name: String, /* varchar(255) CHARACTER SET utf8mb4 COLLATE
+              * utf8mb4_unicode_ci DEFAULT NULL, */
+    priority: i64,    // int DEFAULT '0',
+    date: String,     // date DEFAULT NULL,
+    filter_id: i64,   // int DEFAULT NULL,
     gradient_id: i64, // int DEFAULT '1',
-    is_active: i64, // tinyint(1) DEFAULT '0',
-    hex_color: String, // varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-    kind: i64,    // smallint DEFAULT NULL,
+    is_active: i64,   // tinyint(1) DEFAULT '0',
+    hex_color: String, /* varchar(16) CHARACTER SET utf8mb4 COLLATE
+                       * utf8mb4_unicode_ci DEFAULT NULL, */
+    kind: i64,     // smallint DEFAULT NULL,
     group_id: i64, // int DEFAULT NULL,
-    global: i64,  // tinyint(1) DEFAULT '1',
-    first_comment: String, // varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-    latitude: f64,         // double(18,12) DEFAULT NULL,
-    longitude: f64,        // double(18,12) DEFAULT NULL,
-    created_at: String,    // timestamp NULL DEFAULT NULL,
-    updated_at: String,    // timestamp NULL DEFAULT NULL,
-    gender: String, // varchar(1) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-    giveaway_num_wins: i64, // tinyint NOT NULL DEFAULT '0',
+    global: i64,   // tinyint(1) DEFAULT '1',
+    first_comment: String, /* varchar(255) CHARACTER SET utf8mb4 COLLATE
+                    * utf8mb4_unicode_ci DEFAULT NULL, */
+    latitude: f64,      // double(18,12) DEFAULT NULL,
+    longitude: f64,     // double(18,12) DEFAULT NULL,
+    created_at: String, // timestamp NULL DEFAULT NULL,
+    updated_at: String, // timestamp NULL DEFAULT NULL,
+    gender: String,     /* varchar(1) CHARACTER SET utf8mb4 COLLATE
+                         * utf8mb4_unicode_ci DEFAULT NULL, */
+    giveaway_num_wins: i64,      // tinyint NOT NULL DEFAULT '0',
     giveaway_joining_limit: i64, // tinyint NOT NULL DEFAULT '0',
-    giveaway_dialogue_title: String, // varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-    giveaway_dialogue_description: String, // text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
-    giveaway_win_comment: String,    // text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
-    giveaway_lose_comment_appended: String, // varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-    is_live_giveaway: i64,                  // tinyint NOT NULL DEFAULT '0',
-    suggested_invite_id: i64,               // int DEFAULT NULL,
-    image: String, // varchar(155) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+    giveaway_dialogue_title: String, /* varchar(255) CHARACTER SET utf8mb4 COLLATE
+                                  * utf8mb4_unicode_ci DEFAULT NULL, */
+    giveaway_dialogue_description: String, /* text CHARACTER SET utf8mb4 COLLATE
+                                            * utf8mb4_unicode_ci, */
+    giveaway_win_comment: String, // text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+    giveaway_lose_comment_appended: String, /* varchar(255) CHARACTER SET utf8mb4 COLLATE
+                                   * utf8mb4_unicode_ci DEFAULT NULL, */
+    is_live_giveaway: i64,    // tinyint NOT NULL DEFAULT '0',
+    suggested_invite_id: i64, // int DEFAULT NULL,
+    image: String,            /* varchar(155) CHARACTER SET utf8mb4 COLLATE
+                               * utf8mb4_unicode_ci DEFAULT NULL, */
     initialization_date: String, // date DEFAULT NULL,
 }
 

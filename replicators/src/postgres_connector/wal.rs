@@ -1,8 +1,8 @@
-//! This module implements 100% of the current Postgres end: (), time: (), reply: ()  end: (), time: (), reply: ()  WAL spec as defined in
-//! [Streaming Replication Protocol](https://www.postgresql.org/docs/current/protocol-replication.html)
+//! This module implements 100% of the current Postgres end: (), time: (), reply: ()  end: (), time:
+//! (), reply: ()  WAL spec as defined in [Streaming Replication Protocol](https://www.postgresql.org/docs/current/protocol-replication.html)
 //! and [Logical Replication Message Formats](https://www.postgresql.org/docs/current/protocol-logicalrep-message-formats.html)
-//! every struct here maps percisely to the defenitions in the spec, and tryes to avoid abastractions that don't map
-//! exactly. The parsing is therefore very much straightforward.
+//! every struct here maps percisely to the defenitions in the spec, and tryes to avoid
+//! abastractions that don't map exactly. The parsing is therefore very much straightforward.
 
 use std::convert::{TryFrom, TryInto};
 
@@ -103,23 +103,27 @@ pub enum WalData {
         start: i64,
         /// The current end of WAL on the server.
         end: i64,
-        /// The server's system clock at the time of transmission, as microseconds since midnight on 2000-01-01.
+        /// The server's system clock at the time of transmission, as microseconds since midnight
+        /// on 2000-01-01.
         time: i64,
         /// A section of the WAL data stream.
-        /// A single WAL record is never split across two XLogData messages. When a WAL record crosses a WAL page boundary,
-        /// and is therefore already split using continuation records, it can be split at the page boundary. In other words,
-        /// the first main WAL record and its continuation records can be sent in different XLogData messages.
+        /// A single WAL record is never split across two XLogData messages. When a WAL record
+        /// crosses a WAL page boundary, and is therefore already split using continuation
+        /// records, it can be split at the page boundary. In other words, the first main
+        /// WAL record and its continuation records can be sent in different XLogData messages.
         data: WalRecord,
     },
     /// Primary keepalive message
     Keepalive {
         /// The current end of WAL on the server.
         end: i64,
-        /// The server's system clock at the time of transmission, as microseconds since midnight on 2000-01-01.
+        /// The server's system clock at the time of transmission, as microseconds since midnight
+        /// on 2000-01-01.
         time: i64,
-        /// 1 means that the client should reply to this message as soon as possible, to avoid a timeout disconnect. 0 otherwise.
-        /// The receiving process can send replies back to the sender at any time, using one of the following message formats
-        /// (also in the payload of a CopyData message):
+        /// 1 means that the client should reply to this message as soon as possible, to avoid a
+        /// timeout disconnect. 0 otherwise. The receiving process can send replies back to
+        /// the sender at any time, using one of the following message formats (also in the
+        /// payload of a CopyData message):
         reply: u8,
     },
     StandbyStatusUpdate {
@@ -129,21 +133,26 @@ pub enum WalData {
         flushed: i64,
         /// The location of the last WAL byte + 1 applied in the standby.
         applied: i64,
-        /// The client's system clock at the time of transmission, as microseconds since midnight on 2000-01-01.
+        /// The client's system clock at the time of transmission, as microseconds since midnight
+        /// on 2000-01-01.
         time: i64,
-        /// If 1, the client requests the server to reply to this message immediately. This can be used to ping the server, to test if the connection is still healthy.
+        /// If 1, the client requests the server to reply to this message immediately. This can be
+        /// used to ping the server, to test if the connection is still healthy.
         reply: u8,
     },
     HotStandbyFeedback {
-        /// The client's system clock at the time of transmission, as microseconds since midnight on 2000-01-01.
+        /// The client's system clock at the time of transmission, as microseconds since midnight
+        /// on 2000-01-01.
         time: i64,
-        /// The standby's current global xmin, excluding the catalog_xmin from any replication slots.
-        /// If both this value and the following catalog_xmin are 0 this is treated as a notification that Hot Standby feedback will no longer
-        /// be sent on this connection. Later non-zero messages may reinitiate the feedback mechanism.
+        /// The standby's current global xmin, excluding the catalog_xmin from any replication
+        /// slots. If both this value and the following catalog_xmin are 0 this is treated
+        /// as a notification that Hot Standby feedback will no longer be sent on this
+        /// connection. Later non-zero messages may reinitiate the feedback mechanism.
         xmin: i32,
         /// The epoch of the global xmin xid on the standby.
         epoch: i32,
-        /// The lowest catalog_xmin of any replication slots on the standby. Set to 0 if no catalog_xmin exists on the standby or if hot standby feedback is being disabled.
+        /// The lowest catalog_xmin of any replication slots on the standby. Set to 0 if no
+        /// catalog_xmin exists on the standby or if hot standby feedback is being disabled.
         catalog_xmin: i32,
         /// The epoch of the catalog_xmin xid on the standby.
         epoch_catalog_xmin: i32,
@@ -181,7 +190,8 @@ pub enum WalRecord {
     Begin {
         /// The final LSN of the transaction.
         final_lsn: i64,
-        /// Commit timestamp of the transaction. The value is in number of microseconds since PostgreSQL epoch (2000-01-01).
+        /// Commit timestamp of the transaction. The value is in number of microseconds since
+        /// PostgreSQL epoch (2000-01-01).
         timestamp: i64,
         /// Xid of the transaction.
         xid: i32,
@@ -194,7 +204,8 @@ pub enum WalRecord {
         lsn: i64,
         /// The end LSN of the transaction
         end_lsn: i64,
-        /// Commit timestamp of the transaction. The value is in number of microseconds since PostgreSQL epoch (2000-01-01).
+        /// Commit timestamp of the transaction. The value is in number of microseconds since
+        /// PostgreSQL epoch (2000-01-01).
         timestamp: i64,
     },
     Origin {
@@ -230,9 +241,11 @@ pub enum WalRecord {
     Update {
         /// ID of the relation corresponding to the ID in the relation message.
         relation_id: i32,
-        /// This field is optional and is only present if the update changed data in any of the column(s) that are part of the REPLICA IDENTITY index.
+        /// This field is optional and is only present if the update changed data in any of the
+        /// column(s) that are part of the REPLICA IDENTITY index.
         key_tuple: Option<TupleData>,
-        /// This field is optional and is only present if table in which the update happened has REPLICA IDENTITY set to FULL.
+        /// This field is optional and is only present if table in which the update happened has
+        /// REPLICA IDENTITY set to FULL.
         old_tuple: Option<TupleData>,
         new_tuple: TupleData,
     },
@@ -241,9 +254,11 @@ pub enum WalRecord {
     Delete {
         /// ID of the relation corresponding to the ID in the relation message.
         relation_id: i32,
-        /// This field is present if the table in which the delete has happened uses an index as REPLICA IDENTITY.
+        /// This field is present if the table in which the delete has happened uses an index as
+        /// REPLICA IDENTITY.
         key_tuple: Option<TupleData>,
-        /// This field is present if the table in which the delete happened has REPLICA IDENTITY set to FULL.
+        /// This field is present if the table in which the delete happened has REPLICA IDENTITY
+        /// set to FULL.
         old_tuple: Option<TupleData>,
     },
     /// Sent when [`TRUNCATE`](https://www.postgresql.org/docs/current/sql-truncate.html) is used
@@ -252,7 +267,8 @@ pub enum WalRecord {
         n_relations: i32,
         /// Option bits for TRUNCATE: 1 for CASCADE, 2 for RESTART IDENTITY
         options: i8,
-        /// ID of the relation corresponding to the ID in the relation message. Idenitifies the tables to truncate.
+        /// ID of the relation corresponding to the ID in the relation message. Idenitifies the
+        /// tables to truncate.
         relation_ids: Vec<i32>,
     },
     Unknown(Bytes),
@@ -261,7 +277,8 @@ pub enum WalRecord {
 /// Defines the type and metadata for a single column in a `Relation` mapping
 #[derive(Debug, PartialEq)]
 pub struct ColumnSpec {
-    /// Flags for the column. Currently can be either 0 for no flags or 1 which marks the column as part of the key.
+    /// Flags for the column. Currently can be either 0 for no flags or 1 which marks the column as
+    /// part of the key.
     pub(crate) flags: i8,
     /// Name of the column.
     pub(crate) name: Bytes,

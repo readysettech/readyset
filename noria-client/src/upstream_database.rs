@@ -100,7 +100,8 @@ pub trait UpstreamDatabase: Sized + Send {
     ///
     /// If 'on_execute' is called with a 'statement_id' that was not previously passed to
     /// 'on_prepare', this method should return
-    /// ['Err(Error::ReadySet(ReadSetError::PreparedStatementMissing))'](noria::ReadSetError::PreparedStatementMissing)
+    /// ['Err(Error::ReadySet(ReadSetError::PreparedStatementMissing))'](noria::ReadSetError::
+    /// PreparedStatementMissing)
     async fn execute(
         &mut self,
         statement_id: u32,

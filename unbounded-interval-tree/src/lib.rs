@@ -338,9 +338,8 @@ where
         //   `range` from its interval, resulting in either one or two ranges. We then put both of
         //   the node's children in the queue to re-insert, and remove the node entirely
         //
-        // - after recursively walking the node's children, we re-calculate the node's max by
-        //   taking the max of its left child's max, its right child's max, and its own upper
-        //    bound.
+        // - after recursively walking the node's children, we re-calculate the node's max by taking
+        //   the max of its left child's max, its right child's max, and its own upper bound.
         //
         // - once we're done walking the tree, we run through the list of split-off nodes and walk
         //   each of *their* subtrees, then reinsert back into the tree, and keep going until we

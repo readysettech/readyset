@@ -51,21 +51,21 @@ pub trait Backend {
     /// Initializes the backend.
     ///
     /// * `database` - The name of the database that will be used for queries to this `Backend`
-    ///     instance.
+    ///   instance.
     async fn on_init(&mut self, database: &str) -> Result<(), Error>;
 
     /// Performs the specified SQL query.
     ///
     /// * `query` - The sql query to perform.
     /// * returns - A `QueryResponse` containing either the data retrieved (for a read query) or a
-    ///     confirmation (for a write query), or else an `Error` if a failure occurs.
+    ///   confirmation (for a write query), or else an `Error` if a failure occurs.
     async fn on_query(&mut self, query: &str) -> Result<QueryResponse<Self::Resultset>, Error>;
 
     /// Prepares the specified SQL query, creating a prepared statement.
     ///
     /// * `query` - The sql query to prepare.
     /// * returns - A `PrepareResponse` containing metadata about the new prepared statement, or an
-    ///     `Error` if a failure occurs.
+    ///   `Error` if a failure occurs.
     async fn on_prepare(&mut self, query: &str) -> Result<PrepareResponse, Error>;
 
     /// Executes a previously prepared SQL query using the provided parameters.
@@ -73,7 +73,7 @@ pub trait Backend {
     /// * `statement_id` - The identifier of the previously created prepared statement.
     /// * `params` - The values to substitue for the prepared statement's parameter placeholders.
     /// * returns - A `QueryResponse` containing either the data retrieved (for a read query) or a
-    ///     confirmation (for a write query), or else an `Error` if a failure occurs.
+    ///   confirmation (for a write query), or else an `Error` if a failure occurs.
     async fn on_execute(
         &mut self,
         statement_id: u32,
@@ -131,9 +131,8 @@ pub enum QueryResponse<S> {
 ///
 /// * `backend` - A `Backend` object that emulates a PostgreSQL database as described above.
 /// * `channel` - A bytestream channel connected to a PostgreSQL frontend. Requests sent by the
-///     frontend on this channel will be forwarded to `backend`, and the `backend`'s responses will
-///     be returned to the frontend. When `channel` is closed by the frontend, `run_backend`
-///     returns.
+///   frontend on this channel will be forwarded to `backend`, and the `backend`'s responses will be
+///   returned to the frontend. When `channel` is closed by the frontend, `run_backend` returns.
 pub async fn run_backend<B: Backend, C: AsyncRead + AsyncWrite + Unpin>(backend: B, channel: C) {
     runner::Runner::run(backend, channel).await
 }

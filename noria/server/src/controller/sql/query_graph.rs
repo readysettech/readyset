@@ -416,9 +416,9 @@ fn classify_conditionals(
     match ce {
         Expression::BinaryOp { op, lhs, rhs } => {
             if let Ok(op) = LogicalOp::try_from(*op) {
-                // first, we recurse on both sides, collected the result of nested predicate analysis
-                // in separate collections. What do do with these depends on whether we're an AND or an
-                // OR clause:
+                // first, we recurse on both sides, collected the result of nested predicate
+                // analysis in separate collections. What do do with these depends
+                // on whether we're an AND or an OR clause:
                 //  1) AND can be split into separate local predicates one one or more tables
                 //  2) OR predictes must be preserved in their entirety, and we only use the nested
                 //     local predicates discovered to decide if the OR is over one table (so it can
@@ -725,9 +725,10 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                             }
                         },
                         FieldDefinitionExpression::Expression { .. } => {
-                            // No need to do anything for expressions here, since they aren't associated
-                            // with a relation (and thus have no QGN)
-                            // XXX(malte): don't drop aggregation columns
+                            // No need to do anything for expressions here, since they aren't
+                            // associated with a relation (and thus have
+                            // no QGN) XXX(malte): don't drop
+                            // aggregation columns
                             None
                         }
                     })
@@ -1059,8 +1060,9 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     // would be assigned in the `rewrite_selection` pass
                 }
                 (Some(_), None) => {
-                    // This is a reference to a column in a table, we need to project it if it is not
-                    // yet projected in order to be able to execute `ORDER BY` post lookup.
+                    // This is a reference to a column in a table, we need to project it if it is
+                    // not yet projected in order to be able to execute `ORDER
+                    // BY` post lookup.
                     if !qg.columns.iter().any(
                         |e| matches!(e, OutputColumn::Data {  column, .. } if column == ord_col),
                     ) {
@@ -1072,7 +1074,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     }
                 }
                 (_, Some(box func)) => {
-                    // This is a function call expression that we need to add to the list of projected columns
+                    // This is a function call expression that we need to add to the list of
+                    // projected columns
                     let column = add_computed_column(&mut qg, func.clone(), ord_col.name.clone());
                     qg.columns.push(OutputColumn::Data {
                         alias: column.name.clone(),

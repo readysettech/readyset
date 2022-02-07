@@ -24,7 +24,8 @@ pub struct ExternalCalendarsInnerJoinExternalInvites {
     should_skip_callback: i64,    // tinyint NOT NULL DEFAULT '0',
     user_id_subscribing_to: i64,  // bigint DEFAULT NULL,
     is_irl_cal: i64,              // tinyint DEFAULT NULL,
-    access_type: String, // varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'reader',
+    access_type: String,          /* varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT
+                                   * 'reader', */
     // Columns from `external_invites`
     ei_invite_id: i64, // int unsigned NOT NULL,
 }

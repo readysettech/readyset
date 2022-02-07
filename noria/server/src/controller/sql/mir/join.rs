@@ -70,9 +70,9 @@ pub(super) fn make_joins(
     Ok(join_nodes)
 }
 
-// Generate join nodes for the query aggregates. This will call `mir_converter.make_join_aggregates_node` only
-// once if there are only two parents, and otherwise create multiple nodes of type
-// `MirNodeInner::JoinAggregates`.
+// Generate join nodes for the query aggregates. This will call
+// `mir_converter.make_join_aggregates_node` only once if there are only two parents, and otherwise
+// create multiple nodes of type `MirNodeInner::JoinAggregates`.
 pub(super) fn make_joins_for_aggregates(
     mir_converter: &SqlToMirConverter,
     name: &str,

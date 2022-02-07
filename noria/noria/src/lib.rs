@@ -164,8 +164,8 @@ pub(crate) const BUFFER_TO_POOL: usize = 1024;
 ///
 /// The value isn't higher for a couple of reasons:
 ///
-///  - It is per table, which means it is per shard of a domain. Unless _all_ of your requests go
-///    to a single shard of one table, you should be fine.
+///  - It is per table, which means it is per shard of a domain. Unless _all_ of your requests go to
+///    a single shard of one table, you should be fine.
 ///  - Table operations are generally not bottlenecked on serialization, but on committing.
 ///
 /// The value isn't lower, because we want _some_ concurrency in serialization.
@@ -415,7 +415,8 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
         | DataType::TimestampTz(_) => {
             use std::hash::Hasher;
             let mut hasher = ahash::AHasher::new_with_keys(0x3306, 0x6033);
-            // this unwrap should be safe because there are no error paths with a Text, TinyText, nor Timestamp converting to Text
+            // this unwrap should be safe because there are no error paths with a Text, TinyText,
+            // nor Timestamp converting to Text
             #[allow(clippy::unwrap_used)]
             let str_dt = dt.coerce_to(&SqlType::Text).unwrap();
             // this unwrap should be safe because we just coerced dt to a text

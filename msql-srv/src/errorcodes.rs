@@ -210,7 +210,8 @@ pub enum ErrorKind {
     ER_UNEXPECTED_EOF = 1039,
     /// Too many connections
     ER_CON_COUNT_ERROR = 1040,
-    /// Out of memory; check if mysqld or some other process uses all available memory; if not, you may have to use 'ulimit' to allow mysqld to use more memory or you can add more swap space
+    /// Out of memory; check if mysqld or some other process uses all available memory; if not, you
+    /// may have to use 'ulimit' to allow mysqld to use more memory or you can add more swap space
     ER_OUT_OF_RESOURCES = 1041,
     /// Can't get hostname for your address
     ER_BAD_HOST_ERROR = 1042,
@@ -278,7 +279,8 @@ pub enum ErrorKind {
     ER_BLOB_USED_AS_KEY = 1073,
     /// Column length too big for column '%s' (max = %lu); use BLOB or TEXT instead
     ER_TOO_BIG_FIELDLENGTH = 1074,
-    /// Incorrect table definition; there can be only one auto column and it must be defined as a key
+    /// Incorrect table definition; there can be only one auto column and it must be defined as a
+    /// key
     ER_WRONG_AUTO_KEY = 1075,
     /// %s: ready for connections. Version: '%s' socket: '%s' port: %d
     ER_READY = 1076,
@@ -306,7 +308,8 @@ pub enum ErrorKind {
     ER_LOAD_INF = 1087,
     /// Records: %ld Duplicates: %ld
     ER_ALTER_INF = 1088,
-    /// Incorrect prefix key; the used key part isn't a string, the used length is longer than the key part, or the storage engine doesn't support unique prefix keys
+    /// Incorrect prefix key; the used key part isn't a string, the used length is longer than the
+    /// key part, or the storage engine doesn't support unique prefix keys
     ER_WRONG_SUB_KEY = 1089,
     /// You can't delete all columns with ALTER TABLE; use DROP TABLE instead
     ER_CANT_REMOVE_ALL_FIELDS = 1090,
@@ -336,7 +339,8 @@ pub enum ErrorKind {
     ER_WRONG_DB_NAME = 1102,
     /// Incorrect table name '%s'
     ER_WRONG_TABLE_NAME = 1103,
-    /// The SELECT would examine more than MAX_JOIN_SIZE rows; check your WHERE and use SET SQL_BIG_SELECTS=1 or SET MAX_JOIN_SIZE=# if the SELECT is okay
+    /// The SELECT would examine more than MAX_JOIN_SIZE rows; check your WHERE and use SET
+    /// SQL_BIG_SELECTS=1 or SET MAX_JOIN_SIZE=# if the SELECT is okay
     ER_TOO_BIG_SELECT = 1104,
     /// Unknown error
     ER_UNKNOWN_ERROR = 1105,
@@ -364,13 +368,16 @@ pub enum ErrorKind {
     ER_TOO_MANY_TABLES = 1116,
     /// Too many columns
     ER_TOO_MANY_FIELDS = 1117,
-    /// Row size too large. The maximum row size for the used table type, not counting BLOBs, is %ld. You have to change some columns to TEXT or BLOBs
+    /// Row size too large. The maximum row size for the used table type, not counting BLOBs, is
+    /// %ld. You have to change some columns to TEXT or BLOBs
     ER_TOO_BIG_ROWSIZE = 1118,
-    /// Thread stack overrun: Used: %ld of a %ld stack. Use 'mysqld --thread_stack=#' to specify a bigger stack if needed
+    /// Thread stack overrun: Used: %ld of a %ld stack. Use 'mysqld --thread_stack=#' to specify a
+    /// bigger stack if needed
     ER_STACK_OVERRUN = 1119,
     /// Cross dependency found in OUTER JOIN; examine your ON conditions
     ER_WRONG_OUTER_JOIN = 1120,
-    /// Table handler doesn't support NULL in given index. Please change column '%s' to be NOT NULL or use another handler
+    /// Table handler doesn't support NULL in given index. Please change column '%s' to be NOT NULL
+    /// or use another handler
     ER_NULL_COLUMN_IN_INDEX = 1121,
     /// Can't load function '%s'
     ER_CANT_FIND_UDF = 1122,
@@ -386,19 +393,23 @@ pub enum ErrorKind {
     ER_CANT_FIND_DL_ENTRY = 1127,
     /// Function '%s' is not defined
     ER_FUNCTION_NOT_DEFINED = 1128,
-    /// Host '%s' is blocked because of many connection errors; unblock with 'mysqladmin flush-hosts'
+    /// Host '%s' is blocked because of many connection errors; unblock with 'mysqladmin
+    /// flush-hosts'
     ER_HOST_IS_BLOCKED = 1129,
     /// Host '%s' is not allowed to connect to this MariaDB server
     ER_HOST_NOT_PRIVILEGED = 1130,
-    /// You are using MariaDB as an anonymous user and anonymous users are not allowed to change passwords
+    /// You are using MariaDB as an anonymous user and anonymous users are not allowed to change
+    /// passwords
     ER_PASSWORD_ANONYMOUS_USER = 1131,
-    /// You must have privileges to update tables in the mysql database to be able to change passwords for others
+    /// You must have privileges to update tables in the mysql database to be able to change
+    /// passwords for others
     ER_PASSWORD_NOT_ALLOWED = 1132,
     /// Can't find any matching row in the user table
     ER_PASSWORD_NO_MATCH = 1133,
     /// Rows matched: %ld Changed: %ld Warnings: %ld
     ER_UPDATE_INF = 1134,
-    /// Can't create a new thread (Errno %d); if you are not out of available memory, you can consult the manual for a possible OS-dependent bug
+    /// Can't create a new thread (Errno %d); if you are not out of available memory, you can
+    /// consult the manual for a possible OS-dependent bug
     ER_CANT_CREATE_THREAD = 1135,
     /// Column count doesn't match value count at row %ld
     ER_WRONG_VALUE_COUNT_ON_ROW = 1136,
@@ -408,7 +419,8 @@ pub enum ErrorKind {
     ER_INVALID_USE_OF_NULL = 1138,
     /// Got error '%s' from regexp
     ER_REGEXP_ERROR = 1139,
-    /// Mixing of GROUP columns (MIN(),MAX(),COUNT(),...) with no GROUP columns is illegal if there is no GROUP BY clause
+    /// Mixing of GROUP columns (MIN(),MAX(),COUNT(),...) with no GROUP columns is illegal if there
+    /// is no GROUP BY clause
     ER_MIX_OF_GROUP_FUNC_AND_FIELDS = 1140,
     /// There is no such grant defined for user '%s' on host '%s'
     ER_NONEXISTING_GRANT = 1141,
@@ -426,7 +438,8 @@ pub enum ErrorKind {
     ER_NONEXISTING_TABLE_GRANT = 1147,
     /// The used command is not allowed with this MariaDB version
     ER_NOT_ALLOWED_COMMAND = 1148,
-    /// You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use
+    /// You have an error in your SQL syntax; check the manual that corresponds to your MariaDB
+    /// server version for the right syntax to use
     ER_SYNTAX_ERROR = 1149,
     /// Delayed insert thread couldn't get requested lock for table %s
     ER_DELAYED_CANT_CHANGE_LOCK = 1150,
@@ -464,7 +477,8 @@ pub enum ErrorKind {
     ER_WRONG_COLUMN_NAME = 1166,
     /// The used storage engine can't index column '%s'
     ER_WRONG_KEY_COLUMN = 1167,
-    /// Unable to open underlying table which is differently defined or of non-MyISAM type or doesn't exist
+    /// Unable to open underlying table which is differently defined or of non-MyISAM type or
+    /// doesn't exist
     ER_WRONG_MRG_TABLE = 1168,
     /// Can't write, because of unique constraint, to table '%s'
     ER_DUP_UNIQUE = 1169,
@@ -478,7 +492,8 @@ pub enum ErrorKind {
     ER_REQUIRES_PRIMARY_KEY = 1173,
     /// This version of MariaDB is not compiled with RAID support
     ER_NO_RAID_COMPILED = 1174,
-    /// You are using safe update mode and you tried to update a table without a WHERE that uses a KEY column
+    /// You are using safe update mode and you tried to update a table without a WHERE that uses a
+    /// KEY column
     ER_UPDATE_WITHOUT_KEY_IN_SAFE_MODE = 1175,
     /// Key '%s' doesn't exist in table '%s'
     ER_KEY_DOES_NOT_EXITS = 1176,
@@ -512,7 +527,8 @@ pub enum ErrorKind {
     ER_MASTER_NET_WRITE = 1190,
     /// Can't find FULLTEXT index matching the column list
     ER_FT_MATCHING_KEY_NOT_FOUND = 1191,
-    /// Can't execute the given command because you have active locked tables or an active transaction
+    /// Can't execute the given command because you have active locked tables or an active
+    /// transaction
     ER_LOCK_OR_ACTIVE_TRANSACTION = 1192,
     /// Unknown system variable '%s'
     ER_UNKNOWN_SYSTEM_VARIABLE = 1193,
@@ -522,7 +538,8 @@ pub enum ErrorKind {
     ER_CRASHED_ON_REPAIR = 1195,
     /// Some non-transactional changed tables couldn't be rolled back
     ER_WARNING_NOT_COMPLETE_ROLLBACK = 1196,
-    /// Multi-statement transaction required more than 'max_binlog_cache_size' bytes of storage; increase this mysqld variable and try again
+    /// Multi-statement transaction required more than 'max_binlog_cache_size' bytes of storage;
+    /// increase this mysqld variable and try again
     ER_TRANS_CACHE_FULL = 1197,
     /// This operation cannot be performed with a running slave; run STOP SLAVE first
     ER_SLAVE_MUST_STOP = 1198,
@@ -530,7 +547,8 @@ pub enum ErrorKind {
     ER_SLAVE_NOT_RUNNING = 1199,
     /// The server is not configured as slave; fix in config file or with CHANGE MASTER TO
     ER_BAD_SLAVE = 1200,
-    /// Could not initialize master info structure; more error messages can be found in the MariaDB error log
+    /// Could not initialize master info structure; more error messages can be found in the MariaDB
+    /// error log
     ER_MASTER_INF = 1201,
     /// Could not create slave thread; check system resources
     ER_SLAVE_THREAD = 1202,
@@ -630,7 +648,8 @@ pub enum ErrorKind {
     ER_SELECT_REDUCED = 1249,
     /// Table '%s' from one of the SELECTs cannot be used in %s
     ER_TABLENAME_NOT_ALLOWED_HERE = 1250,
-    /// Client does not support authentication protocol requested by server; consider upgrading MariaDB client
+    /// Client does not support authentication protocol requested by server; consider upgrading
+    /// MariaDB client
     ER_NOT_SUPPORTED_AUTH_MODE = 1251,
     /// All parts of a SPATIAL index must be NOT NULL
     ER_SPATIAL_CANT_HAVE_NULL = 1252,
@@ -640,11 +659,13 @@ pub enum ErrorKind {
     ER_SLAVE_WAS_RUNNING = 1254,
     /// Slave already has been stopped
     ER_SLAVE_WAS_NOT_RUNNING = 1255,
-    /// Uncompressed data size too large; the maximum size is %d (probably, length of uncompressed data was corrupted)
+    /// Uncompressed data size too large; the maximum size is %d (probably, length of uncompressed
+    /// data was corrupted)
     ER_TOO_BIG_FOR_UNCOMPRESS = 1256,
     /// ZLIB: Not enough memory
     ER_ZLIB_Z_MEM_ERROR = 1257,
-    /// ZLIB: Not enough room in the output buffer (probably, length of uncompressed data was corrupted)
+    /// ZLIB: Not enough room in the output buffer (probably, length of uncompressed data was
+    /// corrupted)
     ER_ZLIB_Z_BUF_ERROR = 1258,
     /// ZLIB: Input data corrupted
     ER_ZLIB_Z_DATA_ERROR = 1259,
@@ -676,15 +697,19 @@ pub enum ErrorKind {
     ER_VARIABLE_IS_NOT_STRUCT = 1272,
     /// Unknown collation: '%s'
     ER_UNKNOWN_COLLATION = 1273,
-    /// SSL parameters in CHANGE MASTER are ignored because this MariaDB slave was compiled without SSL support; they can be used later if MariaDB slave with SSL is started
+    /// SSL parameters in CHANGE MASTER are ignored because this MariaDB slave was compiled without
+    /// SSL support; they can be used later if MariaDB slave with SSL is started
     ER_SLAVE_IGNORED_SSL_PARAMS = 1274,
-    /// Server is running in --secure-auth mode, but '%s'@'%s' has a password in the old format; please change the password to the new format
+    /// Server is running in --secure-auth mode, but '%s'@'%s' has a password in the old format;
+    /// please change the password to the new format
     ER_SERVER_IS_IN_SECURE_AUTH_MODE = 1275,
     /// Field or reference '%s%s%s%s%s' of SELECT #%d was resolved in SELECT #%d
     ER_WARN_FIELD_RESOLVED = 1276,
     /// Incorrect parameter or combination of parameters for START SLAVE UNTIL
     ER_BAD_SLAVE_UNTIL_COND = 1277,
-    /// It is recommended to use --skip-slave-start when doing step-by-step replication with START SLAVE UNTIL; otherwise, you will get problems if you get an unexpected slave's mysqld restart
+    /// It is recommended to use --skip-slave-start when doing step-by-step replication with START
+    /// SLAVE UNTIL; otherwise, you will get problems if you get an unexpected slave's mysqld
+    /// restart
     ER_MISSING_SKIP_SLAVE = 1278,
     /// SQL thread is not to be started so UNTIL options are ignored
     ER_UNTIL_COND_IGNORED = 1279,
@@ -698,7 +723,8 @@ pub enum ErrorKind {
     ER_BAD_FT_COLUMN = 1283,
     /// Unknown key cache '%s'
     ER_UNKNOWN_KEY_CACHE = 1284,
-    /// MariaDB is started in --skip-name-resolve mode; you must restart it without this switch for this grant to work
+    /// MariaDB is started in --skip-name-resolve mode; you must restart it without this switch for
+    /// this grant to work
     ER_WARN_HOSTNAME_WONT_WORK = 1285,
     /// Unknown storage engine '%s'
     ER_UNKNOWN_STORAGE_ENGINE = 1286,
@@ -714,7 +740,8 @@ pub enum ErrorKind {
     ER_DUPLICATED_VALUE_IN_TYPE = 1291,
     /// Truncated incorrect %s value: '%s'
     ER_TRUNCATED_WRONG_VALUE = 1292,
-    /// Incorrect table definition; there can be only one TIMESTAMP column with CURRENT_TIMESTAMP in DEFAULT or ON UPDATE clause
+    /// Incorrect table definition; there can be only one TIMESTAMP column with CURRENT_TIMESTAMP
+    /// in DEFAULT or ON UPDATE clause
     ER_TOO_MUCH_AUTO_TIMESTAMP_COLS = 1293,
     /// Invalid ON UPDATE clause for '%s' column
     ER_INVALID_ON_UPDATE = 1294,
@@ -758,9 +785,11 @@ pub enum ErrorKind {
     ER_SP_BADRETURN = 1313,
     /// %s is not allowed in stored procedures
     ER_SP_BADSTATEMENT = 1314,
-    /// The update log is deprecated and replaced by the binary log; SET SQL_LOG_UPDATE has been ignored. This option will be removed in MariaDB 5.6.
+    /// The update log is deprecated and replaced by the binary log; SET SQL_LOG_UPDATE has been
+    /// ignored. This option will be removed in MariaDB 5.6.
     ER_UPDATE_LOG_DEPRECATED_IGNORED = 1315,
-    /// The update log is deprecated and replaced by the binary log; SET SQL_LOG_UPDATE has been translated to SET SQL_LOG_BIN. This option will be removed in MariaDB 5.6.
+    /// The update log is deprecated and replaced by the binary log; SET SQL_LOG_UPDATE has been
+    /// translated to SET SQL_LOG_BIN. This option will be removed in MariaDB 5.6.
     ER_UPDATE_LOG_DEPRECATED_TRANSLATED = 1316,
     /// Query execution was interrupted
     ER_QUERY_INTERRUPTED = 1317,
@@ -840,7 +869,8 @@ pub enum ErrorKind {
     ER_WARN_VIEW_MERGE = 1354,
     /// View being updated does not have complete key of underlying table in it
     ER_WARN_VIEW_WITHOUT_KEY = 1355,
-    /// View '%s.%s' references invalid table(s) or column(s) or function(s) or definer/invoker of view lack rights to use them
+    /// View '%s.%s' references invalid table(s) or column(s) or function(s) or definer/invoker of
+    /// view lack rights to use them
     ER_VIEW_INVALID = 1356,
     /// Can't drop or alter a %s from within another stored routine
     ER_SP_NO_DROP_SP = 1357,
@@ -930,7 +960,8 @@ pub enum ErrorKind {
     ER_XAER_RMFAIL = 1399,
     /// XAER_OUTSIDE: Some work is done outside global transaction
     ER_XAER_OUTSIDE = 1400,
-    /// XAER_RMERR: Fatal error occurred in the transaction branch - check your data for consistency
+    /// XAER_RMERR: Fatal error occurred in the transaction branch - check your data for
+    /// consistency
     ER_XAER_RMERR = 1401,
     /// XA_RBROLLBACK: Transaction branch was rolled back
     ER_XA_RBROLLBACK = 1402,
@@ -956,19 +987,26 @@ pub enum ErrorKind {
     ER_TABLE_DEF_CHANGED = 1412,
     /// Duplicate handler declared in the same block
     ER_SP_DUP_HANDLER = 1413,
-    /// OUT or INOUT argument %d for routine %s is not a variable or NEW pseudo-variable in BEFORE trigger
+    /// OUT or INOUT argument %d for routine %s is not a variable or NEW pseudo-variable in BEFORE
+    /// trigger
     ER_SP_NOT_VAR_ARG = 1414,
     /// Not allowed to return a result set from a %s
     ER_SP_NO_RETSET = 1415,
     /// Cannot get geometry object from data you send to the GEOMETRY field
     ER_CANT_CREATE_GEOMETRY_OBJECT = 1416,
-    /// A routine failed and has neither NO SQL nor READS SQL DATA in its declaration and binary logging is enabled; if non-transactional tables were updated, the binary log will miss their changes
+    /// A routine failed and has neither NO SQL nor READS SQL DATA in its declaration and binary
+    /// logging is enabled; if non-transactional tables were updated, the binary log will miss
+    /// their changes
     ER_FAILED_ROUTINE_BREAK_BINLOG = 1417,
-    /// This function has none of DETERMINISTIC, NO SQL, or READS SQL DATA in its declaration and binary logging is enabled (you *might* want to use the less safe log_bin_trust_function_creators variable)
+    /// This function has none of DETERMINISTIC, NO SQL, or READS SQL DATA in its declaration and
+    /// binary logging is enabled (you *might* want to use the less safe
+    /// log_bin_trust_function_creators variable)
     ER_BINLOG_UNSAFE_ROUTINE = 1418,
-    /// You do not have the SUPER privilege and binary logging is enabled (you *might* want to use the less safe log_bin_trust_function_creators variable)
+    /// You do not have the SUPER privilege and binary logging is enabled (you *might* want to use
+    /// the less safe log_bin_trust_function_creators variable)
     ER_BINLOG_CREATE_ROUTINE_NEED_SUPER = 1419,
-    /// You can't execute a prepared statement which has an open cursor associated with it. Reset the statement to re-execute it.
+    /// You can't execute a prepared statement which has an open cursor associated with it. Reset
+    /// the statement to re-execute it.
     ER_EXEC_STMT_WITH_OPEN_CURSOR = 1420,
     /// The statement (%lu) has no open cursor.
     ER_STMT_HAS_NO_OPEN_CURSOR = 1421,
@@ -992,7 +1030,8 @@ pub enum ErrorKind {
     ER_QUERY_ON_FOREIGN_DATA_SOURCE = 1430,
     /// The foreign data source you are trying to reference does not exist. Data source error: %s
     ER_FOREIGN_DATA_SOURCE_DOESNT_EXIST = 1431,
-    /// Can't create federated table. The data source connection string '%s' is not in the correct format
+    /// Can't create federated table. The data source connection string '%s' is not in the correct
+    /// format
     ER_FOREIGN_DATA_STRING_INVALID_CANT_CREATE = 1432,
     /// The data source connection string '%s' is not in the correct format
     ER_FOREIGN_DATA_STRING_INVALID = 1433,
@@ -1000,7 +1039,8 @@ pub enum ErrorKind {
     ER_CANT_CREATE_FEDERATED_TABLE = 1434,
     /// Trigger in wrong schema
     ER_TRG_IN_WRONG_SCHEMA = 1435,
-    /// Thread stack overrun: %ld bytes used of a %ld byte stack, and %ld bytes needed. Use 'mysqld --thread_stack=#' to specify a bigger stack.
+    /// Thread stack overrun: %ld bytes used of a %ld byte stack, and %ld bytes needed. Use 'mysqld
+    /// --thread_stack=#' to specify a bigger stack.
     ER_STACK_OVERRUN_NEED_MORE = 1436,
     /// Routine body for '%s' is too long
     ER_TOO_LONG_BODY = 1437,
@@ -1012,17 +1052,20 @@ pub enum ErrorKind {
     ER_XAER_DUPID = 1440,
     /// Datetime function: %s field overflow
     ER_DATETIME_FUNCTION_OVERFLOW = 1441,
-    /// Can't update table '%s' in stored function/trigger because it is already used by statement which invoked this stored function/trigger.
+    /// Can't update table '%s' in stored function/trigger because it is already used by statement
+    /// which invoked this stored function/trigger.
     ER_CANT_UPDATE_USED_TABLE_IN_SF_OR_TRG = 1442,
     /// The definition of table '%s' prevents operation %s on table '%s'.
     ER_VIEW_PREVENT_UPDATE = 1443,
-    /// The prepared statement contains a stored routine call that refers to that same statement. It's not allowed to execute a prepared statement in such a recursive manner
+    /// The prepared statement contains a stored routine call that refers to that same statement.
+    /// It's not allowed to execute a prepared statement in such a recursive manner
     ER_PS_NO_RECURSION = 1444,
     /// Not allowed to set autocommit from a stored function or trigger
     ER_SP_CANT_SET_AUTOCOMMIT = 1445,
     /// Definer is not fully qualified
     ER_MALFORMED_DEFINER = 1446,
-    /// View '%s'.'%s' has no definer information (old table format). Current user is used as definer. Please recreate the view!
+    /// View '%s'.'%s' has no definer information (old table format). Current user is used as
+    /// definer. Please recreate the view!
     ER_VIEW_FRM_NO_USER = 1447,
     /// You need the SUPER privilege for creation view with '%s'@'%s' definer
     ER_VIEW_OTHER_USER = 1448,
@@ -1036,13 +1079,17 @@ pub enum ErrorKind {
     ER_NO_REFERENCED_ROW_2 = 1452,
     /// Variable '%s' must be quoted with `...`, or renamed
     ER_SP_BAD_VAR_SHADOW = 1453,
-    /// No definer attribute for trigger '%s'.'%s'. The trigger will be activated under the authorization of the invoker, which may have insufficient privileges. Please recreate the trigger.
+    /// No definer attribute for trigger '%s'.'%s'. The trigger will be activated under the
+    /// authorization of the invoker, which may have insufficient privileges. Please recreate the
+    /// trigger.
     ER_TRG_NO_DEFINER = 1454,
     /// '%s' has an old format, you should re-create the '%s' object(s)
     ER_OLD_FILE_FORMAT = 1455,
-    /// Recursive limit %d (as set by the max_sp_recursion_depth variable) was exceeded for routine %s
+    /// Recursive limit %d (as set by the max_sp_recursion_depth variable) was exceeded for routine
+    /// %s
     ER_SP_RECURSION_LIMIT = 1456,
-    /// Failed to load routine %s. The table mysql.proc is missing, corrupt, or contains bad data (internal code %d)
+    /// Failed to load routine %s. The table mysql.proc is missing, corrupt, or contains bad data
+    /// (internal code %d)
     ER_SP_PROC_TABLE_CORRUPT = 1457,
     /// Incorrect routine name '%s'
     ER_SP_WRONG_NAME = 1458,
@@ -1078,7 +1125,8 @@ pub enum ErrorKind {
     ER_TOO_HIGH_LEVEL_OF_NESTING_FOR_SELECT = 1473,
     /// Name '%s' has become ''
     ER_NAME_BECOMES_EMPTY = 1474,
-    /// First character of the FIELDS TERMINATED string is ambiguous; please use non-optional and non-empty FIELDS ENCLOSED BY
+    /// First character of the FIELDS TERMINATED string is ambiguous; please use non-optional and
+    /// non-empty FIELDS ENCLOSED BY
     ER_AMBIGUOUS_FIELD_TERM = 1475,
     /// The foreign server, %s, you are trying to create already exists.
     ER_FOREIGN_SERVER_EXISTS = 1476,
@@ -1100,7 +1148,8 @@ pub enum ErrorKind {
     ER_PARTITION_WRONG_NO_PART_ERROR = 1484,
     /// Wrong number of subpartitions defined, mismatch with previous setting
     ER_PARTITION_WRONG_NO_SUBPART_ERROR = 1485,
-    /// Constant, random or timezone-dependent expressions in (sub)partitioning function are not allowed
+    /// Constant, random or timezone-dependent expressions in (sub)partitioning function are not
+    /// allowed
     ER_WRONG_EXPR_IN_PARTITION_FUNC_ERROR = 1486,
     /// Expression in RANGE/LIST VALUES must be constant
     ER_NO_CONST_EXPR_IN_RANGE_OR_LIST_ERROR = 1487,
@@ -1108,7 +1157,8 @@ pub enum ErrorKind {
     ER_FIELD_NOT_FOUND_PART_ERROR = 1488,
     /// List of fields is only allowed in KEY partitions
     ER_LIST_OF_FIELDS_ONLY_IN_HASH_ERROR = 1489,
-    /// The partition info in the frm file is not consistent with what can be written into the frm file
+    /// The partition info in the frm file is not consistent with what can be written into the frm
+    /// file
     ER_INCONSISTENT_PARTITION_INFO_ERROR = 1490,
     /// The %s function returns the wrong type
     ER_PARTITION_FUNC_NOT_ALLOWED_ERROR = 1491,
@@ -1128,7 +1178,8 @@ pub enum ErrorKind {
     ER_PARTITION_NOT_DEFINED_ERROR = 1498,
     /// Too many partitions (including subpartitions) were defined
     ER_TOO_MANY_PARTITIONS_ERROR = 1499,
-    /// It is only possible to mix RANGE/LIST partitioning with HASH/KEY partitioning for subpartitioning
+    /// It is only possible to mix RANGE/LIST partitioning with HASH/KEY partitioning for
+    /// subpartitioning
     ER_SUBPARTITION_ERROR = 1500,
     /// Failed to create specific handler file
     ER_CANT_CREATE_HANDLER_FILE = 1501,
@@ -1150,7 +1201,8 @@ pub enum ErrorKind {
     ER_COALESCE_ONLY_ON_HASH_PARTITION = 1509,
     /// REORGANIZE PARTITION can only be used to reorganize partitions not to change their numbers
     ER_REORG_HASH_ONLY_ON_SAME_N = 1510,
-    /// REORGANIZE PARTITION without parameters can only be used on auto-partitioned tables using HASH PARTITIONs
+    /// REORGANIZE PARTITION without parameters can only be used on auto-partitioned tables using
+    /// HASH PARTITIONs
     ER_REORG_NO_PARAM_ERROR = 1511,
     /// %s PARTITION can only be used on RANGE/LIST partitions
     ER_ONLY_ON_RANGE_LIST_PARTITION = 1512,
@@ -1168,7 +1220,8 @@ pub enum ErrorKind {
     ER_NO_BINLOG_ERROR = 1518,
     /// When reorganizing a set of partitions they must be in consecutive order
     ER_CONSECUTIVE_REORG_PARTITIONS = 1519,
-    /// Reorganize of range partitions cannot change total ranges except for last partition where it can extend the range
+    /// Reorganize of range partitions cannot change total ranges except for last partition where
+    /// it can extend the range
     ER_REORG_OUTSIDE_RANGE = 1520,
     /// Partition function not supported in this version for this handler
     ER_PARTITION_FUNCTION_FAILURE = 1521,
@@ -1200,7 +1253,8 @@ pub enum ErrorKind {
     ER_BINLOG_ROW_LOGGING_FAILED = 1534,
     /// Table definition on master and slave does not match: %s
     ER_BINLOG_ROW_WRONG_TABLE_DEF = 1535,
-    /// Slave running with --log-slave-updates must use row-based binary logging to be able to replicate row-based binary log events
+    /// Slave running with --log-slave-updates must use row-based binary logging to be able to
+    /// replicate row-based binary log events
     ER_BINLOG_ROW_RBR_TO_SBR = 1536,
     /// Event '%s' already exists
     ER_EVENT_ALREADY_EXISTS = 1537,
@@ -1242,11 +1296,14 @@ pub enum ErrorKind {
     ER_CANT_WRITE_LOCK_LOG_TABLE = 1555,
     /// You can't use locks with log tables.
     ER_CANT_LOCK_LOG_TABLE = 1556,
-    /// Upholding foreign key constraints for table '%s', entry '%s', key %d would lead to a duplicate entry
+    /// Upholding foreign key constraints for table '%s', entry '%s', key %d would lead to a
+    /// duplicate entry
     ER_FOREIGN_DUPLICATE_KEY = 1557,
-    /// Column count of mysql.%s is wrong. Expected %d, found %d. Created with MariaDB %d, now running %d. Please use mysql_upgrade to fix this error.
+    /// Column count of mysql.%s is wrong. Expected %d, found %d. Created with MariaDB %d, now
+    /// running %d. Please use mysql_upgrade to fix this error.
     ER_COL_COUNT_DOESNT_MATCH_PLEASE_UPDATE = 1558,
-    /// Cannot switch out of the row-based binary log format when the session has open temporary tables
+    /// Cannot switch out of the row-based binary log format when the session has open temporary
+    /// tables
     ER_TEMP_TABLE_PREVENTS_SWITCH_OUT_OF_RBR = 1559,
     /// Cannot change the binary logging format inside a stored function or trigger
     ER_STORED_FUNCTION_PREVENTS_SWITCH_BINLOG_FORMAT = 1560,
@@ -1266,7 +1323,8 @@ pub enum ErrorKind {
     ER_WRONG_PARTITION_NAME = 1567,
     /// Transaction isolation level can't be changed while a transaction is in progress
     ER_CANT_CHANGE_TX_ISOLATION = 1568,
-    /// ALTER TABLE causes auto_increment resequencing, resulting in duplicate entry '%s' for key '%s'
+    /// ALTER TABLE causes auto_increment resequencing, resulting in duplicate entry '%s' for key
+    /// '%s'
     ER_DUP_ENTRY_AUTOINCREMENT_CASE = 1569,
     /// Internal scheduler error %d
     ER_EVENT_MODIFY_QUEUE_ERROR = 1570,
@@ -1282,7 +1340,8 @@ pub enum ErrorKind {
     ER_BASE64_DECODE_ERROR = 1575,
     /// Recursion of EVENT DDL statements is forbidden when body is present
     ER_EVENT_RECURSION_FORBIDDEN = 1576,
-    /// Cannot proceed because system tables used by Event Scheduler were found damaged at server start
+    /// Cannot proceed because system tables used by Event Scheduler were found damaged at server
+    /// start
     ER_EVENTS_DB_ERROR = 1577,
     /// Only integers allowed as number here
     ER_ONLY_INTEGERS_ALLOWED = 1578,
@@ -1290,7 +1349,8 @@ pub enum ErrorKind {
     ER_UNSUPORTED_LOG_ENGINE = 1579,
     /// You cannot '%s' a log table if logging is enabled
     ER_BAD_LOG_STATEMENT = 1580,
-    /// Cannot rename '%s'. When logging enabled, rename to/from log table must rename two tables: the log table to an archive table and another table back to '%s'
+    /// Cannot rename '%s'. When logging enabled, rename to/from log table must rename two tables:
+    /// the log table to an archive table and another table back to '%s'
     ER_CANT_RENAME_LOG_TABLE = 1581,
     /// Incorrect parameter count in the call to native function '%s'
     ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT = 1582,
@@ -1304,15 +1364,18 @@ pub enum ErrorKind {
     ER_DUP_ENTRY_WITH_KEY_NAME = 1586,
     /// Too many files opened, please execute the command again
     ER_BINLOG_PURGE_EMFILE = 1587,
-    /// Event execution time is in the past and ON COMPLETION NOT PRESERVE is set. The event was dropped immediately after creation.
+    /// Event execution time is in the past and ON COMPLETION NOT PRESERVE is set. The event was
+    /// dropped immediately after creation.
     ER_EVENT_CANNOT_CREATE_IN_THE_PAST = 1588,
-    /// Event execution time is in the past and ON COMPLETION NOT PRESERVE is set. The event was dropped immediately after creation.
+    /// Event execution time is in the past and ON COMPLETION NOT PRESERVE is set. The event was
+    /// dropped immediately after creation.
     ER_EVENT_CANNOT_ALTER_IN_THE_PAST = 1589,
     /// The incident %s occured on the master. Message: %s
     ER_SLAVE_INCIDENT = 1590,
     /// Table has no partition for some existing values
     ER_NO_PARTITION_FOR_GIVEN_VALUE_SILENT = 1591,
-    /// Unsafe statement written to the binary log using statement format since BINLOG_FORMAT = STATEMENT. %s
+    /// Unsafe statement written to the binary log using statement format since BINLOG_FORMAT =
+    /// STATEMENT. %s
     ER_BINLOG_UNSAFE_STATEMENT = 1592,
     /// Fatal error: %s
     ER_SLAVE_FATAL_ERROR = 1593,
@@ -1346,7 +1409,8 @@ pub enum ErrorKind {
     ER_CANT_CREATE_SROUTINE = 1607,
     /// You should never see it
     ER_UNUSED_11 = 1608,
-    /// The BINLOG statement of type `%s` was not preceded by a format description BINLOG statement.
+    /// The BINLOG statement of type `%s` was not preceded by a format description BINLOG
+    /// statement.
     ER_NO_FORMAT_DESCRIPTION_EVENT_BEFORE_BINLOG_STATEMENT = 1609,
     /// Corrupted replication event was detected
     ER_SLAVE_CORRUPT_EVENT = 1610,
@@ -1372,11 +1436,13 @@ pub enum ErrorKind {
     WARN_PLUGIN_BUSY = 1620,
     /// %s variable '%s' is read-only. Use SET %s to assign the value
     ER_VARIABLE_IS_READONLY = 1621,
-    /// Storage engine %s does not support rollback for this statement. Transaction rolled back and must be restarted
+    /// Storage engine %s does not support rollback for this statement. Transaction rolled back and
+    /// must be restarted
     ER_WARN_ENGINE_TRANSACTION_ROLLBACK = 1622,
     /// Unexpected master's heartbeat data: %s
     ER_SLAVE_HEARTBEAT_FAILURE = 1623,
-    /// The requested value for the heartbeat period is either negative or exceeds the maximum allowed (%s seconds).
+    /// The requested value for the heartbeat period is either negative or exceeds the maximum
+    /// allowed (%s seconds).
     ER_SLAVE_HEARTBEAT_VALUE_OUT_OF_RANGE = 1624,
     /// Bad schema for mysql.ndb_replication table. Message: %s
     ER_NDB_REPLICATION_SCHEMA_ERROR = 1625,
@@ -1388,7 +1454,8 @@ pub enum ErrorKind {
     ER_TOO_LONG_TABLE_COMMENT = 1628,
     /// Comment for field '%s' is too long (max = %lu)
     ER_TOO_LONG_FIELD_COMMENT = 1629,
-    /// FUNCTION %s does not exist. Check the 'Function Name Parsing and Resolution' section in the Reference Manual
+    /// FUNCTION %s does not exist. Check the 'Function Name Parsing and Resolution' section in the
+    /// Reference Manual
     ER_FUNC_INEXISTENT_NAME_COLLISION = 1630,
     /// Database
     ER_DATABASE_NAME = 1631,
@@ -1450,35 +1517,49 @@ pub enum ErrorKind {
     ER_FIELD_TYPE_NOT_ALLOWED_AS_PARTITION_FIELD = 1659,
     /// The total length of the partitioning fields is too large
     ER_PARTITION_FIELDS_TOO_LONG = 1660,
-    /// Cannot execute statement: impossible to write to binary log since both row-incapable engines and statement-incapable engines are involved.
+    /// Cannot execute statement: impossible to write to binary log since both row-incapable
+    /// engines and statement-incapable engines are involved.
     ER_BINLOG_ROW_ENGINE_AND_STMT_ENGINE = 1661,
-    /// Cannot execute statement: impossible to write to binary log since BINLOG_FORMAT = ROW and at least one table uses a storage engine limited to statement-based logging.
+    /// Cannot execute statement: impossible to write to binary log since BINLOG_FORMAT = ROW and
+    /// at least one table uses a storage engine limited to statement-based logging.
     ER_BINLOG_ROW_MODE_AND_STMT_ENGINE = 1662,
-    /// Cannot execute statement: impossible to write to binary log since statement is unsafe, storage engine is limited to statement-based logging, and BINLOG_FORMAT = MIXED. %s
+    /// Cannot execute statement: impossible to write to binary log since statement is unsafe,
+    /// storage engine is limited to statement-based logging, and BINLOG_FORMAT = MIXED. %s
     ER_BINLOG_UNSAFE_AND_STMT_ENGINE = 1663,
-    /// Cannot execute statement: impossible to write to binary log since statement is in row format and at least one table uses a storage engine limited to statement-based logging.
+    /// Cannot execute statement: impossible to write to binary log since statement is in row
+    /// format and at least one table uses a storage engine limited to statement-based logging.
     ER_BINLOG_ROW_INJECTION_AND_STMT_ENGINE = 1664,
-    /// Cannot execute statement: impossible to write to binary log since BINLOG_FORMAT = STATEMENT and at least one table uses a storage engine limited to row-based logging.%s
+    /// Cannot execute statement: impossible to write to binary log since BINLOG_FORMAT = STATEMENT
+    /// and at least one table uses a storage engine limited to row-based logging.%s
     ER_BINLOG_STMT_MODE_AND_ROW_ENGINE = 1665,
-    /// Cannot execute statement: impossible to write to binary log since statement is in row format and BINLOG_FORMAT = STATEMENT.
+    /// Cannot execute statement: impossible to write to binary log since statement is in row
+    /// format and BINLOG_FORMAT = STATEMENT.
     ER_BINLOG_ROW_INJECTION_AND_STMT_MODE = 1666,
-    /// Cannot execute statement: impossible to write to binary log since more than one engine is involved and at least one engine is self-logging.
+    /// Cannot execute statement: impossible to write to binary log since more than one engine is
+    /// involved and at least one engine is self-logging.
     ER_BINLOG_MULTIPLE_ENGINES_AND_SELF_LOGGING_ENGINE = 1667,
-    /// The statement is unsafe because it uses a LIMIT clause. This is unsafe because the set of rows included cannot be predicted.
+    /// The statement is unsafe because it uses a LIMIT clause. This is unsafe because the set of
+    /// rows included cannot be predicted.
     ER_BINLOG_UNSAFE_LIMIT = 1668,
-    /// The statement is unsafe because it uses INSERT DELAYED. This is unsafe because the times when rows are inserted cannot be predicted.
+    /// The statement is unsafe because it uses INSERT DELAYED. This is unsafe because the times
+    /// when rows are inserted cannot be predicted.
     ER_BINLOG_UNSAFE_INSERT_DELAYED = 1669,
-    /// The statement is unsafe because it uses the general log, slow query log, or performance_schema table(s). This is unsafe because system tables may differ on slaves.
+    /// The statement is unsafe because it uses the general log, slow query log, or
+    /// performance_schema table(s). This is unsafe because system tables may differ on slaves.
     ER_BINLOG_UNSAFE_SYSTEM_TABLE = 1670,
-    /// Statement is unsafe because it invokes a trigger or a stored function that inserts into an AUTO_INCREMENT column. Inserted values cannot be logged correctly.
+    /// Statement is unsafe because it invokes a trigger or a stored function that inserts into an
+    /// AUTO_INCREMENT column. Inserted values cannot be logged correctly.
     ER_BINLOG_UNSAFE_AUTOINC_COLUMNS = 1671,
     /// Statement is unsafe because it uses a UDF which may not return the same value on the slave.
     ER_BINLOG_UNSAFE_UDF = 1672,
-    /// Statement is unsafe because it uses a system variable that may have a different value on the slave.
+    /// Statement is unsafe because it uses a system variable that may have a different value on
+    /// the slave.
     ER_BINLOG_UNSAFE_SYSTEM_VARIABLE = 1673,
-    /// Statement is unsafe because it uses a system function that may return a different value on the slave.
+    /// Statement is unsafe because it uses a system function that may return a different value on
+    /// the slave.
     ER_BINLOG_UNSAFE_SYSTEM_FUNCTION = 1674,
-    /// Statement is unsafe because it accesses a non-transactional table after accessing a transactional table within the same transaction.
+    /// Statement is unsafe because it accesses a non-transactional table after accessing a
+    /// transactional table within the same transaction.
     ER_BINLOG_UNSAFE_NONTRANS_AFTER_TRANS = 1675,
     /// %s Statement: %s
     ER_MESSAGE_AND_STATEMENT = 1676,
@@ -1496,7 +1577,8 @@ pub enum ErrorKind {
     ER_WRONG_NATIVE_TABLE_STRUCTURE = 1682,
     /// Invalid performance_schema usage.
     ER_WRONG_PERFSCHEMA_USAGE = 1683,
-    /// Table '%s'.'%s' was skipped since its definition is being modified by concurrent DDL statement
+    /// Table '%s'.'%s' was skipped since its definition is being modified by concurrent DDL
+    /// statement
     ER_WARN_I_S_SKIPPED_TABLE = 1684,
     /// Cannot modify @@session.binlog_direct_non_transactional_updates inside a transaction
     ER_INSIDE_TRANSACTION_PREVENTS_SWITCH_BINLOG_DIRECT = 1685,
@@ -1514,7 +1596,8 @@ pub enum ErrorKind {
     ER_WRONG_SPVAR_TYPE_IN_LIMIT = 1691,
     /// Mixing self-logging and non-self-logging engines in a statement is unsafe.
     ER_BINLOG_UNSAFE_MULTIPLE_ENGINES_AND_SELF_LOGGING_ENGINE = 1692,
-    /// Statement accesses nontransactional table as well as transactional or temporary table, and writes to any of them.
+    /// Statement accesses nontransactional table as well as transactional or temporary table, and
+    /// writes to any of them.
     ER_BINLOG_UNSAFE_MIXED_STATEMENT = 1693,
     /// Cannot modify @@session.sql_log_bin inside a transaction
     ER_INSIDE_TRANSACTION_PREVENTS_SWITCH_SQL_LOG_BIN = 1694,
@@ -1534,13 +1617,17 @@ pub enum ErrorKind {
     ER_TRUNCATE_ILLEGAL_FK = 1701,
     /// Plugin '%s' is force_plus_permanent and can not be unloaded
     ER_PLUGIN_IS_PERMANENT = 1702,
-    /// The requested value for the heartbeat period is less than 1 millisecond. The value is reset to 0, meaning that heartbeating will effectively be disabled.
+    /// The requested value for the heartbeat period is less than 1 millisecond. The value is reset
+    /// to 0, meaning that heartbeating will effectively be disabled.
     ER_SLAVE_HEARTBEAT_VALUE_OUT_OF_RANGE_MIN = 1703,
-    /// The requested value for the heartbeat period exceeds the value of slave_net_timeout seconds. A sensible value for the period should be less than the timeout.
+    /// The requested value for the heartbeat period exceeds the value of slave_net_timeout
+    /// seconds. A sensible value for the period should be less than the timeout.
     ER_SLAVE_HEARTBEAT_VALUE_OUT_OF_RANGE_MAX = 1704,
-    /// Multi-row statements required more than 'max_binlog_stmt_cache_size' bytes of storage; increase this mysqld variable and try again
+    /// Multi-row statements required more than 'max_binlog_stmt_cache_size' bytes of storage;
+    /// increase this mysqld variable and try again
     ER_STMT_CACHE_FULL = 1705,
-    /// Primary key/partition key update is not allowed since the table is updated both as '%s' and '%s'.
+    /// Primary key/partition key update is not allowed since the table is updated both as '%s' and
+    /// '%s'.
     ER_MULTI_UPDATE_KEY_CONFLICT = 1706,
     /// Table rebuild required. Please do "ALTER TABLE `%s` FORCE" or dump/reload to fix it!
     ER_TABLE_NEEDS_REBUILD = 1707,
@@ -1556,25 +1643,44 @@ pub enum ErrorKind {
     ER_INDEX_CORRUPT = 1712,
     /// Undo log record is too big.
     ER_UNDO_RECORD_TOO_BIG = 1713,
-    /// INSERT IGNORE... SELECT is unsafe because the order in which rows are retrieved by the SELECT determines which (if any) rows are ignored. This order cannot be predicted and may differ on master and the slave.
+    /// INSERT IGNORE... SELECT is unsafe because the order in which rows are retrieved by the
+    /// SELECT determines which (if any) rows are ignored. This order cannot be predicted and may
+    /// differ on master and the slave.
     ER_BINLOG_UNSAFE_INSERT_IGNORE_SELECT = 1714,
-    /// INSERT... SELECT... ON DUPLICATE KEY UPDATE is unsafe because the order in which rows are retrieved by the SELECT determines which (if any) rows are updated. This order cannot be predicted and may differ on master and the slave.
+    /// INSERT... SELECT... ON DUPLICATE KEY UPDATE is unsafe because the order in which rows are
+    /// retrieved by the SELECT determines which (if any) rows are updated. This order cannot be
+    /// predicted and may differ on master and the slave.
     ER_BINLOG_UNSAFE_INSERT_SELECT_UPDATE = 1715,
-    /// REPLACE... SELECT is unsafe because the order in which rows are retrieved by the SELECT determines which (if any) rows are replaced. This order cannot be predicted and may differ on master and the slave.
+    /// REPLACE... SELECT is unsafe because the order in which rows are retrieved by the SELECT
+    /// determines which (if any) rows are replaced. This order cannot be predicted and may differ
+    /// on master and the slave.
     ER_BINLOG_UNSAFE_REPLACE_SELECT = 1716,
-    /// CREATE... IGNORE SELECT is unsafe because the order in which rows are retrieved by the SELECT determines which (if any) rows are ignored. This order cannot be predicted and may differ on master and the slave.
+    /// CREATE... IGNORE SELECT is unsafe because the order in which rows are retrieved by the
+    /// SELECT determines which (if any) rows are ignored. This order cannot be predicted and may
+    /// differ on master and the slave.
     ER_BINLOG_UNSAFE_CREATE_IGNORE_SELECT = 1717,
-    /// CREATE... REPLACE SELECT is unsafe because the order in which rows are retrieved by the SELECT determines which (if any) rows are replaced. This order cannot be predicted and may differ on master and the slave.
+    /// CREATE... REPLACE SELECT is unsafe because the order in which rows are retrieved by the
+    /// SELECT determines which (if any) rows are replaced. This order cannot be predicted and may
+    /// differ on master and the slave.
     ER_BINLOG_UNSAFE_CREATE_REPLACE_SELECT = 1718,
-    /// UPDATE IGNORE is unsafe because the order in which rows are updated determines which (if any) rows are ignored. This order cannot be predicted and may differ on master and the slave.
+    /// UPDATE IGNORE is unsafe because the order in which rows are updated determines which (if
+    /// any) rows are ignored. This order cannot be predicted and may differ on master and the
+    /// slave.
     ER_BINLOG_UNSAFE_UPDATE_IGNORE = 1719,
-    /// Plugin '%s' is marked as not dynamically uninstallable. You have to stop the server to uninstall it.
+    /// Plugin '%s' is marked as not dynamically uninstallable. You have to stop the server to
+    /// uninstall it.
     ER_PLUGIN_NO_UNINSTALL = 1720,
-    /// Plugin '%s' is marked as not dynamically installable. You have to stop the server to install it.
+    /// Plugin '%s' is marked as not dynamically installable. You have to stop the server to
+    /// install it.
     ER_PLUGIN_NO_INSTALL = 1721,
-    /// Statements writing to a table with an auto-increment column after selecting from another table are unsafe because the order in which rows are retrieved determines what (if any) rows will be written. This order cannot be predicted and may differ on master and the slave.
+    /// Statements writing to a table with an auto-increment column after selecting from another
+    /// table are unsafe because the order in which rows are retrieved determines what (if any)
+    /// rows will be written. This order cannot be predicted and may differ on master and the
+    /// slave.
     ER_BINLOG_UNSAFE_WRITE_AUTOINC_SELECT = 1722,
-    /// CREATE TABLE... SELECT... on a table with an auto-increment column is unsafe because the order in which rows are retrieved by the SELECT determines which (if any) rows are inserted. This order cannot be predicted and may differ on master and the slave.
+    /// CREATE TABLE... SELECT... on a table with an auto-increment column is unsafe because the
+    /// order in which rows are retrieved by the SELECT determines which (if any) rows are
+    /// inserted. This order cannot be predicted and may differ on master and the slave.
     ER_BINLOG_UNSAFE_CREATE_SELECT_AUTOINC = 1723,
     /// INSERT... ON DUPLICATE KEY UPDATE on a table with more than one UNIQUE KEY is unsafe
     ER_BINLOG_UNSAFE_INSERT_TWO_KEYS = 1724,
@@ -1582,13 +1688,15 @@ pub enum ErrorKind {
     ER_TABLE_IN_FK_CHECK = 1725,
     /// Storage engine '%s' does not support system tables. [%s.%s]
     ER_UNSUPPORTED_ENGINE = 1726,
-    /// INSERT into autoincrement field which is not the first part in the composed primary key is unsafe.
+    /// INSERT into autoincrement field which is not the first part in the composed primary key is
+    /// unsafe.
     ER_BINLOG_UNSAFE_AUTOINC_NOT_FIRST = 1727,
     /// Cannot load from %s.%s. The table is probably corrupted
     ER_CANNOT_LOAD_FROM_TABLE_V2 = 1728,
     /// The requested value %s for the master delay exceeds the maximum %u
     ER_MASTER_DELAY_VALUE_OUT_OF_RANGE = 1729,
-    /// Only Format_description_log_event and row events are allowed in BINLOG statements (but %s was provided
+    /// Only Format_description_log_event and row events are allowed in BINLOG statements (but %s
+    /// was provided
     ER_ONLY_FD_AND_RBR_EVENTS_ALLOWED_IN_BINLOG_STATEMENT = 1730,
     /// Non matching attribute '%s' between partition and table
     ER_PARTITION_EXCHANGE_DIFFERENT_OPTION = 1731,
@@ -1604,7 +1712,8 @@ pub enum ErrorKind {
     ER_TABLES_DIFFERENT_METADATA = 1736,
     /// Found a row that does not match the partition
     ER_ROW_DOES_NOT_MATCH_PARTITION = 1737,
-    /// Option binlog_cache_size (%lu) is greater than max_binlog_cache_size (%lu); setting binlog_cache_size equal to max_binlog_cache_size.
+    /// Option binlog_cache_size (%lu) is greater than max_binlog_cache_size (%lu); setting
+    /// binlog_cache_size equal to max_binlog_cache_size.
     ER_BINLOG_CACHE_SIZE_GREATER_THAN_MAX = 1738,
     /// Cannot use %s access on index '%s' due to type or collation conversion on field '%s'
     ER_WARN_INDEX_NOT_APPLICABLE = 1739,
@@ -1618,7 +1727,8 @@ pub enum ErrorKind {
     ER_NETWORK_READ_EVENT_CHECKSUM_FAILURE = 1743,
     /// Replication event checksum verification failed while reading from a log file.
     ER_BINLOG_READ_EVENT_CHECKSUM_FAILURE = 1744,
-    /// Option binlog_stmt_cache_size (%lu) is greater than max_binlog_stmt_cache_size (%lu); setting binlog_stmt_cache_size equal to max_binlog_stmt_cache_size.
+    /// Option binlog_stmt_cache_size (%lu) is greater than max_binlog_stmt_cache_size (%lu);
+    /// setting binlog_stmt_cache_size equal to max_binlog_stmt_cache_size.
     ER_BINLOG_STMT_CACHE_SIZE_GREATER_THAN_MAX = 1745,
     /// Can't update table '%s' while '%s' is being created.
     ER_CANT_UPDATE_TABLE_IN_CREATE_TABLE_SELECT = 1746,
@@ -1636,9 +1746,12 @@ pub enum ErrorKind {
     ER_WARNING_NOT_COMPLETE_ROLLBACK_WITH_DROPPED_TEMP_TABLE = 1752,
     /// %s is not supported in multi-threaded slave mode. %s
     ER_MTS_FEATURE_IS_NOT_SUPPORTED = 1753,
-    /// The number of modified databases exceeds the maximum %d; the database names will not be included in the replication event metadata.
+    /// The number of modified databases exceeds the maximum %d; the database names will not be
+    /// included in the replication event metadata.
     ER_MTS_UPDATED_DBS_GREATER_MAX = 1754,
-    /// Cannot execute the current event group in the parallel mode. Encountered event %s, relay-log name %s, position %s which prevents execution of this event group in parallel mode. Reason: %s.
+    /// Cannot execute the current event group in the parallel mode. Encountered event %s,
+    /// relay-log name %s, position %s which prevents execution of this event group in parallel
+    /// mode. Reason: %s.
     ER_MTS_CANT_PARALLEL = 1755,
     /// %s
     ER_MTS_INCONSISTENT_DATA = 1756,
@@ -1648,13 +1761,19 @@ pub enum ErrorKind {
     ER_DA_INVALID_CONDITION_NUMBER = 1758,
     /// Sending passwords in plain text without SSL/TLS is extremely insecure.
     ER_INSECURE_PLAIN_TEXT = 1759,
-    /// Storing MySQL user name or password information in the master info repository is not secure and is therefore not recommended. Please consider using the USER and PASSWORD connection options for START SLAVE; see the 'START SLAVE Syntax' in the MySQL Manual for more information.
+    /// Storing MySQL user name or password information in the master info repository is not secure
+    /// and is therefore not recommended. Please consider using the USER and PASSWORD connection
+    /// options for START SLAVE; see the 'START SLAVE Syntax' in the MySQL Manual for more
+    /// information.
     ER_INSECURE_CHANGE_MASTER = 1760,
-    /// Foreign key constraint for table '%s', record '%s' would lead to a duplicate entry in table '%s', key '%s'
+    /// Foreign key constraint for table '%s', record '%s' would lead to a duplicate entry in table
+    /// '%s', key '%s'
     ER_FOREIGN_DUPLICATE_KEY_WITH_CHILD_INFO = 1761,
-    /// Foreign key constraint for table '%s', record '%s' would lead to a duplicate entry in a child table
+    /// Foreign key constraint for table '%s', record '%s' would lead to a duplicate entry in a
+    /// child table
     ER_FOREIGN_DUPLICATE_KEY_WITHOUT_CHILD_INFO = 1762,
-    /// Setting authentication options is not possible when only the Slave SQL Thread is being started.
+    /// Setting authentication options is not possible when only the Slave SQL Thread is being
+    /// started.
     ER_SQLTHREAD_WITH_SECURE_SLAVE = 1763,
     /// The table does not have FULLTEXT index to support this query
     ER_TABLE_HAS_NO_FT = 1764,
@@ -1662,13 +1781,15 @@ pub enum ErrorKind {
     ER_VARIABLE_NOT_SETTABLE_IN_SF_OR_TRIGGER = 1765,
     /// The system variable %s cannot be set when there is an ongoing transaction.
     ER_VARIABLE_NOT_SETTABLE_IN_TRANSACTION = 1766,
-    /// The system variable @@SESSION.GTID_NEXT has the value %s, which is not listed in @@SESSION.GTID_NEXT_LIST.
+    /// The system variable @@SESSION.GTID_NEXT has the value %s, which is not listed in
+    /// @@SESSION.GTID_NEXT_LIST.
     ER_GTID_NEXT_IS_NOT_IN_GTID_NEXT_LIST = 1767,
     /// The system variable @@SESSION.GTID_NEXT cannot change inside a transaction.
     ER_CANT_CHANGE_GTID_NEXT_IN_TRANSACTION_WHEN_GTID_NEXT_LIST_IS_NULL = 1768,
     /// The statement 'SET %s' cannot invoke a stored function.
     ER_SET_STATEMENT_CANNOT_INVOKE_FUNCTION = 1769,
-    /// The system variable @@SESSION.GTID_NEXT cannot be 'AUTOMATIC' when @@SESSION.GTID_NEXT_LIST is non-NULL.
+    /// The system variable @@SESSION.GTID_NEXT cannot be 'AUTOMATIC' when @@SESSION.GTID_NEXT_LIST
+    /// is non-NULL.
     ER_GTID_NEXT_CANT_BE_AUTOMATIC_IF_GTID_NEXT_LIST_IS_NON_NULL = 1770,
     /// Skipping transaction %s because it has already been executed and logged.
     ER_SKIPPING_LOGGED_TRANSACTION = 1771,
@@ -1678,17 +1799,22 @@ pub enum ErrorKind {
     ER_MALFORMED_GTID_SET_ENCODING = 1773,
     /// Malformed GTID specification '%s'.
     ER_MALFORMED_GTID_SPECIFICATION = 1774,
-    /// Impossible to generate Global Transaction Identifier: the integer component reached the maximal value. Restart the server with a new server_uuid.
+    /// Impossible to generate Global Transaction Identifier: the integer component reached the
+    /// maximal value. Restart the server with a new server_uuid.
     ER_GNO_EXHAUSTED = 1775,
-    /// Parameters MASTER_LOG_FILE, MASTER_LOG_POS, RELAY_LOG_FILE and RELAY_LOG_POS cannot be set when MASTER_AUTO_POSITION is active.
+    /// Parameters MASTER_LOG_FILE, MASTER_LOG_POS, RELAY_LOG_FILE and RELAY_LOG_POS cannot be set
+    /// when MASTER_AUTO_POSITION is active.
     ER_BAD_SLAVE_AUTO_POSITION = 1776,
-    /// CHANGE MASTER TO MASTER_AUTO_POSITION = 1 can only be executed when @@GLOBAL.GTID_MODE = ON.
+    /// CHANGE MASTER TO MASTER_AUTO_POSITION = 1 can only be executed when @@GLOBAL.GTID_MODE =
+    /// ON.
     ER_AUTO_POSITION_REQUIRES_GTID_MODE_ON = 1777,
-    /// Cannot execute statements with implicit commit inside a transaction when @@SESSION.GTID_NEXT != AUTOMATIC.
+    /// Cannot execute statements with implicit commit inside a transaction when
+    /// @@SESSION.GTID_NEXT != AUTOMATIC.
     ER_CANT_DO_IMPLICIT_COMMIT_IN_TRX_WHEN_GTID_NEXT_IS_SET = 1778,
     /// GTID_MODE = ON or GTID_MODE = UPGRADE_STEP_2 requires DISABLE_GTID_UNSAFE_STATEMENTS = 1.
     ER_GTID_MODE_2_OR_3_REQUIRES_DISABLE_GTID_UNSAFE_STATEMENTS_ON = 1779,
-    /// @@GLOBAL.GTID_MODE = ON or UPGRADE_STEP_1 or UPGRADE_STEP_2 requires --log-bin and --log-slave-updates.
+    /// @@GLOBAL.GTID_MODE = ON or UPGRADE_STEP_1 or UPGRADE_STEP_2 requires --log-bin and
+    /// --log-slave-updates.
     ER_GTID_MODE_REQUIRES_BINLOG = 1780,
     /// @@SESSION.GTID_NEXT cannot be set to UUID:NUMBER when @@GLOBAL.GTID_MODE = OFF.
     ER_CANT_SET_GTID_NEXT_TO_GTID_WHEN_GTID_MODE_IS_OFF = 1781,
@@ -1698,17 +1824,25 @@ pub enum ErrorKind {
     ER_CANT_SET_GTID_NEXT_LIST_TO_NON_NULL_WHEN_GTID_MODE_IS_OFF = 1783,
     /// Found a Gtid_log_event or Previous_gtids_log_event when @@GLOBAL.GTID_MODE = OFF.
     ER_FOUND_GTID_EVENT_WHEN_GTID_MODE_IS_OFF = 1784,
-    /// When @@GLOBAL.ENFORCE_GTID_CONSISTENCY = 1, updates to non-transactional tables can only be done in either autocommitted statements or single-statement transactions, and never in the same statement as updates to transactional tables.
+    /// When @@GLOBAL.ENFORCE_GTID_CONSISTENCY = 1, updates to non-transactional tables can only be
+    /// done in either autocommitted statements or single-statement transactions, and never in the
+    /// same statement as updates to transactional tables.
     ER_GTID_UNSAFE_NON_TRANSACTIONAL_TABLE = 1785,
     /// CREATE TABLE ... SELECT is forbidden when @@GLOBAL.ENFORCE_GTID_CONSISTENCY = 1.
     ER_GTID_UNSAFE_CREATE_SELECT = 1786,
-    /// When @@GLOBAL.ENFORCE_GTID_CONSISTENCY = 1, the statements CREATE TEMPORARY TABLE and DROP TEMPORARY TABLE can be executed in a non-transactional context only, and require that AUTOCOMMIT = 1.
+    /// When @@GLOBAL.ENFORCE_GTID_CONSISTENCY = 1, the statements CREATE TEMPORARY TABLE and DROP
+    /// TEMPORARY TABLE can be executed in a non-transactional context only, and require that
+    /// AUTOCOMMIT = 1.
     ER_GTID_UNSAFE_CREATE_DROP_TEMPORARY_TABLE_IN_TRANSACTION = 1787,
-    /// The value of @@GLOBAL.GTID_MODE can only change one step at a time: OFF <-> UPGRADE_STEP_1 <-> UPGRADE_STEP_2 <-> ON. Also note that this value must be stepped up or down simultaneously on all servers; see the Manual for instructions.
+    /// The value of @@GLOBAL.GTID_MODE can only change one step at a time: OFF <-> UPGRADE_STEP_1
+    /// <-> UPGRADE_STEP_2 <-> ON. Also note that this value must be stepped up or down
+    /// simultaneously on all servers; see the Manual for instructions.
     ER_GTID_MODE_CAN_ONLY_CHANGE_ONE_STEP_AT_A_TIME = 1788,
-    /// The slave is connecting using CHANGE MASTER TO MASTER_AUTO_POSITION = 1, but the master has purged binary logs containing GTIDs that the slave requires.
+    /// The slave is connecting using CHANGE MASTER TO MASTER_AUTO_POSITION = 1, but the master has
+    /// purged binary logs containing GTIDs that the slave requires.
     ER_MASTER_HAS_PURGED_REQUIRED_GTIDS = 1789,
-    /// @@SESSION.GTID_NEXT cannot be changed by a client that owns a GTID. The client owns %s. Ownership is released on COMMIT or ROLLBACK.
+    /// @@SESSION.GTID_NEXT cannot be changed by a client that owns a GTID. The client owns %s.
+    /// Ownership is released on COMMIT or ROLLBACK.
     ER_CANT_SET_GTID_NEXT_WHEN_OWNING_GTID = 1790,
     /// Unknown EXPLAIN format name: '%s'
     ER_UNKNOWN_EXPLAIN_FORMAT = 1791,
@@ -1716,7 +1850,9 @@ pub enum ErrorKind {
     ER_CANT_EXECUTE_IN_READ_ONLY_TRANSACTION = 1792,
     /// Comment for table partition '%s' is too long (max = %lu
     ER_TOO_LONG_TABLE_PARTITION_COMMENT = 1793,
-    /// Slave is not configured or failed to initialize properly. You must at least set --server-id to enable either a master or a slave. Additional error messages can be found in the MySQL error log.
+    /// Slave is not configured or failed to initialize properly. You must at least set --server-id
+    /// to enable either a master or a slave. Additional error messages can be found in the MySQL
+    /// error log.
     ER_SLAVE_CONFIGURATION = 1794,
     /// InnoDB presently supports one FULLTEXT index creation at a time
     ER_INNODB_FT_LIMIT = 1795,
@@ -1726,17 +1862,21 @@ pub enum ErrorKind {
     ER_INNODB_FT_WRONG_DOCID_COLUMN = 1797,
     /// Index '%s' is of wrong type for an InnoDB FULLTEXT index
     ER_INNODB_FT_WRONG_DOCID_INDEX = 1798,
-    /// Creating index '%s' required more than 'innodb_online_alter_log_max_size' bytes of modification log. Please try again.
+    /// Creating index '%s' required more than 'innodb_online_alter_log_max_size' bytes of
+    /// modification log. Please try again.
     ER_INNODB_ONLINE_LOG_TOO_BIG = 1799,
     /// Unknown ALGORITHM '%s'
     ER_UNKNOWN_ALTER_ALGORITHM = 1800,
     /// Unknown LOCK type '%s'
     ER_UNKNOWN_ALTER_LOCK = 1801,
-    /// CHANGE MASTER cannot be executed when the slave was stopped with an error or killed in MTS mode. Consider using RESET SLAVE or START SLAVE UNTIL.
+    /// CHANGE MASTER cannot be executed when the slave was stopped with an error or killed in MTS
+    /// mode. Consider using RESET SLAVE or START SLAVE UNTIL.
     ER_MTS_CHANGE_MASTER_CANT_RUN_WITH_GAPS = 1802,
-    /// Cannot recover after SLAVE errored out in parallel execution mode. Additional error messages can be found in the MySQL error log.
+    /// Cannot recover after SLAVE errored out in parallel execution mode. Additional error
+    /// messages can be found in the MySQL error log.
     ER_MTS_RECOVERY_FAILURE = 1803,
-    /// Cannot clean up worker info tables. Additional error messages can be found in the MySQL error log.
+    /// Cannot clean up worker info tables. Additional error messages can be found in the MySQL
+    /// error log.
     ER_MTS_RESET_WORKERS = 1804,
     /// Column count of %s.%s is wrong. Expected %d, found %d. The table is probably corrupted
     ER_COL_COUNT_DOESNT_MATCH_CORRUPTED_V2 = 1805,
@@ -1770,19 +1910,23 @@ pub enum ErrorKind {
     ER_NOT_VALID_PASSWORD = 1819,
     /// You must SET PASSWORD before executing this statement
     ER_MUST_CHANGE_PASSWORD = 1820,
-    /// Failed to add the foreign key constaint. Missing index for constraint '%s' in the foreign table '%s'
+    /// Failed to add the foreign key constaint. Missing index for constraint '%s' in the foreign
+    /// table '%s'
     ER_FK_NO_INDEX_CHILD = 1821,
-    /// Failed to add the foreign key constaint. Missing index for constraint '%s' in the referenced table '%s'
+    /// Failed to add the foreign key constaint. Missing index for constraint '%s' in the
+    /// referenced table '%s'
     ER_FK_NO_INDEX_PARENT = 1822,
     /// Failed to add the foreign key constraint '%s' to system tables
     ER_FK_FAIL_ADD_SYSTEM = 1823,
     /// Failed to open the referenced table '%s'
     ER_FK_CANNOT_OPEN_PARENT = 1824,
-    /// Failed to add the foreign key constraint on table '%s'. Incorrect options in FOREIGN KEY constraint '%s'
+    /// Failed to add the foreign key constraint on table '%s'. Incorrect options in FOREIGN KEY
+    /// constraint '%s'
     ER_FK_INCORRECT_OPTION = 1825,
     /// Duplicate foreign key constraint name '%s'
     ER_FK_DUP_NAME = 1826,
-    /// The password hash doesn't have the expected format. Check if the correct password algorithm is being used with the PASSWORD() function.
+    /// The password hash doesn't have the expected format. Check if the correct password algorithm
+    /// is being used with the PASSWORD() function.
     ER_PASSWORD_FORMAT = 1827,
     /// Cannot drop column '%s': needed in a foreign key constraint '%s'
     ER_FK_COLUMN_CANNOT_DROP = 1828,
@@ -1790,19 +1934,23 @@ pub enum ErrorKind {
     ER_FK_COLUMN_CANNOT_DROP_CHILD = 1829,
     /// Column '%s' cannot be NOT NULL: needed in a foreign key constraint '%s' SET NULL
     ER_FK_COLUMN_NOT_NULL = 1830,
-    /// Duplicate index '%s' defined on the table '%s.%s'. This is deprecated and will be disallowed in a future release.
+    /// Duplicate index '%s' defined on the table '%s.%s'. This is deprecated and will be
+    /// disallowed in a future release.
     ER_DUP_INDEX = 1831,
     /// Cannot change column '%s': used in a foreign key constraint '%s'
     ER_FK_COLUMN_CANNOT_CHANGE = 1832,
     /// Cannot change column '%s': used in a foreign key constraint '%s' of table '%s'
     ER_FK_COLUMN_CANNOT_CHANGE_CHILD = 1833,
-    /// Cannot delete rows from table which is parent in a foreign key constraint '%s' of table '%s'
+    /// Cannot delete rows from table which is parent in a foreign key constraint '%s' of table
+    /// '%s'
     ER_FK_CANNOT_DELETE_PARENT = 1834,
     /// Malformed communication packet.
     ER_MALFORMED_PACKET = 1835,
     /// Running in read-only mode
     ER_READ_ONLY_MODE = 1836,
-    /// When @@SESSION.GTID_NEXT is set to a GTID, you must explicitly set it to a different value after a COMMIT or ROLLBACK. Please check GTID_NEXT variable manual page for detailed explanation. Current @@SESSION.GTID_NEXT is '%s'.
+    /// When @@SESSION.GTID_NEXT is set to a GTID, you must explicitly set it to a different value
+    /// after a COMMIT or ROLLBACK. Please check GTID_NEXT variable manual page for detailed
+    /// explanation. Current @@SESSION.GTID_NEXT is '%s'.
     ER_GTID_NEXT_TYPE_UNDEFINED_GROUP = 1837,
     /// The system variable %s cannot be set in stored procedures.
     ER_VARIABLE_NOT_SETTABLE_IN_SP = 1838,
@@ -1810,13 +1958,15 @@ pub enum ErrorKind {
     ER_CANT_SET_GTID_PURGED_WHEN_GTID_MODE_IS_OFF = 1839,
     /// @@GLOBAL.GTID_PURGED can only be set when @@GLOBAL.GTID_EXECUTED is empty.
     ER_CANT_SET_GTID_PURGED_WHEN_GTID_EXECUTED_IS_NOT_EMPTY = 1840,
-    /// @@GLOBAL.GTID_PURGED can only be set when there are no ongoing transactions (not even in other clients).
+    /// @@GLOBAL.GTID_PURGED can only be set when there are no ongoing transactions (not even in
+    /// other clients).
     ER_CANT_SET_GTID_PURGED_WHEN_OWNED_GTIDS_IS_NOT_EMPTY = 1841,
     /// @@GLOBAL.GTID_PURGED was changed from '%s' to '%s'.
     ER_GTID_PURGED_WAS_CHANGED = 1842,
     /// @@GLOBAL.GTID_EXECUTED was changed from '%s' to '%s'.
     ER_GTID_EXECUTED_WAS_CHANGED = 1843,
-    /// Cannot execute statement: impossible to write to binary log since BINLOG_FORMAT = STATEMENT, and both replicated and non replicated tables are written to.
+    /// Cannot execute statement: impossible to write to binary log since BINLOG_FORMAT =
+    /// STATEMENT, and both replicated and non replicated tables are written to.
     ER_BINLOG_STMT_MODE_AND_NO_REPL_TABLES = 1844,
     /// %s is not supported for this operation. Try %s.
     ER_ALTER_OPERATION_NOT_SUPPORTED = 1845,
@@ -1844,31 +1994,38 @@ pub enum ErrorKind {
     ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_CHANGE_FTS = 1856,
     /// Fulltext index creation requires a lock
     ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_FTS = 1857,
-    /// sql_slave_skip_counter can not be set when the server is running with @@GLOBAL.GTID_MODE = ON. Instead, for each transaction that you want to skip, generate an empty transaction with the same GTID as the transaction
+    /// sql_slave_skip_counter can not be set when the server is running with @@GLOBAL.GTID_MODE =
+    /// ON. Instead, for each transaction that you want to skip, generate an empty transaction with
+    /// the same GTID as the transaction
     ER_SQL_SLAVE_SKIP_COUNTER_NOT_SETTABLE_IN_GTID_MODE = 1858,
     /// Duplicate entry for key '%s'
     ER_DUP_UNKNOWN_IN_INDEX = 1859,
-    /// Long database name and identifier for object resulted in path length exceeding %d characters. Path: '%s'.
+    /// Long database name and identifier for object resulted in path length exceeding %d
+    /// characters. Path: '%s'.
     ER_IDENT_CAUSES_TOO_LONG_PATH = 1860,
     /// cannot silently convert NULL values, as required in this SQL_MODE
     ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_NOT_NULL = 1861,
-    /// Your password has expired. To log in you must change it using a client that supports expired passwords.
+    /// Your password has expired. To log in you must change it using a client that supports
+    /// expired passwords.
     ER_MUST_CHANGE_PASSWORD_LOGIN = 1862,
     /// Found a row in wrong partition %s
     ER_ROW_IN_WRONG_PARTITION = 1863,
-    /// Cannot schedule event %s, relay-log name %s, position %s to Worker thread because its size %lu exceeds %lu of slave_pending_jobs_size_max.
+    /// Cannot schedule event %s, relay-log name %s, position %s to Worker thread because its size
+    /// %lu exceeds %lu of slave_pending_jobs_size_max.
     ER_MTS_EVENT_BIGGER_PENDING_JOBS_SIZE_MAX = 1864,
     /// Cannot CREATE FULLTEXT INDEX WITH PARSER on InnoDB table
     ER_INNODB_NO_FT_USES_PARSER = 1865,
     /// The binary log file '%s' is logically corrupted: %s
     ER_BINLOG_LOGICAL_CORRUPTION = 1866,
-    /// file %s was not purged because it was being read by %d thread(s), purged only %d out of %d files.
+    /// file %s was not purged because it was being read by %d thread(s), purged only %d out of %d
+    /// files.
     ER_WARN_PURGE_LOG_IN_USE = 1867,
     /// file %s was not purged because it is the active log file.
     ER_WARN_PURGE_LOG_IS_ACTIVE = 1868,
     /// Auto-increment value in UPDATE conflicts with internally generated values
     ER_AUTO_INCREMENT_CONFLICT = 1869,
-    /// Row events are not logged for %s statements that modify BLACKHOLE tables in row format. Table(s): '%s'
+    /// Row events are not logged for %s statements that modify BLACKHOLE tables in row format.
+    /// Table(s): '%s'
     WARN_ON_BLOCKHOLE_IN_RBR = 1870,
     /// Slave failed to initialize master info structure from the repository
     ER_SLAVE_MI_INIT_REPOSITORY = 1871,
@@ -1878,15 +2035,18 @@ pub enum ErrorKind {
     ER_ACCESS_DENIED_CHANGE_USER_ERROR = 1873,
     /// InnoDB is in read only mode.
     ER_INNODB_READ_ONLY = 1874,
-    /// STOP SLAVE command execution is incomplete: Slave SQL thread got the stop signal, thread is busy, SQL thread will stop once the current task is complete.
+    /// STOP SLAVE command execution is incomplete: Slave SQL thread got the stop signal, thread is
+    /// busy, SQL thread will stop once the current task is complete.
     ER_STOP_SLAVE_SQL_THREAD_TIMEOUT = 1875,
-    /// STOP SLAVE command execution is incomplete: Slave IO thread got the stop signal, thread is busy, IO thread will stop once the current task is complete.
+    /// STOP SLAVE command execution is incomplete: Slave IO thread got the stop signal, thread is
+    /// busy, IO thread will stop once the current task is complete.
     ER_STOP_SLAVE_IO_THREAD_TIMEOUT = 1876,
     /// Operation cannot be performed. The table '%s.%s' is missing, corrupt or contains bad data.
     ER_TABLE_CORRUPT = 1877,
     /// Temporary file write failure.
     ER_TEMP_FILE_WRITE_FAILURE = 1878,
-    /// Upgrade index name failed, please use create index(alter table) algorithm copy to rebuild index.
+    /// Upgrade index name failed, please use create index(alter table) algorithm copy to rebuild
+    /// index.
     ER_INNODB_FT_AUX_NOT_HEX_ID = 1879,
     /// TIME/TIMESTAMP/DATETIME columns of old format have been upgraded to the new format.
     ER_OLD_TEMPORALS_UPGRADED = 1880,
@@ -1896,9 +2056,16 @@ pub enum ErrorKind {
     ER_AES_INVALID_IV = 1882,
     /// Plugin '%s' cannot be uninstalled now. %s
     ER_PLUGIN_CANNOT_BE_UNINSTALLED = 1883,
-    /// Cannot execute statement because it needs to be written to the binary log as multiple statements, and this is not allowed when @@SESSION.GTID_NEXT == 'UUID:NUMBER'.
+    /// Cannot execute statement because it needs to be written to the binary log as multiple
+    /// statements, and this is not allowed when @@SESSION.GTID_NEXT == 'UUID:NUMBER'.
     ER_GTID_UNSAFE_BINLOG_SPLITTABLE_STATEMENT_AND_GTID_GROUP = 1884,
-    /// Slave has more GTIDs than the master has, using the master's SERVER_UUID. This may indicate that the end of the binary log was truncated or that the last binary log file was lost, e.g., after a power or disk failure when sync_binlog != 1. The master may or may not have rolled back transactions that were already replicated to the slave. Suggest to replicate any transactions that master has rolled back from slave to master, and/or commit empty transactions on master to account for transactions that have been committed on master but are not included in GTID_EXECUTED.
+    /// Slave has more GTIDs than the master has, using the master's SERVER_UUID. This may indicate
+    /// that the end of the binary log was truncated or that the last binary log file was lost,
+    /// e.g., after a power or disk failure when sync_binlog != 1. The master may or may not have
+    /// rolled back transactions that were already replicated to the slave. Suggest to replicate
+    /// any transactions that master has rolled back from slave to master, and/or commit empty
+    /// transactions on master to account for transactions that have been committed on master but
+    /// are not included in GTID_EXECUTED.
     ER_SLAVE_HAS_MORE_GTIDS_THAN_MASTER = 1885,
 }
 

@@ -675,10 +675,11 @@ impl ToMysqlValue for myc::value::Value {
             })),
             myc::value::Value::Bytes(ref bytes) => bytes.to_mysql_bin(w, c),
             myc::value::Value::Int(n) => {
-                // we *could* just delegate to i64 impl here, but then you couldn't use myc::value::Value
-                // and return, say, a short. also, myc uses i64 for *every* number type, *except*
-                // u64, so we even need to coerce across unsigned :( the good news is that our
-                // impls for numbers auto-upgrade to wider coltypes, so we can just downcast to the
+                // we *could* just delegate to i64 impl here, but then you couldn't use
+                // myc::value::Value and return, say, a short. also, myc uses i64
+                // for *every* number type, *except* u64, so we even need to coerce
+                // across unsigned :( the good news is that our impls for numbers
+                // auto-upgrade to wider coltypes, so we can just downcast to the
                 // smallest containing type, and then call on that
                 let signed = !c.colflags.contains(ColumnFlags::UNSIGNED_FLAG);
                 if signed {

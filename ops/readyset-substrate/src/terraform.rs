@@ -156,8 +156,8 @@ pub(crate) fn run_plan(chdir: &Path, lock: bool) -> Result<Plan> {
         .arg("-detailed-exitcode")
         .arg("-out=.terraform/terraform.tfplan");
     if !lock {
-        // TODO consider removing this if we do apply from buildkite (but then we'll have to solve locks
-        // getting left around from canceled builds)
+        // TODO consider removing this if we do apply from buildkite (but then we'll have to solve
+        // locks getting left around from canceled builds)
         command.arg("-lock=false");
     }
     let mut child = command.spawn()?;
@@ -194,7 +194,8 @@ pub(crate) fn run_plan(chdir: &Path, lock: bool) -> Result<Plan> {
     }
 }
 
-// TOOD: Use this to create refresh plans to reflect changes into Terraform State that happened outside of Terraform
+// TOOD: Use this to create refresh plans to reflect changes into Terraform State that happened
+// outside of Terraform
 #[allow(dead_code)]
 pub(crate) fn run_plan_refresh_only(chdir: &Path) -> Result<Plan> {
     event!(Level::DEBUG, "Running terraform plan -refresh-only");
@@ -243,7 +244,8 @@ pub(crate) fn run_apply(chdir: &Path) -> Result<()> {
     }
 }
 
-// TOOD: Use this to apply refresh plans to reflect changes into Terraform state that happened outside of Terraform
+// TOOD: Use this to apply refresh plans to reflect changes into Terraform state that happened
+// outside of Terraform
 #[allow(dead_code)]
 pub(crate) fn run_apply_refresh_only(chdir: &Path) -> Result<()> {
     event!(Level::DEBUG, "Running terraform apply");

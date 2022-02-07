@@ -106,9 +106,9 @@ impl ReadRequestHandler {
         } = query;
         let immediate = READERS.with(|readers_cache| {
             let mut readers_cache = readers_cache.borrow_mut();
-            // TODO(ENG-845): We currently assume that a reader *must* exist if we have gotten a view
-            // to it. This may not always be true if queries can be removed. A client should not
-            // be able to continue to query with a view.
+            // TODO(ENG-845): We currently assume that a reader *must* exist if we have gotten a
+            // view to it. This may not always be true if queries can be removed. A
+            // client should not be able to continue to query with a view.
             let reader = readers_cache.entry(target.clone()).or_insert_with(|| {
                 let readers = self.readers.lock().unwrap();
                 readers.get(&target).unwrap().clone()
@@ -126,16 +126,18 @@ impl ReadRequestHandler {
             // being materialized.
             let mut miss_indices = Vec::new();
 
-            // A key needs to be replayed only in the case of a materialization miss. `keys_to_replay`
-            // is separate from `miss_keys` because `miss_keys` also includes consistency misses.
+            // A key needs to be replayed only in the case of a materialization miss.
+            // `keys_to_replay` is separate from `miss_keys` because `miss_keys` also
+            // includes consistency misses.
             let mut keys_to_replay = Vec::new();
 
             let mut ready = true;
 
             // First do non-blocking reads for all keys to see if we can return immediately.
-            // We execute this loop even if there is RYW miss, since we still want to trigger a partial
-            // replay if the key has been evicted. However, if there is RYW miss, a successful lookup
-            // is actually still a miss since the row is not sufficiently up to date.
+            // We execute this loop even if there is RYW miss, since we still want to trigger a
+            // partial replay if the key has been evicted. However, if there is RYW
+            // miss, a successful lookup is actually still a miss since the row is not
+            // sufficiently up to date.
             for (i, key) in key_comparisons.drain(..).enumerate() {
                 if !ready {
                     ret.push(SerializedReadReplyBatch::empty());
@@ -163,13 +165,16 @@ impl ReadRequestHandler {
 
                         let misses = miss.into_misses();
 
-                        // if we did a lookup of a range, it might be the case that part of the range
-                        // *didn't* miss - we still want the results for the bits that didn't miss, so
-                        // subtract the misses from our original keys and do the lookups now
-                        // NOTE(grfn): The asymptotics here are bad, but we only ever do range queries
-                        // with one key at a time so it doesn't matter - if that changes, we may want to
-                        // improve this somewhat, but for now it's actually *faster* to do this linearly
-                        // rather than trying to make a data structure out of it
+                        // if we did a lookup of a range, it might be the case that part of the
+                        // range *didn't* miss - we still want the results
+                        // for the bits that didn't miss, so subtract the
+                        // misses from our original keys and do the lookups now
+                        // NOTE(grfn): The asymptotics here are bad, but we only ever do range
+                        // queries with one key at a time so it doesn't
+                        // matter - if that changes, we may want to
+                        // improve this somewhat, but for now it's actually *faster* to do this
+                        // linearly rather than trying to make a data
+                        // structure out of it
                         if key.is_range() {
                             let non_miss_ranges =
                                 misses.iter().fold(vec![key.clone()], |acc, miss| {
@@ -191,9 +196,10 @@ impl ReadRequestHandler {
                         }
 
                         for key in misses {
-                            // We do not push a lookup miss to `missing_keys` and `missing_indices` here
-                            // If there is a `consistency_miss` the key will be pushed at the end of
-                            // the loop no matter if it is materialized or not.
+                            // We do not push a lookup miss to `missing_keys` and `missing_indices`
+                            // here If there is a `consistency_miss` the
+                            // key will be pushed at the end of the loop
+                            // no matter if it is materialized or not.
                             if !consistency_miss {
                                 miss_keys.push(key.clone());
                                 miss_indices.push(i as usize);
@@ -203,8 +209,8 @@ impl ReadRequestHandler {
                     }
                 };
 
-                // Every key is a missed key if there is a `consistency_miss` since the reader is not
-                // sufficiently up to date.
+                // Every key is a missed key if there is a `consistency_miss` since the reader is
+                // not sufficiently up to date.
                 if consistency_miss {
                     miss_keys.push(key);
                     miss_indices.push(i as usize);
@@ -372,8 +378,8 @@ pub(crate) async fn listen(
 
         let retries = READERS.scope(Default::default(), async move {
             while let Some((mut pending, ack)) = rx.recv().await {
-                // A blocking read always comes immediately after a miss, so no reason to retry it right away
-                // better to wait a bit
+                // A blocking read always comes immediately after a miss, so no reason to retry it
+                // right away better to wait a bit
                 tokio::time::sleep(RETRY_TIMEOUT / 4).await;
                 loop {
                     if let Poll::Ready(res) = pending.check() {

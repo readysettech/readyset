@@ -122,7 +122,8 @@ pub trait AuthorityControl: Send + Sync {
         P: Send + Serialize + DeserializeOwned,
         E: Send;
 
-    /// Register a worker with their descriptor. Returns a unique identifier that represents this worker if successful.
+    /// Register a worker with their descriptor. Returns a unique identifier that represents this
+    /// worker if successful.
     async fn register_worker(&self, payload: WorkerDescriptor) -> Result<Option<WorkerId>, Error>
     where
         WorkerDescriptor: Serialize;
