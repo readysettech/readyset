@@ -1,5 +1,4 @@
-use crate::ops::grouped::GroupedOperation;
-use crate::ops::grouped::GroupedOperator;
+use crate::ops::grouped::{GroupedOperation, GroupedOperator};
 use serde::{Deserialize, Serialize};
 
 use crate::prelude::*;

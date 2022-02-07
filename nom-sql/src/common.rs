@@ -12,16 +12,13 @@ use launchpad::arbitrary::{
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take_until};
 use nom::character::complete::{digit1, line_ending, multispace0, multispace1};
-use nom::combinator::{map, peek};
-use nom::combinator::{map_parser, map_res};
-use nom::combinator::{opt, recognize};
+use nom::combinator::{map, map_parser, map_res, opt, peek, recognize};
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{many0, many1, separated_list};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
 use nom::{call, do_parse, map, named, opt, tag_no_case, IResult, InputLength};
-use proptest::prelude as prop;
-use proptest::prop_oneof;
 use proptest::strategy::Strategy;
+use proptest::{prelude as prop, prop_oneof};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use test_strategy::Arbitrary;

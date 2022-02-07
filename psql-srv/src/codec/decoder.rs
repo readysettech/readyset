@@ -3,11 +3,9 @@ use crate::codec::error::DecodeError as Error;
 use crate::codec::error::DecodeError::InvalidTextByteArrayValue;
 use crate::codec::{Codec, DecodeError};
 use crate::error::Error as BackendError;
-use crate::message::{
-    FrontendMessage::{self, *},
-    StatementName::*,
-    TransferFormat::{self, *},
-};
+use crate::message::FrontendMessage::{self, *};
+use crate::message::StatementName::*;
+use crate::message::TransferFormat::{self, *};
 use crate::value::Value;
 use bit_vec::BitVec;
 use bytes::{Buf, Bytes, BytesMut};
@@ -17,8 +15,7 @@ use postgres_types::{FromSql, Type};
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use std::borrow::Borrow;
-use std::convert::TryFrom;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use tokio_util::codec::Decoder;
 use uuid::Uuid;
 

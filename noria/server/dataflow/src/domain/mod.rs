@@ -1,15 +1,12 @@
 mod domain_metrics;
 
 use std::borrow::Cow;
-use std::cell;
-use std::cmp;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::{TryFrom, TryInto};
-use std::mem;
 use std::ops::Bound;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time;
+use std::{cell, cmp, mem, time};
 
 use ahash::RandomState;
 use futures_util::future::FutureExt;
@@ -26,9 +23,8 @@ use vec1::Vec1;
 
 use failpoint_macros::failpoint;
 pub use internal::DomainIndex;
-use noria::channel;
 use noria::replication::ReplicationOffset;
-use noria::{internal, KeyComparison, ReadySetError};
+use noria::{channel, internal, KeyComparison, ReadySetError};
 use noria_errors::{internal, internal_err, ReadySetResult};
 
 use crate::node::NodeProcessingResult;

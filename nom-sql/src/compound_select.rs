@@ -1,6 +1,5 @@
 use nom::character::complete::{multispace0, multispace1};
-use std::fmt;
-use std::str;
+use std::{fmt, str};
 
 use crate::common::{opt_delimited, statement_terminator};
 use crate::order::{order_clause, OrderClause};

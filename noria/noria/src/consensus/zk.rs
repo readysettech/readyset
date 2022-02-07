@@ -1,12 +1,10 @@
 // TODO: Replace how leader election is done and locking implementation of recipes from
 // https://zookeeper.apache.org/doc/current/recipes.html
 
+use std::collections::{HashMap, HashSet};
+use std::net::SocketAddr;
 use std::process;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::{
-    collections::{HashMap, HashSet},
-    net::SocketAddr,
-};
 
 use anyhow::{bail, Error};
 use async_trait::async_trait;

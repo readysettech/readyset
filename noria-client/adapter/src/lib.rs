@@ -1,12 +1,12 @@
 #![deny(macro_use_extern_crate)]
 
 use std::collections::HashMap;
+use std::io;
 use std::marker::Send;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::{io, net::IpAddr};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -23,11 +23,10 @@ use noria_client::query_status_cache::{MigrationStyle, QueryStatusCache};
 use noria_client::{QueryHandler, UpstreamDatabase};
 use noria_client_metrics::QueryExecutionEvent;
 use stream_cancel::Valve;
-use tokio::net;
 use tokio::net::UdpSocket;
-use tokio::select;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::{net, select};
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, error, info, info_span, span, Level};
 use tracing_futures::Instrument;

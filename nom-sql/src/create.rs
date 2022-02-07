@@ -1,14 +1,13 @@
-use nom::{
-    bytes::complete::is_not,
-    call,
-    character::complete::{digit1, multispace0, multispace1},
-    combinator::map_res,
-};
+use nom::bytes::complete::is_not;
+use nom::call;
+use nom::character::complete::{digit1, multispace0, multispace1};
+use nom::combinator::map_res;
 use serde::{Deserialize, Serialize};
-use std::str;
+use std::borrow::Cow;
 use std::str::FromStr;
-use std::{borrow::Cow, fmt};
+use std::{fmt, str};
 
+use crate::column::{column_specification, Column, ColumnSpecification};
 use crate::common::{
     column_identifier_no_alias, if_not_exists, schema_table_reference, statement_terminator,
     ws_sep_comma, IndexType, ReferentialAction, TableKey,
@@ -17,12 +16,8 @@ use crate::compound_select::{compound_selection, CompoundSelectStatement};
 use crate::create_table_options::{table_options, CreateTableOption};
 use crate::expression::expression;
 use crate::order::{order_type, OrderType};
-use crate::select::{nested_selection, SelectStatement};
+use crate::select::{nested_selection, selection, SelectStatement};
 use crate::table::Table;
-use crate::{
-    column::{column_specification, Column, ColumnSpecification},
-    select::selection,
-};
 use crate::{ColumnConstraint, Dialect};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
@@ -721,8 +716,8 @@ pub fn create_cached_query(
 
 #[cfg(test)]
 mod tests {
-    use crate::{common::type_identifier, ColumnConstraint, Literal, SqlType};
-    use crate::{BinaryOperator, Expression};
+    use crate::common::type_identifier;
+    use crate::{BinaryOperator, ColumnConstraint, Expression, Literal, SqlType};
 
     use super::*;
     use crate::column::Column;

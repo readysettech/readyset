@@ -9,15 +9,14 @@ use bincode::{ErrorKind, Options};
 use bufstream::BufStream;
 use byteorder::{NetworkEndian, WriteBytesExt};
 use futures_util::ready;
-use futures_util::{sink::Sink, stream::Stream};
+use futures_util::sink::Sink;
+use futures_util::stream::Stream;
 use noria_errors::ReadySetError;
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use std::{
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 

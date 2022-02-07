@@ -1391,9 +1391,8 @@ impl SqlToMirConverter {
         has_leaf: bool,
     ) -> Result<Vec<MirNodeRef>, ReadySetError> {
         // TODO: make this take &self!
-        use crate::controller::sql::mir::grouped::make_grouped;
         use crate::controller::sql::mir::grouped::{
-            make_expressions_above_grouped, make_predicates_above_grouped,
+            make_expressions_above_grouped, make_grouped, make_predicates_above_grouped,
         };
         use crate::controller::sql::mir::join::make_joins;
 

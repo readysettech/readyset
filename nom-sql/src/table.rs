@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str;
+use std::{fmt, str};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Table {

@@ -1,6 +1,5 @@
 use crate::query_status_cache::{MigrationState, QueryStatusCache};
-use noria::ControllerHandle;
-use noria::ReadySetResult;
+use noria::{ControllerHandle, ReadySetResult};
 
 use tokio::select;
 

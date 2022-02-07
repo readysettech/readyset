@@ -1,5 +1,4 @@
-use std::collections::BTreeMap;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Display;
 use std::mem;
 use std::str::FromStr;

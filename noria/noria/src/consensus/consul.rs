@@ -131,20 +131,17 @@ use futures::TryStreamExt;
 use metrics::gauge;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
+use std::net::SocketAddr;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
-use std::{
-    collections::{HashMap, HashSet},
-    net::SocketAddr,
-};
 use thiserror::Error as ThisError;
 use tracing::{error, warn};
 
-use super::{AdapterId, WorkerId};
 use super::{
-    AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
-    WorkerDescriptor,
+    AdapterId, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
+    WorkerDescriptor, WorkerId,
 };
 use crate::metrics::recorded;
 use crate::{ReadySetError, ReadySetResult};

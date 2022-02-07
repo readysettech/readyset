@@ -10,9 +10,7 @@ extern crate tokio;
 use async_trait::async_trait;
 use mysql::prelude::Queryable;
 use mysql::Row;
-use std::io;
-use std::net;
-use std::thread;
+use std::{io, net, thread};
 use tokio::io::AsyncWrite;
 
 use core::iter;

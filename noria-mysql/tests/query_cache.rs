@@ -1,7 +1,6 @@
-use mysql_async::{prelude::*, Statement};
-use mysql_async::{Conn, Result, Row};
-use noria_client::backend::MigrationMode;
-use noria_client::backend::QueryInfo;
+use mysql_async::prelude::*;
+use mysql_async::{Conn, Result, Row, Statement};
+use noria_client::backend::{MigrationMode, QueryInfo};
 use noria_client::query_status_cache::QueryStatusCache;
 use noria_client_metrics::QueryDestination;
 use noria_client_test_helpers::mysql_helpers::query_cache_setup;

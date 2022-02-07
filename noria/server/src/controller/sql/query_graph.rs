@@ -10,9 +10,9 @@ use common::IndexType;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, Column, Expression, FieldDefinitionExpression, InValue, ItemPlaceholder,
-    JoinConstraint, JoinOperator, JoinRightSide, Literal, Table, UnaryOperator,
+    JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderType, SelectStatement, Table,
+    UnaryOperator,
 };
-use nom_sql::{OrderType, SelectStatement};
 use noria::{PlaceholderIdx, ViewPlaceholder};
 use noria_errors::{
     internal, invariant, invariant_eq, unsupported, unsupported_err, ReadySetResult,

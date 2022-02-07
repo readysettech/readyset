@@ -2219,7 +2219,8 @@ mod tests {
     mod lookup_range {
         use super::*;
         use pretty_assertions::assert_eq;
-        use std::{iter, ops::Bound::*};
+        use std::iter;
+        use std::ops::Bound::*;
         use vec1::vec1;
 
         fn setup() -> PersistentState {

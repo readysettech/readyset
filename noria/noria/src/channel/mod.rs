@@ -7,11 +7,9 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::io::{self, Write};
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::RwLock;
-use std::{
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::task::{Context, Poll};
 
 use async_bincode::{AsyncBincodeWriter, AsyncDestination};
 use futures_util::sink::{Sink, SinkExt};
@@ -21,8 +19,7 @@ pub mod tcp;
 
 pub use self::tcp::{DualTcpStream, TcpSender};
 use crate::internal::DomainIndex;
-use crate::ReadySetError;
-use crate::ReadySetResult;
+use crate::{ReadySetError, ReadySetResult};
 
 pub const CONNECTION_FROM_BASE: u8 = 1;
 pub const CONNECTION_FROM_DOMAIN: u8 = 2;

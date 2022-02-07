@@ -1,6 +1,4 @@
-use chrono::naive::NaiveDate;
-use chrono::naive::NaiveDateTime;
-use chrono::naive::NaiveTime;
+use chrono::naive::{NaiveDate, NaiveDateTime, NaiveTime};
 use std::convert::TryFrom;
 use std::fs::File;
 use std::io::{BufRead, BufReader};

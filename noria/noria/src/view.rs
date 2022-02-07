@@ -11,13 +11,12 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
-use futures_util::{
-    future, future::TryFutureExt, ready, stream::futures_unordered::FuturesUnordered,
-    stream::StreamExt, stream::TryStreamExt,
-};
+use futures_util::future::TryFutureExt;
+use futures_util::stream::futures_unordered::FuturesUnordered;
+use futures_util::stream::{StreamExt, TryStreamExt};
+use futures_util::{future, ready};
 use launchpad::intervals::{cmp_start_end, BoundPair};
-use nom_sql::{BinaryOperator, ColumnSpecification};
-use nom_sql::{Column, SqlType};
+use nom_sql::{BinaryOperator, Column, ColumnSpecification, SqlType};
 use noria_data::DataType;
 use noria_errors::{internal_err, rpc_err, view_err, ReadySetError, ReadySetResult};
 use petgraph::graph::NodeIndex;

@@ -1,11 +1,12 @@
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str;
+use std::{fmt, str};
 
+use crate::alter::{alter_table_statement, AlterTableStatement};
 use crate::compound_select::{compound_selection, CompoundSelectStatement};
-use crate::create::create_cached_query;
-use crate::create::CreateCachedQueryStatement;
-use crate::create::{creation, view_creation, CreateTableStatement, CreateViewStatement};
+use crate::create::{
+    create_cached_query, creation, view_creation, CreateCachedQueryStatement, CreateTableStatement,
+    CreateViewStatement,
+};
 use crate::delete::{deletion, DeleteStatement};
 use crate::drop::{drop_cached_query, drop_table, DropCachedQueryStatement, DropTableStatement};
 use crate::explain::{explain_statement, ExplainStatement};
@@ -14,14 +15,13 @@ use crate::rename::{rename_table, RenameTableStatement};
 use crate::select::{selection, SelectStatement};
 use crate::set::{set, SetStatement};
 use crate::show::{show, ShowStatement};
-use crate::transaction::{CommitStatement, RollbackStatement, StartTransactionStatement};
+use crate::transaction::{
+    commit, rollback, start_transaction, CommitStatement, RollbackStatement,
+    StartTransactionStatement,
+};
 use crate::update::{updating, UpdateStatement};
 use crate::use_statement::{use_statement, UseStatement};
 use crate::Dialect;
-use crate::{
-    alter::{alter_table_statement, AlterTableStatement},
-    transaction::{commit, rollback, start_transaction},
-};
 use nom::branch::alt;
 use nom::combinator::map;
 use nom::IResult;

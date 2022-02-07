@@ -373,8 +373,7 @@ fn trace(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dataflow::node;
-    use dataflow::ops;
+    use dataflow::{node, ops};
 
     fn bases() -> (Graph, NodeIndex, NodeIndex) {
         let mut g = petgraph::Graph::new();

@@ -3,8 +3,7 @@ use std::convert::TryFrom;
 use nom_sql::SqlType;
 use noria_client::backend as cl;
 use noria_errors::unsupported;
-use psql_srv as ps;
-use tokio_postgres as pgsql;
+use {psql_srv as ps, tokio_postgres as pgsql};
 
 use crate::Error;
 

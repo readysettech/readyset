@@ -8,8 +8,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use nom_sql::SelectStatement;
-use noria::consensus::Authority;
-use noria::consensus::LocalAuthorityStore;
+use noria::consensus::{Authority, LocalAuthorityStore};
 use noria_client::backend::noria_connector::NoriaConnector;
 use noria_client::backend::{BackendBuilder, MigrationMode};
 use noria_client::query_status_cache::QueryStatusCache;

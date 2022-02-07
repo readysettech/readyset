@@ -6,8 +6,9 @@ use noria::{ReadySetError, ReadySetResult};
 use noria_data::DataType;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
+use std::collections::HashMap;
+use std::convert::TryInto;
 use std::sync::Arc;
-use std::{collections::HashMap, convert::TryInto};
 use tokio_postgres as pgsql;
 use tracing::{debug, error};
 

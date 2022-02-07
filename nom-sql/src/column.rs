@@ -1,22 +1,17 @@
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::fmt;
-use std::str;
 use std::str::FromStr;
+use std::{fmt, str};
 
-use crate::Dialect;
-use crate::FunctionExpression;
-use crate::{
-    common::{column_identifier_no_alias, parse_comment, type_identifier, Literal, SqlType},
-    Double,
-};
-use nom::bytes::complete::{tag_no_case, take_until};
-use nom::character::complete::{multispace0, multispace1};
+use crate::common::{column_identifier_no_alias, parse_comment, type_identifier, Literal, SqlType};
+use crate::{Dialect, Double, FunctionExpression};
+use nom::branch::alt;
+use nom::bytes::complete::{tag, tag_no_case, take_until};
+use nom::character::complete::{digit1, multispace0, multispace1};
 use nom::combinator::{map, map_res, opt};
 use nom::multi::many0;
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::{alt, complete, do_parse, named, opt, tag, tag_no_case, IResult};
-use nom::{branch::alt, bytes::complete::tag, character::complete::digit1};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Column {

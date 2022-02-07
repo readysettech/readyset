@@ -12,15 +12,11 @@
 //! cargo test -p noria-mysql --features vertical_tests --test vertical
 //! ```
 
-use std::cmp;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::convert::TryInto;
-use std::env;
-use std::iter;
-use std::mem;
+use std::convert::{TryFrom, TryInto};
 use std::ops::Range;
+use std::{cmp, env, iter, mem};
 
 use itertools::Itertools;
 use maplit::hashmap;

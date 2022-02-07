@@ -15,8 +15,7 @@ use tracing::trace;
 
 use crate::prelude::*;
 
-use crate::processing::{ColumnSource, LookupMode};
-use crate::processing::{IngredientLookupResult, SuggestedIndex};
+use crate::processing::{ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex};
 use nom_sql::OrderType;
 use noria_errors::{internal_err, ReadySetResult};
 

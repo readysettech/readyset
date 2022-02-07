@@ -1,16 +1,14 @@
 use crate::channel::Channel;
 use crate::error::Error;
-use crate::message::{
-    BackendMessage::{self, *},
-    CommandCompleteTag, ErrorSeverity, FieldDescription,
-    FrontendMessage::{self, *},
-    SqlState,
-    StatementName::*,
-    TransferFormat::{self, *},
-};
+use crate::message::BackendMessage::{self, *};
+use crate::message::FrontendMessage::{self, *};
+use crate::message::StatementName::*;
+use crate::message::TransferFormat::{self, *};
+use crate::message::{CommandCompleteTag, ErrorSeverity, FieldDescription, SqlState};
 use crate::response::Response;
 use crate::value::Value;
-use crate::{Backend, Column, PrepareResponse, QueryResponse::*};
+use crate::QueryResponse::*;
+use crate::{Backend, Column, PrepareResponse};
 use postgres_types::Type;
 use smallvec::smallvec;
 use std::borrow::Borrow;

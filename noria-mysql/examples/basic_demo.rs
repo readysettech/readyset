@@ -1,7 +1,8 @@
 use anyhow::Result;
 use maplit::hashmap;
 use nom_sql::SelectStatement;
-use noria::{consensus::Authority, ControllerHandle, ZookeeperAuthority};
+use noria::consensus::Authority;
+use noria::{ControllerHandle, ZookeeperAuthority};
 use noria_client::backend::noria_connector::{self, NoriaConnector};
 use noria_client::backend::{BackendBuilder, QueryResult};
 use noria_client::query_status_cache::QueryStatusCache;

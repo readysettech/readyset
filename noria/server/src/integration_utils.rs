@@ -5,10 +5,8 @@ use std::time::Duration;
 use crate::ReuseConfigType;
 use dataflow::{DurabilityMode, PersistenceParameters};
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
-use noria::{
-    metrics::client::MetricsClient,
-    metrics::{DumpedMetric, DumpedMetricValue, MetricsDump},
-};
+use noria::metrics::client::MetricsClient;
+use noria::metrics::{DumpedMetric, DumpedMetricValue, MetricsDump};
 
 use crate::metrics::{
     get_global_recorder, install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,

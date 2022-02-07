@@ -1,8 +1,7 @@
 use crate::myc::constants::{ColumnFlags, StatusFlags};
 use crate::packet::PacketWriter;
 use crate::value::ToMysqlValue;
-use crate::writers;
-use crate::{Column, ErrorKind, StatementData};
+use crate::{writers, Column, ErrorKind, StatementData};
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::io;

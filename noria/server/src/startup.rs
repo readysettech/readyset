@@ -48,9 +48,8 @@
 //! (TODO: write this section)
 
 use std::net::{IpAddr, SocketAddr};
-use std::process;
 use std::sync::{Arc, Mutex};
-use std::time;
+use std::{process, time};
 
 use futures_util::future::{Either, TryFutureExt};
 use launchpad::futures::abort_on_panic;

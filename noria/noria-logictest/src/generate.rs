@@ -1,5 +1,4 @@
-use std::convert::TryFrom;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 use std::mem;

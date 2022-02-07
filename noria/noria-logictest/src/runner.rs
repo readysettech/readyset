@@ -1,22 +1,20 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io;
 use std::io::Write;
 use std::iter::FromIterator;
-use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
+use std::{io, mem};
 use tokio::time::sleep;
 
 use anyhow::{anyhow, bail, Context};
 use colored::*;
 use itertools::Itertools;
 use msql_srv::MysqlIntermediary;
-use mysql_async as mysql;
-use tokio_postgres as pgsql;
+use {mysql_async as mysql, tokio_postgres as pgsql};
 
 use nom_sql::SelectStatement;
 use noria::consensus::{Authority, LocalAuthorityStore};

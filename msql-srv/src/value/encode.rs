@@ -1,8 +1,7 @@
 use crate::error::{other_error, OtherErrorKind};
-use crate::myc;
 use crate::myc::constants::{ColumnFlags, ColumnType};
 use crate::myc::io::WriteMysqlExt;
-use crate::Column;
+use crate::{myc, Column};
 use byteorder::{LittleEndian, WriteBytesExt};
 use mysql_time::MysqlTime;
 use std::io::{self, Write};

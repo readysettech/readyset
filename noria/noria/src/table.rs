@@ -15,10 +15,10 @@ use serde::{Deserialize, Serialize};
 use tracing::error;
 
 use core::convert::TryInto;
-use futures_util::{
-    future, future::TryFutureExt, ready, stream::futures_unordered::FuturesUnordered,
-    stream::TryStreamExt,
-};
+use futures_util::future::TryFutureExt;
+use futures_util::stream::futures_unordered::FuturesUnordered;
+use futures_util::stream::TryStreamExt;
+use futures_util::{future, ready};
 use itertools::Either;
 use nom_sql::CreateTableStatement;
 use noria_data::DataType;

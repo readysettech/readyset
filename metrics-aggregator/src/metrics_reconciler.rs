@@ -1,24 +1,19 @@
 use anyhow::anyhow;
 use futures::future::join_all;
 use itertools::Itertools;
-use noria::{
-    consensus::{AuthorityControl, ConsulAuthority},
-    ReadySetResult,
-};
-use prometheus_http_query::{
-    response::{InstantVector, QueryResultType},
-    Client, InstantVector as InstantVectorReq, Selector,
-};
-use tokio::{select, sync::Mutex};
+use noria::consensus::{AuthorityControl, ConsulAuthority};
+use noria::ReadySetResult;
+use prometheus_http_query::response::{InstantVector, QueryResultType};
+use prometheus_http_query::{Client, InstantVector as InstantVectorReq, Selector};
+use tokio::select;
+use tokio::sync::Mutex;
 use tracing::{error, info};
 
-use std::{
-    collections::{HashMap, HashSet},
-    convert::TryInto,
-    net::SocketAddr,
-    sync::Arc,
-    time::Duration,
-};
+use std::collections::{HashMap, HashSet};
+use std::convert::TryInto;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
 
 /// A timeout for the prometheus query to scrape relevant metrics.
 /// Constant is in a string format, because that's what the prometheus client library we're using

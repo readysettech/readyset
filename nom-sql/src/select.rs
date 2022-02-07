@@ -6,8 +6,7 @@ use nom::{
     alt, call, char, complete, delimited, do_parse, opt, separated_nonempty_list, tag, tag_no_case,
 };
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str;
+use std::{fmt, str};
 
 use crate::common::{
     as_alias, field_definition_expr, field_list, schema_table_reference, statement_terminator,

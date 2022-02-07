@@ -33,10 +33,9 @@
 
 use std::borrow::Borrow;
 use std::cmp::{max, Ordering};
-use std::fmt;
 use std::fmt::Debug;
-use std::mem;
 use std::ops::{Bound, RangeBounds};
+use std::{fmt, mem};
 use Bound::*;
 use Ordering::*;
 

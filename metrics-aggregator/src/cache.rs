@@ -1,6 +1,8 @@
 use serde::ser::{SerializeMap, Serializer};
 use serde::Serialize;
-use std::{collections::HashMap, iter::FromIterator, time::Duration};
+use std::collections::HashMap;
+use std::iter::FromIterator;
+use std::time::Duration;
 
 /// A list of allowed queries along with relevant query latency metrics.
 #[derive(Serialize, Debug, PartialEq, Eq, Default)]
