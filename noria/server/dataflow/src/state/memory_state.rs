@@ -183,6 +183,14 @@ impl State for MemoryState {
         // resulting in upqueries along an overlapping replay path.
         // FIXME(eta): a lot of this could be computed at index addition time.
         for state in self.state.iter() {
+            // Try other index types with the same columns
+            if state.columns() == columns && state.index_type() != self.state[index].index_type() {
+                let res = state.lookup(key);
+                if res.is_some() {
+                    return res;
+                }
+            }
+
             // We might have another index with the same columns in another order
             if state.columns() != columns && state.columns().len() == columns.len() {
                 // Make a map from column index -> the position in the index we're trying to do a
