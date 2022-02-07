@@ -1,11 +1,11 @@
-use crate::expression::expression;
-use crate::{Dialect, Expression};
-
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::opt;
 use nom::sequence::{delimited, terminated, tuple};
 use nom::IResult;
+
+use crate::expression::expression;
+use crate::{Dialect, Expression};
 
 pub fn case_when(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
     move |i| {
@@ -42,9 +42,8 @@ pub fn case_when(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expressio
 
 #[cfg(test)]
 mod tests {
-    use crate::{BinaryOperator, Column, Literal};
-
     use super::*;
+    use crate::{BinaryOperator, Column, Literal};
 
     #[test]
     fn it_displays() {

@@ -1,11 +1,11 @@
+use std::collections::HashMap;
+use std::mem;
+
 use nom_sql::{
     Column, CommonTableExpression, Expression, FieldDefinitionExpression, JoinClause,
     JoinRightSide, SelectStatement, SqlQuery, Table,
 };
-
 use noria::{ReadySetError, ReadySetResult};
-use std::collections::HashMap;
-use std::mem;
 
 fn extract_tables_from_join(joins: &[JoinClause]) -> impl Iterator<Item = &Table> {
     use itertools::Either;
@@ -110,9 +110,10 @@ impl StarExpansion for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use super::StarExpansion;
     use maplit::hashmap;
     use nom_sql::{parse_query, Dialect};
+
+    use super::StarExpansion;
 
     macro_rules! expands_stars {
 	    ($source: expr, $expected: expr, schema: {$($schema:tt)*}) => {{

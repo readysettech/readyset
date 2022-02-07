@@ -2,13 +2,12 @@
 #![deny(unused_extern_crates, macro_use_extern_crate)]
 #![feature(stmt_expr_attributes)]
 
-use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
-use petgraph::graph::NodeIndex;
-
 pub use column::Column;
+use petgraph::graph::NodeIndex;
+use serde::{Deserialize, Serialize};
 
 mod column;
 pub mod node;

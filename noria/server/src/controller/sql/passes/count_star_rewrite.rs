@@ -1,7 +1,7 @@
-use nom_sql::{Column, Expression, FieldDefinitionExpression, FunctionExpression, SqlQuery, Table};
-
-use noria_errors::{internal, invariant, ReadySetResult};
 use std::collections::HashMap;
+
+use nom_sql::{Column, Expression, FieldDefinitionExpression, FunctionExpression, SqlQuery, Table};
+use noria_errors::{internal, invariant, ReadySetResult};
 
 pub trait CountStarRewrite {
     fn rewrite_count_star(
@@ -73,9 +73,11 @@ impl CountStarRewrite for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use nom_sql::{Column, Dialect, FieldDefinitionExpression, SqlQuery};
     use std::collections::HashMap;
+
+    use nom_sql::{Column, Dialect, FieldDefinitionExpression, SqlQuery};
+
+    use super::*;
 
     #[test]
     fn it_expands_count_star() {

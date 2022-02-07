@@ -1,10 +1,11 @@
+use std::collections::HashSet;
+use std::vec::Vec;
+
 use super::super::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
 use super::helpers::predicate_implication::join_predicates_are_equivalent;
 use super::ReuseType;
 use crate::controller::sql::query_graph::JoinPredicate;
 use crate::ReadySetResult;
-use std::collections::HashSet;
-use std::vec::Vec;
 
 #[derive(Debug, Clone)]
 struct JoinChain {

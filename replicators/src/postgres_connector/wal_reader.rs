@@ -1,4 +1,7 @@
-use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
+use std::collections::HashMap;
+use std::convert::TryInto;
+use std::sync::Arc;
+
 use bit_vec::BitVec;
 use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime};
 use mysql_time::MysqlTime;
@@ -6,11 +9,10 @@ use noria::{ReadySetError, ReadySetResult};
 use noria_data::DataType;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
-use std::collections::HashMap;
-use std::convert::TryInto;
-use std::sync::Arc;
 use tokio_postgres as pgsql;
 use tracing::{debug, error};
+
+use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
 
 pub struct WalReader {
     /// The handle to the log stream itself

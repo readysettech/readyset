@@ -6,16 +6,18 @@
 //!  - Egress nodes must be added to nodes that now have children in a different domain
 //!  - Egress nodes that gain new children must gain channels to facilitate forwarding
 
-use crate::controller::migrate::DomainMigrationPlan;
-use crate::controller::state::DataflowState;
+use std::collections::{HashMap, HashSet};
+
 use dataflow::prelude::*;
 use dataflow::{node, DomainRequest};
 use noria_errors::{
     internal, internal_err, invariant, invariant_eq, ReadySetError, ReadySetResult,
 };
 use petgraph::graph::NodeIndex;
-use std::collections::{HashMap, HashSet};
 use tracing::trace;
+
+use crate::controller::migrate::DomainMigrationPlan;
+use crate::controller::state::DataflowState;
 
 /// Add in ingress and egress nodes as appropriate in the graph to facilitate cross-domain
 /// communication.

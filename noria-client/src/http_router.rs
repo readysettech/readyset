@@ -1,22 +1,23 @@
-use anyhow::anyhow;
-use futures::TryFutureExt;
-use hyper::header::CONTENT_TYPE;
-use hyper::service::make_service_fn;
-use hyper::{self, Body, Method, Request, Response};
 use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+
+use anyhow::anyhow;
+use futures::TryFutureExt;
+use hyper::header::CONTENT_TYPE;
+use hyper::service::make_service_fn;
+use hyper::{self, Body, Method, Request, Response};
+use metrics_exporter_prometheus::PrometheusHandle;
+use noria_client_metrics::recorded;
 use stream_cancel::Valve;
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
 
 use crate::query_status_cache::QueryStatusCache;
-use metrics_exporter_prometheus::PrometheusHandle;
-use noria_client_metrics::recorded;
 
 /// Routes requests from an HTTP server to expose metrics data from the adapter.
 /// To see the supported http requests and their respective routing, see

@@ -1,14 +1,15 @@
-use nom_sql::SqlType;
-use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::convert::TryInto;
+
+use dataflow_expression::Expression;
+use nom_sql::SqlType;
+use noria_errors::ReadySetResult;
+use serde::{Deserialize, Serialize};
 use tracing::error;
 
 use crate::prelude::*;
 use crate::processing::{ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex};
-use dataflow_expression::Expression;
-use noria_errors::ReadySetResult;
-use std::convert::TryInto;
 
 /// Permutes or omits columns from its source node, or adds additional columns whose values are
 /// given by expressions
@@ -292,13 +293,14 @@ impl Ingredient for Project {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::convert::TryFrom;
+
     use nom_sql::BinaryOperator;
     use Expression::{Column, Literal, Op};
 
+    use super::*;
     use crate::ops;
     use crate::state::MaterializedNodeState;
-    use std::convert::TryFrom;
 
     fn setup(materialized: bool, all: bool, add: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();

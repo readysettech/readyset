@@ -1,10 +1,11 @@
-use crate::ops;
-use crate::prelude::*;
-use crate::processing::SuggestedIndex;
+use std::collections::{HashMap, HashSet};
+
 use noria::consistency::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use std::collections::{HashMap, HashSet};
+use crate::ops;
+use crate::prelude::*;
+use crate::processing::SuggestedIndex;
 
 mod process;
 #[cfg(test)]

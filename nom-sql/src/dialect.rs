@@ -1,7 +1,7 @@
-use bit_vec::BitVec;
 use std::borrow::Cow;
 use std::str::{self, FromStr};
 
+use bit_vec::BitVec;
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_while1};
 use nom::character::complete::char;

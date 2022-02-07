@@ -1,10 +1,10 @@
 #![allow(dead_code, unused_variables)]
-use noria::{Builder, Handle, ReuseConfigType};
-use noria_data::DataType;
 use std::collections::HashMap;
 use std::fs::File;
-
 use std::time;
+
+use noria::{Builder, Handle, ReuseConfigType};
+use noria_data::DataType;
 
 #[macro_use]
 mod populate;

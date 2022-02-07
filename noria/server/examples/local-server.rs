@@ -1,6 +1,7 @@
-use noria_server::Builder;
 use std::convert::TryInto;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use noria_server::Builder;
 
 #[tokio::main]
 async fn main() {

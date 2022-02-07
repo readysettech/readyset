@@ -1,3 +1,5 @@
+use std::convert::{TryFrom, TryInto};
+
 use async_trait::async_trait;
 use binlog::consts::{BinlogChecksumAlg, EventType};
 use mysql::binlog::jsonb::{self, JsonbToJsonError};
@@ -9,11 +11,9 @@ use mysql_common::binlog::value::BinlogValue;
 use noria::replication::ReplicationOffset;
 use noria::{ReadySetError, ReadySetResult};
 use noria_data::DataType;
-use std::convert::{TryFrom, TryInto};
-
-use crate::noria_adapter::{Connector, ReplicationAction};
 
 use super::BinlogPosition;
+use crate::noria_adapter::{Connector, ReplicationAction};
 
 const CHECKSUM_QUERY: &str = "SET @master_binlog_checksum='CRC32'";
 const DEFAULT_SERVER_ID: u32 = u32::MAX - 55;

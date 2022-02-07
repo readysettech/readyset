@@ -1,13 +1,13 @@
-use maplit::hashmap;
-
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::TryInto;
+
+use maplit::hashmap;
+use noria_errors::{internal_err, ReadySetResult};
+use serde::{Deserialize, Serialize};
 use vec1::vec1;
 
 use crate::prelude::*;
 use crate::processing::{ColumnSource, SuggestedIndex};
-use noria_errors::{internal_err, ReadySetResult};
 
 /// Latest provides an operator that will maintain the last record for every group.
 ///
@@ -154,7 +154,6 @@ impl Ingredient for Latest {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::ops;
 
     fn setup(key: usize, mat: bool) -> ops::test::MockGraph {

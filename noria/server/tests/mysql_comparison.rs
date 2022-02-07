@@ -1,7 +1,3 @@
-use mysql::prelude::Queryable;
-use mysql::{OptsBuilder, Params};
-use serde::Deserialize;
-
 use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::fmt::Write as FmtWrite;
@@ -10,11 +6,13 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-
 use std::{io, panic, thread, time};
 
+use mysql::prelude::Queryable;
+use mysql::{OptsBuilder, Params};
 use noria_data::DataType;
 use noria_server::Builder;
+use serde::Deserialize;
 
 const DIRECTORY_PREFIX: &str = "tests/mysql_comparison_tests";
 

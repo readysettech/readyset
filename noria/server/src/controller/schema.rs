@@ -1,11 +1,12 @@
-use super::keys::provenance_of;
-use super::recipe::{Recipe, Schema};
 use dataflow::ops;
 use dataflow::prelude::*;
 use nom_sql::{Column, ColumnSpecification, SqlType};
 use noria::{ColumnBase, ColumnSchema};
 use ops::NodeOperator;
 use tracing::{error, trace};
+
+use super::keys::provenance_of;
+use super::recipe::{Recipe, Schema};
 
 type Path<'a> = &'a [(
     petgraph::graph::NodeIndex,

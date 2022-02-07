@@ -1,8 +1,9 @@
-use super::ReadHandle;
-use crate::inner::Inner;
 use std::collections::hash_map::RandomState;
 use std::fmt;
 use std::hash::BuildHasher;
+
+use super::ReadHandle;
+use crate::inner::Inner;
 
 /// A type that is both `Sync` and `Send` and lets you produce new [`ReadHandle`] instances.
 ///

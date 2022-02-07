@@ -1,6 +1,5 @@
-use crate::common::statement_terminator;
-use crate::expression::{expression, scoped_var};
-use crate::{Dialect, Expression};
+use std::{fmt, str};
+
 use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
@@ -10,7 +9,10 @@ use nom::multi::separated_nonempty_list;
 use nom::sequence::{separated_pair, terminated, tuple};
 use nom::IResult;
 use serde::{Deserialize, Serialize};
-use std::{fmt, str};
+
+use crate::common::statement_terminator;
+use crate::expression::{expression, scoped_var};
+use crate::{Dialect, Expression};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SetStatement {

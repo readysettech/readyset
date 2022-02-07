@@ -131,15 +131,15 @@
 
 extern crate mysql_common as myc;
 
-use async_trait::async_trait;
-use error::{other_error, OtherErrorKind};
 use std::collections::HashMap;
 use std::io;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net;
 
+use async_trait::async_trait;
 use authentication::{generate_auth_data, hash_password};
 use constants::{PROTOCOL_41, RESERVED, SECURE_CONNECTION};
+use error::{other_error, OtherErrorKind};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net;
 
 pub use crate::myc::constants::{ColumnFlags, ColumnType, StatusFlags};
 pub use crate::writers::prepare_column_definitions;

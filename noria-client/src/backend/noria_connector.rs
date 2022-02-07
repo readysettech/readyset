@@ -1,34 +1,32 @@
-use noria::consistency::Timestamp;
-use noria::internal::LocalNodeIndex;
-use noria::results::Results;
-use noria::{
-    ControllerHandle, ReadySetError, ReadySetResult, SchemaType, Table, TableOperation, View,
-    ViewQuery, ViewQueryFilter, ViewQueryOperator,
-};
-use noria_data::DataType;
+use std::borrow::Cow;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::convert::{TryFrom, TryInto};
+use std::fmt;
+use std::ops::Bound;
+use std::sync::{atomic, Arc, RwLock};
 
+use itertools::Itertools;
 use nom_sql::{
     self, BinaryOperator, ColumnConstraint, DeleteStatement, Expression, InsertStatement, Literal,
     SelectStatement, SqlQuery, UpdateStatement,
 };
-use vec1::vec1;
-
-use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::convert::{TryFrom, TryInto};
-use std::ops::Bound;
-use std::sync::{atomic, Arc, RwLock};
-
-use crate::rewrite::{self, ProcessedQueryParams};
-use crate::utils;
-
-use crate::backend::SelectSchema;
-use itertools::Itertools;
-use noria::{ColumnSchema, KeyColumnIdx, KeyComparison, ViewPlaceholder, ViewSchema};
+use noria::consistency::Timestamp;
+use noria::internal::LocalNodeIndex;
+use noria::results::Results;
+use noria::{
+    ColumnSchema, ControllerHandle, KeyColumnIdx, KeyComparison, ReadySetError, ReadySetResult,
+    SchemaType, Table, TableOperation, View, ViewPlaceholder, ViewQuery, ViewQueryFilter,
+    ViewQueryOperator, ViewSchema,
+};
+use noria_data::DataType;
 use noria_errors::ReadySetError::PreparedStatementMissing;
 use noria_errors::{internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err};
-use std::fmt;
 use tracing::{error, info, trace};
+use vec1::vec1;
+
+use crate::backend::SelectSchema;
+use crate::rewrite::{self, ProcessedQueryParams};
+use crate::utils;
 
 type StatementID = u32;
 

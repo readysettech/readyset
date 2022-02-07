@@ -1,17 +1,18 @@
-use nom::character::complete::{multispace0, multispace1};
-use serde::{Deserialize, Serialize};
 use std::{fmt, str};
+
+use nom::branch::alt;
+use nom::bytes::complete::tag_no_case;
+use nom::character::complete::{multispace0, multispace1};
+use nom::combinator::{map, opt};
+use nom::multi::many0;
+use nom::sequence::{preceded, tuple};
+use nom::IResult;
+use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::column::Column;
 use crate::common::{column_identifier_no_alias, ws_sep_comma};
 use crate::Dialect;
-use nom::branch::alt;
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::{map, opt};
-use nom::multi::many0;
-use nom::sequence::{preceded, tuple};
-use nom::IResult;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum OrderType {

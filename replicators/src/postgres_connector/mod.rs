@@ -3,12 +3,11 @@ mod snapshot;
 mod wal;
 mod wal_reader;
 
-pub use connector::PostgresWalConnector;
-pub use snapshot::PostgresReplicator;
-
 use std::fmt::{self, Display};
 
+pub use connector::PostgresWalConnector;
 use noria::replication::ReplicationOffset;
+pub use snapshot::PostgresReplicator;
 
 pub(crate) const REPLICATION_SLOT: &str = "noria";
 pub(crate) const PUBLICATION_NAME: &str = "noria";

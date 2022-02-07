@@ -1,7 +1,8 @@
+use noria::ReadySetResult;
+
 use crate::column::Column;
 use crate::query::MirQuery;
 use crate::MirNodeRef;
-use noria::ReadySetResult;
 
 fn has_column(n: &MirNodeRef, column: &Column) -> bool {
     if n.borrow().columns().contains(column) {
@@ -92,10 +93,9 @@ mod tests {
             BinaryOperator, ColumnSpecification, Expression, FunctionExpression, Literal, SqlType,
         };
 
+        use super::*;
         use crate::node::node_inner::MirNodeInner;
         use crate::node::MirNode;
-
-        use super::*;
 
         #[test]
         fn changing_index() {

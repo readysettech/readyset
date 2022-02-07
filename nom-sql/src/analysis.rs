@@ -1,8 +1,9 @@
 pub mod visit;
 
-use maplit::hashset;
 use std::collections::{HashSet, VecDeque};
 use std::iter;
+
+use maplit::hashset;
 
 use crate::create::CreateCachedQueryStatement;
 use crate::{Column, Expression, FunctionExpression, InValue, SqlQuery, Table};
@@ -327,9 +328,10 @@ mod tests {
     use crate::BinaryOperator;
 
     mod referred_columns {
+        use Expression::{Call, Column as ColExpr, Literal as LitExpr};
+
         use super::*;
         use crate::Literal;
-        use Expression::{Call, Column as ColExpr, Literal as LitExpr};
 
         #[test]
         fn literal() {

@@ -3,7 +3,6 @@ use noria_client::BackendBuilder;
 use noria_client_test_helpers::mysql_helpers::MySQLAdapter;
 use noria_client_test_helpers::{self, sleep};
 use noria_server::Handle;
-
 use serial_test::serial;
 
 async fn setup() -> (mysql_async::Opts, Handle) {

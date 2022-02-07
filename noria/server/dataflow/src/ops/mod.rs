@@ -1,10 +1,11 @@
-use derive_more::From;
-use noria::KeyComparison;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-use crate::prelude::*;
+use derive_more::From;
+use noria::KeyComparison;
 use noria_errors::ReadySetResult;
+use serde::{Deserialize, Serialize};
+
+use crate::prelude::*;
 
 pub mod filter;
 pub mod grouped;
@@ -203,12 +204,12 @@ pub mod test {
     use std::cell;
     use std::collections::HashMap;
 
+    use petgraph::graph::NodeIndex;
+
     use crate::node;
     use crate::prelude::*;
     use crate::processing::SuggestedIndex;
-
     use crate::state::MaterializedNodeState;
-    use petgraph::graph::NodeIndex;
 
     pub(super) struct MockGraph {
         graph: Graph,

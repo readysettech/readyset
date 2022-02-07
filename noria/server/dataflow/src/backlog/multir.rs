@@ -1,3 +1,6 @@
+use std::convert::{TryFrom, TryInto};
+use std::ops::RangeBounds;
+
 use ahash::RandomState;
 use common::DataType;
 use launchpad::intervals::BoundPair;
@@ -5,8 +8,6 @@ use noria::consistency::Timestamp;
 use noria::KeyComparison;
 use reader_map::refs::{Miss, ValuesIter};
 use serde::{Deserialize, Serialize};
-use std::convert::{TryFrom, TryInto};
-use std::ops::RangeBounds;
 use vec1::{vec1, Vec1};
 
 #[derive(Clone, Debug)]
@@ -242,9 +243,10 @@ impl Handle {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use proptest::prelude::*;
     use reader_map::handles::WriteHandle;
+
+    use super::*;
 
     fn make_single() -> (
         WriteHandle<DataType, Box<[DataType]>, i64, Timestamp, RandomState>,

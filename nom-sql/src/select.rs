@@ -1,12 +1,18 @@
+use std::{fmt, str};
+
 use itertools::Itertools;
+use nom::branch::alt;
+use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::{multispace0, multispace1};
+use nom::combinator::{map, opt};
 use nom::error::ErrorKind;
 use nom::multi::many0;
+use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::{
     alt, call, char, complete, delimited, do_parse, opt, separated_nonempty_list, tag, tag_no_case,
+    IResult,
 };
 use serde::{Deserialize, Serialize};
-use std::{fmt, str};
 
 use crate::common::{
     as_alias, field_definition_expr, field_list, schema_table_reference, statement_terminator,
@@ -17,11 +23,6 @@ use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use crate::order::{order_clause, OrderClause};
 use crate::table::Table;
 use crate::{Column, Dialect, Expression, FunctionExpression};
-use nom::branch::alt;
-use nom::bytes::complete::{tag, tag_no_case};
-use nom::combinator::{map, opt};
-use nom::sequence::{delimited, preceded, terminated, tuple};
-use nom::IResult;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Default, Serialize, Deserialize)]
 pub struct GroupByClause {

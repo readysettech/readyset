@@ -1,5 +1,5 @@
-use crate::node::BaseNodeAdaptation;
-use crate::{Column, MirNodeRef};
+use std::fmt::{self, Debug, Formatter};
+
 use common::{DataType, IndexType};
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::grouped::extremum::Extremum;
@@ -10,7 +10,9 @@ use nom_sql::{ColumnSpecification, Expression, OrderType};
 use noria::ViewPlaceholder;
 use noria_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Debug, Formatter};
+
+use crate::node::BaseNodeAdaptation;
+use crate::{Column, MirNodeRef};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum MirNodeInner {

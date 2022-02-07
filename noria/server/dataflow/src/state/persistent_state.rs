@@ -1043,9 +1043,10 @@ impl PersistentState {
     // fragile, as it depends on the LOG format not changing, and if it does the report
     // will be less accurate or not work at all. This is however not critical.
     fn compaction_progress_watcher(&self) -> anyhow::Result<impl notify::Watcher> {
-        use notify::{raw_watcher, RecursiveMode, Watcher};
         use std::fs::File;
         use std::io::{Seek, SeekFrom};
+
+        use notify::{raw_watcher, RecursiveMode, Watcher};
 
         // We open the LOG file, skip to the end, and begin watching for change events
         // on it in order to get the latest log entries as they come
@@ -1552,9 +1553,11 @@ impl SizeOf for PersistentState {
 #[cfg(test)]
 #[allow(clippy::unreachable)]
 mod tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
+
+    use pretty_assertions::assert_eq;
+
+    use super::*;
 
     fn insert<S: State>(state: &mut S, row: Vec<DataType>) {
         let record: Record = row.into();
@@ -2217,11 +2220,13 @@ mod tests {
     }
 
     mod lookup_range {
-        use super::*;
-        use pretty_assertions::assert_eq;
         use std::iter;
         use std::ops::Bound::*;
+
+        use pretty_assertions::assert_eq;
         use vec1::vec1;
+
+        use super::*;
 
         fn setup() -> PersistentState {
             let mut state = setup_persistent("persistent_state_single_key", None);
@@ -2626,8 +2631,9 @@ mod tests {
 
 #[cfg(feature = "bench")]
 pub mod bench {
-    use super::*;
     use itertools::Itertools;
+
+    use super::*;
 
     const UNIQUE_ENTIRES: usize = 100000;
 

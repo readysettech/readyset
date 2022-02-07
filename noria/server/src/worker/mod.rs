@@ -1,6 +1,11 @@
-use crate::coordination::{DomainDescriptor, RunDomainResponse};
-use crate::worker::replica::WrappedDomainRequest;
-use crate::ReadySetResult;
+use std::cmp;
+use std::collections::hash_map::Entry::{Occupied, Vacant};
+use std::collections::HashMap;
+use std::future::Future;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
+
 use dataflow::{DomainBuilder, DomainRequest, Packet, Readers};
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
@@ -15,13 +20,6 @@ use noria::{channel, ReadySetError};
 use noria_errors::internal_err;
 use replica::ReplicaAddr;
 use serde::{Deserialize, Serialize};
-use std::cmp;
-use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::HashMap;
-use std::future::Future;
-use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
 use stream_cancel::Valve;
 use tikv_jemalloc_ctl::stats::allocated_mib;
 use tikv_jemalloc_ctl::{epoch, epoch_mib, stats};
@@ -33,6 +31,9 @@ use tracing::{debug, error, info, info_span, trace, warn};
 use url::Url;
 
 use self::replica::Replica;
+use crate::coordination::{DomainDescriptor, RunDomainResponse};
+use crate::worker::replica::WrappedDomainRequest;
+use crate::ReadySetResult;
 
 pub(crate) mod readers;
 mod replica;

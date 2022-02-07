@@ -597,12 +597,14 @@ fn addtime_times(time1: &MysqlTime, time2: &MysqlTime) -> MysqlTime {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
     use std::convert::TryInto;
     use std::sync::Arc;
+
+    use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
     use test_strategy::proptest;
     use Expression::*;
+
+    use super::*;
 
     #[test]
     fn eval_column() {
@@ -1271,8 +1273,9 @@ mod tests {
     }
 
     mod builtin_funcs {
-        use super::*;
         use launchpad::arbitrary::arbitrary_timestamp_naive_date_time;
+
+        use super::*;
 
         // NOTE(Fran): We have to be careful when testing timezones, as the time difference
         //   between two timezones might differ depending on the date (due to daylight savings

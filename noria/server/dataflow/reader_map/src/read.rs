@@ -1,18 +1,20 @@
-use crate::inner::Inner;
-use crate::values::Values;
-use crate::Aliased;
-use left_right::ReadGuard;
-use noria::internal::IndexType;
-
 use std::borrow::Borrow;
 use std::collections::hash_map::RandomState;
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
 use std::iter::FromIterator;
 
+use left_right::ReadGuard;
+use noria::internal::IndexType;
+
+use crate::inner::Inner;
+use crate::values::Values;
+use crate::Aliased;
+
 mod read_ref;
-pub use crate::inner::Miss;
 pub use read_ref::{MapReadRef, ReadGuardIter};
+
+pub use crate::inner::Miss;
 
 mod factory;
 pub use factory::ReadHandleFactory;

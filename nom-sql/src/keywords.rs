@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-use crate::common::eof;
 use lazy_static::lazy_static;
 use maplit::hashset;
 use nom::branch::alt;
@@ -8,6 +7,8 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::peek;
 use nom::sequence::terminated;
 use nom::IResult;
+
+use crate::common::eof;
 
 // NOTE: Each keyword_$start_letter_to_$end_letter function uses `alt`,
 // which is implemented for tuples sizes up to 21. Because of this constraint

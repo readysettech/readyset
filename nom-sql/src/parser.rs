@@ -1,5 +1,9 @@
-use serde::{Deserialize, Serialize};
 use std::{fmt, str};
+
+use nom::branch::alt;
+use nom::combinator::map;
+use nom::IResult;
+use serde::{Deserialize, Serialize};
 
 use crate::alter::{alter_table_statement, AlterTableStatement};
 use crate::compound_select::{compound_selection, CompoundSelectStatement};
@@ -22,9 +26,6 @@ use crate::transaction::{
 use crate::update::{updating, UpdateStatement};
 use crate::use_statement::{use_statement, UseStatement};
 use crate::Dialect;
-use nom::branch::alt;
-use nom::combinator::map;
-use nom::IResult;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
@@ -286,10 +287,10 @@ mod tests {
     }
 
     mod mysql {
-        use super::*;
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
+        use super::*;
         use crate::table::Table;
 
         #[test]
@@ -350,10 +351,10 @@ mod tests {
     }
 
     mod tests_postgres {
-        use super::*;
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
+        use super::*;
         use crate::table::Table;
 
         #[test]

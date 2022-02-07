@@ -1,17 +1,19 @@
-use crate::controller::migrate::Migration;
-use crate::controller::HandleRequest;
-use crate::ControllerDescriptor;
+use std::collections::HashMap;
+use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
+
 use anyhow::format_err;
 use dataflow::prelude::*;
 use noria::consensus::Authority;
 use noria::prelude::*;
 use noria_errors::bad_request_err;
 use reqwest::Url;
-use std::collections::HashMap;
-use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
 use stream_cancel::Trigger;
 use tokio::sync::mpsc::Sender;
+
+use crate::controller::migrate::Migration;
+use crate::controller::HandleRequest;
+use crate::ControllerDescriptor;
 
 /// A handle to a controller that is running in the same process as this one.
 pub struct Handle {

@@ -36,13 +36,13 @@ use std::cmp::{max, Ordering};
 use std::fmt::Debug;
 use std::ops::{Bound, RangeBounds};
 use std::{fmt, mem};
-use Bound::*;
-use Ordering::*;
 
 use launchpad::intervals::{
     cmp_end_start, cmp_endbound, cmp_start_end, cmp_startbound, covers, intersection, overlaps,
 };
 use proptest::arbitrary::Arbitrary;
+use Bound::*;
+use Ordering::*;
 
 /// A tree for storing intervals
 ///
@@ -1526,11 +1526,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use proptest::prelude::*;
     use std::hash::Hash;
     use std::ops::{Bound, Range};
+
+    use proptest::prelude::*;
     use test_strategy::proptest;
+
+    use super::*;
 
     fn arbitrary_ordered_bound<K: Arbitrary + Ord>() -> impl Strategy<Value = (Bound<K>, Bound<K>)>
     {
@@ -2370,9 +2372,10 @@ mod tests {
     }
 
     mod balancing {
-        use super::*;
         use pretty_assertions::assert_eq;
         use test_strategy::proptest;
+
+        use super::*;
 
         #[test]
         fn rotate_right() {

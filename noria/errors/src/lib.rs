@@ -1,10 +1,11 @@
 //! Error handling, definitions, and utilities
 
+use std::error::Error;
+use std::io;
+
 use derive_more::Display;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
-use std::error::Error;
-use std::io;
 use thiserror::Error;
 use url::Url;
 use vec1::Size0Error;

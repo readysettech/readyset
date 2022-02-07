@@ -1,11 +1,14 @@
+use std::collections::{HashMap, HashSet};
+use std::convert::{TryFrom, TryInto};
+use std::mem;
+
 use itertools::Itertools;
 use launchpad::intervals::into_bound_endpoint;
 use launchpad::Indices;
 use maplit::hashmap;
+use noria::KeyComparison;
+use noria_errors::{internal_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::convert::{TryFrom, TryInto};
-use std::mem;
 use vec1::{vec1, Vec1};
 
 use super::Side;
@@ -13,8 +16,6 @@ use crate::prelude::*;
 use crate::processing::{
     ColumnMiss, ColumnRef, ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex,
 };
-use noria::KeyComparison;
-use noria_errors::{internal_err, ReadySetResult};
 
 /// Kind of join
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -985,7 +986,6 @@ impl Ingredient for Join {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::ops;
 
     fn setup() -> (ops::test::MockGraph, IndexPair, IndexPair) {

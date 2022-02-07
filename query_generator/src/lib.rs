@@ -62,18 +62,6 @@
 
 mod distribution_annotation;
 
-use anyhow::anyhow;
-use chrono::{FixedOffset, NaiveDate, NaiveTime, TimeZone};
-use clap::Parser;
-use derive_more::{Display, From, Into};
-use itertools::{Either, Itertools};
-use lazy_static::lazy_static;
-use nom_sql::analysis::{contains_aggregate, ReferredColumns};
-use proptest::arbitrary::{any, any_with, Arbitrary};
-use proptest::strategy::{BoxedStrategy, Strategy};
-use rand::distributions::Distribution;
-use rand::Rng;
-use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
@@ -82,14 +70,19 @@ use std::hash::Hash;
 use std::iter::{self, FromIterator};
 use std::ops::{Bound, DerefMut};
 use std::str::FromStr;
-use strum::IntoEnumIterator;
-use strum_macros::EnumIter;
-use test_strategy::Arbitrary;
-use zipf::ZipfDistribution;
+use std::sync::Arc;
 
+use anyhow::anyhow;
 use bit_vec::BitVec;
+use chrono::{FixedOffset, NaiveDate, NaiveTime, TimeZone};
+use clap::Parser;
+use derive_more::{Display, From, Into};
+pub use distribution_annotation::DistributionAnnotation;
 use eui48::{MacAddress, MacAddressFormat};
+use itertools::{Either, Itertools};
 use launchpad::intervals::{BoundPair, IterBoundPair};
+use lazy_static::lazy_static;
+use nom_sql::analysis::{contains_aggregate, ReferredColumns};
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpression,
     CreateTableStatement, Expression, FieldDefinitionExpression, FunctionExpression, InValue,
@@ -98,11 +91,16 @@ use nom_sql::{
 };
 use noria_data::DataType;
 use parking_lot::Mutex;
-use rand::distributions::Standard;
+use proptest::arbitrary::{any, any_with, Arbitrary};
+use proptest::strategy::{BoxedStrategy, Strategy};
+use rand::distributions::{Distribution, Standard};
+use rand::Rng;
 use rust_decimal::Decimal;
-use std::sync::Arc;
-
-pub use distribution_annotation::DistributionAnnotation;
+use serde::{Deserialize, Serialize};
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
+use test_strategy::Arbitrary;
+use zipf::ZipfDistribution;
 
 /// Generate a constant value with the given [`SqlType`]
 ///

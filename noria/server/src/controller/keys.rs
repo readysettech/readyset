@@ -1,9 +1,9 @@
+use std::collections::HashMap;
+use std::convert::TryFrom;
+
 pub use common::IndexRef;
 use dataflow::prelude::*;
 use noria::ReadySetError;
-
-use std::collections::HashMap;
-use std::convert::TryFrom;
 use vec1::Vec1;
 
 // TODO: rewrite as iterator
@@ -372,8 +372,9 @@ fn trace(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use dataflow::{node, ops};
+
+    use super::*;
 
     fn bases() -> (Graph, NodeIndex, NodeIndex) {
         let mut g = petgraph::Graph::new();

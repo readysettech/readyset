@@ -76,8 +76,9 @@ impl StripPostFilters for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use nom_sql::{parse_query, Dialect};
+
+    use super::*;
 
     #[test]
     fn strip_ilike() {

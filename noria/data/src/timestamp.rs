@@ -1,6 +1,7 @@
+use std::fmt;
+
 use chrono::{DateTime, FixedOffset, NaiveDateTime};
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
 /// An optimized storage for a timestamp with timezone. Sadly the way chrono implements
 /// DateTime<Tz> occupies at least 16 bytes, and therefore overflows DataType. However

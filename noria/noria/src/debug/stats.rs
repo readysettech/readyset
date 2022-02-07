@@ -1,8 +1,10 @@
-use crate::internal::*;
-use crate::MaterializationStatus;
+use std::collections::HashMap;
+
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+
+use crate::internal::*;
+use crate::MaterializationStatus;
 
 type DomainMap = HashMap<(DomainIndex, usize), (DomainStats, HashMap<NodeIndex, NodeStats>)>;
 

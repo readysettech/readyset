@@ -1,17 +1,16 @@
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
+use common::SizeOf;
 use noria::replication::ReplicationOffset;
 use noria::KeyComparison;
 use rand::{self, Rng};
 use tracing::trace;
 
-use crate::prelude::*;
-use crate::state::single_state::SingleState;
-use common::SizeOf;
-
 use super::keyed_state::KeyedState;
 use super::{RangeLookupResult, Rows, StateEvicted};
+use crate::prelude::*;
+use crate::state::single_state::SingleState;
 
 #[derive(Default)]
 pub struct MemoryState {
@@ -459,9 +458,10 @@ impl MemoryState {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::convert::TryInto;
     use std::ops::Bound;
+
+    use super::*;
 
     fn insert<S: State>(state: &mut S, row: Vec<DataType>) {
         let record: Record = row.into();
@@ -583,9 +583,11 @@ mod tests {
     }
 
     mod lookup_range {
-        use super::*;
         use std::ops::{Bound, RangeBounds};
+
         use vec1::vec1;
+
+        use super::*;
 
         mod partial {
             use vec1::Vec1;

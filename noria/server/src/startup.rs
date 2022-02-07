@@ -51,16 +51,15 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::{process, time};
 
+use dataflow::Readers;
 use futures_util::future::{Either, TryFutureExt};
 use launchpad::futures::abort_on_panic;
+use noria::consensus::Authority;
+use noria::{ControllerDescriptor, WorkerDescriptor};
 use stream_cancel::Valve;
 use tokio::net::TcpListener;
 use tracing::error;
 use url::Url;
-
-use dataflow::Readers;
-use noria::consensus::Authority;
-use noria::{ControllerDescriptor, WorkerDescriptor};
 
 use crate::controller::Controller;
 use crate::handle::Handle;

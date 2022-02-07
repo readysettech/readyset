@@ -5,19 +5,21 @@
 //! domains, but does not perform that copying itself (that is the role of the `augmentation`
 //! module).
 
-use crate::controller::keys;
-use crate::controller::migrate::DomainMigrationPlan;
-use crate::controller::state::graphviz;
+use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
+
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use maplit::hashmap;
 use noria_errors::{internal, internal_err, invariant, ReadySetError, ReadySetResult};
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
 use tracing::{debug, error, info, info_span, trace};
 use vec1::Vec1;
+
+use crate::controller::keys;
+use crate::controller::migrate::DomainMigrationPlan;
+use crate::controller::state::graphviz;
 
 mod plan;
 

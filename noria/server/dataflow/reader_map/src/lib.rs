@@ -202,15 +202,16 @@
 #![deny(unreachable_pub)]
 #![feature(btree_drain_filter)]
 
+use std::collections::hash_map::RandomState;
+use std::fmt;
+use std::hash::{BuildHasher, Hash};
+
+use left_right::aliasing::Aliased;
+use noria::internal::IndexType;
+
 use crate::inner::Inner;
 use crate::read::ReadHandle;
 use crate::write::WriteHandle;
-use left_right::aliasing::Aliased;
-use noria::internal::IndexType;
-use std::collections::hash_map::RandomState;
-
-use std::fmt;
-use std::hash::{BuildHasher, Hash};
 
 mod inner;
 mod read;
@@ -219,22 +220,21 @@ mod write;
 
 /// Handles to the read and write halves of an `reader_map`.
 pub mod handles {
-    pub use crate::write::WriteHandle;
-
     // These cannot use ::{..} syntax because of
     // https://github.com/rust-lang/rust/issues/57411
     pub use crate::read::{ReadHandle, ReadHandleFactory};
+    pub use crate::write::WriteHandle;
 }
 
 /// Helper types that give access to values inside the read half of an `reader_map`.
 pub mod refs {
     // Same here, ::{..} won't work.
-    pub use super::values::{Values, ValuesIter};
-    pub use crate::read::{MapReadRef, Miss, ReadGuardIter};
-
     // Expose `ReadGuard` since it has useful methods the user will likely care about.
     #[doc(inline)]
     pub use left_right::ReadGuard;
+
+    pub use super::values::{Values, ValuesIter};
+    pub use crate::read::{MapReadRef, Miss, ReadGuardIter};
 }
 
 // NOTE: It is _critical_ that this module is not public.

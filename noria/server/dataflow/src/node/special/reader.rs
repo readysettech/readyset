@@ -1,13 +1,13 @@
 pub mod post_lookup;
 
-use metrics::histogram;
-use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 
 use failpoint_macros::failpoint;
+use metrics::histogram;
 use noria::consistency::Timestamp;
 use noria::metrics::recorded;
 use noria::{KeyColumnIdx, KeyComparison, ViewPlaceholder};
+use serde::{Deserialize, Serialize};
 use tracing::{trace, warn};
 
 use self::post_lookup::PostLookup;

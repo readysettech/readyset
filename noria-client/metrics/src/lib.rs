@@ -1,13 +1,14 @@
 #![feature(derive_default_enum)]
 
-use metrics::SharedString;
-use nom_sql::SqlQuery;
-use noria::ReadySetError;
-use serde::Serialize;
 use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use metrics::SharedString;
+use nom_sql::SqlQuery;
+use noria::ReadySetError;
+use serde::Serialize;
 
 pub mod recorded;
 

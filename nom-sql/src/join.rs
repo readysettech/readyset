@@ -1,16 +1,17 @@
-use itertools::Itertools;
-use serde::{Deserialize, Serialize};
 use std::{fmt, str};
+
+use itertools::Itertools;
+use nom::branch::alt;
+use nom::bytes::complete::tag_no_case;
+use nom::combinator::map;
+use nom::IResult;
+use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::column::Column;
 use crate::select::SelectStatement;
 use crate::table::Table;
 use crate::Expression;
-use nom::branch::alt;
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::map;
-use nom::IResult;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum JoinRightSide {

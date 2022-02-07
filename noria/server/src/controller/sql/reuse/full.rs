@@ -1,9 +1,10 @@
-use crate::controller::sql::query_graph::QueryGraph;
-use crate::controller::sql::reuse::{ReuseConfiguration, ReuseType};
-
-use noria::ReadySetError;
 use std::collections::HashMap;
 use std::vec::Vec;
+
+use noria::ReadySetError;
+
+use crate::controller::sql::query_graph::QueryGraph;
+use crate::controller::sql::reuse::{ReuseConfiguration, ReuseType};
 
 /// Full reuse algorithm
 /// Implementation of reuse algorithm that checks all available reuse options.

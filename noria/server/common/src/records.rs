@@ -1,7 +1,8 @@
-use noria_data::DataType;
-use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::ops::{Deref, DerefMut};
+
+use noria_data::DataType;
+use serde::{Deserialize, Serialize};
 
 /// A record is a single positive or negative data record with an associated time stamp.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]

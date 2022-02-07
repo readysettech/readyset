@@ -1,7 +1,3 @@
-use crate::inner::{Inner, Miss};
-use crate::values::{Values, ValuesInner};
-use crate::Aliased;
-use left_right::ReadGuard;
 use std::borrow::Borrow;
 use std::collections::btree_map;
 use std::collections::hash_map::RandomState;
@@ -9,6 +5,11 @@ use std::fmt;
 use std::hash::{BuildHasher, Hash};
 use std::ops::RangeBounds;
 
+use left_right::ReadGuard;
+
+use crate::inner::{Inner, Miss};
+use crate::values::{Values, ValuesInner};
+use crate::Aliased;
 // To make [`WriteHandle`] and friends work.
 #[cfg(doc)]
 use crate::WriteHandle;

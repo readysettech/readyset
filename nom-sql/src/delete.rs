@@ -1,15 +1,16 @@
-use nom::character::complete::multispace1;
-use serde::{Deserialize, Serialize};
 use std::{fmt, str};
+
+use nom::bytes::complete::tag_no_case;
+use nom::character::complete::multispace1;
+use nom::combinator::opt;
+use nom::sequence::{delimited, tuple};
+use nom::IResult;
+use serde::{Deserialize, Serialize};
 
 use crate::common::{schema_table_reference, statement_terminator};
 use crate::select::where_clause;
 use crate::table::Table;
 use crate::{Dialect, Expression};
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::opt;
-use nom::sequence::{delimited, tuple};
-use nom::IResult;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DeleteStatement {

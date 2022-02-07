@@ -1,6 +1,7 @@
-use crate::{myc, MsqlSrvError, StatementData, Value};
 use std::collections::HashMap;
 use std::convert::TryFrom;
+
+use crate::{myc, MsqlSrvError, StatementData, Value};
 
 /// A `ParamParser` decodes query parameters included in a client's `EXECUTE` command given
 /// type information for the expected parameters.

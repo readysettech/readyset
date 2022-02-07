@@ -2,12 +2,11 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use async_trait::async_trait;
 use clap::Parser;
-use tokio::net;
-use tracing::{error, instrument};
-
 use msql_srv::MysqlIntermediary;
 use nom_sql::Dialect;
 use noria_client_adapter::{ConnectionHandler, DatabaseType, NoriaAdapter};
+use tokio::net;
+use tracing::{error, instrument};
 
 mod backend;
 mod error;

@@ -1,8 +1,9 @@
+use std::collections::{HashMap, HashSet};
+
 use dataflow::prelude::*;
 use dataflow::{node, ops};
 use noria_errors::{internal, invariant, invariant_eq, ReadySetResult};
 use petgraph::graph::NodeIndex;
-use std::collections::{HashMap, HashSet};
 use tracing::{debug, error, info_span, trace};
 
 #[allow(clippy::cognitive_complexity)]

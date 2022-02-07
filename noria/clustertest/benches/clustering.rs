@@ -26,10 +26,11 @@ criterion::criterion_main!(benches);
 
 #[cfg(feature = "slow_bench")]
 mod slow_bench {
-    use clustertest::{DeploymentBuilder, ServerParams};
-    use criterion::Criterion;
     use std::cell::RefCell;
     use std::sync::Arc;
+
+    use clustertest::{DeploymentBuilder, ServerParams};
+    use criterion::Criterion;
 
     pub fn leader_failover(c: &mut Criterion) {
         let rt = tokio::runtime::Runtime::new().unwrap();

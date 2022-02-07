@@ -1,3 +1,9 @@
+use std::collections::{HashMap, HashSet};
+use std::convert::TryInto;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
 use anyhow::anyhow;
 use futures::future::join_all;
 use itertools::Itertools;
@@ -8,12 +14,6 @@ use prometheus_http_query::{Client, InstantVector as InstantVectorReq, Selector}
 use tokio::select;
 use tokio::sync::Mutex;
 use tracing::{error, info};
-
-use std::collections::{HashMap, HashSet};
-use std::convert::TryInto;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::Duration;
 
 /// A timeout for the prometheus query to scrape relevant metrics.
 /// Constant is in a string format, because that's what the prometheus client library we're using

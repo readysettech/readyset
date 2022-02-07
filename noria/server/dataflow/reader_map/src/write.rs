@@ -1,14 +1,15 @@
-use crate::inner::{Entry, Inner};
-use crate::read::ReadHandle;
-use crate::values::ValuesInner;
-use left_right::aliasing::Aliased;
-use left_right::Absorb;
-
-use rand::prelude::IteratorRandom;
 use std::collections::hash_map::RandomState;
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Bound, RangeBounds};
+
+use left_right::aliasing::Aliased;
+use left_right::Absorb;
+use rand::prelude::IteratorRandom;
+
+use crate::inner::{Entry, Inner};
+use crate::read::ReadHandle;
+use crate::values::ValuesInner;
 
 /// A handle that may be used to modify the eventually consistent map.
 ///

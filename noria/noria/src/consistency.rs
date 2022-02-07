@@ -1,9 +1,11 @@
 //! Primitives and structs related to maintaining different consistency
 //! models within the Noria dataflow graph.
-use crate::LocalNodeIndex;
+use std::collections::HashMap;
+
 use proptest::arbitrary::Arbitrary;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+
+use crate::LocalNodeIndex;
 
 /// The timestamp maps a each base table to a monotonically increasing
 /// identifier, the transaction id of the last transaction executed on the
@@ -114,9 +116,10 @@ impl Timestamp {
 
 #[cfg(test)]
 mod tests {
+    use test_strategy::proptest;
+
     use super::*;
     use crate::internal::LocalNodeIndex;
-    use test_strategy::proptest;
 
     fn create_timestamp(t: Vec<(LocalNodeIndex, u64)>) -> Timestamp {
         Timestamp {

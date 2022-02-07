@@ -153,10 +153,11 @@ pub(crate) fn convert_column(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use msql_srv::ColumnType::{self, *};
     use proptest::prelude::*;
     use test_strategy::proptest;
+
+    use super::*;
 
     pub fn arbitrary_column_type() -> impl Strategy<Value = ColumnType> {
         prop_oneof![

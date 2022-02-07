@@ -1,14 +1,16 @@
 mod parameters;
 mod populate;
 
-use crate::parameters::SampleKeys;
-use futures_util::stream::StreamExt;
-use noria::{Builder, Handle};
-use rand::prelude::*;
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Barrier};
 use std::time;
+
+use futures_util::stream::StreamExt;
+use noria::{Builder, Handle};
+use rand::prelude::*;
+
+use crate::parameters::SampleKeys;
 
 pub struct Backend {
     r: String,
@@ -179,8 +181,9 @@ impl Backend {
 
 #[tokio::main]
 async fn main() {
-    use crate::populate::*;
     use clap::{App, Arg};
+
+    use crate::populate::*;
 
     let matches = App::new("tpc_w")
         .version("0.1")

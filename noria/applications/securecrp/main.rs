@@ -1,12 +1,13 @@
 mod test_populate;
 
-use noria::{Builder, Handle, ReuseConfigType};
-use noria_data::DataType;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fs::File;
 use std::io::Write;
 use std::time;
+
+use noria::{Builder, Handle, ReuseConfigType};
+use noria_data::DataType;
 
 pub struct Backend {
     g: Handle,

@@ -331,10 +331,9 @@ mod tests {
     }
 
     mod mysql {
+        use super::*;
         use crate::common::ReferentialAction;
         use crate::{Column, ColumnConstraint, SqlType};
-
-        use super::*;
 
         #[test]
         fn parse_add_column() {

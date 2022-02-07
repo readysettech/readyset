@@ -1,6 +1,10 @@
-use crate::controller::ControllerRequest;
-use crate::metrics::{get_global_recorder, Clear, RecorderType};
-use crate::worker::WorkerRequest;
+use std::future::Future;
+use std::io;
+use std::net::{IpAddr, SocketAddr};
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
+
 use anyhow::anyhow;
 use futures::TryFutureExt;
 use hyper::header::CONTENT_TYPE;
@@ -9,18 +13,16 @@ use hyper::{self, Body, Method, Request, Response, StatusCode};
 use noria::consensus::{Authority, AuthorityControl};
 use noria::metrics::recorded;
 use noria::ReadySetError;
-use std::future::Future;
-use std::io;
-use std::net::{IpAddr, SocketAddr};
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
 use stream_cancel::Valve;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
 use tracing::warn;
+
+use crate::controller::ControllerRequest;
+use crate::metrics::{get_global_recorder, Clear, RecorderType};
+use crate::worker::WorkerRequest;
 
 /// Routes requests from an HTTP server to noria server workers and controllers.
 /// The NoriaServerHttpRouter takes several channels (`worker_tx`, `controller_tx`)

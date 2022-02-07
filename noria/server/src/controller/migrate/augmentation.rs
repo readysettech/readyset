@@ -6,16 +6,15 @@
 //!  - Existing egress nodes that gain new children must gain channels to facilitate forwarding
 //!  - State must be replayed for materializations in other domains that need it
 
-use dataflow::prelude::*;
-use tracing::{debug_span, trace};
-
 use std::collections::{HashMap, HashSet};
 
+use dataflow::prelude::*;
+use dataflow::DomainRequest;
 use petgraph::graph::NodeIndex;
+use tracing::{debug_span, trace};
 
 use crate::controller::migrate::DomainMigrationPlan;
 use crate::controller::state::DataflowState;
-use dataflow::DomainRequest;
 
 /// Adds all the necessary messages to [`DomainMigrationPlan`] to inform
 /// the domains (present in the `nodes` map) about all the new nodes that were

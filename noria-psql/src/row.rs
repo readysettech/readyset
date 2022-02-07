@@ -1,7 +1,9 @@
-use crate::value::Value;
-use noria_data::DataType;
 use std::sync::Arc;
+
+use noria_data::DataType;
 use tokio_postgres::types::Type;
+
+use crate::value::Value;
 
 /// A structure containing a `Vec<DataType>`, representing one row of data, which facilitates
 /// iteration over the values within this row as `Value` structures.
@@ -56,10 +58,12 @@ impl Iterator for RowIterator {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::convert::TryFrom;
+
     use psql_srv as ps;
     use rust_decimal::Decimal;
-    use std::convert::TryFrom;
+
+    use super::*;
 
     fn collect_row_values(row: Row) -> Vec<ps::Value> {
         row.into_iter()

@@ -1,40 +1,36 @@
+use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
+use std::ops::Deref;
+use std::vec::Vec;
+
 use ::serde::{Deserialize, Serialize};
 use common::IndexType;
 use dataflow::ops::join::JoinType;
 use dataflow::ops::union;
+use itertools::Itertools;
 use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};
 use mir::query::MirQuery;
 pub use mir::Column;
 use mir::MirNodeRef;
 use nom_sql::analysis::ReferredColumns;
-use petgraph::graph::NodeIndex;
-use std::convert::TryFrom;
-use tracing::{debug, error, trace, warn};
-
-use crate::controller::sql::mir::grouped::post_lookup_aggregates;
-use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
-use crate::controller::sql::query_signature::Signature;
-use crate::controller::sql::query_utils::extract_limit;
 use nom_sql::{
     BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableStatement, Expression,
     FieldDefinitionExpression, FunctionExpression, LimitClause, Literal, OrderClause,
     SelectStatement, TableKey, UnaryOperator,
 };
-
-use itertools::Itertools;
-
-use std::collections::{HashMap, HashSet};
-
-use std::ops::Deref;
-use std::vec::Vec;
-
-use crate::ReadySetResult;
 use noria::ViewPlaceholder;
 use noria_data::DataType;
 use noria_errors::{internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError};
+use petgraph::graph::NodeIndex;
+use tracing::{debug, error, trace, warn};
 
 use super::query_graph::JoinPredicate;
+use crate::controller::sql::mir::grouped::post_lookup_aggregates;
+use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
+use crate::controller::sql::query_signature::Signature;
+use crate::controller::sql::query_utils::extract_limit;
+use crate::ReadySetResult;
 
 mod grouped;
 mod join;

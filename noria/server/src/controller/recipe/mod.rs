@@ -1,22 +1,20 @@
-use crate::controller::sql::SqlIncorporator;
-use crate::controller::Migration;
-use crate::{ReadySetResult, ReuseConfigType};
-
-use nom_sql::{Dialect, SqlQuery};
-use noria::ActivationResult;
-use petgraph::graph::NodeIndex;
-use tracing::{debug, error, warn};
-
-use crate::controller::recipe::changelist::{Change, SqlExpression};
-use changelist::ChangeList;
-use nom_sql::CreateTableStatement;
-use noria_errors::{internal, internal_err, ReadySetError};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
 
+use changelist::ChangeList;
+use nom_sql::{CreateTableStatement, Dialect, SqlQuery};
+use noria::ActivationResult;
+use noria_errors::{internal, internal_err, ReadySetError};
+use petgraph::graph::NodeIndex;
+use serde::{Deserialize, Serialize};
+use tracing::{debug, error, warn};
+
 use super::sql;
+use crate::controller::recipe::changelist::{Change, SqlExpression};
+use crate::controller::sql::SqlIncorporator;
+use crate::controller::Migration;
+use crate::{ReadySetResult, ReuseConfigType};
 
 pub(crate) mod changelist;
 

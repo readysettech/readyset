@@ -3,11 +3,12 @@
 //! Noria.
 use std::time::{Duration, Instant};
 
-use crate::rewrite::anonymize_literals;
 use dashmap::DashMap;
 use nom_sql::SelectStatement;
 use serde::ser::SerializeSeq;
 use serde::{Serialize, Serializer};
+
+use crate::rewrite::anonymize_literals;
 
 /// Each query is uniquely identifier by its select statement
 type Query = SelectStatement;
@@ -439,8 +440,9 @@ pub enum MigrationStyle {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use nom_sql::SqlQuery;
+
+    use super::*;
 
     fn select_statement(s: &str) -> anyhow::Result<SelectStatement> {
         match nom_sql::parse_query(nom_sql::Dialect::MySQL, s) {

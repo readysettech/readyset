@@ -3,13 +3,12 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use async_trait::async_trait;
 use clap::Parser;
 use nom_sql::Dialect;
-use tokio::net;
-use tracing::instrument;
-
 use noria_client::backend as cl;
 use noria_client_adapter::{ConnectionHandler, DatabaseType, NoriaAdapter};
 use noria_psql::{Backend, PostgreSqlQueryHandler, PostgreSqlUpstream};
 use psql_srv::run_backend;
+use tokio::net;
+use tracing::instrument;
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]

@@ -7,8 +7,11 @@
 //! requirement in integration.rs, which supports running tests in
 //! parallel.
 
-use crate::integration_utils::*;
-use crate::{get_col, Builder};
+use std::collections::HashMap;
+use std::convert::TryFrom;
+use std::sync::Arc;
+use std::time::Duration;
+
 use assert_approx_eq::assert_approx_eq;
 use common::Index;
 use dataflow::node::special::Base;
@@ -21,10 +24,8 @@ use noria_data::DataType;
 use petgraph::graph::NodeIndex;
 use serial_test::serial;
 
-use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::sync::Arc;
-use std::time::Duration;
+use crate::integration_utils::*;
+use crate::{get_col, Builder};
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]

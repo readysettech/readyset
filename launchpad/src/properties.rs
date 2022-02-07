@@ -32,8 +32,9 @@ macro_rules! eq_laws {
     (#[$meta: meta] $ty: ty) => {
         #[allow(clippy::eq_op)]
         mod eq {
-            use super::*;
             use test_strategy::proptest;
+
+            use super::*;
 
             #[proptest]
             fn reflexive(#[$meta] x: $ty) {
@@ -80,8 +81,9 @@ macro_rules! ord_laws {
     };
     (#[$meta: meta] $ty: ty) => {
         mod ord {
-            use super::*;
             use test_strategy::proptest;
+
+            use super::*;
 
             #[proptest]
             fn partial_cmp_matches_cmp(#[$meta] x: $ty, #[$meta] y: $ty) {
@@ -162,9 +164,10 @@ macro_rules! hash_laws {
     };
     (#[$meta: meta] $ty: ty) => {
         mod hash {
-            use super::*;
             use launchpad::hash::hash;
             use test_strategy::proptest;
+
+            use super::*;
 
             #[proptest]
             fn matches_eq(#[$meta] x: $ty, #[$meta] y: $ty) {

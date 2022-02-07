@@ -1,3 +1,8 @@
+use std::fs;
+use std::process::Command;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
 use clap::{App, Arg};
 use hdrhistogram::Histogram;
 use itertools::Itertools;
@@ -5,10 +10,6 @@ use noria::consensus::Authority;
 use noria::{Builder, DurabilityMode, Handle, PersistenceParameters, ZookeeperAuthority};
 use noria_data::DataType;
 use rand::prelude::*;
-use std::fs;
-use std::process::Command;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 use zookeeper::ZooKeeper;
 
 // If we .batch_put a huge amount of rows we'll end up with a deadlock when the base

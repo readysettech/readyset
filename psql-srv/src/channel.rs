@@ -1,13 +1,15 @@
+use std::convert::TryInto;
+
+use futures::prelude::*;
+use postgres_types::Type;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio_util::codec::Framed;
+
 use crate::codec::{Codec, DecodeError, EncodeError};
 use crate::error::Error;
 use crate::message::FrontendMessage;
 use crate::response::Response;
 use crate::value::Value;
-use futures::prelude::*;
-use postgres_types::Type;
-use std::convert::TryInto;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_util::codec::Framed;
 
 const CHANNEL_INITIAL_CAPACITY: usize = 4096;
 

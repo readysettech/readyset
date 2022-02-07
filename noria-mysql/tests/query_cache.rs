@@ -1,3 +1,6 @@
+use std::convert::TryFrom;
+use std::sync::Arc;
+
 use mysql_async::prelude::*;
 use mysql_async::{Conn, Result, Row, Statement};
 use noria_client::backend::{MigrationMode, QueryInfo};
@@ -6,8 +9,6 @@ use noria_client_metrics::QueryDestination;
 use noria_client_test_helpers::mysql_helpers::query_cache_setup;
 use noria_client_test_helpers::sleep;
 use serial_test::serial;
-use std::convert::TryFrom;
-use std::sync::Arc;
 
 /// Retrieves where the query executed by parsing the row returned by
 /// EXPLAIN LAST STATEMENT.

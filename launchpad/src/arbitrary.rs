@@ -1,13 +1,14 @@
 //! Utilities for generating arbitrary values with [`proptest`]
 
+use std::iter::FromIterator;
+use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
+
 use bit_vec::BitVec;
 use chrono::{Date, DateTime, Duration, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use eui48::MacAddress;
 use proptest::prelude::*;
 use proptest::sample::SizeRange;
 use rust_decimal::Decimal;
-use std::iter::FromIterator;
-use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 /// Strategy to generate an arbitrary [`NaiveDate`]

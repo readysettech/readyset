@@ -416,9 +416,6 @@ pub enum ReuseConfigType {
     Full,
 }
 
-pub use crate::builder::Builder;
-pub use crate::handle::Handle;
-pub use crate::metrics::NoriaMetricsRecorder;
 use controller::migrate::materialization;
 pub use controller::migrate::materialization::FrontierStrategy;
 use controller::sql;
@@ -427,16 +424,22 @@ pub use noria::consensus::{Authority, LocalAuthority};
 pub use noria::*;
 pub use petgraph::graph::NodeIndex;
 
+pub use crate::builder::Builder;
+pub use crate::handle::Handle;
+pub use crate::metrics::NoriaMetricsRecorder;
+
 #[doc(hidden)]
 pub mod manual {
-    pub use crate::controller::migrate::Migration;
     pub use dataflow::node::special::Base;
     pub use dataflow::ops;
+
+    pub use crate::controller::migrate::Migration;
 }
+
+use std::time::Duration;
 
 use dataflow::DomainConfig;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 
 /// Configuration for an running noria cluster
 // WARNING: if you change this structure or any of the structures used in its fields, make sure to
@@ -502,9 +505,10 @@ impl Default for Config {
     }
 }
 
-use futures_util::sink::Sink;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+
+use futures_util::sink::Sink;
 struct ImplSinkForSender<T>(tokio::sync::mpsc::UnboundedSender<T>);
 
 impl<T> Sink<T> for ImplSinkForSender<T> {

@@ -3,11 +3,12 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-use crate::ops::grouped::{GroupedOperation, GroupedOperator};
-use crate::prelude::*;
 pub use nom_sql::{BinaryOperator, Literal, SqlType};
 use noria_errors::{invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
+
+use crate::ops::grouped::{GroupedOperation, GroupedOperator};
+use crate::prelude::*;
 
 /// Supported aggregation operators.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -289,7 +290,6 @@ impl GroupedOperation for Aggregator {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::{ops, SuggestedIndex};
 
     fn setup(aggregation: Aggregation, mat: bool) -> ops::test::MockGraph {

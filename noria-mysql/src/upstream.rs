@@ -1,17 +1,17 @@
+use std::collections::HashMap;
+use std::convert::TryInto;
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use mysql_async::consts::{CapabilityFlags, StatusFlags};
 use mysql_async::prelude::Queryable;
 use mysql_async::{Column, Conn, Opts, OptsBuilder, Row, TxOpts, UrlError};
-use noria_client::upstream_database::NoriaCompare;
-use std::collections::HashMap;
-use std::convert::TryInto;
-use std::sync::Arc;
-use tracing::{debug, error};
-
 use noria::ColumnSchema;
+use noria_client::upstream_database::NoriaCompare;
 use noria_client::{UpstreamDatabase, UpstreamPrepare};
 use noria_data::DataType;
 use noria_errors::{internal_err, ReadySetError};
+use tracing::{debug, error};
 
 use crate::schema::{convert_column, is_subtype};
 use crate::Error;
@@ -314,9 +314,10 @@ impl UpstreamDatabase for MySqlUpstream {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use msql_srv::ColumnType;
     use nom_sql::{Column as NomColumn, ColumnSpecification, SqlType};
+
+    use super::*;
 
     fn test_column() -> NomColumn {
         NomColumn {

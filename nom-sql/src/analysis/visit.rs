@@ -327,10 +327,9 @@ pub fn walk_select_statement<'ast, V: Visitor<'ast>>(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::select::selection;
     use crate::Dialect;
-
-    use super::*;
 
     #[derive(Default, Debug, PartialEq, Eq)]
     struct NodeCounter(usize);

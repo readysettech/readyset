@@ -71,6 +71,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Debug};
+use std::marker::PhantomData;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -87,7 +88,6 @@ use noria_client_metrics::{EventType, QueryDestination, QueryExecutionEvent, Sql
 use noria_data::DataType;
 use noria_errors::ReadySetError::{self, PreparedStatementMissing};
 use noria_errors::{internal, internal_err, unsupported, ReadySetResult};
-use std::marker::PhantomData;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, instrument, trace, warn};

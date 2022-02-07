@@ -1,4 +1,3 @@
-use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -7,10 +6,11 @@ use std::fmt;
 
 use maplit::hashmap;
 use nom_sql::SqlType;
+use noria_errors::{internal_err, ReadySetResult};
+use serde::{Deserialize, Serialize};
 
 use crate::prelude::*;
 use crate::processing::{ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex};
-use noria_errors::{internal_err, ReadySetResult};
 
 // pub mod latest;
 pub mod aggregate;

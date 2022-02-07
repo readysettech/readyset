@@ -1,6 +1,7 @@
+use std::net::SocketAddr;
+
 use dataflow::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
 
 /// Response to `WorkerRequestKind::RunDomain`.
 #[derive(Clone, Debug, Deserialize, Serialize)]

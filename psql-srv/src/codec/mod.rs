@@ -2,14 +2,15 @@ mod decoder;
 mod encoder;
 mod error;
 
+use std::collections::HashMap;
+use std::convert::TryInto;
+use std::marker::PhantomData;
+
 pub use error::{DecodeError, EncodeError};
 use postgres_types::Type;
 
 use crate::error::Error;
 use crate::value::Value;
-use std::collections::HashMap;
-use std::convert::TryInto;
-use std::marker::PhantomData;
 
 /// A [`Decoder`] implementation that deserializes `FrontendMessage` and [`Encoder`] implementation
 /// that serializes `BackendMessage`.

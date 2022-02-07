@@ -1,9 +1,10 @@
+use std::fmt;
+
 use postgres_types::Type;
 
 use crate::bytes::BytesStr;
 use crate::message::TransferFormat;
 use crate::value::Value;
-use std::fmt;
 
 /// A message received from a Postgresql frontend (client). The different types of frontend
 /// messages, and the fields they contain, are described in the

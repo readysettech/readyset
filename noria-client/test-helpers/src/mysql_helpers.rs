@@ -1,14 +1,15 @@
-use async_trait::async_trait;
-use mysql_async::prelude::Queryable;
 use std::env;
 use std::fmt::Display;
-use tokio::net::TcpStream;
 
-use crate::Adapter;
+use async_trait::async_trait;
 use msql_srv::MysqlIntermediary;
+use mysql_async::prelude::Queryable;
 use noria_client::backend::{BackendBuilder, MigrationMode};
 use noria_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
 use noria_server::Handle;
+use tokio::net::TcpStream;
+
+use crate::Adapter;
 
 pub async fn recreate_database<N>(dbname: N)
 where

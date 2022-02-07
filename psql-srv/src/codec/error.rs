@@ -1,10 +1,11 @@
-use eui48::ParseError;
-use hex::FromHexError;
-use postgres_types::Type;
 use std::fmt;
 use std::marker::{Send, Sync};
 use std::num::{ParseFloatError, ParseIntError, TryFromIntError};
 use std::str::Utf8Error;
+
+use eui48::ParseError;
+use hex::FromHexError;
+use postgres_types::Type;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

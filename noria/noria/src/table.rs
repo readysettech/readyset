@@ -1,3 +1,4 @@
+use core::convert::TryInto;
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::SocketAddr;
@@ -8,13 +9,6 @@ use std::{fmt, iter};
 
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use derive_more::TryInto;
-use noria_errors::{
-    internal, internal_err, rpc_err, table_err, unsupported, ReadySetError, ReadySetResult,
-};
-use serde::{Deserialize, Serialize};
-use tracing::error;
-
-use core::convert::TryInto;
 use futures_util::future::TryFutureExt;
 use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::TryStreamExt;
@@ -22,13 +16,18 @@ use futures_util::{future, ready};
 use itertools::Either;
 use nom_sql::CreateTableStatement;
 use noria_data::DataType;
+use noria_errors::{
+    internal, internal_err, rpc_err, table_err, unsupported, ReadySetError, ReadySetResult,
+};
 use petgraph::graph::NodeIndex;
+use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio_tower::multiplex;
 use tower::balance::p2c::Balance;
 use tower::buffer::Buffer;
 use tower::limit::concurrency::ConcurrencyLimit;
 use tower_service::Service;
+use tracing::error;
 use vec_map::VecMap;
 
 use crate::channel::CONNECTION_FROM_BASE;

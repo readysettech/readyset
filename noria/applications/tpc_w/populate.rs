@@ -1,13 +1,14 @@
-use chrono::naive::{NaiveDate, NaiveDateTime, NaiveTime};
 use std::convert::TryFrom;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::str::FromStr;
 use std::time;
 
-use super::Backend;
+use chrono::naive::{NaiveDate, NaiveDateTime, NaiveTime};
 use noria::ReadySetResult;
 use noria_data::DataType;
+
+use super::Backend;
 
 async fn populate(
     backend: &mut Backend,

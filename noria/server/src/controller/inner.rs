@@ -7,10 +7,10 @@
     clippy::unreachable
 )]
 
-use crate::controller::state::DataflowStateHandle;
-use crate::controller::{ControllerRequest, ControllerState, Worker, WorkerIdentifier};
-use crate::coordination::DomainDescriptor;
-use crate::worker::WorkerRequestKind;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::time::Duration;
+
 use failpoint_macros::failpoint;
 use hyper::Method;
 use noria::consensus::Authority;
@@ -19,12 +19,14 @@ use noria::status::{ReadySetStatus, SnapshotStatus};
 use noria::{RecipeSpec, WorkerDescriptor};
 use noria_errors::{ReadySetError, ReadySetResult};
 use reqwest::Url;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::Notify;
 use tracing::{error, info, warn};
+
+use crate::controller::state::DataflowStateHandle;
+use crate::controller::{ControllerRequest, ControllerState, Worker, WorkerIdentifier};
+use crate::coordination::DomainDescriptor;
+use crate::worker::WorkerRequestKind;
 
 /// The Noria leader, responsible for making control-plane decisions for the whole of a Noria
 /// cluster.

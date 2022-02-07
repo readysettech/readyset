@@ -8,7 +8,6 @@ use anyhow::anyhow;
 use clap::Parser;
 use futures_util::future::{self, Either};
 use metrics_exporter_prometheus::PrometheusBuilder;
-
 use noria::metrics::recorded;
 use noria_server::consensus::AuthorityType;
 use noria_server::metrics::{install_global_recorder, CompositeMetricsRecorder, MetricsRecorder};

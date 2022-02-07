@@ -7,18 +7,20 @@
     clippy::unreachable
 )]
 
-use crate::controller::keys::{self, IndexRef};
-use crate::controller::migrate::DomainMigrationPlan;
-use crate::controller::state::graphviz;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::convert::TryFrom;
+
 use dataflow::payload::{ReplayPathSegment, SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use noria::ReadySetError;
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::convert::TryFrom;
 use tracing::{debug, trace};
 use vec1::Vec1;
+
+use crate::controller::keys::{self, IndexRef};
+use crate::controller::migrate::DomainMigrationPlan;
+use crate::controller::state::graphviz;
 
 pub(super) struct Plan<'a> {
     m: &'a mut super::Materializations,

@@ -1,14 +1,15 @@
+use std::fmt;
+
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::multispace1;
 use nom::combinator::{map, opt};
 use nom::sequence::tuple;
+use nom::IResult;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
 use crate::expression::expression;
 use crate::{Dialect, Expression};
-use nom::IResult;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ShowStatement {

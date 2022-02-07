@@ -107,11 +107,12 @@ impl Backend {
 
 #[tokio::main]
 async fn main() {
-    use clap::{App, Arg};
     use std::fs::{self, File};
     use std::io::Write;
     use std::path::PathBuf;
     use std::str::FromStr;
+
+    use clap::{App, Arg};
 
     readyset_logging::Options::default().init().unwrap();
 

@@ -1,9 +1,11 @@
-use crate::node::special::packet_filter::PacketFilter;
-use crate::prelude::*;
+use std::collections::HashMap;
+
 use noria::metrics::recorded;
 use noria_errors::{internal_err, invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+
+use crate::node::special::packet_filter::PacketFilter;
+use crate::prelude::*;
 
 #[derive(Serialize, Deserialize)]
 struct EgressTx {

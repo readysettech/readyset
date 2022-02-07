@@ -5,12 +5,16 @@ use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::process;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::time::Duration;
 
 use anyhow::{bail, Error};
 use async_trait::async_trait;
+use backoff::backoff::Backoff;
+use backoff::exponential::ExponentialBackoff;
+use backoff::SystemClock;
+use noria_errors::internal_err;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::time::Duration;
 use tokio::sync::Notify;
 use tracing::{error, info, warn};
 use zookeeper_async::{
@@ -22,10 +26,6 @@ use super::{
     WorkerDescriptor, WorkerId,
 };
 use crate::{ReadySetError, ReadySetResult};
-use backoff::backoff::Backoff;
-use backoff::exponential::ExponentialBackoff;
-use backoff::SystemClock;
-use noria_errors::internal_err;
 
 pub const CONTROLLER_KEY: &str = "/controller";
 pub const STATE_KEY: &str = "/state";
@@ -442,10 +442,12 @@ impl AuthorityControl for ZookeeperAuthority {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use reqwest::Url;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::Arc;
+
+    use reqwest::Url;
+
+    use super::*;
 
     #[tokio::test]
     #[ignore]

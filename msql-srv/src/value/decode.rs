@@ -1,9 +1,11 @@
+use std::convert::TryFrom;
+use std::io;
+
+use byteorder::{LittleEndian, ReadBytesExt};
+
 use crate::error::MsqlSrvError;
 use crate::myc::constants::ColumnType;
 use crate::myc::io::ReadMysqlExt;
-use byteorder::{LittleEndian, ReadBytesExt};
-use std::convert::TryFrom;
-use std::io;
 
 /// MySQL value as provided when executing prepared statements.
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -328,14 +330,16 @@ impl<'a> TryFrom<Value<'a>> for Duration {
 #[cfg(test)]
 #[allow(unused_imports)]
 mod tests {
+    use std::convert::{TryFrom, TryInto};
+    use std::time;
+
+    use chrono::{self, TimeZone};
+    use mysql_time::MysqlTime;
+
     use super::Value;
     use crate::myc::io::{ParseBuf, WriteMysqlExt};
     use crate::myc::proto::MySerialize;
     use crate::{myc, Column, ColumnFlags, ColumnType};
-    use chrono::{self, TimeZone};
-    use mysql_time::MysqlTime;
-    use std::convert::{TryFrom, TryInto};
-    use std::time;
 
     macro_rules! rt {
         ($name:ident, $t:ty, $v:expr, $ct:expr) => {

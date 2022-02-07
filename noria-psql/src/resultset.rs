@@ -1,12 +1,14 @@
-use crate::row::Row;
-use crate::schema::{type_to_pgsql, SelectSchema};
-use noria::results::Results;
-use noria_data::DataType;
-use psql_srv as ps;
 use std::convert::TryFrom;
 use std::iter;
 use std::sync::Arc;
+
+use noria::results::Results;
+use noria_data::DataType;
+use psql_srv as ps;
 use tokio_postgres::types::Type;
+
+use crate::row::Row;
+use crate::schema::{type_to_pgsql, SelectSchema};
 
 /// A structure that contains a `Vec<Results>`, as provided by `QueryResult::NoriaSelect`, and
 /// facilitates iteration over these results as `Row` values.
@@ -129,13 +131,15 @@ impl TryFrom<Vec<tokio_postgres::Row>> for Resultset {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::borrow::Cow;
+    use std::convert::TryFrom;
+
     use nom_sql::{ColumnSpecification, SqlType};
     use noria::ColumnSchema;
     use noria_client::backend as cl;
     use noria_data::DataType;
-    use std::borrow::Cow;
-    use std::convert::TryFrom;
+
+    use super::*;
 
     fn collect_resultset_values(resultset: Resultset) -> Vec<Vec<ps::Value>> {
         resultset

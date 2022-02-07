@@ -1,9 +1,11 @@
 use std::borrow::Cow;
+use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
 use std::str;
 use std::str::FromStr;
 
 use bit_vec::BitVec;
+use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
 use launchpad::arbitrary::{
     arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_json, arbitrary_naive_time,
@@ -19,8 +21,8 @@ use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple
 use nom::{call, do_parse, map, named, opt, tag_no_case, IResult, InputLength};
 use proptest::strategy::Strategy;
 use proptest::{prelude as prop, prop_oneof};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
 use test_strategy::Arbitrary;
 
 use crate::column::Column;
@@ -28,8 +30,6 @@ use crate::dialect::Dialect;
 use crate::expression::expression;
 use crate::table::Table;
 use crate::{Expression, FunctionExpression};
-use eui48::{MacAddress, MacAddressFormat};
-use rust_decimal::Decimal;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum SqlType {
@@ -1473,11 +1473,12 @@ pub fn parse_comment(i: &[u8]) -> IResult<&[u8], String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use assert_approx_eq::assert_approx_eq;
     use launchpad::hash::hash;
     use proptest::prop_assume;
     use test_strategy::proptest;
+
+    use super::*;
 
     fn test_opt_delimited_fn_call(i: &str) -> IResult<&[u8], &[u8]> {
         opt_delimited(tag("("), tag("abc"), tag(")"))(i.as_bytes())

@@ -1,6 +1,8 @@
-use crate::Backend;
-use noria_data::DataType;
 use std::convert::TryFrom;
+
+use noria_data::DataType;
+
+use crate::Backend;
 
 pub async fn create_users(backend: &mut Backend) {
     // username varchar(1024),

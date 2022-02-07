@@ -1,11 +1,11 @@
+use std::collections::HashMap;
+use std::mem;
+
 use nom_sql::{
     Column, CommonTableExpression, Expression, FieldDefinitionExpression, FunctionExpression,
     InValue, JoinClause, JoinRightSide, SelectStatement, SqlQuery, Table,
 };
-
 use noria_errors::{internal, ReadySetResult};
-use std::collections::HashMap;
-use std::mem;
 use tracing::warn;
 
 pub trait ImpliedTableExpansion {
@@ -339,10 +339,12 @@ impl ImpliedTableExpansion for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::collections::HashMap;
+
     use maplit::hashmap;
     use nom_sql::{parse_query, Column, Dialect, FieldDefinitionExpression, SqlQuery, Table};
-    use std::collections::HashMap;
+
+    use super::*;
 
     #[test]
     fn it_expands_implied_tables_for_select() {

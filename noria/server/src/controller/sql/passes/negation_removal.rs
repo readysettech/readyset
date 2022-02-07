@@ -1,6 +1,7 @@
-use crate::controller::sql::query_utils::is_logical_op;
 use nom_sql::{BinaryOperator, Expression, JoinConstraint, SqlQuery, UnaryOperator};
 use noria_errors::{internal, unsupported, ReadySetResult};
+
+use crate::controller::sql::query_utils::is_logical_op;
 
 pub trait NegationRemoval {
     fn remove_negation(self) -> ReadySetResult<SqlQuery>;

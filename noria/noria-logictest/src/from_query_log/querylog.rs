@@ -6,12 +6,11 @@ use std::str::FromStr;
 use anyhow::{bail, Error};
 use chrono::{DateTime, FixedOffset, Utc};
 use enum_display_derive::Display;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, Lines};
-
 use nom_sql::{
     Expression, FieldDefinitionExpression, FunctionExpression, InValue, ItemPlaceholder,
     JoinConstraint, JoinRightSide, Literal, SelectStatement, SqlQuery,
 };
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, Lines};
 
 #[derive(Clone, Debug, Display, Eq, PartialEq)]
 pub enum Command {
@@ -380,8 +379,9 @@ impl<R: AsyncBufRead + Unpin> Stream<R> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use nom_sql::{parse_query, Dialect, Literal};
+
+    use super::*;
 
     /// The primary purpose of this test is to validate that, when we extract literals from
     /// queries, they come out in left-to-right order.  Anything else it covers is a happy

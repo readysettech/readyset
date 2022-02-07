@@ -1,9 +1,10 @@
+use std::convert::{TryFrom, TryInto};
+use std::sync::Arc;
+
 use msql_srv::{Value, ValueInner};
 use mysql_common::chrono::NaiveDate;
 use noria_data::DataType;
 use noria_errors::{ReadySetError, ReadySetResult};
-use std::convert::{TryFrom, TryInto};
-use std::sync::Arc;
 
 pub(crate) fn mysql_value_to_datatype(value: Value) -> ReadySetResult<DataType> {
     Ok(match value.into_inner() {

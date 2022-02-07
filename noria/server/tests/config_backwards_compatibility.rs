@@ -1,8 +1,9 @@
 #![feature(option_result_contains)]
 
+use std::ffi::OsStr;
+
 use include_dir::{include_dir, Dir};
 use noria_server::Config;
-use std::ffi::OsStr;
 
 const CONFIG_VERSIONS: Dir = include_dir!("tests/config_versions");
 

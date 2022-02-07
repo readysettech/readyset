@@ -7,20 +7,20 @@ extern crate mysql_common as myc;
 extern crate nom;
 extern crate tokio;
 
-use async_trait::async_trait;
-use mysql::prelude::Queryable;
-use mysql::Row;
-use std::{io, net, thread};
-use tokio::io::AsyncWrite;
-
 use core::iter;
+use std::future::Future;
+use std::marker::PhantomData;
+use std::pin::Pin;
+use std::{io, net, thread};
+
+use async_trait::async_trait;
 use msql_srv::{
     Column, ErrorKind, InitWriter, MysqlIntermediary, MysqlShim, ParamParser, QueryResultWriter,
     StatementMetaWriter,
 };
-use std::future::Future;
-use std::marker::PhantomData;
-use std::pin::Pin;
+use mysql::prelude::Queryable;
+use mysql::Row;
+use tokio::io::AsyncWrite;
 use tokio::net::tcp::OwnedWriteHalf;
 
 struct TestingShim<Q, P, E, I, W> {

@@ -12,20 +12,15 @@
 //! This module provides the structures to store the state of the Noria dataflow graph, and
 //! to manipulate it in a thread-safe way.
 
-use crate::controller::domain_handle::DomainHandle;
-use crate::controller::migrate::materialization::Materializations;
-use crate::controller::migrate::scheduling::Scheduler;
-use crate::controller::migrate::{routing, DomainMigrationPlan, Migration};
-use crate::controller::recipe::changelist::ChangeList;
-use crate::controller::recipe::{Recipe, Schema};
-use crate::controller::{
-    schema, ControllerState, DomainPlacementRestriction, NodeRestrictionKey, Worker,
-    WorkerIdentifier,
-};
-use crate::coordination::{DomainDescriptor, RunDomainResponse};
-use crate::internal::LocalNodeIndex;
-use crate::worker::WorkerRequestKind;
-use crate::RecipeSpec;
+use std::borrow::Cow;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::net::SocketAddr;
+use std::ops::Deref;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Instant;
+use std::{cell, time};
+
 use common::IndexPair;
 use dataflow::node::Node;
 use dataflow::prelude::{ChannelCoordinator, DomainIndex, DomainNodes, Graph, NodeIndex};
@@ -52,17 +47,24 @@ use noria_errors::{bad_request_err, internal, internal_err, invariant, invariant
 use petgraph::visit::Bfs;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::net::SocketAddr;
-use std::ops::Deref;
-use std::str::FromStr;
-use std::sync::Arc;
-use std::time::Instant;
-use std::{cell, time};
 use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, instrument, trace, warn};
 use vec1::Vec1;
+
+use crate::controller::domain_handle::DomainHandle;
+use crate::controller::migrate::materialization::Materializations;
+use crate::controller::migrate::scheduling::Scheduler;
+use crate::controller::migrate::{routing, DomainMigrationPlan, Migration};
+use crate::controller::recipe::changelist::ChangeList;
+use crate::controller::recipe::{Recipe, Schema};
+use crate::controller::{
+    schema, ControllerState, DomainPlacementRestriction, NodeRestrictionKey, Worker,
+    WorkerIdentifier,
+};
+use crate::coordination::{DomainDescriptor, RunDomainResponse};
+use crate::internal::LocalNodeIndex;
+use crate::worker::WorkerRequestKind;
+use crate::RecipeSpec;
 
 /// Number of concurrent requests to make when making multiple simultaneous requests to domains (eg
 /// for replication offsets)

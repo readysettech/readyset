@@ -1,11 +1,13 @@
+use std::borrow::Borrow;
+use std::collections::HashMap;
+use std::io;
+
+use tokio::io::AsyncWrite;
+
 use crate::myc::constants::{ColumnFlags, StatusFlags};
 use crate::packet::PacketWriter;
 use crate::value::ToMysqlValue;
 use crate::{writers, Column, ErrorKind, StatementData};
-use std::borrow::Borrow;
-use std::collections::HashMap;
-use std::io;
-use tokio::io::AsyncWrite;
 
 const DEFAULT_ROW_CAPACITY: usize = 4096;
 

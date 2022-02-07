@@ -1,6 +1,7 @@
-use crate::backend::noria_connector;
 use nom_sql::SqlQuery;
 use noria::ReadySetResult;
+
+use crate::backend::noria_connector;
 
 /// A trait describing the behaviour of how specific queries should be
 /// handled by a noria-client [`Backend`].

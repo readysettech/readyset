@@ -1,3 +1,11 @@
+use std::borrow::Borrow;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use postgres_types::Type;
+use smallvec::smallvec;
+use tokio::io::{AsyncRead, AsyncWrite};
+
 use crate::channel::Channel;
 use crate::error::Error;
 use crate::message::BackendMessage::{self, *};
@@ -9,12 +17,6 @@ use crate::response::Response;
 use crate::value::Value;
 use crate::QueryResponse::*;
 use crate::{Backend, Column, PrepareResponse};
-use postgres_types::Type;
-use smallvec::smallvec;
-use std::borrow::Borrow;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::io::{AsyncRead, AsyncWrite};
 
 const ATTTYPMOD_NONE: i32 = -1;
 const TRANSFER_FORMAT_PLACEHOLDER: TransferFormat = TransferFormat::Text;
@@ -483,19 +485,21 @@ fn make_field_description(
 #[cfg(test)]
 mod tests {
 
-    use super::*;
-    use crate::bytes::BytesStr;
-    use crate::value::Value as DataValue;
-    use crate::{PrepareResponse, QueryResponse};
-    use async_trait::async_trait;
-    use bytes::BytesMut;
-    use futures::task::Context;
     use std::convert::TryFrom;
     use std::io;
     use std::pin::Pin;
     use std::task::Poll;
+
+    use async_trait::async_trait;
+    use bytes::BytesMut;
+    use futures::task::Context;
     use tokio::io::ReadBuf;
     use tokio_test::block_on;
+
+    use super::*;
+    use crate::bytes::BytesStr;
+    use crate::value::Value as DataValue;
+    use crate::{PrepareResponse, QueryResponse};
 
     fn bytes_str(s: &str) -> BytesStr {
         let mut buf = BytesMut::new();

@@ -1,10 +1,10 @@
-use itertools::Itertools;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::{self, Display};
 
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
 use dataflow::ops::union;
+use itertools::Itertools;
 
 use crate::column::Column;
 use crate::node::node_inner::MirNodeInner;

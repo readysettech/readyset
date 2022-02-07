@@ -1,8 +1,9 @@
-use noria_server::Config;
 use std::fs::File;
 use std::path::Path;
 use std::process::Command;
 use std::str;
+
+use noria_server::Config;
 
 fn main() {
     let out_directory = Path::new(file!())

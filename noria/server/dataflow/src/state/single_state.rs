@@ -1,15 +1,17 @@
+use std::ops::{Bound, RangeBounds};
+use std::rc::Rc;
+
+use common::SizeOf;
+use itertools::Either;
+use noria::KeyComparison;
+use rand::prelude::*;
+use vec1::Vec1;
+
 use super::mk_key::MakeKey;
 use super::RangeLookupResult;
 use crate::prelude::*;
 use crate::state::keyed_state::KeyedState;
 use crate::state::Rows;
-use common::SizeOf;
-use itertools::Either;
-use noria::KeyComparison;
-use rand::prelude::*;
-use std::ops::{Bound, RangeBounds};
-use std::rc::Rc;
-use vec1::Vec1;
 
 /// A single index of a [`MemoryState`].
 ///
@@ -417,8 +419,9 @@ impl SingleState {
 mod tests {
     use std::ops::Bound;
 
-    use super::*;
     use vec1::vec1;
+
+    use super::*;
 
     #[test]
     fn mark_filled_point() {
@@ -441,8 +444,9 @@ mod tests {
     }
 
     mod evict_keys {
-        use super::*;
         use vec1::vec1;
+
+        use super::*;
 
         #[test]
         fn equal() {

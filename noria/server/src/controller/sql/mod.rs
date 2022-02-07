@@ -2,11 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::str;
 use std::vec::Vec;
 
-use petgraph::graph::NodeIndex;
-
+use ::mir::node::node_inner::MirNodeInner;
 use ::mir::query::{MirQuery, QueryFlowParts};
 use ::mir::{reuse as mir_reuse, Column, MirNodeRef};
-
 use ::serde::{Deserialize, Serialize};
 use nom_sql::analysis::ReferredTables;
 use nom_sql::{
@@ -14,22 +12,20 @@ use nom_sql::{
     CreateTableStatement, Expression, FieldDefinitionExpression, InValue, SelectStatement,
     SqlQuery, Table,
 };
+use noria::internal::IndexType;
 use noria_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
+use petgraph::graph::NodeIndex;
 use tracing::{debug, trace, warn};
-
-use crate::controller::Migration;
-use crate::ReuseConfigType;
-
-use super::mir_to_flow::mir_query_to_flow_parts;
-use super::recipe::CANONICAL_DIALECT;
 
 use self::mir::SqlToMirConverter;
 use self::query_graph::{to_query_graph, QueryGraph};
 use self::query_signature::Signature;
 use self::query_utils::{contains_aggregate, is_aggregate};
 use self::reuse::ReuseConfig;
-use ::mir::node::node_inner::MirNodeInner;
-use noria::internal::IndexType;
+use super::mir_to_flow::mir_query_to_flow_parts;
+use super::recipe::CANONICAL_DIALECT;
+use crate::controller::Migration;
+use crate::ReuseConfigType;
 
 pub(crate) mod mir;
 mod passes;
@@ -846,8 +842,9 @@ impl SqlIncorporator {
         // flattens out the query by replacing subqueries for references
         // to existing views in the graph
         for sq in q.extract_subqueries()? {
-            use self::passes::subqueries::SubqueryPosition;
             use nom_sql::JoinRightSide;
+
+            use self::passes::subqueries::SubqueryPosition;
             let default_name = format!("q_{}", self.num_queries);
 
             let mut subquery_column = |stmt: &SelectStatement| -> ReadySetResult<_> {
@@ -1083,10 +1080,9 @@ mod tests {
     use dataflow::prelude::*;
     use nom_sql::{BinaryOperator, Column, Dialect, Expression, FunctionExpression, Literal};
 
+    use super::{SqlIncorporator, ToFlowParts};
     use crate::controller::Migration;
     use crate::integration_utils;
-
-    use super::{SqlIncorporator, ToFlowParts};
 
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration<'_>, name: &str) -> &'a Node {
@@ -1112,9 +1108,10 @@ mod tests {
     /// Note that the argument slices must be ordered in the same way as &str and &Column are
     /// ordered by `Ord`.
     fn query_id_hash(relations: &[&str], attrs: &[&Column], columns: &[&Column]) -> u64 {
-        use crate::controller::sql::query_graph::OutputColumn;
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
+
+        use crate::controller::sql::query_graph::OutputColumn;
 
         let mut hasher = DefaultHasher::new();
         let mut r_vec: Vec<&str> = relations.to_vec();

@@ -1,10 +1,12 @@
+use std::io::{self, Write};
+
+use byteorder::{LittleEndian, WriteBytesExt};
+use mysql_time::MysqlTime;
+
 use crate::error::{other_error, OtherErrorKind};
 use crate::myc::constants::{ColumnFlags, ColumnType};
 use crate::myc::io::WriteMysqlExt;
 use crate::{myc, Column};
-use byteorder::{LittleEndian, WriteBytesExt};
-use mysql_time::MysqlTime;
-use std::io::{self, Write};
 
 /// Implementors of this trait can be sent as a single resultset value to a MySQL/MariaDB client.
 pub trait ToMysqlValue {
@@ -743,19 +745,22 @@ impl ToMysqlValue for myc::value::Value {
 #[cfg(test)]
 #[allow(unused_imports)]
 mod tests {
+    use std::convert::TryFrom;
+    use std::time;
+
+    use chrono::{self, TimeZone};
+
     use super::ToMysqlValue;
     use crate::myc::io::ParseBuf;
     use crate::myc::proto::MyDeserialize;
     use crate::myc::value::convert::from_value;
     use crate::myc::value::{BinValue, TextValue, Value, ValueDeserializer};
     use crate::{Column, ColumnFlags, ColumnType};
-    use chrono::{self, TimeZone};
-    use std::convert::TryFrom;
-    use std::time;
 
     mod roundtrip_text {
-        use super::*;
         use mysql_time::MysqlTime;
+
+        use super::*;
 
         macro_rules! rt {
             ($name:ident, $t:ty, $v:expr) => {
@@ -812,8 +817,9 @@ mod tests {
     }
 
     mod roundtrip_bin {
-        use super::*;
         use mysql_time::MysqlTime;
+
+        use super::*;
 
         macro_rules! rt {
             ($name:ident, $t:ty, $v:expr, $ct:expr) => {

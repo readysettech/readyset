@@ -1,5 +1,12 @@
 #![feature(total_cmp)]
 
+use std::borrow::Cow;
+use std::convert::{TryFrom, TryInto};
+use std::error::Error;
+use std::hash::{Hash, Hasher};
+use std::ops::{Add, Div, Mul, Sub};
+use std::{fmt, mem};
+
 use bytes::BytesMut;
 use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
 use enum_kinds::EnumKind;
@@ -8,13 +15,6 @@ use nom_sql::{Double, Float, Literal, SqlType};
 use noria_errors::{internal, ReadySetError, ReadySetResult};
 use proptest::prelude::{prop_oneof, Arbitrary};
 use tokio_postgres::types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
-
-use std::borrow::Cow;
-use std::convert::{TryFrom, TryInto};
-use std::error::Error;
-use std::hash::{Hash, Hasher};
-use std::ops::{Add, Div, Mul, Sub};
-use std::{fmt, mem};
 
 mod serde;
 mod text;
@@ -955,14 +955,15 @@ impl Default for DataType {
     }
 }
 
+use std::cmp::Ordering;
+use std::sync::Arc;
+
 use bit_vec::BitVec;
 use eui48::{MacAddress, MacAddressFormat};
 use launchpad::arbitrary::arbitrary_decimal;
 use mysql_time::MysqlTime;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
-use std::cmp::Ordering;
-use std::sync::Arc;
 use uuid::Uuid;
 
 impl PartialOrd for DataType {
@@ -2319,11 +2320,12 @@ impl Arbitrary for DataType {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use derive_more::{From, Into};
     use launchpad::{eq_laws, hash_laws, ord_laws};
     use proptest::prelude::*;
     use test_strategy::proptest;
+
+    use super::*;
 
     #[test]
     fn test_size_and_alignment() {
@@ -3421,7 +3423,6 @@ mod tests {
     }
 
     mod coerce_to {
-        use super::*;
         use launchpad::arbitrary::{
             arbitrary_naive_date, arbitrary_naive_date_time, arbitrary_naive_time,
         };
@@ -3429,6 +3430,8 @@ mod tests {
         use proptest::strategy::Strategy;
         use test_strategy::proptest;
         use SqlType::*;
+
+        use super::*;
 
         #[proptest]
         fn same_type_is_identity(dt: DataType) {

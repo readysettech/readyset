@@ -1,8 +1,8 @@
-use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::mem;
 
 use nom_sql::{self, FunctionExpression};
+use serde::{Deserialize, Serialize};
 
 // FIXME: this is _not_ okay! malte knows about it
 #[allow(clippy::derive_hash_xor_eq)]

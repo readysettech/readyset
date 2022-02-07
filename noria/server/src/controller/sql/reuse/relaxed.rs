@@ -1,11 +1,12 @@
+use std::collections::HashMap;
+use std::vec::Vec;
+
+use noria::ReadySetError;
+
 use super::super::query_graph::{QueryGraph, QueryGraphEdge};
 use super::super::query_signature::Signature;
 use super::helpers::predicate_implication::complex_predicate_implies;
 use super::{ReuseConfiguration, ReuseType};
-
-use noria::ReadySetError;
-use std::collections::HashMap;
-use std::vec::Vec;
 
 /// Implementation of reuse algorithm with relaxed constraints.
 /// While Finkelstein checks if queries are compatible for direct extension,

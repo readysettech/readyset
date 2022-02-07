@@ -1,5 +1,9 @@
-use super::ChannelCoordinator;
-use crate::ReadySetResult;
+use std::collections::hash_map::Entry::{Occupied, Vacant};
+use std::collections::{HashSet, VecDeque};
+use std::net::SocketAddr;
+use std::sync::{atomic, Arc};
+use std::time;
+
 use ahash::AHashMap;
 use anyhow::{self, Context as AnyhowContext};
 use async_bincode::AsyncDestination;
@@ -12,11 +16,6 @@ use futures_util::FutureExt;
 use noria::channel::{self, CONNECTION_FROM_BASE};
 use noria::internal::{DomainIndex, LocalOrNot};
 use noria::{KeyComparison, PacketData, PacketPayload, Tagged};
-use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::{HashSet, VecDeque};
-use std::net::SocketAddr;
-use std::sync::{atomic, Arc};
-use std::time;
 use strawpoll::Strawpoll;
 use time::Duration;
 use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
@@ -24,6 +23,9 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_stream::wrappers::IntervalStream;
 use tracing::{debug, error, info_span, instrument, warn, Span};
+
+use super::ChannelCoordinator;
+use crate::ReadySetResult;
 
 pub(super) type ReplicaAddr = (DomainIndex, usize);
 

@@ -22,13 +22,12 @@ use itertools::Itertools;
 use maplit::hashmap;
 use mysql_async::prelude::Queryable;
 use mysql_common::value::Value;
+use noria_data::DataType;
 use paste::paste;
 use proptest::prelude::*;
 use proptest::sample::select;
 use proptest::test_runner::TestCaseResult;
 use test_strategy::proptest;
-
-use noria_data::DataType;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Operation<const K: usize> {

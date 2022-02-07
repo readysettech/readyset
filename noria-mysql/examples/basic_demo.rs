@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, RwLock};
+
 use anyhow::Result;
 use maplit::hashmap;
 use nom_sql::SelectStatement;
@@ -8,9 +12,6 @@ use noria_client::backend::{BackendBuilder, QueryResult};
 use noria_client::query_status_cache::QueryStatusCache;
 use noria_client::Backend;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
-use std::collections::HashMap;
-use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, RwLock};
 
 #[tokio::main]
 async fn main() -> Result<()> {

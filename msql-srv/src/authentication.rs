@@ -8,9 +8,10 @@
 //!
 //! [0]: https://dev.mysql.com/doc/internals/en/secure-password-authentication.html
 
-use crate::error::MsqlSrvError;
 use getrandom::getrandom;
 use sha1::{Digest, Sha1};
+
+use crate::error::MsqlSrvError;
 
 pub type AuthData = [u8; 20];
 

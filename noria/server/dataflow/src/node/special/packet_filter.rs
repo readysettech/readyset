@@ -1,14 +1,16 @@
-use crate::payload::ReplayPieceContext;
-use crate::prelude::NodeIndex;
-use crate::Packet;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
+use std::ops::Bound;
+
 use common::DataType;
 use noria::KeyComparison;
 use noria_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
-use std::ops::Bound;
 use vec1::Vec1;
+
+use crate::payload::ReplayPieceContext;
+use crate::prelude::NodeIndex;
+use crate::Packet;
 
 type ColumnIndexes = Vec<usize>;
 
@@ -202,11 +204,13 @@ where
 
 #[cfg(test)]
 mod test {
+    use std::convert::TryInto;
+
+    use common::{Link, Tag};
+    use vec1::vec1;
+
     use super::*;
     use crate::prelude::LocalNodeIndex;
-    use common::{Link, Tag};
-    use std::convert::TryInto;
-    use vec1::vec1;
 
     #[test]
     fn process_random_packet() {
@@ -233,10 +237,12 @@ mod test {
     }
 
     mod update_processing {
-        use super::*;
+        use std::ops::Bound;
+
         use common::Record;
         use maplit::hashset;
-        use std::ops::Bound;
+
+        use super::*;
 
         #[test]
         fn process_no_keys_associated() {

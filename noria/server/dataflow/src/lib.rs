@@ -34,12 +34,13 @@ mod domain;
 mod node_map;
 mod processing;
 
-use derivative::Derivative;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
+
+use derivative::Derivative;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub use crate::backlog::{LookupError, SingleReadHandle};
@@ -47,13 +48,13 @@ pub type Readers =
     Arc<Mutex<HashMap<(petgraph::graph::NodeIndex, String, usize), backlog::SingleReadHandle>>>;
 pub type DomainConfig = domain::Config;
 
+pub use dataflow_expression::{BuiltinFunction, Expression};
+
 pub use crate::domain::{Domain, DomainBuilder, DomainIndex};
 pub use crate::node::special::reader::post_lookup;
 pub use crate::node_map::NodeMap;
 pub use crate::payload::{DomainRequest, Packet, PacketDiscriminants};
 pub use crate::processing::SuggestedIndex;
-
-pub use dataflow_expression::{BuiltinFunction, Expression};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Sharding {

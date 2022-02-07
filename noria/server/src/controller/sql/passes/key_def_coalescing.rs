@@ -45,10 +45,11 @@ impl KeyDefinitionCoalescing for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use super::KeyDefinitionCoalescing;
     use nom_sql::{
         Column, ColumnConstraint, ColumnSpecification, SqlQuery, SqlType, Table, TableKey,
     };
+
+    use super::KeyDefinitionCoalescing;
 
     #[test]
     fn it_coalesces_pkeys() {

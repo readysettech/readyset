@@ -1,9 +1,12 @@
+use std::convert::{TryFrom, TryInto};
+use std::ops::Deref;
+use std::sync::Arc;
+
 use async_trait::async_trait;
+use eui48::MacAddressFormat;
 use noria_client::backend as cl;
 use noria_data::DataType;
 use psql_srv as ps;
-use std::convert::{TryFrom, TryInto};
-use std::ops::Deref;
 
 use crate::error::Error;
 use crate::query_handler::PostgreSqlQueryHandler;
@@ -12,8 +15,6 @@ use crate::resultset::Resultset;
 use crate::row::Row;
 use crate::value::Value;
 use crate::PostgreSqlUpstream;
-use eui48::MacAddressFormat;
-use std::sync::Arc;
 
 /// A `noria_client` `Backend` wrapper that implements `psql_srv::Backend`. PostgreSQL client
 /// requests provided to `psql_srv::Backend` trait function implementations are forwared to the

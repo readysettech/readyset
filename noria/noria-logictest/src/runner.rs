@@ -8,14 +8,11 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use std::{io, mem};
-use tokio::time::sleep;
 
 use anyhow::{anyhow, bail, Context};
 use colored::*;
 use itertools::Itertools;
 use msql_srv::MysqlIntermediary;
-use {mysql_async as mysql, tokio_postgres as pgsql};
-
 use nom_sql::SelectStatement;
 use noria::consensus::{Authority, LocalAuthorityStore};
 use noria::ControllerHandle;
@@ -25,6 +22,8 @@ use noria_client::UpstreamDatabase;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use noria_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use noria_server::{Builder, LocalAuthority, ReuseConfigType};
+use tokio::time::sleep;
+use {mysql_async as mysql, tokio_postgres as pgsql};
 
 use crate::ast::{
     Conditional, Query, QueryResults, Record, SortMode, Statement, StatementResult, Value,

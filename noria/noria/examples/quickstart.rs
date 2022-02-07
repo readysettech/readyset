@@ -1,7 +1,8 @@
-use noria::consensus::Authority;
-use noria::{ControllerHandle, ZookeeperAuthority};
 use std::convert::TryInto;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use noria::consensus::Authority;
+use noria::{ControllerHandle, ZookeeperAuthority};
 
 #[tokio::main]
 async fn main() {

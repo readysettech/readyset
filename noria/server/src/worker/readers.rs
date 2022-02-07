@@ -1,5 +1,13 @@
-use async_bincode::AsyncBincodeStream;
 use core::task::Context;
+use std::borrow::Cow;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::future::Future;
+use std::task::Poll;
+use std::time::Duration;
+use std::{mem, time};
+
+use async_bincode::AsyncBincodeStream;
 use dataflow::prelude::{DataType, *};
 use dataflow::{Readers, SingleReadHandle};
 use failpoint_macros::set_failpoint;
@@ -12,13 +20,6 @@ use noria::metrics::recorded;
 use noria::{KeyComparison, ReadQuery, ReadReply, Tagged, ViewQuery, ViewQueryFilter};
 use pin_project::pin_project;
 use serde::ser::Serializer;
-use std::borrow::Cow;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::future::Future;
-use std::task::Poll;
-use std::time::Duration;
-use std::{mem, time};
 use stream_cancel::Valve;
 use tokio::task_local;
 use tokio_stream::wrappers::TcpListenerStream;
@@ -629,9 +630,10 @@ impl BlockingRead {
 mod readreply {
     use std::borrow::Cow;
 
-    use super::SerializedReadReplyBatch;
     use noria::{ReadReply, Tagged};
     use noria_data::DataType;
+
+    use super::SerializedReadReplyBatch;
 
     fn rtt_ok(data: Vec<Vec<Vec<DataType>>>) {
         let got: Tagged<ReadReply> = bincode::deserialize(

@@ -1,6 +1,7 @@
 //! Msql specific error codes
 
 use std::io;
+
 use thiserror::Error;
 /// Enum of errors returned from msql-srv
 #[derive(Debug, Error)]

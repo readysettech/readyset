@@ -1,7 +1,9 @@
+use std::fmt;
+
+use itertools::Itertools;
+
 use crate::node::{Node, NodeType};
 use crate::prelude::*;
-use itertools::Itertools;
-use std::fmt;
 
 impl fmt::Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
