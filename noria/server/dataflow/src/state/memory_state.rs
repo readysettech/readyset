@@ -254,11 +254,6 @@ impl State for MemoryState {
         LookupResult::Missing
     }
 
-    fn lookup_in_tag<'a>(&'a self, tag: Tag, key: &KeyType) -> LookupResult<'a> {
-        let index = self.by_tag.get(&tag).expect("Lookup on nonexistent tag");
-        self.state[*index].lookup(key)
-    }
-
     fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a> {
         debug_assert!(
             !self.state.is_empty(),
@@ -540,19 +535,6 @@ mod tests {
                 .len(),
             3
         );
-    }
-
-    #[test]
-    fn lookup_in_tag_point_btree() {
-        let mut state = MemoryState::default();
-        state.add_key(Index::btree_map(vec![0]), Some(vec![Tag::new(1)]));
-        state.mark_filled(
-            KeyComparison::from_range(&(vec1![DataType::from(1)]..vec1![DataType::from(2)])),
-            Tag::new(1),
-        );
-        let res = state.lookup_in_tag(Tag::new(1), &KeyType::Single(&1.into()));
-        assert!(!res.is_missing());
-        assert!(res.unwrap().is_empty());
     }
 
     #[test]

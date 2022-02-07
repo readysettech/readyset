@@ -374,18 +374,7 @@ impl Ingredient for TopK {
                 current_group_key.extend(self.project_group(r.rec())?.into_iter().cloned());
 
                 // check out current state
-                let lookup_result = {
-                    let lookup_key = KeyType::from(&current_group_key[..]);
-                    // see Note [self-lookup-uses-tag]
-                    match (replay.tag(), replay.key()) {
-                        (Some(tag), Some(key)) if key == self.group_by => {
-                            db.lookup_in_tag(tag, &lookup_key)
-                        }
-                        _ => db.lookup(&self.group_by, &lookup_key),
-                    }
-                };
-
-                match lookup_result {
+                match db.lookup(&self.group_by[..], &KeyType::from(&current_group_key[..])) {
                     LookupResult::Some(local_records) => {
                         if replay.is_partial() {
                             lookups.push(Lookup {
