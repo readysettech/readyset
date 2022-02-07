@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 /// # Examples
 ///
 /// ```rust
-/// use noria_dataflow::NodeMap;
 /// use noria::internal::LocalNodeIndex;
+/// use noria_dataflow::NodeMap;
 ///
 /// let node_1 = unsafe { LocalNodeIndex::make(1u32) };
 ///

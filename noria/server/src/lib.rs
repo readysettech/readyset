@@ -195,17 +195,22 @@
 //!     let vote = mig.add_ingredient("vote", &["user", "id"], Base::default());
 //!
 //!     // vote count is an aggregation over vote where we group by the second field ([1])
-//!     let vc = mig.add_ingredient("vc", &["id", "votes"], Aggregation::COUNT.over(vote, 0, &[1]));
+//!     let vc = mig.add_ingredient(
+//!         "vc",
+//!         &["id", "votes"],
+//!         Aggregation::COUNT.over(vote, 0, &[1]),
+//!     );
 //!
 //!     // add final join using first field from article and first from vc.
 //!     // joins are trickier because you need to specify what to join on. the B(0, 0) here
 //!     // signifies that the first field of article and vc should be equal,
 //!     // and the second field can be whatever.
-//!     let j = Join::new(article, vc, JoinType::Inner, vec![
-//!                JoinSource::B(0, 0),
-//!                JoinSource::L(1),
-//!                JoinSource::R(1)
-//!             ]);
+//!     let j = Join::new(
+//!         article,
+//!         vc,
+//!         JoinType::Inner,
+//!         vec![JoinSource::B(0, 0), JoinSource::L(1), JoinSource::R(1)],
+//!     );
 //!     let awvc = mig.add_ingredient("end", &["id", "title", "votes"], j);
 //!
 //!     // we want to be able to query awvc_q using "id"
@@ -241,7 +246,13 @@
 //! );
 //! let mut db = noria::ControllerHandle::new(zk_auth).await;
 //! let mut article = db.table("article").await.unwrap();
-//! article.insert(vec![noria_data::DataType::from(1), "Hello world".try_into().unwrap()]).await.unwrap();
+//! article
+//!     .insert(vec![
+//!         noria_data::DataType::from(1),
+//!         "Hello world".try_into().unwrap(),
+//!     ])
+//!     .await
+//!     .unwrap();
 //! # }
 //! ```
 //!
@@ -304,7 +315,9 @@
 //! );
 //! let mut db = noria::ControllerHandle::new(zk_auth).await;
 //! let mut vote = db.table("vote").await.unwrap();
-//! vote.insert(vec![noria_data::DataType::from(1000), 1.into()]).await.unwrap();
+//! vote.insert(vec![noria_data::DataType::from(1000), 1.into()])
+//!     .await
+//!     .unwrap();
 //! # }
 //! ```
 //!

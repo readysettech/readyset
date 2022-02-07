@@ -19,16 +19,21 @@
 //! # use std::io;
 //! # use std::net;
 //! # use std::thread;
-//! use msql_srv::*;
-//! use tokio::io::AsyncWrite;
-//! use async_trait::async_trait;
-//! use mysql::prelude::*;
 //! use std::iter;
+//!
+//! use async_trait::async_trait;
+//! use msql_srv::*;
+//! use mysql::prelude::*;
+//! use tokio::io::AsyncWrite;
 //!
 //! struct Backend;
 //! #[async_trait]
 //! impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
-//!     async fn on_prepare(&mut self, _: &str, info: StatementMetaWriter<'_, W>) -> io::Result<()> {
+//!     async fn on_prepare(
+//!         &mut self,
+//!         _: &str,
+//!         info: StatementMetaWriter<'_, W>,
+//!     ) -> io::Result<()> {
 //!         info.reply(42, &[], &[]).await
 //!     }
 //!     async fn on_execute(
@@ -45,7 +50,11 @@
 //!         w.ok().await
 //!     }
 //!
-//!     async fn on_query(&mut self, query: &str, results: QueryResultWriter<'_, W>) -> io::Result<()> {
+//!     async fn on_query(
+//!         &mut self,
+//!         query: &str,
+//!         results: QueryResultWriter<'_, W>,
+//!     ) -> io::Result<()> {
 //!         if query.starts_with("SELECT @@") || query.starts_with("select @@") {
 //!             let var = &query.get(b"SELECT @@".len()..);
 //!             return match var {
@@ -101,7 +110,8 @@
 //!                 let _guard = rt.handle().enter();
 //!                 tokio::net::TcpStream::from_std(s).unwrap()
 //!             };
-//!             rt.block_on(MysqlIntermediary::run_on_tcp(Backend, s)).unwrap();
+//!             rt.block_on(MysqlIntermediary::run_on_tcp(Backend, s))
+//!                 .unwrap();
 //!         }
 //!     });
 //!
@@ -110,7 +120,12 @@
 //!     )
 //!     .unwrap();
 //!     assert_eq!(db.ping(), true);
-//!     assert_eq!(db.query::<mysql::Row, _>("SELECT a, b FROM foo").unwrap().len(), 1);
+//!     assert_eq!(
+//!         db.query::<mysql::Row, _>("SELECT a, b FROM foo")
+//!             .unwrap()
+//!             .len(),
+//!         1
+//!     );
 //!     drop(db);
 //!     jh.join().unwrap();
 //! }

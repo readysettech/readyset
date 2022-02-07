@@ -322,17 +322,18 @@ impl<'a> RangeKey<'a> {
     /// # Examples
     ///
     /// ```rust
+    /// use std::ops::Bound::*;
+    ///
     /// use noria_common::RangeKey;
     /// use noria_data::DataType;
-    /// use std::ops::Bound::*;
     /// use vec1::vec1;
     ///
     /// // Can build RangeKeys from regular range expressions
     /// assert_eq!(RangeKey::from(&(..)), RangeKey::Unbounded);
     /// assert_eq!(
-    ///   RangeKey::from(&(vec1![DataType::from(0)]..vec1![DataType::from(1)])),
-    ///   RangeKey::Single((Included(&(0.into())), Excluded(&(1.into())))
-    /// ));
+    ///     RangeKey::from(&(vec1![DataType::from(0)]..vec1![DataType::from(1)])),
+    ///     RangeKey::Single((Included(&(0.into())), Excluded(&(1.into()))))
+    /// );
     /// ```
     pub fn from<R>(range: &'a R) -> Self
     where

@@ -263,11 +263,11 @@ impl Expression {
     /// # Examaples
     ///
     /// ```rust
-    /// use nom_sql::{Expression, UnaryOperator, Column};
+    /// use nom_sql::{Column, Expression, UnaryOperator};
     ///
     /// let expr = Expression::UnaryOp {
     ///     op: UnaryOperator::Not,
-    ///     rhs: Box::new(Expression::Column("x".into()))
+    ///     rhs: Box::new(Expression::Column("x".into())),
     /// };
     ///
     /// let subexprs = expr.immediate_subexpressions().collect::<Vec<_>>();

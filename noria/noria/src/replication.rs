@@ -110,21 +110,23 @@ impl ReplicationOffsets {
     /// use noria::replication::ReplicationOffsets;
     ///
     /// let mut replication_offsets = ReplicationOffsets::default();
-    /// replication_offsets.tables.insert("table_1".to_string(), None);
+    /// replication_offsets
+    ///     .tables
+    ///     .insert("table_1".to_string(), None);
     /// assert!(!replication_offsets.has_table("table_1"));
     /// ```
     ///
     /// A table that is present returns `true`:
     ///
     /// ```rust
-    /// use noria::replication::{ReplicationOffsets, ReplicationOffset};
+    /// use noria::replication::{ReplicationOffset, ReplicationOffsets};
     ///
     /// let mut replication_offsets = ReplicationOffsets::default();
     /// replication_offsets.tables.insert(
     ///     "table_1".to_string(),
     ///     Some(ReplicationOffset {
     ///         replication_log_name: "binlog".to_string(),
-    ///         offset: 1
+    ///         offset: 1,
     ///     }),
     /// );
     /// assert!(replication_offsets.has_table("table_1"));

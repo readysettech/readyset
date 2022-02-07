@@ -355,8 +355,8 @@ impl DataType {
     /// Reals can be converted to integers
     ///
     /// ```rust
-    /// use noria_data::DataType;
     /// use nom_sql::SqlType;
+    /// use noria_data::DataType;
     ///
     /// let real = DataType::Double(123.0, 0);
     /// let int = real.coerce_to(&SqlType::Int(None)).unwrap();
@@ -366,17 +366,18 @@ impl DataType {
     /// Text can be parsed as a timestamp using the SQL `%Y-%m-%d %H:%M:%S` format:
     ///
     /// ```rust
-    /// use noria_data::DataType;
-    /// use nom_sql::SqlType;
-    /// use chrono::NaiveDate;
     /// use std::borrow::Borrow;
     /// use std::convert::TryFrom;
+    ///
+    /// use chrono::NaiveDate;
+    /// use nom_sql::SqlType;
+    /// use noria_data::DataType;
     ///
     /// let text = DataType::try_from("2021-01-26 10:20:37").unwrap();
     /// let timestamp = text.coerce_to(&SqlType::Timestamp).unwrap();
     /// assert_eq!(
-    ///   timestamp.into_owned(),
-    ///   DataType::Timestamp(NaiveDate::from_ymd(2021, 01, 26).and_hms(10, 20, 37))
+    ///     timestamp.into_owned(),
+    ///     DataType::Timestamp(NaiveDate::from_ymd(2021, 01, 26).and_hms(10, 20, 37))
     /// );
     /// ```
     pub fn coerce_to<'a>(&'a self, ty: &SqlType) -> ReadySetResult<Cow<'a, Self>> {

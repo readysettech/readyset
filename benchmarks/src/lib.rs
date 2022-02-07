@@ -7,13 +7,12 @@
 //! use std::collections::HashMap;
 //!
 //! use anyhow::Result;
-//! use itertools::{Itertools, Tuples};
-//! use metrics::Unit;
-//! use mysql_async::prelude::*;
-//!
 //! use benchmarks::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
 //! use benchmarks::benchmark_gauge;
 //! use benchmarks::utils::prometheus::ForwardPrometheusMetrics;
+//! use itertools::{Itertools, Tuples};
+//! use metrics::Unit;
+//! use mysql_async::prelude::*;
 //!
 //! #[derive(clap::Parser, Clone)]
 //! pub struct MyBenchmark {
@@ -28,8 +27,12 @@
 //! impl BenchmarkControl for MyBenchmark {
 //!     async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
 //!         let mut conn = deployment.connect_to_setup().await?;
-//!         r"CREATE TABLE integers (id INT UNSIGNED NOT NULL)".ignore(&mut conn).await?;
-//!         let stmt = conn.prep(r"INSERT INTO integers VALUES (?), (?), (?), (?)").await?;
+//!         r"CREATE TABLE integers (id INT UNSIGNED NOT NULL)"
+//!             .ignore(&mut conn)
+//!             .await?;
+//!         let stmt = conn
+//!             .prep(r"INSERT INTO integers VALUES (?), (?), (?), (?)")
+//!             .await?;
 //!         let chunks: Tuples<Range<u32>, (_, _, _, _)> = (0..self.row_count).tuples();
 //!         conn.exec_batch(stmt, chunks).await?;
 //!         Ok(())
@@ -59,11 +62,11 @@
 //!         // It can be a good practice to add any of this run's parameters as labels
 //!         labels.insert(
 //!             "benchmark.my_benchmark.row_count".into(),
-//!             self.row_count.to_string()
+//!             self.row_count.to_string(),
 //!         );
 //!         labels.insert(
 //!             "benchmark.my_benchmark.where_value".into(),
-//!             self.where_value.to_string()
+//!             self.where_value.to_string(),
 //!         );
 //!         labels
 //!     }

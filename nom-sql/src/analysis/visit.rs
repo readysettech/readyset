@@ -27,8 +27,8 @@ use crate::{
 /// ```
 /// #![feature(never_type)]
 ///
-/// use nom_sql::{parse_query, Literal, SqlQuery, Dialect};
 /// use nom_sql::analysis::visit::Visitor;
+/// use nom_sql::{parse_query, Dialect, Literal, SqlQuery};
 ///
 /// fn count_placeholders(query: &str) -> usize {
 ///     #[derive(Default)]
@@ -42,7 +42,7 @@ use crate::{
 ///                 self.0 += 1;
 ///             }
 ///             Ok(())
-///        }
+///         }
 ///     }
 ///
 ///     let mut query = match parse_query(Dialect::MySQL, query).unwrap() {
@@ -55,8 +55,10 @@ use crate::{
 ///     counter.0
 /// }
 ///
-///
-/// assert_eq!(count_placeholders("SELECT id FROM users WHERE name = ? AND age = ?"), 2);
+/// assert_eq!(
+///     count_placeholders("SELECT id FROM users WHERE name = ? AND age = ?"),
+///     2
+/// );
 /// ```
 pub trait Visitor<'ast>: Sized {
     /// Errors that can be thrown during execution of this visitor

@@ -3,3 +3,4 @@ imports_granularity = "Module"
 group_imports = "StdExternalCrate"
 wrap_comments = true
 comment_width = 100
+format_code_in_doc_comments = true

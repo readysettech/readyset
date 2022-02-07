@@ -39,9 +39,9 @@
 //! let (mut book_reviews_w, book_reviews_r) = reader_map::new();
 //!
 //! // review some books.
-//! book_reviews_w.insert("Adventures of Huckleberry Finn",    "My favorite book.");
-//! book_reviews_w.insert("Grimms' Fairy Tales",               "Masterpiece.");
-//! book_reviews_w.insert("Pride and Prejudice",               "Very enjoyable.");
+//! book_reviews_w.insert("Adventures of Huckleberry Finn", "My favorite book.");
+//! book_reviews_w.insert("Grimms' Fairy Tales", "Masterpiece.");
+//! book_reviews_w.insert("Pride and Prejudice", "Very enjoyable.");
 //! book_reviews_w.insert("The Adventures of Sherlock Holmes", "Eye lyked it alot.");
 //!
 //! // at this point, reads from book_reviews_r will not see any of the reviews!
@@ -50,26 +50,45 @@
 //! book_reviews_w.publish();
 //! assert_eq!(book_reviews_r.len(), 4);
 //! // reads will now return Some() because the map has been initialized
-//! assert_eq!(book_reviews_r.get("Grimms' Fairy Tales").map(|rs| rs.len()), Some(1));
+//! assert_eq!(
+//!     book_reviews_r.get("Grimms' Fairy Tales").map(|rs| rs.len()),
+//!     Some(1)
+//! );
 //!
 //! // remember, this is a multi-value map, so we can have many reviews
-//! book_reviews_w.insert("Grimms' Fairy Tales",               "Eh, the title seemed weird.");
-//! book_reviews_w.insert("Pride and Prejudice",               "Too many words.");
+//! book_reviews_w.insert("Grimms' Fairy Tales", "Eh, the title seemed weird.");
+//! book_reviews_w.insert("Pride and Prejudice", "Too many words.");
 //!
 //! // but again, new writes are not yet visible
-//! assert_eq!(book_reviews_r.get("Grimms' Fairy Tales").map(|rs| rs.len()), Some(1));
+//! assert_eq!(
+//!     book_reviews_r.get("Grimms' Fairy Tales").map(|rs| rs.len()),
+//!     Some(1)
+//! );
 //!
 //! // we need to refresh first
 //! book_reviews_w.publish();
-//! assert_eq!(book_reviews_r.get("Grimms' Fairy Tales").map(|rs| rs.len()), Some(2));
+//! assert_eq!(
+//!     book_reviews_r.get("Grimms' Fairy Tales").map(|rs| rs.len()),
+//!     Some(2)
+//! );
 //!
 //! // oops, this review has a lot of spelling mistakes, let's delete it.
 //! // remove_entry deletes *all* reviews (though in this case, just one)
 //! book_reviews_w.remove_entry("The Adventures of Sherlock Holmes");
 //! // but again, it's not visible to readers until we refresh
-//! assert_eq!(book_reviews_r.get("The Adventures of Sherlock Holmes").map(|rs| rs.len()), Some(1));
+//! assert_eq!(
+//!     book_reviews_r
+//!         .get("The Adventures of Sherlock Holmes")
+//!         .map(|rs| rs.len()),
+//!     Some(1)
+//! );
 //! book_reviews_w.publish();
-//! assert_eq!(book_reviews_r.get("The Adventures of Sherlock Holmes").map(|rs| rs.len()), None);
+//! assert_eq!(
+//!     book_reviews_r
+//!         .get("The Adventures of Sherlock Holmes")
+//!         .map(|rs| rs.len()),
+//!     None
+//! );
 //!
 //! // look up the values associated with some keys.
 //! let to_find = ["Pride and Prejudice", "Alice's Adventure in Wonderland"];
@@ -98,27 +117,29 @@
 //! let (mut book_reviews_w, book_reviews_r) = reader_map::new();
 //!
 //! // start some readers
-//! let readers: Vec<_> = (0..4).map(|_| {
-//!     let r = book_reviews_r.clone();
-//!     thread::spawn(move || {
-//!         loop {
-//!             let l = r.len();
-//!             if l == 0 {
-//!                 thread::yield_now();
-//!             } else {
-//!                 // the reader will either see all the reviews,
-//!                 // or none of them, since refresh() is atomic.
-//!                 assert_eq!(l, 4);
-//!                 break;
+//! let readers: Vec<_> = (0..4)
+//!     .map(|_| {
+//!         let r = book_reviews_r.clone();
+//!         thread::spawn(move || {
+//!             loop {
+//!                 let l = r.len();
+//!                 if l == 0 {
+//!                     thread::yield_now();
+//!                 } else {
+//!                     // the reader will either see all the reviews,
+//!                     // or none of them, since refresh() is atomic.
+//!                     assert_eq!(l, 4);
+//!                     break;
+//!                 }
 //!             }
-//!         }
+//!         })
 //!     })
-//! }).collect();
+//!     .collect();
 //!
 //! // do some writes
-//! book_reviews_w.insert("Adventures of Huckleberry Finn",    "My favorite book.");
-//! book_reviews_w.insert("Grimms' Fairy Tales",               "Masterpiece.");
-//! book_reviews_w.insert("Pride and Prejudice",               "Very enjoyable.");
+//! book_reviews_w.insert("Adventures of Huckleberry Finn", "My favorite book.");
+//! book_reviews_w.insert("Grimms' Fairy Tales", "Masterpiece.");
+//! book_reviews_w.insert("Pride and Prejudice", "Very enjoyable.");
 //! book_reviews_w.insert("The Adventures of Sherlock Holmes", "Eye lyked it alot.");
 //! // expose the writes
 //! book_reviews_w.publish();
@@ -138,25 +159,29 @@
 //! If multiple writers are needed, the `WriteHandle` must be protected by a `Mutex`.
 //!
 //! ```
-//! use std::thread;
 //! use std::sync::{Arc, Mutex};
+//! use std::thread;
 //! let (mut book_reviews_w, book_reviews_r) = reader_map::new();
 //!
 //! // start some writers.
 //! // since reader_map does not support concurrent writes, we need
 //! // to protect the write handle by a mutex.
 //! let w = Arc::new(Mutex::new(book_reviews_w));
-//! let writers: Vec<_> = (0..4).map(|i| {
-//!     let w = w.clone();
-//!     thread::spawn(move || {
-//!         let mut w = w.lock().unwrap();
-//!         w.insert(i, true);
-//!         w.publish();
+//! let writers: Vec<_> = (0..4)
+//!     .map(|i| {
+//!         let w = w.clone();
+//!         thread::spawn(move || {
+//!             let mut w = w.lock().unwrap();
+//!             w.insert(i, true);
+//!             w.publish();
+//!         })
 //!     })
-//! }).collect();
+//!     .collect();
 //!
 //! // eventually we should see all the writes
-//! while book_reviews_r.len() < 4 { thread::yield_now(); };
+//! while book_reviews_r.len() < 4 {
+//!     thread::yield_now();
+//! }
 //!
 //! // all the threads should eventually finish writing
 //! for w in writers.into_iter() {

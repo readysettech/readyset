@@ -48,11 +48,15 @@ pub trait EnglishList: Sized {
     ///
     /// // Commas aren't used for only two elements
     /// let mut two_elements = String::new();
-    /// vec!["one", "two"].write_and_list(&mut two_elements).unwrap();
+    /// vec!["one", "two"]
+    ///     .write_and_list(&mut two_elements)
+    ///     .unwrap();
     /// assert_eq!(two_elements, "one and two");
     ///
     /// let mut three_elements = String::new();
-    /// vec!["one", "two", "three"].write_and_list(&mut three_elements).unwrap();
+    /// vec!["one", "two", "three"]
+    ///     .write_and_list(&mut three_elements)
+    ///     .unwrap();
     /// assert_eq!(three_elements, "one, two, and three");
     /// ```
     fn write_and_list<W>(self, f: &mut W) -> fmt::Result
@@ -79,7 +83,9 @@ pub trait EnglishList: Sized {
     /// assert_eq!(two_elements, "one or two");
     ///
     /// let mut three_elements = String::new();
-    /// vec!["one", "two", "three"].write_or_list(&mut three_elements).unwrap();
+    /// vec!["one", "two", "three"]
+    ///     .write_or_list(&mut three_elements)
+    ///     .unwrap();
     /// assert_eq!(three_elements, "one, two, or three");
     /// ```
     fn write_or_list<W>(self, f: &mut W) -> fmt::Result
