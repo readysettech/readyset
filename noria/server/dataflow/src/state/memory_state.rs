@@ -460,7 +460,8 @@ impl MemoryState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{convert::TryInto, ops::Bound};
+    use std::convert::TryInto;
+    use std::ops::Bound;
 
     fn insert<S: State>(state: &mut S, row: Vec<DataType>) {
         let record: Record = row.into();

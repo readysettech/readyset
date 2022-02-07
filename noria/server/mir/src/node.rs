@@ -1,7 +1,8 @@
 use std::cell::RefCell;
 use std::fmt::{Debug, Display, Error, Formatter};
 
-use dataflow::{ops, prelude::ReadySetError};
+use dataflow::ops;
+use dataflow::prelude::ReadySetError;
 use node_inner::MirNodeInner;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::ColumnSpecification;
@@ -612,8 +613,7 @@ mod tests {
     mod add_column {
         use crate::node::node_inner::MirNodeInner;
         use crate::node::MirNode;
-        use crate::Column;
-        use crate::MirNodeRef;
+        use crate::{Column, MirNodeRef};
         use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
         use nom_sql::{BinaryOperator, Expression, Literal};
 

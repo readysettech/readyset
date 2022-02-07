@@ -7,11 +7,12 @@ mod single_state;
 #[cfg(feature = "bench")]
 pub use persistent_state::bench;
 
+use std::borrow::Cow;
 use std::fmt::{self, Debug};
+use std::iter::FromIterator;
 use std::ops::{Bound, Deref};
 use std::rc::Rc;
 use std::vec;
-use std::{borrow::Cow, iter::FromIterator};
 
 use crate::prelude::*;
 use ahash::RandomState;

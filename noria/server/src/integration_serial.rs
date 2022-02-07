@@ -7,9 +7,8 @@
 //! requirement in integration.rs, which supports running tests in
 //! parallel.
 
-use crate::get_col;
 use crate::integration_utils::*;
-use crate::Builder;
+use crate::{get_col, Builder};
 use assert_approx_eq::assert_approx_eq;
 use common::Index;
 use dataflow::node::special::Base;

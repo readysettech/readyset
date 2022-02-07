@@ -7,9 +7,6 @@ use std::{env, iter};
 use ::console::{style, Emoji};
 use anyhow::{anyhow, bail, Result};
 use aws::vpc_attribute;
-use aws_sdk_cloudformation as cfn;
-use aws_sdk_ec2 as ec2;
-use aws_sdk_rds as rds;
 use aws_types::credentials::future::ProvideCredentials as ProvideCredentialsFut;
 use aws_types::credentials::{CredentialsError, ProvideCredentials};
 use aws_types::region::Region;
@@ -29,6 +26,7 @@ use regex::Regex;
 use rusoto_credential::ProfileProvider;
 use tokio::fs::{DirBuilder, OpenOptions};
 use tokio::io::AsyncWriteExt;
+use {aws_sdk_cloudformation as cfn, aws_sdk_ec2 as ec2, aws_sdk_rds as rds};
 
 mod aws;
 mod deployment;

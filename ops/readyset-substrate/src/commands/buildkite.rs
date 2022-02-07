@@ -10,9 +10,8 @@ use handlebars::Handlebars;
 use serde::Serialize;
 use tracing::{event, Level};
 
-use crate::gerrit;
 use crate::substrate::{self, RootModule};
-use crate::terraform;
+use crate::{gerrit, terraform};
 
 #[derive(Serialize)]
 struct TerraformValidateAllPipelineTemplateData {

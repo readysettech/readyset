@@ -1,18 +1,15 @@
 use crate::codec::error::EncodeError as Error;
 use crate::codec::Codec;
 use crate::error::Error as BackendError;
-use crate::message::{
-    BackendMessage::{self, *},
-    CommandCompleteTag::*,
-    ErrorSeverity,
-    TransferFormat::{self, *},
-};
+use crate::message::BackendMessage::{self, *};
+use crate::message::CommandCompleteTag::*;
+use crate::message::ErrorSeverity;
+use crate::message::TransferFormat::{self, *};
 use crate::value::Value;
 use bytes::{BufMut, BytesMut};
 use eui48::MacAddressFormat;
 use postgres_types::{ToSql, Type};
-use std::convert::TryFrom;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use tokio_util::codec::Encoder;
 
 const ID_AUTHENTICATION_OK: u8 = b'R';

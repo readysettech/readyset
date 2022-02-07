@@ -1,6 +1,7 @@
 use crate::utils;
 use chrono::NaiveDateTime;
-use neon::{prelude::*, types::JsDate};
+use neon::prelude::*;
+use neon::types::JsDate;
 use noria::results::Results;
 use noria::ColumnSchema;
 use noria_client::backend::{

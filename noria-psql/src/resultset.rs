@@ -134,7 +134,8 @@ mod tests {
     use noria::ColumnSchema;
     use noria_client::backend as cl;
     use noria_data::DataType;
-    use std::{borrow::Cow, convert::TryFrom};
+    use std::borrow::Cow;
+    use std::convert::TryFrom;
 
     fn collect_resultset_values(resultset: Resultset) -> Vec<Vec<ps::Value>> {
         resultset

@@ -7,9 +7,8 @@
 
 use crate::controller::recipe::Recipe;
 use crate::controller::sql::{mir, SqlIncorporator};
-use crate::get_col;
 use crate::integration_utils::*;
-use crate::{Builder, ReadySetError, ReuseConfigType};
+use crate::{get_col, Builder, ReadySetError, ReuseConfigType};
 use common::Index;
 use dataflow::node::special::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
@@ -24,11 +23,12 @@ use futures::StreamExt;
 use itertools::Itertools;
 use nom_sql::OrderType;
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
+use noria::consistency::Timestamp;
+use noria::internal::LocalNodeIndex;
 use noria::{
-    consistency::Timestamp, internal::LocalNodeIndex, KeyComparison, SchemaType, ViewQuery,
-    ViewQueryFilter, ViewQueryOperator, ViewRequest,
+    KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery, ViewQueryFilter,
+    ViewQueryOperator, ViewRequest,
 };
-use noria::{Modification, ViewPlaceholder};
 use noria_data::DataType;
 
 use crate::controller::recipe::changelist::{Change, ChangeList};

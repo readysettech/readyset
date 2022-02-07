@@ -14,9 +14,8 @@ use std::convert::TryFrom;
 use std::env;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 static REPORTING_INTERVAL: Duration = Duration::from_secs(10);

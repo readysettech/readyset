@@ -9,8 +9,7 @@ extern crate quickcheck;
 #[macro_use(quickcheck)]
 extern crate quickcheck_macros;
 
-use quickcheck::Arbitrary;
-use quickcheck::Gen;
+use quickcheck::{Arbitrary, Gen};
 
 use rand::Rng;
 use std::cmp::{min, Ord};

@@ -1,8 +1,7 @@
 use nom_sql::{ColumnSpecification, SqlType};
 use noria::results::Results;
 use noria::ColumnSchema;
-use noria_client::backend::{self as cl, UpstreamPrepare};
-use noria_client::backend::{noria_connector, SinglePrepareResult};
+use noria_client::backend::{self as cl, noria_connector, SinglePrepareResult, UpstreamPrepare};
 use psql_srv as ps;
 use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
@@ -11,8 +10,7 @@ use upstream::StatementMeta;
 
 use crate::resultset::Resultset;
 use crate::schema::{NoriaSchema, SelectSchema};
-use crate::upstream;
-use crate::PostgreSqlUpstream;
+use crate::{upstream, PostgreSqlUpstream};
 use psql_srv::Column;
 
 /// A simple wrapper around `noria_client`'s `PrepareResult`, facilitating conversion to

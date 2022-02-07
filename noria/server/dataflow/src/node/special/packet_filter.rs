@@ -204,8 +204,7 @@ where
 mod test {
     use super::*;
     use crate::prelude::LocalNodeIndex;
-    use common::Link;
-    use common::Tag;
+    use common::{Link, Tag};
     use std::convert::TryInto;
     use vec1::vec1;
 

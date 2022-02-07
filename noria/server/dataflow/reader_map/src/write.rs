@@ -1,7 +1,8 @@
 use crate::inner::{Entry, Inner};
 use crate::read::ReadHandle;
 use crate::values::ValuesInner;
-use left_right::{aliasing::Aliased, Absorb};
+use left_right::aliasing::Aliased;
+use left_right::Absorb;
 
 use rand::prelude::IteratorRandom;
 use std::collections::hash_map::RandomState;

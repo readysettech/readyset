@@ -223,17 +223,14 @@ pub mod handles {
 
     // These cannot use ::{..} syntax because of
     // https://github.com/rust-lang/rust/issues/57411
-    pub use crate::read::ReadHandle;
-    pub use crate::read::ReadHandleFactory;
+    pub use crate::read::{ReadHandle, ReadHandleFactory};
 }
 
 /// Helper types that give access to values inside the read half of an `reader_map`.
 pub mod refs {
     // Same here, ::{..} won't work.
     pub use super::values::{Values, ValuesIter};
-    pub use crate::read::MapReadRef;
-    pub use crate::read::Miss;
-    pub use crate::read::ReadGuardIter;
+    pub use crate::read::{MapReadRef, Miss, ReadGuardIter};
 
     // Expose `ReadGuard` since it has useful methods the user will likely care about.
     #[doc(inline)]

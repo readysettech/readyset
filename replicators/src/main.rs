@@ -5,10 +5,9 @@ pub(crate) mod noria_adapter;
 pub(crate) mod postgres_connector;
 
 use clap::Parser;
-use mysql_async as mysql;
 use noria::consensus::AuthorityType;
 use noria_adapter::{AdapterOpts, NoriaAdapter};
-use tokio_postgres as pgsql;
+use {mysql_async as mysql, tokio_postgres as pgsql};
 
 /// A replication connector from an existing database to Noria
 #[derive(Parser)]

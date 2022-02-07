@@ -67,7 +67,8 @@
 //! only trigger on networking related errors specifically to try to prevent this feature from
 //! being too heavy handed.
 use std::borrow::Cow;
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Debug};
 use std::str::FromStr;
@@ -84,11 +85,8 @@ use noria::results::Results;
 use noria::ColumnSchema;
 use noria_client_metrics::{EventType, QueryDestination, QueryExecutionEvent, SqlQueryType};
 use noria_data::DataType;
-use noria_errors::{
-    internal, internal_err, unsupported,
-    ReadySetError::{self, PreparedStatementMissing},
-    ReadySetResult,
-};
+use noria_errors::ReadySetError::{self, PreparedStatementMissing};
+use noria_errors::{internal, internal_err, unsupported, ReadySetResult};
 use std::marker::PhantomData;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 use tokio::sync::mpsc::UnboundedSender;
@@ -97,10 +95,9 @@ use tracing::{error, instrument, trace, warn};
 use crate::query_status_cache::{
     ExecutionInfo, ExecutionState, MigrationState, QueryStatus, QueryStatusCache,
 };
-use crate::rewrite;
 use crate::upstream_database::NoriaCompare;
 pub use crate::upstream_database::UpstreamPrepare;
-use crate::{QueryHandler, UpstreamDatabase};
+use crate::{rewrite, QueryHandler, UpstreamDatabase};
 
 pub mod noria_connector;
 

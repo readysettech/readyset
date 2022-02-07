@@ -42,10 +42,11 @@ use noria::consensus::{Authority, AuthorityControl};
 use noria::debug::info::{DomainKey, GraphInfo};
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
 use noria::internal::MaterializationStatus;
+use noria::metrics::recorded;
 use noria::replication::{ReplicationOffset, ReplicationOffsets};
 use noria::{
-    metrics::recorded, ActivationResult, ReaderReplicationResult, ReaderReplicationSpec,
-    ReadySetError, ReadySetResult, ViewFilter, ViewRequest, ViewSchema,
+    ActivationResult, ReaderReplicationResult, ReaderReplicationSpec, ReadySetError,
+    ReadySetResult, ViewFilter, ViewRequest, ViewSchema,
 };
 use noria_errors::{bad_request_err, internal, internal_err, invariant, invariant_eq, NodeType};
 use petgraph::visit::Bfs;

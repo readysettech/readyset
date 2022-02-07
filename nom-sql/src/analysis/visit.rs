@@ -3,10 +3,11 @@
 //! [rustc-ast-visit]: https://doc.rust-lang.org/stable/nightly-rustc/rustc_ast/visit/index.html
 #![warn(clippy::todo, clippy::unimplemented)]
 
+use crate::set::Variable;
 use crate::{
-    set::Variable, Column, CommonTableExpression, Expression, FieldDefinitionExpression,
-    FunctionExpression, GroupByClause, InValue, JoinClause, JoinRightSide, LimitClause, Literal,
-    OrderClause, SelectStatement, SqlType, Table,
+    Column, CommonTableExpression, Expression, FieldDefinitionExpression, FunctionExpression,
+    GroupByClause, InValue, JoinClause, JoinRightSide, LimitClause, Literal, OrderClause,
+    SelectStatement, SqlType, Table,
 };
 
 /// Each method of the `Visitor` trait is a hook to be potentially overridden when recursively
@@ -326,7 +327,8 @@ pub fn walk_select_statement<'ast, V: Visitor<'ast>>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{select::selection, Dialect};
+    use crate::select::selection;
+    use crate::Dialect;
 
     use super::*;
 

@@ -1,16 +1,11 @@
 use async_bincode::AsyncBincodeStream;
 use core::task::Context;
-use dataflow::prelude::DataType;
-use dataflow::prelude::*;
-use dataflow::Readers;
-use dataflow::SingleReadHandle;
+use dataflow::prelude::{DataType, *};
+use dataflow::{Readers, SingleReadHandle};
 use failpoint_macros::set_failpoint;
-use futures_util::{
-    future,
-    future::Either,
-    future::{FutureExt, TryFutureExt},
-    stream::{StreamExt, TryStreamExt},
-};
+use futures_util::future;
+use futures_util::future::{Either, FutureExt, TryFutureExt};
+use futures_util::stream::{StreamExt, TryStreamExt};
 use launchpad::intervals;
 use noria::consistency::Timestamp;
 use noria::metrics::recorded;
@@ -20,17 +15,16 @@ use serde::ser::Serializer;
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::mem;
-use std::time;
+use std::future::Future;
+use std::task::Poll;
 use std::time::Duration;
-use std::{future::Future, task::Poll};
+use std::{mem, time};
 use stream_cancel::Valve;
 use tokio::task_local;
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_tower::multiplex::server;
 use tower::Service;
-use tracing::error;
-use tracing::warn;
+use tracing::{error, warn};
 
 /// Retry reads every this often.
 const RETRY_TIMEOUT: Duration = Duration::from_micros(100);

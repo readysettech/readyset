@@ -3,19 +3,18 @@ use crate::metrics::{get_global_recorder, Clear, RecorderType};
 use crate::worker::WorkerRequest;
 use anyhow::anyhow;
 use futures::TryFutureExt;
-use hyper::{self, header::CONTENT_TYPE, Method, StatusCode};
-use hyper::{service::make_service_fn, Body, Request, Response};
+use hyper::header::CONTENT_TYPE;
+use hyper::service::make_service_fn;
+use hyper::{self, Body, Method, Request, Response, StatusCode};
 use noria::consensus::{Authority, AuthorityControl};
 use noria::metrics::recorded;
 use noria::ReadySetError;
+use std::future::Future;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
+use std::pin::Pin;
 use std::sync::Arc;
-use std::{
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::task::{Context, Poll};
 use stream_cancel::Valve;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;

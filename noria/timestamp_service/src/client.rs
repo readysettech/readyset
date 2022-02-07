@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Error};
 
-use noria::{consistency::Timestamp, internal::LocalNodeIndex};
+use noria::consistency::Timestamp;
+use noria::internal::LocalNodeIndex;
 
 /// Unique identifier for a client write discernable at both the
 /// debezium connector and the noria client.

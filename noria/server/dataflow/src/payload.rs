@@ -3,8 +3,8 @@ use strum_macros::{EnumCount, EnumDiscriminants, EnumIter, IntoStaticStr};
 use vec1::Vec1;
 
 use crate::prelude::*;
-use noria::{self, KeyComparison};
-use noria::{internal::LocalOrNot, PacketData, PacketTrace};
+use noria::internal::LocalOrNot;
+use noria::{self, KeyComparison, PacketData, PacketTrace};
 
 use std::collections::HashSet;
 use std::fmt;

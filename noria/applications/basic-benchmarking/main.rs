@@ -5,8 +5,7 @@ use noria::{Builder, Handle};
 use noria_data::DataType;
 use rand::Rng;
 use std::convert::TryFrom;
-use std::result;
-use std::time;
+use std::{result, time};
 use vec1::vec1;
 
 #[tokio::main]

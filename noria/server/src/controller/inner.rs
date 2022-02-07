@@ -8,8 +8,7 @@
 )]
 
 use crate::controller::state::DataflowStateHandle;
-use crate::controller::{ControllerRequest, ControllerState};
-use crate::controller::{Worker, WorkerIdentifier};
+use crate::controller::{ControllerRequest, ControllerState, Worker, WorkerIdentifier};
 use crate::coordination::DomainDescriptor;
 use crate::worker::WorkerRequestKind;
 use failpoint_macros::failpoint;

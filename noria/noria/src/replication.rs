@@ -1,9 +1,9 @@
 //! Data types for implementing snapshot and streaming replication from an upstream database.
 
-use std::cmp::min_by_key;
+use std::borrow::Borrow;
+use std::cmp::{min_by_key, Ordering};
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::{borrow::Borrow, cmp::Ordering};
 
 use noria_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};

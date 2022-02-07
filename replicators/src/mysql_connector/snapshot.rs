@@ -1,7 +1,9 @@
 use futures::future::TryFutureExt;
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use itertools::Itertools;
-use mysql::{prelude::*, Transaction, TxOpts};
+use mysql::prelude::*;
+use mysql::{Transaction, TxOpts};
 use mysql_async as mysql;
 use noria::replication::{ReplicationOffset, ReplicationOffsets};
 use noria::ReadySetResult;

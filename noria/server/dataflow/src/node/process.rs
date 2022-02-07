@@ -11,8 +11,7 @@ use noria_errors::ReadySetResult;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::mem;
-use tracing::debug_span;
-use tracing::trace;
+use tracing::{debug_span, trace};
 
 /// The results of running a forward pass on a node
 #[derive(Debug, PartialEq, Eq, Default)]

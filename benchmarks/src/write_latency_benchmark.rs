@@ -1,6 +1,5 @@
 use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::time::Instant;
 
 use anyhow::{anyhow, bail, Result};

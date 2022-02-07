@@ -2,8 +2,7 @@
 
 use thiserror::Error;
 
-pub use crate::metrics::composite_recorder::CompositeMetricsRecorder;
-pub use crate::metrics::composite_recorder::RecorderType;
+pub use crate::metrics::composite_recorder::{CompositeMetricsRecorder, RecorderType};
 pub use crate::metrics::noria_recorder::NoriaMetricsRecorder;
 pub use crate::metrics::recorders::MetricsRecorder;
 

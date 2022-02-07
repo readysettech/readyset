@@ -1,15 +1,11 @@
 use itertools::{Either, Itertools};
-use nom_sql::{
-    analysis::visit::{self, Visitor},
-    BinaryOperator, Expression, InValue, ItemPlaceholder, Literal, SelectStatement,
-};
+use nom_sql::analysis::visit::{self, Visitor};
+use nom_sql::{BinaryOperator, Expression, InValue, ItemPlaceholder, Literal, SelectStatement};
 use noria_errors::{unsupported, ReadySetError, ReadySetResult};
-use std::{
-    borrow::Cow,
-    cmp::max,
-    convert::{TryFrom, TryInto},
-    iter, mem,
-};
+use std::borrow::Cow;
+use std::cmp::max;
+use std::convert::{TryFrom, TryInto};
+use std::{iter, mem};
 
 /// Struct storing information about parameters processed from a raw user supplied query, which
 /// provides support for converting a user-supplied parameter list into a set of lookup keys to pass

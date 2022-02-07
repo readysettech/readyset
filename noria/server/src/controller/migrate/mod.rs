@@ -34,8 +34,7 @@
 use dataflow::post_lookup::PostLookup;
 use dataflow::prelude::*;
 use dataflow::{node, DomainRequest};
-use metrics::counter;
-use metrics::histogram;
+use metrics::{counter, histogram};
 use noria::metrics::recorded;
 use noria::{KeyColumnIdx, ReadySetError, ViewPlaceholder};
 use std::collections::{HashMap, HashSet};

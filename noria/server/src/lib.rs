@@ -503,10 +503,8 @@ impl Default for Config {
 }
 
 use futures_util::sink::Sink;
-use std::{
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::pin::Pin;
+use std::task::{Context, Poll};
 struct ImplSinkForSender<T>(tokio::sync::mpsc::UnboundedSender<T>);
 
 impl<T> Sink<T> for ImplSinkForSender<T> {

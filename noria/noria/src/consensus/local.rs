@@ -12,9 +12,10 @@
 //! The LocalAuthority supports ephemeral keys, instead of tying these keys to
 //! an active session similar to Zookeeper, the authority will drop ephemeral
 //! keys it created when it is dropped.
-use std::collections::{btree_map::Entry, BTreeMap, HashSet};
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::net::SocketAddr;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::{collections::HashMap, net::SocketAddr};
 
 use anyhow::{anyhow, bail, Error};
 use async_trait::async_trait;

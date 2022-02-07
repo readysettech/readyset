@@ -1,19 +1,15 @@
-use std::{
-    collections::HashMap,
-    sync::{atomic::AtomicUsize, Arc, RwLock},
-    time::Duration,
-};
+use std::collections::HashMap;
+use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use nom_sql::SelectStatement;
-use noria::{consensus::Authority, ControllerHandle, ZookeeperAuthority};
-use noria_client::{
-    backend::{
-        noria_connector::{self, NoriaConnector},
-        BackendBuilder, QueryResult,
-    },
-    query_status_cache::QueryStatusCache,
-    Backend, UpstreamDatabase,
-};
+use noria::consensus::Authority;
+use noria::{ControllerHandle, ZookeeperAuthority};
+use noria_client::backend::noria_connector::{self, NoriaConnector};
+use noria_client::backend::{BackendBuilder, QueryResult};
+use noria_client::query_status_cache::QueryStatusCache;
+use noria_client::{Backend, UpstreamDatabase};
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 
 /// This example demonstrates setting Noria up with a separate MySQL database.

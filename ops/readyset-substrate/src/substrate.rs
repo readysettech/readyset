@@ -1,10 +1,11 @@
 //! Defintions of things specific to how Substrate organizes Terraform modules.
 
 use std::fmt;
+use std::fmt::Display;
+use std::io::BufRead;
 use std::path::PathBuf;
 use std::process::Command;
 use std::str::FromStr;
-use std::{fmt::Display, io::BufRead};
 
 use anyhow::{bail, Result};
 use serde::Serialize;

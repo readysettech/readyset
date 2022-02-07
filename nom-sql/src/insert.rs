@@ -1,7 +1,6 @@
 use nom::character::complete::{multispace0, multispace1};
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str;
+use std::{fmt, str};
 
 use crate::column::Column;
 use crate::common::{
@@ -9,8 +8,7 @@ use crate::common::{
     value_list, ws_sep_comma, Literal,
 };
 use crate::table::Table;
-use crate::Dialect;
-use crate::Expression;
+use crate::{Dialect, Expression};
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::opt;
 use nom::multi::many1;

@@ -252,10 +252,7 @@ pub use view::{
 
 /// The prelude contains most of the types needed in everyday operation.
 pub mod prelude {
-    pub use super::ActivationResult;
-    pub use super::ControllerHandle;
-    pub use super::Table;
-    pub use super::View;
+    pub use super::{ActivationResult, ControllerHandle, Table, View};
 }
 
 /// Wrapper types for Noria query results.

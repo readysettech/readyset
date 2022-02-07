@@ -1,4 +1,6 @@
-use crate::{inner::Inner, values::Values, Aliased};
+use crate::inner::Inner;
+use crate::values::Values;
+use crate::Aliased;
 use left_right::ReadGuard;
 use noria::internal::IndexType;
 

@@ -2,8 +2,7 @@ use indexmap::IndexMap;
 use partial_map::PartialMap;
 use std::iter;
 use std::ops::{Bound, RangeBounds};
-use tuple::Map;
-use tuple::TupleElements;
+use tuple::{Map, TupleElements};
 use vec1::Vec1;
 
 use super::mk_key::MakeKey;

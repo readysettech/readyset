@@ -5,16 +5,15 @@ use std::vec::Vec;
 use petgraph::graph::NodeIndex;
 
 use ::mir::query::{MirQuery, QueryFlowParts};
-use ::mir::reuse as mir_reuse;
-use ::mir::Column;
-use ::mir::MirNodeRef;
+use ::mir::{reuse as mir_reuse, Column, MirNodeRef};
 
 use ::serde::{Deserialize, Serialize};
 use nom_sql::analysis::ReferredTables;
-use nom_sql::{parser as sql_parser, Expression, InValue};
-use nom_sql::{BinaryOperator, CreateTableStatement};
-use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, FieldDefinitionExpression};
-use nom_sql::{SelectStatement, SqlQuery, Table};
+use nom_sql::{
+    parser as sql_parser, BinaryOperator, CompoundSelectOperator, CompoundSelectStatement,
+    CreateTableStatement, Expression, FieldDefinitionExpression, InValue, SelectStatement,
+    SqlQuery, Table,
+};
 use noria_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
 use tracing::{debug, trace, warn};
 

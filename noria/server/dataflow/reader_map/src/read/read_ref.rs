@@ -1,6 +1,6 @@
-use crate::inner::Miss;
-use crate::values::ValuesInner;
-use crate::{inner::Inner, values::Values, Aliased};
+use crate::inner::{Inner, Miss};
+use crate::values::{Values, ValuesInner};
+use crate::Aliased;
 use left_right::ReadGuard;
 use std::borrow::Borrow;
 use std::collections::btree_map;

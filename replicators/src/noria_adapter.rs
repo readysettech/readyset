@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use futures::FutureExt;
 use launchpad::select;
 use metrics::{counter, histogram};
-use mysql_async as mysql;
 use noria::consensus::Authority;
 use noria::consistency::Timestamp;
 use noria::metrics::recorded::{self, SnapshotStatusTag};
@@ -18,8 +17,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Notify;
-use tokio_postgres as pgsql;
 use tracing::{debug, error, info, info_span, warn, Instrument};
+use {mysql_async as mysql, tokio_postgres as pgsql};
 
 #[derive(Debug)]
 pub(crate) enum ReplicationAction {

@@ -1,6 +1,4 @@
-use crate::myc;
-use crate::MsqlSrvError;
-use crate::{StatementData, Value};
+use crate::{myc, MsqlSrvError, StatementData, Value};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 

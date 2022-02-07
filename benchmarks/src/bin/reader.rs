@@ -1,10 +1,7 @@
 use anyhow::Result;
 use chrono::Utc;
 use noria::consensus::AuthorityType;
-use noria::ControllerHandle;
-use noria::KeyComparison;
-use noria::View;
-use noria::ViewQuery;
+use noria::{ControllerHandle, KeyComparison, View, ViewQuery};
 use noria_data::DataType;
 use noria_logictest::upstream::{DatabaseConnection, DatabaseURL};
 use rand::distributions::{Distribution, Uniform};

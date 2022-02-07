@@ -2,7 +2,8 @@ use std::convert::TryFrom;
 
 use crate::controller::sql::query_graph::JoinPredicate;
 use crate::controller::sql::query_utils::LogicalOp;
-use nom_sql::{BinaryOperator, Expression, Expression::*, Literal};
+use nom_sql::Expression::*;
+use nom_sql::{BinaryOperator, Expression, Literal};
 use noria_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 
 fn direct_elimination(

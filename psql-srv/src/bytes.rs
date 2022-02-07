@@ -1,8 +1,7 @@
 use bytes::Bytes;
 use std::borrow::Borrow;
 use std::convert::TryFrom;
-use std::fmt;
-use std::str;
+use std::{fmt, str};
 
 /// A [`Bytes`] wrapper that always contains a valid utf8 string and can be borrowed as a `&str`.
 ///

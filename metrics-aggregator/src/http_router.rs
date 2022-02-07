@@ -1,17 +1,17 @@
 use anyhow::anyhow;
 use futures::TryFutureExt;
-use hyper::{self, header::CONTENT_TYPE, Method};
-use hyper::{service::make_service_fn, Body, Request, Response};
+use hyper::header::CONTENT_TYPE;
+use hyper::service::make_service_fn;
+use hyper::{self, Body, Method, Request, Response};
+use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
-use std::{
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::task::{Context, Poll};
 use stream_cancel::Valve;
-use tokio::{net::TcpListener, sync::Mutex};
+use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
 

@@ -1,8 +1,9 @@
+use noria::consistency::Timestamp;
+use noria::internal::LocalNodeIndex;
 use noria::results::Results;
 use noria::{
-    consistency::Timestamp, internal::LocalNodeIndex, ControllerHandle, ReadySetError,
-    ReadySetResult, SchemaType, Table, TableOperation, View, ViewQuery, ViewQueryFilter,
-    ViewQueryOperator,
+    ControllerHandle, ReadySetError, ReadySetResult, SchemaType, Table, TableOperation, View,
+    ViewQuery, ViewQueryFilter, ViewQueryOperator,
 };
 use noria_data::DataType;
 
@@ -16,8 +17,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::ops::Bound;
-use std::sync::atomic;
-use std::sync::{Arc, RwLock};
+use std::sync::{atomic, Arc, RwLock};
 
 use crate::rewrite::{self, ProcessedQueryParams};
 use crate::utils;

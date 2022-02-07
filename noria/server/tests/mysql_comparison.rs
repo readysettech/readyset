@@ -1,6 +1,5 @@
 use mysql::prelude::Queryable;
-use mysql::OptsBuilder;
-use mysql::Params;
+use mysql::{OptsBuilder, Params};
 use serde::Deserialize;
 
 use std::collections::BTreeMap;
@@ -12,10 +11,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
-use std::io;
-use std::panic;
-use std::thread;
-use std::time;
+use std::{io, panic, thread, time};
 
 use noria_data::DataType;
 use noria_server::Builder;

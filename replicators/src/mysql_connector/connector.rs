@@ -11,8 +11,7 @@ use noria::{ReadySetError, ReadySetResult};
 use noria_data::DataType;
 use std::convert::{TryFrom, TryInto};
 
-use crate::noria_adapter::Connector;
-use crate::noria_adapter::ReplicationAction;
+use crate::noria_adapter::{Connector, ReplicationAction};
 
 use super::BinlogPosition;
 

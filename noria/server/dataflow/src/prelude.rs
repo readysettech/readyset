@@ -7,9 +7,8 @@
 use std::cell;
 
 // core types
-pub(crate) use crate::processing::Ingredient;
 pub(crate) use crate::processing::{
-    Lookup, Miss, ProcessingResult, RawProcessingResult, ReplayContext,
+    Ingredient, Lookup, Miss, ProcessingResult, RawProcessingResult, ReplayContext,
 };
 pub(crate) type Edge = ();
 
@@ -37,8 +36,7 @@ pub use petgraph::graph::NodeIndex;
 pub type Graph = petgraph::Graph<Node, Edge>;
 pub use crate::processing::{ColumnRef, ColumnSource};
 use crate::state::MaterializedNodeState;
-pub use crate::DurabilityMode;
-pub use crate::PersistenceParameters;
+pub use crate::{DurabilityMode, PersistenceParameters};
 pub use noria_errors::*;
 pub use vec1::vec1;
 

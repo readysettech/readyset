@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 use crate::rewrite::anonymize_literals;
 use dashmap::DashMap;
 use nom_sql::SelectStatement;
-use serde::{ser::SerializeSeq, Serialize, Serializer};
+use serde::ser::SerializeSeq;
+use serde::{Serialize, Serializer};
 
 /// Each query is uniquely identifier by its select statement
 type Query = SelectStatement;

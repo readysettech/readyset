@@ -2,7 +2,6 @@ use mysql_async::prelude::Queryable;
 use mysql_time::MysqlTime;
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::{ControllerHandle, ReadySetResult};
-use noria_data::DataType as D;
 use noria_data::{DataType, TinyText};
 use noria_server::Builder;
 use replicators::NoriaAdapter;
@@ -32,9 +31,9 @@ const fn tiny<const N: usize>(text: &[u8; N]) -> DataType {
 }
 
 const SNAPSHOT_RESULT: &[&[DataType]] = &[
-    &[D::Int(1), tiny(b"abc"), D::Int(2)],
-    &[D::Int(2), tiny(b"bcd"), D::Int(3)],
-    &[D::Int(40), tiny(b"xyz"), D::Int(4)],
+    &[DataType::Int(1), tiny(b"abc"), DataType::Int(2)],
+    &[DataType::Int(2), tiny(b"bcd"), DataType::Int(3)],
+    &[DataType::Int(40), tiny(b"xyz"), DataType::Int(4)],
 ];
 
 const TESTS: &[(&str, &str, &[&[DataType]])] = &[
@@ -42,39 +41,39 @@ const TESTS: &[(&str, &str, &[&[DataType]])] = &[
         "Test UPDATE key column replication",
         "UPDATE `groups` SET id=id+10",
         &[
-            &[D::Int(11), tiny(b"abc"), D::Int(2)],
-            &[D::Int(12), tiny(b"bcd"), D::Int(3)],
-            &[D::Int(50), tiny(b"xyz"), D::Int(4)],
+            &[DataType::Int(11), tiny(b"abc"), DataType::Int(2)],
+            &[DataType::Int(12), tiny(b"bcd"), DataType::Int(3)],
+            &[DataType::Int(50), tiny(b"xyz"), DataType::Int(4)],
         ],
     ),
     (
         "Test DELETE replication",
         "DELETE FROM `groups` WHERE string='bcd'",
         &[
-            &[D::Int(11), tiny(b"abc"), D::Int(2)],
-            &[D::Int(50), tiny(b"xyz"), D::Int(4)],
+            &[DataType::Int(11), tiny(b"abc"), DataType::Int(2)],
+            &[DataType::Int(50), tiny(b"xyz"), DataType::Int(4)],
         ],
     ),
     (
         "Test INSERT replication",
         "INSERT INTO `groups` VALUES (1, 'abc', 2), (2, 'bcd', 3), (40, 'xyz', 4)",
         &[
-            &[D::Int(1), tiny(b"abc"), D::Int(2)],
-            &[D::Int(2), tiny(b"bcd"), D::Int(3)],
-            &[D::Int(11), tiny(b"abc"), D::Int(2)],
-            &[D::Int(40), tiny(b"xyz"), D::Int(4)],
-            &[D::Int(50), tiny(b"xyz"), D::Int(4)],
+            &[DataType::Int(1), tiny(b"abc"), DataType::Int(2)],
+            &[DataType::Int(2), tiny(b"bcd"), DataType::Int(3)],
+            &[DataType::Int(11), tiny(b"abc"), DataType::Int(2)],
+            &[DataType::Int(40), tiny(b"xyz"), DataType::Int(4)],
+            &[DataType::Int(50), tiny(b"xyz"), DataType::Int(4)],
         ],
     ),
     (
         "Test UPDATE non-key column replication",
         "UPDATE `groups` SET bignum=id+10",
         &[
-            &[D::Int(1), tiny(b"abc"), D::Int(11)],
-            &[D::Int(2), tiny(b"bcd"), D::Int(12)],
-            &[D::Int(11), tiny(b"abc"), D::Int(21)],
-            &[D::Int(40), tiny(b"xyz"), D::Int(50)],
-            &[D::Int(50), tiny(b"xyz"), D::Int(60)],
+            &[DataType::Int(1), tiny(b"abc"), DataType::Int(11)],
+            &[DataType::Int(2), tiny(b"bcd"), DataType::Int(12)],
+            &[DataType::Int(11), tiny(b"abc"), DataType::Int(21)],
+            &[DataType::Int(40), tiny(b"xyz"), DataType::Int(50)],
+            &[DataType::Int(50), tiny(b"xyz"), DataType::Int(60)],
         ],
     ),
 ];
@@ -83,13 +82,13 @@ const TESTS: &[(&str, &str, &[&[DataType]])] = &[
 const DISCONNECT_QUERY: &str = "INSERT INTO `groups` VALUES (3, 'abc', 2), (5, 'xyz', 4)";
 /// Test result after replicator reconnects and catches up
 const RECONNECT_RESULT: &[&[DataType]] = &[
-    &[D::Int(1), tiny(b"abc"), D::Int(11)],
-    &[D::Int(2), tiny(b"bcd"), D::Int(12)],
-    &[D::Int(3), tiny(b"abc"), D::Int(2)],
-    &[D::Int(5), tiny(b"xyz"), D::Int(4)],
-    &[D::Int(11), tiny(b"abc"), D::Int(21)],
-    &[D::Int(40), tiny(b"xyz"), D::Int(50)],
-    &[D::Int(50), tiny(b"xyz"), D::Int(60)],
+    &[DataType::Int(1), tiny(b"abc"), DataType::Int(11)],
+    &[DataType::Int(2), tiny(b"bcd"), DataType::Int(12)],
+    &[DataType::Int(3), tiny(b"abc"), DataType::Int(2)],
+    &[DataType::Int(5), tiny(b"xyz"), DataType::Int(4)],
+    &[DataType::Int(11), tiny(b"abc"), DataType::Int(21)],
+    &[DataType::Int(40), tiny(b"xyz"), DataType::Int(50)],
+    &[DataType::Int(50), tiny(b"xyz"), DataType::Int(60)],
 ];
 
 struct TestHandle {
@@ -445,18 +444,18 @@ async fn replication_catch_up_inner(url: &str) -> ReadySetResult<()> {
     ctx.ready_notify.as_ref().unwrap().notified().await;
     let mut client = inserter.await.unwrap()?;
 
-    let rs: Vec<_> = std::iter::repeat([D::from(100), D::from("I am a teapot")])
+    let rs: Vec<_> = std::iter::repeat([DataType::from(100), DataType::from("I am a teapot")])
         .take(TOTAL_INSERTS)
         .collect();
-    let rs: Vec<&[D]> = rs.iter().map(|r| r.as_slice()).collect();
+    let rs: Vec<&[DataType]> = rs.iter().map(|r| r.as_slice()).collect();
     ctx.check_results("catch_up_view", "Catch up", rs.as_slice())
         .await
         .unwrap();
 
     let rs: Vec<_> = (0..TOTAL_INSERTS)
-        .map(|i| [D::from(i as i32), D::from("I am a teapot")])
+        .map(|i| [DataType::from(i as i32), DataType::from("I am a teapot")])
         .collect();
-    let rs: Vec<&[D]> = rs.iter().map(|r| r.as_slice()).collect();
+    let rs: Vec<&[DataType]> = rs.iter().map(|r| r.as_slice()).collect();
     ctx.check_results("catch_up_pk_view", "Catch up with pk", rs.as_slice())
         .await
         .unwrap();
@@ -595,18 +594,18 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
         "Snapshot",
         &[
             &[
-                D::Int(0),
-                D::None,
-                D::None,
-                D::None,
-                D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
+                DataType::Int(0),
+                DataType::None,
+                DataType::None,
+                DataType::None,
+                DataType::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
             ],
             &[
-                D::Int(1),
-                D::None,
-                D::None,
-                D::None,
-                D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
+                DataType::Int(1),
+                DataType::None,
+                DataType::None,
+                DataType::None,
+                DataType::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
             ],
         ],
     )
@@ -626,32 +625,32 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
         "Replication",
         &[
             &[
-                D::Int(0),
-                D::None,
-                D::None,
-                D::None,
-                D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
+                DataType::Int(0),
+                DataType::None,
+                DataType::None,
+                DataType::None,
+                DataType::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
             ],
             &[
-                D::Int(1),
-                D::None,
-                D::None,
-                D::None,
-                D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
+                DataType::Int(1),
+                DataType::None,
+                DataType::None,
+                DataType::None,
+                DataType::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
             ],
             &[
-                D::Int(2),
-                D::None,
-                D::None,
-                D::None,
-                D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
+                DataType::Int(2),
+                DataType::None,
+                DataType::None,
+                DataType::None,
+                DataType::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
             ],
             &[
-                D::Int(3),
-                D::None,
-                D::None,
-                D::None,
-                D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
+                DataType::Int(3),
+                DataType::None,
+                DataType::None,
+                DataType::None,
+                DataType::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
             ],
         ],
     )
@@ -683,7 +682,11 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
     ctx.check_results(
         "t2_view",
         "skip_unparsable",
-        &[&[D::Int(1)], &[D::Int(2)], &[D::Int(3)]],
+        &[
+            &[DataType::Int(1)],
+            &[DataType::Int(2)],
+            &[DataType::Int(3)],
+        ],
     )
     .await?;
 
@@ -711,12 +714,12 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
         "t2_view",
         "skip_unparsable",
         &[
-            &[D::Int(1)],
-            &[D::Int(2)],
-            &[D::Int(3)],
-            &[D::Int(4)],
-            &[D::Int(5)],
-            &[D::Int(6)],
+            &[DataType::Int(1)],
+            &[DataType::Int(2)],
+            &[DataType::Int(3)],
+            &[DataType::Int(4)],
+            &[DataType::Int(5)],
+            &[DataType::Int(6)],
         ],
     )
     .await?;

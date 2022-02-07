@@ -5,8 +5,9 @@
 //! domains, but does not perform that copying itself (that is the role of the `augmentation`
 //! module).
 
+use crate::controller::keys;
 use crate::controller::migrate::DomainMigrationPlan;
-use crate::controller::{keys, state::graphviz};
+use crate::controller::state::graphviz;
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use maplit::hashmap;

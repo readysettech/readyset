@@ -1,20 +1,14 @@
 #![feature(iter_intersperse)]
 
-use std::env;
-use std::iter;
-use std::path::Path;
-use std::path::PathBuf;
-use std::str;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
+use std::{env, iter, str};
 
 use anyhow::{anyhow, bail, Result};
 use aws_config::provider_config::ProviderConfig;
-use aws_sdk_autoscaling as autoscaling;
-use aws_sdk_ec2 as ec2;
 use aws_sdk_ec2::model::{
     Filter, InstanceStateName, ResourceType, Tag, TagSpecification, VolumeState,
 };
-use aws_sdk_sqs as sqs;
 use aws_types::config::Config;
 use aws_types::region::Region;
 use clap::Parser;
@@ -23,19 +17,14 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sqs::output::ReceiveMessageOutput;
-use tokio::fs::create_dir_all;
-use tokio::fs::File;
-use tokio::io::AsyncReadExt;
-use tokio::io::AsyncWriteExt;
-use tokio::join;
+use tokio::fs::{create_dir_all, File};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
-use tokio::task;
-use tokio::time;
 use tokio::time::sleep;
-use tracing::debug;
-use tracing::warn;
-use tracing::{error, info, instrument};
+use tokio::{join, task, time};
+use tracing::{debug, error, info, instrument, warn};
 use tracing_subscriber::EnvFilter;
+use {aws_sdk_autoscaling as autoscaling, aws_sdk_ec2 as ec2, aws_sdk_sqs as sqs};
 
 mod util;
 mod volume_grow;

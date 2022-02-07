@@ -329,14 +329,12 @@ impl<'a> TryFrom<Value<'a>> for Duration {
 #[allow(unused_imports)]
 mod tests {
     use super::Value;
-    use crate::myc;
     use crate::myc::io::{ParseBuf, WriteMysqlExt};
     use crate::myc::proto::MySerialize;
-    use crate::{Column, ColumnFlags, ColumnType};
+    use crate::{myc, Column, ColumnFlags, ColumnType};
     use chrono::{self, TimeZone};
     use mysql_time::MysqlTime;
-    use std::convert::TryFrom;
-    use std::convert::TryInto;
+    use std::convert::{TryFrom, TryInto};
     use std::time;
 
     macro_rules! rt {

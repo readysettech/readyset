@@ -1,7 +1,6 @@
 use nom::character::complete::{multispace0, multispace1};
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str;
+use std::{fmt, str};
 use test_strategy::Arbitrary;
 
 use crate::column::Column;

@@ -1,15 +1,11 @@
 use anyhow::{anyhow, bail, Result};
-use aws_sdk_cloudformation as cfn;
-use aws_sdk_ec2 as ec2;
-use aws_sdk_rds as rds;
 use cfn::model::Parameter as CfnParameter;
 use console::style;
 use ec2::model::{Filter, VpcAttributeName};
-use futures::{
-    stream::{self, FuturesUnordered},
-    TryStreamExt,
-};
+use futures::stream::{self, FuturesUnordered};
+use futures::TryStreamExt;
 use rds::model::{DbInstance, DbParameterGroup, Parameter};
+use {aws_sdk_cloudformation as cfn, aws_sdk_ec2 as ec2, aws_sdk_rds as rds};
 
 use crate::console::{spinner, GREEN_CHECK};
 

@@ -11,7 +11,8 @@
 //! gamut than needed for the desired hit rate).
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::Ordering::Relaxed;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;

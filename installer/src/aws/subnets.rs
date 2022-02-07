@@ -51,7 +51,8 @@ where
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
-    use std::{cmp::min, net::Ipv4Addr};
+    use std::cmp::min;
+    use std::net::Ipv4Addr;
     use test_strategy::proptest;
 
     use super::*;
