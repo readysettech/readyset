@@ -2,24 +2,24 @@
 //! which Noria worker acts as the controller, which Noria workers exist, detecting failed
 //! workers which necessitate changes, and storing cluster wide global state.
 
+use std::collections::{HashMap, HashSet};
+use std::net::SocketAddr;
+use std::str::FromStr;
+
 use anyhow::{anyhow, Error};
 use async_trait::async_trait;
 use enum_dispatch::enum_dispatch;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::net::SocketAddr;
-use std::str::FromStr;
 use url::Url;
 
 mod consul;
 mod local;
 pub mod zk;
-use crate::ControllerDescriptor;
-
 pub use self::consul::ConsulAuthority;
 pub use self::local::{LocalAuthority, LocalAuthorityStore};
 pub use self::zk::ZookeeperAuthority;
+use crate::ControllerDescriptor;
 
 // This should be an associated type on Authority but since Authority will only have one possible
 // type inside of Noria, we are using a type alias here instead.

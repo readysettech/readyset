@@ -1,10 +1,12 @@
+use std::io::{self, Cursor, Write};
+
+use byteorder::{LittleEndian, WriteBytesExt};
+use tokio::io::AsyncWrite;
+
 use crate::myc::constants::{StatusFlags, UTF8_GENERAL_CI};
 use crate::myc::io::WriteMysqlExt;
 use crate::packet::PacketWriter;
 use crate::{Column, ErrorKind};
-use byteorder::{LittleEndian, WriteBytesExt};
-use std::io::{self, Cursor, Write};
-use tokio::io::AsyncWrite;
 
 pub(crate) async fn write_eof_packet<W: AsyncWrite + Unpin>(
     w: &mut PacketWriter<W>,

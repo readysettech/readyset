@@ -13,12 +13,13 @@
 //! Without this guarantee, we could mistakenly attempt to drop a table before creating it
 //! (if we processed removals before additions), or avoid creating a table that should exist (if we
 //! processed additions before removals).
-use nom_sql::SqlQuery;
-use noria_errors::{ReadySetError, ReadySetResult};
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
+
+use nom_sql::SqlQuery;
+use noria_errors::{ReadySetError, ReadySetResult};
+use serde::{Deserialize, Serialize};
 
 /// The specification for a list of changes that must be made
 /// to the MIR and dataflow graphs.

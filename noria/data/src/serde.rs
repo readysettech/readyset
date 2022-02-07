@@ -1,4 +1,7 @@
-use crate::{DataType, Text, TinyText};
+use std::convert::TryFrom;
+use std::fmt;
+use std::sync::Arc;
+
 use bit_vec::BitVec;
 use chrono::{DateTime, FixedOffset, NaiveDateTime};
 use mysql_time::MysqlTime;
@@ -7,11 +10,10 @@ use serde::de::{EnumAccess, VariantAccess, Visitor};
 use serde::ser::SerializeTupleVariant;
 use serde::{Deserialize, Deserializer};
 use serde_bytes::{ByteBuf, Bytes};
-use std::convert::TryFrom;
-use std::fmt;
-use std::sync::Arc;
 use strum::VariantNames;
 use strum_macros::{EnumString, EnumVariantNames, FromRepr};
+
+use crate::{DataType, Text, TinyText};
 
 #[derive(EnumVariantNames, EnumString, FromRepr, Clone, Copy)]
 enum Field {

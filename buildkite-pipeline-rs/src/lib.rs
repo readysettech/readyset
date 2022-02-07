@@ -552,9 +552,10 @@ impl From<Vec<Step>> for Pipeline {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_yaml as yaml;
     use test_strategy::proptest;
+
+    use super::*;
 
     #[test]
     fn ecr_plugin() {

@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 use tokio::fs::{read_dir, File};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+pub(crate) use MaybeExisting::{CreateNew, Existing};
 
 use crate::console::{confirm, input, select};
-pub(crate) use MaybeExisting::{CreateNew, Existing};
 
 /// An enum encapsulating the user selection to either use an existing entity (represented by the
 /// `T` type argument) or create a new one

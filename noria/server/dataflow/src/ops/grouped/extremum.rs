@@ -1,8 +1,8 @@
-use crate::ops::grouped::{GroupedOperation, GroupedOperator};
+use noria_errors::{invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
+use crate::ops::grouped::{GroupedOperation, GroupedOperator};
 use crate::prelude::*;
-use noria_errors::{invariant, ReadySetResult};
 
 /// Supported kinds of extremum operators.
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -168,7 +168,6 @@ impl GroupedOperation for ExtremumOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::{ops, SuggestedIndex};
 
     fn setup(op: Extremum, mat: bool) -> ops::test::MockGraph {

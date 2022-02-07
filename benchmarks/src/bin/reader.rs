@@ -1,3 +1,8 @@
+use std::convert::{TryFrom, TryInto};
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+use std::{env, fs, mem};
+
 use anyhow::Result;
 use chrono::Utc;
 use noria::consensus::AuthorityType;
@@ -7,10 +12,6 @@ use noria_logictest::upstream::{DatabaseConnection, DatabaseURL};
 use rand::distributions::{Distribution, Uniform};
 use rand::prelude::*;
 use rinfluxdb::line_protocol::LineBuilder;
-use std::convert::{TryFrom, TryInto};
-use std::path::PathBuf;
-use std::time::{Duration, Instant};
-use std::{env, fs, mem};
 use structopt::clap::{arg_enum, ArgGroup};
 use structopt::StructOpt;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};

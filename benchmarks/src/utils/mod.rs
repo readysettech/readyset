@@ -1,13 +1,14 @@
-use anyhow::Result;
-use mysql_async::prelude::Queryable;
-use mysql_async::ServerError;
-use noria::status::{ReadySetStatus, SnapshotStatus};
-use noria::ReadySetResult;
 use std::convert::TryFrom;
 use std::future::Future;
 use std::num::ParseIntError;
 use std::str::FromStr;
 use std::time::Duration;
+
+use anyhow::Result;
+use mysql_async::prelude::Queryable;
+use mysql_async::ServerError;
+use noria::status::{ReadySetStatus, SnapshotStatus};
+use noria::ReadySetResult;
 use tracing::info;
 
 pub mod generate;

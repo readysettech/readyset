@@ -1,19 +1,18 @@
 use std::cell::RefCell;
 use std::fmt::{Debug, Display, Error, Formatter};
+use std::rc::Rc;
 
 use dataflow::ops;
 use dataflow::prelude::ReadySetError;
 use node_inner::MirNodeInner;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::ColumnSpecification;
+use noria_errors::{internal, internal_err, ReadySetResult};
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 
-use std::rc::Rc;
-
 use crate::column::Column;
 use crate::{FlowNode, MirNodeRef, MirNodeWeakRef};
-use noria_errors::{internal, internal_err, ReadySetResult};
 
 pub mod node_inner;
 
@@ -611,11 +610,12 @@ mod tests {
     }
 
     mod add_column {
+        use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
+        use nom_sql::{BinaryOperator, Expression, Literal};
+
         use crate::node::node_inner::MirNodeInner;
         use crate::node::MirNode;
         use crate::{Column, MirNodeRef};
-        use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
-        use nom_sql::{BinaryOperator, Expression, Literal};
 
         fn setup_filter(cond: (usize, Expression)) -> (MirNodeRef, MirNodeRef) {
             let cols: Vec<nom_sql::Column> = vec!["x".into(), "agg".into()];

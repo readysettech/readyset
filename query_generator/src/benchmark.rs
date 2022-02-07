@@ -8,13 +8,6 @@ use clap::Parser;
 use humantime::format_duration;
 use indicatif::{ProgressBar, ProgressStyle};
 use lazy_static::lazy_static;
-use regex::Regex;
-use serde::Serialize;
-use serde_with::{serde_as, DurationNanoSeconds};
-use size_format::SizeFormatterSI;
-use thiserror::Error;
-use tokio::time::Instant;
-
 use noria::metrics::client::MetricsClient;
 use noria::metrics::{recorded, MetricsDump};
 use noria_data::DataType;
@@ -24,6 +17,12 @@ use noria_server::metrics::{
 };
 use noria_server::{DurabilityMode, PersistenceParameters};
 use query_generator::{ColumnName, GenerateOpts, GeneratorState, QuerySeed, TableName};
+use regex::Regex;
+use serde::Serialize;
+use serde_with::{serde_as, DurationNanoSeconds};
+use size_format::SizeFormatterSI;
+use thiserror::Error;
+use tokio::time::Instant;
 
 /// Metrics collected during the run of an individual query
 #[serde_as]

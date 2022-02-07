@@ -1,4 +1,5 @@
-use crate::utils;
+use std::convert::TryFrom;
+
 use chrono::NaiveDateTime;
 use neon::prelude::*;
 use neon::types::JsDate;
@@ -10,7 +11,8 @@ use noria_client::backend::{
 use noria_data::DataType;
 use noria_mysql::{Error, MySqlUpstream};
 use rust_decimal::prelude::ToPrimitive;
-use std::convert::TryFrom;
+
+use crate::utils;
 
 pub(crate) fn convert_error<'a, C>(cx: &mut C, e: Error) -> NeonResult<Handle<'a, JsError>>
 where

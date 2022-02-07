@@ -19,7 +19,6 @@ async fn setup() -> (tokio_postgres::Config, Handle) {
 mod types {
     use std::fmt::Display;
 
-    use super::*;
     use eui48::MacAddress;
     use launchpad::arbitrary::{
         arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_json,
@@ -31,6 +30,8 @@ mod types {
     use rust_decimal::Decimal;
     use tokio_postgres::types::{FromSql, ToSql};
     use uuid::Uuid;
+
+    use super::*;
 
     async fn test_type_roundtrip<T, V>(type_name: T, val: V)
     where

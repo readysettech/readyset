@@ -7,18 +7,11 @@
     clippy::unreachable
 )]
 
-use nom_sql::{
-    BinaryOperator, ColumnConstraint, ColumnSpecification, Expression, FunctionExpression, InValue,
-    OrderType, UnaryOperator,
-};
-use noria::internal::{Index, IndexType};
-use noria::ViewPlaceholder;
 use std::collections::HashMap;
 use std::convert::TryInto;
 
-use crate::controller::Migration;
-use crate::manual::ops::grouped::aggregate::Aggregation;
 use common::DataType;
+use dataflow::ops::grouped::concat::GroupConcat;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::project::Project;
@@ -28,12 +21,19 @@ use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::{Column, FlowNode, MirNodeRef};
+use nom_sql::{
+    BinaryOperator, ColumnConstraint, ColumnSpecification, Expression, FunctionExpression, InValue,
+    OrderType, UnaryOperator,
+};
+use noria::internal::{Index, IndexType};
+use noria::ViewPlaceholder;
 use noria_errors::{
     internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,
 };
-
-use dataflow::ops::grouped::concat::GroupConcat;
 use petgraph::graph::NodeIndex;
+
+use crate::controller::Migration;
+use crate::manual::ops::grouped::aggregate::Aggregation;
 
 pub(super) fn mir_query_to_flow_parts(
     mir_query: &mut MirQuery,

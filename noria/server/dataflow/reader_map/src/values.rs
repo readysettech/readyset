@@ -1,7 +1,8 @@
-use left_right::aliasing::{Aliased, DropBehavior};
 use std::borrow::Borrow;
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
+
+use left_right::aliasing::{Aliased, DropBehavior};
 
 /// This value determines when a value-set is promoted from a list to a HashBag.
 const BAG_THRESHOLD: usize = 32;
@@ -369,8 +370,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::hash_map::RandomState;
+
+    use super::*;
 
     macro_rules! assert_empty {
         ($x:expr) => {

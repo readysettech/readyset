@@ -10,6 +10,17 @@
 //!     - Create a type that implements `BenchmarkControl`,
 //!     - Add the type's name as a variant `Benchmark`.
 
+use std::collections::HashMap;
+use std::fmt;
+
+use anyhow::Result;
+use async_trait::async_trait;
+use clap::Parser;
+use enum_dispatch::enum_dispatch;
+use itertools::Itertools;
+use mysql_async::{Conn, Opts};
+use serde::{Deserialize, Serialize};
+
 use crate::cache_hit_benchmark::CacheHitBenchmark;
 use crate::eviction_benchmark::EvictionBenchmark;
 use crate::fallback_benchmark::FallbackBenchmark;
@@ -22,15 +33,6 @@ use crate::template::Template;
 use crate::utils::prometheus::{ForwardPrometheusMetrics, PrometheusEndpoint};
 use crate::write_benchmark::WriteBenchmark;
 use crate::write_latency_benchmark::WriteLatencyBenchmark;
-use anyhow::Result;
-use async_trait::async_trait;
-use clap::Parser;
-use enum_dispatch::enum_dispatch;
-use itertools::Itertools;
-use mysql_async::{Conn, Opts};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt;
 
 #[allow(clippy::large_enum_variant)]
 #[enum_dispatch(BenchmarkControl)]

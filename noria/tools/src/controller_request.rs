@@ -1,10 +1,11 @@
 #![warn(clippy::panic)]
 
+use std::str::FromStr;
+
 use anyhow::anyhow;
 use clap::Parser;
 use noria::consensus::AuthorityType;
 use noria::ControllerHandle;
-use std::str::FromStr;
 
 #[derive(Parser)]
 #[clap(name = "controller_request")]

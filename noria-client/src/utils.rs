@@ -561,8 +561,9 @@ pub(crate) fn coerce_params(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use nom_sql::{self, Dialect, SqlQuery};
+
+    use super::*;
 
     fn compare_flatten<I>(cond_query: &str, key: Vec<&str>, expected: Option<Vec<Vec<I>>>)
     where

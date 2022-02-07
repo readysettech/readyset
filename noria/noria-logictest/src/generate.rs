@@ -8,7 +8,6 @@ use anyhow::{anyhow, bail, Context};
 use clap::Parser;
 use colored::Colorize;
 use itertools::Itertools;
-
 use nom_sql::{
     parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Dialect, Expression,
     SqlQuery, Table,

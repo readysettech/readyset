@@ -1,11 +1,10 @@
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashSet};
-use tokio::process::Command;
-
-use aws_sdk_s3::{Client, Region};
 
 use anyhow::{anyhow, Result};
+use aws_sdk_s3::{Client, Region};
 use clap::Parser;
+use tokio::process::Command;
 
 #[derive(Parser, Debug)]
 pub(crate) struct Opts {

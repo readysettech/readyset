@@ -1,9 +1,9 @@
-use anyhow::bail;
-use noria::consensus::zk::{CONTROLLER_KEY, STATE_KEY};
-use serde_json::Value;
 use std::process;
 use std::time::Duration;
 
+use anyhow::bail;
+use noria::consensus::zk::{CONTROLLER_KEY, STATE_KEY};
+use serde_json::Value;
 use zookeeper::{KeeperState, WatchedEvent, Watcher, ZkError, ZooKeeper};
 
 struct EventWatcher;

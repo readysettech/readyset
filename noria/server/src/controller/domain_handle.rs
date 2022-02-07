@@ -1,10 +1,12 @@
-use crate::controller::{Worker, WorkerIdentifier};
-use crate::worker::WorkerRequestKind;
+use std::collections::HashMap;
+
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use serde::de::DeserializeOwned;
-use std::collections::HashMap;
 use tracing::error;
+
+use crate::controller::{Worker, WorkerIdentifier};
+use crate::worker::WorkerRequestKind;
 
 /// A `DomainHandle` is a handle that allows communicating with all of the shards of a given
 /// domain.

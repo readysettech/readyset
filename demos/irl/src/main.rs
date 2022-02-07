@@ -1,5 +1,14 @@
 mod definitions;
 
+use std::env;
+use std::time::Duration;
+
+use clap::Parser;
+use mysql::prelude::{FromRow, Queryable};
+use mysql::{Conn, Params};
+use tracing::{debug, info};
+use tracing_subscriber::EnvFilter;
+
 use crate::definitions::explore_section::ExploreSection;
 use crate::definitions::external_account::ExternalAccount;
 use crate::definitions::external_calendars_inner_join_external_invites::ExternalCalendarsInnerJoinExternalInvites;
@@ -28,13 +37,6 @@ use crate::definitions::user_group::UserGroup;
 use crate::definitions::user_id_inner_join_users_groups::UserIdInnerJoinUsersGroups;
 use crate::definitions::users_inner_join_users_friends::UserInnerJoinUsersFriends;
 use crate::definitions::users_inner_join_users_groups::UserInnerJoinUsersGroups;
-use clap::Parser;
-use mysql::prelude::{FromRow, Queryable};
-use mysql::{Conn, Params};
-use std::env;
-use std::time::Duration;
-use tracing::{debug, info};
-use tracing_subscriber::EnvFilter;
 
 /// Runs all the IRL queries against the provided
 /// MySQL database (which must have the schemas already installed).

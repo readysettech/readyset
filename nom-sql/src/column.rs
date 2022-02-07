@@ -1,10 +1,7 @@
-use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::str::FromStr;
 use std::{fmt, str};
 
-use crate::common::{column_identifier_no_alias, parse_comment, type_identifier, Literal, SqlType};
-use crate::{Dialect, Double, FunctionExpression};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take_until};
 use nom::character::complete::{digit1, multispace0, multispace1};
@@ -12,6 +9,10 @@ use nom::combinator::{map, map_res, opt};
 use nom::multi::many0;
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::{alt, complete, do_parse, named, opt, tag, tag_no_case, IResult};
+use serde::{Deserialize, Serialize};
+
+use crate::common::{column_identifier_no_alias, parse_comment, type_identifier, Literal, SqlType};
+use crate::{Dialect, Double, FunctionExpression};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Column {

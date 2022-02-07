@@ -1,13 +1,15 @@
-use super::PostgresPosition;
+use std::convert::{TryFrom, TryInto};
+use std::fmt::{self, Display};
+
 use chrono::{DateTime, FixedOffset};
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt};
 use noria::{ReadySetError, ReadySetResult};
 use postgres_types::Type;
-use std::convert::{TryFrom, TryInto};
-use std::fmt::{self, Display};
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, info_span, trace, Instrument};
+
+use super::PostgresPosition;
 
 const BATCH_SIZE: usize = 1024; // How many queries to buffer before pushing to Noria
 

@@ -12,12 +12,12 @@ use metrics::{
     register_counter, register_gauge, register_histogram, Counter, Gauge, Histogram, Label,
     SharedString,
 };
+use noria::internal::DomainIndex;
+use noria::metrics::recorded;
 use strum::{EnumCount, IntoEnumIterator};
 
 use crate::domain::{LocalNodeIndex, Tag};
 use crate::{NodeMap, Packet, PacketDiscriminants};
-use noria::internal::DomainIndex;
-use noria::metrics::recorded;
 
 /// Contains hanldes to the varius metrics collected for a domain.
 /// Whenever possible the handles are generated at init time, others

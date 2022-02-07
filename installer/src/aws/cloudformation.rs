@@ -15,9 +15,8 @@ use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use tokio::time::sleep;
 
-use crate::console::{confirm, input, password, spinner, GREEN_CHECK};
-
 use super::cfn_parameter;
+use crate::console::{confirm, input, password, spinner, GREEN_CHECK};
 
 #[skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

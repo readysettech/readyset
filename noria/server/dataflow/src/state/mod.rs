@@ -4,9 +4,6 @@ mod mk_key;
 mod persistent_state;
 mod single_state;
 
-#[cfg(feature = "bench")]
-pub use persistent_state::bench;
-
 use std::borrow::Cow;
 use std::fmt::{self, Debug};
 use std::iter::FromIterator;
@@ -14,18 +11,19 @@ use std::ops::{Bound, Deref};
 use std::rc::Rc;
 use std::vec;
 
-use crate::prelude::*;
 use ahash::RandomState;
 use common::SizeOf;
 use derive_more::From;
 use hashbag::HashBag;
 use noria::replication::ReplicationOffset;
 use noria::KeyComparison;
-
 pub use partial_map::PartialMap;
+#[cfg(feature = "bench")]
+pub use persistent_state::bench;
 
 pub(crate) use self::memory_state::MemoryState;
 pub(crate) use self::persistent_state::PersistentState;
+use crate::prelude::*;
 
 /// Information about state evicted via a call to [`State::evict_bytes`]
 pub(crate) struct StateEvicted<'a> {

@@ -1,7 +1,8 @@
-use noria_data::DataType;
-use rand::prelude::*;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+
+use noria_data::DataType;
+use rand::prelude::*;
 
 const CLASSES_PER_STUDENT: usize = 5;
 pub const TAS_PER_CLASS: usize = 5;

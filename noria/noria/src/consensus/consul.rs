@@ -116,6 +116,12 @@
 //! we introduce  [`StateValue`] which may be a version referring to a chunked dataflow state, or
 //! it holds the dataflow state directly.
 
+use std::collections::{HashMap, HashSet};
+use std::convert::TryInto;
+use std::net::SocketAddr;
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::time::Duration;
+
 use anyhow::{anyhow, bail, Error};
 use async_trait::async_trait;
 use consulrs::api::kv::common::KVPair;
@@ -129,13 +135,9 @@ use futures::future::join_all;
 use futures::stream::FuturesOrdered;
 use futures::TryStreamExt;
 use metrics::gauge;
+use noria_errors::internal_err;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::convert::TryInto;
-use std::net::SocketAddr;
-use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::time::Duration;
 use thiserror::Error as ThisError;
 use tracing::{error, warn};
 
@@ -145,7 +147,6 @@ use super::{
 };
 use crate::metrics::recorded;
 use crate::{ReadySetError, ReadySetResult};
-use noria_errors::internal_err;
 
 pub const WORKER_PREFIX: &str = "workers/";
 /// Path to the leader key.
@@ -1049,15 +1050,17 @@ impl AuthorityControl for ConsulAuthority {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use rand::distributions::Alphanumeric;
-    use rand::{thread_rng, Rng};
-    use reqwest::Url;
-    use serial_test::serial;
     use std::iter;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::Arc;
     use std::time::Duration;
+
+    use rand::distributions::Alphanumeric;
+    use rand::{thread_rng, Rng};
+    use reqwest::Url;
+    use serial_test::serial;
+
+    use super::*;
 
     fn test_authority_address(deployment: &str) -> String {
         format!(

@@ -1,5 +1,7 @@
-use crate::prelude::*;
-use crate::processing::SuggestedIndex;
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::convert::TryFrom;
+
 use itertools::Itertools;
 use launchpad::Indices;
 use maplit::hashmap;
@@ -8,11 +10,11 @@ use noria::{Modification, Operation, TableOperation};
 use noria_data::DataTypeKind;
 use noria_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::convert::TryFrom;
 use tracing::warn;
 use vec_map::VecMap;
+
+use crate::prelude::*;
+use crate::processing::SuggestedIndex;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum SetSnapshotMode {
@@ -564,9 +566,10 @@ mod tests {
     }
 
     mod process {
+        use std::convert::TryInto;
+
         use super::*;
         use crate::state::MaterializedNodeState;
-        use std::convert::TryInto;
 
         fn test_lots_of_changes_in_same_batch(mut state: MaterializedNodeState) {
             use crate::node;

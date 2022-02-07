@@ -1,7 +1,8 @@
+use std::io;
+
 use noria::ReadySetError;
 use noria_client::upstream_database::IsFatalError;
 use psql_srv as ps;
-use std::io;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

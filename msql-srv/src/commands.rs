@@ -122,10 +122,11 @@ pub fn parse(i: &[u8]) -> nom::IResult<&[u8], Command<'_>> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use super::*;
     use crate::myc::constants::{CapabilityFlags, UTF8_GENERAL_CI};
     use crate::packet::PacketReader;
-    use std::io::Cursor;
 
     #[tokio::test]
     async fn it_parses_handshake() {

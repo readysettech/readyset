@@ -1,6 +1,7 @@
-use crate::get;
 use mysql::prelude::FromRow;
 use mysql::{FromRowError, Row};
+
+use crate::get;
 
 #[allow(dead_code)]
 pub struct ExternalCalendarsInnerJoinExternalInvites {

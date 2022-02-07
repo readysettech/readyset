@@ -1,12 +1,13 @@
 use std::collections::HashMap;
+use std::convert::TryInto;
 
-use crate::prelude::*;
-use crate::processing::{ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex};
 use dataflow_expression::Expression;
 pub use nom_sql::BinaryOperator;
 use noria_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
-use std::convert::TryInto;
+
+use crate::prelude::*;
+use crate::processing::{ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex};
 
 /// The filter operator
 ///
@@ -131,7 +132,6 @@ impl Ingredient for Filter {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::ops;
 
     fn setup(materialized: bool, filters: Option<Expression>) -> ops::test::MockGraph {

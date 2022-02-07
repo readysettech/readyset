@@ -1,5 +1,6 @@
-use crate::common::{integer_literal, ws_sep_comma, ws_sep_equals, Literal};
-use crate::Dialect;
+use std::fmt;
+use std::str::FromStr;
+
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::{alphanumeric1, digit1, multispace0, multispace1};
@@ -8,8 +9,9 @@ use nom::multi::separated_list;
 use nom::sequence::tuple;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str::FromStr;
+
+use crate::common::{integer_literal, ws_sep_comma, ws_sep_equals, Literal};
+use crate::Dialect;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub enum CreateTableOption {

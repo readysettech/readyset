@@ -1,7 +1,9 @@
-use crate::internal::*;
+use std::collections::HashMap;
+
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+
+use crate::internal::*;
 
 /// [`HashMap`] that has a pair of [`DomainIndex`] and [`usize`] as keys.
 /// Useful since it already implements the Serialization/Deserialization traits.
@@ -18,6 +20,7 @@ pub struct GraphInfo {
 }
 
 use std::ops::Deref;
+
 use url::Url;
 
 impl Deref for GraphInfo {

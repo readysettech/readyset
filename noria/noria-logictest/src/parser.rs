@@ -10,12 +10,9 @@ use std::convert::TryInto;
 use std::io;
 use std::str::FromStr;
 
-use crate::ast::*;
-use mysql_time::MysqlTime;
-use noria_data::TIMESTAMP_FORMAT;
-
 use anyhow::{anyhow, bail, Context};
 use chrono::NaiveDateTime;
+use mysql_time::MysqlTime;
 use nom::character::complete::{
     alphanumeric1, anychar, digit1, line_ending, multispace1, not_line_ending,
 };
@@ -25,6 +22,9 @@ use nom::{
     named, one_of, opt, parse_to, peek, preceded, recognize, tag, take_while, take_while1,
     terminated,
 };
+use noria_data::TIMESTAMP_FORMAT;
+
+use crate::ast::*;
 
 named!(
     comment<()>,

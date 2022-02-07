@@ -1,5 +1,6 @@
-use anyhow::{bail, Result};
 use std::path::PathBuf;
+
+use anyhow::{bail, Result};
 use walkdir::WalkDir;
 
 /// Walks the directory referenced by `dir` recursively up to a depth of 5.

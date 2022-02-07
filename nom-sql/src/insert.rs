@@ -1,6 +1,12 @@
-use nom::character::complete::{multispace0, multispace1};
-use serde::{Deserialize, Serialize};
 use std::{fmt, str};
+
+use nom::bytes::complete::{tag, tag_no_case};
+use nom::character::complete::{multispace0, multispace1};
+use nom::combinator::opt;
+use nom::multi::many1;
+use nom::sequence::{delimited, preceded, tuple};
+use nom::IResult;
+use serde::{Deserialize, Serialize};
 
 use crate::column::Column;
 use crate::common::{
@@ -9,11 +15,6 @@ use crate::common::{
 };
 use crate::table::Table;
 use crate::{Dialect, Expression};
-use nom::bytes::complete::{tag, tag_no_case};
-use nom::combinator::opt;
-use nom::multi::many1;
-use nom::sequence::{delimited, preceded, tuple};
-use nom::IResult;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct InsertStatement {

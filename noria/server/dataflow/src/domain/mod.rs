@@ -9,10 +9,15 @@ use std::sync::Arc;
 use std::{cell, cmp, mem, time};
 
 use ahash::RandomState;
+use failpoint_macros::failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
+pub use internal::DomainIndex;
 use launchpad::Indices;
 use noria::internal::Index;
+use noria::replication::ReplicationOffset;
+use noria::{channel, internal, KeyComparison, ReadySetError};
+use noria_errors::{internal, internal_err, ReadySetResult};
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
@@ -20,12 +25,6 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, info, trace, warn};
 use unbounded_interval_tree::IntervalTree;
 use vec1::Vec1;
-
-use failpoint_macros::failpoint;
-pub use internal::DomainIndex;
-use noria::replication::ReplicationOffset;
-use noria::{channel, internal, KeyComparison, ReadySetError};
-use noria_errors::{internal, internal_err, ReadySetResult};
 
 use crate::node::NodeProcessingResult;
 use crate::payload::{ReplayPieceContext, SourceSelection};

@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Error};
-
 use noria::consistency::Timestamp;
 use noria::internal::LocalNodeIndex;
 

@@ -1,8 +1,9 @@
+use std::net::{SocketAddr, ToSocketAddrs};
+
 use anyhow::Result;
 use clap::Parser;
 use deployment_tools::prometheus;
 use prometheus_http_query::{Client, Scheme};
-use std::net::{SocketAddr, ToSocketAddrs};
 
 #[derive(Parser)]
 #[clap(name = "prometheus_metrics")]

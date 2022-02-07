@@ -1,17 +1,19 @@
+use std::collections::{HashMap, HashSet};
+use std::convert::TryInto;
+use std::mem;
+
+use noria::consistency::Timestamp;
+use noria::replication::ReplicationOffset;
+use noria::{KeyComparison, PacketData, ReadySetError};
+use noria_errors::ReadySetResult;
+use tracing::{debug_span, trace};
+
 use crate::node::special::base::{BaseWrite, SetSnapshotMode, SnapshotMode};
 use crate::node::NodeType;
 use crate::payload;
 use crate::prelude::*;
 use crate::processing::{MissLookupKey, MissReplayKey};
 use crate::state::MaterializedNodeState;
-use noria::consistency::Timestamp;
-use noria::replication::ReplicationOffset;
-use noria::{KeyComparison, PacketData, ReadySetError};
-use noria_errors::ReadySetResult;
-use std::collections::{HashMap, HashSet};
-use std::convert::TryInto;
-use std::mem;
-use tracing::{debug_span, trace};
 
 /// The results of running a forward pass on a node
 #[derive(Debug, PartialEq, Eq, Default)]
@@ -632,8 +634,9 @@ pub(crate) fn materialize(
 
 #[cfg(feature = "bench")]
 pub mod bench {
-    use super::*;
     use noria_data::DataType::Int;
+
+    use super::*;
 
     pub fn unique_misses(c: &mut criterion::Criterion) {
         let state = unsafe {

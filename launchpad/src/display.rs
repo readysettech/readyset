@@ -167,8 +167,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use test_strategy::proptest;
+
+    use super::*;
 
     #[proptest]
     fn all_elements_in_string(elems: Vec<String>, conjunction: String) {

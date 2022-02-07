@@ -1,3 +1,12 @@
+use std::borrow::Borrow;
+use std::cmp::Ordering;
+use std::convert::{TryFrom, TryInto};
+use std::fmt;
+use std::fmt::Formatter;
+use std::hash::{Hash, Hasher};
+use std::ops::{Add, Sub};
+use std::str::FromStr;
+
 use chrono::{Duration, NaiveDateTime, NaiveTime, Timelike};
 use launchpad::arbitrary::arbitrary_duration;
 use mysql_common::value::convert::{ConvIr, FromValue, FromValueError};
@@ -7,14 +16,6 @@ use proptest::strategy::Strategy;
 use serde::de;
 use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
-use std::borrow::Borrow;
-use std::cmp::Ordering;
-use std::convert::{TryFrom, TryInto};
-use std::fmt;
-use std::fmt::Formatter;
-use std::hash::{Hash, Hasher};
-use std::ops::{Add, Sub};
-use std::str::FromStr;
 use thiserror::Error;
 
 const MICROSECS_IN_SECOND: i64 = 1_000_000;
@@ -382,7 +383,6 @@ impl Borrow<Duration> for MysqlTime {
 }
 
 mod parse {
-    use super::*;
     use nom::bytes::complete::take_while_m_n;
     use nom::character::complete::digit1;
     use nom::character::is_digit;
@@ -390,6 +390,8 @@ mod parse {
         alt, call, char, complete, do_parse, eof, flat_map, fold_many0, many0, map, named, opt,
         parse_to, IResult,
     };
+
+    use super::*;
 
     fn microseconds_padding(digits: &[u8]) -> IResult<&[u8], u32> {
         let num_digits = digits.len();
@@ -826,13 +828,15 @@ impl Arbitrary for MysqlTime {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::collections::hash_map::DefaultHasher;
+
     use launchpad::arbitrary::{
         arbitrary_duration, arbitrary_naive_date_time, arbitrary_naive_time,
     };
     use serde_test::{assert_tokens, Token};
-    use std::collections::hash_map::DefaultHasher;
     use test_strategy::proptest;
+
+    use super::*;
 
     macro_rules! assert_valid {
         ($mysql_time:expr,$duration:expr) => {

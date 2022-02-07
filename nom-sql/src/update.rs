@@ -1,16 +1,17 @@
-use nom::character::complete::{multispace0, multispace1};
 use std::{fmt, str};
+
+use nom::bytes::complete::tag_no_case;
+use nom::character::complete::{multispace0, multispace1};
+use nom::combinator::opt;
+use nom::sequence::tuple;
+use nom::IResult;
+use serde::{Deserialize, Serialize};
 
 use crate::column::Column;
 use crate::common::{assignment_expr_list, schema_table_reference_no_alias, statement_terminator};
 use crate::select::where_clause;
 use crate::table::Table;
 use crate::{Dialect, Expression};
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::opt;
-use nom::sequence::tuple;
-use nom::IResult;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct UpdateStatement {

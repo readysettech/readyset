@@ -1,12 +1,13 @@
+use std::convert::TryFrom;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 use std::time;
 
-use super::Backend;
 use noria::Table;
 use noria_data::DataType;
-use std::convert::TryFrom;
+
+use super::Backend;
 
 async fn do_put(mutator: &mut Table, tx: bool, v: Vec<DataType>) {
     if tx {

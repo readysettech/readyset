@@ -19,6 +19,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLock
 
 use anyhow::{anyhow, bail, Error};
 use async_trait::async_trait;
+use noria_errors::internal_err;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -26,7 +27,6 @@ use super::{
     AdapterId, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
     WorkerDescriptor, WorkerId,
 };
-use noria_errors::internal_err;
 
 pub const CONTROLLER_KEY: &str = "/controller";
 pub const STATE_KEY: &str = "/state";
@@ -432,12 +432,14 @@ impl AuthorityControl for LocalAuthority {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use reqwest::Url;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
+
+    use reqwest::Url;
+
+    use super::*;
 
     #[tokio::test]
     async fn it_works() {

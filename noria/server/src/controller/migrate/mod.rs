@@ -31,14 +31,15 @@
 //!
 //! Beware, Here be slightly smaller dragons™
 
+use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
+
 use dataflow::post_lookup::PostLookup;
 use dataflow::prelude::*;
 use dataflow::{node, DomainRequest};
 use metrics::{counter, histogram};
 use noria::metrics::recorded;
 use noria::{KeyColumnIdx, ReadySetError, ViewPlaceholder};
-use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
 use tracing::{debug, debug_span, error, info, info_span, instrument, trace};
 
 use crate::controller::migrate::materialization::InvalidEdge;

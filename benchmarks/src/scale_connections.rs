@@ -1,14 +1,16 @@
-use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
-use crate::utils::prometheus::ForwardPrometheusMetrics;
-use crate::{benchmark_counter, benchmark_histogram};
+use std::collections::HashMap;
+use std::time::Instant;
+
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
 use metrics::Unit;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::time::Instant;
 use tracing::info;
+
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
+use crate::utils::prometheus::ForwardPrometheusMetrics;
+use crate::{benchmark_counter, benchmark_histogram};
 
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct ScaleConnections {

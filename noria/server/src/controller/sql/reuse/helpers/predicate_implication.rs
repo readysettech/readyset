@@ -1,10 +1,11 @@
 use std::convert::TryFrom;
 
-use crate::controller::sql::query_graph::JoinPredicate;
-use crate::controller::sql::query_utils::LogicalOp;
 use nom_sql::Expression::*;
 use nom_sql::{BinaryOperator, Expression, Literal};
 use noria_errors::{internal, unsupported, ReadySetError, ReadySetResult};
+
+use crate::controller::sql::query_graph::JoinPredicate;
+use crate::controller::sql::query_utils::LogicalOp;
 
 fn direct_elimination(
     op1: BinaryOperator,
@@ -222,8 +223,9 @@ fn predicate_implies(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use nom_sql::{Column, Literal};
+
+    use super::*;
 
     #[test]
     fn predicate_implication() {

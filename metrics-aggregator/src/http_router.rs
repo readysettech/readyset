@@ -1,14 +1,15 @@
-use anyhow::anyhow;
-use futures::TryFutureExt;
-use hyper::header::CONTENT_TYPE;
-use hyper::service::make_service_fn;
-use hyper::{self, Body, Method, Request, Response};
 use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+
+use anyhow::anyhow;
+use futures::TryFutureExt;
+use hyper::header::CONTENT_TYPE;
+use hyper::service::make_service_fn;
+use hyper::{self, Body, Method, Request, Response};
 use stream_cancel::Valve;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;

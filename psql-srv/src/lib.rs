@@ -24,13 +24,14 @@ mod response;
 mod runner;
 mod value;
 
-pub use crate::error::Error;
-pub use crate::value::Value;
+use std::convert::TryInto;
 
 use async_trait::async_trait;
 use postgres_types::Type;
-use std::convert::TryInto;
 use tokio::io::{AsyncRead, AsyncWrite};
+
+pub use crate::error::Error;
+pub use crate::value::Value;
 
 /// A trait for implementing a SQL backend that produces responses to SQL query statements. This
 /// trait is the primary interface for the `psql-srv` crate.

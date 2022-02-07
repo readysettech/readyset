@@ -1,16 +1,16 @@
-use derive_more::From;
-use itertools::{Either, Itertools};
-use pratt::{Affix, Associativity, PrattParser, Precedence};
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::iter;
-use test_strategy::Arbitrary;
 
+use derive_more::From;
+use itertools::{Either, Itertools};
 use nom::character::complete::{multispace0, multispace1};
 use nom::{
     alt, call, char, complete, delimited, do_parse, many0, map, named, opt, preceded,
     separated_list, tag, tag_no_case, terminated, tuple, IResult,
 };
+use pratt::{Affix, Associativity, PrattParser, Precedence};
+use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::case::case_when;
 use crate::common::{
@@ -897,9 +897,8 @@ mod tests {
     }
 
     mod conditions {
-        use crate::{FieldDefinitionExpression, ItemPlaceholder};
-
         use super::*;
+        use crate::{FieldDefinitionExpression, ItemPlaceholder};
 
         fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpression> {
             cols.iter()

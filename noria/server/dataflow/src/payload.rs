@@ -1,13 +1,13 @@
+use std::collections::HashSet;
+use std::fmt;
+
+use noria::internal::LocalOrNot;
+use noria::{self, KeyComparison, PacketData, PacketTrace};
 use serde::{Deserialize, Serialize};
 use strum_macros::{EnumCount, EnumDiscriminants, EnumIter, IntoStaticStr};
 use vec1::Vec1;
 
 use crate::prelude::*;
-use noria::internal::LocalOrNot;
-use noria::{self, KeyComparison, PacketData, PacketTrace};
-
-use std::collections::HashSet;
-use std::fmt;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReplayPathSegment {

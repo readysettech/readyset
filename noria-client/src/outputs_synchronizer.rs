@@ -1,11 +1,10 @@
-use crate::query_status_cache::{MigrationState, QueryStatusCache};
+use std::sync::Arc;
+
 use noria::{ControllerHandle, ReadySetResult};
-
 use tokio::select;
-
 use tracing::{info, instrument, warn};
 
-use std::sync::Arc;
+use crate::query_status_cache::{MigrationState, QueryStatusCache};
 
 pub struct OutputsSynchronizer {
     /// The noria connector used to query

@@ -1391,8 +1391,9 @@ mod tests {
 
     #[allow(clippy::eq_op)]
     mod key_comparison {
-        use super::*;
         use launchpad::eq_laws;
+
+        use super::*;
 
         eq_laws!(KeyComparison);
     }

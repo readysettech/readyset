@@ -1,3 +1,10 @@
+use std::convert::{TryFrom, TryInto};
+
+use bytes::{BufMut, BytesMut};
+use eui48::MacAddressFormat;
+use postgres_types::{ToSql, Type};
+use tokio_util::codec::Encoder;
+
 use crate::codec::error::EncodeError as Error;
 use crate::codec::Codec;
 use crate::error::Error as BackendError;
@@ -6,11 +13,6 @@ use crate::message::CommandCompleteTag::*;
 use crate::message::ErrorSeverity;
 use crate::message::TransferFormat::{self, *};
 use crate::value::Value;
-use bytes::{BufMut, BytesMut};
-use eui48::MacAddressFormat;
-use postgres_types::{ToSql, Type};
-use std::convert::{TryFrom, TryInto};
-use tokio_util::codec::Encoder;
 
 const ID_AUTHENTICATION_OK: u8 = b'R';
 const ID_BIND_COMPLETE: u8 = b'2';
@@ -476,16 +478,18 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::message::{FieldDescription, SqlState};
-    use crate::value::Value as DataValue;
+    use std::sync::Arc;
+
     use bit_vec::BitVec;
     use bytes::{BufMut, BytesMut};
     use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
     use eui48::MacAddress;
     use rust_decimal::Decimal;
-    use std::sync::Arc;
     use uuid::Uuid;
+
+    use super::*;
+    use crate::message::{FieldDescription, SqlState};
+    use crate::value::Value as DataValue;
 
     struct Value(DataValue);
 

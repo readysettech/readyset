@@ -1,12 +1,13 @@
+use std::convert::TryFrom;
+use std::env;
+use std::path::PathBuf;
+
 use benchmarks::utils::generate::parallel_load;
 use benchmarks::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use clap::{Parser, ValueHint};
 use noria_data::DataType;
 use noria_logictest::upstream::DatabaseURL;
 use query_generator::ColumnGenerationSpec;
-use std::convert::TryFrom;
-use std::env;
-use std::path::PathBuf;
 
 #[derive(Parser)]
 #[clap(name = "data_generator")]

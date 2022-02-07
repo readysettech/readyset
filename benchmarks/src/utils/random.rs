@@ -1,7 +1,8 @@
+use std::convert::TryInto;
+
 use mysql_async::Value;
 use nom_sql::SqlType;
 use query_generator::RandomGenerator;
-use std::convert::TryInto;
 
 /// Uses a random generator that uses the bounds of the SqlType to determine the
 /// range to generate random values in. This is unlikely to randomly generate

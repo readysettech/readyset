@@ -1,9 +1,10 @@
 use std::ops::RangeBounds;
 
-use super::{key_to_single, Key};
-use crate::prelude::*;
 use ahash::RandomState;
 use noria::consistency::Timestamp;
+
+use super::{key_to_single, Key};
+use crate::prelude::*;
 
 pub(super) enum Handle {
     Single(

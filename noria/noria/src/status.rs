@@ -7,11 +7,12 @@
 //!
 //! These two converions are used to convert the [`ReadySetStatus`] structs to a format
 //! that can be passed to various SQL clients.
+use std::convert::TryFrom;
+use std::fmt::{self, Display};
+
 use mysql_common::row::Row;
 use noria_errors::{internal, ReadySetError};
 use serde::{Deserialize, Serialize};
-use std::convert::TryFrom;
-use std::fmt::{self, Display};
 
 // Consts for variable names.
 const SNAPSHOT_STATUS_VARIABLE: &str = "Snapshot Status";

@@ -6,10 +6,9 @@ use noria::{ReadySetError, ReadySetResult, TableOperation};
 use tokio_postgres as pgsql;
 use tracing::{debug, error};
 
-use crate::noria_adapter::{Connector, ReplicationAction};
-
 use super::wal_reader::{WalEvent, WalReader};
 use super::{PostgresPosition, PUBLICATION_NAME, REPLICATION_SLOT};
+use crate::noria_adapter::{Connector, ReplicationAction};
 
 /// A connector that connects to a PostgreSQL server and starts reading WAL from the "noria" replication slot
 /// with the "noria" publication.

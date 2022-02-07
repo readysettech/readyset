@@ -5,6 +5,7 @@ use std::cmp::{max_by, min_by, Ordering};
 use std::iter::{self, Step};
 use std::mem;
 use std::ops::{Bound, RangeBounds};
+
 use Bound::*;
 use Ordering::*;
 
@@ -533,8 +534,9 @@ mod tests {
     }
 
     mod covers {
-        use super::*;
         use test_strategy::proptest;
+
+        use super::*;
 
         #[proptest]
         fn covers_reflexive(x: (Bound<i32>, Bound<i32>)) {
@@ -559,11 +561,13 @@ mod tests {
     }
 
     mod overlaps {
-        use super::*;
-        use proptest::prelude::*;
         use std::collections::HashSet;
         use std::ops::Range;
+
+        use proptest::prelude::*;
         use test_strategy::proptest;
+
+        use super::*;
 
         #[proptest]
         fn overlaps_is_collect_intersects(r1: Range<i8>, r2: Range<i8>) {
@@ -618,8 +622,9 @@ mod tests {
     }
 
     mod difference {
-        use super::*;
         use test_strategy::proptest;
+
+        use super::*;
 
         #[test]
         fn empty() {
@@ -659,10 +664,12 @@ mod tests {
     }
 
     mod intersection {
-        use super::*;
-        use proptest::prop_assume;
         use std::ops::Range;
+
+        use proptest::prop_assume;
         use test_strategy::proptest;
+
+        use super::*;
 
         #[proptest]
         fn commutative(r1: Range<i8>, r2: Range<i8>) {

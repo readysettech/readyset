@@ -1,12 +1,12 @@
-use crate::controller::sql::query_graph::QueryGraph;
-use crate::controller::sql::reuse::join_order::reorder_joins;
-use crate::{ReadySetResult, ReuseConfigType};
+use std::collections::HashMap;
+use std::vec::Vec;
 
 use nom_sql::Table;
 use noria::ReadySetError;
-use std::collections::HashMap;
 
-use std::vec::Vec;
+use crate::controller::sql::query_graph::QueryGraph;
+use crate::controller::sql::reuse::join_order::reorder_joins;
+use crate::{ReadySetResult, ReuseConfigType};
 
 mod finkelstein;
 mod full;

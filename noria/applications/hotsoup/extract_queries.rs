@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+
 use tracing::{info, trace};
 
 fn traverse(path: &Path) -> Vec<PathBuf> {
@@ -22,11 +23,12 @@ fn traverse(path: &Path) -> Vec<PathBuf> {
 }
 
 fn process_file(fp: &Path, git_rev: &str) -> Vec<(String, String)> {
-    use regex::Regex;
     use std::collections::hash_map::DefaultHasher;
     use std::fs::File;
     use std::hash::{Hash, Hasher};
     use std::io::Read;
+
+    use regex::Regex;
 
     let re = "\"((?is)select [^;]* from [^;]*?(?-is))\"(?:, \".*\"\\)| \\.|;|\\s*\\)|,)";
     let query_regex = Regex::new(re).unwrap();
@@ -84,9 +86,10 @@ fn reformat(queries: Vec<(String, String)>) -> Vec<(String, String)> {
 const SKIP_FILES: [&str; 1] = ["test02.php"];
 
 fn main() {
-    use clap::{App, Arg};
     use std::fs::File;
     use std::io::Write;
+
+    use clap::{App, Arg};
 
     readyset_logging::Options::default().init().unwrap();
 

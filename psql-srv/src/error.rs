@@ -1,8 +1,10 @@
+use std::num::TryFromIntError;
+
+use postgres_types::Type;
+use thiserror::Error;
+
 use crate::codec::{DecodeError, EncodeError};
 use crate::message::FrontendMessage;
-use postgres_types::Type;
-use std::num::TryFromIntError;
-use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {

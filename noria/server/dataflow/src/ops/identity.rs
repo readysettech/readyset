@@ -1,10 +1,11 @@
 use std::collections::HashMap;
+use std::convert::TryInto;
+
+use noria_errors::ReadySetResult;
+use serde::{Deserialize, Serialize};
 
 use crate::prelude::*;
 use crate::processing::{ColumnSource, SuggestedIndex};
-use noria_errors::ReadySetResult;
-use serde::{Deserialize, Serialize};
-use std::convert::TryInto;
 
 /// Applies the identity operation to the view. Since the identity does nothing,
 /// it is the simplest possible operation. Primary intended as a reference
@@ -66,7 +67,6 @@ impl Ingredient for Identity {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::ops;
 
     fn setup(materialized: bool) -> ops::test::MockGraph {

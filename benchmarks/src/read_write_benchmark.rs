@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -10,7 +11,6 @@ use mysql_async::prelude::Queryable;
 use mysql_async::Row;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error};
 

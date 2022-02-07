@@ -1,17 +1,18 @@
-use nom::character::complete::{multispace0, multispace1};
 use std::{fmt, str};
 
-use crate::common::{opt_delimited, statement_terminator};
-use crate::order::{order_clause, OrderClause};
-use crate::select::{limit_clause, nested_selection, LimitClause, SelectStatement};
-use crate::Dialect;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
+use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
 use nom::multi::many1;
 use nom::sequence::{delimited, preceded, tuple};
 use nom::IResult;
 use serde::{Deserialize, Serialize};
+
+use crate::common::{opt_delimited, statement_terminator};
+use crate::order::{order_clause, OrderClause};
+use crate::select::{limit_clause, nested_selection, LimitClause, SelectStatement};
+use crate::Dialect;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub enum CompoundSelectOperator {

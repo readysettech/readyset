@@ -1,13 +1,15 @@
-use crate::benchmark::BenchmarkResults;
+use std::time::Duration;
+
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::stream::futures_unordered::FuturesUnordered;
 use futures::StreamExt;
-use std::time::Duration;
 use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::time::Interval;
 use tracing::error;
+
+use crate::benchmark::BenchmarkResults;
 
 /// A group of methods that facilitate executing a single benchmark from multiple
 /// threads. This should be used in conjunction with `run_multithread_benchmark`

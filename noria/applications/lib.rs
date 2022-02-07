@@ -1,6 +1,7 @@
+use std::time::Duration;
+
 use hdrhistogram::serialization::interval_log;
 use hdrhistogram::Histogram;
-use std::time::Duration;
 
 #[derive(Default, Clone)]
 pub struct Timeline {

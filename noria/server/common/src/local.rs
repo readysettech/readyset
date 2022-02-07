@@ -1,10 +1,11 @@
+use std::collections::HashMap;
+use std::fmt;
+use std::ops::{Bound, RangeBounds};
+
 use noria::internal::LocalNodeIndex;
 use noria_data::DataType;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::collections::HashMap;
-use std::fmt;
-use std::ops::{Bound, RangeBounds};
 use test_strategy::Arbitrary;
 use vec1::Vec1;
 

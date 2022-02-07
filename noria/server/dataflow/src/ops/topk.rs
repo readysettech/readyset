@@ -1,9 +1,3 @@
-use itertools::Itertools;
-use launchpad::Indices;
-use maplit::hashmap;
-use noria::internal;
-use noria_errors::{internal, invariant};
-use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
@@ -11,13 +5,18 @@ use std::convert::TryInto;
 use std::fmt::Display;
 use std::mem;
 use std::num::NonZeroUsize;
+
+use itertools::Itertools;
+use launchpad::Indices;
+use maplit::hashmap;
+use nom_sql::OrderType;
+use noria::internal;
+use noria_errors::{internal, internal_err, invariant, ReadySetResult};
+use serde::{Deserialize, Serialize};
 use tracing::trace;
 
 use crate::prelude::*;
-
 use crate::processing::{ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex};
-use nom_sql::OrderType;
-use noria_errors::{internal_err, ReadySetResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct Order(Vec<(usize, OrderType)>);
@@ -514,7 +513,6 @@ impl Ingredient for TopK {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::ops;
 
     fn setup(reversed: bool) -> (ops::test::MockGraph, IndexPair) {

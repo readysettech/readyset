@@ -1,10 +1,11 @@
 extern crate psql_srv;
 
+use std::convert::TryFrom;
+use std::io;
+
 use async_trait::async_trait;
 use postgres_types::Type;
 use psql_srv::{run_backend, Backend, Column, Error, PrepareResponse, QueryResponse};
-use std::convert::TryFrom;
-use std::io;
 use tokio::net::TcpListener;
 
 struct Value(psql_srv::Value);

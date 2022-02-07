@@ -1,8 +1,9 @@
+use std::convert::TryFrom;
+
 use eui48::MacAddress;
 use noria_data::DataType;
 use psql_srv as ps;
 use rust_decimal::Decimal;
-use std::convert::TryFrom;
 use tokio_postgres::types::Type;
 use tracing::error;
 use uuid::Uuid;

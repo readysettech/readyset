@@ -1,12 +1,14 @@
-use crate::utils::*;
-use crate::*;
+use std::time::Duration;
+
 use mysql_async::prelude::Queryable;
 use noria::get_metric;
 use noria::metrics::{recorded, DumpedMetricValue};
 use serial_test::serial;
-use std::time::Duration;
 use test_utils::skip_slow_tests;
 use tokio::time::{sleep, timeout};
+
+use crate::utils::*;
+use crate::*;
 
 const PROPAGATION_DELAY_TIMEOUT: Duration = Duration::from_secs(60);
 

@@ -1,12 +1,13 @@
 //! Remove from the target directory things that shouldn't be cached.
 // Based on the GitHub Action https://github.com/Swatinem/rust-cache
-use anyhow::{bail, Result};
-use camino::{Utf8Path, Utf8PathBuf};
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
+
+use anyhow::{bail, Result};
+use camino::{Utf8Path, Utf8PathBuf};
 
 const ONE_WEEK: Duration = Duration::from_secs(7 * 24 * 3600);
 

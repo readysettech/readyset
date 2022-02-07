@@ -189,7 +189,14 @@ mod readyset_mysql;
 #[cfg(test)]
 mod utils;
 
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::{Duration, Instant};
+
 use anyhow::{anyhow, Result};
+#[cfg(test)]
+use clustertest_macros::clustertest;
 use futures::executor;
 use hyper::Client;
 use mysql_async::prelude::Queryable;
@@ -199,15 +206,8 @@ use noria::{ControllerHandle, ReadySetResult};
 use rand::Rng;
 use serde::Deserialize;
 use server::{AdapterBuilder, NoriaServerBuilder, ProcessHandle};
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use url::Url;
-
-#[cfg(test)]
-use clustertest_macros::clustertest;
 
 /// The set of environment variables that need to be set for the
 /// tests to run. Each variable is the upper case of their respective,
@@ -997,8 +997,9 @@ fn get_next_good_port(port: Option<u16>) -> u16 {
 // responsible for cleaning up its own external state.
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serial_test::serial;
+
+    use super::*;
     // Verifies that the wrappers that create and teardown the deployment.
     #[clustertest]
     async fn clustertest_startup_teardown_test() {

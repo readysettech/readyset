@@ -1,11 +1,12 @@
-use itertools::{Either, Itertools};
-use nom_sql::analysis::visit::{self, Visitor};
-use nom_sql::{BinaryOperator, Expression, InValue, ItemPlaceholder, Literal, SelectStatement};
-use noria_errors::{unsupported, ReadySetError, ReadySetResult};
 use std::borrow::Cow;
 use std::cmp::max;
 use std::convert::{TryFrom, TryInto};
 use std::{iter, mem};
+
+use itertools::{Either, Itertools};
+use nom_sql::analysis::visit::{self, Visitor};
+use nom_sql::{BinaryOperator, Expression, InValue, ItemPlaceholder, Literal, SelectStatement};
+use noria_errors::{unsupported, ReadySetError, ReadySetResult};
 
 /// Struct storing information about parameters processed from a raw user supplied query, which
 /// provides support for converting a user-supplied parameter list into a set of lookup keys to pass
@@ -574,8 +575,9 @@ fn splice_auto_parameters<'param, 'a, T: Clone>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use nom_sql::{parse_query, Dialect, SqlQuery};
+
+    use super::*;
 
     fn parse_select_statement(q: &str) -> SelectStatement {
         let q = parse_query(Dialect::MySQL, q).unwrap();

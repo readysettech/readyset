@@ -136,10 +136,11 @@ impl SubQueries for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use nom_sql::{
         BinaryOperator, Column, FieldDefinitionExpression, SelectStatement, SqlQuery, Table,
     };
+
+    use super::*;
 
     #[test]
     fn it_extracts_subqueries() {

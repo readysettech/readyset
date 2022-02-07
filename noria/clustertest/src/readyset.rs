@@ -1,8 +1,9 @@
-use crate::*;
 use noria::get_metric;
 use noria::metrics::{recorded, DumpedMetricValue};
 use noria_data::DataType;
 use serial_test::serial;
+
+use crate::*;
 
 // This test verifies that requests routed to specific regions,
 // actually does just that.

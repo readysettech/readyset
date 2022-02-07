@@ -1,7 +1,8 @@
+use std::sync::Arc;
+
 use clap::Parser;
 use noria::consensus::{Authority, ZookeeperAuthority};
 use noria::ControllerHandle;
-use std::sync::Arc;
 use url::Url;
 
 #[derive(Parser)]

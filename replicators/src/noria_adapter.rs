@@ -1,7 +1,9 @@
-use crate::mysql_connector::{MySqlBinlogConnector, MySqlReplicator};
-use crate::postgres_connector::{
-    PostgresPosition, PostgresReplicator, PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
-};
+use std::collections::{hash_map, HashMap, HashSet};
+use std::convert::TryInto;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Instant;
+
 use async_trait::async_trait;
 use futures::FutureExt;
 use launchpad::select;
@@ -11,14 +13,14 @@ use noria::consistency::Timestamp;
 use noria::metrics::recorded::{self, SnapshotStatusTag};
 use noria::replication::{ReplicationOffset, ReplicationOffsets};
 use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table, TableOperation};
-use std::collections::{hash_map, HashMap, HashSet};
-use std::convert::TryInto;
-use std::str::FromStr;
-use std::sync::Arc;
-use std::time::Instant;
 use tokio::sync::Notify;
 use tracing::{debug, error, info, info_span, warn, Instrument};
 use {mysql_async as mysql, tokio_postgres as pgsql};
+
+use crate::mysql_connector::{MySqlBinlogConnector, MySqlReplicator};
+use crate::postgres_connector::{
+    PostgresPosition, PostgresReplicator, PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
+};
 
 #[derive(Debug)]
 pub(crate) enum ReplicationAction {

@@ -2,7 +2,6 @@ use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::ReuseConfigType;
 use dataflow::{DurabilityMode, PersistenceParameters};
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::metrics::client::MetricsClient;
@@ -12,7 +11,7 @@ use crate::metrics::{
     get_global_recorder, install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,
     NoriaMetricsRecorder,
 };
-use crate::{Builder, Handle};
+use crate::{Builder, Handle, ReuseConfigType};
 
 // Settle time must be longer than the leader state check interval
 // when using a local authority.

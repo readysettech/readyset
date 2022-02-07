@@ -1,3 +1,25 @@
+use std::borrow::Cow;
+use std::collections::{BTreeMap, HashMap};
+use std::future::Future;
+use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
+
+use futures_util::future;
+use futures_util::future::Either;
+use hyper::client::HttpConnector;
+use noria_errors::{
+    internal, internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult,
+};
+use petgraph::graph::NodeIndex;
+use serde::{Deserialize, Serialize};
+use tower::buffer::Buffer;
+use tower::timeout::Timeout;
+use tower::ServiceExt;
+use tower_service::Service;
+use url::Url;
+
 use crate::consensus::{Authority, AuthorityControl};
 use crate::debug::info::GraphInfo;
 use crate::debug::stats;
@@ -10,26 +32,6 @@ use crate::{
     ActivationResult, ReaderReplicationResult, ReaderReplicationSpec, RecipeSpec,
     ReplicationOffset, ViewFilter, ViewRequest,
 };
-use futures_util::future;
-use futures_util::future::Either;
-use hyper::client::HttpConnector;
-use noria_errors::{
-    internal, internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult,
-};
-use petgraph::graph::NodeIndex;
-use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
-use std::future::Future;
-use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
-use tower::buffer::Buffer;
-use tower::timeout::Timeout;
-use tower::ServiceExt;
-use tower_service::Service;
-use url::Url;
 
 /// Describes a running controller instance.
 ///

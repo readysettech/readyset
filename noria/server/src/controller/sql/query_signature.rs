@@ -1,8 +1,8 @@
-use nom_sql::analysis::ReferredColumns;
-use nom_sql::Column;
-
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
+
+use nom_sql::analysis::ReferredColumns;
+use nom_sql::Column;
 
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph, QueryGraphEdge};
 
@@ -159,9 +159,8 @@ impl Signature for QueryGraph {
 mod tests {
     use nom_sql::{parse_query, Dialect, SqlQuery};
 
-    use crate::controller::sql::query_graph::to_query_graph;
-
     use super::*;
+    use crate::controller::sql::query_graph::to_query_graph;
 
     /// Parse a SQL query that is expected to be a SelectQuery. Returns None if
     /// parsing fails *or* if the query is something other than a Select
@@ -204,8 +203,9 @@ mod tests {
 
     #[test]
     fn it_generalizes() {
-        use crate::controller::sql::query_graph::to_query_graph;
         use nom_sql::parser::{parse_query, SqlQuery};
+
+        use crate::controller::sql::query_graph::to_query_graph;
 
         let qa = parse_query(
             Dialect::MySQL,
@@ -250,8 +250,9 @@ mod tests {
     #[test]
     #[allow(clippy::eq_op)]
     fn it_compares_signatures() {
-        use crate::controller::sql::query_graph::to_query_graph;
         use nom_sql::parser::{parse_query, SqlQuery};
+
+        use crate::controller::sql::query_graph::to_query_graph;
 
         let qa = parse_query(Dialect::MySQL, "SELECT b.c3 FROM a, b WHERE a.c1 = 42;").unwrap();
         let qb = parse_query(Dialect::MySQL, "SELECT b.c3 FROM a, b WHERE a.c1 > 42;").unwrap();

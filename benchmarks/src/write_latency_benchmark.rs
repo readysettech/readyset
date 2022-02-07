@@ -8,11 +8,10 @@ use clap::Parser;
 use metrics::Unit;
 use mysql_async::prelude::Queryable;
 use mysql_async::{Row, Value};
-use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
-
 use nom_sql::{parse_query, Dialect, SqlQuery};
 use query_generator::{ColumnName, TableName};
+use serde::{Deserialize, Serialize};
+use tracing::{debug, info};
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
 use crate::utils::generate::DataGenerator;

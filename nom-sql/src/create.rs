@@ -1,11 +1,15 @@
-use nom::bytes::complete::is_not;
-use nom::call;
-use nom::character::complete::{digit1, multispace0, multispace1};
-use nom::combinator::map_res;
-use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::str::FromStr;
 use std::{fmt, str};
+
+use nom::branch::alt;
+use nom::bytes::complete::{is_not, tag, tag_no_case};
+use nom::character::complete::{digit1, multispace0, multispace1};
+use nom::combinator::{map, map_res, opt};
+use nom::multi::{many0, many1};
+use nom::sequence::{delimited, preceded, terminated, tuple};
+use nom::{call, do_parse, opt, preceded, separated_list, tag, tag_no_case, terminated, IResult};
+use serde::{Deserialize, Serialize};
 
 use crate::column::{column_specification, Column, ColumnSpecification};
 use crate::common::{
@@ -19,12 +23,6 @@ use crate::order::{order_type, OrderType};
 use crate::select::{nested_selection, selection, SelectStatement};
 use crate::table::Table;
 use crate::{ColumnConstraint, Dialect};
-use nom::branch::alt;
-use nom::bytes::complete::{tag, tag_no_case};
-use nom::combinator::{map, opt};
-use nom::multi::{many0, many1};
-use nom::sequence::{delimited, preceded, terminated, tuple};
-use nom::{do_parse, opt, preceded, separated_list, tag, tag_no_case, terminated, IResult};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateTableStatement {
@@ -716,12 +714,11 @@ pub fn create_cached_query(
 
 #[cfg(test)]
 mod tests {
-    use crate::common::type_identifier;
-    use crate::{BinaryOperator, ColumnConstraint, Expression, Literal, SqlType};
-
     use super::*;
     use crate::column::Column;
+    use crate::common::type_identifier;
     use crate::table::Table;
+    use crate::{BinaryOperator, ColumnConstraint, Expression, Literal, SqlType};
 
     #[test]
     fn sql_types() {
@@ -1240,11 +1237,10 @@ mod tests {
     mod mysql {
         use std::vec;
 
-        use crate::{ColumnConstraint, Literal, SqlType};
-
         use super::*;
         use crate::column::Column;
         use crate::table::Table;
+        use crate::{ColumnConstraint, Literal, SqlType};
 
         #[test]
         fn create_view_with_security_params() {
@@ -1673,11 +1669,10 @@ mod tests {
     }
 
     mod postgres {
-        use crate::{ColumnConstraint, Literal, SqlType};
-
         use super::*;
         use crate::column::Column;
         use crate::table::Table;
+        use crate::{ColumnConstraint, Literal, SqlType};
 
         #[test]
         fn double_precision_column() {

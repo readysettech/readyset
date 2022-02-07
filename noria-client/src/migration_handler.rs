@@ -5,19 +5,21 @@
 //!
 //! The migration handler may change a queries state based on the
 //! response from Noria.
-use crate::backend::{noria_connector, NoriaConnector};
-use crate::query_status_cache::{MigrationState, QueryStatusCache};
-use crate::upstream_database::{IsFatalError, NoriaCompare};
-use crate::UpstreamDatabase;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Instant;
+
 use metrics::counter;
 use nom_sql::SelectStatement;
 use noria::ReadySetResult;
 use noria_client_metrics::recorded;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Instant;
 use tokio::select;
 use tracing::{error, info, instrument, warn};
+
+use crate::backend::{noria_connector, NoriaConnector};
+use crate::query_status_cache::{MigrationState, QueryStatusCache};
+use crate::upstream_database::{IsFatalError, NoriaCompare};
+use crate::UpstreamDatabase;
 
 pub struct MigrationHandler<DB> {
     /// Connection used to issue prepare requests to Noria.

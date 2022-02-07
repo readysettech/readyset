@@ -4,12 +4,6 @@
 //! Assumptions: There is only a single write client
 //! in the system.
 
-use benchmarks::utils::generate::parallel_load;
-use benchmarks::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
-use clap::{Parser, ValueHint};
-use noria_data::DataType;
-use noria_logictest::upstream::DatabaseURL;
-use query_generator::ColumnGenerationSpec;
 use std::convert::TryFrom;
 use std::env;
 use std::path::PathBuf;
@@ -17,6 +11,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
+
+use benchmarks::utils::generate::parallel_load;
+use benchmarks::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
+use clap::{Parser, ValueHint};
+use noria_data::DataType;
+use noria_logictest::upstream::DatabaseURL;
+use query_generator::ColumnGenerationSpec;
 
 static REPORTING_INTERVAL: Duration = Duration::from_secs(10);
 

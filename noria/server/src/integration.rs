@@ -5,10 +5,15 @@
 //! to prevent flaky behavior.
 #![allow(clippy::many_single_char_names)]
 
-use crate::controller::recipe::Recipe;
-use crate::controller::sql::{mir, SqlIncorporator};
-use crate::integration_utils::*;
-use crate::{get_col, Builder, ReadySetError, ReuseConfigType};
+use std::collections::HashMap;
+use std::convert::{TryFrom, TryInto};
+use std::ops::Bound;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
+use std::{iter, thread};
+
+use chrono::NaiveDate;
 use common::Index;
 use dataflow::node::special::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
@@ -30,23 +35,19 @@ use noria::{
     ViewQueryOperator, ViewRequest,
 };
 use noria_data::DataType;
-
-use crate::controller::recipe::changelist::{Change, ChangeList};
-use chrono::NaiveDate;
 use noria_errors::ReadySetError::MigrationPlanFailed;
 use rusty_fork::rusty_fork_test;
-use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
-use std::ops::Bound;
-use std::str::FromStr;
-use std::sync::Arc;
-use std::time::Duration;
-use std::{iter, thread};
 use tempfile::TempDir;
 use test_utils::skip_with_flaky_finder;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use vec1::vec1;
+
+use crate::controller::recipe::changelist::{Change, ChangeList};
+use crate::controller::recipe::Recipe;
+use crate::controller::sql::{mir, SqlIncorporator};
+use crate::integration_utils::*;
+use crate::{get_col, Builder, ReadySetError, ReuseConfigType};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_completes() {

@@ -1,11 +1,13 @@
-use crate::handle::Handle;
-use crate::{Config, FrontierStrategy, ReuseConfigType, VolumeId};
-use dataflow::PersistenceParameters;
-use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time;
+
+use dataflow::PersistenceParameters;
+use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
+
+use crate::handle::Handle;
+use crate::{Config, FrontierStrategy, ReuseConfigType, VolumeId};
 
 /// Used to construct a worker.
 #[derive(Clone)]

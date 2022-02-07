@@ -6,9 +6,9 @@
 //! it takes to create the connection and the number of views.
 //! `--param_count` can be specified to modify the number of
 //! parameters in the view.
-use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
-use crate::utils::prometheus::ForwardPrometheusMetrics;
-use crate::{benchmark_counter, benchmark_histogram};
+use std::collections::HashMap;
+use std::time::Instant;
+
 use anyhow::{bail, Result};
 use async_trait::async_trait;
 use clap::Parser;
@@ -16,9 +16,11 @@ use itertools::Itertools;
 use metrics::Unit;
 use mysql_async::prelude::Queryable;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::time::Instant;
 use tracing::{debug, info};
+
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
+use crate::utils::prometheus::ForwardPrometheusMetrics;
+use crate::{benchmark_counter, benchmark_histogram};
 
 const MAX_MYSQL_COLUMN_COUNT: usize = 4096;
 

@@ -7,11 +7,10 @@ use std::collections::HashSet;
 use std::fs;
 
 use anyhow::{bail, Result};
-
-use crate::project_root_path;
+use tracing::warn;
 use yaml_rust::{Yaml, YamlLoader};
 
-use tracing::warn;
+use crate::project_root_path;
 
 pub(crate) fn run() -> Result<()> {
     let project_path = project_root_path();

@@ -9,14 +9,14 @@ extern crate quickcheck;
 #[macro_use(quickcheck)]
 extern crate quickcheck_macros;
 
-use quickcheck::{Arbitrary, Gen};
-
-use rand::Rng;
 use std::cmp::{min, Ord};
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::Debug;
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Bound, Deref, RangeBounds};
+
+use quickcheck::{Arbitrary, Gen};
+use rand::Rng;
 
 fn set<'a, T: 'a, I>(iter: I) -> HashSet<T>
 where

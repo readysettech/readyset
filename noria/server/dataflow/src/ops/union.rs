@@ -1,23 +1,22 @@
+use std::cmp::Ordering;
+use std::collections::{hash_map, BTreeMap, HashMap, HashSet};
+use std::convert::{TryFrom, TryInto};
+use std::ops::Bound;
+
 use itertools::Itertools;
 use launchpad::hash::hash;
 use launchpad::intervals::{cmp_endbound, cmp_startbound};
 use launchpad::Indices;
 use noria::KeyComparison;
-use noria_errors::invariant;
+use noria_errors::{invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::collections::{hash_map, BTreeMap, HashMap, HashSet};
-use std::convert::{TryFrom, TryInto};
-use std::ops::Bound;
 use test_strategy::Arbitrary;
 use tracing::{debug, error, trace};
 use vec1::Vec1;
 
+use super::Side;
 use crate::prelude::*;
 use crate::processing::{ColumnRef, ColumnSource, SuggestedIndex};
-use noria_errors::ReadySetResult;
-
-use super::Side;
 
 /// Specification for how the union operator should operate with respect to rows that exist in both
 /// the left and right parents.
@@ -1041,7 +1040,6 @@ impl Ingredient for Union {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::ops;
 
     fn setup(duplicate_mode: DuplicateMode) -> (ops::test::MockGraph, IndexPair, IndexPair) {
@@ -1126,16 +1124,18 @@ mod tests {
     }
 
     mod buffered_replay_key {
-        use super::*;
         use launchpad::ord_laws;
+
+        use super::*;
 
         ord_laws!(BufferedReplayKey);
     }
 
     mod replay_capturing {
-        use super::*;
         use maplit::hashset;
         use vec1::vec1;
+
+        use super::*;
 
         #[test]
         fn left_then_right() {
@@ -1296,9 +1296,11 @@ mod tests {
     /// An oracle implementation of the "bag union" algorithm that unions implement for
     /// [`DuplicateMode::BagUnion`], and a property test showing its theoretical correctness
     mod bag_union {
-        use super::*;
         use std::cmp::max;
+
         use test_strategy::{proptest, Arbitrary};
+
+        use super::*;
 
         #[derive(Debug, Arbitrary, PartialEq, Eq, Clone, Copy)]
         enum Input {

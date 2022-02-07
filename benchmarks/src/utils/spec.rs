@@ -5,6 +5,11 @@
 // Once we have a fastly schema we want to generate rows for the article TableSpec.
 // Specify how we select values for each column type.
 
+use std::collections::HashMap;
+use std::convert::TryFrom;
+use std::fs::read_to_string;
+use std::path::PathBuf;
+
 use anyhow::{anyhow, bail, Context};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_until, take_while};
@@ -14,10 +19,6 @@ use nom::multi::many1;
 use nom::sequence::{preceded, terminated, tuple};
 use nom_sql::{sql_query, Dialect, Expression, SqlQuery};
 use query_generator::{TableName, TableSpec};
-use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::fs::read_to_string;
-use std::path::PathBuf;
 
 /// Set of parameters used to generate a single table's data.
 #[derive(Clone)]
@@ -207,9 +208,9 @@ impl TryFrom<(PathBuf, HashMap<String, String>)> for DatabaseSchema {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use query_generator::ColumnGenerator;
+
+    use super::*;
 
     #[test]
     fn parse_ddl_test() {

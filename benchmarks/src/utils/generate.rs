@@ -1,9 +1,13 @@
 //! Utilities to take a `DatabaseGenerationSpec` and a `DatabaseConnection`,
 //! and generate batches of data to write to the connection.
 
-use super::spec::{DatabaseGenerationSpec, DatabaseSchema, TableGenerationSpec};
+use std::borrow::Borrow;
+use std::collections::HashMap;
+use std::convert::{TryFrom, TryInto};
+use std::iter::repeat;
+use std::path::PathBuf;
+use std::str::FromStr;
 
-use crate::utils::path::benchmark_path;
 use anyhow::{Context, Result};
 use clap::{Parser, ValueHint};
 use futures::StreamExt;
@@ -13,12 +17,9 @@ use noria_logictest::upstream::DatabaseURL;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use query_generator::{ColumnName, TableName, TableSpec};
 use serde::{Deserialize, Serialize};
-use std::borrow::Borrow;
-use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
-use std::iter::repeat;
-use std::path::PathBuf;
-use std::str::FromStr;
+
+use super::spec::{DatabaseGenerationSpec, DatabaseSchema, TableGenerationSpec};
+use crate::utils::path::benchmark_path;
 
 const MAX_BATCH_ROWS: usize = 500;
 const MAX_PARTITION_ROWS: usize = 20000;

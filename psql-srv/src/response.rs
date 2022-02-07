@@ -1,11 +1,13 @@
+use std::convert::TryInto;
+use std::sync::Arc;
+
+use futures::prelude::*;
+use smallvec::SmallVec;
+
 use crate::codec::EncodeError;
 use crate::error::Error;
 use crate::message::{BackendMessage, CommandCompleteTag, TransferFormat};
 use crate::value::Value;
-use futures::prelude::*;
-use smallvec::SmallVec;
-use std::convert::TryInto;
-use std::sync::Arc;
 
 /// An encapsulation of a complete response produced by a Postgresql backend in response to a
 /// request. The response will be sent to the frontend as a sequence of zero or more
@@ -93,11 +95,13 @@ where
 #[cfg(test)]
 mod tests {
 
+    use std::convert::TryFrom;
+
+    use smallvec::smallvec;
+    use tokio_test::block_on;
+
     use super::*;
     use crate::value::Value as DataValue;
-    use smallvec::smallvec;
-    use std::convert::TryFrom;
-    use tokio_test::block_on;
 
     #[derive(Clone, Debug, PartialEq)]
     struct Value(DataValue);

@@ -1,8 +1,8 @@
+use std::convert::TryFrom;
+
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use mysql_async::prelude::*;
 use noria::status::ReadySetStatus;
-use std::convert::TryFrom;
-
 use noria_client_test_helpers::mysql_helpers::setup;
 use noria_client_test_helpers::sleep;
 #[tokio::test(flavor = "multi_thread")]

@@ -1,8 +1,9 @@
+use std::convert::TryInto;
+use std::net::{SocketAddr, ToSocketAddrs};
+
 use anyhow::{anyhow, bail, ensure, Result};
 use prometheus_http_query::aggregations::sum;
 use prometheus_http_query::{Client, InstantVector, Scheme, Selector};
-use std::convert::TryInto;
-use std::net::{SocketAddr, ToSocketAddrs};
 
 /// Prometheus query timeout, specified as a str according to promethes' requirements.
 const PROM_QUERY_TIMEOUT: &str = "20s";

@@ -1,3 +1,16 @@
+use std::borrow::Borrow;
+use std::convert::{TryFrom, TryInto};
+
+use bit_vec::BitVec;
+use bytes::{Buf, Bytes, BytesMut};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
+use eui48::MacAddress;
+use postgres_types::{FromSql, Type};
+use rust_decimal::prelude::FromStr;
+use rust_decimal::Decimal;
+use tokio_util::codec::Decoder;
+use uuid::Uuid;
+
 use crate::bytes::BytesStr;
 use crate::codec::error::DecodeError as Error;
 use crate::codec::error::DecodeError::InvalidTextByteArrayValue;
@@ -7,17 +20,6 @@ use crate::message::FrontendMessage::{self, *};
 use crate::message::StatementName::*;
 use crate::message::TransferFormat::{self, *};
 use crate::value::Value;
-use bit_vec::BitVec;
-use bytes::{Buf, Bytes, BytesMut};
-use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
-use eui48::MacAddress;
-use postgres_types::{FromSql, Type};
-use rust_decimal::prelude::FromStr;
-use rust_decimal::Decimal;
-use std::borrow::Borrow;
-use std::convert::{TryFrom, TryInto};
-use tokio_util::codec::Decoder;
-use uuid::Uuid;
 
 const ID_BIND: u8 = b'B';
 const ID_CLOSE: u8 = b'C';
@@ -403,10 +405,11 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
 #[cfg(test)]
 mod tests {
 
-    use super::*;
-    use crate::value::Value as DataValue;
     use bytes::{BufMut, BytesMut};
     use postgres_types::ToSql;
+
+    use super::*;
+    use crate::value::Value as DataValue;
 
     struct Value(DataValue);
 

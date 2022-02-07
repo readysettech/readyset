@@ -1,14 +1,15 @@
-use indexmap::IndexMap;
-use partial_map::PartialMap;
 use std::iter;
 use std::ops::{Bound, RangeBounds};
+
+use indexmap::IndexMap;
+use launchpad::intervals::into_bound_endpoint;
+use partial_map::PartialMap;
 use tuple::{Map, TupleElements};
 use vec1::Vec1;
 
 use super::mk_key::MakeKey;
 use super::Misses;
 use crate::prelude::*;
-use launchpad::intervals::into_bound_endpoint;
 
 /// A map containing a single index into the state of a node.
 ///

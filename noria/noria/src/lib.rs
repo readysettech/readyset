@@ -207,10 +207,11 @@ pub(crate) const VIEW_POOL_SIZE: usize = 16;
 /// batch less work, which means lower overall efficiency.
 pub(crate) const PENDING_LIMIT: usize = 8192;
 
+use std::collections::HashMap;
+
 use nom_sql::SqlType;
 use petgraph::graph::NodeIndex;
 use replication::ReplicationOffset;
-use std::collections::HashMap;
 use tokio_tower::multiplex;
 
 pub mod consistency;
@@ -233,22 +234,23 @@ pub mod consensus;
 pub mod internal;
 
 // for the row! macro
-#[doc(hidden)]
-pub use nom_sql::ColumnConstraint;
-
-pub use crate::consensus::ZookeeperAuthority;
-// FIXME(eta): get rid of these
-use crate::internal::*;
-use noria_data::DataType;
-pub use noria_errors::{ReadySetError, ReadySetResult};
-use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::future::Future;
 use std::pin::Pin;
+
+#[doc(hidden)]
+pub use nom_sql::ColumnConstraint;
+use noria_data::DataType;
+pub use noria_errors::{ReadySetError, ReadySetResult};
+use serde::{Deserialize, Serialize};
 use tokio::task_local;
 pub use view::{
     ColumnBase, ColumnSchema, KeyColumnIdx, PlaceholderIdx, ViewPlaceholder, ViewSchema,
 };
+
+pub use crate::consensus::ZookeeperAuthority;
+// FIXME(eta): get rid of these
+use crate::internal::*;
 
 /// The prelude contains most of the types needed in everyday operation.
 pub mod prelude {
@@ -306,20 +308,19 @@ impl<T> From<T> for Tagged<T> {
     }
 }
 
+use url::Url;
+
 pub use crate::consensus::WorkerDescriptor;
 pub use crate::controller::{ControllerDescriptor, ControllerHandle};
 pub use crate::table::{Modification, Operation, Table, TableOperation, TableRequest};
-pub use crate::view::View;
-
 #[doc(hidden)]
 pub use crate::table::{PacketData, PacketPayload, PacketTrace};
-
+pub use crate::view::View;
 #[doc(hidden)]
 pub use crate::view::{
     KeyComparison, ReadQuery, ReadReply, ReadReplyBatch, SchemaType, ViewQuery, ViewQueryFilter,
     ViewQueryOperator,
 };
-use url::Url;
 
 #[doc(hidden)]
 pub mod builders {

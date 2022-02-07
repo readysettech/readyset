@@ -1,10 +1,12 @@
-use crate::controller::sql::mir::SqlToMirConverter;
-use crate::controller::sql::query_graph::{JoinPredicate, JoinRef, QueryGraph, QueryGraphEdge};
-use crate::ReadySetResult;
+use std::collections::{HashMap, HashSet};
+
 use dataflow::ops::join::JoinType;
 use mir::MirNodeRef;
 use noria_errors::invariant;
-use std::collections::{HashMap, HashSet};
+
+use crate::controller::sql::mir::SqlToMirConverter;
+use crate::controller::sql::query_graph::{JoinPredicate, JoinRef, QueryGraph, QueryGraphEdge};
+use crate::ReadySetResult;
 
 struct JoinChain {
     tables: HashSet<String>,

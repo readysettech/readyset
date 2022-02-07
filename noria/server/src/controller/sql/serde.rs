@@ -14,10 +14,10 @@
 //! Since serializing here means changing the [`MirNodeRef`] into just the identifiers of the [`MirNode`]s,
 //! these changes require that we have access to the real [`MirNodeRef`]s upon deserialization.
 //! Those should be available through the [`SqlToMirConverter::nodes()`] method.
-use crate::sql::mir::serde::MirNodeId;
-use crate::sql::mir::SqlToMirConverter;
-use crate::sql::query_graph::QueryGraph;
-use crate::sql::{Config, SqlIncorporator};
+use std::collections::HashMap;
+use std::fmt;
+use std::str::FromStr;
+
 use mir::query::MirQuery;
 use mir::MirNodeRef;
 use nom_sql::CreateTableStatement;
@@ -25,9 +25,11 @@ use petgraph::graph::NodeIndex;
 use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
-use std::collections::HashMap;
-use std::fmt;
-use std::str::FromStr;
+
+use crate::sql::mir::serde::MirNodeId;
+use crate::sql::mir::SqlToMirConverter;
+use crate::sql::query_graph::QueryGraph;
+use crate::sql::{Config, SqlIncorporator};
 
 #[derive(Serialize, Deserialize)]
 struct SerializableMirQuery {

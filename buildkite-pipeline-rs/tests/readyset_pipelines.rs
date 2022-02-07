@@ -1,9 +1,8 @@
 use std::fs::File;
 use std::path::PathBuf;
 
-use serde_yaml as yaml;
-
 use buildkite_pipeline::Pipeline;
+use serde_yaml as yaml;
 
 fn open_pipeline(relative_path: &str) -> File {
     let path = PathBuf::from(".")

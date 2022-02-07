@@ -1,3 +1,7 @@
+use std::convert::{TryFrom, TryInto};
+use std::error::Error;
+use std::fmt::{self, Display};
+
 use futures::future::TryFutureExt;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -7,9 +11,6 @@ use mysql::{Transaction, TxOpts};
 use mysql_async as mysql;
 use noria::replication::{ReplicationOffset, ReplicationOffsets};
 use noria::ReadySetResult;
-use std::convert::{TryFrom, TryInto};
-use std::error::Error;
-use std::fmt::{self, Display};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;

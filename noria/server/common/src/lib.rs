@@ -4,12 +4,13 @@
 mod local;
 mod records;
 
-pub use self::local::*;
-pub use self::records::*;
 pub use noria::internal::{Index, IndexType};
 pub use noria_data::DataType;
 use petgraph::prelude::*;
 use serde::{Deserialize, Serialize};
+
+pub use self::local::*;
+pub use self::records::*;
 
 pub trait SizeOf {
     fn deep_size_of(&self) -> u64;
@@ -109,13 +110,15 @@ impl IndexRef {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::convert::TryInto;
+
+    use super::*;
 
     #[test]
     fn data_type_mem_size() {
-        use chrono::NaiveDateTime;
         use std::mem::{size_of, size_of_val};
+
+        use chrono::NaiveDateTime;
 
         let s = "this needs to be longer than 14 chars to make it be a Text";
         let txt: DataType = DataType::from(s);

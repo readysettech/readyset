@@ -1,10 +1,11 @@
+use std::collections::HashMap;
+
 use dataflow::prelude::DataType;
 use itertools::Itertools;
 use nom_sql::{
     Column, CommonTableExpression, Expression, FieldDefinitionExpression, FunctionExpression,
     InValue, JoinConstraint, JoinRightSide, SelectStatement, SqlQuery, Table,
 };
-use std::collections::HashMap;
 
 #[derive(Debug, PartialEq)]
 pub enum TableAliasRewrite {
@@ -399,15 +400,17 @@ impl AliasRemoval for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use super::{AliasRemoval, TableAliasRewrite};
+    use std::collections::HashMap;
+    use std::convert::TryInto;
+
     use maplit::hashmap;
     use nom_sql::{
         parse_query, parser, BinaryOperator, Column, Dialect, Expression,
         FieldDefinitionExpression, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator,
         JoinRightSide, Literal, SelectStatement, SqlQuery, Table,
     };
-    use std::collections::HashMap;
-    use std::convert::TryInto;
+
+    use super::{AliasRemoval, TableAliasRewrite};
 
     macro_rules! rewrites_to {
         ($before: expr, $after: expr) => {{

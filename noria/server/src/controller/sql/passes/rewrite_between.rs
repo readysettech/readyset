@@ -183,8 +183,9 @@ fn rewrite_between_condition(operand: Expression, min: Expression, max: Expressi
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use nom_sql::{parse_query, Dialect};
+
+    use super::*;
 
     #[test]
     fn test_rewrite_top_level_between_in_select() {

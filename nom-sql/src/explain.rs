@@ -1,12 +1,12 @@
-use nom::branch::alt;
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::{map, opt};
-use nom::sequence::{terminated, tuple};
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
+use nom::branch::alt;
+use nom::bytes::complete::tag_no_case;
 use nom::character::complete::multispace1;
+use nom::combinator::{map, opt};
+use nom::sequence::{terminated, tuple};
 use nom::IResult;
+use serde::{Deserialize, Serialize};
 
 use crate::common::statement_terminator;
 

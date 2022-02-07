@@ -1,10 +1,9 @@
-use crate::controller::inner::Leader;
-use crate::controller::migrate::Migration;
-use crate::controller::recipe::Recipe;
-use crate::controller::state::DataflowState;
-use crate::materialization::Materializations;
-use crate::worker::{WorkerRequest, WorkerRequestKind};
-use crate::{Config, ReadySetResult, VolumeId};
+use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
 use anyhow::{format_err, Context};
 use dataflow::node;
 use dataflow::prelude::ChannelCoordinator;
@@ -22,17 +21,20 @@ use noria::ControllerDescriptor;
 use noria_errors::{internal, internal_err, ReadySetError};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt::{Debug, Formatter};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 use stream_cancel::Valve;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Notify, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::{error, info, warn};
 use tracing_futures::Instrument;
 use url::Url;
+
+use crate::controller::inner::Leader;
+use crate::controller::migrate::Migration;
+use crate::controller::recipe::Recipe;
+use crate::controller::state::DataflowState;
+use crate::materialization::Materializations;
+use crate::worker::{WorkerRequest, WorkerRequestKind};
+use crate::{Config, ReadySetResult, VolumeId};
 
 mod domain_handle;
 mod inner;
@@ -1021,10 +1023,12 @@ async fn handle_controller_request(
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+
+    use noria::replication::ReplicationOffset;
+
     use super::*;
     use crate::integration_utils::start_simple;
-    use noria::replication::ReplicationOffset;
-    use std::error::Error;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn extend_recipe_parse_failure() {

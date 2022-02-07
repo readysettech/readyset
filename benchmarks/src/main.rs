@@ -4,20 +4,18 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::bail;
+use benchmarks::benchmark::{Benchmark, BenchmarkControl, BenchmarkResults, DeploymentParameters};
+use benchmarks::benchmark_histogram;
+use benchmarks::utils::readyset_ready;
 use clap::{AppSettings, Parser, ValueHint};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::MetricKindMask;
+use noria_client_test_helpers::mysql_helpers::MySQLAdapter;
+use noria_client_test_helpers::setup_like_prod_with_handle;
 use noria_server::Handle;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::warn;
-
-use noria_client_test_helpers::mysql_helpers::MySQLAdapter;
-use noria_client_test_helpers::setup_like_prod_with_handle;
-
-use benchmarks::benchmark::{Benchmark, BenchmarkControl, BenchmarkResults, DeploymentParameters};
-use benchmarks::benchmark_histogram;
-use benchmarks::utils::readyset_ready;
 
 const PUSH_GATEWAY_PUSH_INTERVAL: Duration = Duration::from_secs(5);
 

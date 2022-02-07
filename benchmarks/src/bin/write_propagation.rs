@@ -12,6 +12,15 @@
 //!   issued, to the time that the view returns the result as
 //!   the write propagation time.
 
+use std::collections::HashMap;
+use std::convert::TryFrom;
+use std::env;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{mpsc, Arc, RwLock};
+use std::time::{Duration, Instant};
+
 use benchmarks::utils::generate::load_to_backend;
 use benchmarks::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use chrono::Utc;
@@ -28,14 +37,6 @@ use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use query_generator::ColumnGenerationSpec;
 use reqwest::Url;
 use rinfluxdb::line_protocol::LineBuilder;
-use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::env;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{mpsc, Arc, RwLock};
-use std::time::{Duration, Instant};
 use vec1::Vec1;
 
 static REPORTING_INTERVAL: Duration = Duration::from_secs(10);

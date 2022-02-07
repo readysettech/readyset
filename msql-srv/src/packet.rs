@@ -1,6 +1,8 @@
-use crate::error::{other_error, OtherErrorKind};
 use std::io::{self, IoSlice};
+
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+use crate::error::{other_error, OtherErrorKind};
 
 const U24_MAX: usize = 16_777_215;
 
@@ -342,8 +344,9 @@ fn packet(i: &[u8]) -> nom::IResult<&[u8], (u8, Packet<'_>)> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use test_utils::skip_slow_tests;
+
+    use super::*;
 
     #[test]
     fn test_one_ping() {

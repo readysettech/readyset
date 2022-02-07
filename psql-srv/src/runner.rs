@@ -1,9 +1,10 @@
+use tokio::io::{AsyncRead, AsyncWrite};
+
 use crate::channel::Channel;
 use crate::error::Error;
 use crate::message::FrontendMessage;
 use crate::protocol::Protocol;
 use crate::{codec, Backend};
-use tokio::io::{AsyncRead, AsyncWrite};
 
 /// A helper struct that can be used to run a `Protocol` on a `Backend` and `Channel`.
 pub struct Runner<B: Backend, C> {

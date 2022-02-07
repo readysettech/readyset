@@ -1,11 +1,12 @@
+use std::borrow::Cow;
+use std::sync::Arc;
+
 use nom_sql::SqlQuery;
 use noria::results::Results;
 use noria::ReadySetResult;
 use noria_client::backend::noria_connector::QueryResult;
 use noria_client::backend::{noria_connector, SelectSchema};
 use noria_client::QueryHandler;
-use std::borrow::Cow;
-use std::sync::Arc;
 
 /// PostgreSQL flavor of [`QueryHandler`].
 pub struct PostgreSqlQueryHandler;

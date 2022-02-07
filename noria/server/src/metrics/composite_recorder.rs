@@ -1,8 +1,9 @@
 #![allow(clippy::option_map_unit_fn)]
+use std::sync::Arc;
+
 use metrics::{Counter, Gauge, Histogram, KeyName, Recorder, Unit};
 use metrics_exporter_prometheus::PrometheusRecorder;
 use noria::metrics::Key;
-use std::sync::Arc;
 
 use crate::metrics::recorders::MetricsRecorder;
 use crate::metrics::{Clear, Render};

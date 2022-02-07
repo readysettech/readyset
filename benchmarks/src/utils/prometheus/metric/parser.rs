@@ -274,9 +274,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use futures::stream::StreamExt;
+
     use super::super::Value;
     use super::*;
-    use futures::stream::StreamExt;
 
     fn label<'a>(key: &'a str, value: &'a str) -> BorrowedLabel<'a> {
         BorrowedLabel { key, value }

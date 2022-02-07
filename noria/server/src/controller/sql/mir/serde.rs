@@ -32,17 +32,19 @@
 //! Also, the [`SqlToMirConverter::nodes`] field gets serialized as a vector of tuples (name, version).
 //! For deserialization, read the comments in the [`Deserialize`] impl.
 
-use crate::sql::mir::{Config, SqlToMirConverter};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::fmt;
+use std::rc::Rc;
+
 use mir::node::node_inner::MirNodeInner;
 use mir::node::MirNode;
 use nom_sql::ColumnSpecification;
 use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::fmt;
-use std::rc::Rc;
+
+use crate::sql::mir::{Config, SqlToMirConverter};
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash)]
 pub(in crate::controller::sql) struct MirNodeId {

@@ -1,7 +1,8 @@
-use noria::Builder;
-use noria_data::DataType;
 use std::convert::TryFrom;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use noria::Builder;
+use noria_data::DataType;
 
 static NUM_ARTICLES: usize = 10_000;
 

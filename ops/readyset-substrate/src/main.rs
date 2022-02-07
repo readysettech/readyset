@@ -1,8 +1,7 @@
 use anyhow::Result;
 use clap::{AppSettings, Parser};
-use tracing_subscriber::EnvFilter;
-
 use substrate::RootModule;
+use tracing_subscriber::EnvFilter;
 mod commands;
 mod gerrit;
 mod substrate;

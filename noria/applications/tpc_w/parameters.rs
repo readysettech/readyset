@@ -1,10 +1,11 @@
-use noria_data::DataType;
-use rand::prelude::*;
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::str::FromStr;
+
+use noria_data::DataType;
+use rand::prelude::*;
 
 pub struct SampleKeys {
     customer: Vec<Vec<DataType>>,

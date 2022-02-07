@@ -110,8 +110,9 @@ impl From<String> for LikePattern {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use test_strategy::proptest;
+
+    use super::*;
 
     #[test]
     fn like_matching() {

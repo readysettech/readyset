@@ -1,7 +1,7 @@
-use itertools::{Either, Itertools};
 use std::collections::{HashMap, HashSet};
 use std::iter;
 
+use itertools::{Either, Itertools};
 use nom_sql::{
     BinaryOperator, Column, Expression, FieldDefinitionExpression, JoinConstraint, JoinRightSide,
     SelectStatement, SqlQuery, Table,
@@ -215,8 +215,9 @@ mod tests {
     use super::*;
 
     mod unsupported {
-        use super::*;
         use nom_sql::{parse_query, Dialect};
+
+        use super::*;
 
         fn is_unsupported(query_str: &str) {
             let query = parse_query(Dialect::MySQL, query_str).unwrap();
@@ -314,8 +315,9 @@ mod tests {
     }
 
     mod supported {
-        use super::*;
         use nom_sql::{parse_query, Dialect};
+
+        use super::*;
 
         fn is_supported(query_str: &str) {
             let query = parse_query(Dialect::MySQL, query_str).unwrap();

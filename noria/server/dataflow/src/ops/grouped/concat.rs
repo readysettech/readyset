@@ -1,17 +1,19 @@
 //! Kinda (s)crappy group_concat() implementation
 
-use crate::node::Node;
-use crate::ops::grouped::aggregate::SqlType;
-use crate::ops::grouped::{GroupedOperation, GroupedOperator};
-use crate::prelude::*;
-use common::DataType;
-use launchpad::Indices;
-use noria_errors::invariant_eq;
-use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::Write;
+
+use common::DataType;
+use launchpad::Indices;
+use noria_errors::invariant_eq;
+use serde::{Deserialize, Serialize};
+
+use crate::node::Node;
+use crate::ops::grouped::aggregate::SqlType;
+use crate::ops::grouped::{GroupedOperation, GroupedOperator};
+use crate::prelude::*;
 
 /// The last stored state for a given group.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -209,10 +211,10 @@ impl GroupedOperation for GroupConcat {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    use crate::{ops, SuggestedIndex};
     use std::convert::TryInto;
+
+    use super::*;
+    use crate::{ops, SuggestedIndex};
 
     fn setup(mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();

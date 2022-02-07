@@ -1,7 +1,8 @@
+use std::env;
+
 use clap::Parser;
 use mysql::prelude::Queryable;
 use mysql::{Conn, Params};
-use std::env;
 use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
 

@@ -1,7 +1,8 @@
-use bytes::Bytes;
 use std::borrow::Borrow;
 use std::convert::TryFrom;
 use std::{fmt, str};
+
+use bytes::Bytes;
 
 /// A [`Bytes`] wrapper that always contains a valid utf8 string and can be borrowed as a `&str`.
 ///
@@ -34,8 +35,9 @@ impl fmt::Display for BytesStr {
 #[cfg(test)]
 mod tests {
 
-    use super::*;
     use bytes::{BufMut, BytesMut};
+
+    use super::*;
 
     #[test]
     fn test_valid_utf8() {

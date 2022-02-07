@@ -1,12 +1,12 @@
 //! Data types representing metrics dumped from a running Noria instance
 
-use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::Hash;
 
 pub use metrics::Key;
 use metrics_util::Histogram;
+use serde::{Deserialize, Serialize};
 
 /// A client for accessing noria metrics for a deployment.
 pub mod client;

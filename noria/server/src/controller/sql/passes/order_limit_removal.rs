@@ -1,9 +1,10 @@
+use std::collections::HashMap;
+
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expression, SqlQuery, Table,
     TableKey,
 };
 use noria::{ReadySetError, ReadySetResult};
-use std::collections::HashMap;
 
 pub trait OrderLimitRemoval: Sized {
     /// Remove any LIMIT and ORDER statement belonging to a query that is determined to return at

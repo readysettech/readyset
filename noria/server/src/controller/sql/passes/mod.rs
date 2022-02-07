@@ -11,24 +11,24 @@ mod star_expansion;
 mod strip_post_filters;
 pub(crate) mod subqueries;
 
+use std::collections::HashMap;
+
 pub(crate) use alias_removal::AliasRemoval;
 pub(crate) use count_star_rewrite::CountStarRewrite;
 pub(crate) use detect_problematic_self_joins::DetectProblematicSelfJoins;
 pub(crate) use implied_tables::ImpliedTableExpansion;
 pub(crate) use key_def_coalescing::KeyDefinitionCoalescing;
 pub(crate) use negation_removal::NegationRemoval;
+use nom_sql::{
+    Column, CommonTableExpression, Expression, FieldDefinitionExpression, JoinClause,
+    JoinRightSide, SelectStatement,
+};
 pub(crate) use normalize_topk_with_aggregate::NormalizeTopKWithAggregate;
 pub(crate) use order_limit_removal::OrderLimitRemoval;
 pub(crate) use rewrite_between::RewriteBetween;
 pub(crate) use star_expansion::StarExpansion;
 pub(crate) use strip_post_filters::StripPostFilters;
 pub(crate) use subqueries::SubQueries;
-
-use nom_sql::{
-    Column, CommonTableExpression, Expression, FieldDefinitionExpression, JoinClause,
-    JoinRightSide, SelectStatement,
-};
-use std::collections::HashMap;
 
 fn field_names(statement: &SelectStatement) -> impl Iterator<Item = &str> {
     statement.fields.iter().filter_map(|field| match &field {

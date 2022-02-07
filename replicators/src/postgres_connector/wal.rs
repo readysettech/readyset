@@ -4,8 +4,9 @@
 //! every struct here maps percisely to the defenitions in the spec, and tryes to avoid abastractions that don't map
 //! exactly. The parsing is therefore very much straightforward.
 
-use bytes::Bytes;
 use std::convert::{TryFrom, TryInto};
+
+use bytes::Bytes;
 
 /// An parse error
 #[derive(Debug)]
@@ -678,9 +679,10 @@ impl WalRecord {
 
 #[cfg(test)]
 mod tests {
+    use std::convert::TryInto;
+
     use bytes::Bytes;
     use postgres_types::Type;
-    use std::convert::TryInto;
 
     use super::*;
 

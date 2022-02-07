@@ -1,3 +1,7 @@
+use std::env;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
 use mysql_async::prelude::Queryable;
 use mysql_time::MysqlTime;
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
@@ -5,9 +9,6 @@ use noria::{ControllerHandle, ReadySetResult};
 use noria_data::{DataType, TinyText};
 use noria_server::Builder;
 use replicators::NoriaAdapter;
-use std::env;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 
 // Postgres does not accept MySQL escapes, so rename the table before the query
 const PGSQL_RENAME: (&str, &str) = ("`groups`", "groups");

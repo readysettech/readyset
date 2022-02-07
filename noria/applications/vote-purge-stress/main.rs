@@ -1,11 +1,12 @@
 #![allow(clippy::many_single_char_names)]
 
+use std::convert::TryFrom;
+use std::time::{Duration, Instant};
+
 use clap::{App, Arg};
 use hdrhistogram::Histogram;
 use noria::{Builder, DurabilityMode, FrontierStrategy, PersistenceParameters};
 use noria_data::DataType;
-use std::convert::TryFrom;
-use std::time::{Duration, Instant};
 
 const RECIPE: &str = "# base tables
 CREATE TABLE Article (id int, title varchar(255), PRIMARY KEY(id));

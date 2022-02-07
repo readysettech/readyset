@@ -3,22 +3,22 @@
 mod convert;
 mod utils;
 
-use neon::prelude::*;
-use noria_client::UpstreamDatabase;
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
-use tokio::runtime::Runtime;
+use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, RwLock};
 
+use neon::prelude::*;
 use nom_sql::{Dialect, SelectStatement};
 use noria::consensus::Authority;
 use noria::{ControllerHandle, ZookeeperAuthority};
 use noria_client::backend::{Backend, BackendBuilder, NoriaConnector};
 use noria_client::query_status_cache::QueryStatusCache;
+use noria_client::UpstreamDatabase;
 use noria_data::DataType;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
-use std::collections::{HashMap, HashSet};
-use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, RwLock};
+use tokio::runtime::Runtime;
 
 type BoxedClient = JsBox<RefCell<JsClient>>;
 

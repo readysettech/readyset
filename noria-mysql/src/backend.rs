@@ -1,25 +1,25 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
-use noria_client::backend::noria_connector::MetaVariable;
-use std::ops::{Deref, DerefMut};
-use tokio::io::{self, AsyncWrite};
-use tracing::{error, trace};
-
-use crate::schema::convert_column;
-use crate::upstream::{self, MySqlUpstream};
-use crate::value::mysql_value_to_datatype;
-use crate::{Error, MySqlQueryHandler};
 use msql_srv::{
     Column, ColumnFlags, ColumnType, InitWriter, MsqlSrvError, MysqlShim, QueryResultWriter,
     RowWriter, StatementMetaWriter,
 };
 use mysql_async::consts::StatusFlags;
+use noria_client::backend::noria_connector::MetaVariable;
 use noria_client::backend::{noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare};
 use noria_data::DataType;
 use noria_errors::{internal, internal_err, ReadySetError};
+use tokio::io::{self, AsyncWrite};
+use tracing::{error, trace};
 use upstream::StatementMeta;
+
+use crate::schema::convert_column;
+use crate::upstream::{self, MySqlUpstream};
+use crate::value::mysql_value_to_datatype;
+use crate::{Error, MySqlQueryHandler};
 
 async fn write_column<W: AsyncWrite + Unpin>(
     rw: &mut RowWriter<'_, W>,

@@ -1,6 +1,7 @@
-use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+
+use anyhow::{anyhow, Result};
 
 /// Wrapper for a single process.
 pub struct ProcessHandle {

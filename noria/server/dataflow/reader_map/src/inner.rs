@@ -1,4 +1,5 @@
 use std::borrow::Borrow;
+use std::collections::{hash_map, HashMap};
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Bound, RangeBounds};
@@ -7,7 +8,6 @@ use itertools::Either;
 use left_right::aliasing::DropBehavior;
 use noria::internal::IndexType;
 use partial_map::PartialMap;
-use std::collections::{hash_map, HashMap};
 
 use crate::values::ValuesInner;
 

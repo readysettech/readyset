@@ -8,6 +8,11 @@
 //! statement. Each parameter in a prepared statement is generated
 //! based on a DistributionAnnotation.
 
+use std::collections::{HashMap, HashSet};
+use std::convert::{TryFrom, TryInto};
+use std::fs;
+use std::path::{Path, PathBuf};
+
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use mysql_async::consts::ColumnType;
@@ -16,10 +21,6 @@ use mysql_async::{Statement, Value};
 use nom_sql::SqlType;
 use query_generator::{ColumnGenerator, DistributionAnnotation};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::convert::{TryFrom, TryInto};
-use std::fs;
-use std::path::{Path, PathBuf};
 
 use crate::utils::path::benchmark_path;
 use crate::utils::random::random_value_for_sql_type;

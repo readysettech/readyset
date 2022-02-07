@@ -912,9 +912,10 @@ pub async fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::NamedTempFile;
     use tokio::fs::{File, OpenOptions};
+
+    use super::*;
 
     #[tokio::test]
     async fn configure_volume_id_existing_volume_id() {

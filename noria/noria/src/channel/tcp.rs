@@ -2,8 +2,9 @@ use std::convert::TryFrom;
 use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
-use crate::Tagged;
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use bincode::{ErrorKind, Options};
 use bufstream::BufStream;
@@ -15,10 +16,10 @@ use noria_errors::ReadySetError;
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use std::pin::Pin;
-use std::task::{Context, Poll};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
+
+use crate::Tagged;
 
 #[derive(Debug, Error)]
 pub enum SendError {

@@ -1,5 +1,6 @@
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(PartialEq)]
 struct LocalBypass<T>(*mut T);

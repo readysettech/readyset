@@ -186,9 +186,11 @@ impl fmt::Debug for TinyText {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use proptest::proptest;
     use std::convert::TryInto;
+
+    use proptest::proptest;
+
+    use super::*;
 
     proptest! {
         #[test]
