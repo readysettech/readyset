@@ -42,7 +42,11 @@ use crate::values::ValuesInner;
 ///
 /// // but after the swap, the record is there!
 /// assert_eq!(r.get(&x.0).map(|rs| rs.len()), Some(1));
-/// assert_eq!(r.get(&x.0).map(|rs| rs.iter().any(|v| v.0 == x.0 && v.1 == x.1)), Some(true));
+/// assert_eq!(
+///     r.get(&x.0)
+///         .map(|rs| rs.iter().any(|v| v.0 == x.0 && v.1 == x.1)),
+///     Some(true)
+/// );
 /// ```
 pub struct WriteHandle<K, V, M = (), T = (), S = RandomState>
 where

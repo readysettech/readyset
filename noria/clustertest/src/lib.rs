@@ -90,18 +90,42 @@
 //!         .unwrap();
 //!
 //!     // Check that we currently have two workers.
-//!     assert_eq!(deployment.leader_handle().healthy_workers().await.unwrap().len(), 2);
+//!     assert_eq!(
+//!         deployment
+//!             .leader_handle()
+//!             .healthy_workers()
+//!             .await
+//!             .unwrap()
+//!             .len(),
+//!         2
+//!     );
 //!
 //!     // Start up a new server.
 //!     let server_handle = deployment
-//!     .start_server(ServerParams::default())
-//!     .await
-//!     .unwrap();
-//!     assert_eq!(deployment.leader_handle().healthy_workers().await.unwrap().len(), 3);
+//!         .start_server(ServerParams::default())
+//!         .await
+//!         .unwrap();
+//!     assert_eq!(
+//!         deployment
+//!             .leader_handle()
+//!             .healthy_workers()
+//!             .await
+//!             .unwrap()
+//!             .len(),
+//!         3
+//!     );
 //!
 //!     // Now kill that server we started up.
 //!     deployment.kill_server(&server_handle).await.unwrap();
-//!     assert_eq!(deployment.leader_handle().healthy_workers().await.unwrap().len(), 2);
+//!     assert_eq!(
+//!         deployment
+//!             .leader_handle()
+//!             .healthy_workers()
+//!             .await
+//!             .unwrap()
+//!             .len(),
+//!         2
+//!     );
 //!
 //!     // Clustertests must cleanup their state via deployment.teardown().
 //!     deployment.teardown().await.unwrap();

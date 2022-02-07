@@ -439,8 +439,8 @@ impl KeyComparison {
     /// Equal keys contain themselves and only themselves:
     ///
     /// ```rust
+    /// use noria::KeyComparison;
     /// use noria_data::DataType;
-    /// use noria::{KeyComparison};
     /// use vec1::vec1;
     ///
     /// let key = KeyComparison::Equal(vec1![1.into(), 2.into()]);
@@ -451,14 +451,15 @@ impl KeyComparison {
     /// Range keys contain anything in the range, comparing lexicographically
     ///
     /// ```rust
-    /// use noria_data::DataType;
-    /// use noria::{KeyComparison};
-    /// use vec1::vec1;
     /// use std::ops::Bound::*;
+    ///
+    /// use noria::KeyComparison;
+    /// use noria_data::DataType;
+    /// use vec1::vec1;
     ///
     /// let key = KeyComparison::Range((
     ///     Included(vec1![1.into(), 2.into()]),
-    ///     Excluded(vec1![1.into(), 5.into()])
+    ///     Excluded(vec1![1.into(), 5.into()]),
     /// ));
     ///
     /// assert!(key.contains(&[1.into(), 3.into()]));

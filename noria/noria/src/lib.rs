@@ -40,10 +40,14 @@
 //!     let mut db = ControllerHandle::new(zk_auth).await;
 //!
 //!     // if this is the first time we interact with Noria, we must give it the schema
-//!     db.install_recipe("
+//!     db.install_recipe(
+//!         "
 //!         CREATE TABLE Article (aid int, title varchar(255), url text, PRIMARY KEY(aid));
 //!         CREATE TABLE Vote (aid int, uid int);
-//!     ").await.unwrap();
+//!     ",
+//!     )
+//!     .await
+//!     .unwrap();
 //!
 //!     // we can then get handles that let us insert into the new tables
 //!     let mut article = db.table("Article").await.unwrap();
@@ -54,7 +58,11 @@
 //!     let title = "I love Soup";
 //!     let url = "https://pdos.csail.mit.edu";
 //!     article
-//!         .insert(vec![aid.into(), title.try_into().unwrap(), url.try_into().unwrap()])
+//!         .insert(vec![
+//!             aid.into(),
+//!             title.try_into().unwrap(),
+//!             url.try_into().unwrap(),
+//!         ])
 //!         .await
 //!         .unwrap();
 //!
@@ -62,21 +70,30 @@
 //!     vote.insert(vec![aid.into(), 1.into()]).await.unwrap();
 //!
 //!     // we can also declare views that we want want to query
-//!     db.extend_recipe("
+//!     db.extend_recipe(
+//!         "
 //!         VoteCount: \
 //!           SELECT Vote.aid, COUNT(uid) AS votes \
 //!           FROM Vote GROUP BY Vote.aid;
 //!         QUERY ArticleWithVoteCount: \
 //!           SELECT Article.aid, title, url, VoteCount.votes AS votes \
 //!           FROM Article LEFT JOIN VoteCount ON (Article.aid = VoteCount.aid) \
-//!           WHERE Article.aid = ?;").await.unwrap();
+//!           WHERE Article.aid = ?;",
+//!     )
+//!     .await
+//!     .unwrap();
 //!
 //!     // and then get handles that let us execute those queries to fetch their results
 //!     let mut awvc = db.view("ArticleWithVoteCount").await.unwrap();
 //!     // looking up article 42 should yield the article we inserted with a vote count of 1
 //!     assert_eq!(
 //!         awvc.lookup(&[aid.into()], true).await.unwrap(),
-//!         vec![vec![DataType::from(aid), title.try_into().unwrap(), url.try_into().unwrap(), 1.into()]]
+//!         vec![vec![
+//!             DataType::from(aid),
+//!             title.try_into().unwrap(),
+//!             url.try_into().unwrap(),
+//!             1.into()
+//!         ]]
 //!     );
 //! }
 //! ```

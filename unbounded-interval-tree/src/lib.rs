@@ -163,7 +163,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    /// use std::ops::Bound::{Excluded, Included, Unbounded};
     ///
     /// let mut int_tree = unbounded_interval_tree::IntervalTree::default();
     ///
@@ -667,7 +667,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    /// use std::ops::Bound::{Excluded, Included, Unbounded};
     ///
     /// let mut tree = unbounded_interval_tree::IntervalTree::default();
     ///
@@ -770,16 +770,20 @@ where
     /// # Examples
     ///
     /// ```
-    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    /// use std::ops::Bound::{Excluded, Included, Unbounded};
     ///
     /// let mut tree = unbounded_interval_tree::IntervalTree::default();
     ///
     /// tree.insert((Included(0), Included(5)));
     /// tree.insert((Included(7), Excluded(10)));
     ///
-    /// assert_eq!(tree.get_interval_overlaps(&(Included(-5), Excluded(7))),
-    ///            vec![&(Included(0), Included(5))]);
-    /// assert!(tree.get_interval_overlaps(&(Included(10), Unbounded)).is_empty());
+    /// assert_eq!(
+    ///     tree.get_interval_overlaps(&(Included(-5), Excluded(7))),
+    ///     vec![&(Included(0), Included(5))]
+    /// );
+    /// assert!(tree
+    ///     .get_interval_overlaps(&(Included(10), Unbounded))
+    ///     .is_empty());
     /// ```
     pub fn get_interval_overlaps<'a, R, Q>(&self, q: &'a R) -> Vec<&(Bound<K>, Bound<K>)>
     where
@@ -801,7 +805,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    /// use std::ops::Bound::{Excluded, Included, Unbounded};
     ///
     /// let mut tree = unbounded_interval_tree::IntervalTree::default();
     ///
@@ -820,7 +824,9 @@ where
     ///     tree.get_interval_difference(&(Unbounded, Excluded(10))),
     ///     vec![(Unbounded, Excluded(&0))]
     /// );
-    /// assert!(tree.get_interval_difference(&(Included(100), Unbounded)).is_empty());
+    /// assert!(tree
+    ///     .get_interval_difference(&(Included(100), Unbounded))
+    ///     .is_empty());
     /// ```
     pub fn get_interval_difference<'a, R, Q>(
         &'a self,
@@ -1068,7 +1074,10 @@ where
     /// let mut tree = unbounded_interval_tree::IntervalTree::default();
     ///
     /// tree.insert(1..10);
-    /// assert_eq!(tree.get_interval_intersection(&(5..15)), vec![(Included(&5), Excluded(&10))])
+    /// assert_eq!(
+    ///     tree.get_interval_intersection(&(5..15)),
+    ///     vec![(Included(&5), Excluded(&10))]
+    /// )
     /// ```
     pub fn get_interval_intersection<'a, R>(
         &'a self,
@@ -1116,7 +1125,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    /// use std::ops::Bound::{Excluded, Included, Unbounded};
     ///
     /// let mut tree = unbounded_interval_tree::IntervalTree::default();
     ///
@@ -1136,7 +1145,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    /// use std::ops::Bound::{Excluded, Included, Unbounded};
     ///
     /// let mut tree = unbounded_interval_tree::IntervalTree::default();
     ///
@@ -1155,7 +1164,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    /// use std::ops::Bound::{Excluded, Included, Unbounded};
     ///
     /// let mut tree = unbounded_interval_tree::IntervalTree::default();
     ///

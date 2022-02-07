@@ -23,7 +23,9 @@ pub use failpoint_proc_macros::failpoint;
 /// ```rust
 /// use failpoint_macros::set_failpoint;
 /// let is_leader_rpc = false;
-/// set_failpoint!("rpc-failed", is_leader_rpc, |_| ReadySetError::Internal("thrown from failpoint"));
+/// set_failpoint!("rpc-failed", is_leader_rpc, |_| ReadySetError::Internal(
+///     "thrown from failpoint"
+/// ));
 /// ```
 #[macro_export]
 macro_rules! set_failpoint {

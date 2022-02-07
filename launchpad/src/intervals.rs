@@ -28,6 +28,7 @@ pub fn into_bound_endpoint<A>(bound: Bound<A>) -> Option<A> {
 ///
 /// ```rust
 /// use std::ops::Bound::*;
+///
 /// use launchpad::intervals::covers;
 ///
 /// assert!(covers(&(1..10), &(2..3)));
@@ -124,8 +125,9 @@ where
 /// # Examples
 ///
 /// ```rust
-/// use launchpad::intervals;
 /// use std::ops::Bound::*;
+///
+/// use launchpad::intervals;
 ///
 /// assert!(intervals::is_empty(&(1..1)));
 /// assert!(intervals::is_empty(&(Excluded(1), Included(1))));
@@ -149,11 +151,15 @@ where
 /// [`Included(x)`][Bound::Included], whereas at the start of an interval it's *greater*:
 ///
 /// ```rust
-/// use std::ops::Bound::*;
-/// use launchpad::intervals::cmp_startbound;
 /// use std::cmp::Ordering;
+/// use std::ops::Bound::*;
 ///
-/// assert_eq!(cmp_startbound(Excluded(&10), Included(&10)), Ordering::Greater);
+/// use launchpad::intervals::cmp_startbound;
+///
+/// assert_eq!(
+///     cmp_startbound(Excluded(&10), Included(&10)),
+///     Ordering::Greater
+/// );
 /// ```
 pub fn cmp_startbound<Q>(b1: Bound<&Q>, b2: Bound<&Q>) -> Ordering
 where
@@ -186,9 +192,10 @@ where
 /// *greater*:
 ///
 /// ```rust
-/// use std::ops::Bound::*;
-/// use launchpad::intervals::cmp_endbound;
 /// use std::cmp::Ordering;
+/// use std::ops::Bound::*;
+///
+/// use launchpad::intervals::cmp_endbound;
 ///
 /// assert_eq!(cmp_endbound(Excluded(&10), Included(&10)), Ordering::Less);
 /// ```
@@ -225,9 +232,10 @@ where
 /// at the start of an interval:
 ///
 /// ```rust
-/// use std::ops::Bound::*;
-/// use launchpad::intervals::cmp_start_end;
 /// use std::cmp::Ordering;
+/// use std::ops::Bound::*;
+///
+/// use launchpad::intervals::cmp_start_end;
 ///
 /// assert_eq!(cmp_start_end::<i32>(Unbounded, Unbounded), Ordering::Less);
 /// ```
@@ -261,11 +269,15 @@ where
 /// at the start of an interval:
 ///
 /// ```rust
-/// use std::ops::Bound::*;
-/// use launchpad::intervals::cmp_end_start;
 /// use std::cmp::Ordering;
+/// use std::ops::Bound::*;
 ///
-/// assert_eq!(cmp_end_start::<i32>(Unbounded, Unbounded), Ordering::Greater);
+/// use launchpad::intervals::cmp_end_start;
+///
+/// assert_eq!(
+///     cmp_end_start::<i32>(Unbounded, Unbounded),
+///     Ordering::Greater
+/// );
 /// ```
 pub fn cmp_end_start<Q>(e1: Bound<&Q>, e2: Bound<&Q>) -> Ordering
 where
@@ -338,10 +350,14 @@ where
     ///
     /// ```
     /// use std::ops::Bound::*;
+    ///
     /// use launchpad::intervals::IterBoundPair;
     ///
     /// assert_eq!(
-    ///     (Excluded(4_u32), Included(6_u32)).into_iter().unwrap().collect::<Vec<u32>>(),
+    ///     (Excluded(4_u32), Included(6_u32))
+    ///         .into_iter()
+    ///         .unwrap()
+    ///         .collect::<Vec<u32>>(),
     ///     vec![5_u32, 6_u32]
     /// );
     /// ```
@@ -420,8 +436,9 @@ impl<'a, Q, R> ExactSizeIterator for DifferenceIterator<'a, Q, R> where R: Range
 /// # Examples
 ///
 /// ```rust
-/// use launchpad::intervals::difference;
 /// use std::ops::Bound::*;
+///
+/// use launchpad::intervals::difference;
 ///
 /// // When the intervals don't overlap at all, the first interval is returned unchanged
 /// assert_eq!(
@@ -489,16 +506,23 @@ where
 /// # Examples
 ///
 /// ```rust
-/// use launchpad::intervals::intersection;
 /// use std::ops::Bound::*;
+///
+/// use launchpad::intervals::intersection;
 ///
 /// // If the intervals don't intersect, returns None
 /// assert_eq!(intersection(&(1..3), &(4..8)), None);
 ///
-/// assert_eq!(intersection(&(1..8), &(7..10)), Some((Included(&7), Excluded(&8))));
+/// assert_eq!(
+///     intersection(&(1..8), &(7..10)),
+///     Some((Included(&7), Excluded(&8)))
+/// );
 ///
 /// // If one interval fully covers another, the smaller interval will be returned unchanged
-/// assert_eq!(intersection(&(1..10), &(2..9)), Some((Included(&2), Excluded(&9))));
+/// assert_eq!(
+///     intersection(&(1..10), &(2..9)),
+///     Some((Included(&2), Excluded(&9)))
+/// );
 /// ```
 pub fn intersection<'a, Q, R, S>(r1: &'a R, r2: &'a S) -> Option<(Bound<&'a Q>, Bound<&'a Q>)>
 where

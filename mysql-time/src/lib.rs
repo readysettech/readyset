@@ -59,8 +59,8 @@ impl MysqlTime {
     /// # Example
     ///
     /// ```rust
-    /// use mysql_time::MysqlTime;
     /// use chrono::Duration;
+    /// use mysql_time::MysqlTime;
     ///
     /// let duration: Duration = Duration::hours(838); // Within range
     /// let mysql_time: MysqlTime = MysqlTime::new(duration); // 838:00:00
