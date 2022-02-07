@@ -1,0 +1,16 @@
+global:
+  scrape_interval:     15s # By default, scrape targets every 15 seconds.
+  external_labels:
+    monitor: 'local-noria'
+
+scrape_configs:
+  - job_name: 'prometheus'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['vector:9092']
+    honor_labels: true
+  - job_name: 'pushgateway'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['pushgateway:9091']
+    honor_labels: true

@@ -23,6 +23,8 @@ ADD config.ru /solidus/config.ru
 ADD docker-entrypoint.sh /solidus/docker-entrypoint.sh
 
 EXPOSE 3000
+EXPOSE 4000
+
 VOLUME /state
 
 CMD ["bash", "./docker-entrypoint.sh"]

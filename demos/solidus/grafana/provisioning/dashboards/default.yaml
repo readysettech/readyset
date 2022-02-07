@@ -1,0 +1,23 @@
+apiVersion: 1
+
+providers:
+  - name: Readyset Overview
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards/readyset_external.json
+
+  - name: Readyset Internal
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards/readyset_internal.json
+
+  - name: Solidus Queries
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards/solidus-demo.json
+
+  - name: Connected
+    type: file
+    folder: Onboarding
+    options:
+      path: /var/lib/grafana/dashboards/connected.json
