@@ -1,7 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 
-use chrono::{DateTime, FixedOffset};
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt};
 use noria::{ReadySetError, ReadySetResult};
@@ -247,38 +246,37 @@ impl TableDescription {
 
         info!(rows = %nrows, "Replication started");
         while let Some(Ok(row)) = binary_rows.next().await {
-            let noria_row =
-                type_map
-                    .iter()
-                    .enumerate()
-                    .map(|(i, t)| match *t {
-                        Type::BPCHAR | Type::TEXT | Type::VARCHAR => {
-                            Ok(noria_data::DataType::from(row.try_get::<&str>(i)?))
-                        }
-                        Type::CHAR => Ok(row.try_get::<i8>(i)?.into()),
-                        Type::INT2 => Ok((row.try_get::<i16>(i)? as i64).into()),
-                        Type::INT4 => Ok((row.try_get::<i32>(i)? as i64).into()),
-                        Type::INT8 => Ok((row.try_get::<i64>(i)? as i64).into()),
-                        Type::OID => Ok((row.try_get::<u32>(i)? as u64).into()),
-                        Type::TIMESTAMP => Ok(noria_data::DataType::Timestamp(row.try_get(i)?)),
-                        Type::TIMESTAMPTZ => Ok(noria_data::DataType::from(
-                            row.try_get::<DateTime<FixedOffset>>(i)?,
-                        )),
-                        Type::FLOAT8 => Ok(row.try_get::<f64>(i)?.try_into()?),
-                        Type::FLOAT4 => Ok(row.try_get::<f32>(i)?.try_into()?),
-                        Type::TIME => Ok(row.try_get::<chrono::NaiveTime>(i)?.into()),
-                        Type::DATE => Ok(row.try_get::<chrono::NaiveDate>(i)?.into()),
-                        Type::BIT | Type::VARBIT => Ok(row.try_get::<bit_vec::BitVec>(i)?.into()),
-                        Type::BYTEA => Ok(noria_data::DataType::ByteArray(
-                            row.try_get::<Vec<u8>>(i)?.into(),
-                        )),
-                        Type::BOOL => Ok(row.try_get::<bool>(i)?.into()),
-                        _ => Err(ReadySetError::ReplicationFailed(format!(
-                            "Unimplmented type conversion for {}",
-                            t
-                        ))),
-                    })
-                    .collect::<ReadySetResult<Vec<_>>>()?;
+            let noria_row = type_map
+                .iter()
+                .enumerate()
+                .map(|(i, t)| match *t {
+                    Type::BPCHAR | Type::TEXT | Type::VARCHAR => {
+                        Ok(noria_data::DataType::from(row.try_get::<&str>(i)?))
+                    }
+                    Type::CHAR => Ok(row.try_get::<i8>(i)?.into()),
+                    Type::INT2 => Ok((row.try_get::<i16>(i)? as i64).into()),
+                    Type::INT4 => Ok((row.try_get::<i32>(i)? as i64).into()),
+                    Type::INT8 => Ok((row.try_get::<i64>(i)? as i64).into()),
+                    Type::OID => Ok((row.try_get::<u32>(i)? as u64).into()),
+                    Type::TIMESTAMP => Ok(row.try_get::<chrono::NaiveDateTime>(i)?.into()),
+                    Type::TIMESTAMPTZ => Ok(row
+                        .try_get::<chrono::DateTime<chrono::FixedOffset>>(i)?
+                        .into()),
+                    Type::FLOAT8 => Ok(row.try_get::<f64>(i)?.try_into()?),
+                    Type::FLOAT4 => Ok(row.try_get::<f32>(i)?.try_into()?),
+                    Type::TIME => Ok(row.try_get::<chrono::NaiveTime>(i)?.into()),
+                    Type::DATE => Ok(row.try_get::<chrono::NaiveDate>(i)?.into()),
+                    Type::BIT | Type::VARBIT => Ok(row.try_get::<bit_vec::BitVec>(i)?.into()),
+                    Type::BYTEA => Ok(noria_data::DataType::ByteArray(
+                        row.try_get::<Vec<u8>>(i)?.into(),
+                    )),
+                    Type::BOOL => Ok(row.try_get::<bool>(i)?.into()),
+                    _ => Err(ReadySetError::ReplicationFailed(format!(
+                        "Unimplmented type conversion for {}",
+                        t
+                    ))),
+                })
+                .collect::<ReadySetResult<Vec<_>>>()?;
 
             noria_rows.push(noria_row);
             cnt += 1;

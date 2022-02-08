@@ -3,7 +3,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use bit_vec::BitVec;
-use chrono::{DateTime, FixedOffset, NaiveDateTime};
+use chrono::NaiveDateTime;
 use mysql_time::MysqlTime;
 use rust_decimal::Decimal;
 use serde::de::{EnumAccess, VariantAccess, Visitor};
@@ -13,7 +13,7 @@ use serde_bytes::{ByteBuf, Bytes};
 use strum::VariantNames;
 use strum_macros::{EnumString, EnumVariantNames, FromRepr};
 
-use crate::{DataType, Text, TinyText};
+use crate::{DataType, Text, TimestampTz, TinyText};
 
 #[derive(EnumVariantNames, EnumString, FromRepr, Clone, Copy)]
 enum Field {
@@ -94,14 +94,6 @@ impl serde::ser::Serialize for DataType {
             DataType::TinyText(v) => {
                 serialize_variant(serializer, Field::Text, Bytes::new(v.as_bytes()))
             }
-            DataType::Timestamp(v) => {
-                // We serialize the NaiveDateTime as seconds in the low 64 bits of u128 and subsec
-                // nanos in the high 64 bits NOTE: don't be tempted to remove the
-                // intermediate step of casting to u64, as it will propagate the sign bit
-                let ts =
-                    v.timestamp() as u64 as u128 + ((v.timestamp_subsec_nanos() as u128) << 64);
-                serialize_variant(serializer, Field::Timestamp, &ts)
-            }
             DataType::Time(v) => serialize_variant(serializer, Field::Time, &v),
             DataType::ByteArray(a) => {
                 serialize_variant(serializer, Field::ByteArray, Bytes::new(a.as_ref()))
@@ -109,11 +101,11 @@ impl serde::ser::Serialize for DataType {
             DataType::Numeric(d) => serialize_variant(serializer, Field::Numeric, &d),
             DataType::BitVector(bits) => serialize_variant(serializer, Field::BitVector, &bits),
             DataType::TimestampTz(ts) => {
+                let extra = ts.extra;
                 let nt = ts.to_chrono();
                 let ts = nt.naive_utc().timestamp() as u64 as u128
                     + ((nt.naive_utc().timestamp_subsec_nanos() as u128) << 64);
-                let offset = nt.offset().utc_minus_local();
-                serialize_variant(serializer, Field::TimestampTz, &(ts, offset))
+                serialize_variant(serializer, Field::TimestampTz, &(ts, extra))
             }
             DataType::Max => serializer.serialize_unit_variant(
                 "DataType",
@@ -294,12 +286,13 @@ impl<'de> Deserialize<'de> for DataType {
                         VariantAccess::newtype_variant::<BitVec>(variant)
                             .map(|bits| DataType::BitVector(Arc::new(bits)))
                     }
-                    (Field::TimestampTz, variant) => VariantAccess::newtype_variant::<(u128, i32)>(
-                        variant,
-                    )
-                    .map(|(ts, offset)| {
-                        let dt = NaiveDateTime::from_timestamp(ts as _, (ts >> 64) as _);
-                        DateTime::<FixedOffset>::from_utc(dt, FixedOffset::east(offset)).into()
+                    (Field::TimestampTz, variant) => VariantAccess::newtype_variant::<(
+                        u128,
+                        [u8; 3],
+                    )>(variant)
+                    .map(|(ts, extra)| {
+                        let datetime = NaiveDateTime::from_timestamp(ts as _, (ts >> 64) as _);
+                        DataType::TimestampTz(TimestampTz { datetime, extra })
                     }),
                     (Field::Max, variant) => {
                         VariantAccess::unit_variant(variant).map(|_| DataType::Max)

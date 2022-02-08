@@ -311,11 +311,11 @@ async fn check_query(
                             s.to_string()
                         }
                         d @ DataType::ByteArray(_) => format!("{}", d),
-                        DataType::Timestamp(_) | DataType::Time(_) => {
+                        DataType::TimestampTz(_) | DataType::Time(_) => {
                             unimplemented!()
                         }
                         // These types are PostgreSQL specific
-                        DataType::BitVector(_) | DataType::TimestampTz(_) => unimplemented!(),
+                        DataType::BitVector(_) => unimplemented!(),
                     })
                     .collect()
             })

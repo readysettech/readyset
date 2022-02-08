@@ -422,10 +422,7 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
     match *dt {
         DataType::Int(n) => n as usize % shards,
         DataType::UnsignedInt(n) => n as usize % shards,
-        DataType::Text(..)
-        | DataType::TinyText(..)
-        | DataType::Timestamp(..)
-        | DataType::TimestampTz(_) => {
+        DataType::Text(..) | DataType::TinyText(..) | DataType::TimestampTz(_) => {
             use std::hash::Hasher;
             let mut hasher = ahash::AHasher::new_with_keys(0x3306, 0x6033);
             // this unwrap should be safe because there are no error paths with a Text, TinyText,

@@ -120,13 +120,6 @@ where
             let s = String::try_from(d).or_else(|e| cx.throw_error(e.to_string()))?;
             Ok(cx.string(s).upcast::<JsValue>())
         }
-        // NOTE: making a js date object from the naive timestamp *assuming* it was created in the
-        // *UTC* timezone
-        DataType::Timestamp(t) => Ok(cx
-            .date(t.timestamp_millis() as f64)
-            .or_else(|e| cx.throw_error(e.to_string()))?
-            .upcast::<JsValue>()),
-        // NOTE: making a js date object from the datetime timestamp from UTC
         DataType::TimestampTz(t) => Ok(cx
             .date(t.to_chrono().naive_utc().timestamp_millis() as f64)
             .or_else(|e| cx.throw_error(e.to_string()))?
@@ -307,10 +300,13 @@ where
         if f64::is_nan(millis) {
             return cx.throw_error("Date input must be a valid javascript date");
         }
-        Ok(DataType::Timestamp(NaiveDateTime::from_timestamp(
-            millis as i64 / 1000i64,
-            ((millis as i64 % 1000i64) * 1000000i64) as u32,
-        )))
+        Ok(DataType::TimestampTz(
+            NaiveDateTime::from_timestamp(
+                millis as i64 / 1000i64,
+                ((millis as i64 % 1000i64) * 1000000i64) as u32,
+            )
+            .into(),
+        ))
     } else {
         cx.throw_error("Unknown parameter type")
     }

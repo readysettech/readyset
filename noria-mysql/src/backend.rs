@@ -65,18 +65,22 @@ async fn write_column<W: AsyncWrite + Unpin>(
                 internal!()
             }
         },
-        DataType::Timestamp(ts) => rw.write_col(ts),
+        DataType::TimestampTz(ts) => match cs.coltype {
+            msql_srv::ColumnType::MYSQL_TYPE_DATETIME
+            | msql_srv::ColumnType::MYSQL_TYPE_DATETIME2
+            | msql_srv::ColumnType::MYSQL_TYPE_TIMESTAMP
+            | msql_srv::ColumnType::MYSQL_TYPE_TIMESTAMP2 => {
+                rw.write_col(ts.to_chrono().naive_local())
+            }
+            ColumnType::MYSQL_TYPE_DATE => rw.write_col(ts.to_chrono().naive_local().date()),
+            _ => internal!("Expecing a timestamp-like type, got {:?}", cs.coltype),
+        },
         DataType::Time(ref t) => rw.write_col(t),
         DataType::ByteArray(ref bytes) => rw.write_col(bytes.as_ref()),
         DataType::Numeric(_) => unimplemented!("MySQL does not implement the type NUMERIC"),
         // These types are PostgreSQL specific
         DataType::BitVector(_) => {
             internal!("Cannot write MySQL column: MySQL does not support bit vectors")
-        }
-        DataType::TimestampTz(_) => {
-            internal!(
-                "Cannot write MySQL column: MySQL does not support timestamps with time zones"
-            )
         }
     };
     Ok(written?)

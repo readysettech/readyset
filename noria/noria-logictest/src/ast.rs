@@ -368,7 +368,6 @@ impl TryFrom<DataType> for Value {
             DataType::Float(f, _) => Ok(f.into()),
             DataType::Double(f, _) => Ok(f.into()),
             DataType::Text(_) | DataType::TinyText(_) => Ok(Value::Text(value.try_into()?)),
-            DataType::Timestamp(ts) => Ok(Value::Date(ts)),
             DataType::TimestampTz(ref ts) => Ok(Value::Date(ts.to_chrono().naive_utc())),
             DataType::Time(t) => Ok(Value::Time(t)),
             DataType::ByteArray(t) => Ok(Value::ByteArray(t.as_ref().clone())),
@@ -519,7 +518,9 @@ impl Value {
             (Self::Text(txt), Type::Integer) => Ok(Cow::Owned(Self::Integer(txt.parse()?))),
             (Self::Text(txt), Type::Real) => Ok(Cow::Owned(Self::from(txt.parse::<f64>()?))),
             (Self::Text(txt), Type::Date) => Ok(Cow::Owned(Self::Date(
-                NaiveDateTime::parse_from_str(txt, "%Y-%m-%d %H:%M:%S")?,
+                NaiveDateTime::parse_from_str(txt, "%Y-%m-%d %H:%M:%S").or_else(|_| {
+                    NaiveDate::parse_from_str(txt, "%Y-%m-%d").map(|nd| nd.and_hms(0, 0, 0))
+                })?,
             ))),
             (Self::Text(txt), Type::Time) => Ok(Cow::Owned(Self::Time(txt.parse()?))),
             _ => {
