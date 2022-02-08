@@ -382,7 +382,6 @@ impl DataType {
     pub fn coerce_to(&self, ty: &SqlType) -> ReadySetResult<DataType> {
         let mk_err = |message: String, source: Option<anyhow::Error>| {
             ReadySetError::DataTypeConversionError {
-                val: format!("{:?}", self),
                 src_type: "DataType".to_string(),
                 target_type: format!("{:?}", ty),
                 details: format!(
@@ -1199,7 +1198,6 @@ impl TryFrom<i128> for DataType {
             Ok(DataType::UnsignedInt(s as u64))
         } else {
             Err(Self::Error::DataTypeConversionError {
-                val: s.to_string(),
                 src_type: "i128".to_string(),
                 target_type: "DataType".to_string(),
                 details: "".to_string(),
@@ -1268,7 +1266,6 @@ impl TryFrom<f32> for DataType {
     fn try_from(f: f32) -> Result<Self, Self::Error> {
         if !f.is_finite() {
             return Err(Self::Error::DataTypeConversionError {
-                val: f.to_string(),
                 src_type: "f32".to_string(),
                 target_type: "DataType".to_string(),
                 details: "".to_string(),
@@ -1285,7 +1282,6 @@ impl TryFrom<f64> for DataType {
     fn try_from(f: f64) -> Result<Self, Self::Error> {
         if !f.is_finite() {
             return Err(Self::Error::DataTypeConversionError {
-                val: f.to_string(),
                 src_type: "f64".to_string(),
                 target_type: "DataType".to_string(),
                 details: "".to_string(),
@@ -1311,7 +1307,6 @@ impl<'a> TryFrom<&'a DataType> for Decimal {
             DataType::UnsignedInt(i) => Ok(Decimal::from(*i)),
             DataType::Float(value, _) => {
                 Decimal::from_f32(*value).ok_or(Self::Error::DataTypeConversionError {
-                    val: format!("{:?}", dt),
                     src_type: "DataType".to_string(),
                     target_type: "Decimal".to_string(),
                     details: "".to_string(),
@@ -1319,7 +1314,6 @@ impl<'a> TryFrom<&'a DataType> for Decimal {
             }
             DataType::Double(value, _) => {
                 Decimal::from_f64(*value).ok_or(Self::Error::DataTypeConversionError {
-                    val: format!("{:?}", dt),
                     src_type: "DataType".to_string(),
                     target_type: "Decimal".to_string(),
                     details: "".to_string(),
@@ -1327,7 +1321,6 @@ impl<'a> TryFrom<&'a DataType> for Decimal {
             }
             DataType::Numeric(d) => Ok(*d.as_ref()),
             _ => Err(Self::Error::DataTypeConversionError {
-                val: format!("{:?}", dt),
                 src_type: "DataType".to_string(),
                 target_type: "Decimal".to_string(),
                 details: "".to_string(),
@@ -1350,7 +1343,6 @@ impl<'a> TryFrom<&'a DataType> for BitVec {
         match dt {
             DataType::BitVector(ref bits) => Ok(bits.as_ref().clone()),
             _ => Err(Self::Error::DataTypeConversionError {
-                val: format!("{:?}", dt),
                 src_type: "DataType".to_string(),
                 target_type: "Decimal".to_string(),
                 details: "".to_string(),
@@ -1406,7 +1398,6 @@ impl<'a> TryFrom<&'a Literal> for DataType {
             Literal::Double(ref double) => Ok(DataType::Double(double.value, double.precision)),
             Literal::Numeric(i, s) => Decimal::try_from_i128_with_scale(*i, *s)
                 .map_err(|e| ReadySetError::DataTypeConversionError {
-                    val: format!("Mantissa: {} | Scale: {}", i, s),
                     src_type: "Literal".to_string(),
                     target_type: "DataType".to_string(),
                     details: format!("Values out-of-bounds for Numeric type. Error: {}", e),
@@ -1493,7 +1484,6 @@ impl<'a> TryFrom<&'a DataType> for NaiveDateTime {
         match *data {
             DataType::Timestamp(ref dt) => Ok(*dt),
             _ => Err(Self::Error::DataTypeConversionError {
-                val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
                 target_type: "NaiveDateTime".to_string(),
                 details: "".to_string(),
@@ -1515,7 +1505,6 @@ impl<'a> TryFrom<&'a DataType> for DateTime<FixedOffset> {
         match *data {
             DataType::TimestampTz(dt) => Ok(dt.to_chrono()),
             _ => Err(Self::Error::DataTypeConversionError {
-                val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
                 target_type: "DateTime<FixedOffset>".to_string(),
                 details: "".to_string(),
@@ -1531,7 +1520,6 @@ impl<'a> TryFrom<&'a DataType> for NaiveDate {
         match *data {
             DataType::Timestamp(ref dt) => Ok(dt.date()),
             _ => Err(Self::Error::DataTypeConversionError {
-                val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
                 target_type: "NaiveDate".to_string(),
                 details: "".to_string(),
@@ -1547,7 +1535,6 @@ impl<'a> TryFrom<&'a DataType> for MysqlTime {
         match *data {
             DataType::Time(ref mysql_time) => Ok(*mysql_time),
             _ => Err(Self::Error::DataTypeConversionError {
-                val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
                 target_type: "MysqlTime".to_string(),
                 details: "".to_string(),
@@ -1565,7 +1552,6 @@ impl<'a> TryFrom<&'a DataType> for Vec<u8> {
             DataType::TinyText(ref tt) => Ok(tt.as_str().as_bytes().to_vec()),
             DataType::ByteArray(ref array) => Ok(array.as_ref().clone()),
             _ => Err(Self::Error::DataTypeConversionError {
-                val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
                 target_type: "Vec<u8>".to_string(),
                 details: "".to_string(),
@@ -1586,7 +1572,6 @@ impl<'a> TryFrom<&'a DataType> for &'a str {
             DataType::Text(ref t) => Ok(t.as_str()),
             DataType::TinyText(ref tt) => Ok(tt.as_str()),
             _ => Err(Self::Error::DataTypeConversionError {
-                val: format!("{:?}", data),
                 src_type: match data.sql_type() {
                     Some(ty) => ty.to_string(),
                     None => "Null".to_string(),
@@ -1607,7 +1592,6 @@ impl TryFrom<DataType> for Vec<u8> {
             DataType::TinyText(tt) => Ok(tt.as_str().as_bytes().to_vec()),
             DataType::ByteArray(bytes) => Ok(bytes.as_ref().clone()),
             _ => Err(Self::Error::DataTypeConversionError {
-                val: format!("{:?}", data),
                 src_type: match data.sql_type() {
                     Some(ty) => ty.to_string(),
                     None => "Null".to_string(),
@@ -1643,7 +1627,6 @@ impl TryFrom<&'_ DataType> for i128 {
             DataType::Int(s) => Ok(i128::from(s)),
             DataType::UnsignedInt(s) => Ok(i128::from(s)),
             _ => Err(Self::Error::DataTypeConversionError {
-                val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
                 target_type: "i128".to_string(),
                 details: "".to_string(),
@@ -1662,7 +1645,6 @@ impl TryFrom<&'_ DataType> for i64 {
                     Ok(s as i64)
                 } else {
                     Err(Self::Error::DataTypeConversionError {
-                        val: format!("{:?}", data),
                         src_type: "DataType".to_string(),
                         target_type: "i64".to_string(),
                         details: format!("Out of bounds {}", s),
@@ -1671,7 +1653,6 @@ impl TryFrom<&'_ DataType> for i64 {
             }
             DataType::Int(s) => Ok(s),
             _ => Err(Self::Error::DataTypeConversionError {
-                val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
                 target_type: "i64".to_string(),
                 details: "".to_string(),
@@ -1699,7 +1680,6 @@ impl TryFrom<&'_ DataType> for u64 {
                     Ok(s as u64)
                 } else {
                     Err(Self::Error::DataTypeConversionError {
-                        val: format!("{:?}", data),
                         src_type: "DataType".to_string(),
                         target_type: "u64".to_string(),
                         details: "Out of bounds".to_string(),
@@ -1708,7 +1688,6 @@ impl TryFrom<&'_ DataType> for u64 {
             }
 
             _ => Err(Self::Error::DataTypeConversionError {
-                val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
                 target_type: "u64".to_string(),
                 details: "".to_string(),
@@ -1735,7 +1714,6 @@ impl TryFrom<&'_ DataType> for i32 {
                     Ok(s as i32)
                 } else {
                     Err(Self::Error::DataTypeConversionError {
-                        val: format!("{:?}", data),
                         src_type: "DataType".to_string(),
                         target_type: "i32".to_string(),
                         details: "out of bounds".to_string(),
@@ -1747,7 +1725,6 @@ impl TryFrom<&'_ DataType> for i32 {
                     Ok(s as i32)
                 } else {
                     Err(Self::Error::DataTypeConversionError {
-                        val: format!("{:?}", data),
                         src_type: "DataType".to_string(),
                         target_type: "i32".to_string(),
                         details: "out of bounds".to_string(),
@@ -1756,7 +1733,6 @@ impl TryFrom<&'_ DataType> for i32 {
             }
 
             _ => Err(Self::Error::DataTypeConversionError {
-                val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
                 target_type: "i32".to_string(),
                 details: "".to_string(),
@@ -1782,7 +1758,6 @@ impl TryFrom<&'_ DataType> for u32 {
                     Ok(s as u32)
                 } else {
                     Err(Self::Error::DataTypeConversionError {
-                        val: format!("{:?}", data),
                         src_type: "DataType".to_string(),
                         target_type: "u32".to_string(),
                         details: "out of bounds".to_string(),
@@ -1794,7 +1769,6 @@ impl TryFrom<&'_ DataType> for u32 {
                     Ok(s as u32)
                 } else {
                     Err(Self::Error::DataTypeConversionError {
-                        val: format!("{:?}", data),
                         src_type: "DataType".to_string(),
                         target_type: "u32".to_string(),
                         details: "out of bounds".to_string(),
@@ -1802,7 +1776,6 @@ impl TryFrom<&'_ DataType> for u32 {
                 }
             }
             _ => Err(Self::Error::DataTypeConversionError {
-                val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
                 target_type: "u32".to_string(),
                 details: "".to_string(),
@@ -1827,7 +1800,6 @@ impl TryFrom<&'_ DataType> for f32 {
             DataType::Float(f, _) => Ok(f),
             DataType::Double(f, _) => Ok(f as f32),
             DataType::Numeric(ref d) => d.to_f32().ok_or(Self::Error::DataTypeConversionError {
-                val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
                 target_type: "f32".to_string(),
                 details: "".to_string(),
@@ -1835,7 +1807,6 @@ impl TryFrom<&'_ DataType> for f32 {
             DataType::UnsignedInt(i) => Ok(i as f32),
             DataType::Int(i) => Ok(i as f32),
             _ => Err(Self::Error::DataTypeConversionError {
-                val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
                 target_type: "f32".to_string(),
                 details: "".to_string(),
@@ -1860,7 +1831,6 @@ impl TryFrom<&'_ DataType> for f64 {
             DataType::Float(f, _) => Ok(f as f64),
             DataType::Double(f, _) => Ok(f),
             DataType::Numeric(ref d) => d.to_f64().ok_or(Self::Error::DataTypeConversionError {
-                val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
                 target_type: "f32".to_string(),
                 details: "".to_string(),
@@ -1868,7 +1838,6 @@ impl TryFrom<&'_ DataType> for f64 {
             DataType::UnsignedInt(i) => Ok(i as f64),
             DataType::Int(i) => Ok(i as f64),
             _ => Err(Self::Error::DataTypeConversionError {
-                val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
                 target_type: "f64".to_string(),
                 details: "".to_string(),
@@ -2214,14 +2183,12 @@ macro_rules! arithmetic_operation (
             (first @ &DataType::Numeric(..), second @ &DataType::Numeric(..)) => {
                 let a: Decimal = Decimal::try_from(first)
                     .map_err(|e| ReadySetError::DataTypeConversionError {
-                        val: format!("{:?}", first),
                         src_type: "DataType".to_string(),
                         target_type: "Decimal".to_string(),
                         details: e.to_string(),
                     })?;
                 let b: Decimal = Decimal::try_from(second)
                     .map_err(|e| ReadySetError::DataTypeConversionError {
-                        val: format!("{:?}", second),
                         src_type: "DataType".to_string(),
                         target_type: "Decimal".to_string(),
                         details: e.to_string(),
@@ -2231,14 +2198,12 @@ macro_rules! arithmetic_operation (
             (first @ &DataType::Numeric(..), second @ &DataType::Float(..)) => {
                 let a: Decimal = Decimal::try_from(first)
                     .map_err(|e| ReadySetError::DataTypeConversionError {
-                        val: format!("{:?}", first),
                         src_type: "DataType".to_string(),
                         target_type: "Decimal".to_string(),
                         details: e.to_string(),
                     })?;
                 let b: Decimal = f32::try_from(second).and_then(|f| Decimal::from_f32(f)
                     .ok_or(ReadySetError::DataTypeConversionError {
-                        val: format!("{:?}", first),
                         src_type: "DataType".to_string(),
                         target_type: "Decimal".to_string(),
                         details: "".to_string(),
@@ -2248,14 +2213,12 @@ macro_rules! arithmetic_operation (
             (first @ &DataType::Numeric(..), second @ &DataType::Double(..)) => {
                 let a: Decimal = Decimal::try_from(first)
                     .map_err(|e| ReadySetError::DataTypeConversionError {
-                        val: format!("{:?}", first),
                         src_type: "DataType".to_string(),
                         target_type: "Decimal".to_string(),
                         details: e.to_string(),
                     })?;
                 let b: Decimal = f64::try_from(second).and_then(|f| Decimal::from_f64(f)
                     .ok_or(ReadySetError::DataTypeConversionError {
-                        val: format!("{:?}", first),
                         src_type: "DataType".to_string(),
                         target_type: "Decimal".to_string(),
                         details: "".to_string(),
