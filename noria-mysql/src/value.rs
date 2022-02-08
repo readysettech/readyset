@@ -14,7 +14,6 @@ pub(crate) fn mysql_value_to_datatype(value: Value) -> ReadySetResult<DataType> 
         ValueInner::Double(f) => DataType::try_from(f)?,
         ValueInner::Datetime(_) => DataType::Timestamp(value.try_into().map_err(|e| {
             ReadySetError::DataTypeConversionError {
-                val: format!("{:?}", value.into_inner()),
                 src_type: "ValueInner::Datetime".to_string(),
                 target_type: "DataType::Timestamp".to_string(),
                 details: format!("{:?}", e),
@@ -22,7 +21,6 @@ pub(crate) fn mysql_value_to_datatype(value: Value) -> ReadySetResult<DataType> 
         })?),
         ValueInner::Time(_) => DataType::Time(value.try_into().map_err(|e| {
             ReadySetError::DataTypeConversionError {
-                val: format!("{:?}", value.into_inner()),
                 src_type: "ValueInner::Time".to_string(),
                 target_type: "Datatype::Time".to_string(),
                 details: format!("{:?}", e),
@@ -31,9 +29,8 @@ pub(crate) fn mysql_value_to_datatype(value: Value) -> ReadySetResult<DataType> 
         ValueInner::Date(_) => DataType::Timestamp(
             NaiveDate::try_from(value)
                 .map_err(|e| ReadySetError::DataTypeConversionError {
-                    val: format!("{:?}", value.into_inner()),
-                    src_type: "ValueInner::Time".to_string(),
-                    target_type: "Datatype::Time".to_string(),
+                    src_type: "ValueInner::Date".to_string(),
+                    target_type: "Datatype::Timestamp".to_string(),
                     details: format!("{:?}", e),
                 })?
                 .and_hms(0, 0, 0),

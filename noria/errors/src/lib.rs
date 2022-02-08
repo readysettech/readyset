@@ -294,10 +294,8 @@ pub enum ReadySetError {
     NoSuchColumn(String),
 
     /// Conversion to or from a [`DataType`](crate::DataType) failed.
-    #[error("DataType conversion error: Failed to convert {val} of type {src_type} to the type {target_type}: {details}")]
+    #[error("DataType conversion error: Failed to convert value of type {src_type} to the type {target_type}: {details}")]
     DataTypeConversionError {
-        /// Source value.
-        val: String,
         /// Source type.
         src_type: String,
         /// Target type.
