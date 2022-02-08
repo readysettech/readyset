@@ -451,11 +451,7 @@ where
                 Expression::Literal(ref v) => {
                     updates.push((
                         i,
-                        Modification::Set(
-                            DataType::try_from(v)?
-                                .coerce_to(&field.sql_type)?
-                                .into_owned(),
-                        ),
+                        Modification::Set(DataType::try_from(v)?.coerce_to(&field.sql_type)?),
                     ));
                 }
                 Expression::BinaryOp {
@@ -548,8 +544,7 @@ pub(crate) fn coerce_params(
         for (i, col) in get_parameter_columns(q).iter().enumerate() {
             for field in &schema.fields {
                 if col.name == field.column.name {
-                    coerced_params
-                        .push(DataType::coerce_to(&prms[i], &field.sql_type)?.into_owned());
+                    coerced_params.push(DataType::coerce_to(&prms[i], &field.sql_type)?);
                 }
             }
         }

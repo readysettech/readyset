@@ -438,7 +438,7 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
             let str_dt = dt.coerce_to(&SqlType::Text).unwrap();
             // this unwrap should be safe because we just coerced dt to a text
             #[allow(clippy::unwrap_used)]
-            let s: &str = <&str>::try_from(str_dt.as_ref()).unwrap();
+            let s: &str = <&str>::try_from(&str_dt).unwrap();
             hasher.write(s.as_bytes());
             hasher.finish() as usize % shards
         }

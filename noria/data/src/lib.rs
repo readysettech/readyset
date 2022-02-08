@@ -1,6 +1,5 @@
 #![feature(total_cmp)]
 
-use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::hash::{Hash, Hasher};
@@ -360,7 +359,7 @@ impl DataType {
     ///
     /// let real = DataType::Double(123.0, 0);
     /// let int = real.coerce_to(&SqlType::Int(None)).unwrap();
-    /// assert_eq!(int.into_owned(), DataType::Int(123));
+    /// assert_eq!(int, DataType::Int(123));
     /// ```
     ///
     /// Text can be parsed as a timestamp using the SQL `%Y-%m-%d %H:%M:%S` format:
@@ -376,11 +375,11 @@ impl DataType {
     /// let text = DataType::try_from("2021-01-26 10:20:37").unwrap();
     /// let timestamp = text.coerce_to(&SqlType::Timestamp).unwrap();
     /// assert_eq!(
-    ///     timestamp.into_owned(),
+    ///     timestamp,
     ///     DataType::Timestamp(NaiveDate::from_ymd(2021, 01, 26).and_hms(10, 20, 37))
     /// );
     /// ```
-    pub fn coerce_to<'a>(&'a self, ty: &SqlType) -> ReadySetResult<Cow<'a, Self>> {
+    pub fn coerce_to(&self, ty: &SqlType) -> ReadySetResult<DataType> {
         let mk_err = |message: String, source: Option<anyhow::Error>| {
             ReadySetError::DataTypeConversionError {
                 val: format!("{:?}", self),
@@ -398,35 +397,33 @@ impl DataType {
 
         macro_rules! convert_numeric {
             ($dt: expr, $source_ty: ty, $target_ty: ty) => {{
-                Ok(Cow::Owned(
-                    <$target_ty>::try_from(<$source_ty>::try_from($dt)?)
-                        .map_err(|e| {
-                            mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
-                        })?
-                        .into(),
-                ))
+                Ok(<$target_ty>::try_from(<$source_ty>::try_from($dt)?)
+                    .map_err(|e| {
+                        mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
+                    })?
+                    .into())
             }};
         }
 
         macro_rules! convert_boolean {
             ($val: expr) => {{
-                Ok(Cow::Owned(DataType::from($val != 0)))
+                Ok(DataType::from($val != 0))
             }};
         }
 
         use SqlType::*;
         match (self, self.sql_type(), ty) {
-            (_, None, _) => Ok(Cow::Borrowed(self)),
-            (_, Some(src_type), tgt_type) if src_type == *tgt_type => Ok(Cow::Borrowed(self)),
+            (_, None, _) => Ok(DataType::None),
+            (_, Some(src_type), tgt_type) if src_type == *tgt_type => Ok(self.clone()),
             (_, Some(Text | Tinytext | Mediumtext), Text | Tinytext | Mediumtext) => {
-                Ok(Cow::Borrowed(self))
+                Ok(self.clone())
             }
             // Per https://dev.mysql.com/doc/refman/8.0/en/numeric-type-syntax.html, the "number"
             // argument to integer types only controls the display width, not the max length
             (_, Some(Int(_)), Int(_) | Serial)
             | (_, Some(Bigint(_)), Bigint(_) | BigSerial)
             | (_, Some(UnsignedInt(_)), UnsignedInt(_))
-            | (_, Some(UnsignedBigint(_)), UnsignedBigint(_)) => Ok(Cow::Borrowed(self)),
+            | (_, Some(UnsignedBigint(_)), UnsignedBigint(_)) => Ok(self.clone()),
             (_, Some(Int(_)), Tinyint(_)) => convert_numeric!(self, i64, i8),
             (_, Some(Int(_)), UnsignedTinyint(_)) => convert_numeric!(self, i64, u8),
             (_, Some(Int(_)), UnsignedInt(_)) => convert_numeric!(self, i64, u32),
@@ -442,13 +439,13 @@ impl DataType {
             (_, Some(Bigint(_)), UnsignedBigint(_)) => convert_numeric!(self, i64, u64),
             (Self::Int(n), _, Bool) => convert_boolean!(*n),
             (Self::UnsignedInt(n), _, Bool) => convert_boolean!(*n),
-            (_, Some(Float), Float | Real) => Ok(Cow::Borrowed(self)),
-            (_, Some(Real), Double) => Ok(Cow::Borrowed(self)),
-            (_, Some(Numeric(_)), Numeric(_)) => Ok(Cow::Borrowed(self)),
+            (_, Some(Float), Float | Real) => Ok(self.clone()),
+            (_, Some(Real), Double) =>Ok(self.clone()),
+            (_, Some(Numeric(_)), Numeric(_)) => Ok(self.clone()),
             (_, Some(Text | Tinytext | Mediumtext), Varchar(Some(max_len))) => {
                 let actual_len = <&str>::try_from(self)?.len();
                 if actual_len <= (*max_len).into() {
-                    Ok(Cow::Borrowed(self))
+                    Ok(self.clone())
                 } else {
                     Err(mk_err(
                         format!(
@@ -463,7 +460,7 @@ impl DataType {
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Char(Some(len))) => {
                 let actual_len = <&str>::try_from(self)?.len();
                 if actual_len <= usize::from(*len) {
-                    Ok(Cow::Borrowed(self))
+                    Ok(self.clone())
                 } else {
                     Err(mk_err(
                         format!(
@@ -475,7 +472,7 @@ impl DataType {
                 }
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Char(None) | Varchar(None)) => {
-                Ok(Cow::Borrowed(self))
+                Ok(self.clone())
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Timestamp | DateTime(_)) => {
                 NaiveDateTime::parse_from_str(<&str>::try_from(self)?, TIMESTAMP_FORMAT)
@@ -486,7 +483,6 @@ impl DataType {
                         )
                     })
                     .map(Self::Timestamp)
-                    .map(Cow::Owned)
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), TimestampTz) => {
                 chrono::DateTime::<FixedOffset>::parse_from_str(<&str>::try_from(self)?, TIMESTAMP_TZ_FORMAT)
@@ -497,7 +493,6 @@ impl DataType {
                         )
                     })
                     .map(DataType::from)
-                    .map(Cow::Owned)
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Date) => {
                 let text: &str = <&str>::try_from(self)?;
@@ -509,13 +504,12 @@ impl DataType {
                     .map(|date| {
                         Self::Timestamp(NaiveDateTime::new(date, NaiveTime::from_hms(0, 0, 0)))
                     })
-                    .map(Cow::Owned)
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Time) => {
                 match <&str>::try_from(self)?.parse() {
-                    Ok(t) => Ok(Cow::Owned(Self::Time(t))),
+                    Ok(t) => Ok(Self::Time(t)),
                     Err(mysql_time::ConvertError::ParseError) => {
-                        Ok(Cow::Owned(Self::Time(Default::default())))
+                        Ok(Self::Time(Default::default()))
                     }
                     Err(e) => Err(mk_err(
                         "Could not parse value as time".to_owned(),
@@ -527,42 +521,41 @@ impl DataType {
                 MysqlTime::try_from(<f64>::try_from(self)?)
                     .map_err(|e| mk_err("Could not parse value as time".to_owned(), Some(e.into())))
                     .map(Self::Time)
-                    .map(Cow::Owned)
             }
             (Self::Timestamp(ts), Some(Timestamp), Text | Tinytext | Mediumtext | Varchar(_)) => {
-                Ok(Cow::Owned(ts.format(TIMESTAMP_FORMAT).to_string().into()))
+                Ok(ts.format(TIMESTAMP_FORMAT).to_string().into())
             }
             (Self::Time(ts), Some(Time), Text | Tinytext | Mediumtext | Varchar(_)) => {
-                Ok(Cow::Owned(ts.to_string().into()))
+                Ok(ts.to_string().into())
             }
             (Self::Timestamp(ts), Some(Timestamp), Date) => {
-                Ok(Cow::Owned(Self::Timestamp(ts.date().and_hms(0, 0, 0))))
+                Ok(Self::Timestamp(ts.date().and_hms(0, 0, 0)))
             }
             (Self::Timestamp(ts), Some(Timestamp), Time) => {
-                Ok(Cow::Owned(Self::Time(ts.time().into())))
+                Ok(Self::Time(ts.time().into()))
             }
             (Self::Timestamp(ts), Some(Timestamp), TimestampTz) => {
-                Ok(Cow::Owned(Self::from(FixedOffset::west(0).from_utc_datetime(ts))))
+                Ok(Self::from(FixedOffset::west(0).from_utc_datetime(ts)))
             }
-            (_, Some(Timestamp), DateTime(_)) => Ok(Cow::Borrowed(self)),
+            (_, Some(Timestamp), DateTime(_)) => Ok(self.clone()),
             (Self::TimestampTz(ref ts), Some(Timestamp), Text | Tinytext | Mediumtext | Varchar(_)) => {
-                Ok(Cow::Owned(ts.to_chrono().format(TIMESTAMP_TZ_FORMAT).to_string().into()))
+                Ok(ts.to_chrono().format(TIMESTAMP_TZ_FORMAT).to_string().into())
             }
             (Self::TimestampTz(ref ts), Some(Timestamp), Date) => {
-                Ok(Cow::Owned(Self::Timestamp(ts.to_chrono().date().naive_utc().and_hms(0, 0, 0))))
+                Ok(Self::Timestamp(ts.to_chrono().date().naive_utc().and_hms(0, 0, 0)))
             }
             (Self::TimestampTz(ref ts), Some(Timestamp), Time) => {
-                Ok(Cow::Owned(Self::Time(ts.to_chrono().time().into())))
+                Ok(Self::Time(ts.to_chrono().time().into()))
             }
-            (_, Some(Int(_)), Bigint(_) | BigSerial) => Ok(Cow::Owned(DataType::Int(i64::try_from(self)?))),
+            (_, Some(Int(_)), Bigint(_) | BigSerial) => Ok(DataType::Int(i64::try_from(self)?)),
             (Self::Float(f, _), Some(Float), Tinyint(_) | Smallint(_) | Int(_)) => {
-                Ok(Cow::Owned(DataType::Int(f.round() as i64)))
+                Ok(DataType::Int(f.round() as i64))
             }
             (Self::Float(f, _), Some(_), Bigint(_) | BigSerial) => {
-                Ok(Cow::Owned(DataType::Int(f.round() as i64)))
+                Ok(DataType::Int(f.round() as i64))
             }
             (Self::Float(f, prec), Some(_), Double) => {
-                Ok(Cow::Owned(DataType::Double(*f as f64, *prec)))
+                Ok(DataType::Double(*f as f64, *prec))
             }
             (Self::Float(f, _), Some(_), Numeric(_)) => rust_decimal::Decimal::from_f32(*f)
                 .ok_or_else(|| mk_err(
@@ -572,23 +565,23 @@ impl DataType {
                     ),
                     None,
                 ))
-                .map(|d| Cow::Owned(DataType::from(d))),
+                .map( DataType::from),
             (
                 Self::Float(f, _),
                 Some(Float),
                 UnsignedTinyint(_) | UnsignedSmallint(_) | UnsignedInt(_),
-            ) => Ok(Cow::Owned(DataType::UnsignedInt(
+            ) => Ok(DataType::UnsignedInt(
                 u64::try_from(f.round() as i32).map_err(|e| {
                     mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
                 })?,
-            ))),
-            (Self::Double(f, _), Some(Real), Tinyint(_) | Smallint(_) | Int(_) | Serial) => Ok(Cow::Owned(
-                DataType::Int(f.round() as i64)
             )),
+            (Self::Double(f, _), Some(Real), Tinyint(_) | Smallint(_) | Int(_) | Serial) => Ok(
+                DataType::Int(f.round() as i64)
+            ),
             (Self::Double(f, prec), Some(_), Float) => {
                 let float = *f as f32;
                 if float.is_finite() {
-                    Ok(Cow::Owned(DataType::Float(*f as f32, *prec)))
+                    Ok(DataType::Float(*f as f32, *prec))
                 } else {
                     Err(mk_err(
                         "Could not convert numeric types: infinite value is not supported"
@@ -605,24 +598,24 @@ impl DataType {
                     ),
                     None,
                 ))
-                .map(|d| Cow::Owned(DataType::from(d))),
+                .map(DataType::from),
             (Self::Double(f, _), Some(_), Bigint(_) | BigSerial) => {
-                Ok(Cow::Owned(DataType::Int(f.round() as i64)))
+                Ok(DataType::Int(f.round() as i64))
             }
             (
                 Self::Double(f, _),
                 Some(Real),
                 UnsignedTinyint(_) | UnsignedSmallint(_) | UnsignedInt(_),
-            ) => Ok(Cow::Owned(DataType::UnsignedInt(
+            ) => Ok(DataType::UnsignedInt(
                 u64::try_from(f.round() as i64).map_err(|e| {
                     mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
                 })?,
-            ))),
-            (Self::Double(f, _), Some(Real), UnsignedBigint(_)) => Ok(Cow::Owned(
+            )),
+            (Self::Double(f, _), Some(Real), UnsignedBigint(_)) => Ok(
                 DataType::UnsignedInt(u64::try_from(f.round() as i64).map_err(|e| {
                     mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
                 })?),
-            )),
+            ),
             (Self::Numeric(d), Some(Numeric(_)), Tinyint(_) | Smallint(_) | Int(_) | Serial) => d
                 .to_i64()
                 .ok_or_else(|| mk_err(
@@ -632,7 +625,7 @@ impl DataType {
                     ),
                     None,
                 ))
-                .map(|i| Cow::Owned(DataType::Int(i))),
+                .map(DataType::Int),
             (Self::Numeric(d), Some(_), Float) => d
                 .to_f32()
                 .ok_or_else(|| mk_err(
@@ -642,7 +635,7 @@ impl DataType {
                     ),
                     None,
                 ))
-                .map(|f| Cow::Owned(DataType::Float(f, u8::MAX))),
+                .map(|f| DataType::Float(f, u8::MAX)),
             (Self::Numeric(d), Some(_), Double) => d.to_f64()
                 .ok_or_else(|| mk_err(
                     format!(
@@ -651,7 +644,7 @@ impl DataType {
                     ),
                     None,
                 ))
-                .map(|f| Cow::Owned(DataType::Double(f, u8::MAX))),
+                .map(|f| DataType::Double(f, u8::MAX)),
             (Self::Numeric(d), Some(_), Bigint(_) | BigSerial) => d
                 .to_i64()
                 .ok_or_else(|| mk_err(
@@ -661,7 +654,7 @@ impl DataType {
                     ),
                     None,
                 ))
-                .map(|i| Cow::Owned(DataType::Int(i))),
+                .map(DataType::from),
             (
                 Self::Numeric(d),
                 Some(Numeric(_)),
@@ -675,7 +668,7 @@ impl DataType {
                     ),
                     None,
                 ))
-                .map(|i| Cow::Owned(DataType::UnsignedInt(i))),
+                .map(DataType::from),
             (Self::Numeric(d), Some(Numeric(_)), UnsignedBigint(_)) => d
                 .to_u64()
                 .ok_or_else(|| mk_err(
@@ -685,11 +678,11 @@ impl DataType {
                     ),
                     None,
                 ))
-                .map(|i| Cow::Owned(DataType::UnsignedInt(i))),
+                .map(DataType::from),
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Tinyint(_)) => {
                 <&str>::try_from(self)?
                     .parse::<i8>()
-                    .map(|x| (Cow::Owned(DataType::from(x))))
+                    .map( DataType::from)
                     .map_err(|e| {
                         mk_err("Could not parse value as number".to_owned(), Some(e.into()))
                     })
@@ -697,19 +690,19 @@ impl DataType {
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Smallint(_)) => {
                 <&str>::try_from(self)?
                     .parse::<i16>()
-                    .map(|x| (Cow::Owned(DataType::from(x))))
+                    .map( DataType::from)
                     .map_err(|e| {
                         mk_err("Could not parse value as number".to_owned(), Some(e.into()))
                     })
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Int(_) | Serial) => <&str>::try_from(self)?
                 .parse::<i32>()
-                .map(|x| (Cow::Owned(DataType::from(x))))
+                .map(DataType::from)
                 .map_err(|e| mk_err("Could not parse value as number".to_owned(), Some(e.into()))),
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Bigint(_) | BigSerial) => {
                 <&str>::try_from(self)?
                     .parse::<i64>()
-                    .map(|x| (Cow::Owned(DataType::from(x))))
+                    .map( DataType::from)
                     .map_err(|e| {
                         mk_err("Could not parse value as number".to_owned(), Some(e.into()))
                     })
@@ -717,7 +710,7 @@ impl DataType {
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), UnsignedTinyint(_)) => {
                 <&str>::try_from(self)?
                     .parse::<u8>()
-                    .map(|x| (Cow::Owned(DataType::from(x))))
+                    .map( DataType::from)
                     .map_err(|e| {
                         mk_err("Could not parse value as number".to_owned(), Some(e.into()))
                     })
@@ -725,7 +718,7 @@ impl DataType {
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), UnsignedSmallint(_)) => {
                 <&str>::try_from(self)?
                     .parse::<u16>()
-                    .map(|x| (Cow::Owned(DataType::from(x))))
+                    .map( DataType::from)
                     .map_err(|e| {
                         mk_err("Could not parse value as number".to_owned(), Some(e.into()))
                     })
@@ -733,7 +726,7 @@ impl DataType {
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), UnsignedInt(_)) => {
                 <&str>::try_from(self)?
                     .parse::<u32>()
-                    .map(|x| (Cow::Owned(DataType::from(x))))
+                    .map( DataType::from)
                     .map_err(|e| {
                         mk_err("Could not parse value as number".to_owned(), Some(e.into()))
                     })
@@ -741,7 +734,7 @@ impl DataType {
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), UnsignedBigint(_)) => {
                 <&str>::try_from(self)?
                     .parse::<u64>()
-                    .map(|x| (Cow::Owned(DataType::from(x))))
+                    .map( DataType::from)
                     .map_err(|e| {
                         mk_err("Could not parse value as number".to_owned(), Some(e.into()))
                     })
@@ -754,7 +747,7 @@ impl DataType {
                         Some(e.into()),
                     )
                 })?;
-                Ok(Cow::Borrowed(self))
+                Ok(self.clone())
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), MacAddr) => {
                 MacAddress::parse_str(<&str>::try_from(self)?).map_err(|e| {
@@ -763,7 +756,7 @@ impl DataType {
                         Some(e.into()),
                     )
                 })?;
-                Ok(Cow::Borrowed(self))
+                Ok(self.clone())
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Uuid) => {
                 // We perform this parsing just to validate that the string
@@ -774,14 +767,14 @@ impl DataType {
                         Some(e.into()),
                     )
                 })?;
-                Ok(Cow::Borrowed(self))
+                Ok(self.clone())
             }
             (Self::BitVector(_), Some(Bit(size_opt)), Varbit(max_size_opt)) => {
                 let size = size_opt.unwrap_or(1);
                 match max_size_opt {
                     Some(max_size) if size > *max_size =>
                         Err(mk_err(format!("Cannot coerce BIT({}) to VARBIT({})", size, max_size), None)),
-                    _ => Ok(Cow::Borrowed(self))
+                    _ => Ok(self.clone())
                 }
             }
             (Self::BitVector(ref bits), Some(Varbit(max_size_opt)), Bit(size_opt)) => {
@@ -792,7 +785,7 @@ impl DataType {
                     _ => if bits.len() as u16 != size {
                         Err(mk_err(format!("Cannot coerce VARBIT to BIT({}). VARBIT has length {}", size, bits.len()), None))
                     } else {
-                        Ok(Cow::Borrowed(self))
+                        Ok(self.clone())
                     }
                 }
             }
@@ -1450,10 +1443,10 @@ impl TryFrom<DataType> for Literal {
             DataType::Text(_) => Ok(Literal::String(String::try_from(dt)?)),
             DataType::TinyText(_) => Ok(Literal::String(String::try_from(dt)?)),
             DataType::Timestamp(_) | DataType::TimestampTz(_) => Ok(Literal::String(
-                String::try_from(dt.coerce_to(&SqlType::Text)?.as_ref())?,
+                String::try_from(dt.coerce_to(&SqlType::Text)?)?,
             )),
             DataType::Time(_) => Ok(Literal::String(String::try_from(
-                dt.coerce_to(&SqlType::Text)?.as_ref(),
+                dt.coerce_to(&SqlType::Text)?,
             )?)),
             DataType::ByteArray(ref array) => Ok(Literal::ByteArray(array.as_ref().clone())),
             DataType::Numeric(ref d) => Ok(Literal::Numeric(d.mantissa(), d.scale())),
@@ -3458,7 +3451,7 @@ mod tests {
         #[proptest]
         fn same_type_is_identity(dt: DataType) {
             if let Some(ty) = dt.sql_type() {
-                assert_eq!(dt.coerce_to(&ty).as_deref().unwrap(), &dt);
+                assert_eq!(dt.coerce_to(&ty).unwrap(), dt);
             }
         }
 
@@ -3467,7 +3460,7 @@ mod tests {
             let expected = DataType::from(ndt);
             let input = DataType::try_from(ndt.format(TIMESTAMP_FORMAT).to_string()).unwrap();
             let result = input.coerce_to(&Timestamp).unwrap();
-            assert_eq!(*result, expected);
+            assert_eq!(result, expected);
         }
 
         #[proptest]
@@ -3475,7 +3468,7 @@ mod tests {
             let expected = DataType::from(nt);
             let input = DataType::try_from(nt.format(TIME_FORMAT).to_string()).unwrap();
             let result = input.coerce_to(&Time).unwrap();
-            assert_eq!(*result, expected);
+            assert_eq!(result, expected);
         }
 
         #[proptest]
@@ -3484,7 +3477,7 @@ mod tests {
             let expected = DataType::from(dt);
             let input = DataType::try_from(dt.format(TIMESTAMP_FORMAT).to_string()).unwrap();
             let result = input.coerce_to(&SqlType::DateTime(None)).unwrap();
-            assert_eq!(*result, expected);
+            assert_eq!(result, expected);
         }
 
         #[proptest]
@@ -3492,18 +3485,18 @@ mod tests {
             let expected = DataType::from(NaiveDateTime::new(nd, NaiveTime::from_hms(0, 0, 0)));
             let input = DataType::try_from(nd.format(DATE_FORMAT).to_string()).unwrap();
             let result = input.coerce_to(&Date).unwrap();
-            assert_eq!(*result, expected);
+            assert_eq!(result, expected);
         }
 
         #[test]
         fn timestamp_surjections() {
             let input = DataType::from(NaiveDate::from_ymd(2021, 3, 17).and_hms(11, 34, 56));
             assert_eq!(
-                *input.coerce_to(&Date).unwrap(),
+                input.coerce_to(&Date).unwrap(),
                 NaiveDate::from_ymd(2021, 3, 17).into()
             );
             assert_eq!(
-                *input.coerce_to(&Time).unwrap(),
+                input.coerce_to(&Time).unwrap(),
                 NaiveTime::from_hms(11, 34, 56).into()
             );
         }
@@ -3516,7 +3509,7 @@ mod tests {
             let input = DataType::from(ndt);
             assert_eq!(
                 input.clone().coerce_to(&SqlType::DateTime(prec)).unwrap(),
-                Cow::Owned(input)
+                input
             );
         }
 
@@ -3527,7 +3520,7 @@ mod tests {
                     let input = <$from>::try_from(source);
                     prop_assume!(input.is_ok());
                     assert_eq!(
-                        *DataType::from(input.unwrap())
+                        DataType::from(input.unwrap())
                             .coerce_to(&$sql_type)
                             .unwrap(),
                         DataType::from(source)
@@ -3559,7 +3552,7 @@ mod tests {
                 fn $name(source: $from) {
                     if (source as $to).is_finite() {
                         assert_eq!(
-                            *DataType::try_from(source)
+                            DataType::try_from(source)
                                 .unwrap()
                                 .coerce_to(&$sql_type)
                                 .unwrap(),
@@ -3583,7 +3576,7 @@ mod tests {
             let expected = rust_decimal::Decimal::from_f32(source);
             if expected.is_some() {
                 assert_eq!(
-                    *DataType::try_from(source)
+                    DataType::try_from(source)
                         .unwrap()
                         .coerce_to(&SqlType::Numeric(None))
                         .unwrap(),
@@ -3604,7 +3597,7 @@ mod tests {
             let expected = rust_decimal::Decimal::from_f64(source);
             if expected.is_some() {
                 assert_eq!(
-                    *DataType::try_from(source)
+                    DataType::try_from(source)
                         .unwrap()
                         .coerce_to(&SqlType::Numeric(None))
                         .unwrap(),
@@ -3627,7 +3620,7 @@ mod tests {
         fn double_to_int(whole_part: i32, #[strategy(int_type())] int_type: SqlType) {
             let double = DataType::Double(whole_part as f64, 0);
             let result = double.coerce_to(&int_type).unwrap();
-            assert_eq!(i32::try_from(result.into_owned()).unwrap(), whole_part);
+            assert_eq!(i32::try_from(result).unwrap(), whole_part);
         }
 
         #[proptest]
@@ -3635,10 +3628,7 @@ mod tests {
             let decimal = rust_decimal::Decimal::from_i32(whole_part);
             prop_assume!(decimal.is_some());
             let decimal = decimal.unwrap();
-            let result = DataType::from(decimal)
-                .coerce_to(&int_type)
-                .unwrap()
-                .into_owned();
+            let result = DataType::from(decimal).coerce_to(&int_type).unwrap();
             assert_eq!(i32::try_from(result).unwrap(), whole_part)
         }
 
@@ -3659,7 +3649,7 @@ mod tests {
         ) {
             let double = DataType::Double(whole_part as f64, 0);
             let result = double.coerce_to(&unsigned_type).unwrap();
-            assert_eq!(u32::try_from(result.into_owned()).unwrap(), whole_part);
+            assert_eq!(u32::try_from(result).unwrap(), whole_part);
         }
 
         #[proptest]
@@ -3667,10 +3657,7 @@ mod tests {
             let decimal = rust_decimal::Decimal::from_u8(whole_part);
             prop_assume!(decimal.is_some());
             let decimal = decimal.unwrap();
-            let result = DataType::from(decimal)
-                .coerce_to(&int_type)
-                .unwrap()
-                .into_owned();
+            let result = DataType::from(decimal).coerce_to(&int_type).unwrap();
             assert_eq!(u32::try_from(result).unwrap(), whole_part as u32)
         }
 
@@ -3680,20 +3667,17 @@ mod tests {
             let input = DataType::try_from(text.as_str()).unwrap();
             let intermediate = Char(Some(u16::try_from(text.len()).unwrap()));
             let result = input.coerce_to(&intermediate).unwrap();
-            assert_eq!(
-                String::try_from(&result.into_owned()).unwrap().as_str(),
-                text.as_str()
-            );
+            assert_eq!(String::try_from(&result).unwrap().as_str(), text.as_str());
         }
 
         #[test]
         fn text_to_json() {
             let input = DataType::from("{\"name\": \"John Doe\", \"age\": 43, \"phones\": [\"+44 1234567\", \"+44 2345678\"] }");
             let result = input.coerce_to(&SqlType::Json).unwrap();
-            assert_eq!(&input, result.as_ref());
+            assert_eq!(input, result);
 
             let result = input.coerce_to(&SqlType::Jsonb).unwrap();
-            assert_eq!(&input, result.as_ref());
+            assert_eq!(input, result);
 
             let input = DataType::from("not a json");
             let result = input.coerce_to(&SqlType::Json);
@@ -3707,14 +3691,14 @@ mod tests {
         fn text_to_macaddr() {
             let input = DataType::from("12:34:56:AB:CD:EF");
             let result = input.coerce_to(&SqlType::MacAddr).unwrap();
-            assert_eq!(&input, result.as_ref());
+            assert_eq!(input, result);
         }
 
         #[test]
         fn text_to_uuid() {
             let input = DataType::from(uuid::Uuid::new_v4().to_string());
             let result = input.coerce_to(&SqlType::Uuid).unwrap();
-            assert_eq!(&input, result.as_ref());
+            assert_eq!(input, result);
         }
 
         macro_rules! bool_conversion {
@@ -3724,7 +3708,7 @@ mod tests {
                     let input_dt = DataType::from(input);
                     let result = input_dt.coerce_to(&SqlType::Bool).unwrap();
                     let expected = DataType::from(input != 0);
-                    assert_eq!(result.as_ref(), &expected);
+                    assert_eq!(result, expected);
                 }
             };
         }
