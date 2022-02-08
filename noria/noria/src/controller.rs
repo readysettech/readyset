@@ -12,6 +12,7 @@ use hyper::client::HttpConnector;
 use noria_errors::{
     internal, internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult,
 };
+use parking_lot::RwLock;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 use tower::buffer::Buffer;
@@ -47,6 +48,9 @@ pub struct ControllerDescriptor {
 struct Controller {
     authority: Arc<Authority>,
     client: hyper::Client<hyper::client::HttpConnector>,
+    /// The last valid leader URL seen by this service. Used to circumvent requests to Consul in
+    /// the happy-path.
+    leader_url: Arc<RwLock<Option<Url>>>,
 }
 
 #[derive(Debug)]
@@ -83,6 +87,7 @@ impl Service<ControllerRequest> for Controller {
     fn call(&mut self, req: ControllerRequest) -> Self::Future {
         let client = self.client.clone();
         let auth = self.authority.clone();
+        let leader_url = self.leader_url.clone();
         let request_timeout = req.timeout.unwrap_or(Duration::MAX);
         let path = req.path;
         let body = req.request;
@@ -90,7 +95,8 @@ impl Service<ControllerRequest> for Controller {
         let mut last_error_desc: Option<String> = None;
 
         async move {
-            let mut url = None;
+            let original_url = leader_url.read().clone();
+            let mut url = original_url.clone();
 
             loop {
                 let elapsed = Instant::now().duration_since(start);
@@ -101,19 +107,18 @@ impl Service<ControllerRequest> for Controller {
                     );
                 }
                 if url.is_none() {
-                    // TODO: cache this value?
                     let descriptor: ControllerDescriptor =
                         auth.get_leader().await.map_err(|e| {
                             internal_err(format!("failed to get current leader: {}", e))
                         })?;
 
-                    url = Some(descriptor.controller_uri.join(path)?);
+                    url = Some(descriptor.controller_uri);
                 }
 
                 // FIXME(eta): error[E0277]: the trait bound `Uri: From<&Url>` is not satisfied
                 //             (if you try and use the `url` directly instead of stringifying)
                 #[allow(clippy::unwrap_used)]
-                let string_url = url.as_ref().unwrap().to_string();
+                let string_url = url.as_ref().unwrap().join(path)?.to_string();
                 let r = hyper::Request::post(string_url)
                     .body(hyper::Body::from(body.clone()))
                     .map_err(|e| internal_err(format!("http request failed: {}", e)))?;
@@ -142,7 +147,14 @@ impl Service<ControllerRequest> for Controller {
                     .map_err(|he| internal_err(format!("hyper response failed: {}", he)))?;
 
                 match status {
-                    hyper::StatusCode::OK => return Ok(body),
+                    hyper::StatusCode::OK => {
+                        // If all went well update the leader url if it changed.
+                        if url != original_url {
+                            *leader_url.write() = url;
+                        }
+
+                        return Ok(body);
+                    }
                     hyper::StatusCode::INTERNAL_SERVER_ERROR => {
                         let err: ReadySetError = bincode::deserialize(&body)?;
                         return Err(err);
@@ -236,6 +248,7 @@ impl ControllerHandle {
                                 request_timeout.unwrap_or(Duration::from_secs(20)),
                             )
                             .build(http_connector),
+                        leader_url: Arc::new(RwLock::new(None)),
                     },
                     request_timeout.unwrap_or(Duration::MAX),
                 ),

@@ -1220,8 +1220,10 @@ impl NoriaConnector {
 
         trace!(%qname, "query::select::do");
         let res = do_read(getter, &query, keys, ticket).await;
-        if res.is_err() {
-            self.failed_views.insert(qname.to_owned());
+        if let Err(e) = res.as_ref() {
+            if e.is_networking_related() {
+                self.failed_views.insert(qname.to_owned());
+            }
         }
 
         res

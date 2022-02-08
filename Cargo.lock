@@ -3522,6 +3522,7 @@ dependencies = [
  "nom-sql",
  "noria-data",
  "noria-errors",
+ "parking_lot",
  "petgraph",
  "pin-project",
  "proptest",
