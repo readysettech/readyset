@@ -1030,6 +1030,12 @@ impl SqlIncorporator {
 
         Ok(qfp)
     }
+
+    /// Upgrades the schema version for the
+    /// internal [`SqlToMirConverter`].
+    pub(super) fn upgrade_version(&mut self) {
+        self.mir_converter.upgrade_version();
+    }
 }
 
 /// Enables incorporation of a textual SQL query into a Soup graph.

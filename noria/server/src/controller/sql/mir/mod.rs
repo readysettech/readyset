@@ -1856,4 +1856,9 @@ impl SqlToMirConverter {
         // finally, we output all the nodes we generated
         Ok(nodes_added)
     }
+
+    /// Upgrades the schema version of the MIR nodes.
+    pub(super) fn upgrade_version(&mut self) {
+        self.schema_version += 1;
+    }
 }
