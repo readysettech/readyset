@@ -8,7 +8,8 @@ use itertools::Either;
 use launchpad::Indices;
 use nom_sql::OrderType;
 use noria::util::like::{CaseSensitivityMode, LikePattern};
-use noria::{ViewQueryFilter, ViewQueryOperator};
+use noria::{ReadySetResult, ViewQueryFilter, ViewQueryOperator};
+use noria_errors::internal_err;
 use serde::{Deserialize, Serialize};
 
 /// Representation of an aggregate function
@@ -34,19 +35,19 @@ impl PostLookupAggregateFunction {
     /// Apply this aggregate function to the two input values
     ///
     /// This forms a semigroup.
-    fn apply(&self, val1: &DataType, val2: &DataType) -> DataType {
+    fn apply(&self, val1: &DataType, val2: &DataType) -> ReadySetResult<DataType> {
         match self {
-            PostLookupAggregateFunction::Sum => (val1 + val2).unwrap(),
-            PostLookupAggregateFunction::Product => (val1 * val2).unwrap(),
-            PostLookupAggregateFunction::GroupConcat { separator } => format!(
+            PostLookupAggregateFunction::Sum => (val1 + val2),
+            PostLookupAggregateFunction::Product => (val1 * val2),
+            PostLookupAggregateFunction::GroupConcat { separator } => Ok(format!(
                 "{}{}{}",
-                String::try_from(val1).unwrap(),
+                String::try_from(val1)?,
                 separator,
-                String::try_from(val2).unwrap()
+                String::try_from(val2)?
             )
-            .into(),
-            PostLookupAggregateFunction::Max => cmp::max(val1, val2).clone(),
-            PostLookupAggregateFunction::Min => cmp::min(val1, val2).clone(),
+            .into()),
+            PostLookupAggregateFunction::Max => Ok(cmp::max(val1, val2).clone()),
+            PostLookupAggregateFunction::Min => Ok(cmp::min(val1, val2).clone()),
         }
     }
 }
@@ -86,24 +87,24 @@ pub struct PostLookupAggregates<Column = usize> {
 
 impl PostLookupAggregates {
     /// Process the given set of rows by performing the aggregates in self on all input values
-    #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
-    // unfortunately, none of the post-lookup path can return an error right now, because of the way
-    // misses get reported - we should fix that at some point, but for now the only choice we have
-    // is unwrapping and indexing-slicing. Fortunately all of the unwrapping/panicking we're doing
-    // will only happen if we get rows that're the wrong length or contain the wrong types.
-    fn process<'a, I>(&self, iter: I) -> impl Iterator<Item = Vec<Cow<'a, DataType>>>
+    fn process<'a, I>(
+        &self,
+        iter: I,
+    ) -> ReadySetResult<impl Iterator<Item = Vec<Cow<'a, DataType>>>>
     where
         I: Iterator<Item = Vec<Cow<'a, DataType>>>,
     {
         let mut groups: HashMap<Vec<Cow<DataType>>, Vec<Cow<DataType>>> = HashMap::new();
         for row in iter {
-            let group_key = row.cloned_indices(self.group_by.iter().copied()).unwrap();
+            let group_key = row
+                .cloned_indices(self.group_by.iter().copied())
+                .map_err(|_| internal_err("Wrong length row provided to post_lookup"))?;
             match groups.entry(group_key) {
                 hash_map::Entry::Occupied(entry) => {
                     let out_row = entry.into_mut();
                     for agg in &self.aggregates {
                         out_row[agg.column] =
-                            Cow::Owned(agg.function.apply(&out_row[agg.column], &row[agg.column]));
+                            Cow::Owned(agg.function.apply(&out_row[agg.column], &row[agg.column])?);
                     }
                 }
                 hash_map::Entry::Vacant(entry) => {
@@ -111,7 +112,7 @@ impl PostLookupAggregates {
                 }
             }
         }
-        groups.into_values()
+        Ok(groups.into_values())
     }
 }
 
@@ -179,21 +180,21 @@ impl PostLookup {
         &'a self,
         iter: I,
         filters: &[ViewQueryFilter],
-    ) -> Vec<Vec<Cow<'a, DataType>>>
+    ) -> ReadySetResult<Vec<Vec<Cow<'a, DataType>>>>
     where
         I: Iterator<Item = &'b Box<[DataType]>> + ExactSizeIterator,
         Self: 'a,
     {
         let data = iter.map(|r| r.iter().map(Cow::Borrowed).collect::<Vec<_>>());
         if self.is_empty() && filters.is_empty() {
-            return data.collect::<Vec<_>>();
+            return Ok(data.collect::<Vec<_>>());
         }
 
         // If no data is present AND we have default values (e.g. we're aggregating), we can
         // short-circuit here and just return the defaults.
         if data.len() == 0 {
             if let Some(defaults) = self.default_row.as_ref() {
-                return vec![defaults.iter().map(Cow::Borrowed).collect()];
+                return Ok(vec![defaults.iter().map(Cow::Borrowed).collect()]);
             }
         }
 
@@ -258,7 +259,7 @@ impl PostLookup {
         });
 
         let aggregated = if let Some(aggs) = &self.aggregates {
-            Either::Left(aggs.process(filtered))
+            Either::Left(aggs.process(filtered)?)
         } else {
             Either::Right(filtered)
         };
@@ -268,17 +269,17 @@ impl PostLookup {
         let returned_cols = if let Some(c) = &self.returned_cols {
             c
         } else {
-            return ordered_limited.collect();
+            return Ok(ordered_limited.collect());
         };
 
-        ordered_limited
+        Ok(ordered_limited
             .map(|row| {
                 returned_cols
                     .iter()
                     .map(|i| row[*i].clone())
                     .collect::<Vec<_>>()
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>())
     }
 }
 
@@ -400,7 +401,7 @@ mod tests {
             ];
 
             let post_lookup = PostLookup::default();
-            let result = post_lookup.process(records.iter(), &[filter]);
+            let result = post_lookup.process(records.iter(), &[filter]).unwrap();
 
             assert_eq!(
                 result,
@@ -425,7 +426,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let result = post_lookup.process(records.iter(), &[]);
+            let result = post_lookup.process(records.iter(), &[]).unwrap();
 
             assert_eq!(
                 result,
@@ -450,7 +451,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let result = post_lookup.process(records.iter(), &[]);
+            let result = post_lookup.process(records.iter(), &[]).unwrap();
 
             assert_eq!(
                 result,
@@ -477,7 +478,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let result = post_lookup.process(records.iter(), &[]);
+            let result = post_lookup.process(records.iter(), &[]).unwrap();
 
             assert_eq!(
                 result,
@@ -504,7 +505,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let mut result = post_lookup.process(records.iter(), &[]);
+            let mut result = post_lookup.process(records.iter(), &[]).unwrap();
             result.sort();
 
             assert_eq!(
@@ -539,7 +540,7 @@ mod tests {
                 value: 1.into(),
             };
 
-            let result = post_lookup.process(records.iter(), &[filter]);
+            let result = post_lookup.process(records.iter(), &[filter]).unwrap();
 
             assert_eq!(result.len(), 3);
             assert_eq!(
@@ -587,7 +588,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let result = post_lookup.process(records.iter(), &[filter]);
+            let result = post_lookup.process(records.iter(), &[filter]).unwrap();
 
             assert_eq!(result.len(), 1);
             assert_eq!(

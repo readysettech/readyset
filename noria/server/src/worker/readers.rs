@@ -159,6 +159,12 @@ impl ReadRequestHandler {
                         ready = false;
                         ret.push(SerializedReadReplyBatch::empty());
                     }
+                    Err(Error(e)) => {
+                        return Ok(Ok(Tagged {
+                            tag,
+                            v: ReadReply::Normal(Err(e)),
+                        }))
+                    }
                     Err(miss) => {
                         // need to trigger partial replay for this key
                         ret.push(SerializedReadReplyBatch::empty());
@@ -220,7 +226,7 @@ impl ReadRequestHandler {
             if !ready {
                 return Ok(Ok(Tagged {
                     tag,
-                    v: ReadReply::Normal(Err(())),
+                    v: ReadReply::Normal(Err(ReadySetError::ViewNotYetAvailable)),
                 }));
             }
 
@@ -452,8 +458,8 @@ fn do_lookup(
     if let Some(equal) = &key.equal() {
         reader
             .try_find_and(*equal, |rs| {
-                let filtered = reader.post_lookup.process(rs, filters);
-                serialize(filtered)
+                let filtered = reader.post_lookup.process(rs, filters)?;
+                Ok(serialize(filtered))
             })
             .map(|r| r.0)
     } else {
@@ -463,13 +469,12 @@ fn do_lookup(
         }
 
         reader
-            .try_find_range_and(&key, |r| r.into_iter().cloned().collect::<Vec<_>>())
-            .map(|(rs, _)| {
-                serialize(
-                    reader
-                        .post_lookup
-                        .process(rs.into_iter().flatten().collect::<Vec<_>>().iter(), filters),
-                )
+            .try_find_range_and(&key, |r| Ok(r.into_iter().cloned().collect::<Vec<_>>()))
+            .and_then(|(rs, _)| {
+                Ok(serialize(reader.post_lookup.process(
+                    rs.into_iter().flatten().collect::<Vec<_>>().iter(),
+                    filters,
+                )?))
             })
     }
 }
@@ -636,7 +641,7 @@ impl BlockingRead {
 mod readreply {
     use std::borrow::Cow;
 
-    use noria::{ReadReply, Tagged};
+    use noria::{ReadReply, ReadySetError, Tagged};
     use noria_data::DataType;
 
     use super::SerializedReadReplyBatch;
@@ -740,7 +745,9 @@ mod readreply {
         let got: Tagged<ReadReply> = bincode::deserialize(
             &bincode::serialize(&Tagged {
                 tag: 32,
-                v: ReadReply::Normal::<SerializedReadReplyBatch>(Err(())),
+                v: ReadReply::Normal::<SerializedReadReplyBatch>(Err(
+                    ReadySetError::ViewNotYetAvailable,
+                )),
             })
             .unwrap(),
         )
@@ -750,7 +757,7 @@ mod readreply {
             got,
             Tagged {
                 tag: 32,
-                v: ReadReply::Normal(Err(()))
+                v: ReadReply::Normal(Err(ReadySetError::ViewNotYetAvailable))
             }
         ));
     }
