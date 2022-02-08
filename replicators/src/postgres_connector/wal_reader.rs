@@ -3,7 +3,6 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 use bit_vec::BitVec;
-use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime};
 use mysql_time::MysqlTime;
 use noria::{ReadySetError, ReadySetResult};
 use noria_data::DataType;
@@ -267,53 +266,18 @@ impl wal::TupleData {
                         PGType::JSONB => serde_json::from_str::<serde_json::Value>(str.as_ref())
                             .map_err(|e| WalError::JsonParseError(e.to_string()))
                             .map(|v| DataType::from(v.to_string()))?,
-                        PGType::TIMESTAMP => DataType::Timestamp({
-                            // If there is a dot, there is a microseconds field attached
-                            if let Some((time, micro)) = &str.split_once('.') {
-                                // The usec format in WAL is super dumb, it is actually skipping the
-                                // trailing zeroes, and not the leading zeroes ...
-                                NaiveDateTime::parse_from_str(time, noria_data::TIMESTAMP_FORMAT)?
-                                    + Duration::microseconds(
-                                        micro.parse::<i64>()? * 10i64.pow(6 - micro.len() as u32),
-                                    )
-                            } else {
-                                NaiveDateTime::parse_from_str(&str, noria_data::TIMESTAMP_FORMAT)?
-                            }
-                        }),
-                        PGType::TIMESTAMPTZ => match str.strip_suffix(" BC") {
-                            Some(str_without_epoch) => {
-                                let dt = DateTime::<FixedOffset>::parse_from_str(
-                                    str_without_epoch,
-                                    "%Y-%m-%d %H:%M:%S%#z",
-                                )
-                                .map_err(|_| WalError::TimestampTzParseError)?;
-                                let year = dt.year();
-                                DataType::from(
-                                    dt.with_year(-year + 1)
-                                        .ok_or(WalError::TimestampTzParseError)?,
-                                )
-                            }
-                            None => DataType::from(
-                                DateTime::<FixedOffset>::parse_from_str(
-                                    &str,
-                                    "%Y-%m-%d %H:%M:%S%#z",
-                                )
-                                .map_err(|_| WalError::TimestampTzParseError)?,
-                            ),
-                        },
+                        PGType::TIMESTAMP => DataType::TimestampTz(
+                            str.parse().map_err(|_| WalError::TimestampParseError)?,
+                        ),
+                        PGType::TIMESTAMPTZ => DataType::TimestampTz(
+                            str.parse().map_err(|_| WalError::TimestampTzParseError)?,
+                        ),
                         PGType::BYTEA => hex::decode(str.strip_prefix("\\x").unwrap_or(&str))
                             .map_err(|_| WalError::ByteArrayHexParseError)
                             .map(|bytes| DataType::ByteArray(Arc::new(bytes)))?,
-                        PGType::DATE => DataType::Timestamp({
-                            // WAL is not using negative years, but converts to BC notation instead
-                            if let Some(is_bc) = str.strip_suffix(" BC") {
-                                let d = NaiveDate::parse_from_str(is_bc, noria_data::DATE_FORMAT)?;
-                                NaiveDate::from_ymd(-d.year() + 1, d.month(), d.day())
-                            } else {
-                                NaiveDate::parse_from_str(&str, noria_data::DATE_FORMAT)?
-                            }
-                            .and_hms(0, 0, 0)
-                        }),
+                        PGType::DATE => DataType::TimestampTz(
+                            str.parse().map_err(|_| WalError::DateParseError)?,
+                        ),
                         PGType::TIME => DataType::Time(MysqlTime::from_str(&str)?),
                         PGType::BIT | PGType::VARBIT => {
                             let mut bits = BitVec::with_capacity(str.len());

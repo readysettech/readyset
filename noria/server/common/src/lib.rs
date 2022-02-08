@@ -123,7 +123,7 @@ mod tests {
         let s = "this needs to be longer than 14 chars to make it be a Text";
         let txt: DataType = DataType::from(s);
         let shrt = DataType::Int(5);
-        let time = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
+        let time = DataType::TimestampTz(NaiveDateTime::from_timestamp(0, 42_000_000).into());
 
         let rec = vec![
             DataType::Int(5),

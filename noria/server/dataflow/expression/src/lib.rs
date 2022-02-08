@@ -299,7 +299,7 @@ impl Expression {
                         <&str>::try_from(&param2_cast)?,
                         <&str>::try_from(&param3_cast)?,
                     ) {
-                        Ok(v) => Ok(DataType::Timestamp(v)),
+                        Ok(v) => Ok(DataType::TimestampTz(v.into())),
                         Err(_) => Ok(DataType::None),
                     }
                 }
@@ -363,10 +363,13 @@ impl Expression {
                     }
                     let time_param1 = get_time_or_default!(param1);
                     if time_param1.is_datetime() {
-                        Ok(DataType::Timestamp(addtime_datetime(
-                            &(NaiveDateTime::try_from(&time_param1)?),
-                            &(MysqlTime::try_from(&time_param2)?),
-                        )))
+                        Ok(DataType::TimestampTz(
+                            addtime_datetime(
+                                &(NaiveDateTime::try_from(&time_param1)?),
+                                &(MysqlTime::try_from(&time_param2)?),
+                            )
+                            .into(),
+                        ))
                     } else {
                         Ok(DataType::Time(addtime_times(
                             &(MysqlTime::try_from(&time_param1)?),
@@ -1008,10 +1011,13 @@ mod tests {
         assert_eq!(
             expr.eval::<DataType>(&[param1.into(), param2.into()])
                 .unwrap(),
-            DataType::Timestamp(NaiveDateTime::new(
-                NaiveDate::from_ymd(2003, 10, 12),
-                NaiveTime::from_hms(9, 27, 6),
-            ))
+            DataType::TimestampTz(
+                NaiveDateTime::new(
+                    NaiveDate::from_ymd(2003, 10, 12),
+                    NaiveTime::from_hms(9, 27, 6),
+                )
+                .into()
+            )
         );
         assert_eq!(
             expr.eval::<DataType>(&[
@@ -1019,19 +1025,25 @@ mod tests {
                 param2.to_string().try_into().unwrap()
             ])
             .unwrap(),
-            DataType::Timestamp(NaiveDateTime::new(
-                NaiveDate::from_ymd(2003, 10, 12),
-                NaiveTime::from_hms(9, 27, 6),
-            ))
+            DataType::TimestampTz(
+                NaiveDateTime::new(
+                    NaiveDate::from_ymd(2003, 10, 12),
+                    NaiveTime::from_hms(9, 27, 6),
+                )
+                .into()
+            )
         );
         let param2 = MysqlTime::from_hmsus(false, 3, 11, 35, 0);
         assert_eq!(
             expr.eval::<DataType>(&[param1.into(), param2.into()])
                 .unwrap(),
-            DataType::Timestamp(NaiveDateTime::new(
-                NaiveDate::from_ymd(2003, 10, 12),
-                NaiveTime::from_hms(2, 1, 58),
-            ))
+            DataType::TimestampTz(
+                NaiveDateTime::new(
+                    NaiveDate::from_ymd(2003, 10, 12),
+                    NaiveTime::from_hms(2, 1, 58),
+                )
+                .into()
+            )
         );
         assert_eq!(
             expr.eval::<DataType>(&[
@@ -1039,10 +1051,13 @@ mod tests {
                 param2.to_string().try_into().unwrap()
             ])
             .unwrap(),
-            DataType::Timestamp(NaiveDateTime::new(
-                NaiveDate::from_ymd(2003, 10, 12),
-                NaiveTime::from_hms(2, 1, 58),
-            ))
+            DataType::TimestampTz(
+                NaiveDateTime::new(
+                    NaiveDate::from_ymd(2003, 10, 12),
+                    NaiveTime::from_hms(2, 1, 58),
+                )
+                .into()
+            )
         );
         let param1 = MysqlTime::from_hmsus(true, 10, 12, 44, 123_000);
         assert_eq!(

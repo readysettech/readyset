@@ -49,11 +49,15 @@ impl TryFrom<Value> for ps::Value {
             (Type::NUMERIC, DataType::Numeric(ref d)) => Ok(ps::Value::Numeric(*d.as_ref())),
             (Type::TEXT, DataType::Text(v)) => Ok(ps::Value::Text(v)),
             (Type::TEXT, DataType::TinyText(t)) => Ok(ps::Value::Text(t.as_str().into())),
-            (Type::TIMESTAMP, DataType::Timestamp(v)) => Ok(ps::Value::Timestamp(v)),
+            (Type::TIMESTAMP, DataType::TimestampTz(v)) => {
+                Ok(ps::Value::Timestamp(v.to_chrono().naive_local()))
+            }
             (Type::TIMESTAMPTZ, DataType::TimestampTz(v)) => {
                 Ok(ps::Value::TimestampTz(v.to_chrono()))
             }
-            (Type::DATE, DataType::Timestamp(v)) => Ok(ps::Value::Date(v.date())),
+            (Type::DATE, DataType::TimestampTz(v)) => {
+                Ok(ps::Value::Date(v.to_chrono().naive_local().date()))
+            }
             (Type::TIME, DataType::Time(t)) => Ok(ps::Value::Time((t).into())),
             (Type::BOOL, DataType::UnsignedInt(v)) => Ok(ps::Value::Bool(v != 0)),
             (Type::BOOL, DataType::Int(v)) => Ok(ps::Value::Bool(v != 0)),
