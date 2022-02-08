@@ -5,7 +5,8 @@ use ahash::RandomState;
 use common::DataType;
 use launchpad::intervals::BoundPair;
 use noria::consistency::Timestamp;
-use noria::KeyComparison;
+use noria::{KeyComparison, ReadySetResult};
+use noria_errors::ReadySetError;
 use reader_map::refs::{Miss, ValuesIter};
 use serde::{Deserialize, Serialize};
 use vec1::{vec1, Vec1};
@@ -25,10 +26,13 @@ pub(super) enum Handle {
 }
 
 /// An error that could occur during an equality or range lookup to a reader node.
-#[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize, Hash)]
+#[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub enum LookupError {
     /// The map is not ready to accept queries
     NotReady,
+
+    /// Some other error occurred during the lookup
+    Error(ReadySetError),
 
     /// A single-keyed point query missed
     ///
@@ -49,6 +53,12 @@ pub enum LookupError {
     ///
     /// Second field contains the metadata of the handle
     MissRangeMany(Vec<BoundPair<Vec<DataType>>>, i64),
+}
+
+impl From<ReadySetError> for LookupError {
+    fn from(err: ReadySetError) -> Self {
+        Self::Error(err)
+    }
 }
 
 impl LookupError {
@@ -76,10 +86,11 @@ impl LookupError {
     }
 
     /// Returns the misses from this LookupError as a list of KeyComparisons. If this LookupError is
-    /// NotReady, the result will be empty
+    /// [`Self::NotReady`] or [`Self::Error`], the result will be empty
     pub fn into_misses(self) -> Vec<KeyComparison> {
         match self {
             LookupError::NotReady => vec![],
+            LookupError::Error(_) => vec![],
             LookupError::MissPointSingle(x, _) => vec![vec1![x].into()],
             LookupError::MissPointMany(xs, _) => vec![xs.try_into().unwrap()],
             LookupError::MissRangeSingle(ranges, _) => ranges
@@ -127,25 +138,25 @@ impl Handle {
 
     pub(super) fn meta_get_and<F, T>(&self, key: &[DataType], then: F) -> LookupResult<T>
     where
-        F: FnOnce(ValuesIter<'_, Box<[DataType]>, RandomState>) -> T,
+        F: FnOnce(ValuesIter<'_, Box<[DataType]>, RandomState>) -> ReadySetResult<T>,
     {
         use LookupError::*;
 
         match *self {
             Handle::Single(ref h) => {
                 assert_eq!(key.len(), 1);
-                let map = h.enter().ok_or(NotReady)?;
+                let map = h.enter().ok_or(ReadySetError::ViewNotYetAvailable)?;
                 let m = *map.meta();
                 let v = map
                     .get(&key[0])
                     .ok_or_else(|| MissPointSingle(key[0].clone(), m))?;
-                Ok((then(v.iter()), m))
+                Ok((then(v.iter())?, m))
             }
             Handle::Many(ref h) => {
                 let map = h.enter().ok_or(NotReady)?;
                 let m = *map.meta();
                 let v = map.get(key).ok_or_else(|| MissPointMany(key.into(), m))?;
-                Ok((then(v.iter()), m))
+                Ok((then(v.iter())?, m))
             }
         }
     }
@@ -177,7 +188,7 @@ impl Handle {
     /// keys.
     pub(super) fn meta_get_range_and<F, T, R>(&self, range: &R, then: F) -> LookupResult<Vec<T>>
     where
-        F: Fn(ValuesIter<'_, Box<[DataType]>, RandomState>) -> T,
+        F: Fn(ValuesIter<'_, Box<[DataType]>, RandomState>) -> ReadySetResult<T>,
         R: RangeBounds<Vec<DataType>>,
     {
         use LookupError::*;
@@ -198,7 +209,12 @@ impl Handle {
                 let records = map
                     .range(&range)
                     .map_err(|Miss(misses)| LookupError::MissRangeSingle(misses, meta))?;
-                Ok((records.map(|(_, row)| then(row.iter())).collect(), meta))
+                Ok((
+                    records
+                        .map(|(_, row)| then(row.iter()))
+                        .collect::<Result<_, _>>()?,
+                    meta,
+                ))
             }
             Handle::Many(ref h) => {
                 let map = h.enter().ok_or(NotReady)?;
@@ -207,7 +223,12 @@ impl Handle {
                 let records = map
                     .range(&range)
                     .map_err(|Miss(misses)| LookupError::MissRangeMany(misses, meta))?;
-                Ok((records.map(|(_, row)| then(row.iter())).collect(), meta))
+                Ok((
+                    records
+                        .map(|(_, row)| then(row.iter()))
+                        .collect::<Result<_, _>>()?,
+                    meta,
+                ))
             }
         }
     }
@@ -280,6 +301,7 @@ mod tests {
             w.publish();
             handle.meta_get_and(&key[..], |result| {
                 assert!(result.eq([&val]));
+                Ok(())
             }).unwrap();
         }
     }
@@ -297,7 +319,7 @@ mod tests {
 
         let (res, meta) = handle
             .meta_get_range_and(&(vec![2i32.into()]..=vec![3i32.into()]), |vals| {
-                vals.into_iter().cloned().collect::<Vec<_>>()
+                Ok(vals.into_iter().cloned().collect::<Vec<_>>())
             })
             .unwrap();
         assert_eq!(
@@ -341,7 +363,7 @@ mod tests {
         let (res, meta) = handle
             .meta_get_range_and(
                 &(vec![2i32.into(), 2i32.into()]..=vec![3i32.into(), 3i32.into()]),
-                |vals| vals.into_iter().cloned().collect::<Vec<_>>(),
+                |vals| Ok(vals.into_iter().cloned().collect::<Vec<_>>()),
             )
             .unwrap();
         assert_eq!(

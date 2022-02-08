@@ -706,12 +706,23 @@ pub enum ReadQuery {
 #[doc(hidden)]
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ReadReply<D = ReadReplyBatch> {
-    /// Errors if view isn't ready yet.
-    Normal(Result<Vec<D>, ()>),
+    /// A reply to a normal lookup request
+    Normal(ReadySetResult<Vec<D>>),
     /// Read size of view
     Size(usize),
     // Read keys of view
     Keys(Vec<Vec<DataType>>),
+}
+
+impl<D> ReadReply<D> {
+    /// Convert this [`ReadReply`] into a [`ReadReply::Normal`], consuming self
+    pub fn into_normal(self) -> Option<ReadySetResult<Vec<D>>> {
+        if let Self::Normal(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
 }
 
 #[doc(hidden)]
@@ -998,14 +1009,17 @@ impl Service<ViewQuery> for View {
                     .call(request)
                     .map_err(rpc_err!("<View as Service<ViewQuery>>::call"))
                     .and_then(move |reply| async move {
-                        match reply.v {
-                            ReadReply::Normal(Ok(rows)) => Ok(rows
-                                .into_iter()
-                                .map(|rows| Results::new(rows.into(), Arc::clone(&columns)))
-                                .collect()),
-                            ReadReply::Normal(Err(())) => Err(ReadySetError::ViewNotYetAvailable),
-                            _ => unreachable!(),
-                        }
+                        reply
+                            .v
+                            .into_normal()
+                            .ok_or_else(|| {
+                                internal_err("Unexpected response type from reader service")
+                            })?
+                            .map(|rows| {
+                                rows.into_iter()
+                                    .map(|rows| Results::new(rows.into(), Arc::clone(&columns)))
+                                    .collect()
+                            })
                     })
                     .map_err(move |e| view_err(ni, e)),
             );
@@ -1067,13 +1081,9 @@ impl Service<ViewQuery> for View {
                         .call(request)
                         .map_err(rpc_err!("<View as Service<ViewQuery>>::call"))
                         .and_then(|reply| async move {
-                            match reply.v {
-                                ReadReply::Normal(Ok(rows)) => Ok(rows),
-                                ReadReply::Normal(Err(())) => {
-                                    Err(ReadySetError::ViewNotYetAvailable)
-                                }
-                                _ => unreachable!(),
-                            }
+                            reply.v.into_normal().ok_or_else(|| {
+                                internal_err("Unexpected response type from reader service")
+                            })?
                         })
                         .map_err(move |e| view_err(ni, e))
                 })

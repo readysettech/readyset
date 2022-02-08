@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use tracing::{trace, warn};
 
 use self::post_lookup::PostLookup;
-use crate::backlog;
 use crate::prelude::*;
+use crate::{backlog, LookupError};
 
 #[derive(Serialize, Deserialize)]
 pub struct Reader {
@@ -184,7 +184,7 @@ impl Reader {
                 m.map_data(|data| {
                     trace!(?data, "reader received regular message");
                     data.retain(|row| {
-                        match state.entry_from_record(&row[..]).try_find_and(|_| ()) {
+                        match state.entry_from_record(&row[..]).try_find_and(|_| Ok(())) {
                             Err(e) if e.is_miss() => {
                                 // row would miss in partial state.
                                 // leave it blank so later lookup triggers replay.
@@ -196,7 +196,7 @@ impl Reader {
                                 // so we can safely keep it up to date.
                                 true
                             }
-                            Err(_) => {
+                            Err(LookupError::NotReady) => {
                                 // If we got here it means we got a `NotReady` error type. This is
                                 // impossible, because when readers are instantiated we issue a
                                 // commit to the underlying map, which makes it Ready.
@@ -204,6 +204,12 @@ impl Reader {
                                     "somehow found a NotReady reader even though we've
                                     already initialized it with a commit"
                                 )
+                            }
+                            Err(_) => {
+                                // The remaining error case here is LookupError::Error, which only
+                                // ever gets constructed from errors returned by the callback passed
+                                // to try_find_and
+                                unreachable!("Callback passed to try_find_and can only return Ok()")
                             }
                         }
                     });
@@ -217,7 +223,7 @@ impl Reader {
                 m.map_data(|data| {
                     trace!(?data, "reader received replay");
                     data.retain(|row| {
-                        match state.entry_from_record(&row[..]).try_find_and(|_| ()) {
+                        match state.entry_from_record(&row[..]).try_find_and(|_| Ok(())) {
                             Err(e) if e.is_miss() => {
                                 // filling a hole with replay -- ok
                                 true
