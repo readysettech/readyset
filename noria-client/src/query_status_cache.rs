@@ -84,6 +84,16 @@ impl ExecutionInfo {
         self.update_inner(ExecutionState::Failed)
     }
 
+    /// Update ExecutionInfo to indicate that a recent execute failed due to some reason other than
+    /// a networking error.
+    pub fn execute_unsupported(&mut self) {
+        if matches!(self.state, ExecutionState::Unsupported) {
+            return;
+        }
+
+        self.update_inner(ExecutionState::Unsupported)
+    }
+
     /// Resets the internal transition time to now. This should be used with extreme caution.
     pub fn reset_transition_time(&mut self) {
         self.last_transition_time = Instant::now();
@@ -128,6 +138,7 @@ pub enum ExecutionState {
     Successful,
     NetworkFailure,
     Failed,
+    Unsupported,
 }
 
 #[derive(Debug, PartialEq, Eq)]
