@@ -1076,7 +1076,7 @@ impl NoriaConnector {
                             )
                         })?
                         .coerce_to(&field.sql_type)?;
-                    buf[ri][idx] = value.into_owned();
+                    buf[ri][idx] = value;
                 }
             }
             Ok(())
@@ -1425,7 +1425,7 @@ fn build_view_query(
                 .iter()
                 .position(|x| x.spec.column.name == col.name)
                 .ok_or_else(|| ReadySetError::NoSuchColumn(col.name.clone()))?;
-            let value = key[idx].coerce_to(key_types.remove(idx))?.into_owned();
+            let value = key[idx].coerce_to(key_types.remove(idx))?;
             if !key.is_empty() {
                 // the LIKE/ILIKE isn't our only key, add the rest back to `keys`
                 raw_keys.push(key);
@@ -1482,7 +1482,7 @@ fn build_view_query(
                                 continue;
                             };
                             // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
-                            let value = key[*idx - 1].coerce_to(key_type)?.into_owned();
+                            let value = key[*idx - 1].coerce_to(key_type)?;
                             if let Some((lower_bound, upper_bound)) = &mut bounds {
                                 let binop = binops[*idx - 1].1;
                                 match binop {
@@ -1535,8 +1535,8 @@ fn build_view_query(
                         ViewPlaceholder::Between(lower_idx, upper_idx) => {
                             let key_type = key_types[key_column_idx];
                             // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
-                            let lower_value = key[*lower_idx - 1].coerce_to(key_type)?.into_owned();
-                            let upper_value = key[*upper_idx - 1].coerce_to(key_type)?.into_owned();
+                            let lower_value = key[*lower_idx - 1].coerce_to(key_type)?;
+                            let upper_value = key[*upper_idx - 1].coerce_to(key_type)?;
                             let (lower_key, upper_key) =
                                 bounds.get_or_insert_with(Default::default);
                             lower_key.push(lower_value);

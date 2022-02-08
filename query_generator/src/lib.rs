@@ -935,9 +935,7 @@ impl From<CreateTableStatement> for TableSpec {
                         field.has_default().and_then(|l| DataType::try_from(l).ok())
                     {
                         // Prefer the specified default value for a field
-                        ColumnGenerator::Constant(
-                            d.coerce_to(&sql_type).unwrap().into_owned().into(),
-                        )
+                        ColumnGenerator::Constant(d.coerce_to(&sql_type).unwrap().into())
                     } else {
                         // Otherwise default to generating fields with a constant value.
                         ColumnGenerator::Constant(sql_type.clone().into())

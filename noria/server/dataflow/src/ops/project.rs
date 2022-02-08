@@ -141,7 +141,7 @@ impl Ingredient for Project {
                 let mut new_r = Vec::with_capacity(r.len());
                 let mut expr: Vec<DataType> = if let Some(ref e) = expressions {
                     e.iter()
-                        .map(|expr| Ok(expr.eval(&r)?.into_owned()))
+                        .map(|expr| expr.eval(&r))
                         .collect::<ReadySetResult<Vec<DataType>>>()?
                 } else {
                     vec![]
@@ -209,7 +209,7 @@ impl Ingredient for Project {
 
                 if let Some(ref e) = self.expressions {
                     new_r.extend(e.iter().map(|expr| match expr.eval(r) {
-                        Ok(val) => val.into_owned(),
+                        Ok(val) => val,
                         Err(e) => {
                             error!(error = %e, "Error evaluating project expression");
                             DataType::None
