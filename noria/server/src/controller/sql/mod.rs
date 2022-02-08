@@ -78,8 +78,6 @@ pub(crate) struct SqlIncorporator {
     base_schemas: HashMap<String, CreateTableStatement>,
     view_schemas: HashMap<String, Vec<String>>,
 
-    schema_version: usize,
-
     pub(crate) config: Config,
 }
 

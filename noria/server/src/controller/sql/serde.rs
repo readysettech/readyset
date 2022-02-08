@@ -77,7 +77,7 @@ impl Serialize for SqlIncorporator {
             // if the key is not a string (i.e., the serde::json).
             mir_queries.insert(qg_hash.to_string(), serialize_mir_query(query));
         }
-        let mut state = serializer.serialize_struct("SqlIncorporator", 11)?;
+        let mut state = serializer.serialize_struct("SqlIncorporator", 10)?;
         state.serialize_field("mir_converter", &self.mir_converter)?;
         state.serialize_field("leaf_addresses", &self.leaf_addresses)?;
         state.serialize_field("named_queries", &self.named_queries)?;
@@ -87,7 +87,6 @@ impl Serialize for SqlIncorporator {
         state.serialize_field("num_queries", &self.num_queries)?;
         state.serialize_field("base_schemas", &self.base_schemas)?;
         state.serialize_field("view_schemas", &self.view_schemas)?;
-        state.serialize_field("schema_version", &self.schema_version)?;
         state.serialize_field("config", &self.config)?;
         state.end()
     }
@@ -107,7 +106,6 @@ impl<'de> serde::Deserialize<'de> for SqlIncorporator {
             NumQueries,
             BaseSchemas,
             ViewSchemas,
-            SchemaVersion,
             Config,
         }
         struct FieldVisitor;
@@ -130,7 +128,6 @@ impl<'de> serde::Deserialize<'de> for SqlIncorporator {
                     "num_queries" => Ok(Field::NumQueries),
                     "base_schemas" => Ok(Field::BaseSchemas),
                     "view_schemas" => Ok(Field::ViewSchemas),
-                    "schema_version" => Ok(Field::SchemaVersion),
                     "config" => Ok(Field::Config),
                     _ => Err(serde::de::Error::unknown_field(val, FIELDS)),
                 }
@@ -182,12 +179,9 @@ impl<'de> serde::Deserialize<'de> for SqlIncorporator {
                 let view_schemas = seq
                     .next_element()?
                     .ok_or_else(|| serde::de::Error::invalid_length(8, &self))?;
-                let schema_version = seq
-                    .next_element()?
-                    .ok_or_else(|| serde::de::Error::invalid_length(9, &self))?;
                 let config = seq
                     .next_element()?
-                    .ok_or_else(|| serde::de::Error::invalid_length(10, &self))?;
+                    .ok_or_else(|| serde::de::Error::invalid_length(9, &self))?;
                 deserialize_into_sql_incorporator::<V::Error>(
                     mir_converter,
                     leaf_addresses,
@@ -198,7 +192,6 @@ impl<'de> serde::Deserialize<'de> for SqlIncorporator {
                     num_queries,
                     base_schemas,
                     view_schemas,
-                    schema_version,
                     config,
                 )
             }
@@ -215,7 +208,6 @@ impl<'de> serde::Deserialize<'de> for SqlIncorporator {
                 let mut num_queries = None;
                 let mut base_schemas = None;
                 let mut view_schemas = None;
-                let mut schema_version = None;
                 let mut config = None;
                 while let Some(key) = map.next_key()? {
                     match key {
@@ -273,12 +265,6 @@ impl<'de> serde::Deserialize<'de> for SqlIncorporator {
                             }
                             view_schemas = Some(map.next_value()?);
                         }
-                        Field::SchemaVersion => {
-                            if schema_version.is_some() {
-                                return Err(serde::de::Error::duplicate_field("schema_version"));
-                            }
-                            schema_version = Some(map.next_value()?);
-                        }
                         Field::Config => {
                             if config.is_some() {
                                 return Err(serde::de::Error::duplicate_field("config"));
@@ -305,8 +291,6 @@ impl<'de> serde::Deserialize<'de> for SqlIncorporator {
                     base_schemas.ok_or_else(|| serde::de::Error::missing_field("base_schemas"))?;
                 let view_schemas =
                     view_schemas.ok_or_else(|| serde::de::Error::missing_field("view_schemas"))?;
-                let schema_version = schema_version
-                    .ok_or_else(|| serde::de::Error::missing_field("schema_version"))?;
                 let config = config.ok_or_else(|| serde::de::Error::missing_field("config"))?;
                 deserialize_into_sql_incorporator::<V::Error>(
                     mir_converter,
@@ -318,7 +302,6 @@ impl<'de> serde::Deserialize<'de> for SqlIncorporator {
                     num_queries,
                     base_schemas,
                     view_schemas,
-                    schema_version,
                     config,
                 )
             }
@@ -333,7 +316,6 @@ impl<'de> serde::Deserialize<'de> for SqlIncorporator {
             "num_queries",
             "base_schemas",
             "view_schemas",
-            "schema_version",
             "config",
         ];
         deserializer.deserialize_struct("SqlIncorporator", FIELDS, SqlIncorporatorVisitor)
@@ -374,7 +356,6 @@ fn deserialize_into_sql_incorporator<E>(
     num_queries: usize,
     base_schemas: HashMap<String, CreateTableStatement>,
     view_schemas: HashMap<String, Vec<String>>,
-    schema_version: usize,
     config: Config,
 ) -> Result<SqlIncorporator, E>
 where
@@ -415,7 +396,6 @@ where
         num_queries,
         base_schemas,
         view_schemas,
-        schema_version,
         config,
     })
 }
