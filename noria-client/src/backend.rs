@@ -389,6 +389,14 @@ where
             false
         }
     }
+
+    pub fn is_unsupported_execute(&self) -> bool {
+        if let Some(info) = self.execution_info.as_ref() {
+            matches!(info.state, ExecutionState::Unsupported)
+        } else {
+            false
+        }
+    }
 }
 
 pub struct Backend<DB, Handler>
@@ -1064,9 +1072,14 @@ where
                 Ok(noria_ok)
             }
             Err(noria_err) => {
-                if noria_err.is_networking_related() {
-                    if let Some(info) = ex_info {
+                if let Some(info) = ex_info {
+                    if noria_err.is_networking_related() {
                         info.execute_network_failure();
+                    } else if noria_err.caused_by_data_type_conversion() {
+                        // Consider queries that fail due to data type conversion errors as
+                        // unsupported. These queries will likely fail on each query to noria,
+                        // introducing increased latency.
+                        info.execute_unsupported();
                     }
                 }
                 warn!(error = %noria_err, "Error received from noria, sending query to fallback");
@@ -1194,10 +1207,10 @@ where
             }
         }
 
-        let in_fallback_recovery = cached_statement.in_fallback_recovery(
+        let should_fallback = cached_statement.in_fallback_recovery(
             self.query_max_failure_duration,
             self.fallback_recovery_duration,
-        );
+        ) || cached_statement.is_unsupported_execute();
 
         let result = match &cached_statement.prep {
             PrepareResult::Noria(prep) => {
@@ -1208,7 +1221,7 @@ where
             PrepareResult::Upstream(prep) => {
                 Self::execute_upstream(upstream, prep, params, &mut event, false).await
             }
-            PrepareResult::Both(.., uprep) if in_fallback_recovery => {
+            PrepareResult::Both(.., uprep) if should_fallback => {
                 Self::execute_upstream(upstream, uprep, params, &mut event, false).await
             }
             PrepareResult::Both(nprep, uprep) => {
@@ -1232,15 +1245,21 @@ where
             }
         };
 
-        if event
-            .noria_error
-            .as_ref()
-            .map(|e| e.caused_by_view_not_found())
-            .unwrap_or_default()
-        {
-            // This can happen during cascade execution if the noria query was removed from another
-            // connection
-            Self::invalidate_prepared_cache_entry(&mut cached_statement.prep);
+        if let Some(e) = event.noria_error.as_ref() {
+            if e.caused_by_view_not_found() {
+                // This can happen during cascade execution if the noria query was removed from
+                // another connection
+                Self::invalidate_prepared_cache_entry(&mut cached_statement.prep);
+            } else if e.caused_by_unsupported() {
+                // On an unsupported execute we update the query migration state to be unsupported.
+                //
+                // Must exist or we would not have executed the query against Noria.
+                #[allow(clippy::unwrap_used)]
+                self.query_status_cache.update_query_migration_state(
+                    cached_statement.rewritten.as_ref().unwrap(),
+                    MigrationState::Unsupported,
+                );
+            }
         }
 
         self.last_query = event.destination.map(|d| QueryInfo { destination: d });

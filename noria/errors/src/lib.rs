@@ -578,6 +578,12 @@ impl ReadySetError {
             )
         })
     }
+
+    /// Returns true if the error either *is* [`DataTypeConversionError`], or was *caused by*
+    /// [`DataTypeConversionError`]
+    pub fn caused_by_data_type_conversion(&self) -> bool {
+        self.any_cause(|e| matches!(e, Self::DataTypeConversionError { .. }))
+    }
 }
 
 /// Make a new [`ReadySetError::Internal`] with the provided string-able argument.
