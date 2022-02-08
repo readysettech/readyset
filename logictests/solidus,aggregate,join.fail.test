@@ -1,0 +1,56 @@
+statement ok
+CREATE TABLE `spree_assets` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `viewable_type` varchar(255) DEFAULT NULL,
+  `viewable_id` int DEFAULT NULL,
+  `attachment_width` int DEFAULT NULL,
+  `attachment_height` int DEFAULT NULL,
+  `attachment_file_size` int DEFAULT NULL,
+  `position` int DEFAULT NULL,
+  `attachment_content_type` varchar(255) DEFAULT NULL,
+  `attachment_file_name` varchar(255) DEFAULT NULL,
+  `type` varchar(75) DEFAULT NULL,
+  `attachment_updated_at` datetime DEFAULT NULL,
+  `alt` text,
+  `created_at` datetime(6) DEFAULT NULL,
+  `updated_at` datetime(6) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `index_assets_on_viewable_id` (`viewable_id`),
+  KEY `index_assets_on_viewable_type_and_type` (`viewable_type`,`type`)
+) ENGINE=InnoDB AUTO_INCREMENT=49 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+statement ok
+CREATE TABLE `spree_variants` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `sku` varchar(255) NOT NULL DEFAULT '',
+  `weight` decimal(8,2) DEFAULT NULL,
+  `height` decimal(8,2) DEFAULT NULL,
+  `width` decimal(8,2) DEFAULT NULL,
+  `depth` decimal(8,2) DEFAULT NULL,
+  `deleted_at` datetime DEFAULT NULL,
+  `is_master` tinyint(1) DEFAULT '0',
+  `product_id` int DEFAULT NULL,
+  `cost_price` decimal(10,2) DEFAULT NULL,
+  `position` int DEFAULT NULL,
+  `cost_currency` varchar(255) DEFAULT NULL,
+  `track_inventory` tinyint(1) DEFAULT '1',
+  `tax_category_id` int DEFAULT NULL,
+  `updated_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `index_spree_variants_on_position` (`position`),
+  KEY `index_spree_variants_on_product_id` (`product_id`),
+  KEY `index_spree_variants_on_sku` (`sku`),
+  KEY `index_spree_variants_on_tax_category_id` (`tax_category_id`),
+  KEY `index_spree_variants_on_track_inventory` (`track_inventory`)
+) ENGINE=InnoDB AUTO_INCREMENT=35 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+query nosort
+SELECT COUNT(*) FROM `spree_assets`
+INNER JOIN `spree_variants`
+ON `spree_assets`.`viewable_id` = `spree_variants`.`id`
+WHERE `spree_variants`.`deleted_at` IS NULL
+AND `spree_assets`.`type` = 'Spree::Image'
+AND `spree_variants`.`product_id` = 1
+AND `spree_assets`.`viewable_type` = 'Spree::Variant';
+----
