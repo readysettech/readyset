@@ -1,0 +1,1 @@
+SELECT `spree_assets`.* FROM `spree_assets` WHERE `spree_assets`.`type` = 'Spree::Image' AND `spree_assets`.`viewable_type` = 'Spree::Variant' AND `spree_assets`.`viewable_id` IN (1, 3) ORDER BY `spree_assets`.`position` ASC;

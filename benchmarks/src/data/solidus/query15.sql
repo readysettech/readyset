@@ -1,0 +1,1 @@
+SELECT `spree_promotion_rules`.* FROM `spree_promotion_rules` INNER JOIN `spree_product_promotion_rules` ON `spree_promotion_rules`.`id` = `spree_product_promotion_rules`.`promotion_rule_id` WHERE `spree_product_promotion_rules`.`product_id` = 1;
