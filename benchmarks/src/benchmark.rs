@@ -29,6 +29,7 @@ use crate::query_benchmark::QueryBenchmark;
 use crate::read_write_benchmark::ReadWriteBenchmark;
 use crate::scale_connections::ScaleConnections;
 use crate::scale_views::ScaleViews;
+use crate::single_query_benchmark::SingleQueryBenchmark;
 use crate::template::Template;
 use crate::utils::prometheus::{ForwardPrometheusMetrics, PrometheusEndpoint};
 use crate::write_benchmark::WriteBenchmark;
@@ -51,6 +52,7 @@ pub enum Benchmark {
     EvictionBenchmark,
     ReadWriteBenchmark,
     FallbackBenchmark,
+    SingleQueryBenchmark,
 }
 
 impl Benchmark {
@@ -67,6 +69,7 @@ impl Benchmark {
             Self::EvictionBenchmark(_) => "eviction",
             Self::ReadWriteBenchmark(_) => "read_write_benchmark",
             Self::FallbackBenchmark(_) => "fallback_benchmark",
+            Self::SingleQueryBenchmark(_) => "single_query_benchmark",
         }
     }
 }

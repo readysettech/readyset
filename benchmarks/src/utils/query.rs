@@ -224,6 +224,23 @@ impl PreparedStatement {
         (self.query.clone(), self.generate_parameters())
     }
 
+    pub fn generate_ad_hoc_query(&self) -> String {
+        let params = self.generate_parameters();
+        let q = self
+            .query
+            .split('?')
+            .zip(&params)
+            .map(|(text, value)| text.to_owned() + &value.as_sql(false))
+            .collect::<Vec<String>>()
+            .join("");
+
+        if q.is_empty() {
+            self.query.clone()
+        } else {
+            q
+        }
+    }
+
     /// Returns the query text and a set of generators that can be used to
     /// execute this prepared statement.
     pub fn query_generators(&self) -> (String, GeneratorSet) {
