@@ -1069,6 +1069,8 @@ where
                         info.execute_network_failure();
                     }
                 }
+                warn!(error = %noria_err, "Error received from noria, sending query to fallback");
+
                 event.set_noria_error(&noria_err);
                 Self::execute_upstream(upstream, upstream_prep, params, event, true).await
             }
