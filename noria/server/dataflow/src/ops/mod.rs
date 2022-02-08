@@ -12,9 +12,11 @@ pub mod grouped;
 pub mod identity;
 pub mod join;
 pub mod latest;
+pub mod pagination;
 pub mod project;
 pub mod topk;
 pub mod union;
+pub(crate) mod utils;
 
 use crate::ops::grouped::concat::GroupConcat;
 use crate::processing::{
@@ -47,6 +49,7 @@ pub enum NodeOperator {
     Concat(grouped::GroupedOperator<GroupConcat>),
     Join(join::Join),
     Latest(latest::Latest),
+    Pagination(pagination::Pagination),
     Project(project::Project),
     Union(union::Union),
     Identity(identity::Identity),
@@ -62,6 +65,7 @@ impl ToString for NodeOperator {
             NodeOperator::Concat(_) => "Concat",
             NodeOperator::Join(_) => "Join",
             NodeOperator::Latest(_) => "Latest",
+            NodeOperator::Pagination(_) => "Pagination",
             NodeOperator::Project(_) => "Project",
             NodeOperator::Union(_) => "Union",
             NodeOperator::Identity(_) => "Identity",
@@ -80,6 +84,7 @@ macro_rules! impl_ingredient_fn_mut {
             NodeOperator::Concat(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Join(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Latest(ref mut i) => i.$fn($($arg),*),
+            NodeOperator::Pagination(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Project(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Union(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Identity(ref mut i) => i.$fn($($arg),*),
@@ -97,6 +102,7 @@ macro_rules! impl_ingredient_fn_ref {
             NodeOperator::Concat(ref i) => i.$fn($($arg),*),
             NodeOperator::Join(ref i) => i.$fn($($arg),*),
             NodeOperator::Latest(ref i) => i.$fn($($arg),*),
+            NodeOperator::Pagination(ref i) => i.$fn($($arg),*),
             NodeOperator::Project(ref i) => i.$fn($($arg),*),
             NodeOperator::Union(ref i) => i.$fn($($arg),*),
             NodeOperator::Identity(ref i) => i.$fn($($arg),*),

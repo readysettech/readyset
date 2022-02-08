@@ -76,6 +76,16 @@ fn type_for_internal_column(
             // ancestors; so keep iterating to try the other paths
             Ok(None)
         }
+        NodeOperator::Pagination(_) => {
+            if column_index == node.fields().len() - 1 {
+                Ok(Some(SqlType::Bigint(None)))
+            } else {
+                Ok(
+                    column_schema(graph, next_node_on_path, recipe, column_index)?
+                        .map(ColumnSchema::take_type),
+                )
+            }
+        }
         NodeOperator::Latest(_)
         | NodeOperator::Union(_)
         | NodeOperator::Identity(_)
