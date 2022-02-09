@@ -5,7 +5,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
-use nom::multi::separated_nonempty_list;
+use nom::multi::separated_list1;
 use nom::sequence::{separated_pair, terminated, tuple};
 use nom::IResult;
 use serde::{Deserialize, Serialize};
@@ -157,7 +157,7 @@ pub fn set(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetStatement> {
 fn set_variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetVariables> {
     move |i| {
         let (remaining_input, variables) = terminated(
-            separated_nonempty_list(
+            separated_list1(
                 tuple((tag_no_case(","), multispace0)),
                 map(
                     tuple((

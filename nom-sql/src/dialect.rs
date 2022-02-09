@@ -33,7 +33,7 @@ fn raw_hex_bytes_mysql(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
 fn hex_bytes(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
     fold_many0(
         map_res(take(2_usize), hex::decode),
-        Vec::new(),
+        Vec::new,
         |mut acc: Vec<u8>, bytes: Vec<u8>| {
             acc.extend(bytes);
             acc
@@ -49,7 +49,7 @@ fn raw_bit_vector_psql(input: &[u8]) -> IResult<&[u8], BitVec> {
 fn bits(input: &[u8]) -> IResult<&[u8], BitVec> {
     fold_many0(
         map(alt((char('0'), char('1'))), |i: char| i == '1'),
-        BitVec::new(),
+        BitVec::new,
         |mut acc: BitVec, bit: bool| {
             acc.push(bit);
             acc
@@ -84,7 +84,7 @@ fn raw_string_quoted(input: &[u8], is_single_quote: bool) -> IResult<&[u8], Vec<
                 map(tag("\\Z"), |_| &b"\x1A"[..]),
                 preceded(tag("\\"), take(1usize)),
             )),
-            Vec::new(),
+            Vec::new,
             |mut acc: Vec<u8>, bytes: &[u8]| {
                 acc.extend(bytes);
                 acc
@@ -235,7 +235,10 @@ impl Dialect {
     pub fn bitvec_literal(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], BitVec> {
         move |i| match self {
             Dialect::PostgreSQL => raw_bit_vector_psql(i),
-            Dialect::MySQL => Err(nom::Err::Error((i, nom::error::ErrorKind::ParseTo))),
+            Dialect::MySQL => Err(nom::Err::Error(nom::error::Error::new(
+                i,
+                nom::error::ErrorKind::Many0,
+            ))),
         }
     }
 }

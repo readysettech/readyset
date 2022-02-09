@@ -7,7 +7,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::{char, multispace0, multispace1};
 use nom::combinator::{complete, map, opt};
-use nom::multi::{many0, separated_list};
+use nom::multi::{many0, separated_list0};
 use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use nom::IResult;
 use pratt::{Affix, Associativity, PrattParser, Precedence};
@@ -715,7 +715,7 @@ fn in_rhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], InValue> {
                 InValue::Subquery(Box::new(sel))
             }),
             map(
-                separated_list(ws_sep_comma, expression(dialect)),
+                separated_list0(ws_sep_comma, expression(dialect)),
                 InValue::List,
             ),
         ))(i)

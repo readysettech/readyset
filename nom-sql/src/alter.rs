@@ -7,7 +7,7 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
-use nom::multi::separated_list;
+use nom::multi::separated_list0;
 use nom::sequence::{preceded, terminated};
 use nom::IResult;
 use serde::{Deserialize, Serialize};
@@ -264,7 +264,7 @@ pub fn alter_table_statement(
 
         let (i, table) = schema_table_reference_no_alias(dialect)(i)?;
         let (i, _) = multispace1(i)?;
-        let (i, definitions) = separated_list(ws_sep_comma, alter_table_definition(dialect))(i)?;
+        let (i, definitions) = separated_list0(ws_sep_comma, alter_table_definition(dialect))(i)?;
         let (i, _) = multispace0(i)?;
         let (i, _) = statement_terminator(i)?;
 
