@@ -3,11 +3,13 @@ use std::iter;
 
 use derive_more::From;
 use itertools::{Either, Itertools};
-use nom::character::complete::{multispace0, multispace1};
-use nom::{
-    alt, call, char, complete, delimited, do_parse, many0, map, named, opt, preceded,
-    separated_list, tag, tag_no_case, terminated, tuple, IResult,
-};
+use nom::branch::alt;
+use nom::bytes::complete::{tag, tag_no_case};
+use nom::character::complete::{char, multispace0, multispace1};
+use nom::combinator::{complete, map, opt};
+use nom::multi::{many0, separated_list};
+use nom::sequence::{delimited, pair, preceded, terminated, tuple};
+use nom::IResult;
 use pratt::{Affix, Associativity, PrattParser, Precedence};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -415,121 +417,181 @@ enum TokenTree {
 // should parse the same as:
 //     (foo between (1 + 2) and 8) and bar
 
-named!(infix_no_and_or(&[u8]) -> TokenTree, complete!(map!(alt!(
-    terminated!(tag_no_case!("like"), multispace1) => { |_| BinaryOperator::Like } |
-    do_parse!(
-        tag_no_case!("not")
-            >> multispace1
-            >> tag_no_case!("like")
-            >> multispace1
-            >> (BinaryOperator::NotLike)) |
-    terminated!(tag_no_case!("ilike"), multispace1) => { |_| BinaryOperator::ILike } |
-    do_parse!(
-        tag_no_case!("not")
-            >> multispace1
-            >> tag_no_case!("ilike")
-            >> multispace1
-            >> (BinaryOperator::NotILike)) |
-    char!('=') => { |_| BinaryOperator::Equal } |
-    tag!("!=") => { |_| BinaryOperator::NotEqual } |
-    tag!("<>") => { |_| BinaryOperator::NotEqual } |
-    tag!(">=") => { |_| BinaryOperator::GreaterOrEqual } |
-    tag!("<=") => { |_| BinaryOperator::LessOrEqual } |
-    char!('>') => { |_| BinaryOperator::Greater } |
-    char!('<') => { |_| BinaryOperator::Less } |
-    do_parse!(
-        tag_no_case!("is")
-            >> multispace1
-            >> tag_no_case!("not")
-            >> multispace1
-            >> (BinaryOperator::IsNot)) |
-    terminated!(tag_no_case!("is"), multispace1) => { |_| BinaryOperator::Is } |
-    char!('+') => { |_| BinaryOperator::Add } |
-    char!('-') => { |_| BinaryOperator::Subtract } |
-    char!('*') => { |_| BinaryOperator::Multiply } |
-    char!('/') => { |_| BinaryOperator::Divide }
-), TokenTree::Infix)));
+fn infix_no_and_or(i: &[u8]) -> IResult<&[u8], TokenTree> {
+    let (i, operator) = alt((
+        map(terminated(tag_no_case("like"), multispace1), |_| {
+            BinaryOperator::Like
+        }),
+        move |i| {
+            let (i, _) = tag_no_case("not")(i)?;
+            let (i, _) = multispace1(i)?;
+            let (i, _) = tag_no_case("like")(i)?;
+            let (i, _) = multispace1(i)?;
 
-named!(infix(&[u8]) -> TokenTree, complete!(alt!(
-    terminated!(tag_no_case!("and"), multispace1) => { |_| TokenTree::Infix(BinaryOperator::And) } |
-    terminated!(tag_no_case!("or"), multispace1) => { |_| TokenTree::Infix(BinaryOperator::Or) } |
-    infix_no_and_or
-)));
+            Ok((i, BinaryOperator::NotLike))
+        },
+        move |i| {
+            let (i, _) = tag_no_case("ilike")(i)?;
+            let (i, _) = multispace1(i)?;
 
-named!(prefix(&[u8]) -> TokenTree, map!(alt!(
-    complete!(char!('-')) => { |_| UnaryOperator::Neg } |
-    terminated!(tag_no_case!("not"), multispace1) => { |_| UnaryOperator::Not }
-), TokenTree::Prefix));
+            Ok((i, BinaryOperator::ILike))
+        },
+        move |i| {
+            let (i, _) = tag_no_case("not")(i)?;
+            let (i, _) = multispace1(i)?;
+            let (i, _) = tag_no_case("ilike")(i)?;
+            let (i, _) = multispace1(i)?;
 
-named_with_dialect!(primary_inner(dialect, &[u8]) -> TokenTree, alt!(
-    do_parse!(
-        multispace0 >>
-            char!('(') >>
-            multispace0 >>
-            group: call!(token_tree(dialect)) >>
-            multispace0 >>
-            char!(')') >>
-            (TokenTree::Group(group))
-    ) |
-    preceded!(multispace0, simple_expr(dialect)) => { TokenTree::Primary }
-));
+            Ok((i, BinaryOperator::NotLike))
+        },
+        map(char('='), |_| BinaryOperator::Equal),
+        map(tag("!="), |_| BinaryOperator::NotEqual),
+        map(tag("<>"), |_| BinaryOperator::NotEqual),
+        map(tag(">="), |_| BinaryOperator::GreaterOrEqual),
+        map(tag("<="), |_| BinaryOperator::LessOrEqual),
+        map(char('>'), |_| BinaryOperator::Greater),
+        map(char('<'), |_| BinaryOperator::Less),
+        move |i| {
+            let (i, _) = tag_no_case("is")(i)?;
+            let (i, _) = multispace1(i)?;
+            let (i, _) = tag_no_case("not")(i)?;
+            let (i, _) = multispace1(i)?;
 
-named_with_dialect!(primary(dialect, &[u8]) -> TokenTree, do_parse!(
-    expr: call!(primary_inner(dialect))
-        // The Postgres cast is in fact a binary operator, but its right hand side is a type
-        // and not an expression, thankfully it has the highest precedence of all the operators,
-        // hence we can simply check if it is present at the end of any primary expression
-        >> type_: opt!(do_parse!(multispace0
-            >> complete!(tag!("::"))
-            >> multispace0
-            >> type_: call!(type_identifier(dialect))
-            >> (type_)))
-        >> (type_.map(|t| TokenTree::PgsqlCast(Box::new(expr.clone()), t)).unwrap_or(expr))
-));
+            Ok((i, BinaryOperator::IsNot))
+        },
+        map(pair(tag_no_case("is"), multispace1), |_| BinaryOperator::Is),
+        map(char('+'), |_| BinaryOperator::Add),
+        map(char('-'), |_| BinaryOperator::Subtract),
+        map(char('*'), |_| BinaryOperator::Multiply),
+        map(char('/'), |_| BinaryOperator::Divide),
+    ))(i)?;
 
-named_with_dialect!(rest(dialect, &[u8]) -> Vec<(TokenTree, Vec<TokenTree>, TokenTree)>, many0!(tuple!(
-    preceded!(multispace0, infix),
-    delimited!(multispace0, many0!(prefix), multispace0),
-    call!(primary(dialect))
-)));
+    Ok((i, TokenTree::Infix(operator)))
+}
 
-named_with_dialect!(token_tree(dialect, &[u8]) -> Vec<TokenTree>, do_parse!(
-    prefix: many0!(prefix)
-        >> primary: call!(primary(dialect))
-        >> rest: call!(rest(dialect))
-        >> ({
-            let mut res = prefix;
+fn infix(i: &[u8]) -> IResult<&[u8], TokenTree> {
+    complete(alt((
+        map(terminated(tag_no_case("and"), multispace1), |_| {
+            TokenTree::Infix(BinaryOperator::And)
+        }),
+        map(terminated(tag_no_case("or"), multispace1), |_| {
+            TokenTree::Infix(BinaryOperator::Or)
+        }),
+        infix_no_and_or,
+    )))(i)
+}
+
+fn prefix(i: &[u8]) -> IResult<&[u8], TokenTree> {
+    map(
+        alt((
+            map(complete(char('-')), |_| UnaryOperator::Neg),
+            map(terminated(tag_no_case("not"), multispace1), |_| {
+                UnaryOperator::Not
+            }),
+        )),
+        TokenTree::Prefix,
+    )(i)
+}
+
+fn primary_inner(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TokenTree> {
+    move |i| {
+        alt((
+            move |i| {
+                let (i, _) = char('(')(i)?;
+                let (i, _) = multispace0(i)?;
+                let (i, tree) = token_tree(dialect)(i)?;
+                let (i, _) = multispace0(i)?;
+                let (i, _) = char(')')(i)?;
+
+                Ok((i, TokenTree::Group(tree)))
+            },
+            move |i| {
+                let (i, _) = multispace0(i)?;
+                let (i, expr) = simple_expr(dialect)(i)?;
+                Ok((i, TokenTree::Primary(expr)))
+            },
+        ))(i)
+    }
+}
+
+fn primary(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TokenTree> {
+    move |i| {
+        let (i, expr) = primary_inner(dialect)(i)?;
+        let (i, t) = opt(move |i| {
+            let (i, _) = multispace0(i)?;
+            let (i, _) = tag("::")(i)?;
+            let (i, _) = multispace0(i)?;
+            type_identifier(dialect)(i)
+        })(i)?;
+
+        Ok((
+            i,
+            t.map(|n| TokenTree::PgsqlCast(Box::new(expr.clone()), n))
+                .unwrap_or(expr),
+        ))
+    }
+}
+
+fn rest(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(TokenTree, Vec<TokenTree>, TokenTree)>> {
+    move |i| {
+        many0(move |i| {
+            let (i, _) = multispace0(i)?;
+            let (i, infix_tree) = infix(i)?;
+            let (i, _) = multispace0(i)?;
+            let (i, prefix_tree) = many0(prefix)(i)?;
+            let (i, _) = multispace0(i)?;
+            let (i, primary_tree) = primary(dialect)(i)?;
+
+            Ok((i, (infix_tree, prefix_tree, primary_tree)))
+        })(i)
+    }
+}
+
+fn token_tree(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<TokenTree>> {
+    move |i| {
+        let (i, prefix) = many0(prefix)(i)?;
+        let (i, primary) = primary(dialect)(i)?;
+        let (i, rest) = rest(dialect)(i)?;
+        let mut res = prefix;
+        res.push(primary);
+        for (infix, mut prefix, primary) in rest {
+            res.push(infix);
+            res.append(&mut prefix);
             res.push(primary);
-            for (infix, mut prefix, primary) in rest {
-                res.push(infix);
-                res.append(&mut prefix);
-                res.push(primary);
-            }
-            res
-        })
-));
+        }
+        Ok((i, res))
+    }
+}
 
-named_with_dialect!(rest_no_and_or(dialect) -> Vec<(TokenTree, Vec<TokenTree>, TokenTree)>, many0!(tuple!(
-    preceded!(multispace0, infix_no_and_or),
-    delimited!(multispace0, many0!(prefix), multispace0),
-    call!(primary(dialect))
-)));
+fn rest_no_and_or(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(TokenTree, Vec<TokenTree>, TokenTree)>> {
+    move |i| {
+        many0(tuple((
+            preceded(multispace0, infix_no_and_or),
+            delimited(multispace0, many0(prefix), multispace0),
+            primary(dialect),
+        )))(i)
+    }
+}
 
-named_with_dialect!(token_tree_no_and_or(dialect) -> Vec<TokenTree>, do_parse!(
-    prefix: many0!(prefix)
-        >> primary: call!(primary(dialect))
-        >> rest: call!(rest_no_and_or(dialect))
-        >> ({
-            let mut res = prefix;
+fn token_tree_no_and_or(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<TokenTree>> {
+    move |i| {
+        let (i, prefix) = many0(prefix)(i)?;
+        let (i, primary) = primary(dialect)(i)?;
+        let (i, rest) = rest_no_and_or(dialect)(i)?;
+        let mut res = prefix;
+        res.push(primary);
+        for (infix, mut prefix, primary) in rest {
+            res.push(infix);
+            res.append(&mut prefix);
             res.push(primary);
-            for (infix, mut prefix, primary) in rest {
-                res.push(infix);
-                res.append(&mut prefix);
-                res.push(primary);
-            }
-            res
-        })
-));
+        }
+        Ok((i, res))
+    }
+}
 
 /// A [`pratt`] operator-precedence parser for [`Expression`]s.
 ///
@@ -635,159 +697,223 @@ where
     }
 }
 
-named_with_dialect!(in_lhs(dialect) -> Expression, alt!(
-    call!(column_function(dialect)) => { Expression::Call } |
-    call!(literal(dialect)) => { Expression::Literal } |
-    call!(case_when(dialect)) |
-    call!(column_identifier_no_alias(dialect)) => { Expression::Column }
-));
+fn in_lhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+    move |i| {
+        alt((
+            map(column_function(dialect), Expression::Call),
+            map(literal(dialect), Expression::Literal),
+            case_when(dialect),
+            map(column_identifier_no_alias(dialect), Expression::Column),
+        ))(i)
+    }
+}
 
-named_with_dialect!(in_rhs(dialect) -> InValue, alt!(
-    call!(nested_selection(dialect)) => { |sel| InValue::Subquery(Box::new(sel)) } |
-    separated_list!(ws_sep_comma, call!(expression(dialect))) => { InValue::List }
-));
+fn in_rhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], InValue> {
+    move |i| {
+        alt((
+            map(nested_selection(dialect), |sel| {
+                InValue::Subquery(Box::new(sel))
+            }),
+            map(
+                separated_list(ws_sep_comma, expression(dialect)),
+                InValue::List,
+            ),
+        ))(i)
+    }
+}
 
-named_with_dialect!(in_expr(dialect) -> Expression, do_parse!(
-    lhs: call!(in_lhs(dialect))
-        >> multispace1
-        >> not: opt!(terminated!(complete!(tag_no_case!("not")), multispace1))
-        >> complete!(tag_no_case!("in"))
-        >> multispace0
-        >> char!('(')
-        >> multispace0
-        >> rhs: call!(in_rhs(dialect))
-        >> multispace0
-        >> char!(')')
-        >> (Expression::In {
-            lhs: Box::new(lhs),
-            rhs,
-            negated: not.is_some()
-        })
-));
+fn in_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+    move |i| {
+        let (i, lhs) = terminated(in_lhs(dialect), multispace1)(i)?;
 
-named_with_dialect!(between_operand(dialect) -> Expression, alt!(
-    call!(parenthesized_expr(dialect)) |
-    call!(column_function(dialect)) => { Expression::Call } |
-    call!(literal(dialect)) => { Expression::Literal } |
-    call!(case_when(dialect)) |
-    call!(column_identifier_no_alias(dialect)) => { Expression::Column }
-));
+        let (i, not) = opt(terminated(tag_no_case("not"), multispace1))(i)?;
+        let (i, _) = tag_no_case("in")(i)?;
+        let (i, _) = multispace0(i)?;
 
-named_with_dialect!(between_max(dialect) -> Expression, alt!(
-    map!(call!(token_tree_no_and_or(dialect)), |tt| {
-        ExprParser.parse(&mut tt.into_iter()).unwrap()
-    }) |
-    call!(simple_expr(dialect))
-));
+        let (i, _) = char('(')(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, rhs) = in_rhs(dialect)(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, _) = char(')')(i)?;
 
-named_with_dialect!(between_expr(dialect) -> Expression, do_parse!(
-    operand: map!(call!(between_operand(dialect)), Box::new)
-        >> multispace1
-        >> not: opt!(terminated!(complete!(tag_no_case!("not")), multispace1))
-        >> complete!(tag_no_case!("between"))
-        >> multispace1
-        >> min: map!(call!(simple_expr(dialect)), Box::new)
-        >> multispace1
-        >> complete!(tag_no_case!("and"))
-        >> multispace1
-        >> max: map!(call!(between_max(dialect)), Box::new)
-        >> (Expression::Between {
-            operand,
-            min,
-            max,
-            negated: not.is_some()
-        })
-));
+        Ok((
+            i,
+            Expression::In {
+                lhs: Box::new(lhs),
+                rhs,
+                negated: not.is_some(),
+            },
+        ))
+    }
+}
 
-named_with_dialect!(exists_expr(dialect) -> Expression, do_parse!(
-    tag_no_case!("exists")
-        >> multispace0
-        >> char!('(')
-        >> multispace0
-        >> statement: call!(nested_selection(dialect))
-        >> multispace0
-        >> char!(')')
-        >> (Expression::Exists(Box::new(statement)))
-));
+fn between_operand(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+    move |i| {
+        alt((
+            parenthesized_expr(dialect),
+            map(column_function(dialect), Expression::Call),
+            map(literal(dialect), Expression::Literal),
+            case_when(dialect),
+            map(column_identifier_no_alias(dialect), Expression::Column),
+        ))(i)
+    }
+}
 
-named_with_dialect!(cast(dialect) -> Expression, do_parse!(
-    complete!(tag_no_case!("cast"))
-        >> multispace0
-        >> complete!(char!('('))
-        >> arg: call!(expression(dialect))
-        >> multispace1
-        >> complete!(tag_no_case!("as"))
-        >> multispace1
-        >> ty: call!(type_identifier(dialect))
-        >> multispace0
-        >> complete!(char!(')'))
-        >> (Expression::Cast {expr: Box::new(arg), ty, postgres_style: false})
-));
+fn between_max(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+    move |i| {
+        alt((
+            map(token_tree_no_and_or(dialect), |tt| {
+                ExprParser.parse(&mut tt.into_iter()).unwrap()
+            }),
+            simple_expr(dialect),
+        ))(i)
+    }
+}
 
-named_with_dialect!(nested_select(dialect) -> Expression, do_parse!(
-    char!('(')
-        >> multispace0
-        >> statement: call!(nested_selection(dialect))
-        >> multispace0
-        >> char!(')')
-        >> (Expression::NestedSelect(Box::new(statement)))
-));
+fn between_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+    move |i| {
+        let (i, operand) = map(between_operand(dialect), Box::new)(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, not) = opt(terminated(tag_no_case("not"), multispace1))(i)?;
+        let (i, _) = tag_no_case("between")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, min) = map(simple_expr(dialect), Box::new)(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, _) = tag_no_case("and")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, max) = map(between_max(dialect), Box::new)(i)?;
 
-named_with_dialect!(parenthesized_expr(dialect) -> Expression, do_parse!(
-    char!('(')
-        >> multispace0
-        >> expr: call!(expression(dialect))
-        >> multispace0
-        >> char!(')')
-        >> (expr)
-));
+        Ok((
+            i,
+            Expression::Between {
+                operand,
+                min,
+                max,
+                negated: not.is_some(),
+            },
+        ))
+    }
+}
 
-named_with_dialect!(pub(crate)scoped_var(dialect) -> Variable, alt!(
-    do_parse!(
-        tag_no_case!("@@GLOBAL.")
-            >> identifier: call!(dialect.identifier())
-            >> (Variable::Global(identifier.to_ascii_lowercase()))) |
-    do_parse!(
-        tag_no_case!("@@SESSION.")
-            >> identifier: call!(dialect.identifier())
-            >> (Variable::Session(identifier.to_ascii_lowercase()))) |
-    do_parse!(
-        tag_no_case!("@@LOCAL.")
-            >> identifier: call!(dialect.identifier())
-            >> (Variable::Local(identifier.to_ascii_lowercase()))) |
-    do_parse!(
-        tag_no_case!("@@")
-            >> identifier: call!(dialect.identifier())
-            >> (Variable::Session(identifier.to_ascii_lowercase()))) |
-    do_parse!(
-        tag_no_case!("@")
-            >> identifier: call!(dialect.identifier())
-            >> (Variable::User(identifier.to_ascii_lowercase())))
-));
+fn exists_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+    move |i| {
+        let (i, _) = tag_no_case("exists")(i)?;
+        let (i, _) = multispace0(i)?;
+
+        let (i, _) = char('(')(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, statement) = nested_selection(dialect)(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, _) = char(')')(i)?;
+
+        Ok((i, Expression::Exists(Box::new(statement))))
+    }
+}
+
+fn cast(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+    move |i| {
+        let (i, _) = tag_no_case("cast")(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, _) = char('(')(i)?;
+
+        let (i, arg) = expression(dialect)(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, _) = tag_no_case("as")(i)?;
+        let (i, _) = multispace1(i)?;
+
+        let (i, ty) = type_identifier(dialect)(i)?;
+
+        let (i, _) = char(')')(i)?;
+
+        Ok((
+            i,
+            Expression::Cast {
+                expr: Box::new(arg),
+                ty,
+                postgres_style: false,
+            },
+        ))
+    }
+}
+
+fn nested_select(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+    move |i| {
+        let (i, _) = char('(')(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, statement) = nested_selection(dialect)(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, _) = char(')')(i)?;
+
+        Ok((i, Expression::NestedSelect(Box::new(statement))))
+    }
+}
+
+fn parenthesized_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+    move |i| {
+        let (i, _) = char('(')(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, expr) = expression(dialect)(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, _) = char(')')(i)?;
+
+        Ok((i, expr))
+    }
+}
+
+pub(crate) fn scoped_var(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Variable> {
+    move |i| {
+        alt((
+            map(
+                preceded(tag_no_case("@@GLOBAL."), dialect.identifier()),
+                |identifier| Variable::Global(identifier.to_ascii_lowercase()),
+            ),
+            map(
+                preceded(tag_no_case("@@SESSION."), dialect.identifier()),
+                |identifier| Variable::Session(identifier.to_ascii_lowercase()),
+            ),
+            map(
+                preceded(tag_no_case("@@LOCAL."), dialect.identifier()),
+                |identifier| Variable::Local(identifier.to_ascii_lowercase()),
+            ),
+            map(
+                preceded(tag_no_case("@@"), dialect.identifier()),
+                |identifier| Variable::Session(identifier.to_ascii_lowercase()),
+            ),
+            map(
+                preceded(tag_no_case("@"), dialect.identifier()),
+                |identifier| Variable::User(identifier.to_ascii_lowercase()),
+            ),
+        ))(i)
+    }
+}
 
 // Expressions without (binary or unary) operators
-named_with_dialect!(simple_expr(dialect, &[u8]) -> Expression, alt!(
-    call!(parenthesized_expr(dialect)) |
-    call!(nested_select(dialect)) |
-    call!(exists_expr(dialect)) |
-    call!(between_expr(dialect)) |
-    call!(in_expr(dialect)) |
-    call!(column_function(dialect)) => { Expression::Call } |
-    call!(literal(dialect)) => { Expression::Literal } |
-    call!(case_when(dialect)) |
-    call!(column_identifier_no_alias(dialect)) => { Expression::Column } |
-    call!(cast(dialect)) |
-    call!(scoped_var(dialect)) => { Expression::Variable }
-));
+pub(crate) fn simple_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+    move |i| {
+        alt((
+            parenthesized_expr(dialect),
+            nested_select(dialect),
+            exists_expr(dialect),
+            between_expr(dialect),
+            in_expr(dialect),
+            map(column_function(dialect), Expression::Call),
+            map(literal(dialect), Expression::Literal),
+            case_when(dialect),
+            map(column_identifier_no_alias(dialect), Expression::Column),
+            cast(dialect),
+            map(scoped_var(dialect), Expression::Variable),
+        ))(i)
+    }
+}
 
 pub(crate) fn expression(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
     move |i| {
-        alt!(
-            i,
-            map!(call!(token_tree(dialect)), |tt| {
+        alt((
+            map(token_tree(dialect), |tt| {
                 ExprParser.parse(&mut tt.into_iter()).unwrap()
-            }) | call!(simple_expr(dialect))
-        )
+            }),
+            simple_expr(dialect),
+        ))(i)
     }
 }
 

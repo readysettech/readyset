@@ -17,7 +17,7 @@ use nom::combinator::{map, map_parser, map_res, opt, peek, recognize};
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{many0, many1, separated_list};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
-use nom::{call, do_parse, map, named, opt, tag_no_case, IResult, InputLength};
+use nom::{IResult, InputLength};
 use proptest::strategy::Strategy;
 use proptest::{prelude as prop, prop_oneof};
 use rust_decimal::Decimal;
@@ -1256,12 +1256,9 @@ fn expression_field(
     dialect: Dialect,
 ) -> impl Fn(&[u8]) -> IResult<&[u8], FieldDefinitionExpression> {
     move |i| {
-        do_parse!(
-            i,
-            expr: call!(expression(dialect))
-                >> alias: opt!(as_alias(dialect))
-                >> (FieldDefinitionExpression::Expression { expr, alias })
-        )
+        let (i, expr) = expression(dialect)(i)?;
+        let (i, alias) = opt(as_alias(dialect))(i)?;
+        Ok((i, FieldDefinitionExpression::Expression { expr, alias }))
     }
 }
 
@@ -1429,15 +1426,20 @@ pub fn schema_table_reference_no_alias(
     }
 }
 
-named!(pub(crate) if_not_exists(&[u8]) -> bool, map!(opt!(do_parse!(
-    tag_no_case!("if")
-        >> multispace1
-        >> tag_no_case!("not")
-        >> multispace1
-        >> tag_no_case!("exists")
-        >> multispace1
-        >> (())
-    )), |o| o.is_some()));
+pub(crate) fn if_not_exists(i: &[u8]) -> IResult<&[u8], bool> {
+    let (i, s) = opt(move |i| {
+        let (i, _) = tag_no_case("if")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, _) = tag_no_case("not")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, _) = tag_no_case("exists")(i)?;
+        let (i, _) = multispace1(i)?;
+
+        Ok((i, ()))
+    })(i)?;
+
+    Ok((i, s.is_some()))
+}
 
 // Parse a reference to a named table, with an optional alias
 pub fn table_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Table> {
