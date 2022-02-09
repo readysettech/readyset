@@ -147,11 +147,17 @@ mod parse {
         let (input, expr) = match sql_parser::sql_query(CANONICAL_DIALECT)(input.as_bytes()) {
             Ok((i, e)) => Ok((std::str::from_utf8(i).unwrap(), e)),
             Err(nom::Err::Incomplete(n)) => Err(nom::Err::Incomplete(n)),
-            Err(nom::Err::Error((i, e))) => {
-                Err(nom::Err::Error((std::str::from_utf8(i).unwrap(), e)))
+            Err(nom::Err::Error(nom::error::Error { input, code })) => {
+                Err(nom::Err::Error(nom::error::Error {
+                    input: std::str::from_utf8(input).unwrap(),
+                    code,
+                }))
             }
-            Err(nom::Err::Failure((i, e))) => {
-                Err(nom::Err::Error((std::str::from_utf8(i).unwrap(), e)))
+            Err(nom::Err::Failure(nom::error::Error { input, code })) => {
+                Err(nom::Err::Error(nom::error::Error {
+                    input: std::str::from_utf8(input).unwrap(),
+                    code,
+                }))
             }
         }?;
         let (input, _) = multispace0(input)?;

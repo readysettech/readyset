@@ -7,8 +7,9 @@ macro_rules! test_parse {
             "res.err = {}",
             match res.err().unwrap() {
                 nom::Err::Incomplete(n) => format!("Incomplete({:?})", n),
-                nom::Err::Failure((i, k)) | nom::Err::Error((i, k)) => {
-                    format!("{:?}: at {}", k, String::from_utf8_lossy(i))
+                nom::Err::Failure(nom::error::Error { input, code })
+                | nom::Err::Error(nom::error::Error { input, code }) => {
+                    format!("{:?}: at {}", code, String::from_utf8_lossy(input))
                 }
             }
         );

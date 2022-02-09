@@ -6,7 +6,7 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
 use nom::error::ErrorKind;
-use nom::multi::{many0, separated_nonempty_list};
+use nom::multi::{many0, separated_list1};
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::IResult;
 use serde::{Deserialize, Serialize};
@@ -454,7 +454,7 @@ fn ctes(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<CommonTableExp
     move |i| {
         let (i, _) = tag_no_case("with")(i)?;
         let (i, _) = multispace1(i)?;
-        let (i, ctes) = separated_nonempty_list(ws_sep_comma, cte(dialect))(i)?;
+        let (i, ctes) = separated_list1(ws_sep_comma, cte(dialect))(i)?;
         let (i, _) = multispace0(i)?;
 
         Ok((i, ctes))
@@ -491,7 +491,7 @@ pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Se
         if let Some((from, extra_joins, where_clause, group_by, order, limit)) = from_clause {
             let (tables, mut join) = from
                 .into_tables_and_joins()
-                .map_err(|_| nom::Err::Error((i, ErrorKind::Tag)))?;
+                .map_err(|_| nom::Err::Error(nom::error::Error::new(i, ErrorKind::Tag)))?;
 
             join.extend(extra_joins);
 
@@ -711,9 +711,9 @@ mod tests {
         let qstring1 = "select * from PaperTag as t;";
         // let qstring2 = "select * from PaperTag t;";
 
-        let res1 = selection(Dialect::MySQL)(qstring1.as_bytes());
+        let res1 = test_parse!(selection(Dialect::MySQL), qstring1.as_bytes());
         assert_eq!(
-            res1.clone().unwrap().1,
+            res1,
             SelectStatement {
                 tables: vec![Table {
                     name: "PaperTag".into(),
@@ -732,9 +732,9 @@ mod tests {
     fn table_schema() {
         let qstring1 = "select * from db1.PaperTag as t;";
 
-        let res1 = selection(Dialect::MySQL)(qstring1.as_bytes());
+        let res1 = test_parse!(selection(Dialect::MySQL), qstring1.as_bytes());
         assert_eq!(
-            res1.clone().unwrap().1,
+            res1,
             SelectStatement {
                 tables: vec![Table {
                     name: "PaperTag".into(),
@@ -754,9 +754,9 @@ mod tests {
         let qstring1 = "select name as TagName from PaperTag;";
         let qstring2 = "select PaperTag.name as TagName from PaperTag;";
 
-        let res1 = selection(Dialect::MySQL)(qstring1.as_bytes());
+        let res1 = test_parse!(selection(Dialect::MySQL), qstring1.as_bytes());
         assert_eq!(
-            res1.clone().unwrap().1,
+            res1,
             SelectStatement {
                 tables: vec![Table::from("PaperTag")],
                 fields: vec![FieldDefinitionExpression::Expression {
@@ -766,9 +766,9 @@ mod tests {
                 ..Default::default()
             }
         );
-        let res2 = selection(Dialect::MySQL)(qstring2.as_bytes());
+        let res2 = test_parse!(selection(Dialect::MySQL), qstring2.as_bytes());
         assert_eq!(
-            res2.clone().unwrap().1,
+            res2,
             SelectStatement {
                 tables: vec![Table::from("PaperTag")],
                 fields: vec![FieldDefinitionExpression::Expression {
@@ -785,9 +785,9 @@ mod tests {
         let qstring1 = "select name TagName from PaperTag;";
         let qstring2 = "select PaperTag.name TagName from PaperTag;";
 
-        let res1 = selection(Dialect::MySQL)(qstring1.as_bytes());
+        let res1 = test_parse!(selection(Dialect::MySQL), qstring1.as_bytes());
         assert_eq!(
-            res1.clone().unwrap().1,
+            res1,
             SelectStatement {
                 tables: vec![Table::from("PaperTag")],
                 fields: vec![FieldDefinitionExpression::Expression {
@@ -800,9 +800,9 @@ mod tests {
                 ..Default::default()
             }
         );
-        let res2 = selection(Dialect::MySQL)(qstring2.as_bytes());
+        let res2 = test_parse!(selection(Dialect::MySQL), qstring2.as_bytes());
         assert_eq!(
-            res2.clone().unwrap().1,
+            res2,
             SelectStatement {
                 tables: vec![Table::from("PaperTag")],
                 fields: vec![FieldDefinitionExpression::Expression {

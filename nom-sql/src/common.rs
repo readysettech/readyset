@@ -15,7 +15,7 @@ use nom::bytes::complete::{tag, tag_no_case, take_until};
 use nom::character::complete::{digit1, line_ending, multispace0, multispace1};
 use nom::combinator::{map, map_parser, map_res, opt, peek, recognize};
 use nom::error::{ErrorKind, ParseError};
-use nom::multi::{many0, many1, separated_list};
+use nom::multi::{many0, many1, separated_list0};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
 use nom::{IResult, InputLength};
 use proptest::strategy::Strategy;
@@ -761,24 +761,25 @@ fn digit_as_u8(len: &[u8]) -> IResult<&[u8], u8> {
 }
 
 pub(crate) fn opt_delimited<I: Clone, O1, O2, O3, E: ParseError<I>, F, G, H>(
-    first: F,
-    second: G,
-    third: H,
-) -> impl Fn(I) -> IResult<I, O2, E>
+    mut first: F,
+    mut second: G,
+    mut third: H,
+) -> impl FnMut(I) -> IResult<I, O2, E>
 where
-    F: Fn(I) -> IResult<I, O1, E>,
-    G: Fn(I) -> IResult<I, O2, E>,
-    H: Fn(I) -> IResult<I, O3, E>,
+    F: FnMut(I) -> IResult<I, O1, E>,
+    G: FnMut(I) -> IResult<I, O2, E>,
+    H: FnMut(I) -> IResult<I, O3, E>,
 {
     move |input: I| {
-        let first_ = &first;
-        let second_ = &second;
-        let third_ = &third;
-
         let inp = input.clone();
         match second(input) {
             Ok((i, o)) => Ok((i, o)),
-            _ => delimited(first_, second_, third_)(inp),
+            _ => {
+                let first_ = &mut first;
+                let second_ = &mut second;
+                let third_ = &mut third;
+                delimited(first_, second_, third_)(inp)
+            }
         }
     }
 }
@@ -1097,7 +1098,7 @@ fn delim_fx_args(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Expre
     move |i| {
         delimited(
             tag("("),
-            separated_list(
+            separated_list0(
                 tag(","),
                 delimited(multispace0, expression(dialect), multispace0),
             ),
@@ -1226,8 +1227,9 @@ pub(crate) fn ws_sep_comma(i: &[u8]) -> IResult<&[u8], &[u8]> {
     delimited(multispace0, tag(","), multispace0)(i)
 }
 
-pub(crate) fn ws_sep_equals<'a, I>(i: I) -> IResult<I, I>
+pub(crate) fn ws_sep_equals<'a, I, E>(i: I) -> IResult<I, I, E>
 where
+    E: ParseError<I>,
     I: nom::InputTakeAtPosition + nom::InputTake + nom::Compare<&'a str>,
     // Compare required by tag
     <I as nom::InputTakeAtPosition>::Item: nom::AsChar + Clone,
@@ -1268,7 +1270,7 @@ pub fn field_definition_expr(
 ) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<FieldDefinitionExpression>> {
     move |i| {
         terminated(
-            separated_list(
+            separated_list0(
                 ws_sep_comma,
                 alt((
                     map(tag("*"), |_| FieldDefinitionExpression::All),

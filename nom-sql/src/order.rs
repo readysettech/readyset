@@ -5,7 +5,7 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
-use nom::multi::separated_nonempty_list;
+use nom::multi::separated_list1;
 use nom::sequence::preceded;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
@@ -82,7 +82,7 @@ pub fn order_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], OrderC
         let (i, _) = multispace1(i)?;
         let (i, _) = tag_no_case("by")(i)?;
         let (i, _) = multispace1(i)?;
-        let (i, order_by) = separated_nonempty_list(ws_sep_comma, order_expr(dialect))(i)?;
+        let (i, order_by) = separated_list1(ws_sep_comma, order_expr(dialect))(i)?;
 
         Ok((i, OrderClause { order_by }))
     }

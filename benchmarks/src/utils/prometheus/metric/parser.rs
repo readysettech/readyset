@@ -5,7 +5,7 @@ use futures::stream::Stream;
 use nom::bytes::complete::{tag, take_while};
 use nom::character::complete::{alpha1, char, space0, space1};
 use nom::combinator::{all_consuming, opt, rest};
-use nom::multi::separated_list;
+use nom::multi::separated_list0;
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::IResult;
 
@@ -140,7 +140,7 @@ fn label(i: &str) -> IResult<&str, BorrowedLabel<'_>> {
 }
 
 fn labels(i: &str) -> IResult<&str, Vec<BorrowedLabel<'_>>> {
-    separated_list(char(','), label)(i)
+    separated_list0(char(','), label)(i)
 }
 
 fn value(i: &str) -> IResult<&str, &str> {

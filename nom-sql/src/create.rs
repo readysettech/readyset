@@ -6,7 +6,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case};
 use nom::character::complete::{digit1, multispace0, multispace1};
 use nom::combinator::{map, map_res, opt};
-use nom::multi::{many0, many1, separated_list};
+use nom::multi::{many0, many1, separated_list0};
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::IResult;
 use serde::{Deserialize, Serialize};
@@ -283,10 +283,9 @@ fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
         let (i, index_name) = opt(preceded(multispace1, dialect.identifier()))(i)?;
 
         // (columns)
-
         let (i, _) = multispace0(i)?;
         let (i, _) = tag("(")(i)?;
-        let (i, columns) = separated_list(
+        let (i, columns) = separated_list0(
             terminated(tag(","), multispace0),
             column_identifier_no_alias(dialect),
         )(i)?;
@@ -301,7 +300,7 @@ fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
         // (columns)
         let (i, _) = multispace0(i)?;
         let (i, _) = tag("(")(i)?;
-        let (i, target_columns) = separated_list(
+        let (i, target_columns) = separated_list0(
             terminated(tag(","), multispace0),
             column_identifier_no_alias(dialect),
         )(i)?;
@@ -1650,8 +1649,10 @@ mod tests {
                         user_editcount int,
                         user_password_expires varbinary(14) DEFAULT NULL
                        ) ENGINE=, DEFAULT CHARSET=utf8";
-            if let Err(nom::Err::Error((s, _))) = creation(Dialect::MySQL)(qstring.as_bytes()) {
-                panic!("{}", std::str::from_utf8(s).unwrap());
+            if let Err(nom::Err::Error(nom::error::Error { input, .. })) =
+                creation(Dialect::MySQL)(qstring.as_bytes())
+            {
+                panic!("{}", std::str::from_utf8(input).unwrap());
             }
         }
 

@@ -3,7 +3,7 @@ use std::{fmt, str};
 use itertools::Itertools;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::multispace1;
-use nom::multi::separated_nonempty_list;
+use nom::multi::separated_list1;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 
@@ -32,7 +32,7 @@ pub fn rename_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Rename
         let (i, _) = multispace1(i)?;
         let (i, _) = tag_no_case("table")(i)?;
         let (i, _) = multispace1(i)?;
-        let (i, ops) = separated_nonempty_list(ws_sep_comma, rename_table_operation(dialect))(i)?;
+        let (i, ops) = separated_list1(ws_sep_comma, rename_table_operation(dialect))(i)?;
         Ok((i, RenameTableStatement { ops }))
     }
 }

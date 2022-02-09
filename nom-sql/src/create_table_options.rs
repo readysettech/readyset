@@ -5,7 +5,8 @@ use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::{alphanumeric1, digit1, multispace0, multispace1};
 use nom::combinator::{map, map_res, opt};
-use nom::multi::separated_list;
+use nom::error::ParseError;
+use nom::multi::separated_list0;
 use nom::sequence::tuple;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
@@ -41,7 +42,7 @@ impl fmt::Display for CreateTableOption {
 }
 
 pub fn table_options(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<CreateTableOption>> {
-    move |i| { separated_list(table_options_separator, create_option(dialect)) }(i)
+    move |i| { separated_list0(table_options_separator, create_option(dialect)) }(i)
 }
 
 fn table_options_separator(i: &[u8]) -> IResult<&[u8], ()> {
@@ -68,13 +69,13 @@ fn create_option(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTab
 
 /// Helper to parse equals-separated create option pairs.
 /// Throws away the create option and value
-pub fn create_option_equals_pair<'a, I, O1, O2, F, G>(
-    first: F,
-    second: G,
-) -> impl Fn(I) -> IResult<I, O2>
+pub fn create_option_equals_pair<'a, I, O1, O2, E: ParseError<I>, F, G>(
+    mut first: F,
+    mut second: G,
+) -> impl FnMut(I) -> IResult<I, O2, E>
 where
-    F: Fn(I) -> IResult<I, O1>,
-    G: Fn(I) -> IResult<I, O2>,
+    F: FnMut(I) -> IResult<I, O1, E>,
+    G: FnMut(I) -> IResult<I, O2, E>,
     I: nom::InputTakeAtPosition + nom::InputTake + nom::Compare<&'a str>,
     <I as nom::InputTakeAtPosition>::Item: nom::AsChar + Clone,
 {
@@ -87,13 +88,13 @@ where
 
 /// Helper to parse space-separated create option pairs.
 /// Throws away the create option and value
-pub fn create_option_spaced_pair<'a, I, O1, O2, F, G>(
-    first: F,
-    second: G,
-) -> impl Fn(I) -> IResult<I, O2>
+pub fn create_option_spaced_pair<'a, I, O1, O2, E: ParseError<I>, F, G>(
+    mut first: F,
+    mut second: G,
+) -> impl FnMut(I) -> IResult<I, O2, E>
 where
-    F: Fn(I) -> IResult<I, O1>,
-    G: Fn(I) -> IResult<I, O2>,
+    F: FnMut(I) -> IResult<I, O1, E>,
+    G: FnMut(I) -> IResult<I, O2, E>,
     I: nom::InputTakeAtPosition + nom::InputTake + nom::Compare<&'a str>,
     <I as nom::InputTakeAtPosition>::Item: nom::AsChar + Clone,
 {
