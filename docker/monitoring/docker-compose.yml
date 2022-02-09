@@ -1,14 +1,5 @@
 version: "3.8"
 services:
-  influxdb:
-    image: influxdb:1.8.6
-    ports:
-      - '8086:8086' 
-    environment:
-      DOCKER_INFLUXDB_INIT_USERNAME: benchmarkuser
-      DOCKER_INFLUXDB_INIT_PASSWORD: benchmark
-    volumes:
-      - ./influx/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
   prometheus:
     image: prom/prometheus
     # Required to access a local noria-server.
@@ -20,7 +11,7 @@ services:
       interval: 10s
       timeout: 2s
       retries: 5
-      start_period: 5s 
+      start_period: 5s
     extra_hosts:
       - "host.docker.internal:host-gateway"
   pushgateway:

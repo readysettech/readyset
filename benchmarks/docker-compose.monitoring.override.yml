@@ -1,5 +1,1 @@
 version: "3.8"
-services:
-  influxdb:
-    network_mode: host
-
