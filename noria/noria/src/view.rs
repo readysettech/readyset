@@ -11,6 +11,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
+use dataflow_expression::Expression as DataflowExpression;
 use futures_util::future::TryFutureExt;
 use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::{StreamExt, TryStreamExt};
@@ -30,7 +31,9 @@ use tower::timeout::Timeout;
 use tower_service::Service;
 use tracing::error;
 use vec1::Vec1;
+pub(crate) mod results;
 
+use self::results::{Results, Row};
 use crate::consistency::Timestamp;
 use crate::{Tagged, Tagger};
 
@@ -884,45 +887,6 @@ impl fmt::Debug for View {
     }
 }
 
-pub(crate) mod results;
-
-use self::results::{Results, Row};
-
-/// Binary predicate operator for a [`ViewQueryFilter`]
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ViewQueryOperator {
-    /// String matching with LIKE
-    Like,
-    /// String matching with case-insensitive LIKE
-    ILike,
-    /// Not-equals
-    NotEqual,
-}
-
-impl TryFrom<nom_sql::BinaryOperator> for ViewQueryOperator {
-    type Error = nom_sql::BinaryOperator;
-
-    fn try_from(op: nom_sql::BinaryOperator) -> Result<Self, Self::Error> {
-        match op {
-            nom_sql::BinaryOperator::Like => Ok(Self::Like),
-            nom_sql::BinaryOperator::ILike => Ok(Self::ILike),
-            nom_sql::BinaryOperator::NotEqual => Ok(Self::NotEqual),
-            op => Err(op),
-        }
-    }
-}
-
-/// Filter the results of a view query after they're returned from the underlying reader
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct ViewQueryFilter {
-    /// Column in the record to filter against
-    pub column: usize,
-    /// Operator to use when filtering
-    pub operator: ViewQueryOperator,
-    /// Value to match against.
-    pub value: DataType,
-}
-
 /// A read query to be run against a view.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ViewQuery {
@@ -930,8 +894,13 @@ pub struct ViewQuery {
     pub key_comparisons: Vec<KeyComparison>,
     /// Whether the query should block.
     pub block: bool,
-    /// Filter(s) to apply to values after they're returned from the underlying reader
-    pub filters: Vec<ViewQueryFilter>,
+    /// Expression to use to filter values after they're returned from the underlying reader.
+    ///
+    /// This expression will be evaluaated on each of the rows returned from the reader, and any
+    /// rows for which it evaluates to a non-[truthy][] value will be omitted from the result set.
+    ///
+    /// [truthy]: DataType::is_truthy
+    pub filter: Option<DataflowExpression>,
     /// Timestamp to compare against for reads, if a timestamp is passed into the
     /// view query, a read will only return once the timestamp is less than
     /// the timestamp associated with the data.
@@ -948,7 +917,7 @@ impl From<(Vec<KeyComparison>, bool, Option<Timestamp>)> for ViewQuery {
         Self {
             key_comparisons,
             block,
-            filters: vec![],
+            filter: None,
             timestamp: ticket,
         }
     }
@@ -959,7 +928,7 @@ impl From<(Vec<KeyComparison>, bool)> for ViewQuery {
         Self {
             key_comparisons,
             block,
-            filters: vec![],
+            filter: None,
             timestamp: None,
         }
     }
@@ -1062,7 +1031,7 @@ impl Service<ViewQuery> for View {
                         query: ViewQuery {
                             key_comparisons: shard_queries,
                             block: query.block,
-                            filters: query.filters.clone(),
+                            filter: query.filter.clone(),
                             timestamp: query.timestamp.clone(),
                         },
                     });

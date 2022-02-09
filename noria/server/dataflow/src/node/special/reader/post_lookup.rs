@@ -1,14 +1,14 @@
 use std::borrow::Cow;
 use std::cmp::{self, Ordering};
 use std::collections::{hash_map, HashMap};
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 
 use common::DataType;
+use dataflow_expression::Expression;
 use itertools::Either;
 use launchpad::Indices;
 use nom_sql::OrderType;
-use noria::util::like::{CaseSensitivityMode, LikePattern};
-use noria::{ReadySetResult, ViewQueryFilter, ViewQueryOperator};
+use noria::ReadySetResult;
 use noria_errors::internal_err;
 use serde::{Deserialize, Serialize};
 
@@ -174,19 +174,19 @@ impl PostLookup {
         *self == Self::default()
     }
 
-    /// Apply this set of post-lookup operations, plus an optional [`ViewQueryFilter`], to the given
-    /// set of results returned from a lookup
+    /// Apply this set of post-lookup operations, optionally filtering by an [`Expression`], to the
+    /// given set of results returned from a lookup
     pub fn process<'a, 'b: 'a, I>(
         &'a self,
         iter: I,
-        filters: &[ViewQueryFilter],
+        filter: &Option<Expression>,
     ) -> ReadySetResult<Vec<Vec<Cow<'a, DataType>>>>
     where
         I: Iterator<Item = &'b Box<[DataType]>> + ExactSizeIterator,
         Self: 'a,
     {
         let data = iter.map(|r| r.iter().map(Cow::Borrowed).collect::<Vec<_>>());
-        if self.is_empty() && filters.is_empty() {
+        if self.is_empty() && filter.is_none() {
             return Ok(data.collect::<Vec<_>>());
         }
 
@@ -198,65 +198,17 @@ impl PostLookup {
             }
         }
 
-        let compiled_filters = filters
-            .iter()
-            .map(
-                |filter @ ViewQueryFilter {
-                     value,
-                     operator,
-                     column,
-                 }| {
-                    match operator {
-                        ViewQueryOperator::Like => Either::Left((
-                            LikePattern::new(
-                                value
-                                    .try_into()
-                                    .expect("Unexpected type for value; expected string"),
-                                CaseSensitivityMode::CaseSensitive,
-                            ),
-                            *column,
-                        )),
-                        ViewQueryOperator::ILike => Either::Left((
-                            LikePattern::new(
-                                value
-                                    .try_into()
-                                    .expect("Unexpected type for value; expected string"),
-                                CaseSensitivityMode::CaseInsensitive,
-                            ),
-                            *column,
-                        )),
-                        _ => Either::Right(filter),
-                    }
-                },
-            )
-            .collect::<Vec<_>>();
-        let filtered = data.filter(move |rec| {
-            compiled_filters.iter().all(|filter| {
-                match filter {
-                    Either::Left((pattern, column)) => pattern.matches(
-                        rec[*column]
-                            .as_ref()
-                            .try_into()
-                            .expect("Type mismatch: LIKE and ILIKE can only be applied to strings"),
-                    ),
-                    Either::Right(ViewQueryFilter {
-                        column,
-                        operator,
-                        value,
-                    }) => {
-                        match operator {
-                            ViewQueryOperator::NotEqual => rec[*column].as_ref() != value,
-                            ViewQueryOperator::Like | ViewQueryOperator::ILike => {
-                                #[allow(clippy::unreachable)] // actually unreachable
-                                {
-                                    unreachable!("Already matched on Like and ILike above")
-                                }
-                            }
-                        }
-                    }
+        let filtered = if let Some(filter) = filter {
+            let mut filtered = vec![];
+            for rec in data {
+                if filter.eval(&rec)?.is_truthy() {
+                    filtered.push(rec);
                 }
-            })
-        });
+            }
+            Either::Left(filtered.into_iter())
+        } else {
+            Either::Right(data)
+        };
 
         let aggregated = if let Some(aggs) = &self.aggregates {
             Either::Left(aggs.process(filtered)?)
@@ -386,14 +338,16 @@ mod tests {
     use super::*;
 
     mod post_lookup {
+        use nom_sql::BinaryOperator;
+
         use super::*;
 
         #[test]
         fn not_equal_filter() {
-            let filter = ViewQueryFilter {
-                column: 0,
-                operator: ViewQueryOperator::NotEqual,
-                value: 1.into(),
+            let filter = Expression::Op {
+                left: Box::new(Expression::Column(0)),
+                op: BinaryOperator::NotEqual,
+                right: Box::new(Expression::Literal(1.into())),
             };
             let records: Vec<Box<[DataType]>> = vec![
                 vec![1.into(), 2.into()].into_boxed_slice(),
@@ -401,7 +355,7 @@ mod tests {
             ];
 
             let post_lookup = PostLookup::default();
-            let result = post_lookup.process(records.iter(), &[filter]).unwrap();
+            let result = post_lookup.process(records.iter(), &Some(filter)).unwrap();
 
             assert_eq!(
                 result,
@@ -426,7 +380,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let result = post_lookup.process(records.iter(), &[]).unwrap();
+            let result = post_lookup.process(records.iter(), &None).unwrap();
 
             assert_eq!(
                 result,
@@ -451,7 +405,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let result = post_lookup.process(records.iter(), &[]).unwrap();
+            let result = post_lookup.process(records.iter(), &None).unwrap();
 
             assert_eq!(
                 result,
@@ -478,7 +432,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let result = post_lookup.process(records.iter(), &[]).unwrap();
+            let result = post_lookup.process(records.iter(), &None).unwrap();
 
             assert_eq!(
                 result,
@@ -505,7 +459,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let mut result = post_lookup.process(records.iter(), &[]).unwrap();
+            let mut result = post_lookup.process(records.iter(), &None).unwrap();
             result.sort();
 
             assert_eq!(
@@ -534,13 +488,13 @@ mod tests {
                 ..Default::default()
             };
 
-            let filter = ViewQueryFilter {
-                column: 0,
-                operator: ViewQueryOperator::NotEqual,
-                value: 1.into(),
+            let filter = Expression::Op {
+                left: Box::new(Expression::Column(0)),
+                op: BinaryOperator::NotEqual,
+                right: Box::new(Expression::Literal(1.into())),
             };
 
-            let result = post_lookup.process(records.iter(), &[filter]).unwrap();
+            let result = post_lookup.process(records.iter(), &Some(filter)).unwrap();
 
             assert_eq!(result.len(), 3);
             assert_eq!(
@@ -569,10 +523,10 @@ mod tests {
 
             // MIN(c1) WHERE c1 != 3 GROUP BY c0 ORDER BY c0 ASC LIMIT 1
 
-            let filter = ViewQueryFilter {
-                column: 1,
-                operator: ViewQueryOperator::NotEqual,
-                value: 3.into(),
+            let filter = Expression::Op {
+                left: Box::new(Expression::Column(1)),
+                op: BinaryOperator::NotEqual,
+                right: Box::new(Expression::Literal(3.into())),
             };
 
             let post_lookup = PostLookup {
@@ -588,7 +542,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let result = post_lookup.process(records.iter(), &[filter]).unwrap();
+            let result = post_lookup.process(records.iter(), &Some(filter)).unwrap();
 
             assert_eq!(result.len(), 1);
             assert_eq!(

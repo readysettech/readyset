@@ -1,3 +1,6 @@
+mod like;
+
+use std::borrow::Borrow;
 use std::cmp::min;
 use std::convert::TryFrom;
 use std::fmt;
@@ -9,13 +12,14 @@ use chrono_tz::Tz;
 use maths::int::integer_rnd;
 use mysql_time::MysqlTime;
 use nom_sql::{BinaryOperator, SqlType};
-use noria::util::like::{CaseInsensitive, CaseSensitive, LikePattern};
 use noria_data::DataType;
 use noria_errors::{ReadySetError, ReadySetResult};
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BuiltinFunction {
     /// convert_tz(expr, expr, expr)
     ConvertTZ(Box<Expression>, Box<Expression>, Box<Expression>),
@@ -135,7 +139,7 @@ impl fmt::Display for BuiltinFunction {
 ///
 /// During forward processing of dataflow, instances of these expressions are
 /// [evaluated](Expression::eval) by both projection nodes and filter nodes.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Expression {
     /// A reference to a column, by index, in the parent node
     Column(usize),
@@ -215,13 +219,16 @@ macro_rules! non_null {
 
 impl Expression {
     /// Evaluate this expression, given a source record to pull columns from
-    pub fn eval(&self, record: &[DataType]) -> ReadySetResult<DataType> {
+    pub fn eval<D>(&self, record: &[D]) -> ReadySetResult<DataType>
+    where
+        D: Borrow<DataType>,
+    {
         use Expression::*;
 
         match self {
             Column(c) => record
                 .get(*c)
-                .cloned()
+                .map(|dt| dt.borrow().clone())
                 .ok_or(ReadySetError::ProjectExpressionInvalidColumnIndex(*c)),
             Literal(dt) => Ok(dt.clone()),
             Op { op, left, right } => {
@@ -602,7 +609,8 @@ mod tests {
     fn eval_column() {
         let expr = Column(1);
         assert_eq!(
-            expr.eval(&[1.into(), "two".try_into().unwrap()]).unwrap(),
+            expr.eval(&[DataType::from(1), "two".try_into().unwrap()])
+                .unwrap(),
             "two".try_into().unwrap()
         )
     }
@@ -611,7 +619,8 @@ mod tests {
     fn eval_literal() {
         let expr = Literal(1.into());
         assert_eq!(
-            expr.eval(&[1.into(), "two".try_into().unwrap()]).unwrap(),
+            expr.eval(&[DataType::from(1), "two".try_into().unwrap()])
+                .unwrap(),
             1.into()
         )
     }
@@ -627,7 +636,10 @@ mod tests {
             }),
             op: BinaryOperator::Add,
         };
-        assert_eq!(expr.eval(&[1.into(), 2.into()]).unwrap(), 6.into());
+        assert_eq!(
+            expr.eval(&[DataType::from(1), DataType::from(2)]).unwrap(),
+            6.into()
+        );
     }
 
     #[test]
@@ -646,7 +658,10 @@ mod tests {
                     right: Box::new(Literal($value)),
                     op: $binary_op,
                 };
-                assert_eq!(expr.eval(&[dt.into()]).unwrap(), $expected.into());
+                assert_eq!(
+                    expr.eval::<DataType>(&[dt.into()]).unwrap(),
+                    $expected.into()
+                );
             };
         }
         assert_op!(BinaryOperator::Less, text_less_dt.clone(), 0u8);
@@ -665,7 +680,7 @@ mod tests {
     fn eval_cast() {
         let expr = Cast(Box::new(Column(0)), SqlType::Int(None));
         assert_eq!(
-            expr.eval(&["1".try_into().unwrap(), "2".try_into().unwrap()])
+            expr.eval::<DataType>(&["1".try_into().unwrap(), "2".try_into().unwrap()])
                 .unwrap(),
             1i32.into()
         );
@@ -689,7 +704,7 @@ mod tests {
         let src = "Atlantic/Cape_Verde";
         let target = "Asia/Kathmandu";
         assert_eq!(
-            expr.eval(&[
+            expr.eval::<DataType>(&[
                 datetime.into(),
                 src.try_into().unwrap(),
                 target.try_into().unwrap()
@@ -698,7 +713,7 @@ mod tests {
             expected.into()
         );
         assert_eq!(
-            expr.eval(&[
+            expr.eval::<DataType>(&[
                 datetime.into(),
                 "invalid timezone".try_into().unwrap(),
                 target.try_into().unwrap()
@@ -707,7 +722,7 @@ mod tests {
             DataType::None
         );
         assert_eq!(
-            expr.eval(&[
+            expr.eval::<DataType>(&[
                 datetime.into(),
                 src.try_into().unwrap(),
                 "invalid timezone".try_into().unwrap()
@@ -718,7 +733,7 @@ mod tests {
 
         let string_datetime = datetime.to_string();
         assert_eq!(
-            expr.eval(&[
+            expr.eval::<DataType>(&[
                 string_datetime.clone().try_into().unwrap(),
                 src.try_into().unwrap(),
                 target.try_into().unwrap()
@@ -728,7 +743,7 @@ mod tests {
         );
 
         assert_eq!(
-            expr.eval(&[
+            expr.eval::<DataType>(&[
                 string_datetime.clone().try_into().unwrap(),
                 "invalid timezone".try_into().unwrap(),
                 target.try_into().unwrap()
@@ -737,7 +752,7 @@ mod tests {
             DataType::None
         );
         assert_eq!(
-            expr.eval(&[
+            expr.eval::<DataType>(&[
                 string_datetime.try_into().unwrap(),
                 src.try_into().unwrap(),
                 "invalid timezone".try_into().unwrap()
@@ -754,9 +769,10 @@ mod tests {
 
         let date = NaiveDate::from_ymd(2021, 3, 22); // Monday
 
-        assert_eq!(expr.eval(&[date.into()]).unwrap(), expected);
+        assert_eq!(expr.eval::<DataType>(&[date.into()]).unwrap(), expected);
         assert_eq!(
-            expr.eval(&[date.to_string().try_into().unwrap()]).unwrap(),
+            expr.eval::<DataType>(&[date.to_string().try_into().unwrap()])
+                .unwrap(),
             expected
         );
 
@@ -764,9 +780,9 @@ mod tests {
             date, // Monday
             NaiveTime::from_hms(18, 8, 00),
         );
-        assert_eq!(expr.eval(&[datetime.into()]).unwrap(), expected);
+        assert_eq!(expr.eval::<DataType>(&[datetime.into()]).unwrap(), expected);
         assert_eq!(
-            expr.eval(&[datetime.to_string().try_into().unwrap()])
+            expr.eval::<DataType>(&[datetime.to_string().try_into().unwrap()])
                 .unwrap(),
             expected
         );
@@ -780,14 +796,20 @@ mod tests {
         ));
         let value = DataType::Int(2);
 
-        assert_eq!(expr.eval(&[DataType::None, 2.into()]).unwrap(), value);
-        assert_eq!(expr.eval(&[2.into(), 3.into()]).unwrap(), value);
+        assert_eq!(
+            expr.eval(&[DataType::None, DataType::from(2)]).unwrap(),
+            value
+        );
+        assert_eq!(
+            expr.eval(&[DataType::from(2), DataType::from(3)]).unwrap(),
+            value
+        );
 
         let expr2 = Call(BuiltinFunction::IfNull(
             Box::new(Literal(DataType::None)),
             Box::new(Column(0)),
         ));
-        assert_eq!(expr2.eval(&[2.into()]).unwrap(), value);
+        assert_eq!(expr2.eval::<DataType>(&[2.into()]).unwrap(), value);
 
         let expr3 = Call(BuiltinFunction::IfNull(
             Box::new(Column(0)),
@@ -804,23 +826,27 @@ mod tests {
             NaiveTime::from_hms(5, 13, 33),
         );
         let expected = 10_u32;
-        assert_eq!(expr.eval(&[datetime.into()]).unwrap(), expected.into());
         assert_eq!(
-            expr.eval(&[datetime.to_string().try_into().unwrap()])
+            expr.eval(&[DataType::from(datetime)]).unwrap(),
+            expected.into()
+        );
+        assert_eq!(
+            expr.eval::<DataType>(&[datetime.to_string().try_into().unwrap()])
                 .unwrap(),
             expected.into()
         );
         assert_eq!(
-            expr.eval(&[datetime.date().into()]).unwrap(),
+            expr.eval::<DataType>(&[datetime.date().into()]).unwrap(),
             expected.into()
         );
         assert_eq!(
-            expr.eval(&[datetime.date().to_string().try_into().unwrap()])
+            expr.eval::<DataType>(&[datetime.date().to_string().try_into().unwrap()])
                 .unwrap(),
             expected.into()
         );
         assert_eq!(
-            expr.eval(&["invalid date".try_into().unwrap()]).unwrap(),
+            expr.eval::<DataType>(&["invalid date".try_into().unwrap()])
+                .unwrap(),
             DataType::None
         );
     }
@@ -840,11 +866,12 @@ mod tests {
             NaiveTime::from_hms(4, 13, 33),
         );
         assert_eq!(
-            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            expr.eval::<DataType>(&[param1.into(), param2.into()])
+                .unwrap(),
             DataType::Time(MysqlTime::from_hmsus(false, 47, 0, 0, 0))
         );
         assert_eq!(
-            expr.eval(&[
+            expr.eval::<DataType>(&[
                 param1.to_string().try_into().unwrap(),
                 param2.to_string().try_into().unwrap()
             ])
@@ -860,11 +887,12 @@ mod tests {
             NaiveTime::from_hms(4, 13, 33),
         );
         assert_eq!(
-            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            expr.eval::<DataType>(&[param1.into(), param2.into()])
+                .unwrap(),
             DataType::Time(MysqlTime::from_hmsus(true, 49, 0, 0, 0))
         );
         assert_eq!(
-            expr.eval(&[
+            expr.eval::<DataType>(&[
                 param1.to_string().try_into().unwrap(),
                 param2.to_string().try_into().unwrap()
             ])
@@ -873,11 +901,12 @@ mod tests {
         );
         let param2 = NaiveTime::from_hms(4, 13, 33);
         assert_eq!(
-            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            expr.eval::<DataType>(&[param1.into(), param2.into()])
+                .unwrap(),
             DataType::None
         );
         assert_eq!(
-            expr.eval(&[
+            expr.eval::<DataType>(&[
                 param1.to_string().try_into().unwrap(),
                 param2.to_string().try_into().unwrap()
             ])
@@ -886,11 +915,12 @@ mod tests {
         );
         let param1 = NaiveTime::from_hms(5, 13, 33);
         assert_eq!(
-            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            expr.eval::<DataType>(&[param1.into(), param2.into()])
+                .unwrap(),
             DataType::Time(MysqlTime::from_hmsus(true, 1, 0, 0, 0))
         );
         assert_eq!(
-            expr.eval(&[
+            expr.eval::<DataType>(&[
                 param1.to_string().try_into().unwrap(),
                 param2.to_string().try_into().unwrap()
             ])
@@ -900,31 +930,31 @@ mod tests {
         let param1 = "not a date nor time";
         let param2 = "01:00:00.4";
         assert_eq!(
-            expr.eval(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
+            expr.eval::<DataType>(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
                 .unwrap(),
             DataType::Time(MysqlTime::from_hmsus(false, 1, 0, 0, 400_000))
         );
         assert_eq!(
-            expr.eval(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
+            expr.eval::<DataType>(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
                 .unwrap(),
             DataType::Time(MysqlTime::from_hmsus(true, 1, 0, 0, 400_000))
         );
 
         let param2 = "10000.4";
         assert_eq!(
-            expr.eval(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
+            expr.eval::<DataType>(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
                 .unwrap(),
             DataType::Time(MysqlTime::from_hmsus(false, 1, 0, 0, 400_000))
         );
         assert_eq!(
-            expr.eval(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
+            expr.eval::<DataType>(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
                 .unwrap(),
             DataType::Time(MysqlTime::from_hmsus(true, 1, 0, 0, 400_000))
         );
 
         let param2: f32 = 3.57;
         assert_eq!(
-            expr.eval(&[
+            expr.eval::<DataType>(&[
                 DataType::try_from(param1).unwrap(),
                 DataType::try_from(param2).unwrap()
             ])
@@ -936,7 +966,7 @@ mod tests {
 
         let param2: f64 = 3.57;
         assert_eq!(
-            expr.eval(&[
+            expr.eval::<DataType>(&[
                 DataType::try_from(param1).unwrap(),
                 DataType::try_from(param2).unwrap()
             ])
@@ -962,11 +992,12 @@ mod tests {
             NaiveTime::from_hms(4, 13, 33),
         );
         assert_eq!(
-            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            expr.eval::<DataType>(&[param1.into(), param2.into()])
+                .unwrap(),
             DataType::None
         );
         assert_eq!(
-            expr.eval(&[
+            expr.eval::<DataType>(&[
                 param1.to_string().try_into().unwrap(),
                 param2.to_string().try_into().unwrap()
             ])
@@ -975,14 +1006,15 @@ mod tests {
         );
         let param2 = NaiveTime::from_hms(4, 13, 33);
         assert_eq!(
-            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            expr.eval::<DataType>(&[param1.into(), param2.into()])
+                .unwrap(),
             DataType::Timestamp(NaiveDateTime::new(
                 NaiveDate::from_ymd(2003, 10, 12),
                 NaiveTime::from_hms(9, 27, 6),
             ))
         );
         assert_eq!(
-            expr.eval(&[
+            expr.eval::<DataType>(&[
                 param1.to_string().try_into().unwrap(),
                 param2.to_string().try_into().unwrap()
             ])
@@ -994,14 +1026,15 @@ mod tests {
         );
         let param2 = MysqlTime::from_hmsus(false, 3, 11, 35, 0);
         assert_eq!(
-            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            expr.eval::<DataType>(&[param1.into(), param2.into()])
+                .unwrap(),
             DataType::Timestamp(NaiveDateTime::new(
                 NaiveDate::from_ymd(2003, 10, 12),
                 NaiveTime::from_hms(2, 1, 58),
             ))
         );
         assert_eq!(
-            expr.eval(&[
+            expr.eval::<DataType>(&[
                 param1.to_string().try_into().unwrap(),
                 param2.to_string().try_into().unwrap()
             ])
@@ -1013,11 +1046,12 @@ mod tests {
         );
         let param1 = MysqlTime::from_hmsus(true, 10, 12, 44, 123_000);
         assert_eq!(
-            expr.eval(&[param2.into(), param1.into()]).unwrap(),
+            expr.eval::<DataType>(&[param2.into(), param1.into()])
+                .unwrap(),
             DataType::Time(MysqlTime::from_hmsus(true, 7, 1, 9, 123_000))
         );
         assert_eq!(
-            expr.eval(&[
+            expr.eval::<DataType>(&[
                 param2.to_string().try_into().unwrap(),
                 param1.to_string().try_into().unwrap()
             ])
@@ -1027,31 +1061,31 @@ mod tests {
         let param1 = "not a date nor time";
         let param2 = "01:00:00.4";
         assert_eq!(
-            expr.eval(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
+            expr.eval::<DataType>(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
                 .unwrap(),
             DataType::Time(MysqlTime::from_hmsus(true, 1, 0, 0, 400_000))
         );
         assert_eq!(
-            expr.eval(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
+            expr.eval::<DataType>(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
                 .unwrap(),
             DataType::Time(MysqlTime::from_hmsus(true, 1, 0, 0, 400_000))
         );
 
         let param2 = "10000.4";
         assert_eq!(
-            expr.eval(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
+            expr.eval::<DataType>(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
                 .unwrap(),
             DataType::Time(MysqlTime::from_hmsus(true, 1, 0, 0, 400_000))
         );
         assert_eq!(
-            expr.eval(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
+            expr.eval::<DataType>(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
                 .unwrap(),
             DataType::Time(MysqlTime::from_hmsus(true, 1, 0, 0, 400_000))
         );
 
         let param2: f32 = 3.57;
         assert_eq!(
-            expr.eval(&[
+            expr.eval::<DataType>(&[
                 param1.try_into().unwrap(),
                 DataType::try_from(param2).unwrap()
             ])
@@ -1063,7 +1097,7 @@ mod tests {
 
         let param2: f64 = 3.57;
         assert_eq!(
-            expr.eval(&[
+            expr.eval::<DataType>(&[
                 param1.try_into().unwrap(),
                 DataType::try_from(param2).unwrap()
             ])
@@ -1085,12 +1119,15 @@ mod tests {
         let param1 = DataType::try_from(number).unwrap();
         let param2 = DataType::Int(precision);
         let want = DataType::try_from(4.123_f64).unwrap();
-        assert_eq!(expr.eval(&[param1, param2.clone()]).unwrap(), want);
+        assert_eq!(
+            expr.eval::<DataType>(&[param1, param2.clone()]).unwrap(),
+            want
+        );
 
         let number: f32 = 4.12345;
         let param1 = DataType::try_from(number).unwrap();
         let want = DataType::try_from(4.123_f32).unwrap();
-        assert_eq!(expr.eval(&[param1, param2]).unwrap(), want);
+        assert_eq!(expr.eval::<DataType>(&[param1, param2]).unwrap(), want);
     }
 
     #[test]
@@ -1104,11 +1141,14 @@ mod tests {
         let param1 = DataType::try_from(number).unwrap();
         let param2 = DataType::Int(precision);
         let want = DataType::try_from(50).unwrap();
-        assert_eq!(expr.eval(&[param1, param2.clone()]).unwrap(), want);
+        assert_eq!(
+            expr.eval::<DataType>(&[param1, param2.clone()]).unwrap(),
+            want
+        );
 
         let number: f32 = 52.12345;
         let param1 = DataType::try_from(number).unwrap();
-        assert_eq!(expr.eval(&[param1, param2]).unwrap(), want);
+        assert_eq!(expr.eval::<DataType>(&[param1, param2]).unwrap(), want);
     }
 
     #[test]
@@ -1122,11 +1162,14 @@ mod tests {
         let param1 = DataType::try_from(number).unwrap();
         let param2 = DataType::try_from(precision).unwrap();
         let want = DataType::try_from(50).unwrap();
-        assert_eq!(expr.eval(&[param1, param2.clone()]).unwrap(), want,);
+        assert_eq!(
+            expr.eval::<DataType>(&[param1, param2.clone()]).unwrap(),
+            want,
+        );
 
         let number: f64 = 52.12345;
         let param1 = DataType::try_from(number).unwrap();
-        assert_eq!(expr.eval(&[param1, param2]).unwrap(), want);
+        assert_eq!(expr.eval::<DataType>(&[param1, param2]).unwrap(), want);
     }
 
     // This is actually straight from MySQL:
@@ -1148,17 +1191,23 @@ mod tests {
         let param1 = DataType::try_from(number).unwrap();
         let param2 = DataType::try_from(precision).unwrap();
         let want = DataType::try_from(52).unwrap();
-        assert_eq!(expr.eval(&[param1, param2.clone()]).unwrap(), want,);
+        assert_eq!(
+            expr.eval::<DataType>(&[param1, param2.clone()]).unwrap(),
+            want,
+        );
 
         let number: f64 = 52.12345;
         let param1 = DataType::try_from(number).unwrap();
-        assert_eq!(expr.eval(&[param1, param2]).unwrap(), want,);
+        assert_eq!(expr.eval::<DataType>(&[param1, param2]).unwrap(), want,);
     }
 
     #[test]
     fn month_null() {
         let expr = Call(BuiltinFunction::Month(Box::new(Column(0))));
-        assert_eq!(expr.eval(&[DataType::None]).unwrap(), DataType::None);
+        assert_eq!(
+            expr.eval::<DataType>(&[DataType::None]).unwrap(),
+            DataType::None
+        );
     }
 
     #[test]
@@ -1169,7 +1218,7 @@ mod tests {
                 op: BinaryOperator::And,
                 right: Box::new(Expression::Literal(3.into())),
             }
-            .eval(&[])
+            .eval::<DataType>(&[])
             .unwrap(),
             1.into()
         );
@@ -1180,7 +1229,7 @@ mod tests {
                 op: BinaryOperator::And,
                 right: Box::new(Expression::Literal(0.into())),
             }
-            .eval(&[])
+            .eval::<DataType>(&[])
             .unwrap(),
             0.into()
         );
@@ -1199,12 +1248,12 @@ mod tests {
         };
 
         assert_eq!(
-            expr.eval(&[1.into()]).unwrap(),
+            expr.eval::<DataType>(&[1.into()]).unwrap(),
             DataType::try_from("yes").unwrap()
         );
 
         assert_eq!(
-            expr.eval(&[8.into()]).unwrap(),
+            expr.eval::<DataType>(&[DataType::from(8)]).unwrap(),
             DataType::try_from("no").unwrap()
         );
     }
@@ -1216,7 +1265,7 @@ mod tests {
             op: BinaryOperator::Like,
             right: Box::new(Expression::Literal("f%".into())),
         };
-        let res = expr.eval(&[]).unwrap();
+        let res = expr.eval::<DataType>(&[]).unwrap();
         assert!(res.is_truthy());
     }
 

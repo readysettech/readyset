@@ -206,7 +206,7 @@ impl Writer {
         let vq = ViewQuery {
             key_comparisons: vec![KeyComparison::Equal(Vec1::new(DataType::Int(article as _)))],
             block: true,
-            filters: vec![],
+            filter: None,
             timestamp: None,
         };
 

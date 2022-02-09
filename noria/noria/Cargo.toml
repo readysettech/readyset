@@ -77,8 +77,6 @@ bufstream = "0.1.3"
 byteorder = "1.0.0"
 socket2 = "0.4"
 async-bincode = "0.6.1"
-regex = "1.4.3"
-lazy_static = "1.4.0"
 test-strategy = "0.1.1"
 
 # metrics/
@@ -89,6 +87,7 @@ launchpad = { path = "../../launchpad" }
 mysql-time = { path = "../../mysql-time" }
 noria-errors = { path = "../errors" }
 noria-data = { path = "../data" }
+dataflow_expression = { path = "../server/dataflow/expression" }
 
 [dev-dependencies]
 assert_approx_eq = "1.1.0"

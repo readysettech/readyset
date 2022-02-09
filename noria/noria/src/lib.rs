@@ -236,7 +236,6 @@ mod controller;
 pub mod metrics;
 pub mod status;
 mod table;
-pub mod util;
 mod view;
 use std::convert::TryFrom;
 pub mod replication;
@@ -334,10 +333,7 @@ pub use crate::table::{Modification, Operation, Table, TableOperation, TableRequ
 pub use crate::table::{PacketData, PacketPayload, PacketTrace};
 pub use crate::view::View;
 #[doc(hidden)]
-pub use crate::view::{
-    KeyComparison, ReadQuery, ReadReply, ReadReplyBatch, SchemaType, ViewQuery, ViewQueryFilter,
-    ViewQueryOperator,
-};
+pub use crate::view::{KeyComparison, ReadQuery, ReadReply, ReadReplyBatch, SchemaType, ViewQuery};
 
 #[doc(hidden)]
 pub mod builders {
