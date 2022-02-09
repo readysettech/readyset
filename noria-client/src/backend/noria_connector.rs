@@ -1475,6 +1475,13 @@ fn build_view_query(
                             };
                             // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
                             let value = key[*idx - 1].coerce_to(key_type)?;
+
+                            let make_op = |op| DataflowExpression::Op {
+                                left: Box::new(DataflowExpression::Column(*key_column_idx)),
+                                op,
+                                right: Box::new(DataflowExpression::Literal(value.clone())),
+                            };
+
                             if let Some((lower_bound, upper_bound)) = &mut bounds {
                                 let binop = binops[*idx - 1].1;
                                 match binop {
@@ -1490,34 +1497,24 @@ fn build_view_query(
                                         upper_bound.push(value);
                                     }
                                     BinaryOperator::GreaterOrEqual => {
+                                        filters.push(make_op(BinaryOperator::GreaterOrEqual));
                                         lower_bound.push(value);
                                         upper_bound.push(DataType::Max);
                                     }
                                     BinaryOperator::LessOrEqual => {
+                                        filters.push(make_op(BinaryOperator::LessOrEqual));
                                         lower_bound.push(DataType::None); // NULL is the minimum DataType
                                         upper_bound.push(value);
                                     }
                                     BinaryOperator::Greater => {
-                                        lower_bound.push(value.clone());
+                                        filters.push(make_op(BinaryOperator::Greater));
+                                        lower_bound.push(value);
                                         upper_bound.push(DataType::Max);
-                                        filters.push(DataflowExpression::Op {
-                                            left: Box::new(DataflowExpression::Column(
-                                                *key_column_idx,
-                                            )),
-                                            op: BinaryOperator::NotEqual,
-                                            right: Box::new(DataflowExpression::Literal(value)),
-                                        });
                                     }
                                     BinaryOperator::Less => {
+                                        filters.push(make_op(BinaryOperator::Less));
                                         lower_bound.push(DataType::None); // NULL is the minimum DataType
-                                        upper_bound.push(value.clone());
-                                        filters.push(DataflowExpression::Op {
-                                            left: Box::new(DataflowExpression::Column(
-                                                *key_column_idx,
-                                            )),
-                                            op: BinaryOperator::NotEqual,
-                                            right: Box::new(DataflowExpression::Literal(value)),
-                                        });
+                                        upper_bound.push(value);
                                     }
                                     op => unsupported!(
                                         "Unsupported binary operator in query: `{}`",
@@ -1525,6 +1522,9 @@ fn build_view_query(
                                     ),
                                 }
                             } else {
+                                if !k.is_empty() && binop_to_use != BinaryOperator::Equal {
+                                    filters.push(make_op(binop_to_use));
+                                }
                                 k.push(value);
                             }
                         }
@@ -1793,7 +1793,6 @@ mod tests {
             )
             .unwrap();
 
-            assert!(query.filter.is_none());
             assert_eq!(
                 query.key_comparisons,
                 vec![KeyComparison::from_range(
@@ -1847,7 +1846,7 @@ mod tests {
                 query.filter,
                 Some(DataflowExpression::Op {
                     left: Box::new(DataflowExpression::Column(0)),
-                    op: BinaryOperator::NotEqual,
+                    op: BinaryOperator::Greater,
                     right: Box::new(DataflowExpression::Literal(1.into()))
                 })
             );
@@ -1857,6 +1856,38 @@ mod tests {
                     &(vec1![DataType::from("a"), DataType::from(1)]
                         ..=vec1![DataType::from("a"), DataType::Max])
                 )]
+            );
+        }
+
+        #[test]
+        fn compound_range() {
+            let query = build_view_query(
+                &*SCHEMA,
+                &[
+                    (ViewPlaceholder::OneToOne(1), 0),
+                    (ViewPlaceholder::OneToOne(2), 1),
+                ],
+                &parse_select_statement("SELECT t.x FROM t WHERE t.x > $1 AND t.y > $2"),
+                vec![vec![DataType::from(1), DataType::from("a")].into()],
+                None,
+            )
+            .unwrap();
+
+            assert_eq!(
+                query.filter,
+                Some(DataflowExpression::Op {
+                    left: Box::new(DataflowExpression::Column(1)),
+                    op: BinaryOperator::Greater,
+                    right: Box::new(DataflowExpression::Literal("a".into()))
+                })
+            );
+
+            assert_eq!(
+                query.key_comparisons,
+                vec![KeyComparison::Range((
+                    Bound::Excluded(vec1![DataType::from(1), DataType::from("a")]),
+                    Bound::Unbounded
+                ))]
             );
         }
     }
