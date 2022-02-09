@@ -12,6 +12,7 @@
 - [Testing your code](./dev-testing.md)
 - [Benchmarking your code](./benchmarking.md)
 - [Debugging your code](./debugging.md)
+- [Developer Environment](./dev-env.md)
 
 # Benchmarking
 
