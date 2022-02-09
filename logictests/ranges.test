@@ -1,0 +1,28 @@
+statement ok
+create table t1 (x int, y int);
+
+statement ok
+insert into t1 (x, y) values
+(1, 2),
+(1, 5),
+(2, 1),
+(3, 3),
+(4, 5);
+
+query I valuesort
+select x from t1 where y < ?;
+? = 5
+----
+1
+2
+3
+
+query I valuesort
+select x from t1 where x >= ? and y >= ?;
+? = 1
+? = 2
+----
+1
+1
+3
+4
