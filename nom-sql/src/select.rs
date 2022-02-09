@@ -6,12 +6,9 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
 use nom::error::ErrorKind;
-use nom::multi::many0;
+use nom::multi::{many0, separated_nonempty_list};
 use nom::sequence::{delimited, preceded, terminated, tuple};
-use nom::{
-    alt, call, char, complete, delimited, do_parse, opt, separated_nonempty_list, tag, tag_no_case,
-    IResult,
-};
+use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
@@ -377,88 +374,112 @@ impl FromClause {
     }
 }
 
-named_with_dialect!(nested_select(dialect) -> FromClause, do_parse!(
-    tag!("(")
-        >> multispace0
-        >> selection: call!(nested_selection(dialect))
-        >> multispace0
-        >> tag!(")")
-        >> alias: opt!(call!(as_alias(dialect)))
-        >> (FromClause::NestedSelect(Box::new(selection), alias))
-));
+fn nested_select(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause> {
+    move |i| {
+        let (i, _) = tag("(")(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, selection) = nested_selection(dialect)(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, _) = tag(")")(i)?;
 
-named_with_dialect!(from_clause_join(dialect) -> FromClause, do_parse!(
-    multispace0
-        >> lhs: call!(nested_from_clause(dialect))
-        >> join_clause: call!(join_clause(dialect))
-        >> multispace0
-        >> (FromClause::Join {
-            lhs: Box::new(lhs),
-            join_clause
-        })
-));
+        let (i, alias) = opt(as_alias(dialect))(i)?;
+        Ok((i, FromClause::NestedSelect(Box::new(selection), alias)))
+    }
+}
 
-named_with_dialect!(nested_from_clause(dialect) -> FromClause, alt!(
-    delimited!(tag!("("), call!(from_clause_join(dialect)), tag!(")"))
-        | call!(table_list(dialect)) => { FromClause::Tables }
-        | call!(nested_select(dialect))
-));
+fn from_clause_join(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause> {
+    move |i| {
+        let (i, _) = multispace0(i)?;
+        let (i, lhs) = nested_from_clause(dialect)(i)?;
+        let (i, join_clause) = join_clause(dialect)(i)?;
+        let (i, _) = multispace0(i)?;
+        Ok((
+            i,
+            FromClause::Join {
+                lhs: Box::new(lhs),
+                join_clause,
+            },
+        ))
+    }
+}
 
-named_with_dialect!(from_clause_tree(dialect) -> FromClause, alt!(
-    delimited!(tag!("("), call!(from_clause_join(dialect)), tag!(")"))
-        | call!(from_clause_join(dialect))
-        | call!(table_list(dialect)) => { FromClause::Tables }
-        | call!(nested_select(dialect))
-));
+fn nested_from_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause> {
+    move |i| {
+        alt((
+            delimited(tag("("), from_clause_join(dialect), tag(")")),
+            map(table_list(dialect), FromClause::Tables),
+            nested_select(dialect),
+        ))(i)
+    }
+}
 
-named_with_dialect!(from_clause(dialect) -> FromClause, do_parse!(
-    multispace0
-        >> complete!(tag_no_case!("from"))
-        >> multispace1
-        >> from_clause: call!(from_clause_tree(dialect))
-        >> (from_clause)
-));
+fn from_clause_tree(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause> {
+    move |i| {
+        alt((
+            delimited(tag("("), from_clause_join(dialect), tag(")")),
+            from_clause_join(dialect),
+            map(table_list(dialect), FromClause::Tables),
+            nested_select(dialect),
+        ))(i)
+    }
+}
 
-named_with_dialect!(cte(dialect) -> CommonTableExpression, do_parse!(
-    name: call!(dialect.identifier())
-        >> multispace1
-        >> complete!(tag_no_case!("as"))
-        >> multispace0
-        >> char!('(')
-        >> multispace0
-        >> statement: call!(nested_selection(dialect))
-        >> multispace0
-        >> char!(')')
-        >> (CommonTableExpression { name, statement })
-));
+fn from_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause> {
+    move |i| {
+        let (i, _) = multispace0(i)?;
+        let (i, _) = tag_no_case("from")(i)?;
+        let (i, _) = multispace1(i)?;
+        from_clause_tree(dialect)(i)
+    }
+}
 
-named_with_dialect!(ctes(dialect) -> Vec<CommonTableExpression>, do_parse!(
-    complete!(tag_no_case!("with"))
-        >> multispace1
-        >> ctes: separated_nonempty_list!(ws_sep_comma, call!(cte(dialect)))
-        >> multispace0
-        >> (ctes)
-));
+fn cte(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CommonTableExpression> {
+    move |i| {
+        let (i, name) = dialect.identifier()(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, _) = tag_no_case("as")(i)?;
+        let (i, _) = multispace0(i)?;
+
+        let (i, _) = tag("(")(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, statement) = nested_selection(dialect)(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, _) = tag(")")(i)?;
+
+        Ok((i, CommonTableExpression { name, statement }))
+    }
+}
+
+fn ctes(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<CommonTableExpression>> {
+    move |i| {
+        let (i, _) = tag_no_case("with")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, ctes) = separated_nonempty_list(ws_sep_comma, cte(dialect))(i)?;
+        let (i, _) = multispace0(i)?;
+
+        Ok((i, ctes))
+    }
+}
 
 pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SelectStatement> {
     move |i| {
-        let (remaining_input, (ctes, _, _, distinct, _, fields)) = tuple((
-            opt(ctes(dialect)),
-            tag_no_case("select"),
-            multispace1,
-            opt(tag_no_case("distinct")),
-            multispace0,
-            field_definition_expr(dialect),
-        ))(i)?;
+        let (i, ctes) = opt(ctes(dialect))(i)?;
+        let (i, _) = tag_no_case("select")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, distinct) = opt(tag_no_case("distinct"))(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, fields) = field_definition_expr(dialect)(i)?;
 
-        let (remaining_input, from_clause) = opt(tuple((
-            from_clause(dialect),
-            many0(join_clause(dialect)),
-            opt(where_clause(dialect)),
-            opt(group_by_clause(dialect)),
-            opt(order_clause(dialect)),
-            opt(limit_clause(dialect)),
-        )))(remaining_input)?;
+        let (i, from_clause) = opt(move |i| {
+            let (i, from) = from_clause(dialect)(i)?;
+            let (i, extra_joins) = many0(join_clause(dialect))(i)?;
+            let (i, where_clause) = opt(where_clause(dialect))(i)?;
+            let (i, group_by) = opt(group_by_clause(dialect))(i)?;
+            let (i, order) = opt(order_clause(dialect))(i)?;
+            let (i, limit) = opt(limit_clause(dialect))(i)?;
+
+            Ok((i, (from, extra_joins, where_clause, group_by, order, limit)))
+        })(i)?;
 
         let mut result = SelectStatement {
             ctes: ctes.unwrap_or_default(),
@@ -470,7 +491,7 @@ pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Se
         if let Some((from, extra_joins, where_clause, group_by, order, limit)) = from_clause {
             let (tables, mut join) = from
                 .into_tables_and_joins()
-                .map_err(|_| nom::Err::Error((remaining_input, ErrorKind::Tag)))?;
+                .map_err(|_| nom::Err::Error((i, ErrorKind::Tag)))?;
 
             join.extend(extra_joins);
 
@@ -482,7 +503,7 @@ pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Se
             result.limit = limit;
         }
 
-        Ok((remaining_input, result))
+        Ok((i, result))
     }
 }
 

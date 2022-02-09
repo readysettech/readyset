@@ -8,7 +8,7 @@ use nom::character::complete::{digit1, multispace0, multispace1};
 use nom::combinator::{map, map_res, opt};
 use nom::multi::many0;
 use nom::sequence::{delimited, preceded, terminated, tuple};
-use nom::{alt, complete, do_parse, named, opt, tag, tag_no_case, IResult};
+use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{column_identifier_no_alias, parse_comment, type_identifier, Literal, SqlType};
@@ -213,23 +213,20 @@ fn default(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
     Ok((remaining_input, ColumnConstraint::DefaultValue(def)))
 }
 
-named!(
-    on_update_current_timestamp(&[u8]) -> ColumnConstraint,
-    do_parse!(
-        complete!(tag_no_case!("on"))
-            >> multispace1
-            >> complete!(tag_no_case!("update"))
-            >> multispace1
-            >> alt!(
-                tag_no_case!("current_timestamp")
-                    | tag_no_case!("now")
-                    | tag_no_case!("localtime")
-                    | tag_no_case!("localtimestamp")
-            )
-            >> opt!(tag!("()"))
-            >> (ColumnConstraint::OnUpdateCurrentTimestamp)
-    )
-);
+pub fn on_update_current_timestamp(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
+    let (i, _) = tag_no_case("on")(i)?;
+    let (i, _) = multispace1(i)?;
+    let (i, _) = tag_no_case("update")(i)?;
+    let (i, _) = multispace1(i)?;
+    let (i, _) = alt((
+        tag_no_case("current_timestamp"),
+        tag_no_case("now"),
+        tag_no_case("localtime"),
+        tag_no_case("localtimestamp"),
+    ))(i)?;
+    let (i, _) = opt(tag("()"))(i)?;
+    Ok((i, ColumnConstraint::OnUpdateCurrentTimestamp))
+}
 
 pub fn column_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ColumnConstraint> {
     move |i| {

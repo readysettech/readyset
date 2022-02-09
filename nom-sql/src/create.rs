@@ -6,9 +6,9 @@ use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case};
 use nom::character::complete::{digit1, multispace0, multispace1};
 use nom::combinator::{map, map_res, opt};
-use nom::multi::{many0, many1};
+use nom::multi::{many0, many1, separated_list};
 use nom::sequence::{delimited, preceded, terminated, tuple};
-use nom::{call, do_parse, opt, preceded, separated_list, tag, tag_no_case, terminated, IResult};
+use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::column::{column_specification, Column, ColumnSpecification};
@@ -267,66 +267,80 @@ fn referential_action(i: &[u8]) -> IResult<&[u8], ReferentialAction> {
 
 fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     move |i| {
-        do_parse!(
+        // constraint users_group foreign key (group_id) references `groups` (id),
+        // CONSTRAINT identifier
+        let (i, _) = opt(move |i| {
+            let (i, _) = tag_no_case("constraint")(i)?;
+            multispace1(i)
+        })(i)?;
+        let (i, name) = opt(dialect.identifier())(i)?;
+
+        // FOREIGN KEY identifier
+        let (i, _) = multispace0(i)?;
+        let (i, _) = tag_no_case("foreign")(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, _) = tag_no_case("key")(i)?;
+        let (i, index_name) = opt(preceded(multispace1, dialect.identifier()))(i)?;
+
+        // (columns)
+
+        let (i, _) = multispace0(i)?;
+        let (i, _) = tag("(")(i)?;
+        let (i, columns) = separated_list(
+            terminated(tag(","), multispace0),
+            column_identifier_no_alias(dialect),
+        )(i)?;
+        let (i, _) = tag(")")(i)?;
+
+        // REFERENCES
+        let (i, _) = multispace1(i)?;
+        let (i, _) = tag_no_case("references")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, target_table) = schema_table_reference(dialect)(i)?;
+
+        // (columns)
+        let (i, _) = multispace0(i)?;
+        let (i, _) = tag("(")(i)?;
+        let (i, target_columns) = separated_list(
+            terminated(tag(","), multispace0),
+            column_identifier_no_alias(dialect),
+        )(i)?;
+        let (i, _) = tag(")")(i)?;
+
+        // ON DELETE
+        let (i, on_delete) = opt(move |i| {
+            let (i, _) = multispace0(i)?;
+            let (i, _) = tag_no_case("on")(i)?;
+            let (i, _) = multispace1(i)?;
+            let (i, _) = tag_no_case("delete")(i)?;
+            let (i, _) = multispace1(i)?;
+
+            referential_action(i)
+        })(i)?;
+
+        // ON UPDATE
+        let (i, on_update) = opt(move |i| {
+            let (i, _) = multispace0(i)?;
+            let (i, _) = tag_no_case("on")(i)?;
+            let (i, _) = multispace1(i)?;
+            let (i, _) = tag_no_case("update")(i)?;
+            let (i, _) = multispace1(i)?;
+
+            referential_action(i)
+        })(i)?;
+
+        Ok((
             i,
-            opt!(preceded!(tag_no_case!("constraint"), multispace1))
-                >> name: opt!(call!(dialect.identifier()))
-                >> preceded!(opt!(multispace1), tag_no_case!("foreign"))
-                >> multispace1
-                >> tag_no_case!("key")
-                >> index_name: opt!(preceded!(multispace1, call!(dialect.identifier())))
-                >> multispace0
-                >> tag!("(")
-                >> columns:
-                    separated_list!(
-                        terminated!(tag!(","), multispace0),
-                        call!(column_identifier_no_alias(dialect))
-                    )
-                >> tag!(")")
-                >> multispace1
-                >> tag_no_case!("references")
-                >> multispace1
-                >> target_table: call!(schema_table_reference(dialect))
-                >> multispace0
-                >> tag!("(")
-                >> target_columns:
-                    separated_list!(
-                        terminated!(tag!(","), multispace0),
-                        call!(column_identifier_no_alias(dialect))
-                    )
-                >> tag!(")")
-                >> on_delete:
-                    opt!(preceded!(
-                        tuple((
-                            multispace0,
-                            tag_no_case("on"),
-                            multispace1,
-                            tag_no_case("delete"),
-                            multispace1
-                        )),
-                        call!(referential_action)
-                    ))
-                >> on_update:
-                    opt!(preceded!(
-                        tuple((
-                            multispace0,
-                            tag_no_case("on"),
-                            multispace1,
-                            tag_no_case("update"),
-                            multispace1
-                        )),
-                        call!(referential_action)
-                    ))
-                >> (TableKey::ForeignKey {
-                    name,
-                    index_name,
-                    columns,
-                    target_table,
-                    target_columns,
-                    on_delete,
-                    on_update
-                })
-        )
+            TableKey::ForeignKey {
+                name,
+                index_name,
+                columns,
+                target_table,
+                target_columns,
+                on_delete,
+                on_update,
+            },
+        ))
     }
 }
 

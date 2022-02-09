@@ -240,51 +240,6 @@ impl Dialect {
     }
 }
 
-/// Create a function from a combination of nom parsers, which takes a [`Dialect`] as an argument.
-///
-/// This macro behaves like [`nom::named`], except the functions it defines take a [`Dialect`] as an
-/// argument, and return a *function* implementing the parse rule. For example, the following
-/// invocation:
-///
-/// ```ignore
-/// named_with_dialect!(fn my_ident(dialect) -> Vec<u8>, call!(dialect.identifier()))
-/// ```
-///
-/// will produce a function with the following signature:
-///
-/// ```ignore
-/// fn named_with_dialect(dialect: Dialect) -> impl Fn(&[u8]) -> nom::IResult<&[u8], Vec<u8>>
-/// ```
-///
-/// For functions with an input type other than `&[u8]`, the input type can be specified after the
-/// name for the dialect argument:
-///
-/// ```ignore
-/// named_with_dialect!(fn my_ident(dialect, &str) -> Vec<u8>, call!(dialect.identifier()))
-/// ```
-///
-/// will produce a function with the following signature:
-///
-/// ```ignore
-/// fn named_with_dialect(dialect: Dialect) -> impl Fn(&str) -> nom::IResult<&str, Vec<u8>>
-/// ```
-macro_rules! named_with_dialect {
-    ($vis: vis $func_name: ident($dialect: ident) -> $result: ty, $($body: tt)*) => {
-        named_with_dialect!($vis $func_name($dialect, &[u8]) -> $result, $($body)*);
-    };
-	($vis: vis $func_name: ident($dialect: ident, $input_type: ty) -> $result: ty, $submac: ident!($($args: tt)*)) => {
-        $vis fn $func_name($dialect: $crate::Dialect) -> impl Fn($input_type) -> nom::IResult<$input_type, $result> {
-            move |i: $input_type| {
-                $submac!(
-                    i,
-                    $($args)*
-                )
-            }
-        }
-
-	};
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

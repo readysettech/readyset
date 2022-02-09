@@ -3,10 +3,13 @@
 /// See https://dev.mysql.com/doc/refman/8.0/en/alter-table.html
 use std::{fmt, str};
 
+use nom::branch::alt;
+use nom::bytes::complete::tag_no_case;
 use nom::character::complete::{multispace0, multispace1};
-use nom::{
-    alt, call, complete, do_parse, named, opt, preceded, separated_list, tag_no_case, terminated,
-};
+use nom::combinator::{map, opt};
+use nom::multi::separated_list;
+use nom::sequence::{preceded, terminated};
+use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::column::{column_specification, ColumnSpecification};
@@ -15,7 +18,7 @@ use crate::common::{
 };
 use crate::create::key_specification;
 use crate::table::Table;
-use crate::SqlIdentifier;
+use crate::{Dialect, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum AlterColumnOperation {
@@ -120,146 +123,154 @@ impl fmt::Display for AlterTableStatement {
     }
 }
 
-named_with_dialect!(
-    add_column(dialect) -> AlterTableDefinition,
-    do_parse!(
-        tag_no_case!("add")
-            >> opt!(preceded!(multispace1, tag_no_case!("column")))
-            >> multispace1
-            >> column: call!(column_specification(dialect))
-            >> (AlterTableDefinition::AddColumn(column))
-    )
-);
+fn add_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
+    move |i| {
+        let (i, _) = tag_no_case("add")(i)?;
+        let (i, _) = opt(preceded(multispace1, tag_no_case("column")))(i)?;
+        let (i, _) = multispace1(i)?;
 
-named_with_dialect!(
-    add_key(dialect) -> AlterTableDefinition,
-    do_parse!(
-        tag_no_case!("add")
-            >> multispace1
-            >> key: call!(key_specification(dialect))
-            >> (AlterTableDefinition::AddKey(key))
-    )
-);
+        map(column_specification(dialect), |c| {
+            AlterTableDefinition::AddColumn(c)
+        })(i)
+    }
+}
 
-named!(
-    drop_behavior<DropBehavior>,
-    alt!(
-        tag_no_case!("cascade") => { |_| DropBehavior::Cascade} |
-        tag_no_case!("restrict") => { |_| DropBehavior::Restrict }
-    )
-);
+fn add_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
+    move |i| {
+        let (i, _) = tag_no_case("add")(i)?;
+        let (i, _) = multispace1(i)?;
 
-named_with_dialect!(
-    drop_column(dialect) -> AlterTableDefinition,
-    do_parse!(
-        tag_no_case!("drop")
-            >> multispace1
-            >> tag_no_case!("column")
-            >> multispace1
-            >> name: call!(dialect.identifier())
-            >> behavior: opt!(preceded!(multispace1, drop_behavior))
-            >> (AlterTableDefinition::DropColumn { name, behavior })
-    )
-);
+        map(key_specification(dialect), |k| {
+            AlterTableDefinition::AddKey(k)
+        })(i)
+    }
+}
 
-named_with_dialect!(
-    set_default(dialect) -> AlterColumnOperation,
-    do_parse!(
-        opt!(terminated!(tag_no_case!("set"), multispace1))
-            >> tag_no_case!("default")
-            >> multispace1
-            >> value: call!(literal(dialect))
-            >> (AlterColumnOperation::SetColumnDefault(value))
-    )
-);
+fn drop_behavior(i: &[u8]) -> IResult<&[u8], DropBehavior> {
+    alt((
+        map(tag_no_case("cascade"), |_| DropBehavior::Cascade),
+        map(tag_no_case("restrict"), |_| DropBehavior::Restrict),
+    ))(i)
+}
 
-named!(
-    drop_default<AlterColumnOperation>,
-    do_parse!(
-        tag_no_case!("drop")
-            >> multispace1
-            >> tag_no_case!("default")
-            >> (AlterColumnOperation::DropColumnDefault)
-    )
-);
+fn drop_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
+    move |i| {
+        let (i, _) = tag_no_case("drop")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, _) = tag_no_case("column")(i)?;
+        let (i, _) = multispace1(i)?;
 
-named_with_dialect!(
-    alter_column_operation(dialect) -> AlterColumnOperation,
-    alt!(call!(set_default(dialect)) | drop_default)
-);
+        let (i, name) = dialect.identifier()(i)?;
+        let (i, behavior) = opt(preceded(multispace1, drop_behavior))(i)?;
 
-named_with_dialect!(
-    alter_column(dialect) -> AlterTableDefinition,
-    do_parse!(
-        tag_no_case!("alter")
-            >> multispace1
-            >> tag_no_case!("column")
-            >> multispace1
-            >> name: call!(dialect.identifier())
-            >> multispace1
-            >> operation: call!(alter_column_operation(dialect))
-            >> (AlterTableDefinition::AlterColumn { name, operation })
-    )
-);
+        Ok((i, AlterTableDefinition::DropColumn { name, behavior }))
+    }
+}
 
-named_with_dialect!(
-    change_column(dialect) -> AlterTableDefinition,
-    do_parse!(
-        tag_no_case!("change")
-            >> opt!(preceded!(multispace1, tag_no_case!("column")))
-            >> multispace1
-            >> name: call!(dialect.identifier())
-            >> multispace1
-            >> spec: call!(column_specification(dialect))
-            // TODO:  FIRST
-            // TODO:  AFTER col_name
-            >> (AlterTableDefinition::ChangeColumn{ name, spec })
-    )
-);
+fn set_default(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterColumnOperation> {
+    move |i| {
+        let (i, _) = opt(terminated(tag_no_case("set"), multispace1))(i)?;
+        let (i, _) = tag_no_case("default")(i)?;
+        let (i, _) = multispace1(i)?;
 
-named_with_dialect!(
-    modify_column(dialect) -> AlterTableDefinition,
-    do_parse!(
-        tag_no_case!("modify")
-            >> opt!(preceded!(multispace1, tag_no_case!("column")))
-            >> multispace1
-            >> spec: call!(column_specification(dialect))
-            // TODO:  FIRST
-            // TODO:  AFTER col_name
-            >> (AlterTableDefinition::ChangeColumn{
+        map(literal(dialect), |v| {
+            AlterColumnOperation::SetColumnDefault(v)
+        })(i)
+    }
+}
+
+fn drop_default(i: &[u8]) -> IResult<&[u8], AlterColumnOperation> {
+    let (i, _) = tag_no_case("drop")(i)?;
+    let (i, _) = multispace1(i)?;
+    let (i, _) = tag_no_case("default")(i)?;
+
+    Ok((i, AlterColumnOperation::DropColumnDefault))
+}
+
+fn alter_column_operation(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], AlterColumnOperation> {
+    move |i| alt((set_default(dialect), drop_default))(i)
+}
+
+fn alter_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
+    move |i| {
+        let (i, _) = tag_no_case("alter")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, _) = tag_no_case("column")(i)?;
+        let (i, _) = multispace1(i)?;
+
+        let (i, name) = dialect.identifier()(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, operation) = alter_column_operation(dialect)(i)?;
+
+        Ok((i, AlterTableDefinition::AlterColumn { name, operation }))
+    }
+}
+
+fn change_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
+    move |i| {
+        let (i, _) = tag_no_case("change")(i)?;
+        let (i, _) = opt(preceded(multispace1, tag_no_case("column")))(i)?;
+        let (i, _) = multispace1(i)?;
+
+        let (i, name) = dialect.identifier()(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, spec) = column_specification(dialect)(i)?;
+
+        Ok((i, AlterTableDefinition::ChangeColumn { name, spec }))
+    }
+}
+
+fn modify_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
+    // TODO: FIRST, AFTER col_name
+    move |i| {
+        let (i, _) = tag_no_case("modify")(i)?;
+        let (i, _) = opt(preceded(multispace1, tag_no_case("column")))(i)?;
+        let (i, _) = multispace1(i)?;
+
+        map(column_specification(dialect), |spec| {
+            AlterTableDefinition::ChangeColumn {
                 name: spec.column.name.clone(),
-                spec
-            })
-    )
-);
+                spec,
+            }
+        })(i)
+    }
+}
 
-named_with_dialect!(
-    alter_table_definition(dialect) -> AlterTableDefinition,
-    alt!(
-        call!(add_column(dialect))
-            | call!(add_key(dialect))
-            | call!(drop_column(dialect))
-            | call!(alter_column(dialect))
-            | call!(change_column(dialect))
-            | call!(modify_column(dialect))
-    )
-);
+fn alter_table_definition(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
+    move |i| {
+        alt((
+            add_column(dialect),
+            add_key(dialect),
+            drop_column(dialect),
+            alter_column(dialect),
+            change_column(dialect),
+            modify_column(dialect),
+        ))(i)
+    }
+}
 
-named_with_dialect!(
-    pub alter_table_statement(dialect) -> AlterTableStatement,
-    complete!(do_parse!(
-        tag_no_case!("alter")
-            >> multispace1
-            >> tag_no_case!("table")
-            >> multispace1
-            >> table: call!(schema_table_reference_no_alias(dialect))
-            >> multispace1
-            >> definitions: separated_list!(ws_sep_comma, alter_table_definition(dialect))
-            >> multispace0
-            >> statement_terminator
-            >> (AlterTableStatement { table, definitions })
-    ))
-);
+pub fn alter_table_statement(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("alter")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, _) = tag_no_case("table")(i)?;
+        let (i, _) = multispace1(i)?;
+
+        let (i, table) = schema_table_reference_no_alias(dialect)(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, definitions) = separated_list(ws_sep_comma, alter_table_definition(dialect))(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, _) = statement_terminator(i)?;
+
+        Ok((i, AlterTableStatement { table, definitions }))
+    }
+}
 
 #[cfg(test)]
 mod tests {
