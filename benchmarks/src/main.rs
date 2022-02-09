@@ -92,7 +92,7 @@ impl BenchmarkRunner {
             .map(|s| {
                 format!(
                     "{}/metrics/job/{}/instance/{}",
-                    s.replace("//", "/"),
+                    s,
                     self.benchmark_cmd.as_ref().unwrap().name_label(),
                     self.deployment_params.instance_label
                 )
