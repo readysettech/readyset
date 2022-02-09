@@ -1,5 +1,5 @@
 #!/bin/bash
-set -exo pipefail
+set -eo pipefail
 
 DIR="$(dirname "${0}")/.."
 
@@ -66,6 +66,7 @@ if [ "$#" -ne 2 ]; then
     echo '  9. Build the codebase and start a Noria cluster'
     echo ' 10. Run benchmarks, tagging metrics with a_committish'
     echo ' 11. Direct you to use your human eyes and brain to view and interpret metrics'
+    exit 1
 fi
 
 ensure_monitoring_stack
@@ -90,4 +91,3 @@ teardown $pids
 
 echo
 echo 'Benchmarks complete.  You can now load up Grafana on http://localhost:3000/ and explore metrics.'
-
