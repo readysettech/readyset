@@ -9,7 +9,7 @@ use std::{mem, time};
 
 use async_bincode::AsyncBincodeStream;
 use dataflow::prelude::{DataType, *};
-use dataflow::{Readers, SingleReadHandle};
+use dataflow::{Expression as DataflowExpression, Readers, SingleReadHandle};
 use failpoint_macros::set_failpoint;
 use futures_util::future;
 use futures_util::future::{Either, FutureExt, TryFutureExt};
@@ -17,7 +17,7 @@ use futures_util::stream::{StreamExt, TryStreamExt};
 use launchpad::intervals;
 use noria::consistency::Timestamp;
 use noria::metrics::recorded;
-use noria::{KeyComparison, ReadQuery, ReadReply, Tagged, ViewQuery, ViewQueryFilter};
+use noria::{KeyComparison, ReadQuery, ReadReply, Tagged, ViewQuery};
 use pin_project::pin_project;
 use serde::ser::Serializer;
 use stream_cancel::Valve;
@@ -102,7 +102,7 @@ impl ReadRequestHandler {
             mut key_comparisons,
             block,
             timestamp,
-            filters,
+            filter,
         } = query;
         let immediate = READERS.with(|readers_cache| {
             let mut readers_cache = readers_cache.borrow_mut();
@@ -145,7 +145,7 @@ impl ReadRequestHandler {
                 }
 
                 use dataflow::LookupError::*;
-                match do_lookup(reader, &key, &filters) {
+                match do_lookup(reader, &key, &filter) {
                     Ok(rs) => {
                         if consistency_miss {
                             ret.push(SerializedReadReplyBatch::empty());
@@ -197,7 +197,7 @@ impl ReadRequestHandler {
                             ret.extend(
                                 non_miss_ranges
                                     .into_iter()
-                                    .flat_map(|key| do_lookup(reader, &key, &filters)),
+                                    .flat_map(|key| do_lookup(reader, &key, &filter)),
                             )
                         }
 
@@ -278,7 +278,7 @@ impl ReadRequestHandler {
                             next_trigger: now,
                             first: now,
                             warned: false,
-                            filters,
+                            filter,
                             timestamp,
                             upquery_timeout: self.upquery_timeout,
                         },
@@ -453,12 +453,12 @@ where
 fn do_lookup(
     reader: &SingleReadHandle,
     key: &KeyComparison,
-    filters: &[ViewQueryFilter],
+    filter: &Option<DataflowExpression>,
 ) -> Result<SerializedReadReplyBatch, dataflow::LookupError> {
     if let Some(equal) = &key.equal() {
         reader
             .try_find_and(*equal, |rs| {
-                let filtered = reader.post_lookup.process(rs, filters)?;
+                let filtered = reader.post_lookup.process(rs, filter)?;
                 Ok(serialize(filtered))
             })
             .map(|r| r.0)
@@ -473,7 +473,7 @@ fn do_lookup(
             .and_then(|(rs, _)| {
                 Ok(serialize(reader.post_lookup.process(
                     rs.into_iter().flatten().collect::<Vec<_>>().iter(),
-                    filters,
+                    filter,
                 )?))
             })
     }
@@ -507,7 +507,7 @@ struct BlockingRead {
     pending_keys: Vec<KeyComparison>,
     pending_indices: Vec<usize>,
     truth: Readers,
-    filters: Vec<ViewQueryFilter>,
+    filter: Option<DataflowExpression>,
     trigger_timeout: Duration,
     next_trigger: time::Instant,
     first: time::Instant,
@@ -564,7 +564,7 @@ impl BlockingRead {
                         .pop()
                         .expect("pending.len() == keys.len()");
 
-                    match do_lookup(reader, &key, &self.filters) {
+                    match do_lookup(reader, &key, &self.filter) {
                         Ok(rs) => {
                             read[read_i] = rs;
                         }

@@ -23,17 +23,14 @@ use dataflow::ops::join::{Join, JoinSource, JoinType};
 use dataflow::ops::project::Project;
 use dataflow::ops::union::{self, Union};
 use dataflow::post_lookup::PostLookup;
-use dataflow::{DurabilityMode, PersistenceParameters};
+use dataflow::{DurabilityMode, Expression as DataflowExpression, PersistenceParameters};
 use futures::StreamExt;
 use itertools::Itertools;
-use nom_sql::OrderType;
+use nom_sql::{BinaryOperator, OrderType};
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::consistency::Timestamp;
 use noria::internal::LocalNodeIndex;
-use noria::{
-    KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery, ViewQueryFilter,
-    ViewQueryOperator, ViewRequest,
-};
+use noria::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery, ViewRequest};
 use noria_data::DataType;
 use noria_errors::ReadySetError::MigrationPlanFailed;
 use rusty_fork::rusty_fork_test;
@@ -159,7 +156,7 @@ async fn test_timestamp_propagation_simple() {
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::Equal(vec1![id.clone()])],
             block: true,
-            filters: vec![],
+            filter: None,
             timestamp: Some(t.clone()),
         })
         .await
@@ -172,7 +169,7 @@ async fn test_timestamp_propagation_simple() {
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::Equal(vec1![id.clone()])],
             block: false,
-            filters: vec![],
+            filter: None,
             // The timestamp at the reader node { 0: 4 }, does not
             // satisfy this timestamp.
             timestamp: Some(timestamp(vec![(1, 4)])),
@@ -242,7 +239,7 @@ async fn test_timestamp_propagation_multitable() {
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::Equal(vec1![DataType::Int(1)])],
             block: true,
-            filters: vec![],
+            filter: None,
             timestamp: Some(timestamp(vec![(0, 6), (1, 6)])),
         })
         .await
@@ -257,7 +254,7 @@ async fn test_timestamp_propagation_multitable() {
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::Equal(vec1![DataType::Int(1)])],
             block: false,
-            filters: vec![],
+            filter: None,
             timestamp: Some(timestamp(vec![(0, 6), (1, 7)])),
         })
         .await
@@ -4560,11 +4557,11 @@ async fn post_read_ilike() {
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::from_range(&(..))],
             block: true,
-            filters: vec![ViewQueryFilter {
-                column: 0,
-                operator: ViewQueryOperator::ILike,
-                value: "%a%".into(),
-            }],
+            filter: Some(DataflowExpression::Op {
+                left: Box::new(DataflowExpression::Column(0)),
+                op: BinaryOperator::ILike,
+                right: Box::new(DataflowExpression::Literal("%a%".into())),
+            }),
             timestamp: None,
         })
         .await
@@ -7540,7 +7537,7 @@ async fn aggressive_eviction_impl() {
         let vq = ViewQuery {
             key_comparisons: keys.clone(),
             block: true,
-            filters: vec![],
+            filter: None,
             timestamp: None,
         };
 

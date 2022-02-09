@@ -5,6 +5,7 @@ use std::fmt;
 use std::ops::Bound;
 use std::sync::{atomic, Arc, RwLock};
 
+use dataflow_expression::Expression as DataflowExpression;
 use itertools::Itertools;
 use nom_sql::{
     self, BinaryOperator, ColumnConstraint, DeleteStatement, Expression, InsertStatement, Literal,
@@ -15,8 +16,7 @@ use noria::internal::LocalNodeIndex;
 use noria::results::Results;
 use noria::{
     ColumnSchema, ControllerHandle, KeyColumnIdx, KeyComparison, ReadySetError, ReadySetResult,
-    SchemaType, Table, TableOperation, View, ViewPlaceholder, ViewQuery, ViewQueryFilter,
-    ViewQueryOperator, ViewSchema,
+    SchemaType, Table, TableOperation, View, ViewPlaceholder, ViewQuery, ViewSchema,
 };
 use noria_data::DataType;
 use noria_errors::ReadySetError::PreparedStatementMissing;
@@ -1405,16 +1405,8 @@ fn build_view_query(
     let mut filters = binops
         .iter()
         .enumerate()
-        .filter_map(|(i, (col, binop))| {
-            if matches!(binop, BinaryOperator::Like | BinaryOperator::ILike) {
-                ViewQueryOperator::try_from(*binop)
-                    .ok()
-                    .map(|op| (i, col, op))
-            } else {
-                None
-            }
-        })
-        .map(|(idx, col, operator)| -> ReadySetResult<_> {
+        .filter(|(_, (_, binop))| matches!(binop, BinaryOperator::Like | BinaryOperator::ILike))
+        .map(|(idx, (col, op))| -> ReadySetResult<_> {
             let key = raw_keys.drain(0..1).next().ok_or(ReadySetError::EmptyKey)?;
             if !raw_keys.is_empty() {
                 unsupported!(
@@ -1433,10 +1425,10 @@ fn build_view_query(
 
             filter_op_idx = Some(idx);
 
-            Ok(ViewQueryFilter {
-                column,
-                operator,
-                value,
+            Ok(DataflowExpression::Op {
+                left: Box::new(DataflowExpression::Column(column)),
+                op: *op,
+                right: Box::new(DataflowExpression::Literal(value)),
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -1508,19 +1500,23 @@ fn build_view_query(
                                     BinaryOperator::Greater => {
                                         lower_bound.push(value.clone());
                                         upper_bound.push(DataType::Max);
-                                        filters.push(ViewQueryFilter {
-                                            column: *key_column_idx,
-                                            operator: ViewQueryOperator::NotEqual,
-                                            value,
+                                        filters.push(DataflowExpression::Op {
+                                            left: Box::new(DataflowExpression::Column(
+                                                *key_column_idx,
+                                            )),
+                                            op: BinaryOperator::NotEqual,
+                                            right: Box::new(DataflowExpression::Literal(value)),
                                         });
                                     }
                                     BinaryOperator::Less => {
                                         lower_bound.push(DataType::None); // NULL is the minimum DataType
                                         upper_bound.push(value.clone());
-                                        filters.push(ViewQueryFilter {
-                                            column: *key_column_idx,
-                                            operator: ViewQueryOperator::NotEqual,
-                                            value,
+                                        filters.push(DataflowExpression::Op {
+                                            left: Box::new(DataflowExpression::Column(
+                                                *key_column_idx,
+                                            )),
+                                            op: BinaryOperator::NotEqual,
+                                            right: Box::new(DataflowExpression::Literal(value)),
                                         });
                                     }
                                     op => unsupported!(
@@ -1563,7 +1559,13 @@ fn build_view_query(
     Ok(ViewQuery {
         key_comparisons: keys,
         block: true,
-        filters,
+        filter: filters
+            .into_iter()
+            .reduce(|expr1, expr2| DataflowExpression::Op {
+                left: Box::new(expr1),
+                op: BinaryOperator::And,
+                right: Box::new(expr2),
+            }),
         timestamp: ticket,
     })
 }
@@ -1726,7 +1728,7 @@ mod tests {
             )
             .unwrap();
 
-            assert!(query.filters.is_empty());
+            assert!(query.filter.is_none());
             assert_eq!(
                 query.key_comparisons,
                 vec![KeyComparison::from(vec1![DataType::from(1)])]
@@ -1744,7 +1746,7 @@ mod tests {
             )
             .unwrap();
 
-            assert!(query.filters.is_empty());
+            assert!(query.filter.is_none());
             assert_eq!(
                 query.key_comparisons,
                 vec![KeyComparison::from_range(
@@ -1768,12 +1770,12 @@ mod tests {
             .unwrap();
 
             assert_eq!(
-                query.filters,
-                vec![ViewQueryFilter {
-                    column: 1,
-                    operator: ViewQueryOperator::ILike,
-                    value: DataType::from("%a%")
-                }]
+                query.filter,
+                Some(DataflowExpression::Op {
+                    left: Box::new(DataflowExpression::Column(1)),
+                    op: BinaryOperator::ILike,
+                    right: Box::new(DataflowExpression::Literal(DataType::from("%a%")))
+                })
             );
         }
 
@@ -1791,7 +1793,7 @@ mod tests {
             )
             .unwrap();
 
-            assert!(query.filters.is_empty());
+            assert!(query.filter.is_none());
             assert_eq!(
                 query.key_comparisons,
                 vec![KeyComparison::from_range(
@@ -1817,7 +1819,7 @@ mod tests {
             )
             .unwrap();
 
-            assert!(query.filters.is_empty());
+            assert!(query.filter.is_none());
             assert_eq!(
                 query.key_comparisons,
                 vec![KeyComparison::from_range(
@@ -1842,12 +1844,12 @@ mod tests {
             .unwrap();
 
             assert_eq!(
-                query.filters,
-                vec![ViewQueryFilter {
-                    column: 0,
-                    operator: ViewQueryOperator::NotEqual,
-                    value: 1.into()
-                }]
+                query.filter,
+                Some(DataflowExpression::Op {
+                    left: Box::new(DataflowExpression::Column(0)),
+                    op: BinaryOperator::NotEqual,
+                    right: Box::new(DataflowExpression::Literal(1.into()))
+                })
             );
             assert_eq!(
                 query.key_comparisons,
