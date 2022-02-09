@@ -383,34 +383,37 @@ impl From<MysqlTime> for Duration {
 }
 
 mod parse {
+    use nom::branch::alt;
     use nom::bytes::complete::take_while_m_n;
-    use nom::character::complete::digit1;
-    use nom::character::is_digit;
-    use nom::{
-        alt, call, char, complete, do_parse, eof, flat_map, fold_many0, many0, map, named, opt,
-        parse_to, IResult,
-    };
+    use nom::character::complete::{char, digit1};
+    use nom::character::{self, is_digit};
+    use nom::combinator::{complete, eof, map, map_parser, opt};
+    use nom::multi::{fold_many0, many0};
+    use nom::sequence::{preceded, terminated, tuple};
+    use nom::IResult;
 
     use super::*;
 
-    fn microseconds_padding(digits: &[u8]) -> IResult<&[u8], u32> {
-        let num_digits = digits.len();
-        map!(digits, parse_to!(u32), |number| {
+    fn microseconds_padding(i: &[u8]) -> IResult<&[u8], u32> {
+        let num_digits = i.len();
+        map(character::complete::u32, move |number| {
             number * (10u32.pow(6 - num_digits as u32))
-        })
+        })(i)
     }
 
-    named!(microseconds(&[u8]) -> u32, do_parse!(
-        complete!(char!('.')) >>
-        microseconds: flat_map!(call!(take_while_m_n(1, 6, is_digit)), microseconds_padding) >>
-        (microseconds)
-    ));
+    fn microseconds(i: &[u8]) -> IResult<&[u8], u32> {
+        preceded(
+            complete(char('.')),
+            map_parser(take_while_m_n(1, 6, is_digit), microseconds_padding),
+        )(i)
+    }
 
-    named!(seconds(&[u8]) -> u8, do_parse!(
-        complete!(char!(':')) >>
-        seconds: flat_map!(call!(take_while_m_n(1, 2, is_digit)), parse_to!(u8)) >>
-        (seconds)
-    ));
+    fn seconds(i: &[u8]) -> IResult<&[u8], u8> {
+        preceded(
+            complete(char(':')),
+            map_parser(take_while_m_n(1, 2, is_digit), character::complete::u8),
+        )(i)
+    }
 
     /// Creates a number from an array of digits.
     /// Each position of the array must be a number from 0-9.
@@ -424,64 +427,87 @@ mod parse {
         res
     }
 
-    named!(one_digit(&[u8]) -> u8, flat_map!(call!(take_while_m_n(1, 1, is_digit)), parse_to!(u8)));
+    fn one_digit(i: &[u8]) -> IResult<&[u8], u8> {
+        map_parser(take_while_m_n(1, 1, is_digit), character::complete::u8)(i)
+    }
 
-    named!(h_m_s_us_no_colons(&[u8]) -> (bool, u16, u8, u8, u32), do_parse!(
-        sign: opt!(char!('-')) >>
-        numbers: fold_many0!(one_digit, Vec::new(), |mut acc: Vec<u8>, num: u8| {
-         acc.push(num);
-         acc
-        }) >>
-        microseconds: opt!(microseconds) >>
-        eof!() >>
-        ({
-            let digits = numbers.len();
-            let (hour, minutes, seconds) = if digits > 4 {
-                // allowed because length is checked before indexing
-                #[allow(clippy::indexing_slicing)]
-                (to_number(&numbers[0..digits-4]), to_number(&numbers[digits-4..digits-2]), to_number(& numbers[digits-2..digits]))
-            } else if digits > 2 {
-                // allowed because length is checked before indexing
-                #[allow(clippy::indexing_slicing)]
-                (0, to_number(&numbers[0..digits-2]), to_number(&numbers[digits-2..digits]))
-            } else {
-                // allowed because length is checked before indexing
-                #[allow(clippy::indexing_slicing)]
-                (0, 0, to_number(&numbers[0..digits]))
-            };
-            (sign.is_none(),
-            hour.try_into().unwrap_or(u16::MAX),
-            minutes.try_into().unwrap_or(u8::MAX),
-            seconds.try_into().unwrap_or(u8::MAX),
-            microseconds.unwrap_or(0))
-        })
-    ));
+    fn h_m_s_us_no_colons(i: &[u8]) -> IResult<&[u8], (bool, u16, u8, u8, u32)> {
+        map(
+            terminated(
+                tuple((
+                    opt(char('-')),
+                    fold_many0(one_digit, Vec::new, |mut acc: Vec<u8>, num: u8| {
+                        acc.push(num);
+                        acc
+                    }),
+                    opt(microseconds),
+                )),
+                eof,
+            ),
+            |(sign, numbers, microseconds)| {
+                let digits = numbers.len();
+                let (hour, minutes, seconds) = if digits > 4 {
+                    // allowed because length is checked before indexing
+                    #[allow(clippy::indexing_slicing)]
+                    (
+                        to_number(&numbers[0..digits - 4]),
+                        to_number(&numbers[digits - 4..digits - 2]),
+                        to_number(&numbers[digits - 2..digits]),
+                    )
+                } else if digits > 2 {
+                    // allowed because length is checked before indexing
+                    #[allow(clippy::indexing_slicing)]
+                    (
+                        0,
+                        to_number(&numbers[0..digits - 2]),
+                        to_number(&numbers[digits - 2..digits]),
+                    )
+                } else {
+                    // allowed because length is checked before indexing
+                    #[allow(clippy::indexing_slicing)]
+                    (0, 0, to_number(&numbers[0..digits]))
+                };
+                (
+                    sign.is_none(),
+                    hour.try_into().unwrap_or(u16::MAX),
+                    minutes.try_into().unwrap_or(u8::MAX),
+                    seconds.try_into().unwrap_or(u8::MAX),
+                    microseconds.unwrap_or(0),
+                )
+            },
+        )(i)
+    }
 
-    named!(h_m_s_us_colons(&[u8]) -> (bool, u16, u8, u8, u32), do_parse!(
-        sign: opt!(char!('-')) >>
-        hour: flat_map!(digit1, parse_to!(u32)) >>
-        char!(':') >>
-        minutes: flat_map!(call!(take_while_m_n(1, 2, is_digit)), parse_to!(u8)) >>
-        seconds: opt!(seconds) >>
-        microseconds: opt!(microseconds) >>
-        eof!() >>
-        (
-            (sign.is_none(),
-            hour.try_into().unwrap_or(u16::MAX),
-            minutes,
-            seconds.unwrap_or(0),
-            microseconds.unwrap_or(0))
-        )
-    ));
+    fn h_m_s_us_colons(i: &[u8]) -> IResult<&[u8], (bool, u16, u8, u8, u32)> {
+        map(
+            terminated(
+                tuple((
+                    opt(char('-')),
+                    terminated(map_parser(digit1, character::complete::u32), char(':')),
+                    map_parser(take_while_m_n(1, 2, is_digit), character::complete::u8),
+                    opt(seconds),
+                    opt(microseconds),
+                )),
+                eof,
+            ),
+            |(sign, hour, minutes, seconds, microseconds)| {
+                (
+                    sign.is_none(),
+                    hour.try_into().unwrap_or(u16::MAX),
+                    minutes,
+                    seconds.unwrap_or(0),
+                    microseconds.unwrap_or(0),
+                )
+            },
+        )(i)
+    }
 
-    named!(pub h_m_s_us(&[u8]) -> (bool, u16, u8, u8, u32), do_parse!(
-        many0!(char!(' ')) >>
-        tuple: alt!(
-            complete!(h_m_s_us_colons) |
-            complete!(h_m_s_us_no_colons)
-        ) >>
-        (tuple)
-    ));
+    pub fn h_m_s_us(i: &[u8]) -> IResult<&[u8], (bool, u16, u8, u8, u32)> {
+        preceded(
+            many0(char(' ')),
+            alt((complete(h_m_s_us_colons), complete(h_m_s_us_no_colons))),
+        )(i)
+    }
 }
 
 impl FromStr for MysqlTime {

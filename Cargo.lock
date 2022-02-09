@@ -3332,7 +3332,7 @@ dependencies = [
  "chrono",
  "launchpad",
  "mysql_common",
- "nom 5.1.2",
+ "nom 7.1.0",
  "proptest",
  "regex",
  "serde",
