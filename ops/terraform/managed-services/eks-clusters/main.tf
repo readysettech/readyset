@@ -1,0 +1,54 @@
+# Module that deploys EKS cluster, Helm charts, etc.
+module "eks-main" {
+  source = "../../modules/eks-cluster"
+
+  # General
+  aws_region    = var.aws_region
+  resource_tags = var.resource_tags
+  environment   = var.environment
+
+  # Namespaces that will be created in k8s by the module
+  kubernetes_namespaces = var.kubernetes_namespaces
+
+  # Cluster Configurations
+  cluster_name                         = var.cluster_name
+  cluster_version                      = var.cluster_version
+  cluster_endpoint_private_only_access = var.cluster_endpoint_private_only_access
+  cluster_ip_family                    = var.cluster_ip_family
+  cluster_service_ipv4_cidr            = var.cluster_service_ipv4_cidr
+  cluster_vpn_cidr_blocks              = var.cluster_vpn_cidr_blocks
+
+  # Workers
+  self_managed_node_groups         = var.self_managed_node_group_configs
+  self_managed_node_group_defaults = var.self_managed_node_group_defaults
+
+  # Networking / Security
+  kms_key_arn              = aws_kms_key.eks-main.arn
+  vpc_id                   = var.vpc_id
+  workers_ssh_cidr_allowed = var.workers_ssh_cidr_allowed
+  worker_subnet_ids        = data.aws_subnet_ids.private.ids
+
+  # Logging
+  cluster_log_retention_days = var.cluster_log_retention_days
+  cluster_log_types          = var.cluster_log_types
+
+  # Addon Helm Charts
+  chart_versions                   = var.chart_versions
+  cluster_autoscaler_enabled       = var.cluster_autoscaler_enabled
+  node_termination_handler_enabled = var.node_termination_handler_enabled
+  external_dns_internal_enabled    = var.external_dns_internal_enabled
+  external_dns_external_enabled    = var.external_dns_external_enabled
+
+  # Ingresses
+  alb_internal_ingress_enabled = true
+  alb_acm_cert_arn             = var.alb_acm_cert_arn
+  ns_ingress_routing_rules     = var.ns_ingress_routing_rules
+}
+
+# KMS key for Kubernetes Secret Wrapper Encryption
+resource "aws_kms_key" "eks-main" {
+  deletion_window_in_days = 30
+  enable_key_rotation     = true
+  description             = format("Used for EKS cluster encryption in %s.", var.cluster_name)
+  tags                    = merge(var.resource_tags, { Name = local.eks_main_kms_key_name })
+}
