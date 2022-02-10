@@ -84,7 +84,9 @@ use nom_sql::{
 use noria::consistency::Timestamp;
 use noria::results::Results;
 use noria::ColumnSchema;
-use noria_client_metrics::{EventType, QueryDestination, QueryExecutionEvent, SqlQueryType};
+use noria_client_metrics::{
+    recorded, EventType, QueryDestination, QueryExecutionEvent, SqlQueryType,
+};
 use noria_data::DataType;
 use noria_errors::ReadySetError::{self, PreparedStatementMissing};
 use noria_errors::{internal, internal_err, unsupported, ReadySetResult};
@@ -237,6 +239,7 @@ impl BackendBuilder {
         upstream: Option<DB>,
         qsc: Arc<QueryStatusCache>,
     ) -> Backend<DB, Handler> {
+        metrics::increment_gauge!(recorded::CONNECTED_CLIENTS, 1.0);
         Backend {
             parsed_query_cache: HashMap::new(),
             prepared_statements: Vec::new(),
@@ -1759,6 +1762,15 @@ where
         };
 
         res
+    }
+}
+
+impl<DB, Handler> Drop for Backend<DB, Handler>
+where
+    DB: UpstreamDatabase,
+{
+    fn drop(&mut self) {
+        metrics::decrement_gauge!(recorded::CONNECTED_CLIENTS, 1.0);
     }
 }
 
