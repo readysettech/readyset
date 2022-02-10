@@ -1,13 +1,70 @@
 use std::collections::HashMap;
 
-use nom_sql::{Column, Expression, FieldDefinitionExpression, FunctionExpression, SqlQuery, Table};
-use noria_errors::{internal, invariant, ReadySetResult};
+use nom_sql::analysis::visit::{walk_select_statement, Visitor};
+use nom_sql::{Column, Expression, FunctionExpression, SelectStatement, SqlQuery, Table};
+use noria_errors::{internal_err, ReadySetError, ReadySetResult};
 
-pub trait CountStarRewrite {
+#[derive(Debug)]
+pub struct CountStarRewriteVisitor<'schema> {
+    schemas: &'schema HashMap<String, Vec<String>>,
+    tables: Option<Vec<Table>>,
+}
+
+impl<'ast, 'schema> Visitor<'ast> for CountStarRewriteVisitor<'schema> {
+    type Error = ReadySetError;
+
+    fn visit_select_statement(
+        &mut self,
+        select_statement: &'ast mut SelectStatement,
+    ) -> Result<(), Self::Error> {
+        self.tables = Some(select_statement.tables.clone());
+        walk_select_statement(self, select_statement)?;
+        Ok(())
+    }
+
+    fn visit_function_expression(
+        &mut self,
+        function_expression: &'ast mut FunctionExpression,
+    ) -> Result<(), Self::Error> {
+        if *function_expression == FunctionExpression::CountStar {
+            let bogo_table = self
+                .tables
+                .as_ref()
+                .and_then(|ts| ts.first())
+                .cloned()
+                .ok_or_else(|| internal_err("Tables should be set first"))?;
+
+            #[allow(clippy::unwrap_used)]
+            // We've already checked that all the tables referenced in the query exist
+            let mut schema_iter = self.schemas.get(&bogo_table.name).unwrap().iter();
+            // The columns in the write_schemas map are actually columns as seen from the
+            // current mir node. In this case, we've already passed star expansion, which
+            // means the list of columns in the passed in write_schemas map contains all
+            // columns for the table in question. This means that we are garaunteed to have
+            // at least one result in this columns list, and can simply choose the first
+            // column.
+            let bogo_column = schema_iter.next().unwrap();
+
+            *function_expression = FunctionExpression::Count {
+                expr: Box::new(Expression::Column(Column {
+                    name: bogo_column.clone(),
+                    table: Some(bogo_table.name.clone()),
+                    function: None,
+                })),
+                distinct: false,
+                count_nulls: true,
+            };
+        }
+
+        Ok(())
+    }
+}
+
+pub trait CountStarRewrite: Sized {
     fn rewrite_count_star(
         self,
         write_schemas: &HashMap<String, Vec<String>>,
-    ) -> ReadySetResult<SqlQuery>;
+    ) -> ReadySetResult<Self>;
 }
 
 impl CountStarRewrite for SqlQuery {
@@ -15,60 +72,19 @@ impl CountStarRewrite for SqlQuery {
         self,
         write_schemas: &HashMap<String, Vec<String>>,
     ) -> ReadySetResult<SqlQuery> {
-        use nom_sql::FunctionExpression::*;
-
-        let rewrite_count_star = |f: &mut FunctionExpression,
-                                  tables: &Vec<Table>|
-         -> ReadySetResult<_> {
-            invariant!(!tables.is_empty());
-            if *f == CountStar {
-                let bogo_table = &tables[0];
-                // unwrap: We've already checked that all the tables referenced in the query exist
-                let mut schema_iter = write_schemas.get(&bogo_table.name).unwrap().iter();
-                // The columns in the write_schemas map are actually columns as seen from the
-                // current mir node. In this case, we've already passed star expansion, which
-                // means the list of columns in the passed in write_schemas map contains all
-                // columns for the table in question. This means that we are garaunteed to have
-                // at least one result in this columns list, and can simply choose the first
-                // column.
-                let bogo_column = schema_iter.next().unwrap();
-
-                *f = Count {
-                    expr: Box::new(Expression::Column(Column {
-                        name: bogo_column.clone(),
-                        table: Some(bogo_table.name.clone()),
-                        function: None,
-                    })),
-                    distinct: false,
-                    count_nulls: true,
-                };
-            }
-            Ok(())
-        };
-
-        Ok(match self {
+        match self {
             SqlQuery::Select(mut sq) => {
-                // Expand within field list
-                let tables = sq.tables.clone();
-                for field in sq.fields.iter_mut() {
-                    match *field {
-                        FieldDefinitionExpression::All
-                        | FieldDefinitionExpression::AllInTable(_) => {
-                            internal!("Must apply StarExpansion pass before CountStarRewrite")
-                        }
-                        FieldDefinitionExpression::Expression {
-                            expr: Expression::Call(ref mut f),
-                            ..
-                        } => rewrite_count_star(f, &tables)?,
-                        _ => {}
-                    }
-                }
-                // TODO: also expand function columns within WHERE clause
-                SqlQuery::Select(sq)
+                let mut visitor = CountStarRewriteVisitor {
+                    schemas: write_schemas,
+                    tables: None,
+                };
+
+                visitor.visit_select_statement(&mut sq)?;
+                Ok(SqlQuery::Select(sq))
             }
             // nothing to do for other query types, as they cannot have aliases
-            x => x,
-        })
+            x => Ok(x),
+        }
     }
 }
 
@@ -76,15 +92,16 @@ impl CountStarRewrite for SqlQuery {
 mod tests {
     use std::collections::HashMap;
 
-    use nom_sql::{Column, Dialect, FieldDefinitionExpression, SqlQuery};
+    use nom_sql::parser::parse_query;
+    use nom_sql::{
+        BinaryOperator, Column, Dialect, FieldDefinitionExpression, FunctionExpression, Literal,
+        SqlQuery,
+    };
 
     use super::*;
 
     #[test]
     fn it_expands_count_star() {
-        use nom_sql::parser::parse_query;
-        use nom_sql::FunctionExpression;
-
         // SELECT COUNT(*) FROM users;
         // -->
         // SELECT COUNT(users.id) FROM users;
@@ -116,9 +133,6 @@ mod tests {
 
     #[test]
     fn it_expands_count_star_with_group_by() {
-        use nom_sql::parser::parse_query;
-        use nom_sql::FunctionExpression;
-
         // SELECT COUNT(*) FROM users GROUP BY id;
         // -->
         // SELECT COUNT(users.name) FROM users GROUP BY id;
@@ -144,6 +158,34 @@ mod tests {
                 );
             }
             // if we get anything other than a selection query back, something really weird is up
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn nested_in_expression() {
+        let q = parse_query(Dialect::MySQL, "SELECT COUNT(*) + 1 FROM users;").unwrap();
+        let schema = HashMap::from([(
+            "users".to_owned(),
+            vec!["id".to_owned(), "name".to_owned(), "age".to_owned()],
+        )]);
+
+        let res = q.rewrite_count_star(&schema).unwrap();
+        match res {
+            SqlQuery::Select(stmt) => {
+                assert_eq!(
+                    stmt.fields,
+                    vec![FieldDefinitionExpression::from(Expression::BinaryOp {
+                        lhs: Box::new(Expression::Call(FunctionExpression::Count {
+                            expr: Box::new(Expression::Column("users.id".into())),
+                            distinct: false,
+                            count_nulls: true,
+                        })),
+                        op: BinaryOperator::Add,
+                        rhs: Box::new(Expression::Literal(Literal::Integer(1)))
+                    })]
+                );
+            }
             _ => panic!(),
         }
     }
