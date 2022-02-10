@@ -17,10 +17,9 @@ ingress:
     listenPorts:
       - HTTP: 80
       - HTTPS: 443
-    externalDnsPublicDomains:
-      - readyset.name
-    externalDnsPrivateDomains:
-      - readyset.name
+    # To be set on a per-cluster/deployment basis in values/
+    externalDnsPublicDomains: []
+    externalDnsPrivateDomains: []
     sslPolicy: "ELBSecurityPolicy-FS-1-2-Res-2019-08"
     sslRedirect:
       Type: redirect

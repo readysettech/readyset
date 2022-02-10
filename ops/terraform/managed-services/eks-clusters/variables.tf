@@ -124,6 +124,23 @@ variable "external_dns_external_enabled" {
   type        = bool
 }
 
+variable "external_dns_pub_zone_domain" {
+  description = "Public hosted zone domain to use for ExternalDNS public DNS records."
+  default     = "readyset.name"
+  type        = string
+}
+
+variable "external_dns_private_zone_domain" {
+  description = "Private hosted zone domain to use for ExternalDNS private DNS records."
+  default     = "readyset.name"
+  type        = string
+}
+
+variable "external_dns_internal_zone_mode" {
+  description = "Determines what DNS zone the internal deployment will use. Can be used with a public zone."
+  default     = "private"
+}
+
 #-------------- [ Ingress Configs ] ----------------------------------- #
 
 variable "alb_internal_ingress_enabled" {

@@ -10,5 +10,5 @@ ingress:
       - namespace=${namespace}
       - Name=rs-${environment}-ingress
     sslPolicy: "ELBSecurityPolicy-FS-1-2-Res-2019-08"
-    externalDnsDomains:
+    externalDnsPrivateDomains:
       - readyset.name

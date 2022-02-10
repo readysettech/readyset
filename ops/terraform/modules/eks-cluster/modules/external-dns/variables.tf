@@ -44,7 +44,7 @@ variable "helm_chart_name" {
 
 variable "helm_chart_version" {
   description = "Version of Helm Chart to deploy."
-  default     = "2.20.3"
+  default     = "6.1.4"
   type        = string
 }
 
@@ -52,4 +52,12 @@ variable "helm_deployment_namespace" {
   description = "Namespace to deploy the Helm chart into."
   default     = "kube-system"
   type        = string
+}
+
+#-------------- [ Cross-Account Logistics ] --------------------------- #
+
+variable "external_dns_cross_account_zone" {
+  description = "If enabled, toggles creation of IAM resources in secondary account indicated by provider aws.dns."
+  type        = bool
+  default     = true
 }

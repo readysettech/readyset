@@ -4,5 +4,5 @@ description: Helm chart for deploying ReadySet k8s ingresses.
 # Important Note:
 # Be sure to increment this number each time you make a change in the chart (./Helm/*)
 # Otherwise Terraform will not detect the change.
-version: 0.1.7
+version: 0.1.9
 appVersion: "1.0"

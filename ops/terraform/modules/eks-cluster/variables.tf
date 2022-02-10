@@ -186,6 +186,11 @@ variable "external_dns_private_zone_domain" {
   type        = string
 }
 
+variable "external_dns_internal_zone_mode" {
+  description = "Determines what DNS zone the internal deployment will use. Can be used with a public zone."
+  default     = "private"
+}
+
 #-------------- [ AWS LB Controller ] --------------------------------- #
 
 variable "aws_lb_controller_enabled" {
@@ -219,7 +224,7 @@ variable "chart_version_defaults" {
   default = {
     cluster_autoscaler = "9.12.0"
     node_term_handler  = "0.16.0"
-    external_dns       = "2.20.3"
+    external_dns       = "6.1.4"
     aws_lb_controller  = "1.3.3"
   }
   type = map(any)

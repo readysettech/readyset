@@ -198,6 +198,10 @@ module "node-term-handler" {
 module "externaldns-internal" {
   count  = var.external_dns_internal_enabled ? 1 : 0
   source = "./modules/external-dns"
+  providers = {
+    aws     = aws
+    aws.dns = aws.dns
+  }
 
   # Environment Configs
   cluster_id         = module.eks.cluster_id
@@ -205,7 +209,7 @@ module "externaldns-internal" {
 
   # Route53 Configs
   r53_domain    = var.external_dns_private_zone_domain
-  dns_zone_mode = "private"
+  dns_zone_mode = var.external_dns_internal_zone_mode
 
   # Identity Provider
   oidc_provider_arn = module.eks.oidc_provider_arn

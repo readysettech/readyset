@@ -1,6 +1,10 @@
 # Module that deploys EKS cluster, Helm charts, etc.
 module "eks-main" {
   source = "../../modules/eks-cluster"
+  providers = {
+    aws     = aws
+    aws.dns = aws.dns
+  }
 
   # General
   aws_region    = var.aws_region
@@ -36,8 +40,12 @@ module "eks-main" {
   chart_versions                   = var.chart_versions
   cluster_autoscaler_enabled       = var.cluster_autoscaler_enabled
   node_termination_handler_enabled = var.node_termination_handler_enabled
+  # ExternalDNS
   external_dns_internal_enabled    = var.external_dns_internal_enabled
   external_dns_external_enabled    = var.external_dns_external_enabled
+  external_dns_pub_zone_domain     = var.external_dns_pub_zone_domain
+  external_dns_private_zone_domain = var.external_dns_private_zone_domain
+  external_dns_internal_zone_mode  = var.external_dns_internal_zone_mode
 
   # Ingresses
   alb_internal_ingress_enabled = true

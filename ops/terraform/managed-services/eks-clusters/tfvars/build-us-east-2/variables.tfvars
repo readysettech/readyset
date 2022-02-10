@@ -11,16 +11,17 @@ vpc_id = "vpc-0adb26542fc16ab14"
 cluster_name            = "rs-build-us-east-2"
 cluster_version         = "1.21"
 cluster_vpn_cidr_blocks = ["10.3.128.0/18"]
-alb_acm_cert_arn        = "arn:aws:acm:us-east-2:305232526136:certificate/f7d9d234-c256-41b5-be19-f21a3713f88f"
+alb_acm_cert_arn        = "arn:aws:acm:us-east-2:305232526136:certificate/d75aa6a7-8d9b-4ba7-8443-5874aea3e2f7"
 kubernetes_namespaces   = ["build"]
 ns_ingress_routing_rules = {
   build = [{
-    fqdn        = "echo-build.readyset.name",
+    fqdn        = "echo.build.readyset.name",
     service     = "echo-service",
     servicePort = "80",
     },
     {
-      fqdn        = "benchmark-prom-build.readyset.name",
+      fqdn        = "prometheus.build.readyset.name",
+      // To be moved later
       service     = "echo-service",
       servicePort = "80",
   }]
@@ -74,3 +75,9 @@ self_managed_node_group_configs = {
     bootstrap_extra_args = "--kubelet-extra-args '--node-labels=readyset.io/worker=general'"
   }
 }
+
+# ExternalDNS
+external_dns_internal_enabled = true
+# This will just create DNS records in the public zone.
+external_dns_internal_zone_mode  = "private"
+external_dns_private_zone_domain = "readyset.name"

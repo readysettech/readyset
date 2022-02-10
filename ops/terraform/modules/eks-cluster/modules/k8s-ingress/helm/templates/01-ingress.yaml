@@ -12,10 +12,12 @@ metadata:
     alb.ingress.kubernetes.io/target-type: {{ .Values.ingress.targetType | quote }}
     alb.ingress.kubernetes.io/scheme: {{ .Values.ingress.scheme }}
     alb.ingress.kubernetes.io/ssl-policy: {{ .Values.ingress.annotations.sslPolicy }}
-  {{- range .Values.ingress.annotations.externalDnsDomains }}
+  {{- range .Values.ingress.annotations.externalDnsPrivateDomains }}
     {{ . }}/externaldns.type: private
-    {{ . }}/externaldns.type: public
     {{ . }}/externaldns.private: "yes"
+  {{- end }}
+  {{- range .Values.ingress.annotations.externalDnsPublicDomains }}
+    {{ . }}/externaldns.type: public
     {{ . }}/externaldns.public: "yes"
   {{- end }}
   {{- if len .Values.ingress.annotations.certName }}

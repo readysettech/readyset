@@ -3,18 +3,20 @@ provider: aws
 aws:
   region: ${region}
   zoneType: ${zoneType}
+%{ if assumeRoleArn != "" }
+  assumeRoleArn: ${assumeRoleArn}
+%{ endif }
 
 serviceAccount:
   annotations:
     eks.amazonaws.com/role-arn: ${sa}
 
 txtOwnerId: ${name}
-publishInternalServices: true
 logLevel: debug
 
 zoneIdFilters:
   - ${id}
 
-annotationFilter: readyset.io/externaldns.${zoneType}=yes
+annotationFilter: ${r53Domain}/externaldns.${zoneType}=yes
 
 fullnameOverride: ${name}
