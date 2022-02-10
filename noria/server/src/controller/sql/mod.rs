@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::str;
 use std::vec::Vec;
+use std::{mem, str};
 
 use ::mir::node::node_inner::MirNodeInner;
 use ::mir::query::{MirQuery, QueryFlowParts};
@@ -9,8 +9,8 @@ use ::serde::{Deserialize, Serialize};
 use nom_sql::analysis::ReferredTables;
 use nom_sql::{
     parser as sql_parser, BinaryOperator, CompoundSelectOperator, CompoundSelectStatement,
-    CreateTableStatement, Expression, FieldDefinitionExpression, InValue, SelectStatement,
-    SqlQuery, Table,
+    CreateTableStatement, Expression, FieldDefinitionExpression, FunctionExpression, InValue,
+    Literal, SelectStatement, SqlQuery, Table,
 };
 use noria::internal::IndexType;
 use noria_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
@@ -840,6 +840,7 @@ impl SqlIncorporator {
 
         // flattens out the query by replacing subqueries for references
         // to existing views in the graph
+        let mut extra_tables = vec![];
         for sq in q.extract_subqueries()? {
             use nom_sql::JoinRightSide;
 
@@ -928,7 +929,47 @@ impl SqlIncorporator {
                         _ => internal!("SubqueryPosition::Join should never contain anything other than JoinRightSide::NestedSelect"),
                     }
                 }
+                SubqueryPosition::Exists(expr) => {
+                    let column = match mem::replace(
+                        expr,
+                        Expression::Literal(Literal::Integer(0))
+                    ) {
+                        Expression::Exists(mut stmt) => {
+                            stmt.fields = vec![FieldDefinitionExpression::Expression {
+                                expr: Expression::Call(FunctionExpression::CountStar),
+                                alias: Some("__exists_count".to_owned()),
+                            }];
+
+                            let qfp = self.nodes_for_named_query(
+                                SqlQuery::Select(*stmt),
+                                default_name.clone(),
+                                false,
+                                false,
+                                mig
+                            )?;
+
+                            extra_tables.push(Table::from(qfp.name.clone()));
+
+                            nom_sql::Column {
+                                name: "__exists_count".to_owned(),
+                                table: Some(qfp.name),
+                                function: None,
+                            }
+                        }
+                        _ => internal!("SubqueryPosition::Exists should never contain anything other than Expression::Exists"),
+                    };
+
+                    *expr = Expression::BinaryOp {
+                        lhs: Box::new(Expression::Column(column)),
+                        op: BinaryOperator::Greater,
+                        rhs: Box::new(Expression::Literal(Literal::Integer(0))),
+                    };
+                }
             }
+        }
+
+        if let SqlQuery::Select(stmt) = &mut q {
+            stmt.tables.extend(extra_tables);
         }
 
         // Remove all table aliases from 'fq'. Create named views in cases where the alias must be
@@ -962,6 +1003,8 @@ impl SqlIncorporator {
                 TableAliasRewrite::Table { .. } => {}
             }
         }
+
+        trace!(rewritten_query = %q);
 
         Ok(q)
     }

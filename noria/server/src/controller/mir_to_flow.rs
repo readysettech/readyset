@@ -631,7 +631,7 @@ fn make_join_node(
 
     invariant_eq!(on_left.len(), on_right.len());
 
-    let column_names = column_names(columns);
+    let mut column_names = column_names(columns);
 
     let (projected_cols_left, rest): (Vec<Column>, Vec<Column>) = proj_cols
         .iter()
@@ -696,7 +696,7 @@ fn make_join_node(
 
     let mut from_left = 0;
     let mut from_right = 0;
-    let join_config = left
+    let mut join_config: Vec<_> = left
         .borrow()
         .columns
         .iter()
@@ -731,8 +731,37 @@ fn make_join_node(
     invariant_eq!(from_left, projected_cols_left.len());
     invariant_eq!(from_right, projected_cols_right.len());
 
-    let left_na = left.borrow().flow_node_addr()?;
-    let right_na = right.borrow().flow_node_addr()?;
+    let mut left_na = left.borrow().flow_node_addr()?;
+    let mut right_na = right.borrow().flow_node_addr()?;
+
+    // If we don't have any join condition, we're making a cross join.
+    // Dataflow needs a non-empty join condition, so project out a constant value on both sides to
+    // use as our join key
+    if join_col_mappings.is_empty() {
+        let mut make_cross_join_bogokey = |node: MirNodeRef| {
+            let mut node_columns = node.borrow().columns().to_vec();
+            node_columns.push(Column::named("cross_join_bogokey".to_owned()));
+
+            make_project_node(
+                &format!("{}_cross_join_bogokey", node.borrow().name()),
+                node.clone(),
+                &node_columns,
+                node.borrow().columns(),
+                &[],
+                &[("cross_join_bogokey".to_owned(), DataType::from(0))],
+                mig,
+            )
+        };
+
+        let left_col_idx = left.borrow().columns().len();
+        let right_col_idx = right.borrow().columns().len();
+
+        left_na = make_cross_join_bogokey(left)?.address();
+        right_na = make_cross_join_bogokey(right)?.address();
+
+        join_config.push(JoinSource::B(left_col_idx, right_col_idx));
+        column_names.push("cross_join_bogokey");
+    }
 
     let j = Join::new(left_na, right_na, kind, join_config);
     let n = mig.add_ingredient(String::from(name), column_names.as_slice(), j);

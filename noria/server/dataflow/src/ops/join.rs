@@ -131,6 +131,8 @@ impl Join {
             )
         };
 
+        debug_assert!(!join_columns.is_empty());
+
         Self {
             left: left.into(),
             right: right.into(),

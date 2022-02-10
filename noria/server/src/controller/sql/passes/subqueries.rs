@@ -1,7 +1,7 @@
 use nom_sql::analysis::visit::{walk_expression, walk_join_clause, Visitor};
 use nom_sql::{Expression, InValue, JoinClause, JoinRightSide, SqlQuery};
 use noria::ReadySetError;
-use noria_errors::{unsupported, ReadySetResult};
+use noria_errors::ReadySetResult;
 
 #[derive(Debug, PartialEq)]
 pub enum SubqueryPosition<'a> {
@@ -15,10 +15,15 @@ pub enum SubqueryPosition<'a> {
     /// Invariant: This will always contain [`InValue::Subquery`]
     In(&'a mut InValue),
 
-    /// Subqueries in expressions.
+    /// Subqueries directly in expressions.
     ///
     /// Invariant: This will always contain [`Expression::NestedSelect`]
     Expr(&'a mut Expression),
+
+    /// Subqueries in `EXISTS` expressions
+    ///
+    /// Invariant: This will always contain [`Expression::Exists`]
+    Exists(&'a mut Expression),
 }
 
 pub trait SubQueries {
@@ -35,7 +40,6 @@ impl<'ast> Visitor<'ast> for ExtractSubqueriesVisitor<'ast> {
 
     fn visit_expression(&mut self, expression: &'ast mut Expression) -> Result<(), Self::Error> {
         match expression {
-            Expression::Exists(_) => unsupported!("EXISTS not supported yet"),
             Expression::In {
                 lhs,
                 rhs: rhs @ InValue::Subquery(_),
@@ -45,6 +49,7 @@ impl<'ast> Visitor<'ast> for ExtractSubqueriesVisitor<'ast> {
                 self.out.push(SubqueryPosition::In(rhs))
             }
             Expression::NestedSelect(_) => self.out.push(SubqueryPosition::Expr(expression)),
+            Expression::Exists(_) => self.out.push(SubqueryPosition::Exists(expression)),
             _ => walk_expression(self, expression)?,
         }
         Ok(())
@@ -74,7 +79,8 @@ impl SubQueries for SqlQuery {
 #[cfg(test)]
 mod tests {
     use nom_sql::{
-        BinaryOperator, Column, FieldDefinitionExpression, SelectStatement, SqlQuery, Table,
+        parse_query, BinaryOperator, Column, Dialect, FieldDefinitionExpression, SelectStatement,
+        SqlQuery, Table,
     };
 
     use super::*;
@@ -172,5 +178,21 @@ mod tests {
         let res = q.extract_subqueries().unwrap();
 
         assert_eq!(res, expected);
+    }
+
+    #[test]
+    fn exists() {
+        let mut q = parse_query(
+            Dialect::MySQL,
+            "SELECT * FROM t1 WHERE EXISTS (SELECT * FROM t2 WHERE t1.x = t2.y)",
+        )
+        .unwrap();
+        let res = q.extract_subqueries().unwrap();
+
+        assert_eq!(res.len(), 1);
+        assert!(matches!(
+            res.first().unwrap(),
+            SubqueryPosition::Exists(Expression::Exists(_))
+        ))
     }
 }

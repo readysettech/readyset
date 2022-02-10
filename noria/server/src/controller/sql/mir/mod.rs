@@ -27,6 +27,7 @@ use tracing::{debug, error, trace, warn};
 
 use super::query_graph::JoinPredicate;
 use crate::controller::sql::mir::grouped::post_lookup_aggregates;
+use crate::controller::sql::mir::join::make_cross_joins;
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
 use crate::controller::sql::query_utils::extract_limit;
@@ -1432,9 +1433,25 @@ impl SqlToMirConverter {
             let mut prev_node = match join_nodes.last() {
                 Some(n) => Some(n.clone()),
                 None => {
-                    invariant_eq!(base_nodes.len(), 1);
-                    #[allow(clippy::unwrap_used)] // checked above
-                    Some(base_nodes.last().unwrap().clone())
+                    invariant!(!base_nodes.is_empty());
+                    if base_nodes.len() > 1 {
+                        // If we have more than one base node, that means we have a list of tables
+                        // that don't have (obvious) join clauses we can pull out of the conditions.
+                        // So we need to make no-condition (cross) joins for those tables.
+                        //
+                        // Later, the optimizer might decide to add conditions to the joins anyway.
+                        make_cross_joins(
+                            self,
+                            &format!("q_{:x}", qg.signature().hash),
+                            &mut new_node_count,
+                            base_nodes.clone(),
+                        )?
+                        .last()
+                        .cloned()
+                    } else {
+                        #[allow(clippy::unwrap_used)] // checked above
+                        Some(base_nodes.last().unwrap().clone())
+                    }
                 }
             };
 
