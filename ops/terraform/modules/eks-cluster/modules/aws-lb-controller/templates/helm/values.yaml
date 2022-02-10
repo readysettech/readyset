@@ -1,0 +1,9 @@
+fullnameOverride: aws-load-balancer-controller
+
+clusterName: ${cluster_name}
+ingressClass: alb
+region: ${region}
+
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: ${role}
