@@ -22,7 +22,7 @@ tikv-jemallocator = "0.4"
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
 postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
 native-tls = "0.2.7"
-nom = "5.1.2"
+nom = "7.1"
 noria-server = { path = "../server/" }
 noria-client = { path = "../../noria-client/" }
 noria = { path = "../noria/" }
