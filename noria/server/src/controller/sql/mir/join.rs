@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use dataflow::ops::join::JoinType;
 use mir::MirNodeRef;
-use noria_errors::invariant;
+use noria_errors::{internal_err, invariant};
 
 use crate::controller::sql::mir::SqlToMirConverter;
 use crate::controller::sql::query_graph::{JoinPredicate, JoinRef, QueryGraph, QueryGraphEdge};
@@ -66,6 +66,39 @@ pub(super) fn make_joins(
             join_nodes.push(jn);
         }
     }
+
+    Ok(join_nodes)
+}
+
+/// Make cartesian (cross) joins for the given list of nodes, returning a list of join nodes created
+/// in order
+///
+/// Will return an error if passed an empty list of `nodes`.
+///
+/// Will never return an empty list.
+pub(super) fn make_cross_joins(
+    mir_converter: &SqlToMirConverter,
+    name: &str,
+    node_count: &mut usize,
+    nodes: Vec<MirNodeRef>,
+) -> ReadySetResult<Vec<MirNodeRef>> {
+    let mut join_nodes = vec![];
+    let mut nodes = nodes.into_iter();
+    let first_node = nodes
+        .next()
+        .ok_or_else(|| internal_err("make_cross_joins called with empty nodes"))?;
+    nodes.try_fold(first_node, |n1, n2| -> ReadySetResult<_> {
+        *node_count += 1;
+        let node = mir_converter.make_join_node(
+            &format!("{}_n{}", name, node_count),
+            &[],
+            n1,
+            n2,
+            JoinType::Inner,
+        )?;
+        join_nodes.push(node.clone());
+        Ok(node)
+    })?;
 
     Ok(join_nodes)
 }

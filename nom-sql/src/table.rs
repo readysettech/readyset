@@ -22,6 +22,16 @@ impl fmt::Display for Table {
     }
 }
 
+impl From<String> for Table {
+    fn from(name: String) -> Self {
+        Table {
+            name,
+            alias: None,
+            schema: None,
+        }
+    }
+}
+
 impl<'a> From<&'a str> for Table {
     fn from(t: &str) -> Table {
         Table {

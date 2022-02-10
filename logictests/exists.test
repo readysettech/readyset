@@ -1,0 +1,44 @@
+statement ok
+CREATE TABLE users (
+    id int primary key,
+    deleted_at datetime default null
+);
+
+statement ok
+CREATE TABLE posts (
+    id int primary key,
+    author_id int,
+    title text,
+    promoted tinyint,
+    deleted_at datetime default null
+);
+
+query I nosort
+select id from users
+where exists (select id from posts where title = 'test1');
+----
+
+statement ok
+insert into users (id, deleted_at) values (1, null);
+
+query I nosort
+select id from users
+where exists (select id from posts where title = 'test1');
+----
+
+statement ok
+insert into posts (id, title) values (1, 'test2');
+
+query I nosort
+select id from users
+where exists (select id from posts where title = 'test1');
+----
+
+statement ok
+insert into posts (id, title) values (2, 'test1');
+
+query I nosort
+select id from users
+where exists (select id from posts where title = 'test1');
+----
+1
