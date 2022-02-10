@@ -1,7 +1,6 @@
-use std::iter;
-
-use itertools::Either;
-use nom_sql::{Expression, FunctionExpression, InValue, JoinRightSide, SqlQuery};
+use nom_sql::analysis::visit::{walk_expression, walk_join_clause, Visitor};
+use nom_sql::{Expression, InValue, JoinClause, JoinRightSide, SqlQuery};
+use noria::ReadySetError;
 use noria_errors::{unsupported, ReadySetResult};
 
 #[derive(Debug, PartialEq)]
@@ -26,111 +25,49 @@ pub trait SubQueries {
     fn extract_subqueries(&mut self) -> ReadySetResult<Vec<SubqueryPosition>>;
 }
 
-fn extract_subqueries_from_function_call(
-    call: &mut FunctionExpression,
-) -> ReadySetResult<Vec<SubqueryPosition>> {
-    match call {
-        FunctionExpression::Avg { expr, .. }
-        | FunctionExpression::Count { expr, .. }
-        | FunctionExpression::Sum { expr, .. }
-        | FunctionExpression::Max(expr)
-        | FunctionExpression::Min(expr)
-        | FunctionExpression::GroupConcat { expr, .. } => extract_subqueries_from_expression(expr),
-        FunctionExpression::CountStar => Ok(vec![]),
-        FunctionExpression::Call { arguments, .. } => Ok(arguments
-            .iter_mut()
-            .map(extract_subqueries_from_expression)
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .flatten()
-            .collect()),
-    }
+#[derive(Default, Debug)]
+struct ExtractSubqueriesVisitor<'ast> {
+    out: Vec<SubqueryPosition<'ast>>,
 }
 
-fn extract_subqueries_from_expression(
-    expr: &mut Expression,
-) -> ReadySetResult<Vec<SubqueryPosition>> {
-    match expr {
-        Expression::BinaryOp { lhs, rhs, .. } => {
-            let lb = extract_subqueries_from_expression(lhs)?;
-            let rb = extract_subqueries_from_expression(rhs)?;
+impl<'ast> Visitor<'ast> for ExtractSubqueriesVisitor<'ast> {
+    type Error = ReadySetError;
 
-            Ok(lb.into_iter().chain(rb.into_iter()).collect())
+    fn visit_expression(&mut self, expression: &'ast mut Expression) -> Result<(), Self::Error> {
+        match expression {
+            Expression::Exists(_) => unsupported!("EXISTS not supported yet"),
+            Expression::In {
+                lhs,
+                rhs: rhs @ InValue::Subquery(_),
+                ..
+            } => {
+                walk_expression(self, lhs)?;
+                self.out.push(SubqueryPosition::In(rhs))
+            }
+            Expression::NestedSelect(_) => self.out.push(SubqueryPosition::Expr(expression)),
+            _ => walk_expression(self, expression)?,
         }
-        Expression::UnaryOp { rhs: expr, .. } | Expression::Cast { expr, .. } => {
-            extract_subqueries_from_expression(expr)
+        Ok(())
+    }
+
+    fn visit_join_clause(&mut self, join: &'ast mut JoinClause) -> Result<(), Self::Error> {
+        if matches!(join.right, JoinRightSide::NestedSelect(_, _)) {
+            self.out.push(SubqueryPosition::Join(&mut join.right))
+        } else {
+            walk_join_clause(self, join)?;
         }
-        Expression::Between {
-            operand, min, max, ..
-        } => {
-            let ob = extract_subqueries_from_expression(operand)?;
-            let minb = extract_subqueries_from_expression(min)?;
-            let maxb = extract_subqueries_from_expression(max)?;
-            Ok(ob
-                .into_iter()
-                .chain(minb.into_iter())
-                .chain(maxb.into_iter())
-                .collect())
-        }
-        Expression::CaseWhen {
-            condition,
-            then_expr,
-            else_expr,
-        } => Ok(extract_subqueries_from_expression(condition)?
-            .into_iter()
-            .chain(extract_subqueries_from_expression(then_expr)?)
-            .chain(match else_expr {
-                Some(else_expr) => {
-                    Either::Left(extract_subqueries_from_expression(else_expr)?.into_iter())
-                }
-                None => Either::Right(iter::empty()),
-            })
-            .collect()),
-        Expression::Exists(_) => unsupported!("EXISTS not supported yet"),
-        Expression::NestedSelect(_) => Ok(vec![SubqueryPosition::Expr(expr)]),
-        Expression::Call(call) => extract_subqueries_from_function_call(call),
-        Expression::In {
-            lhs,
-            rhs: rhs @ InValue::Subquery(_),
-            ..
-        } => Ok(extract_subqueries_from_expression(lhs)?
-            .into_iter()
-            .chain(iter::once(SubqueryPosition::In(rhs)))
-            .collect()),
-        Expression::In {
-            lhs,
-            rhs: InValue::List(exprs),
-            ..
-        } => Ok(extract_subqueries_from_expression(lhs)?
-            .into_iter()
-            .chain(
-                exprs
-                    .iter_mut()
-                    .map(extract_subqueries_from_expression)
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .flatten(),
-            )
-            .collect()),
-        Expression::Literal(_) | Expression::Column(_) | Expression::Variable(_) => Ok(vec![]),
+        Ok(())
     }
 }
 
 impl SubQueries for SqlQuery {
     fn extract_subqueries(&mut self) -> ReadySetResult<Vec<SubqueryPosition>> {
-        let mut subqueries = Vec::new();
-        if let SqlQuery::Select(ref mut st) = *self {
-            for jc in &mut st.join {
-                if let JoinRightSide::NestedSelect(_, _) = jc.right {
-                    subqueries.push(SubqueryPosition::Join(&mut jc.right));
-                }
-            }
-            if let Some(ref mut ce) = st.where_clause {
-                subqueries.extend(extract_subqueries_from_expression(ce)?);
-            }
+        let mut visitor = ExtractSubqueriesVisitor::default();
+        if let SqlQuery::Select(stmt) = self {
+            visitor.visit_select_statement(stmt)?;
         }
 
-        Ok(subqueries)
+        Ok(visitor.out)
     }
 }
 
