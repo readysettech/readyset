@@ -9,7 +9,7 @@ use crate::prelude::*;
 use crate::processing::SuggestedIndex;
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct Pagination {
+pub struct Paginate {
     /// The direct Ingredient or Base ancestor of this node
     src: IndexPair,
     /// The index of this node. Used to look up into our own state
@@ -22,14 +22,14 @@ pub struct Pagination {
     limit: usize,
 }
 
-impl Pagination {
+impl Paginate {
     pub fn new(
         src: NodeIndex,
         order: Vec<(usize, OrderType)>,
         group_by: Vec<usize>,
         limit: usize,
     ) -> Self {
-        Pagination {
+        Paginate {
             src: src.into(),
             our_index: None,
             group_by,
@@ -49,7 +49,7 @@ impl Pagination {
     }
 }
 
-impl Ingredient for Pagination {
+impl Ingredient for Paginate {
     fn take(&mut self) -> NodeOperator {
         self.clone().into()
     }

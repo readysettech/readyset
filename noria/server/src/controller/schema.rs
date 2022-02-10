@@ -76,7 +76,7 @@ fn type_for_internal_column(
             // ancestors; so keep iterating to try the other paths
             Ok(None)
         }
-        NodeOperator::Pagination(_) => {
+        NodeOperator::Paginate(_) => {
             if column_index == node.fields().len() - 1 {
                 Ok(Some(SqlType::Bigint(None)))
             } else {
