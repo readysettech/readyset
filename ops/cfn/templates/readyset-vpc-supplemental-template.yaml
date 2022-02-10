@@ -12,6 +12,11 @@ Parameters:
     Type: String
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
 
+  AdditionalAdapterCIDR:
+    Description: Additional CIDR to allow access to the Adapters from.
+    Type: String
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+
   VPCPrivateSubnetIds:
     Description: Comma-delimited list of private subnet IDs within the target VPC (e.g. subnet-1234,subnet-4567,subnet-8910).
     Type: CommaDelimitedList
@@ -21,6 +26,9 @@ Parameters:
   BastionSecurityGroupID:
     Description: ID of security group designated for Bastion hosts.
     Type: AWS::EC2::SecurityGroup::Id
+
+Conditions:
+  CreateAdditionalAdapterCIDRRule: !Not [!Equals [!Ref AdditionalAdapterCIDR, ""]]
 
 Resources:
   ConsulServerSecurityGroup:
@@ -73,12 +81,33 @@ Resources:
           ToPort: 5432
           CidrIp: !Ref VPCCIDR
           Description: Allow inbound PostgreSQL queries from inside VPC.
-          # In future, we should allow operators to pass in CIDR of another VPC
       SecurityGroupEgress:
         - IpProtocol: -1
           FromPort: 0
           ToPort: 0
           CidrIp: 0.0.0.0/0
+
+  ReadySetAdapterSecurityCIDRMySQLIngressRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ReadySetAdapterSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      CidrIp: !Ref AdditionalAdapterCIDR
+      Description: Allow inbound MySQL queries for additional CIDR
+    Condition: CreateAdditionalAdapterCIDRRule
+
+  ReadySetAdapterSecurityCIDRPostgresIngressRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ReadySetAdapterSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      CidrIp: !Ref AdditionalAdapterCIDR
+      Description: Allow inbound PostgreSQL queries for additional CIDR
+    Condition: CreateAdditionalAdapterCIDRRule
 
   ReadySetServerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
