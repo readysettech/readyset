@@ -178,6 +178,10 @@ struct Opts {
     #[clap(long, env = "EXPERIMENTAL_TOPK_SUPPORT", hide = true)]
     enable_experimental_topk_support: bool,
 
+    /// Enable (experimental, currently unimplemented) support for Paginate in dataflow
+    #[clap(long, env = "EXPERIMENTAL_PAGINATE_SUPPORT", hide = true)]
+    enable_experimental_paginate_support: bool,
+
     #[clap(flatten)]
     logging: readyset_logging::Options,
 
@@ -263,6 +267,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     builder.set_allow_topk(opts.enable_experimental_topk_support);
+    builder.set_allow_paginate(opts.enable_experimental_paginate_support);
 
     if let Some(r) = opts.region {
         builder.set_region(r);

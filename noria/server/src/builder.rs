@@ -127,6 +127,11 @@ impl Builder {
         self.config.mir_config.allow_topk = allow_topk;
     }
 
+    /// Set the value of [`controller::sql::Config::allow_paginate`]
+    pub fn set_allow_paginate(&mut self, allow_paginate: bool) {
+        self.config.mir_config.allow_paginate = allow_paginate;
+    }
+
     /// Set the value of [`controller::sql::Config::allow_mixed_comparisons`]
     pub fn set_allow_mixed_comparisons(&mut self, allow_mixed_comparisons: bool) {
         self.config.mir_config.allow_mixed_comparisons = allow_mixed_comparisons;
