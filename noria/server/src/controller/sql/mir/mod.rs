@@ -117,11 +117,19 @@ fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DataType>> {
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct Config {
     /// If set to `true`, a SQL `ORDER BY` with `LIMIT` will emit a [`TopK`][] node. If set to
-    /// `false`, the SQL conversion process to return a [`ReadySetError::Unsupported`] (causing the
-    /// adapter to send the query to fallback).  Defaults to `false`.
+    /// `false`, the SQL conversion process returns a [`ReadySetError::Unsupported`], causing the
+    /// adapter to send the query to fallback. Defaults to `false`.
     ///
     /// [`TopK`]: MirNodeInner::TopK
     pub(crate) allow_topk: bool,
+
+    /// If set to 'true', a SQL 'ORDER BY' with 'LIMIT' and 'OFFSET' will emit a ['Paginate'][]
+    /// node. If set to 'false', the SQL conversion process returns a
+    /// ['ReadySetError::Unsupported'], causing the adapter to send the query to fallback. Defaults
+    /// to 'false'.
+    ///
+    /// ['Paginate']: MirNodeInner::Paginate
+    pub(crate) allow_paginate: bool,
 
     /// Enable support for mixing equality and range comparisons in a query. Support for mixed
     /// comparisons is currently unfinished, so these queries may return incorrect results.

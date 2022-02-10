@@ -49,6 +49,7 @@ pub async fn start_simple_reuse_unsharded(prefix: &str) -> Handle {
     builder.set_reuse(Some(ReuseConfigType::Finkelstein));
     builder.set_persistence(get_persistence_params(prefix));
     builder.set_allow_topk(true);
+    builder.set_allow_paginate(true);
     builder.set_sharding(None);
     builder.start_local_custom(authority.clone()).await.unwrap()
 }
@@ -90,6 +91,7 @@ pub async fn build_custom(
     builder.set_persistence(get_persistence_params(prefix));
     // don't return unsupported errors for topk in queries
     builder.set_allow_topk(true);
+    builder.set_allow_paginate(true);
 
     if reader_only {
         builder.as_reader_only();

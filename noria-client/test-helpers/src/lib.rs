@@ -145,6 +145,7 @@ where
 
     let mut builder = Builder::for_tests();
     builder.set_allow_topk(true);
+    builder.set_allow_paginate(true);
     if !partial {
         builder.disable_partial();
     }
