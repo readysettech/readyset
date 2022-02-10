@@ -35,3 +35,6 @@ pub const MIGRATION_HANDLER_ALLOWED: &str = "migration-handler.allowed";
 
 /// Counter: The number of HTTP requests received at the noria-client.
 pub const ADAPTER_EXTERNAL_REQUESTS: &str = "noria-client.external_requests";
+
+/// Gauge: The number of currently connected SQL clients
+pub const CONNECTED_CLIENTS: &str = "noria-client.connected_clients";
