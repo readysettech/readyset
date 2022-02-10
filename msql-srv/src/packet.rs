@@ -339,7 +339,7 @@ fn packet(i: &[u8]) -> nom::IResult<&[u8], (u8, Packet<'_>)> {
         nom::sequence::pair(
             nom::multi::fold_many0(
                 fullpacket,
-                (0, None),
+                || (0, None),
                 |(seq, pkt): (_, Option<Packet<'_>>), (nseq, p)| {
                     let pkt = if let Some(mut pkt) = pkt {
                         assert_eq!(nseq, seq + 1);

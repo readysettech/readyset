@@ -2822,20 +2822,7 @@ version = "6.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c34e981f88d060a67815388470172638f1af16b3a12e581cb75142f190161bf9"
 dependencies = [
- "lexical-core 0.8.2",
-]
-
-[[package]]
-name = "lexical-core"
-version = "0.7.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6607c62aa161d23d17a9072cc5da0be67cdfc89d3afb1e8d9c842bebc2525ffe"
-dependencies = [
- "arrayvec",
- "bitflags",
- "cfg-if 1.0.0",
- "ryu",
- "static_assertions",
+ "lexical-core",
 ]
 
 [[package]]
@@ -3103,7 +3090,7 @@ dependencies = [
  "lazy_static",
  "maplit",
  "metrics",
- "nom 5.1.2",
+ "nom 7.1.0",
  "nom-sql",
  "noria",
  "prometheus-http-query",
@@ -3288,7 +3275,7 @@ dependencies = [
  "mysql-time",
  "mysql_async",
  "mysql_common",
- "nom 5.1.2",
+ "nom 7.1.0",
  "sha-1 0.9.8",
  "slab",
  "test_utils",
@@ -3518,7 +3505,6 @@ version = "5.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffb4262d26ed83a1c0a33a38fe2bb15797329c85770da05e6b828ddb782627af"
 dependencies = [
- "lexical-core 0.7.6",
  "memchr",
  "version_check",
 ]
@@ -3681,7 +3667,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "mysql_common",
- "nom 5.1.2",
+ "nom 7.1.0",
  "nom-sql",
  "noria",
  "noria-client-metrics",

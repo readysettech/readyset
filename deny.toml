@@ -188,7 +188,6 @@ skip = [
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
-    { name = "nom", version = "5.1.2" },
     { name = "rusty-fork", version = "0.3.0" },
     { name = "zookeeper", version = "0.6.1" },
     { name = "prettytable-rs", version = "0.8.0" },
