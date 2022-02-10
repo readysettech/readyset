@@ -23,6 +23,7 @@ use noria_logictest::upstream::DatabaseURL;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use query_generator::{ColumnName, TableName, TableSpec};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use super::spec::{DatabaseGenerationSpec, DatabaseSchema, TableGenerationSpec};
 use crate::utils::path::benchmark_path;
@@ -189,17 +190,26 @@ pub async fn load_table_part(
                 .collect::<Vec<mysql_async::Value>>()
         });
 
-        if rows_to_generate == MAX_BATCH_ROWS {
+        let res = if rows_to_generate == MAX_BATCH_ROWS {
             conn.exec_drop(
                 &prepared_stmt,
                 mysql_async::Params::Positional(data_as_params),
             )
-            .await?;
+            .await
         } else {
             let tail_insert = query_for_prepared_insert(&table_name, &columns, rows_to_generate);
             let stmt = conn.prep(tail_insert).await?;
             conn.exec_drop(&stmt, mysql_async::Params::Positional(data_as_params))
-                .await?;
+                .await
+        };
+
+        match res {
+            Ok(_) => {}
+            // If it is a key already exists error try to continue.
+            Err(mysql_async::Error::Server(e)) if e.code == 1062 => {
+                warn!("Key already exists, skipping");
+            }
+            Err(e) => return Err(e.into()),
         }
 
         progress_bar.inc(rows_to_generate as _);
