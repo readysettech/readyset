@@ -1,0 +1,14 @@
+ingress:
+  type: alb
+  listenPorts:
+    - HTTP: 80
+    - HTTPS: 443
+  annotations:
+    certName: "${acm_cert_arn}"
+    awsTags:
+      - environment=${environment}
+      - namespace=${namespace}
+      - Name=rs-${environment}-ingress
+    sslPolicy: "ELBSecurityPolicy-FS-1-2-Res-2019-08"
+    externalDnsDomains:
+      - readyset.name

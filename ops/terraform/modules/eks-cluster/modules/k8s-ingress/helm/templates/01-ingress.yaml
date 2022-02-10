@@ -1,0 +1,52 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.ingress.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- range $k, $v := .Values.ingress.labels }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+  annotations:
+    kubernetes.io/ingress.class: {{ .Values.ingress.type | quote }}
+    alb.ingress.kubernetes.io/target-type: {{ .Values.ingress.targetType | quote }}
+    alb.ingress.kubernetes.io/scheme: {{ .Values.ingress.scheme }}
+    alb.ingress.kubernetes.io/ssl-policy: {{ .Values.ingress.annotations.sslPolicy }}
+  {{- range .Values.ingress.annotations.externalDnsDomains }}
+    {{ . }}/externaldns.type: private
+    {{ . }}/externaldns.type: public
+    {{ . }}/externaldns.private: "yes"
+    {{ . }}/externaldns.public: "yes"
+  {{- end }}
+  {{- if len .Values.ingress.annotations.certName }}
+    alb.ingress.kubernetes.io/certificate-arn: {{ .Values.ingress.annotations.certName }}
+  {{- end }}
+  {{- if len .Values.ingress.annotations.listenPorts }}
+    alb.ingress.kubernetes.io/listen-ports: {{ .Values.ingress.annotations.listenPorts | toJson | quote }}
+  {{- end }}
+  {{- if len .Values.ingress.annotations.sslRedirect }}
+    alb.ingress.kubernetes.io/actions.ssl-redirect: {{ .Values.ingress.annotations.sslRedirect | toJson | quote }}
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+  {{- end }}
+  {{- if len .Values.ingress.annotations.awsTags }}
+    alb.ingress.kubernetes.io/tags: "{{- join "," .Values.ingress.annotations.awsTags }}"
+  {{- end }}
+spec:
+  defaultBackend:
+    service:
+      name: {{ .Values.ingress.defaultBackend.serviceName }}
+      port:
+        number: {{ .Values.ingress.defaultBackend.servicePort }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .fqdn | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .service | quote }}
+                port:
+                  number: {{ .servicePort }}
+    {{- end }}
