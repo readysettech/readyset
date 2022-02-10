@@ -13,401 +13,353 @@ use std::str::FromStr;
 use anyhow::{anyhow, bail, Context};
 use chrono::NaiveDateTime;
 use mysql_time::MysqlTime;
+use nom::branch::alt;
+use nom::bytes::complete::tag;
 use nom::character::complete::{
-    alphanumeric1, anychar, digit1, line_ending, multispace1, not_line_ending,
+    alphanumeric1, anychar, char, digit1, line_ending, multispace1, not_line_ending, one_of,
+    space0, space1,
 };
-use nom::character::is_space;
-use nom::{
-    alt, char, complete, count, do_parse, eof, flat_map, many0, many1, many_till, map, map_opt,
-    named, one_of, opt, parse_to, peek, preceded, recognize, tag, take_while, take_while1,
-    terminated,
-};
+use nom::combinator::{complete, eof, map, map_opt, map_parser, opt, peek, recognize};
+use nom::multi::{count, many0, many1, many_till};
+use nom::sequence::{pair, preceded, terminated, tuple};
+use nom::IResult;
 use noria_data::TIMESTAMP_FORMAT;
 
 use crate::ast::*;
 
-named!(
-    comment<()>,
-    complete!(do_parse!(
-        take_while!(is_space) >> char!('#') >> not_line_ending >> (())
+fn comment(i: &[u8]) -> IResult<&[u8], ()> {
+    let (i, _) = space0(i)?;
+    let (i, _) = char('#')(i)?;
+    let (i, _) = not_line_ending(i)?;
+    Ok((i, ()))
+}
+
+fn skipif(i: &[u8]) -> IResult<&[u8], Conditional> {
+    let (i, _) = tag("skipif")(i)?;
+    let (i, _) = multispace1(i)?;
+    let (i, name) = map(alphanumeric1, String::from_utf8_lossy)(i)?;
+    let (i, _) = opt(comment)(i)?;
+    Ok((i, Conditional::SkipIf(name.to_string())))
+}
+
+fn onlyif(i: &[u8]) -> IResult<&[u8], Conditional> {
+    let (i, _) = tag("onlyif")(i)?;
+    let (i, _) = multispace1(i)?;
+    let (i, name) = map(alphanumeric1, String::from_utf8_lossy)(i)?;
+    let (i, _) = opt(comment)(i)?;
+    Ok((i, Conditional::OnlyIf(name.to_string())))
+}
+
+fn invert_no_upstream(i: &[u8]) -> IResult<&[u8], Conditional> {
+    let (i, _) = tag("invert_no_upstream")(i)?;
+    let (i, _) = opt(comment)(i)?;
+
+    Ok((i, Conditional::InvertNoUpstream))
+}
+
+fn conditional(i: &[u8]) -> IResult<&[u8], Conditional> {
+    alt((skipif, onlyif, invert_no_upstream))(i)
+}
+
+fn conditionals(i: &[u8]) -> IResult<&[u8], Vec<Conditional>> {
+    many0(terminated(conditional, line_ending))(i)
+}
+
+fn statement_header(i: &[u8]) -> IResult<&[u8], StatementResult> {
+    let (i, _) = tag("statement")(i)?;
+    let (i, _) = multispace1(i)?;
+
+    alt((
+        map(tag("ok"), |_| StatementResult::Ok),
+        map(tag("error"), |_| StatementResult::Error),
+    ))(i)
+}
+
+fn end_of_statement(i: &[u8]) -> IResult<&[u8], ()> {
+    alt((
+        map(complete(count(line_ending, 2)), |_| ()),
+        map(eof, |_| ()),
+    ))(i)
+}
+
+fn statement_command(i: &[u8]) -> IResult<&[u8], String> {
+    let (i, s) = many_till(anychar, end_of_statement)(i)?;
+    Ok((i, s.0.into_iter().collect()))
+}
+
+fn statement(i: &[u8]) -> IResult<&[u8], Statement> {
+    let (i, conditionals) = conditionals(i)?;
+    let (i, result) = statement_header(i)?;
+    let (i, _) = line_ending(i)?;
+    let (i, command) = statement_command(i)?;
+
+    Ok((
+        i,
+        Statement {
+            result,
+            command,
+            conditionals,
+        },
     ))
-);
+}
 
-named!(
-    statement_result<StatementResult>,
-    alt!(
-        tag!("ok") => { |_| StatementResult::Ok } |
-        tag!("error") => { |_| StatementResult::Error }
-    )
-);
+fn column_type(i: &[u8]) -> IResult<&[u8], Type> {
+    alt((
+        map(tag("T"), |_| Type::Text),
+        map(tag("I"), |_| Type::Integer),
+        map(tag("R"), |_| Type::Real),
+        map(tag("D"), |_| Type::Date),
+        map(tag("M"), |_| Type::Time),
+        map(tag("BV"), |_| Type::BitVec),
+    ))(i)
+}
 
-named!(
-    skipif<Conditional>,
-    do_parse!(
-        _constructor: tag!("skipif")
-            >> multispace1
-            >> name: flat_map!(alphanumeric1, parse_to!(String))
-            >> opt!(comment)
-            >> (Conditional::SkipIf(name))
-    )
-);
-
-named!(
-    onlyif<Conditional>,
-    do_parse!(
-        _constructor: tag!("onlyif")
-            >> multispace1
-            >> name: flat_map!(alphanumeric1, parse_to!(String))
-            >> opt!(comment)
-            >> (Conditional::OnlyIf(name))
-    )
-);
-
-named!(
-    invert_no_upstream<Conditional>,
-    do_parse!(
-        _constructor: tag!("invert_no_upstream")
-            >> opt!(comment)
-            >> (Conditional::InvertNoUpstream)
-    )
-);
-
-named!(
-    conditional<Conditional>,
-    alt!(skipif | onlyif | invert_no_upstream)
-);
-named!(
-    conditionals<Vec<Conditional>>,
-    many0!(terminated!(conditional, line_ending))
-);
-
-named!(
-    statement_header<StatementResult>,
-    do_parse!(
-        tag!("statement")
-            >> multispace1
-            >> res: alt!(
-                tag!("ok") => { |_| (StatementResult::Ok) } |
-                tag!("error") => { |_| (StatementResult::Error) }
-            )
-            >> (res)
-    )
-);
-
-named!(
-    end_of_statement<()>,
-    alt!(
-        complete!(count!(line_ending, 2)) => { |_| () } |
-        eof!() => { |_| () }
-    )
-);
-
-named!(
-    statement_command<String>,
-    map!(many_till!(anychar, end_of_statement), |(s, _)| s
-        .into_iter()
-        .collect())
-);
-
-named!(
-    statement<Statement>,
-    do_parse!(
-        conditionals: conditionals
-            >> result: terminated!(statement_header, line_ending)
-            >> command: statement_command
-            >> (Statement {
-                result,
-                command,
-                conditionals
-            })
-    )
-);
-
-named!(
-    column_type<Type>,
-    alt!(
-        tag!("T") => { |_| Type::Text } |
-        tag!("I") => { |_| Type::Integer } |
-        tag!("R") => { |_| Type::Real } |
-        tag!("D") => { |_| Type::Date } |
-        tag!("M") => { |_| Type::Time } |
-        tag!("BV") => { |_| Type::BitVec }
-    )
-);
-
-named!(column_types<Vec<Type>>, many1!(column_type));
-
-named!(
-    sort_mode<SortMode>,
-    alt!(
-        tag!("nosort") => { |_| SortMode::NoSort } |
-        tag!("rowsort") => { |_| SortMode::RowSort } |
-        tag!("valuesort") => { |_| SortMode::ValueSort }
-    )
-);
-
-named!(
-    digest<md5::Digest>,
-    map!(count!(one_of!("1234567890abcdef"), 32), |cs| md5::Digest(
-        hex::decode(cs.into_iter().map(|c| c as u8).collect::<Vec<_>>())
-            .unwrap()
-            .try_into()
-            .unwrap()
-    ))
-);
-
-named!(
-    hash_results<QueryResults>,
-    do_parse!(
-        count: flat_map!(digit1, parse_to!(usize))
-            >> take_while1!(is_space)
-            >> tag!("values")
-            >> take_while1!(is_space)
-            >> tag!("hashing")
-            >> take_while1!(is_space)
-            >> tag!("to")
-            >> take_while1!(is_space)
-            >> digest: digest
-            >> opt!(comment)
-            >> (QueryResults::Hash { count, digest })
-    )
-);
-
-named!(
-    float<Value>,
-    map!(
-        flat_map!(
-            recognize!(do_parse!(
-                opt!(tag!("-")) >> digit1 >> tag!(".") >> digit1 >> (())
-            )),
-            parse_to!(f64)
+fn column_types(i: &[u8]) -> IResult<&[u8], Vec<Type>> {
+    many1(column_type)(i)
+}
+fn sort_mode(i: &[u8]) -> IResult<&[u8], SortMode> {
+    alt((
+        map(tag("nosort"), |_| SortMode::NoSort),
+        map(tag("rowsort"), |_| SortMode::RowSort),
+        map(tag("valuesort"), |_| SortMode::ValueSort),
+    ))(i)
+}
+fn digest(i: &[u8]) -> IResult<&[u8], md5::Digest> {
+    let (i, cs) = count(one_of("1234567890abcdef"), 32)(i)?;
+    Ok((
+        i,
+        md5::Digest(
+            hex::decode(cs.into_iter().map(|c| c as u8).collect::<Vec<_>>())
+                .unwrap()
+                .try_into()
+                .unwrap(),
         ),
-        Value::from
-    )
-);
+    ))
+}
 
-named!(
-    integer<i64>,
-    do_parse!(
-        sign: opt!(tag!("-"))
-            >> num: flat_map!(digit1, parse_to!(i64))
-            >> (if sign.is_some() { -num } else { num })
-    )
-);
+fn hash_results(i: &[u8]) -> IResult<&[u8], QueryResults> {
+    let (i, count) = map_parser(digit1, nom::character::complete::u32)(i)?;
+    let (i, _) = space1(i)?;
+    let (i, _) = tag("values")(i)?;
+    let (i, _) = space1(i)?;
+    let (i, _) = tag("hashing")(i)?;
+    let (i, _) = space1(i)?;
+    let (i, _) = tag("to")(i)?;
+    let (i, _) = space1(i)?;
+    let (i, d) = digest(i)?;
+    let (i, _) = opt(comment)(i)?;
 
-named!(
-    empty_string<Value>,
-    map!(tag!("(empty)"), |_| Value::Text(String::new()))
-);
+    Ok((
+        i,
+        QueryResults::Hash {
+            count: count as usize,
+            digest: d,
+        },
+    ))
+}
 
-named!(
-    value<Value>,
-    alt!(
-        terminated!(tag!("NULL"), line_ending) => { |_| Value::Null } |
-        terminated!(empty_string, line_ending) |
-        terminated!(complete!(float), line_ending) |
-        terminated!(integer, line_ending) => { Value::Integer } |
-        terminated!(map_opt!(
-            not_line_ending,
-            |s: &[u8]| {
-                Some(Value::Date(NaiveDateTime::parse_from_str(
-                    String::from_utf8_lossy(s).as_ref(),
-                    TIMESTAMP_FORMAT,
-                ).ok()?))
-            }
-        ), line_ending) |
-        terminated!(map_opt!(
-            not_line_ending,
-            |s: &[u8]| {
-                Some(Value::Date(NaiveDateTime::parse_from_str(
-                    String::from_utf8_lossy(s).as_ref(),
-                    TIMESTAMP_FORMAT,
-                ).ok()?))
-            }
-        ), line_ending) |
-        terminated!(map_opt!(
-            not_line_ending,
-            |s: &[u8]| {
-                Some(Value::Time(MysqlTime::from_str(
-                    String::from_utf8_lossy(s).as_ref(),
-                ).ok()?))
-            }
-        ), line_ending) |
-        terminated!(map_opt!(
-            not_line_ending,
-            |s: &[u8]| {
-                if s.is_empty() {
-                    None
-                } else {
-                    String::from_utf8(s.into()).ok()
-                }
-            }
-        ), line_ending) => { Value::Text }
-    )
-);
+fn float(i: &[u8]) -> IResult<&[u8], Value> {
+    let (i, v) = map_parser(
+        recognize(tuple((opt(tag("-")), digit1, tag("."), digit1))),
+        nom::number::complete::double,
+    )(i)?;
 
-named!(
-    positional_param<Value>,
-    do_parse!(tag!("?") >> multispace1 >> tag!("=") >> multispace1 >> val: value >> (val))
-);
+    Ok((i, Value::from(v)))
+}
 
-named!(
-    positional_params<QueryParams>,
-    map!(many1!(positional_param), QueryParams::PositionalParams)
-);
+fn integer(i: &[u8]) -> IResult<&[u8], i64> {
+    let (i, sign) = opt(tag("-"))(i)?;
+    let (i, num) = map_parser(digit1, nom::character::complete::i64)(i)?;
 
-named!(
-    numbered_param<(u32, Value)>,
-    do_parse!(
-        tag!("$")
-            >> n: flat_map!(digit1, parse_to!(u32))
-            >> multispace1
-            >> tag!("=")
-            >> multispace1
-            >> val: value
-            >> ((n, val))
-    )
-);
+    Ok((i, if sign.is_some() { -num } else { num }))
+}
 
-named!(
-    numbered_params<QueryParams>,
-    map!(many1!(numbered_param), |ps| {
-        QueryParams::NumberedParams(ps.into_iter().collect())
-    })
-);
+fn empty_string(i: &[u8]) -> IResult<&[u8], Value> {
+    let (i, _) = tag("(empty)")(i)?;
+    Ok((i, Value::Text(String::new())))
+}
 
-named!(
-    query_params<QueryParams>,
-    map!(opt!(alt!(positional_params | numbered_params)), |ps| ps
-        .unwrap_or_default())
-);
-
-named!(
-    end_of_query_results<()>,
-    alt!(
-        complete!(line_ending) => { |_| () } |
-        preceded!(opt!(many1!(line_ending)), eof!()) => { |_| () }
-    )
-);
-
-named!(
-    query_results<QueryResults>,
-    alt!(
-        preceded!(line_ending, hash_results) |
-        preceded!(line_ending, many_till!(
-            complete!(value),
-            end_of_query_results
-        )) => { |(vals, _)| QueryResults::Results(vals) }
-    )
-);
-
-named!(
-    end_of_query<()>,
-    preceded!(
-        line_ending,
-        peek!(alt!(
-            tag!("----") => { |_| () } |
-            alt!(numbered_param => { |_| () } | positional_param => { |_| () })
-        ))
-    )
-);
-
-named!(
-    query<Query>,
-    do_parse!(
-        conditionals: conditionals
-            >> tag!("query")
-            >> column_types: opt!(preceded!(take_while1!(is_space), column_types))
-            >> sort_mode: opt!(preceded!(take_while1!(is_space), sort_mode))
-            >> label:
-                opt!(preceded!(
-                    take_while1!(is_space),
-                    map_opt!(not_line_ending, |s: &[u8]| String::from_utf8(s.into())
-                        .ok()
-                        .filter(|s| !s.is_empty()))
+fn value(i: &[u8]) -> IResult<&[u8], Value> {
+    alt((
+        map(terminated(tag("NULL"), line_ending), |_| Value::Null),
+        terminated(empty_string, line_ending),
+        terminated(complete(float), line_ending),
+        map(terminated(integer, line_ending), Value::Integer),
+        terminated(
+            map_opt(not_line_ending, |s: &[u8]| {
+                Some(Value::Date(
+                    NaiveDateTime::parse_from_str(
+                        String::from_utf8_lossy(s).as_ref(),
+                        TIMESTAMP_FORMAT,
+                    )
+                    .ok()?,
                 ))
-            >> line_ending
-            >> query:
-                map!(many_till!(anychar, end_of_query), |(s, _)| s
-                    .into_iter()
-                    .collect::<String>(
+            }),
+            line_ending,
+        ),
+        terminated(
+            map_opt(not_line_ending, |s: &[u8]| {
+                Some(Value::Time(
+                    MysqlTime::from_str(String::from_utf8_lossy(s).as_ref()).ok()?,
                 ))
-            >> params: query_params
-            >> tag!("----")
-            >> opt!(preceded!(line_ending, comment))
-            >> results: query_results
-            >> (Query {
-                label,
-                column_types,
-                sort_mode,
-                conditionals,
-                query,
-                results,
-                params,
-            })
-    )
-);
+            }),
+            line_ending,
+        ),
+        map(
+            terminated(
+                map_opt(not_line_ending, |s: &[u8]| {
+                    if s.is_empty() {
+                        None
+                    } else {
+                        String::from_utf8(s.into()).ok()
+                    }
+                }),
+                line_ending,
+            ),
+            Value::Text,
+        ),
+    ))(i)
+}
 
-named!(
-    hash_threshold<Record>,
-    do_parse!(
-        tag!("hash-threshold")
-            >> take_while1!(is_space)
-            >> threshold: flat_map!(digit1, parse_to!(usize))
-            >> line_ending
-            >> (Record::HashThreshold(threshold))
-    )
-);
+fn positional_param(i: &[u8]) -> IResult<&[u8], Value> {
+    let (i, _) = tag("?")(i)?;
+    let (i, _) = multispace1(i)?;
+    let (i, _) = tag("=")(i)?;
+    let (i, _) = multispace1(i)?;
+    let (i, value) = value(i)?;
 
-named!(
-    sleep<Record>,
-    do_parse!(
-        tag!("sleep")
-            >> multispace1
-            >> msecs: flat_map!(digit1, parse_to!(u64))
-            >> (Record::Sleep(msecs))
-    )
-);
+    Ok((i, value))
+}
 
-named!(
-    halt<Record>,
-    do_parse!(
-        conditionals: conditionals
-            >> tag!("halt")
-            >> opt!(comment)
-            >> (Record::Halt { conditionals })
-    )
-);
+fn positional_params(i: &[u8]) -> IResult<&[u8], QueryParams> {
+    map(many1(positional_param), QueryParams::PositionalParams)(i)
+}
 
-named!(pub record<Record>, alt!(
-    statement => { Record::Statement } |
-    query => { Record::Query } |
-    sleep |
-    halt |
-    terminated!(tag!("graphviz"), line_ending) => { |_| Record::Graphviz } |
-    hash_threshold
-));
+fn numbered_param(i: &[u8]) -> IResult<&[u8], (u32, Value)> {
+    let (i, _) = tag("$")(i)?;
+    let (i, digit) = map_parser(digit1, nom::character::complete::u32)(i)?;
+    let (i, _) = multispace1(i)?;
+    let (i, _) = tag("=")(i)?;
+    let (i, _) = multispace1(i)?;
+    let (i, value) = value(i)?;
 
-named!(
-    ignore<()>,
-    map!(
-        opt!(many1!(alt!(
-            comment |
-            multispace1 => { |_| () }
-        ))),
-        |_| ()
-    )
-);
+    Ok((i, (digit, value)))
+}
 
-named!(pub records<Vec<Record>>, complete!(
-    preceded!(
+fn numbered_params(i: &[u8]) -> IResult<&[u8], QueryParams> {
+    let (i, params) = many1(numbered_param)(i)?;
+    Ok((i, QueryParams::NumberedParams(params.into_iter().collect())))
+}
+
+fn query_params(i: &[u8]) -> IResult<&[u8], QueryParams> {
+    let (i, params) = opt(alt((positional_params, numbered_params)))(i)?;
+    Ok((i, params.unwrap_or_default()))
+}
+
+fn end_of_query_results(i: &[u8]) -> IResult<&[u8], ()> {
+    alt((
+        map(complete(line_ending), |_| ()),
+        map(preceded(opt(many1(line_ending)), eof), |_| ()),
+    ))(i)
+}
+
+fn query_results(i: &[u8]) -> IResult<&[u8], QueryResults> {
+    alt((preceded(line_ending, hash_results), move |i| {
+        let (i, _) = line_ending(i)?;
+        let (i, (vals, _)) = many_till(complete(value), end_of_query_results)(i)?;
+        Ok((i, QueryResults::Results(vals)))
+    }))(i)
+}
+
+fn end_of_query(i: &[u8]) -> IResult<&[u8], ()> {
+    let (i, _) = line_ending(i)?;
+    let (i, _) = peek(alt((
+        map(tag("----"), |_| ()),
+        alt((map(numbered_param, |_| ()), map(positional_param, |_| ()))),
+    )))(i)?;
+
+    Ok((i, ()))
+}
+
+fn query(i: &[u8]) -> IResult<&[u8], Query> {
+    let (i, conditionals) = conditionals(i)?;
+    let (i, _) = tag("query")(i)?;
+    let (i, column_types) = opt(preceded(space0, column_types))(i)?;
+    let (i, sort_mode) = opt(preceded(space0, sort_mode))(i)?;
+    let (i, label) = opt(preceded(
+        space0,
+        map_opt(not_line_ending, |s: &[u8]| {
+            String::from_utf8(s.into()).ok().filter(|s| !s.is_empty())
+        }),
+    ))(i)?;
+    let (i, _) = line_ending(i)?;
+    let (i, query) = map(many_till(anychar, end_of_query), |(s, _)| {
+        s.into_iter().collect::<String>()
+    })(i)?;
+    let (i, params) = query_params(i)?;
+    let (i, _) = tag("----")(i)?;
+    let (i, _) = opt(pair(line_ending, comment))(i)?;
+    let (i, results) = query_results(i)?;
+
+    Ok((
+        i,
+        Query {
+            label,
+            column_types,
+            sort_mode,
+            conditionals,
+            query,
+            results,
+            params,
+        },
+    ))
+}
+
+fn hash_threshold(i: &[u8]) -> IResult<&[u8], Record> {
+    let (i, _) = tag("hash-threshold")(i)?;
+    let (i, _) = space1(i)?;
+    let (i, threshold) = map_parser(digit1, nom::character::complete::u64)(i)?;
+    let (i, _) = line_ending(i)?;
+    Ok((i, Record::HashThreshold(threshold as usize)))
+}
+
+fn sleep(i: &[u8]) -> IResult<&[u8], Record> {
+    let (i, _) = tag("sleep")(i)?;
+    let (i, _) = multispace1(i)?;
+    let (i, len) = map_parser(digit1, nom::character::complete::u64)(i)?;
+    Ok((i, Record::Sleep(len)))
+}
+
+fn halt(i: &[u8]) -> IResult<&[u8], Record> {
+    let (i, conditionals) = conditionals(i)?;
+    let (i, _) = tag("halt")(i)?;
+    let (i, _) = opt(comment)(i)?;
+    Ok((i, Record::Halt { conditionals }))
+}
+
+pub fn record(i: &[u8]) -> IResult<&[u8], Record> {
+    alt((
+        map(statement, Record::Statement),
+        map(query, Record::Query),
+        sleep,
+        halt,
+        map(terminated(tag("graphviz"), line_ending), |_| {
+            Record::Graphviz
+        }),
+        hash_threshold,
+    ))(i)
+}
+
+pub fn ignore(i: &[u8]) -> IResult<&[u8], ()> {
+    map(opt(many1(alt((comment, map(multispace1, |_| ()))))), |_| ())(i)
+}
+
+pub fn records(i: &[u8]) -> IResult<&[u8], Vec<Record>> {
+    complete(preceded(
         ignore,
-        many1!(complete!(terminated!(
-            record,
-            ignore
-        )))
-    )
-));
+        many1(complete(terminated(record, ignore))),
+    ))(i)
+}
 
 pub fn read_records<R>(mut input: R) -> anyhow::Result<Vec<Record>>
 where
@@ -420,12 +372,13 @@ where
         .with_context(|| "Failed to read input file")?;
     let (remaining, records) = records(bytes.as_slice()).map_err(|e| match e {
         nom::Err::Incomplete(_) => anyhow!("Parse error: Incomplete"),
-        nom::Err::Error((input, kind)) | nom::Err::Failure((input, kind)) => {
+        nom::Err::Error(nom::error::Error { input, code })
+        | nom::Err::Failure(nom::error::Error { input, code }) => {
             let pos = String::from_utf8_lossy(input);
             anyhow!(
                 "Parse error, at {}: {:?}",
                 &pos[..std::cmp::min(pos.len(), 16)],
-                kind
+                code
             )
         }
     })?;
