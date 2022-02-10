@@ -67,19 +67,3 @@ data "aws_iam_policy_document" "externaldns" {
     }
   }
 }
-
-#-------------- [ Helm ] ------------------------------------------------- #
-
-# Helm values file for ExternalDNS chart deployment
-data "template_file" "externaldns" {
-  template = file("${path.module}/templates/helm/values.yaml")
-
-  vars = {
-    region   = data.aws_region.current.name
-    id       = data.aws_route53_zone.externaldns.zone_id
-    account  = data.aws_caller_identity.current.account_id
-    sa       = aws_iam_role.externaldns.arn
-    zoneType = var.dns_zone_mode
-    name     = local.name
-  }
-}

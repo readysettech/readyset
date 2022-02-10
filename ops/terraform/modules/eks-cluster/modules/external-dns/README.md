@@ -14,7 +14,6 @@ No requirements.
 |------|---------|
 | aws | n/a |
 | helm | n/a |
-| template | n/a |
 
 ## Inputs
 

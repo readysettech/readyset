@@ -19,5 +19,14 @@ resource "helm_release" "externaldns" {
   chart      = var.helm_chart_name
   namespace  = var.helm_deployment_namespace
   version    = var.helm_chart_version
-  values     = [data.template_file.externaldns.rendered]
+  values = [
+    templatefile("${path.module}/templates/helm/values.yaml", {
+      region   = data.aws_region.current.name
+      id       = data.aws_route53_zone.externaldns.zone_id
+      account  = data.aws_caller_identity.current.account_id
+      sa       = aws_iam_role.externaldns.arn
+      zoneType = var.dns_zone_mode
+      name     = local.name
+    })
+  ]
 }

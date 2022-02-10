@@ -1,4 +1,4 @@
-#-------------- [ General ] ------------------------------------------------- #
+# ------------- [ General ] ------------------------------------------------- #
 
 variable "aws_region" {
   description = "The AWS region to create resources in."
@@ -11,7 +11,7 @@ variable "resource_tags" {
   type        = map(any)
 }
 
-#-------------- [ Cluster Context ] ----------------------------------------- #
+# ------------- [ Cluster Context ] ----------------------------------------- #
 
 variable "cluster_id" {
   description = "ID of the EKS cluster to be augmented with cluster autoscaling."
@@ -21,7 +21,7 @@ variable "cluster_oidc_issuer_url" {
   description = "OIDC issuer URL for the EKS cluster."
 }
 
-#-------------- [ Helm ] ------------------------------------------------- #
+# ------------- [ Helm ] ---------------------------------------------------- #
 
 variable "helm_deployment_name" {
   description = "Name of the Cluster Autoscaler Helm release to create."
@@ -46,4 +46,11 @@ variable "helm_chart_version" {
 variable "helm_deployment_namespace" {
   description = "Namespace to deploy the Cluster Autoscaler Helm chart into."
   default     = "kube-system"
+}
+
+# -------------- [ Chart App Configs ] ----------------------------------- #
+
+variable "cluster_autoscaler_expander_mode" {
+  description = "Expander mode for Cluster Autoscaler to operate in. See docs: https://bit.ly/3soH1T0"
+  default     = "least-waste"
 }

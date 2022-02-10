@@ -11,6 +11,17 @@ variable "resource_tags" {
   type        = map(any)
 }
 
+variable "environment" {
+  description = "The name of the environment."
+  type        = string
+}
+
+variable "kubernetes_namespaces" {
+  description = "List of Kubernetes namespaces to be created by the module inside the EKS cluster."
+  type        = list(string)
+  default     = []
+}
+
 #-------------- [ Cluster ] ------------------------------------------- #
 
 variable "cluster_name" {
@@ -27,7 +38,7 @@ variable "cluster_name" {
 
 variable "cluster_version" {
   description = "Version of the EKS cluster."
-  default     = "1.21.2"
+  default     = "1.21"
   type        = string
 }
 
@@ -47,6 +58,12 @@ variable "cluster_service_ipv4_cidr" {
   description = "IPv4 CIDR block where k8s service will be provisioned from. This is a virtual network."
   default     = "10.100.0.0/16"
   type        = string
+}
+
+variable "cluster_vpn_cidr_blocks" {
+  description = "Ingress IPv4 CIDR block where VPN traffic originates while hitting the k8s control plane."
+  default     = []
+  type        = list(string)
 }
 
 #-------------- [ Security / Auditing ]--------------------------------- #
@@ -87,7 +104,7 @@ variable "self_managed_node_groups" {
         preferences = {
           checkpoint_delay       = 600,
           checkpoint_percentages = [35, 70, 100],
-          instance_warmup        = 300,
+          instance_warmup        = 240,
           min_healthy_percentage = 50,
         }
         triggers = ["tag"]
@@ -99,6 +116,11 @@ variable "self_managed_node_groups" {
       }]
     }
   }
+}
+
+variable "self_managed_node_group_defaults" {
+  description = "Map of self-managed node group default configurations."
+  type        = any
 }
 
 #-------------- [ Networking ] ---------------------------------------- #
@@ -164,6 +186,32 @@ variable "external_dns_private_zone_domain" {
   type        = string
 }
 
+#-------------- [ AWS LB Controller ] --------------------------------- #
+
+variable "aws_lb_controller_enabled" {
+  description = "Toggles provisioning of the AWS-LB-Controller module's resources."
+  default     = true
+  type        = bool
+}
+
+#-------------- [ Ingress Configs ] ----------------------------------- #
+
+variable "alb_internal_ingress_enabled" {
+  description = "Toggles deployment of Internal load balancer ingress definitions."
+  default     = true
+  type        = bool
+}
+
+variable "alb_acm_cert_arn" {
+  description = "ACM certificate arn to be applied to ingress' listeners."
+  default     = ""
+}
+
+variable "ns_ingress_routing_rules" {
+  description = "Map of maps representing per-namespace ingress hosts to be provisioned."
+  type        = map(any)
+}
+
 #-------------- [ Helm Chart Configs ] -------------------------------- #
 
 variable "chart_version_defaults" {
@@ -172,6 +220,7 @@ variable "chart_version_defaults" {
     cluster_autoscaler = "9.12.0"
     node_term_handler  = "0.16.0"
     external_dns       = "2.20.3"
+    aws_lb_controller  = "1.3.3"
   }
   type = map(any)
 }

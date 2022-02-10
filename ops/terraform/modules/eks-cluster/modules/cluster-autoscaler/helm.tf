@@ -42,4 +42,10 @@ resource "helm_release" "cluster_autoscaler" {
     name  = "rbac.create"
     value = "true"
   }
+
+  set {
+    name  = "extraArgs.expander"
+    value = var.cluster_autoscaler_expander_mode
+  }
+
 }
