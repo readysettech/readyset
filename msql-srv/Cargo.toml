@@ -13,7 +13,7 @@ keywords = ["api-bindings", "database", "sql", "mock"]
 categories = ["api-bindings", "network-programming", "database-implementations"]
 
 [dependencies]
-nom = "5.0.1"
+nom = "7.1"
 mysql_async = "0.29"
 mysql_common = "0.28.0"
 byteorder = "1"

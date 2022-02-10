@@ -15,7 +15,7 @@ futures-executor = "0.3.14"
 futures-util = "0.3.14"
 lazy_static = "1.0.0"
 nom-sql = { path = "../nom-sql" }
-nom = "5.0.1"
+nom = "7.1"
 regex = "1.0.0"
 chrono = "0.4"
 tracing = { version = "0.1", features = ["release_max_level_info"] }

@@ -366,8 +366,9 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                     io::ErrorKind::UnexpectedEof,
                     "client sent incomplete handshake",
                 ),
-                nom::Err::Failure((input, nom_e_kind)) | nom::Err::Error((input, nom_e_kind)) => {
-                    if let nom::error::ErrorKind::Eof = nom_e_kind {
+                nom::Err::Failure(nom::error::Error { input, code })
+                | nom::Err::Error(nom::error::Error { input, code }) => {
+                    if let nom::error::ErrorKind::Eof = code {
                         io::Error::new(
                             io::ErrorKind::UnexpectedEof,
                             format!("client did not complete handshake; got {:?}", input),
@@ -375,7 +376,7 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                     } else {
                         io::Error::new(
                             io::ErrorKind::InvalidData,
-                            format!("bad client handshake; got {:?} ({:?})", input, nom_e_kind),
+                            format!("bad client handshake; got {:?} ({:?})", input, code),
                         )
                     }
                 }
