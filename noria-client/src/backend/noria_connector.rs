@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::fmt::Display;
 use std::ops::Bound;
 use std::sync::{atomic, Arc, RwLock};
 
@@ -848,13 +849,23 @@ impl NoriaConnector {
         };
     }
 
-    pub(crate) async fn handle_create_table(
+    /// Calls the `extend_recipe` endpoint on Noria with the given
+    /// query.
+    // TODO(fran): Instead of serialize using `Display`, we should implement `Serialize`
+    //   and `Deserialize` for each table operation struct, and send that instead; otherwise
+    //   we are always recalculating the same stuff.
+    //   Additionally (optional, open to discussion), we should use custom structs that have
+    //   already purged the data into a structure more useful to use, instead of using nom-sql
+    //   structs directly as domain objects.
+    pub(crate) async fn handle_table_operation<T>(
         &mut self,
-        q: &nom_sql::CreateTableStatement,
-    ) -> ReadySetResult<QueryResult<'_>> {
+        q: &T,
+    ) -> ReadySetResult<QueryResult<'_>>
+    where
+        T: Display,
+    {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Noria ever time. On the other hand, CREATE TABLE is rare...
-        info!(table = %q.table.name, "table::create");
         noria_await!(
             self.inner.get_mut().await?,
             self.inner
@@ -863,7 +874,6 @@ impl NoriaConnector {
                 .noria
                 .extend_recipe(&format!("{};", q))
         )?;
-        trace!("table::created");
         Ok(QueryResult::Empty)
     }
 
