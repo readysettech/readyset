@@ -45,7 +45,7 @@ pub fn warn_if_debug_build() {
     }
 }
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 pub struct Options {
     /// Format to use when emitting log events.
     #[clap(

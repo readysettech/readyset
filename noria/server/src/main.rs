@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::anyhow;
 use clap::Parser;
 use futures_util::future::{self, Either};
+use launchpad::redacted_string::RedactedString;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use noria::metrics::recorded;
 use noria_server::consensus::AuthorityType;
@@ -53,7 +54,7 @@ pub fn resolve_addr(addr: &str) -> anyhow::Result<IpAddr> {
         .ip())
 }
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 #[clap(name = "noria-server", version)]
 struct Opts {
     /// IP address to listen on
@@ -151,7 +152,7 @@ struct Opts {
     /// A URL identifying a MySQL or PostgreSQL primary server to replicate from. Should include
     /// username and password if necessary.
     #[clap(long, env = "REPLICATION_URL")]
-    replication_url: Option<String>,
+    replication_url: Option<RedactedString>,
 
     /// Whether this server should only run reader domains
     #[clap(long)]
@@ -194,6 +195,7 @@ fn main() -> anyhow::Result<()> {
     let opts: Opts = Opts::parse();
 
     opts.logging.init()?;
+    info!(?opts, "Starting ReadySet server");
 
     info!(commit_hash = %env!("CARGO_PKG_VERSION", "version not set"));
 
@@ -286,7 +288,7 @@ fn main() -> anyhow::Result<()> {
     builder.set_persistence(persistence_params);
 
     if let Some(url) = opts.replication_url {
-        builder.set_replicator_url(url);
+        builder.set_replicator_url(url.0);
     }
 
     let rt = tokio::runtime::Builder::new_multi_thread()

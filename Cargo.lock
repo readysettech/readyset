@@ -2718,6 +2718,7 @@ checksum = "d4345964bb142484797b161f473a503a434de77149dd8c7427788c6e13379388"
 name = "launchpad"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bit-vec",
  "chrono",
  "eui48",
@@ -3640,6 +3641,7 @@ dependencies = [
  "chrono",
  "clap 3.0.4",
  "futures-util",
+ "launchpad",
  "maplit",
  "metrics",
  "metrics-exporter-prometheus",
