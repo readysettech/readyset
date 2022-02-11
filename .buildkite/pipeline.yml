@@ -110,6 +110,10 @@ steps:
                 - Cargo.toml
                 - rust-toolchain
 
+            - label: 'Test benchmark framework'
+              include:
+                - "benchmarks/**"
+
             - label: 'Run clustertests'
               include:
                 - "[!ops]*"
