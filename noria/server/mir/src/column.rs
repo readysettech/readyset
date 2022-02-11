@@ -15,7 +15,7 @@ pub struct Column {
 }
 
 impl Column {
-    pub fn new(table: Option<&str>, name: &str) -> Self {
+    pub fn new(table: Option<&str>, name: impl Into<SqlIdentifier>) -> Self {
         Column {
             table: table.map(Into::into),
             name: name.into(),

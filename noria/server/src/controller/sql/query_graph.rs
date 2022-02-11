@@ -9,17 +9,17 @@ use common::IndexType;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, Column, Expression, FieldDefinitionExpression, FunctionExpression, InValue,
-    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderType,
+    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderType,
     SelectStatement, SqlIdentifier, Table, UnaryOperator,
 };
 use noria::{PlaceholderIdx, ViewPlaceholder};
 use noria_errors::{
-    internal, invariant, invariant_eq, unsupported, unsupported_err, ReadySetResult,
+    internal, internal_err, invariant, invariant_eq, unsupported, unsupported_err, ReadySetResult,
 };
 use noria_sql_passes::{is_aggregate, is_predicate, map_aggregates, LogicalOp};
 use serde::{Deserialize, Serialize};
 
-use super::mir;
+use super::mir::{self, PAGE_NUMBER_COL};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct LiteralColumn {
@@ -198,9 +198,9 @@ pub enum QueryGraphEdge {
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Pagination {
-    pub order: Vec<(Expression, OrderType)>,
-    pub limit: Option<Expression>,
-    pub offset: Option<Expression>,
+    pub order: Option<Vec<(Expression, OrderType)>>,
+    pub limit: usize,
+    pub offset: Option<ViewPlaceholder>,
 }
 
 /// Description of the lookup key for a view
@@ -245,8 +245,9 @@ impl QueryGraph {
         Default::default()
     }
 
-    /// Returns the set of columns on which this query is parameterized. They can come from
+    /// Returns the set of columns on which this query is parametrized. They can come from
     /// multiple tables involved in the query.
+    /// Does not include limit or offset parameters on which this query may be parametrized.
     pub fn parameters(&self) -> Vec<&Parameter> {
         self.relations
             .values()
@@ -263,16 +264,24 @@ impl QueryGraph {
     }
 
     /// Construct a representation of the lookup key of a view for this query graph, based on the
-    /// parameters in this query.
+    /// parameters in this query and the page number if this query is parametrized on an offset key.
     pub(crate) fn view_key(&self, config: &mir::Config) -> ReadySetResult<ViewKey> {
+        let offset = self.pagination.as_ref().and_then(|p| p.offset);
         if self.parameters().is_empty() {
-            Ok(ViewKey {
-                columns: vec![(
-                    mir::Column::new(None, "bogokey"),
-                    ViewPlaceholder::Generated,
-                )],
-                index_type: IndexType::HashMap,
-            })
+            if let Some(offset) = offset {
+                Ok(ViewKey {
+                    columns: vec![(mir::Column::new(None, PAGE_NUMBER_COL.clone()), offset)],
+                    index_type: IndexType::HashMap,
+                })
+            } else {
+                Ok(ViewKey {
+                    columns: vec![(
+                        mir::Column::new(None, "bogokey"),
+                        ViewPlaceholder::Generated,
+                    )],
+                    index_type: IndexType::HashMap,
+                })
+            }
         } else {
             let mut parameters = self.parameters();
 
@@ -347,6 +356,14 @@ impl QueryGraph {
                 ));
 
                 last_op = Some(param.op);
+            }
+
+            if let Some(offset) = offset {
+                if index_type == Some(IndexType::BTreeMap) {
+                    unsupported!("ReadySet does not support Pagination and range queries")
+                } else {
+                    columns.push((mir::Column::new(None, PAGE_NUMBER_COL.clone()), offset));
+                }
             }
 
             Ok(ViewKey {
@@ -702,6 +719,38 @@ fn collect_join_predicates(cond: Expression, out: &mut Vec<JoinPredicate>) -> Re
             unsupported!("Only direct comparisons combined with AND supported for join conditions")
         }
     }
+}
+
+/// Convert limit and offset fields to usize and Option<ViewPlaceholder>
+pub(crate) fn extract_limit_offset(
+    limit: &LimitClause,
+) -> ReadySetResult<(usize, Option<ViewPlaceholder>)> {
+    let offset = limit
+        .offset
+        .as_ref()
+        .and_then(|offset| match offset {
+            Expression::Literal(Literal::Placeholder(ItemPlaceholder::DollarNumber(idx))) => {
+                Some(Ok(ViewPlaceholder::Offset(*idx as usize)))
+            }
+            // For now, remove offset if it is a literal 0
+            Expression::Literal(Literal::Integer(0)) => None,
+            _ => Some(Err(internal_err("Numeric OFFSETs must be parametrized"))),
+        })
+        .transpose()?;
+    let limit = match limit.limit {
+        Expression::Literal(Literal::Integer(val)) => {
+            if val < 0 {
+                unsupported!("LIMIT field cannot have a negative value")
+            } else {
+                val as usize
+            }
+        }
+        Expression::Literal(Literal::Placeholder(_)) => {
+            unsupported!("ReadySet does not support parametrized LIMIT fields")
+        }
+        _ => unsupported!("Invalid LIMIT statement"),
+    };
+    Ok((limit, offset))
 }
 
 #[allow(clippy::cognitive_complexity)]
@@ -1084,21 +1133,23 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         expression: expr.clone(),
                     }));
                 }
-            });
+            })
+    }
+
+    // Extract pagination parameters
+    if let Some(ref limit) = st.limit {
+        let (limit, offset) = extract_limit_offset(limit)?;
 
         qg.pagination = Some(Pagination {
-            order: order
-                .order_by
-                .iter()
-                .cloned()
-                .map(|(expr, ot)| (expr, ot.unwrap_or(OrderType::OrderAscending)))
-                .collect(),
-            limit: st.limit.as_ref().map(|lim| lim.limit.clone()),
-            offset: st
-                .limit
-                .as_ref()
-                .and_then(|lim| lim.offset.as_ref())
-                .cloned(),
+            order: st.order.as_ref().map(|o| {
+                o.order_by
+                    .iter()
+                    .cloned()
+                    .map(|(expr, ot)| (expr, ot.unwrap_or(OrderType::OrderAscending)))
+                    .collect()
+            }),
+            limit,
+            offset,
         })
     }
 
