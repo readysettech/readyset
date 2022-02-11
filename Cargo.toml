@@ -20,6 +20,7 @@ members = [
     "noria/errors",
     "noria/noria",
     "noria/server",
+    "noria/server/sql-passes",
     "noria/server/dataflow/partial_map",
     "noria/server/dataflow/reader_map",
     "noria/applications",

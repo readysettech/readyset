@@ -3991,6 +3991,7 @@ dependencies = [
  "noria-dataflow",
  "noria-errors",
  "noria-mir",
+ "noria-sql-passes",
  "parking_lot",
  "petgraph",
  "pin-project",
@@ -4027,6 +4028,18 @@ dependencies = [
  "vec1",
  "vec_map",
  "zookeeper",
+]
+
+[[package]]
+name = "noria-sql-passes"
+version = "0.0.1"
+dependencies = [
+ "itertools",
+ "maplit",
+ "nom-sql",
+ "noria-data",
+ "noria-errors",
+ "tracing",
 ]
 
 [[package]]

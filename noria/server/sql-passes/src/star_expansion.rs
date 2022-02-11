@@ -5,7 +5,7 @@ use nom_sql::{
     Column, CommonTableExpression, Expression, FieldDefinitionExpression, JoinClause,
     JoinRightSide, SelectStatement, SqlQuery, Table,
 };
-use noria::{ReadySetError, ReadySetResult};
+use noria_errors::{ReadySetError, ReadySetResult};
 
 fn extract_tables_from_join(joins: &[JoinClause]) -> impl Iterator<Item = &Table> {
     use itertools::Either;

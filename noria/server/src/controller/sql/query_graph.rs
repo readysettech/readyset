@@ -17,11 +17,10 @@ use noria::{PlaceholderIdx, ViewPlaceholder};
 use noria_errors::{
     internal, invariant, invariant_eq, unsupported, unsupported_err, ReadySetResult,
 };
+use noria_sql_passes::{is_aggregate, is_predicate, map_aggregates, LogicalOp};
 use serde::{Deserialize, Serialize};
 
 use super::mir;
-use super::query_utils::{is_aggregate, is_predicate, map_aggregates};
-use crate::controller::sql::query_utils::LogicalOp;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct LiteralColumn {

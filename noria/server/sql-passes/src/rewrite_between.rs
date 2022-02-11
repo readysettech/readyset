@@ -22,6 +22,7 @@ pub trait RewriteBetween {
     ///
     /// Invariant: The return value will have no recursive subexpressions of type
     /// [`Expression::Between`]
+    #[must_use]
     fn rewrite_between(self) -> Self;
 }
 

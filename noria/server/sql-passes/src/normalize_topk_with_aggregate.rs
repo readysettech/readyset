@@ -1,6 +1,6 @@
 use nom_sql::analysis::contains_aggregate;
 use nom_sql::{FieldDefinitionExpression, SqlQuery};
-use noria::{ReadySetError, ReadySetResult};
+use noria_errors::{ReadySetError, ReadySetResult};
 
 pub trait NormalizeTopKWithAggregate: Sized {
     /// Remove any topk clause (order by, limit, offset) from a query with an aggregate without a

@@ -1,7 +1,6 @@
 use nom_sql::analysis::visit::{walk_expression, walk_join_clause, Visitor};
 use nom_sql::{Expression, InValue, JoinClause, JoinRightSide, SqlQuery};
-use noria::ReadySetError;
-use noria_errors::ReadySetResult;
+use noria_errors::{ReadySetError, ReadySetResult};
 
 #[derive(Debug, PartialEq)]
 pub enum SubqueryPosition<'a> {
