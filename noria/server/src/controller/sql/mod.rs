@@ -1,9 +1,12 @@
+use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::vec::Vec;
 use std::{mem, str};
 
 use ::mir::node::node_inner::MirNodeInner;
 use ::mir::query::{MirQuery, QueryFlowParts};
+use ::mir::reuse::merge_mir_for_queries;
+use ::mir::visualize::GraphViz;
 use ::mir::{reuse as mir_reuse, Column, MirNodeRef};
 use ::serde::{Deserialize, Serialize};
 use nom_sql::analysis::ReferredTables;
@@ -37,7 +40,7 @@ mod serde;
 
 #[derive(Clone, Debug)]
 enum QueryGraphReuse<'a> {
-    ExactMatch(&'a str, MirNodeRef),
+    ExactMatch(&'a MirQuery),
     ExtendExisting(Vec<u64>),
     /// (node, columns to re-project if necessary, parameters, index_type)
     ReaderOntoExisting(MirNodeRef, Option<Vec<Column>>, Vec<Column>, IndexType),
@@ -220,10 +223,7 @@ impl SqlIncorporator {
 
                     trace!(%mir_query.name, ?existing_qg);
 
-                    return Ok((
-                        qg,
-                        QueryGraphReuse::ExactMatch(&mir_query.name, mir_query.leaf.clone()),
-                    ));
+                    return Ok((qg, QueryGraphReuse::ExactMatch(mir_query)));
                 } else if existing_qg.signature() == qg.signature()
                     && existing_qg.parameters() != qg.parameters()
                 {
@@ -435,36 +435,6 @@ impl SqlIncorporator {
         Ok((qg, QueryGraphReuse::None))
     }
 
-    fn add_leaf_to_existing_query(
-        &mut self,
-        query_name: &str,
-        params: &[Column],
-        index_type: IndexType,
-        final_query_node: MirNodeRef,
-        project_columns: Option<Vec<Column>>,
-        mig: &mut Migration<'_>,
-    ) -> ReadySetResult<QueryFlowParts> {
-        trace!("Adding a new leaf below: {:?}", final_query_node);
-
-        let mut mir = self.mir_converter.add_leaf_below(
-            final_query_node,
-            query_name,
-            params,
-            index_type,
-            project_columns,
-        );
-
-        trace!(%mir, "Reused leaf node MIR");
-
-        // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`.
-        // Note that we don't need to optimize the MIR here, because the query is trivial.
-        let qfp = mir_query_to_flow_parts(&mut mir, mig)?;
-
-        self.register_query(query_name, None, &mir);
-
-        Ok(qfp)
-    }
-
     fn add_base_via_mir(
         &mut self,
         query_name: &str,
@@ -513,8 +483,7 @@ impl SqlIncorporator {
                         false,
                         mig,
                     )?
-                    .1
-                    .unwrap())
+                    .1)
             })
             .collect();
 
@@ -534,8 +503,55 @@ impl SqlIncorporator {
         Ok(qfp)
     }
 
-    /// Returns tuple of `QueryFlowParts` and an optional new `MirQuery`. The latter is only
-    /// present if a new `MirQuery` was added.
+    fn select_query_to_mir(
+        &mut self,
+        query_name: &str,
+        is_name_required: bool,
+        sq: &SelectStatement,
+        is_leaf: bool,
+    ) -> ReadySetResult<(QueryGraph, MirQuery)> {
+        let (qg, reuse) = self.consider_query_graph(query_name, is_name_required, sq, is_leaf)?;
+
+        let mir_query = match reuse {
+            QueryGraphReuse::ExactMatch(mir_query) => mir_query.clone(),
+            QueryGraphReuse::ExtendExisting(reuse_mirs) => {
+                let mut new_query_mir = self
+                    .mir_converter
+                    .named_query_to_mir(query_name, sq, &qg, is_leaf)?;
+                let mut num_reused_nodes = 0;
+                for m in reuse_mirs {
+                    if !self.mir_queries.contains_key(&m) {
+                        continue;
+                    }
+                    let mq = &self.mir_queries[&m];
+                    let (merged_mir, merged_nodes) = merge_mir_for_queries(&new_query_mir, mq);
+                    new_query_mir = merged_mir;
+                    num_reused_nodes = max(merged_nodes, num_reused_nodes);
+                }
+                new_query_mir
+            }
+            QueryGraphReuse::ReaderOntoExisting(
+                final_query_node,
+                project_columns,
+                params,
+                index_type,
+            ) => self.mir_converter.add_leaf_below(
+                final_query_node,
+                query_name,
+                &params,
+                index_type,
+                project_columns,
+            ),
+            QueryGraphReuse::None => self
+                .mir_converter
+                .named_query_to_mir(query_name, sq, &qg, is_leaf)?,
+        };
+
+        Ok((qg, mir_query))
+    }
+
+    /// Add a new SelectStatement to the given migration, returning information about the dataflow
+    /// and MIR nodes that were added
     fn add_select_query(
         &mut self,
         query_name: &str,
@@ -543,82 +559,23 @@ impl SqlIncorporator {
         sq: &SelectStatement,
         is_leaf: bool,
         mig: &mut Migration<'_>,
-    ) -> Result<(QueryFlowParts, Option<MirQuery>), ReadySetError> {
+    ) -> Result<(QueryFlowParts, MirQuery), ReadySetError> {
         let on_err = |e| ReadySetError::SelectQueryCreationFailed {
             qname: query_name.into(),
             source: Box::new(e),
         };
-        let (qg, reuse) = self
-            .consider_query_graph(query_name, is_name_required, sq, is_leaf)
+
+        let (qg, mir_query) = self
+            .select_query_to_mir(query_name, is_name_required, sq, is_leaf)
             .map_err(on_err)?;
-        Ok(match reuse {
-            QueryGraphReuse::ExactMatch(name, mn) => {
-                let flow_node = mn.borrow().flow_node.as_ref().unwrap().address();
-                let qfp = QueryFlowParts {
-                    name: name.to_owned(),
-                    new_nodes: vec![],
-                    reused_nodes: vec![flow_node],
-                    query_leaf: flow_node,
-                };
-                (qfp, None)
-            }
-            QueryGraphReuse::ExtendExisting(mqs) => {
-                let qfp = self
-                    .extend_existing_query(query_name, sq, qg, mqs, is_leaf, mig)
-                    .map_err(on_err)?;
-                (qfp, None)
-            }
-            QueryGraphReuse::ReaderOntoExisting(mn, project_columns, params, index_type) => {
-                let qfp = self
-                    .add_leaf_to_existing_query(
-                        query_name,
-                        &params,
-                        index_type,
-                        mn,
-                        project_columns,
-                        mig,
-                    )
-                    .map_err(on_err)?;
-                (qfp, None)
-            }
-            QueryGraphReuse::None => {
-                let (qfp, mir) = self
-                    .add_query_via_mir(query_name, sq, qg, is_leaf, mig)
-                    .map_err(on_err)?;
-                (qfp, Some(mir))
-            }
-        })
-    }
 
-    fn add_query_via_mir(
-        &mut self,
-        query_name: &str,
-        query: &SelectStatement,
-        qg: QueryGraph,
-        is_leaf: bool,
-        mig: &mut Migration<'_>,
-    ) -> Result<(QueryFlowParts, MirQuery), ReadySetError> {
-        use ::mir::visualize::GraphViz;
-        // no QG-level reuse possible, so we'll build a new query.
-        // first, compute the MIR representation of the SQL query
-        let og_mir = self
-            .mir_converter
-            .named_query_to_mir(query_name, query, &qg, is_leaf)?;
+        trace!(pre_opt_mir = %mir_query.to_graphviz());
+        let mut opt_mir = mir_query.optimize().map_err(on_err)?;
+        trace!(post_opt_mir = %opt_mir.to_graphviz());
 
-        trace!(unoptimized_mir = %og_mir.to_graphviz());
-
-        // run MIR-level optimizations
-        let mut mir = og_mir.optimize()?;
-
-        trace!(optimized_mir = %mir.to_graphviz());
-
-        // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
-        let qfp = mir_query_to_flow_parts(&mut mir, mig)?;
-
-        // register local state
-        self.register_query(query_name, Some(qg), &mir);
-
-        Ok((qfp, mir))
+        let qfp = mir_query_to_flow_parts(&mut opt_mir, mig).map_err(on_err)?;
+        self.register_query(query_name, Some(qg), &opt_mir);
+        Ok((qfp, opt_mir))
     }
 
     pub(super) fn remove_query(&mut self, query_name: &str) -> ReadySetResult<Option<NodeIndex>> {
@@ -712,52 +669,6 @@ impl SqlIncorporator {
                     .insert(query_name.to_owned(), mir.clone());
             }
         }
-    }
-
-    fn extend_existing_query(
-        &mut self,
-        query_name: &str,
-        query: &SelectStatement,
-        qg: QueryGraph,
-        reuse_mirs: Vec<u64>,
-        is_leaf: bool,
-        mig: &mut Migration<'_>,
-    ) -> Result<QueryFlowParts, ReadySetError> {
-        use ::mir::reuse::merge_mir_for_queries;
-        use ::mir::visualize::GraphViz;
-
-        // no QG-level reuse possible, so we'll build a new query.
-        // first, compute the MIR representation of the SQL query
-        let new_query_mir = self
-            .mir_converter
-            .named_query_to_mir(query_name, query, &qg, is_leaf)?;
-
-        trace!(original_mir = %new_query_mir.to_graphviz());
-        let new_opt_mir = new_query_mir.optimize()?;
-        trace!(optimized_mir = %new_opt_mir.to_graphviz());
-
-        // compare to existing query MIR and reuse prefix
-        let mut reused_mir = new_opt_mir;
-        let mut num_reused_nodes = 0;
-        for m in reuse_mirs {
-            if !self.mir_queries.contains_key(&m) {
-                continue;
-            }
-            let mq = &self.mir_queries[&m];
-            let res = merge_mir_for_queries(&reused_mir, mq);
-            reused_mir = res.0;
-            if res.1 > num_reused_nodes {
-                num_reused_nodes = res.1;
-            }
-        }
-        let qfp = mir_query_to_flow_parts(&mut reused_mir, mig)?;
-
-        debug!(%query_name, num_reused_nodes);
-
-        // register local state
-        self.register_query(query_name, Some(qg), &reused_mir);
-
-        Ok(qfp)
     }
 
     fn nodes_for_query(
