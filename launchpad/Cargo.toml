@@ -9,6 +9,7 @@ description = "Extensions to the Rust standard library"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0"
 proptest = "1.0.0"
 chrono = { version = "0.4.0", features = ["serde"] }
 tokio = { version = "1.15", features = ["full"] }

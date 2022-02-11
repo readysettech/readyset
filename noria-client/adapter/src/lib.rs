@@ -13,6 +13,7 @@ use async_trait::async_trait;
 use clap::Parser;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
+use launchpad::redacted_string::RedactedString;
 use maplit::hashmap;
 use metrics::SharedString;
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -74,7 +75,7 @@ pub struct NoriaAdapter<H> {
     pub mirror_ddl: bool,
 }
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 pub struct Options {
     /// IP:PORT to listen on
     #[clap(long, short = 'a', env = "LISTEN_ADDRESS", parse(try_from_str))]
@@ -138,12 +139,12 @@ pub struct Options {
     /// Password to authenticate database connections with. Ignored if
     /// --allow-unauthenticated-connections is passed
     #[clap(long, env = "ALLOWED_PASSWORD", short = 'p')]
-    password: Option<String>,
+    password: Option<RedactedString>,
 
     /// URL for the upstream database to connect to. Should include username and password if
     /// necessary
     #[clap(long, env = "UPSTREAM_DB_URL")]
-    upstream_db_url: Option<String>,
+    upstream_db_url: Option<RedactedString>,
 
     /// The region the worker is hosted in. Required to route view requests to specific regions.
     #[clap(long, env = "NORIA_REGION")]
@@ -233,12 +234,14 @@ where
     H: ConnectionHandler + Clone + Send + Sync + 'static,
 {
     pub fn run(&mut self, options: Options) -> anyhow::Result<()> {
+        options.logging.init()?;
+        info!(?options, "Starting ReadySet adapter");
         let users: &'static HashMap<String, String> = Box::leak(Box::new(
             if !options.allow_unauthenticated_connections {
                 hashmap! {
                     options.username.ok_or_else(|| {
                         anyhow!("Must specify --username/-u unless --allow-unauthenticated-connections is passed")
-                    })? => options.password.ok_or_else(|| {
+                    })? => options.password.map(|x| x.0).ok_or_else(|| {
                         anyhow!("Must specify --password/-p unless --allow-unauthenticated-connections is passed")
                     })?
                 }
@@ -246,7 +249,6 @@ where
                 HashMap::new()
             },
         ));
-        options.logging.init()?;
         info!(commit_hash = %env!("CARGO_PKG_VERSION", "version not set"));
 
         let rt = tokio::runtime::Runtime::new()?;
@@ -359,7 +361,7 @@ where
 
         if options.async_migrations {
             #[allow(clippy::unwrap_used)] // async_migrations requires upstream_db_url
-            let upstream_db_url = options.upstream_db_url.as_ref().unwrap().clone();
+            let upstream_db_url = options.upstream_db_url.as_ref().unwrap().0.clone();
             let ch = ch.clone();
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
             let shutdown_recv = shutdown_sender.subscribe();
@@ -503,7 +505,7 @@ where
                 let upstream =
                     if let Some(upstream_db_url) = &upstream_db_url {
                         Some(
-                            H::UpstreamDatabase::connect(upstream_db_url.clone())
+                            H::UpstreamDatabase::connect(upstream_db_url.0.clone())
                                 .instrument(connection.in_scope(|| {
                                     span!(Level::INFO, "Connecting to upstream database")
                                 }))
