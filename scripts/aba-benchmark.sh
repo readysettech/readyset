@@ -41,7 +41,7 @@ function run_benchmarks() {
     export RDS_DATABASE=noria
     export READYSET_ADAPTER=mysql://noria@localhost:3307/noria
     export PROMETHEUS_ADDRESS=http://localhost:9091
-    export INSTANCE_LABEL="${1}"
+    export INSTANCE_LABEL="${1//\//-}"
     "${DIR}/scripts/run-benchmark.sh"
 }
 
