@@ -201,3 +201,9 @@ variable "self_managed_node_group_defaults" {
   description = "Map of self-managed node group default configurations."
   type        = any
 }
+
+#-------------- [ Benchmarking Prom + Grafana ] ---------------------- #
+variable "benchmark_prom_grafana_enabled" {
+  description = "Toggles provisioning of the benchmarking initiative's Prometheus and Grafana related resources."
+  default     = false
+}

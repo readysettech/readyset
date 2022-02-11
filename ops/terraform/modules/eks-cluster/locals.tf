@@ -26,5 +26,6 @@ locals {
   })
   # Merged version matrix for Helm charts, considering defaults
   # and any overrides requested in var.chart_version
-  chart_versions_merged = merge(var.chart_version_defaults, var.chart_versions)
+  chart_versions_merged      = merge(var.chart_version_defaults, var.chart_versions)
+  benchmark_grafana_ssm_path = format("/%s%s", module.eks.cluster_id, var.benchmark_ssm_path_grafana_password)
 }

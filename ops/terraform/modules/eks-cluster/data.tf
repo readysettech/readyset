@@ -39,3 +39,9 @@ data "aws_route53_zone" "private" {
   count = var.external_dns_external_enabled ? 1 : 0
   name  = var.external_dns_private_zone_domain
 }
+
+# ---------- [ Benchmarking Prom/Grafana ] ------------------------- #
+
+data "aws_ssm_parameter" "grafana_pass" {
+  name = local.benchmark_grafana_ssm_path
+}

@@ -51,6 +51,9 @@ module "eks-main" {
   alb_internal_ingress_enabled = true
   alb_acm_cert_arn             = var.alb_acm_cert_arn
   ns_ingress_routing_rules     = var.ns_ingress_routing_rules
+
+  # Prometheus / Grafana
+  benchmark_prom_grafana_enabled = var.benchmark_prom_grafana_enabled
 }
 
 # KMS key for Kubernetes Secret Wrapper Encryption

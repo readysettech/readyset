@@ -1,0 +1,37 @@
+# Base values file: https://github.com/grafana/helm-charts/blob/main/charts/grafana/values.yaml
+alertmanager:
+  enabled: true
+  # Ingress is managed outside of this module
+  ingress:
+    enabled: false
+
+grafana:
+  enabled: true
+  defaultDashboardsTimezone: "utc"
+  adminPassword: "${password}"
+  # Ingress is managed outside of this module
+  ingress:
+    enabled: false
+
+prometheus:
+  thanosService:
+    enabled: false
+  prometheusSpec:
+    ingress:
+      enabled: false
+    resources:
+      requests:
+        cpu: ${request_cpu}
+        memory: ${request_mem}
+    ## How long to retain metrics
+    retention: "${metric_reten_days}"
+    storageSpec:
+      ## Using PersistentVolumeClaim
+      ##
+      volumeClaimTemplate:
+        spec:
+          storageClassName: "${prom_disk_storage_class}"
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: ${prom_disk_space_gb}Gi

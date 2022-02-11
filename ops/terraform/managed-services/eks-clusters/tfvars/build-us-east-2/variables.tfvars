@@ -19,12 +19,19 @@ ns_ingress_routing_rules = {
     service     = "echo-service",
     servicePort = "80",
     },
+    // Benchmark prometheus
     {
-      fqdn        = "prometheus.build.readyset.name",
-      // To be moved later
-      service     = "echo-service",
+      fqdn        = "benchmark-prometheus.build.readyset.name",
+      service     = "prom-stack-kube-prometheus-prometheus",
+      servicePort = "9090",
+    },
+    // Benchmark Grafana
+    {
+      fqdn        = "benchmark-grafana.build.readyset.name",
+      service     = "prom-stack-grafana",
       servicePort = "80",
-  }]
+    }
+  ]
 }
 
 # Workers
@@ -77,7 +84,8 @@ self_managed_node_group_configs = {
 }
 
 # ExternalDNS
-external_dns_internal_enabled = true
-# This will just create DNS records in the public zone.
-external_dns_internal_zone_mode  = "private"
+external_dns_internal_enabled    = true
 external_dns_private_zone_domain = "readyset.name"
+
+# Benchmarking Prom/Grafana Stack
+benchmark_prom_grafana_enabled = true

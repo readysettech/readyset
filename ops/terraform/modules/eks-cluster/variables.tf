@@ -226,6 +226,7 @@ variable "chart_version_defaults" {
     node_term_handler  = "0.16.0"
     external_dns       = "6.1.4"
     aws_lb_controller  = "1.3.3"
+    bench_prom_grafana = "32.2.0"
   }
   type = map(any)
 }
@@ -234,4 +235,16 @@ variable "chart_versions" {
   description = "Chart version override map. Setting values here will override what's set in chart_version_defaults."
   default     = {}
   type        = map(any)
+}
+
+#-------------- [ Benchmarking Prom + Grafana ] ---------------------- #
+
+variable "benchmark_prom_grafana_enabled" {
+  description = "Toggles provisioning of the benchmarking initiative's Prometheus and Grafana related resources."
+  default     = false
+}
+
+variable "benchmark_ssm_path_grafana_password" {
+  description = "SSM path suffix to Grafana password. Will be prefixed with cluster name automatically."
+  default     = "/benchmark/grafana/adminPassword"
 }

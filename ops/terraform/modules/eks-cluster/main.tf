@@ -253,3 +253,12 @@ module "k8s-ingress-internal" {
 
   depends_on = [kubernetes_namespace.this]
 }
+
+# -------------- [ Benchmark Prom & Grafana ] -------------------------------- #
+
+module "benchmark-prom-grafana" {
+  source             = "./modules/prom-grafana"
+  count              = var.benchmark_prom_grafana_enabled ? 1 : 0
+  helm_chart_version = lookup(local.chart_versions_merged, "bench_prom_grafana")
+  grafana_password   = data.aws_ssm_parameter.grafana_pass.value
+}
