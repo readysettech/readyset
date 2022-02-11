@@ -22,6 +22,7 @@ use nom_sql::{
 use noria::ViewPlaceholder;
 use noria_data::DataType;
 use noria_errors::{internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError};
+use noria_sql_passes::extract_limit;
 use petgraph::graph::NodeIndex;
 use tracing::{debug, error, trace, warn};
 
@@ -30,7 +31,6 @@ use crate::controller::sql::mir::grouped::post_lookup_aggregates;
 use crate::controller::sql::mir::join::make_cross_joins;
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
-use crate::controller::sql::query_utils::extract_limit;
 use crate::ReadySetResult;
 
 mod grouped;

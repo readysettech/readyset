@@ -6,6 +6,7 @@ use nom_sql::{
 pub trait StripPostFilters {
     /// Remove all filters from the given query that cannot be done as nodes in the query graph, and
     /// require a post-lookup filter. Currently, this is LIKE and ILIKE against a placeholder.
+    #[must_use]
     fn strip_post_filters(self) -> Self;
 }
 

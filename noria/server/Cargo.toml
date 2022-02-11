@@ -90,6 +90,7 @@ noria-data = { path = "../data" }
 launchpad = { path = "../../launchpad" }
 replicators = { path = "../../replicators" }
 readyset-logging = { path = "../../readyset-logging" }
+noria-sql-passes = { path = "sql-passes" }
 
 [dev-dependencies]
 test_utils = { path = "../../test_utils" }

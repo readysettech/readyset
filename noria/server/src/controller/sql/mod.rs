@@ -13,17 +13,23 @@ use nom_sql::analysis::ReferredTables;
 use nom_sql::{
     parser as sql_parser, BinaryOperator, CompoundSelectOperator, CompoundSelectStatement,
     CreateTableStatement, Expression, FieldDefinitionExpression, FunctionExpression, InValue,
-    Literal, SelectStatement, SqlQuery, Table,
+    JoinRightSide, Literal, SelectStatement, SqlQuery, Table,
 };
 use noria::internal::IndexType;
 use noria_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
+use noria_sql_passes::alias_removal::TableAliasRewrite;
+use noria_sql_passes::subqueries::SubqueryPosition;
+use noria_sql_passes::{
+    contains_aggregate, is_aggregate, AliasRemoval, CountStarRewrite, DetectProblematicSelfJoins,
+    ImpliedTableExpansion, KeyDefinitionCoalescing, NegationRemoval, NormalizeTopKWithAggregate,
+    OrderLimitRemoval, RewriteBetween, StarExpansion, StripPostFilters, SubQueries,
+};
 use petgraph::graph::NodeIndex;
 use tracing::{debug, trace, warn};
 
 use self::mir::SqlToMirConverter;
 use self::query_graph::{to_query_graph, QueryGraph};
 use self::query_signature::Signature;
-use self::query_utils::{contains_aggregate, is_aggregate};
 use self::reuse::ReuseConfig;
 use super::mir_to_flow::mir_query_to_flow_parts;
 use super::recipe::CANONICAL_DIALECT;
@@ -31,10 +37,8 @@ use crate::controller::Migration;
 use crate::ReuseConfigType;
 
 pub(crate) mod mir;
-mod passes;
 mod query_graph;
 mod query_signature;
-pub(crate) mod query_utils;
 mod reuse;
 mod serde;
 
@@ -695,9 +699,6 @@ impl SqlIncorporator {
     ) -> Result<SqlQuery, ReadySetError> {
         // TODO: make this not take &mut self
 
-        use passes::alias_removal::TableAliasRewrite;
-        use passes::*;
-
         // Check that all tables mentioned in the query exist.
         // This must happen before the rewrite passes are applied because some of them rely on
         // having the table schema available in `self.view_schemas`.
@@ -753,9 +754,6 @@ impl SqlIncorporator {
         // to existing views in the graph
         let mut extra_tables = vec![];
         for sq in q.extract_subqueries()? {
-            use nom_sql::JoinRightSide;
-
-            use self::passes::subqueries::SubqueryPosition;
             let default_name = format!("q_{}", self.num_queries);
 
             let mut subquery_column = |stmt: &SelectStatement| -> ReadySetResult<_> {

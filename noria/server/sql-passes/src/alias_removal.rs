@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-use dataflow::prelude::DataType;
 use itertools::Itertools;
 use nom_sql::{
     Column, CommonTableExpression, Expression, FieldDefinitionExpression, FunctionExpression,
     InValue, JoinConstraint, JoinRightSide, SelectStatement, SqlQuery, Table,
 };
+use noria_data::DataType;
 
 #[derive(Debug, PartialEq)]
 pub enum TableAliasRewrite {

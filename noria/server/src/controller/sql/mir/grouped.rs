@@ -9,11 +9,11 @@ use nom_sql::analysis::ReferredColumns;
 use nom_sql::FunctionExpression::*;
 use nom_sql::{self, Expression, FieldDefinitionExpression, SelectStatement};
 use noria_errors::{internal, invariant, unsupported, ReadySetError};
+use noria_sql_passes::is_aggregate;
 
 use crate::controller::sql::mir::join::make_joins_for_aggregates;
 use crate::controller::sql::mir::SqlToMirConverter;
 use crate::controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
-use crate::controller::sql::query_utils::is_aggregate;
 use crate::ReadySetResult;
 
 // Move predicates above grouped_by nodes

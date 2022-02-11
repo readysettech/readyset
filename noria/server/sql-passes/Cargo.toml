@@ -1,0 +1,16 @@
+[package]
+name = "noria-sql-passes"
+version = "0.0.1"
+authors = [ "ReadySet Technology, Inc." ]
+edition = "2021"
+publish = false
+
+[dependencies]
+itertools = "0.10"
+maplit = "1.0.2"
+tracing = { version = "0.1" }
+
+# Local dependencies
+nom-sql = { path = "../../../nom-sql" }
+noria-data = { path = "../../data" }
+noria-errors = { path = "../../errors" }
