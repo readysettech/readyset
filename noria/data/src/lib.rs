@@ -353,6 +353,8 @@ impl DataType {
     /// );
     /// ```
     pub fn coerce_to(&self, ty: &SqlType) -> ReadySetResult<DataType> {
+        use crate::text::TextCoerce;
+
         let mk_err = |message: String, source: Option<anyhow::Error>| {
             ReadySetError::DataTypeConversionError {
                 src_type: "DataType".to_string(),
@@ -387,10 +389,11 @@ impl DataType {
         match (self, self.sql_type(), ty) {
             (_, None, _) => Ok(DataType::None),
             (_, Some(src_type), tgt_type) if src_type == *tgt_type => Ok(self.clone()),
+
+            (DataType::Text(t), _, _) => t.coerce_to(ty),
+            (DataType::TinyText(tt), _, _) => tt.coerce_to(ty),
             (DataType::TimestampTz(tz), _, _) => tz.coerce_to(ty),
-            (_, Some(Text | Tinytext | Mediumtext), Text | Tinytext | Mediumtext) => {
-                Ok(self.clone())
-            }
+
             // Per https://dev.mysql.com/doc/refman/8.0/en/numeric-type-syntax.html, the "number"
             // argument to integer types only controls the display width, not the max length
             (_, Some(Int(_)), Int(_) | Serial)
@@ -415,68 +418,6 @@ impl DataType {
             (_, Some(Float), Float | Real) => Ok(self.clone()),
             (_, Some(Real), Double) =>Ok(self.clone()),
             (_, Some(Numeric(_)), Numeric(_)) => Ok(self.clone()),
-            (_, Some(Text | Tinytext | Mediumtext), Varchar(Some(max_len))) => {
-                let actual_len = <&str>::try_from(self)?.len();
-                if actual_len <= (*max_len).into() {
-                    Ok(self.clone())
-                } else {
-                    Err(mk_err(
-                        format!(
-                            "Value ({} characters long) longer than maximum length of {} characters",
-                            actual_len,
-                            max_len
-                        ),
-                        None
-                    ))
-                }
-            }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Char(Some(len))) => {
-                let actual_len = <&str>::try_from(self)?.len();
-                if actual_len <= usize::from(*len) {
-                    Ok(self.clone())
-                } else {
-                    Err(mk_err(
-                        format!(
-                            "Value ({} characters long) is not required length of {} characters",
-                            actual_len, len
-                        ),
-                        None,
-                    ))
-                }
-            }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Char(None) | Varchar(None)) => {
-                Ok(self.clone())
-            }
-            (DataType::Text(t), _, Timestamp | DateTime(_) | TimestampTz | Date) => {
-               t.as_str().parse::<crate::TimestampTz>().map_err(|e| {
-                    mk_err(
-                        format!("Could not parse value as {:?}", ty),
-                        Some(e),
-                    )
-                })
-                .map(Self::TimestampTz)
-            }
-            (DataType::TinyText(t), _, Timestamp | DateTime(_) | TimestampTz | Date) => {
-                t.as_str().parse::<crate::TimestampTz>().map_err(|e| {
-                    mk_err(
-                        format!("Could not parse value as {:?}", ty),
-                        Some(e),
-                    )
-                })
-                .map(Self::TimestampTz)
-            }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Time) => {
-                match <&str>::try_from(self)?.parse() {
-                    Ok(t) => Ok(Self::Time(t)),
-                    Err(mysql_time::ConvertError::ParseError) => {
-                        Ok(Self::Time(Default::default()))
-                    }
-                    Err(e) => Err(mk_err(
-                        "Could not parse value as time".to_owned(),
-                        Some(e.into()),
-                    )),
-                }
-            }
             (_, Some(Int(_) | Bigint(_) | Real | Float), Time) => {
                 MysqlTime::try_from(<f64>::try_from(self)?)
                     .map_err(|e| mk_err("Could not parse value as time".to_owned(), Some(e.into())))
@@ -617,96 +558,6 @@ impl DataType {
                     None,
                 ))
                 .map(DataType::from),
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Tinyint(_)) => {
-                <&str>::try_from(self)?
-                    .parse::<i8>()
-                    .map( DataType::from)
-                    .map_err(|e| {
-                        mk_err("Could not parse value as number".to_owned(), Some(e.into()))
-                    })
-            }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Smallint(_)) => {
-                <&str>::try_from(self)?
-                    .parse::<i16>()
-                    .map( DataType::from)
-                    .map_err(|e| {
-                        mk_err("Could not parse value as number".to_owned(), Some(e.into()))
-                    })
-            }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Int(_) | Serial) => <&str>::try_from(self)?
-                .parse::<i32>()
-                .map(DataType::from)
-                .map_err(|e| mk_err("Could not parse value as number".to_owned(), Some(e.into()))),
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Bigint(_) | BigSerial) => {
-                <&str>::try_from(self)?
-                    .parse::<i64>()
-                    .map( DataType::from)
-                    .map_err(|e| {
-                        mk_err("Could not parse value as number".to_owned(), Some(e.into()))
-                    })
-            }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), UnsignedTinyint(_)) => {
-                <&str>::try_from(self)?
-                    .parse::<u8>()
-                    .map( DataType::from)
-                    .map_err(|e| {
-                        mk_err("Could not parse value as number".to_owned(), Some(e.into()))
-                    })
-            }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), UnsignedSmallint(_)) => {
-                <&str>::try_from(self)?
-                    .parse::<u16>()
-                    .map( DataType::from)
-                    .map_err(|e| {
-                        mk_err("Could not parse value as number".to_owned(), Some(e.into()))
-                    })
-            }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), UnsignedInt(_)) => {
-                <&str>::try_from(self)?
-                    .parse::<u32>()
-                    .map( DataType::from)
-                    .map_err(|e| {
-                        mk_err("Could not parse value as number".to_owned(), Some(e.into()))
-                    })
-            }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), UnsignedBigint(_)) => {
-                <&str>::try_from(self)?
-                    .parse::<u64>()
-                    .map( DataType::from)
-                    .map_err(|e| {
-                        mk_err("Could not parse value as number".to_owned(), Some(e.into()))
-                    })
-            }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Json | Jsonb) => {
-                // We parse the JSON just for validation.
-                serde_json::from_str::<serde_json::Value>(<&str>::try_from(self)?).map_err(|e| {
-                    mk_err(
-                        "Could not parse value as JSON".to_owned(),
-                        Some(e.into()),
-                    )
-                })?;
-                Ok(self.clone())
-            }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), MacAddr) => {
-                MacAddress::parse_str(<&str>::try_from(self)?).map_err(|e| {
-                    mk_err(
-                        "Could not parse value as mac address".to_owned(),
-                        Some(e.into()),
-                    )
-                })?;
-                Ok(self.clone())
-            }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Uuid) => {
-                // We perform this parsing just to validate that the string
-                // is a valid UUID.
-                uuid::Uuid::parse_str(<&str>::try_from(self)?).map_err(|e| {
-                    mk_err(
-                        "Could not parse value as UUID".to_owned(),
-                        Some(e.into()),
-                    )
-                })?;
-                Ok(self.clone())
-            }
             (Self::BitVector(_), Some(Bit(size_opt)), Varbit(max_size_opt)) => {
                 let size = size_opt.unwrap_or(1);
                 match max_size_opt {
@@ -3574,7 +3425,7 @@ mod tests {
 
         #[test]
         fn text_to_macaddr() {
-            let input = DataType::from("12:34:56:AB:CD:EF");
+            let input = DataType::from("12:34:56:ab:cd:ef");
             let result = input.coerce_to(&SqlType::MacAddr).unwrap();
             assert_eq!(input, result);
         }
