@@ -82,12 +82,25 @@ pub enum MirNodeInner {
         emit: Vec<Vec<Column>>,
         duplicate_mode: union::DuplicateMode,
     },
-    /// order function, group columns, limit k
-    TopK {
+    /// MirNodeInner used to create a Paginate dataflow Node, based on whether the node has
+    /// an offset.
+    Paginate {
+        /// Set of columns used for ordering the results
         order: Option<Vec<(Column, OrderType)>>,
+        /// Set of columns that are indexed to form a unique grouping of results
         group_by: Vec<Column>,
-        k: usize,
-        offset: usize,
+        /// Numeric literal that determines the number of results stored per group
+        limit: usize,
+    },
+    /// MirNodeInner used to create a TopK dataflow Node
+    TopK {
+        /// Set of columns used for ordering the results
+        order: Option<Vec<(Column, OrderType)>>,
+        /// Set of columns that are indexed to form a unique grouping of results
+        group_by: Vec<Column>,
+        /// Numeric literal that determines the number of results stored per group. Taken from the
+        /// LIMIT clause
+        limit: usize,
     },
     // Get the distinct element sorted by a specific column
     Distinct {
@@ -173,6 +186,11 @@ impl MirNodeInner {
                 }
             }
             MirNodeInner::Distinct {
+                ref mut group_by, ..
+            } => {
+                group_by.push(c);
+            }
+            MirNodeInner::Paginate {
                 ref mut group_by, ..
             } => {
                 group_by.push(c);
@@ -348,23 +366,28 @@ impl MirNodeInner {
                     _ => us.borrow().inner.can_reuse_as(other),
                 }
             }
+            MirNodeInner::Paginate {
+                order: our_order,
+                group_by: our_group_by,
+                limit: our_limit,
+            } => match other {
+                MirNodeInner::Paginate {
+                    order,
+                    group_by,
+                    limit,
+                } => order == our_order && group_by == our_group_by && limit == our_limit,
+                _ => false,
+            },
             MirNodeInner::TopK {
                 order: our_order,
                 group_by: our_group_by,
-                k: our_k,
-                offset: our_offset,
+                limit: our_limit,
             } => match other {
                 MirNodeInner::TopK {
                     order,
                     group_by,
-                    k,
-                    offset,
-                } => {
-                    order == our_order
-                        && group_by == our_group_by
-                        && k == our_k
-                        && offset == our_offset
-                }
+                    limit,
+                } => order == our_order && group_by == our_group_by && limit == our_limit,
                 _ => false,
             },
             MirNodeInner::Leaf {
@@ -551,9 +574,20 @@ impl Debug for MirNodeInner {
                     .join(", ");
                 write!(f, "Distinct [γ: {}]", key_cols)
             }
+            MirNodeInner::Paginate {
+                ref order,
+                ref limit,
+                ..
+            } => {
+                write!(f, "Paginate [limit: {}, {:?}]", limit, order)
+            }
             MirNodeInner::TopK {
-                ref order, ref k, ..
-            } => write!(f, "TopK [k: {}, {:?}]", k, order),
+                ref order,
+                ref limit,
+                ..
+            } => {
+                write!(f, "TopK [k: {}, {:?}]", limit, order)
+            }
             MirNodeInner::Union {
                 ref emit,
                 ref duplicate_mode,

@@ -8,6 +8,7 @@ use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::join::JoinType;
 use dataflow::ops::union;
 use itertools::Itertools;
+use lazy_static::lazy_static;
 use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};
 use mir::query::MirQuery;
@@ -22,23 +23,26 @@ use nom_sql::{
 use noria::ViewPlaceholder;
 use noria_data::DataType;
 use noria_errors::{internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError};
-use noria_sql_passes::extract_limit;
 use petgraph::graph::NodeIndex;
 use tracing::{debug, error, trace, warn};
 
-use super::query_graph::JoinPredicate;
+use super::query_graph::{extract_limit_offset, JoinPredicate};
 use crate::controller::sql::mir::grouped::{
     make_expressions_above_grouped, make_grouped, make_predicates_above_grouped,
     post_lookup_aggregates,
 };
 use crate::controller::sql::mir::join::{make_cross_joins, make_joins};
-use crate::controller::sql::query_graph::{to_query_graph, OutputColumn, QueryGraph};
+use crate::controller::sql::query_graph::{to_query_graph, OutputColumn, Pagination, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
 use crate::ReadySetResult;
 
 mod grouped;
 mod join;
 pub(in crate::controller::sql) mod serde;
+
+lazy_static! {
+    pub static ref PAGE_NUMBER_COL: SqlIdentifier = "__page_number".into();
+}
 
 fn sanitize_leaf_column(c: &mut Column, view_name: SqlIdentifier) {
     c.table = Some(view_name);
@@ -298,24 +302,48 @@ impl SqlToMirConverter {
             })
             .collect();
 
-        if let Some(limit) = limit.as_ref() {
-            let (topk_name, topk_columns) = if !has_leaf {
+        if let Some(limit) = limit {
+            let (limit, offset) = extract_limit_offset(limit)?;
+            let make_topk = offset.is_none();
+            let (paginate_name, paginate_columns) = if !has_leaf {
                 (name.clone(), sanitized_columns.iter().collect())
             } else {
-                (format!("{}_topk", name).into(), columns.iter().collect())
+                (
+                    if make_topk {
+                        format!("{}_topk", name)
+                    } else {
+                        format!("{}_paginate", name)
+                    }
+                    .into(),
+                    columns.iter().collect(),
+                )
             };
-            let topk_node = self
-                .make_topk_node(&topk_name, final_node, topk_columns, order, limit)?
+            // Either a topk or paginate node
+            let paginate_node = self
+                .make_paginate_node(
+                    &paginate_name,
+                    final_node,
+                    paginate_columns,
+                    &order.as_ref().map(|o| {
+                        o.order_by
+                            .iter()
+                            .map(|(e, ot)| (e.clone(), ot.unwrap_or(OrderType::OrderAscending)))
+                            .collect()
+                    }),
+                    limit,
+                    make_topk,
+                )?
                 .last()
                 .unwrap()
                 .clone();
-            let node_id = (topk_name, self.schema_version);
+            let node_id = (paginate_name, self.schema_version);
             self.nodes
                 .entry(node_id)
-                .or_insert_with(|| topk_node.clone());
-            final_node = topk_node;
+                .or_insert_with(|| paginate_node.clone());
+            final_node = paginate_node;
         }
 
+        // TODO: Initialize leaf with ordering?
         let leaf_node = if has_leaf {
             MirNode::new(
                 name.clone(),
@@ -1171,25 +1199,27 @@ impl SqlToMirConverter {
         )
     }
 
-    fn make_topk_node(
+    fn make_paginate_node(
         &self,
         name: &SqlIdentifier,
         mut parent: MirNodeRef,
         group_by: Vec<&Column>,
-        order: &Option<OrderClause>,
-        limit: &LimitClause,
+        order: &Option<Vec<(Expression, OrderType)>>,
+        limit: usize,
+        is_topk: bool,
     ) -> ReadySetResult<Vec<MirNodeRef>> {
-        if !self.config.allow_topk {
+        if !self.config.allow_topk && is_topk {
             unsupported!("TopK is not supported");
+        } else if !self.config.allow_paginate && !is_topk {
+            unsupported!("Paginate is not supported");
         }
 
-        let combined_columns = parent.borrow().columns().to_vec();
+        let mut combined_columns = parent.borrow().columns().to_vec();
 
-        // Gather a list of expressions we need to evaluate before the topk node
+        // Gather a list of expressions we need to evaluate before the paginate node
         let mut exprs_to_project = vec![];
         let order = order.as_ref().map(|oc| {
-            oc.order_by
-                .iter()
+            oc.iter()
                 .map(|(expr, ot)| {
                     (
                         match expr {
@@ -1205,19 +1235,22 @@ impl SqlToMirConverter {
                                 col
                             }
                         },
-                        ot.unwrap_or(OrderType::OrderAscending),
+                        *ot,
                     )
                 })
                 .collect()
         });
 
-        if let Some(offset) = &limit.offset {
-            if offset != &Expression::Literal(0.into()) {
-                unsupported!("TopK nodes don't support OFFSET yet ({} supplied)", offset)
-            }
+        if !is_topk {
+            // Paginate nodes project the page number
+            combined_columns.push(Column {
+                table: None,
+                name: PAGE_NUMBER_COL.clone(),
+                function: None,
+                aliases: Vec::new(),
+            });
         }
-
-        let k = extract_limit(limit)?;
+        let group_by = group_by.into_iter().cloned().collect();
 
         let mut nodes = vec![];
 
@@ -1240,21 +1273,35 @@ impl SqlToMirConverter {
         }
 
         // make the new operator and record its metadata
-        let topk_node = MirNode::new(
-            name.clone(),
-            self.schema_version,
-            combined_columns,
-            MirNodeInner::TopK {
-                order,
-                group_by: group_by.into_iter().cloned().collect(),
-                k,
-                offset: 0,
-            },
-            vec![MirNodeRef::downgrade(&parent)],
-            vec![],
-        );
+        let paginate_node = if is_topk {
+            MirNode::new(
+                name.clone(),
+                self.schema_version,
+                combined_columns,
+                MirNodeInner::TopK {
+                    order,
+                    group_by,
+                    limit,
+                },
+                vec![MirNodeRef::downgrade(&parent)],
+                vec![],
+            )
+        } else {
+            MirNode::new(
+                name.clone(),
+                self.schema_version,
+                combined_columns,
+                MirNodeInner::Paginate {
+                    order,
+                    group_by,
+                    limit,
+                },
+                vec![MirNodeRef::downgrade(&parent)],
+                vec![],
+            )
+        };
 
-        nodes.push(topk_node);
+        nodes.push(paginate_node);
 
         Ok(nodes)
     }
@@ -1653,7 +1700,6 @@ impl SqlToMirConverter {
                     .chain(join_nodes.into_iter())
                     .chain(predicates_above_group_by_nodes.into_iter()),
             );
-            let mut added_bogokey = false;
 
             let mut predicate_nodes = Vec::new();
             // 5. Generate the necessary filter nodes for local predicates associated with each
@@ -1775,14 +1821,27 @@ impl SqlToMirConverter {
                 }
             };
 
-            // 10. Potentially insert TopK node below the final node
+            // 10. Potentially insert TopK or Paginate node below the final node
             // XXX(malte): this adds a bogokey if there are no parameter columns to do the TopK
             // over, but we could end up in a stick place if we reconcile/combine multiple
             // queries (due to security universes or due to compound select queries) that do
             // not all have the bogokey!
-            if let Some(ref limit) = st.limit {
+
+            // Indicates whether the final project should include a bogokey. This is required when
+            // we have a TopK node that groups on a bogokey. However, it is not required for
+            // Paginate nodes that group on a bogokey, as they will project a page number field
+            let mut bogo_in_final_projection = false;
+            let mut create_paginate = false;
+            if let Some(Pagination {
+                order,
+                limit,
+                offset,
+            }) = qg.pagination.as_ref()
+            {
+                let make_topk = offset.is_none();
                 let group_by = if qg.parameters().is_empty() {
-                    // need to add another projection to introduce a bogokey to group by
+                    // need to add another projection to introduce a bogokey to group by if there
+                    // are no query parameters
                     let cols: Vec<_> = final_node.borrow().columns().to_vec();
                     let table = format!("q_{:x}_n{}", qg.signature().hash, new_node_count).into();
                     let bogo_project = self.make_project_node(
@@ -1796,25 +1855,39 @@ impl SqlToMirConverter {
                     new_node_count += 1;
                     nodes_added.push(bogo_project.clone());
                     final_node = bogo_project;
-                    added_bogokey = true;
+                    // Indicates whether we need a bogokey at the leaf node. This is the case for
+                    // topk nodes that group by a bogokey. However, this is not the case for
+                    // paginate nodes as they will project a page number
+                    bogo_in_final_projection = make_topk;
+                    create_paginate = !make_topk;
                     vec![Column::new(None, "bogokey")]
                 } else {
+                    // view key will have the offset parameter if it exists. We must filter it out
+                    // of the group by, because the column originates at this node
                     view_key
                         .columns
                         .iter()
-                        .map(|(col, _)| col.clone())
+                        .filter_map(|(col, _)| {
+                            if col.name != *PAGE_NUMBER_COL {
+                                Some(col.clone())
+                            } else {
+                                None
+                            }
+                        })
                         .collect()
                 };
 
-                let topk_nodes = self.make_topk_node(
+                // Order by expression projections and either a topk or paginate node
+                let paginate_nodes = self.make_paginate_node(
                     &format!("q_{:x}_n{}", qg.signature().hash, new_node_count).into(),
                     final_node,
                     group_by.iter().collect(),
-                    &st.order,
-                    limit,
+                    order,
+                    *limit,
+                    make_topk,
                 )?;
-                func_nodes.extend(topk_nodes.clone());
-                final_node = topk_nodes.last().unwrap().clone();
+                func_nodes.extend(paginate_nodes.clone());
+                final_node = paginate_nodes.last().unwrap().clone();
                 new_node_count += 1;
             }
 
@@ -1879,12 +1952,14 @@ impl SqlToMirConverter {
                 .flatten()
                 .collect();
 
-            if added_bogokey {
+            // Bogokey will not be added to post-paginate project nodes
+            if bogo_in_final_projection {
                 projected_columns.push(Column::new(None, "bogokey"));
             }
 
             if has_leaf {
                 if qg.parameters().is_empty()
+                    && !create_paginate
                     && !projected_columns.contains(&Column::new(None, "bogokey"))
                 {
                     projected_literals.push(("bogokey".into(), DataType::from(0i32)));
@@ -1974,7 +2049,7 @@ impl SqlToMirConverter {
                                 })
                                 .collect()
                         }),
-                        limit: st.limit.as_ref().map(extract_limit).transpose()?,
+                        limit: qg.pagination.as_ref().map(|p| p.limit),
                         returned_cols: Some({
                             let mut cols = st.fields
                                 .iter()

@@ -338,23 +338,28 @@ fn mir_node_to_flow_parts(
                     let parent = mir_node.first_ancestor().unwrap();
                     make_distinct_node(&name, parent, mir_node.columns.as_slice(), group_by, mig)?
                 }
-                MirNodeInner::TopK {
+                MirNodeInner::Paginate {
                     ref order,
                     ref group_by,
-                    ref k,
-                    ref offset,
+                    limit,
+                    ..
+                }
+                | MirNodeInner::TopK {
+                    ref order,
+                    ref group_by,
+                    limit,
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     #[allow(clippy::unwrap_used)] // checked by above invariant
                     let parent = mir_node.first_ancestor().unwrap();
-                    make_topk_node(
+                    make_paginate_or_topk_node(
                         &name,
                         parent,
                         mir_node.columns.as_slice(),
                         order,
                         group_by,
-                        *k,
-                        *offset,
+                        limit,
+                        matches!(mir_node.inner, MirNodeInner::TopK { .. }),
                         mig,
                     )?
                 }
@@ -1077,14 +1082,14 @@ fn make_distinct_node(
     Ok(FlowNode::New(na))
 }
 
-fn make_topk_node(
+fn make_paginate_or_topk_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
     order: &Option<Vec<(Column, OrderType)>>,
     group_by: &[Column],
-    k: usize,
-    offset: usize,
+    limit: usize,
+    is_topk: bool,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
@@ -1092,7 +1097,7 @@ fn make_topk_node(
 
     invariant!(
         !group_by.is_empty(),
-        "need bogokey for TopK without group columns"
+        "need bogokey for Paginate without group columns"
     );
 
     let group_by_indx = group_by
@@ -1102,8 +1107,6 @@ fn make_topk_node(
 
     let cmp_rows = match *order {
         Some(ref o) => {
-            invariant_eq!(offset, 0); // Non-zero offset not supported
-
             let columns = o
                 .iter()
                 .map(|&(ref c, ref order_type)| {
@@ -1126,11 +1129,19 @@ fn make_topk_node(
     };
 
     // make the new operator and record its metadata
-    let na = mig.add_ingredient(
-        String::from(name),
-        column_names.as_slice(),
-        ops::topk::TopK::new(parent_na, cmp_rows, group_by_indx, k),
-    );
+    let na = if is_topk {
+        mig.add_ingredient(
+            String::from(name),
+            column_names.as_slice(),
+            ops::topk::TopK::new(parent_na, cmp_rows, group_by_indx, limit),
+        )
+    } else {
+        mig.add_ingredient(
+            String::from(name),
+            column_names.as_slice(),
+            ops::paginate::Paginate::new(parent_na, cmp_rows, group_by_indx, limit),
+        )
+    };
     Ok(FlowNode::New(na))
 }
 

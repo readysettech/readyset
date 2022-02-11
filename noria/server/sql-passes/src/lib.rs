@@ -20,10 +20,8 @@ use itertools::Either;
 pub use nom_sql::analysis::{contains_aggregate, is_aggregate};
 use nom_sql::{
     BinaryOperator, Column, CommonTableExpression, Expression, FieldDefinitionExpression,
-    FunctionExpression, InValue, JoinClause, JoinRightSide, LimitClause, Literal, SelectStatement,
-    SqlIdentifier, Table,
+    FunctionExpression, InValue, JoinClause, JoinRightSide, SelectStatement, SqlIdentifier, Table,
 };
-use noria_errors::{unsupported, ReadySetResult};
 
 pub use crate::alias_removal::AliasRemoval;
 pub use crate::count_star_rewrite::CountStarRewrite;
@@ -180,19 +178,5 @@ impl TryFrom<BinaryOperator> for LogicalOp {
             BinaryOperator::Or => Ok(Self::Or),
             _ => Err(value),
         }
-    }
-}
-
-pub fn extract_limit(limit: &LimitClause) -> ReadySetResult<usize> {
-    if let Expression::Literal(Literal::Integer(k)) = limit.limit {
-        if k < 0 {
-            unsupported!("Invalid value for limit: {}", k);
-        }
-        Ok(k as usize)
-    } else {
-        unsupported!(
-            "Only literal limits are supported ({} supplied)",
-            limit.limit
-        );
     }
 }

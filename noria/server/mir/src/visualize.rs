@@ -242,22 +242,37 @@ impl GraphViz for MirNodeInner {
                     .join(", ");
                 write!(f, "Distinct | γ: {}", key_cols)
             }
-            MirNodeInner::TopK {
-                ref order, ref k, ..
+            MirNodeInner::Paginate {
+                ref order,
+                ref limit,
+                ..
             } => {
-                write!(
-                    f,
-                    "TopK [k: {}; {}]",
-                    k,
-                    order
-                        .as_ref()
-                        .map(|v| v
-                            .iter()
+                let order = order
+                    .as_ref()
+                    .map(|v| {
+                        v.iter()
                             .map(|(c, o)| format!("{}: {}", c.name.as_str(), o))
                             .collect::<Vec<_>>()
-                            .join(", "))
-                        .unwrap_or_else(|| "".into())
-                )
+                            .join(", ")
+                    })
+                    .unwrap_or_else(|| "".into());
+                write!(f, "Paginate [limit: {}; {}]", limit, order)
+            }
+            MirNodeInner::TopK {
+                ref order,
+                ref limit,
+                ..
+            } => {
+                let order = order
+                    .as_ref()
+                    .map(|v| {
+                        v.iter()
+                            .map(|(c, o)| format!("{}: {}", c.name.as_str(), o))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_else(|| "".into());
+                write!(f, "TopK [k: {}; {}]", limit, order)
             }
             MirNodeInner::Union {
                 ref emit,

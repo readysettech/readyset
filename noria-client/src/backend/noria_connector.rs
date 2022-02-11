@@ -1570,6 +1570,12 @@ fn build_view_query(
                             lower_key.push(lower_value);
                             upper_key.push(upper_value);
                         }
+                        ViewPlaceholder::Offset(idx) => {
+                            // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
+                            // offset parameters should always be a Bigint
+                            // TODO(DAN): convert from offset to page number here or in view
+                            k.push(key[*idx - 1].coerce_to(&nom_sql::SqlType::Bigint(None))?);
+                        }
                     };
                 }
 

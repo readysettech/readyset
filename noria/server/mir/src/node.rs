@@ -199,6 +199,22 @@ impl MirNode {
                     // the aggregation column must always be the last column
                     Some(node.columns.len() - 1)
                 }
+                MirNodeInner::Paginate { .. } => {
+                    // Paginate nodes emit the page number as the last column. If the paginate node
+                    // is preceeded by an aggregate, we use the column position given by the
+                    // aggregate node, which is guaranteed to be before the page number.
+                    #[allow(clippy::unwrap_used)] // Paginate must have an ancestor
+                    column_pos(
+                        &node
+                            .ancestors()
+                            .first()
+                            .unwrap()
+                            .upgrade()
+                            .unwrap()
+                            .borrow(),
+                    )
+                    .or(Some(node.columns.len() - 1))
+                }
                 MirNodeInner::Project { emit, .. } => {
                     // New projected columns go before all literals and expressions
                     Some(emit.len())
@@ -727,8 +743,7 @@ mod tests {
                 MirNodeInner::TopK {
                     order: None,
                     group_by: vec!["x".into()],
-                    k: 3,
-                    offset: 0,
+                    limit: 3,
                 },
                 vec![MirNodeRef::downgrade(&parent)],
                 vec![],
@@ -739,6 +754,49 @@ mod tests {
             assert_eq!(
                 node.borrow().columns(),
                 vec![Column::from("x"), Column::from("y"), Column::from("agg")]
+            );
+        }
+
+        #[test]
+        fn maintain_computed_and_page_last() {
+            // count(z) group by (x)
+            let parent = MirNode::new(
+                "parent".into(),
+                0,
+                vec!["x".into(), "agg".into()],
+                MirNodeInner::Aggregation {
+                    on: "z".into(),
+                    group_by: vec!["x".into()],
+                    kind: AggregationKind::Count { count_nulls: false },
+                },
+                vec![],
+                vec![],
+            );
+
+            // Paginate γ[x]
+            let node = MirNode::new(
+                "topk".into(),
+                0,
+                vec!["x".into(), "agg".into(), "page".into()],
+                MirNodeInner::Paginate {
+                    order: None,
+                    group_by: vec!["x".into()],
+                    limit: 3,
+                },
+                vec![MirNodeRef::downgrade(&parent)],
+                vec![],
+            );
+
+            node.borrow_mut().add_column("y".into()).unwrap();
+
+            assert_eq!(
+                node.borrow().columns(),
+                vec![
+                    Column::from("x"),
+                    Column::from("y"),
+                    Column::from("agg"),
+                    Column::from("page")
+                ]
             );
         }
     }
