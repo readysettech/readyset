@@ -101,6 +101,33 @@ async fn write_query_results<W: AsyncWrite + Unpin>(
     }
 }
 
+/// Writes a Vec of [`MetaVariable`] as a table with a single row, where the column names correspond
+/// to the variable names and the row values correspond to the variable values
+async fn write_meta_table<W: AsyncWrite + Unpin>(
+    vars: Vec<MetaVariable>,
+    results: QueryResultWriter<'_, W>,
+) -> io::Result<()> {
+    let cols = vars
+        .iter()
+        .map(|v| Column {
+            table: "".to_owned(),
+            column: v.name.clone(),
+            coltype: ColumnType::MYSQL_TYPE_STRING,
+            colflags: ColumnFlags::empty(),
+        })
+        .collect::<Vec<_>>();
+
+    let mut writer = results.start(&cols).await?;
+
+    for var in vars {
+        writer.write_col(var.value)?;
+    }
+    writer.end_row()?;
+    Ok(writer.finish().await?)
+}
+
+/// Writes a Vec of [`MetaVariable`] as a table with two columns, where each row represents one
+/// varaible, with the first column being the variable name and the second column its value
 async fn write_meta_variables<W: AsyncWrite + Unpin>(
     vars: Vec<MetaVariable>,
     results: QueryResultWriter<'_, W>,
@@ -364,17 +391,8 @@ where
             Ok(QueryResult::Noria(noria_connector::QueryResult::Delete { num_rows_deleted })) => {
                 write_query_results(Ok((num_rows_deleted, 0)), results, None).await
             }
-            Ok(QueryResult::Noria(noria_connector::QueryResult::Meta { label, value })) => {
-                let cols = vec![Column {
-                    table: "".to_owned(),
-                    column: label,
-                    coltype: ColumnType::MYSQL_TYPE_STRING,
-                    colflags: ColumnFlags::empty(),
-                }];
-                let mut writer = results.start(&cols).await?;
-                writer.write_col(value)?;
-                writer.end_row()?;
-                Ok(writer.finish().await?)
+            Ok(QueryResult::Noria(noria_connector::QueryResult::Meta(vars))) => {
+                write_meta_table(vars, results).await
             }
             Ok(QueryResult::Noria(noria_connector::QueryResult::MetaVariables(vars))) => {
                 write_meta_variables(vars, results).await
@@ -547,17 +565,8 @@ where
             Ok(QueryResult::Noria(noria_connector::QueryResult::Delete { num_rows_deleted })) => {
                 results.completed(num_rows_deleted, 0, None).await
             }
-            Ok(QueryResult::Noria(noria_connector::QueryResult::Meta { label, value })) => {
-                let cols = vec![Column {
-                    table: "".to_owned(),
-                    column: label,
-                    coltype: ColumnType::MYSQL_TYPE_STRING,
-                    colflags: ColumnFlags::empty(),
-                }];
-                let mut writer = results.start(&cols).await?;
-                writer.write_col(value)?;
-                writer.end_row()?;
-                Ok(writer.finish().await?)
+            Ok(QueryResult::Noria(noria_connector::QueryResult::Meta(vars))) => {
+                write_meta_table(vars, results).await
             }
             Ok(QueryResult::Noria(noria_connector::QueryResult::MetaVariables(vars))) => {
                 write_meta_variables(vars, results).await

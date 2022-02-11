@@ -77,6 +77,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::future::{self, OptionFuture};
+use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
     CreateCachedQueryStatement, DeleteStatement, Dialect, DropCachedQueryStatement, Expression,
     InsertStatement, Literal, SelectStatement, ShowStatement, SqlQuery, UpdateStatement,
@@ -468,35 +469,30 @@ where
 
 /// QueryInfo holds information regarding the last query that was sent along this connection
 /// (Backend).
-/// For now it only includes whether the query went to fallback or not, but may be
-/// expanded in the future to contain more useful information.
 #[derive(Debug, Default)]
 pub struct QueryInfo {
     pub destination: QueryDestination,
+    pub noria_error: String,
 }
 
-/// Converts a MySQL row into a [`QueryInfo`] struct.
-///
-/// This maps the row's column name and value for the column to the
-/// expected QueryInfo fields. It assumes that each column is named
-/// the same as the variable in the [`QueryInfo`] struct and that the
-/// values can be converted from utf8 strings.
-impl TryFrom<&mysql_common::row::Row> for QueryInfo {
-    type Error = ReadySetError;
-    fn try_from(row: &mysql_common::row::Row) -> Result<Self, Self::Error> {
+impl FromRow for QueryInfo {
+    fn from_row_opt(row: mysql_common::row::Row) -> Result<Self, FromRowError> {
         let mut res = QueryInfo::default();
 
         // Parse each column into it's respective QueryInfo field.
         for (i, c) in row.columns_ref().iter().enumerate() {
-            if c.name_str() == "destination" {
-                // Column is referenced in mysql row.
-                #[allow(clippy::unwrap_used)]
-                if let mysql_common::value::Value::Bytes(d) = row.as_ref(i).unwrap() {
-                    let dest = std::str::from_utf8(d)
-                        .map_err(|e| ReadySetError::Internal(e.to_string()))?;
-                    res.destination = QueryDestination::try_from(dest)?;
+            if let mysql_common::value::Value::Bytes(d) = row.as_ref(i).unwrap() {
+                let dest = std::str::from_utf8(d).map_err(|_| FromRowError(row.clone()))?;
+
+                if c.name_str() == "Query_destination" {
+                    res.destination =
+                        QueryDestination::try_from(dest).map_err(|_| FromRowError(row.clone()))?;
+                } else if c.name_str() == "ReadySet_error" {
+                    res.noria_error = std::str::from_utf8(d)
+                        .map_err(|_| FromRowError(row.clone()))?
+                        .to_string();
                 } else {
-                    internal!("Invalid type for destination");
+                    return Err(FromRowError(row.clone()));
                 }
             }
         }
@@ -770,7 +766,10 @@ where
             (false, false) => None,
         };
 
-        self.last_query = destination.map(|d| QueryInfo { destination: d });
+        self.last_query = destination.map(|d| QueryInfo {
+            destination: d,
+            noria_error: String::new(),
+        });
 
         // Update noria migration state for query
         match &noria_res {
@@ -841,6 +840,7 @@ where
             let res = upstream.prepare(query).await.map(PrepareResult::Upstream);
             self.last_query = Some(QueryInfo {
                 destination: QueryDestination::Fallback,
+                noria_error: String::new(),
             });
             res
         } else {
@@ -854,6 +854,7 @@ where
             };
             self.last_query = Some(QueryInfo {
                 destination: QueryDestination::Noria,
+                noria_error: String::new(),
             });
             Ok(PrepareResult::Noria(res))
         }
@@ -947,7 +948,9 @@ where
 
                 self.last_query = Some(QueryInfo {
                     destination: QueryDestination::Fallback,
+                    noria_error: String::new(),
                 });
+
                 res
             }
             PrepareMeta::Write { stmt } => self.prepare_write(query, stmt, event).await,
@@ -1063,7 +1066,6 @@ where
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let noria_res = Self::execute_noria(noria, noria_prep, params, ticket, event).await;
-
         match noria_res {
             Ok(noria_ok) => {
                 if let Some(info) = ex_info {
@@ -1262,7 +1264,14 @@ where
             }
         }
 
-        self.last_query = event.destination.map(|d| QueryInfo { destination: d });
+        self.last_query = event.destination.map(|d| QueryInfo {
+            destination: d,
+            noria_error: event
+                .noria_error
+                .as_ref()
+                .map(|e| e.to_string())
+                .unwrap_or_default(),
+        });
         log_query(self.query_log_sender.as_ref(), event, self.slowlog);
 
         result
@@ -1289,18 +1298,27 @@ where
         }
     }
 
-    /// Generates response to the `GENERATE LAST STATEMENT` query
+    /// Generates response to the `EXPLAIN LAST STATEMENT` query
     fn explain_last_statement(&self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         if self.explain_last_statement {
-            let value = self
+            let (destination, error) = self
                 .last_query
                 .as_ref()
-                .map(|info| info.destination.to_string())
-                .unwrap_or_else(|| "unknown".to_string());
-            Ok(noria_connector::QueryResult::Meta {
-                label: "destination".to_string(),
-                value,
-            })
+                .map(|info| {
+                    (
+                        info.destination.to_string(),
+                        match &info.noria_error {
+                            s if s.is_empty() => "ok".to_string(),
+                            s => s.clone(),
+                        },
+                    )
+                })
+                .unwrap_or_else(|| ("unknown".to_string(), "ok".to_string()));
+
+            Ok(noria_connector::QueryResult::Meta(vec![
+                ("Query_destination", destination).into(),
+                ("ReadySet_error", error).into(),
+            ]))
         } else {
             internal!("EXPLAIN LAST STATEMENT feature is not enabled")
         }
@@ -1489,6 +1507,8 @@ where
                 Ok(noria_ok.into())
             }
             Err(noria_err) => {
+                event.set_noria_error(&noria_err);
+
                 if let Some(i) = status.execution_info.as_mut() {
                     if noria_err.is_networking_related() {
                         i.execute_network_failure();
@@ -1508,7 +1528,6 @@ where
 
                 // Try to execute on fallback if present
                 if let Some(fallback) = self.upstream.as_mut() {
-                    event.set_noria_error(&noria_err);
                     event.destination = Some(QueryDestination::NoriaThenFallback);
                     let _t = event.start_upstream_timer();
                     fallback
@@ -1565,7 +1584,14 @@ where
         }
         .map(|r| r.into_owned());
 
-        self.last_query = event.destination.map(|d| QueryInfo { destination: d });
+        self.last_query = event.destination.map(|d| QueryInfo {
+            destination: d,
+            noria_error: event
+                .noria_error
+                .as_ref()
+                .map(|e| e.to_string())
+                .unwrap_or_default(),
+        });
         log_query(query_log_sender.as_ref(), event, slowlog);
 
         result
@@ -1644,10 +1670,12 @@ where
                         }
                         self.last_query = Some(QueryInfo {
                             destination: QueryDestination::Both,
+                            noria_error: String::new(),
                         });
                     } else {
                         self.last_query = Some(QueryInfo {
                             destination: QueryDestination::Fallback,
+                            noria_error: String::new(),
                         });
                     }
                     let upstream_res = upstream.query(query).await;
@@ -1655,6 +1683,7 @@ where
                 } else {
                     self.last_query = Some(QueryInfo {
                         destination: QueryDestination::Noria,
+                        noria_error: String::new(),
                     });
                     Ok(QueryResult::Noria(self.noria.$noria_method($stmt).await?))
                 }
@@ -1706,6 +1735,7 @@ where
 
                         self.last_query = Some(QueryInfo {
                             destination: QueryDestination::Fallback,
+                            noria_error: String::new(),
                         });
                         Ok(QueryResult::Upstream(query_result?))
                     }
@@ -1722,6 +1752,7 @@ where
                         let res = upstream.query(query).await.map(QueryResult::Upstream);
                         self.last_query = Some(QueryInfo {
                             destination: QueryDestination::Fallback,
+                            noria_error: String::new(),
                         });
                         res
                     }
@@ -1729,6 +1760,7 @@ where
                         let res = self.handle_transaction_boundaries(parsed_query).await;
                         self.last_query = Some(QueryInfo {
                             destination: QueryDestination::Fallback,
+                            noria_error: String::new(),
                         });
                         res
                     }

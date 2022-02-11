@@ -1,4 +1,3 @@
-use std::convert::TryFrom;
 use std::sync::Arc;
 
 use mysql_async::prelude::*;
@@ -12,13 +11,11 @@ use serial_test::serial;
 
 /// Retrieves where the query executed by parsing the row returned by
 /// EXPLAIN LAST STATEMENT.
-async fn last_query_destination(conn: &mut Conn) -> QueryDestination {
-    let res: Row = conn
-        .query_first("EXPLAIN LAST STATEMENT")
+async fn last_query_info(conn: &mut Conn) -> QueryInfo {
+    conn.query_first::<'_, QueryInfo, _>("EXPLAIN LAST STATEMENT")
         .await
         .unwrap()
-        .unwrap();
-    QueryInfo::try_from(&res).unwrap().destination
+        .unwrap()
 }
 
 // With in_request_path migration and fallback, an supported query should execute on Noria
@@ -44,7 +41,7 @@ async fn in_request_path_query_with_fallback() {
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 0);
     assert_eq!(
-        last_query_destination(&mut conn).await,
+        last_query_info(&mut conn).await.destination,
         QueryDestination::Noria
     );
 
@@ -52,17 +49,16 @@ async fn in_request_path_query_with_fallback() {
     assert!(res.is_ok()); // Executed successfully against fallback.
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 1);
-    assert_eq!(
-        last_query_destination(&mut conn).await,
-        QueryDestination::NoriaThenFallback
-    );
+    let info = last_query_info(&mut conn).await;
+    assert_eq!(info.destination, QueryDestination::NoriaThenFallback);
+    assert!(!info.noria_error.is_empty());
 
     let res: Result<Vec<Row>> = conn.query("SELECT * FROM t WHERE a = NOW()").await;
     assert!(res.is_ok()); // Executed successfully against fallback.
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 1);
     assert_eq!(
-        last_query_destination(&mut conn).await,
+        last_query_info(&mut conn).await.destination,
         QueryDestination::Fallback
     );
 }
@@ -121,7 +117,7 @@ async fn out_of_band_query_with_fallback() {
     assert_eq!(query_status_cache.allow_list().len(), 0);
     assert_eq!(query_status_cache.deny_list().len(), 0);
     assert_eq!(
-        last_query_destination(&mut conn).await,
+        last_query_info(&mut conn).await.destination,
         QueryDestination::Fallback
     );
 
@@ -130,7 +126,7 @@ async fn out_of_band_query_with_fallback() {
     assert_eq!(query_status_cache.allow_list().len(), 0);
     assert_eq!(query_status_cache.deny_list().len(), 0);
     assert_eq!(
-        last_query_destination(&mut conn).await,
+        last_query_info(&mut conn).await.destination,
         QueryDestination::Fallback
     );
 
@@ -144,7 +140,7 @@ async fn out_of_band_query_with_fallback() {
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 0);
     assert_eq!(
-        last_query_destination(&mut conn).await,
+        last_query_info(&mut conn).await.destination,
         QueryDestination::Noria
     );
 }
@@ -174,7 +170,7 @@ async fn in_request_path_prep_exec_with_fallback() {
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 0);
     assert_eq!(
-        last_query_destination(&mut conn).await,
+        last_query_info(&mut conn).await.destination,
         QueryDestination::Both
     );
 
@@ -183,7 +179,7 @@ async fn in_request_path_prep_exec_with_fallback() {
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 0);
     assert_eq!(
-        last_query_destination(&mut conn).await,
+        last_query_info(&mut conn).await.destination,
         QueryDestination::Noria
     );
 
@@ -192,7 +188,7 @@ async fn in_request_path_prep_exec_with_fallback() {
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 1);
     assert_eq!(
-        last_query_destination(&mut conn).await,
+        last_query_info(&mut conn).await.destination,
         QueryDestination::Both
     );
 
@@ -201,7 +197,7 @@ async fn in_request_path_prep_exec_with_fallback() {
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 1);
     assert_eq!(
-        last_query_destination(&mut conn).await,
+        last_query_info(&mut conn).await.destination,
         QueryDestination::Fallback
     );
 
@@ -212,7 +208,7 @@ async fn in_request_path_prep_exec_with_fallback() {
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 1);
     assert_eq!(
-        last_query_destination(&mut conn).await,
+        last_query_info(&mut conn).await.destination,
         QueryDestination::Fallback
     );
 
@@ -221,7 +217,7 @@ async fn in_request_path_prep_exec_with_fallback() {
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 1);
     assert_eq!(
-        last_query_destination(&mut conn).await,
+        last_query_info(&mut conn).await.destination,
         QueryDestination::Fallback
     );
 }
@@ -278,7 +274,7 @@ async fn out_of_band_prep_exec_with_fallback() {
     let res: Result<Statement> = conn.prep("SELECT * FROM t").await;
     assert!(res.is_ok()); // Executed successfully against fallback.
     assert_eq!(
-        last_query_destination(&mut conn).await,
+        last_query_info(&mut conn).await.destination,
         QueryDestination::Both
     );
     assert_eq!(query_status_cache.allow_list().len(), 0);
@@ -289,14 +285,14 @@ async fn out_of_band_prep_exec_with_fallback() {
     assert_eq!(query_status_cache.allow_list().len(), 0);
     assert_eq!(query_status_cache.deny_list().len(), 0);
     assert_eq!(
-        last_query_destination(&mut conn).await,
+        last_query_info(&mut conn).await.destination,
         QueryDestination::Fallback
     );
 
     let res: Result<Statement> = conn.prep("SELECT * FROM t WHERE a = NOW()").await;
     assert!(res.is_ok()); // Executed successfully against fallback.
     assert_eq!(
-        last_query_destination(&mut conn).await,
+        last_query_info(&mut conn).await.destination,
         QueryDestination::Both
     );
     assert_eq!(query_status_cache.allow_list().len(), 0);
@@ -307,7 +303,7 @@ async fn out_of_band_prep_exec_with_fallback() {
     assert_eq!(query_status_cache.allow_list().len(), 0);
     assert_eq!(query_status_cache.deny_list().len(), 0);
     assert_eq!(
-        last_query_destination(&mut conn).await,
+        last_query_info(&mut conn).await.destination,
         QueryDestination::Fallback
     );
 
@@ -323,7 +319,7 @@ async fn out_of_band_prep_exec_with_fallback() {
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 0);
     assert_eq!(
-        last_query_destination(&mut conn).await,
+        last_query_info(&mut conn).await.destination,
         QueryDestination::Noria
     );
 
@@ -332,7 +328,7 @@ async fn out_of_band_prep_exec_with_fallback() {
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 0);
     assert_eq!(
-        last_query_destination(&mut conn).await,
+        last_query_info(&mut conn).await.destination,
         QueryDestination::Noria
     );
 
@@ -345,7 +341,7 @@ async fn out_of_band_prep_exec_with_fallback() {
     assert_eq!(query_status_cache.allow_list().len(), 0);
     assert_eq!(query_status_cache.deny_list().len(), 0);
     assert_eq!(
-        last_query_destination(&mut conn).await,
+        last_query_info(&mut conn).await.destination,
         QueryDestination::Fallback
     );
 }

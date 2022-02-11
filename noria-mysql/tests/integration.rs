@@ -3,6 +3,8 @@ use std::convert::TryFrom;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use mysql_async::prelude::*;
 use noria::status::ReadySetStatus;
+use noria_client::backend::QueryInfo;
+use noria_client_metrics::QueryDestination;
 use noria_client_test_helpers::mysql_helpers::setup;
 use noria_client_test_helpers::sleep;
 #[tokio::test(flavor = "multi_thread")]
@@ -1544,12 +1546,12 @@ async fn explain_last_statement() {
     conn.query_drop("SELECT * FROM test").await.unwrap();
     sleep().await;
 
-    let destination: String = conn
+    let destination: QueryInfo = conn
         .query_first("EXPLAIN LAST STATEMENT")
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(&destination[..], "noria");
+    assert_eq!(destination.destination, QueryDestination::Noria);
 }
 
 #[tokio::test(flavor = "multi_thread")]
