@@ -3,6 +3,8 @@ use std::time::Duration;
 use mysql_async::prelude::Queryable;
 use noria::get_metric;
 use noria::metrics::{recorded, DumpedMetricValue};
+use noria_client::backend::QueryInfo;
+use noria_client_metrics::QueryDestination;
 use serial_test::serial;
 use test_utils::skip_slow_tests;
 use tokio::time::{sleep, timeout};
@@ -351,13 +353,13 @@ async fn test_fallback_recovery_period() {
 
     assert_eq!(res, (1, 4));
 
-    let res: String = adapter
+    let res: QueryInfo = adapter
         .query_first(r"EXPLAIN LAST STATEMENT")
         .await
         .unwrap()
         .unwrap();
 
-    assert_eq!(&res[..], "noria_then_fallback");
+    assert_eq!(res.destination, QueryDestination::NoriaThenFallback);
 
     // Standard query path (not prep/exec)
     let flattened_query = "SELECT * FROM t1 WHERE uid = 1";
@@ -369,13 +371,13 @@ async fn test_fallback_recovery_period() {
 
     assert_eq!(res, (1, 4));
 
-    let res: String = adapter
+    let res: QueryInfo = adapter
         .query_first(r"EXPLAIN LAST STATEMENT")
         .await
         .unwrap()
         .unwrap();
 
-    assert_eq!(&res[..], "noria_then_fallback");
+    assert_eq!(res.destination, QueryDestination::NoriaThenFallback);
 
     // We wait out the query_max_failure_seconds period and then try again, at which point we
     // should be in the recovery period.
@@ -387,26 +389,26 @@ async fn test_fallback_recovery_period() {
 
     assert_eq!(res, (1, 4));
 
-    let res: String = adapter
+    let res: QueryInfo = adapter
         .query_first(r"EXPLAIN LAST STATEMENT")
         .await
         .unwrap()
         .unwrap();
 
-    assert_eq!(&res[..], "fallback");
+    assert_eq!(res.destination, QueryDestination::Fallback);
 
     // prep/exec path.
     let res: (i32, i32) = adapter.exec_first(query, (1,)).await.unwrap().unwrap();
 
     assert_eq!(res, (1, 4));
 
-    let res: String = adapter
+    let res: QueryInfo = adapter
         .query_first(r"EXPLAIN LAST STATEMENT")
         .await
         .unwrap()
         .unwrap();
 
-    assert_eq!(&res[..], "fallback");
+    assert_eq!(res.destination, QueryDestination::Fallback);
 
     deployment.teardown().await.unwrap();
 }

@@ -183,6 +183,15 @@ pub struct MetaVariable {
     pub value: String,
 }
 
+impl<N: Into<String>, V: Into<String>> From<(N, V)> for MetaVariable {
+    fn from((name, value): (N, V)) -> Self {
+        MetaVariable {
+            name: name.into(),
+            value: value.into(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum QueryResult<'a> {
     Empty,
@@ -201,13 +210,10 @@ pub enum QueryResult<'a> {
     Delete {
         num_rows_deleted: u64,
     },
-    /// A metadata string returned as a response to eg an EXPLAIN query
-    Meta {
-        /// The label for the metadata, used as a column header when writing results
-        label: String,
-        /// The actual value
-        value: String,
-    },
+    /// A metadata table returned as a response to eg an EXPLAIN query. Unlike
+    /// [`QueryResult::MetaVariables`] it will format the output as a table with a single row,
+    /// where the columns names correspond to the [`MetaVariable`] names.
+    Meta(Vec<MetaVariable>),
     /// A table of variables returned as a response to a SHOW READYSET STATUS query.
     MetaVariables(Vec<MetaVariable>),
 }
@@ -241,7 +247,7 @@ impl<'a> QueryResult<'a> {
                 last_inserted_id,
             },
             QueryResult::Delete { num_rows_deleted } => QueryResult::Delete { num_rows_deleted },
-            QueryResult::Meta { label, value } => QueryResult::Meta { label, value },
+            QueryResult::Meta(meta) => QueryResult::Meta(meta),
             QueryResult::MetaVariables(vec) => QueryResult::MetaVariables(vec),
         }
     }
@@ -440,10 +446,7 @@ impl NoriaConnector {
             ("GRAPHVIZ", noria.graphviz().await?)
         };
 
-        Ok(QueryResult::Meta {
-            label: label.to_owned(),
-            value: graphviz,
-        })
+        Ok(QueryResult::Meta(vec![(label, graphviz).into()]))
     }
 
     pub(crate) async fn verbose_outputs(&mut self) -> ReadySetResult<QueryResult<'static>> {
@@ -856,8 +859,8 @@ impl NoriaConnector {
         Ok(QueryResult::MetaVariables(
             <Vec<(String, String)>>::from(status)
                 .into_iter()
-                .map(|(name, value)| MetaVariable { name, value })
-                .collect::<Vec<MetaVariable>>(),
+                .map(MetaVariable::from)
+                .collect(),
         ))
     }
 }

@@ -212,8 +212,10 @@ where
             utils::set_jsval_field(cx, &js_query_result, "data", js_data.upcast::<JsValue>())?;
             // TODO: convert select_schema?
         }
-        QueryResult::Noria(NoriaResult::Meta { label, value }) => {
-            utils::set_str_field(cx, &js_query_result, &label, &value)?;
+        QueryResult::Noria(NoriaResult::Meta(vars)) => {
+            if let Some(var) = vars.first() {
+                utils::set_str_field(cx, &js_query_result, &var.name, &var.value)?;
+            }
         }
         QueryResult::Noria(NoriaResult::MetaVariables(vars)) => {
             let js_data = cx.empty_array();

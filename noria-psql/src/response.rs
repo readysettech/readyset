@@ -84,24 +84,37 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                 num_rows_updated, ..
             }) => Ok(Update(num_rows_updated)),
             Noria(NoriaResult::Delete { num_rows_deleted }) => Ok(Delete(num_rows_deleted)),
-            Noria(NoriaResult::Meta { label, value }) => {
+            Noria(NoriaResult::Meta(vars)) => {
+                let columns = vars.iter().map(|v| v.name.clone()).collect::<Vec<_>>();
+
                 let select_schema = SelectSchema(noria_client::backend::SelectSchema {
                     use_bogo: false,
-                    schema: Cow::Owned(vec![ColumnSchema {
-                        spec: ColumnSpecification::new(
-                            nom_sql::Column {
-                                name: label.to_owned(),
-                                table: None,
-                                function: None,
-                            },
-                            SqlType::Text,
-                        ),
-                        base: None,
-                    }]),
-                    columns: Cow::Owned(vec![label.to_owned()]),
+                    schema: Cow::Owned(
+                        vars.iter()
+                            .map(|v| ColumnSchema {
+                                spec: ColumnSpecification::new(
+                                    nom_sql::Column {
+                                        name: v.name.clone(),
+                                        table: None,
+                                        function: None,
+                                    },
+                                    SqlType::Text,
+                                ),
+                                base: None,
+                            })
+                            .collect(),
+                    ),
+                    columns: Cow::Owned(columns.clone()),
                 });
+
                 let resultset = Resultset::try_new(
-                    vec![Results::new(vec![vec![value.into()]], Arc::new([label]))],
+                    vec![Results::new(
+                        vec![vars
+                            .into_iter()
+                            .map(|v| noria_data::DataType::from(v.value))
+                            .collect()],
+                        columns.into_boxed_slice().into(),
+                    )],
                     &select_schema,
                 )?;
                 Ok(Select {

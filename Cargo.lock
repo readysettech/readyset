@@ -1199,6 +1199,8 @@ dependencies = [
  "mysql_async",
  "nom-sql",
  "noria",
+ "noria-client",
+ "noria-client-metrics",
  "noria-data",
  "noria-mysql",
  "port_scanner",
