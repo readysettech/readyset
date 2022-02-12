@@ -1,0 +1,15 @@
+---
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+spec:
+  schedule: {{ .Values.job.cron.schedule | quote }}
+  successfulJobsHistoryLimit: {{ .Values.job.cron.successfulJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      template:
+{{ include "job.spec" . | trim | indent 8 }}

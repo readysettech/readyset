@@ -1,0 +1,7 @@
+env:
+  - name: AWS_ACCOUNT
+    value: "${ecr_account_id}"
+  - name: AWS_DEFAULT_REGION
+    value: "${ecr_region}"
+  - name: IPS_SECRET_NAME
+    value: "${ips_secret_name}"

@@ -1,0 +1,67 @@
+secret:
+  # -- Image pull secret name
+  name: ips-refresher-creds
+
+# To be overridden on a per-deployment basis
+irsa:
+  # -- ARN of IAM role enabled with OIDC
+  roleArn: ""
+
+job:
+  # Cron responsible for refreshing docker creds
+  cron:
+    # -- Cron schedule for refreshing value in image pull secret
+    schedule: "* */8 * * *"
+    # -- In what scenarios does k8s want to restart the job after failure(s)
+    restart_policy: OnFailure
+    # -- Total number of successful jobs stored in k8s
+    successfulJobsHistoryLimit: 1
+  awscli:
+    image:
+      # -- Container repo and image for awscli v2
+      repo: amazon/aws-cli
+      # -- Image tag for awscli v2 container
+      tag: 2.0.6
+    script: |
+      #!/bin/bash
+      DOCKER_PASSWORD=`aws ecr get-login-password --region ${AWS_DEFAULT_REGION}`
+      if [ -z "${DOCKER_PASSWORD}" ]; then
+        echo "Error authenticating with Docker registry! Exiting with error."
+        exit 1
+      fi
+      touch /var/docker/buffer/pwd
+      echo $DOCKER_PASSWORD > /var/docker/buffer/pwd
+  kubectl:
+    image:
+      # -- Container repo and image for kubectl
+      repo: bitnami/kubectl
+      # -- Image tag for kubectl container of matching k8s version
+      tag: 1.21
+    script: |
+      #!/bin/bash
+      DOCKER_USER=AWS
+      DOCKER_REGISTRY_SERVER="https://${AWS_ACCOUNT}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
+      # Populate by init container
+      DOCKER_PASSWORD=$(cat /var/docker/buffer/pwd)
+      for ns in $(kubectl get ns --no-headers | awk {' print $1 '})
+      do
+        echo "Provisioning IPS secret: ${IPS_SECRET_NAME} in namespace ${ns}"
+        kubectl delete secret $IPS_SECRET_NAME -n ${ns} --ignore-not-found || true
+        kubectl create secret docker-registry $IPS_SECRET_NAME \
+        --docker-server=$DOCKER_REGISTRY_SERVER \
+        --docker-username=$DOCKER_USER \
+        --docker-password=$DOCKER_PASSWORD \
+        --docker-email=no@emails.local \
+        -n ${ns}
+      done
+      kubectl patch serviceaccount default -p "{\"imagePullSecrets\":[{\"name\":\"$IPS_SECRET_NAME\"}]}" -n ${ns}
+env:
+  # -- AWS account id of the container registry
+  - name: AWS_ACCOUNT
+    value: "" # ECR AWS Account ID
+  # -- AWS region of the container registry
+  - name: AWS_DEFAULT_REGION
+    value: ""
+  # -- Name of k8s secret to populate with generated docker config
+  - name: IPS_SECRET_NAME
+    value: ""

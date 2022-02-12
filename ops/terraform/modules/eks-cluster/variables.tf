@@ -248,3 +248,20 @@ variable "benchmark_ssm_path_grafana_password" {
   description = "SSM path suffix to Grafana password. Will be prefixed with cluster name automatically."
   default     = "/benchmark/grafana/adminPassword"
 }
+
+#-------------- [ Image Pull Secret Refresher ] ---------------------- #
+
+variable "ips_refresher_enabled" {
+  description = "Toggles the deployment of the IPS-refresher Helm chart. This provides creds to k8s when pulling from private ECR repos."
+  default     = true
+}
+
+variable "ips_refresher_authorized_ecr_resource_arns" {
+  description = "IAM resource list of ECR ARNs to grant read-access to. Supports wildcarding."
+  default     = ["*"]
+}
+
+variable "ips_refresher_ecr_aws_account_id" {
+  description = "AWS account ID which ECR repositories exist. There is currently a 1:1 relationship between ECR account and IPS-refresher deployments."
+  default     = "305232526136" # build account
+}

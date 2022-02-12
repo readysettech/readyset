@@ -262,3 +262,25 @@ module "benchmark-prom-grafana" {
   helm_chart_version = lookup(local.chart_versions_merged, "bench_prom_grafana")
   grafana_password   = data.aws_ssm_parameter.grafana_pass.value
 }
+
+# -------------- [ Image Pull Secret Refresher ] ----------------------------- #
+
+module "ips-refresher" {
+  source = "./modules/ips-refresher"
+  count  = var.ips_refresher_enabled ? 1 : 0
+
+  # ECR Repo Configs
+  authorized_ecr_resource_arns = var.ips_refresher_authorized_ecr_resource_arns
+  ecr_account_id               = var.ips_refresher_ecr_aws_account_id
+
+  # Environment Configs
+  aws_region   = var.aws_region
+  cluster_name = var.cluster_name
+
+  # General
+  resource_tags = var.resource_tags
+
+  # Identity Provider
+  oidc_provider_arn = module.eks.oidc_provider_arn
+  oidc_issuer_url   = module.eks.cluster_oidc_issuer_url
+}

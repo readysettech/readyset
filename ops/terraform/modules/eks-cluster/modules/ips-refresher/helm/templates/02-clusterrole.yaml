@@ -1,0 +1,16 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: ["*"]
+    resources: ["namespaces", "serviceaccounts"]
+    verbs: ["list", "get"]
+  - apiGroups: ["*"]
+    resources: ["serviceaccounts"]
+    verbs: ["patch"]
+  - apiGroups: ["*"]
+    resources: ["secrets"]
+    verbs: ["delete", "create", "update", "patch"]

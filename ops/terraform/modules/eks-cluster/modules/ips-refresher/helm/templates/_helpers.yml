@@ -1,0 +1,34 @@
+{{- define "job.spec" -}}
+spec:
+  serviceAccount: {{ .Release.Name }}
+  restartPolicy: {{ .Values.job.cron.restart_policy }}
+  initContainers:
+    - name: awscli
+      image: {{ .Values.job.awscli.image.repo }}:{{ .Values.job.awscli.image.tag }}
+      imagePullPolicy: {{ .Values.job.pullPolicy }}
+      env:
+        {{- toYaml .Values.env | nindent 16 }}
+      command:
+        - "/bin/sh"
+        - "-c"
+        - {{- toYaml .Values.job.awscli.script | nindent 16 }}
+      volumeMounts:
+        - mountPath: /var/docker/buffer
+          name: dock
+  containers:
+    - name: kubectl
+      image: {{ .Values.job.kubectl.image.repo }}:{{ .Values.job.kubectl.image.tag }}
+      imagePullPolicy: {{ .Values.job.pullPolicy }}
+      env:
+        {{- toYaml .Values.env | nindent 16 }}
+      volumeMounts:
+        - mountPath: /var/docker/buffer
+          name: dock
+      command:
+        - "/bin/sh"
+        - "-c"
+        - {{- toYaml .Values.job.kubectl.script | nindent 16 }}
+  volumes:
+    - emptyDir: {}
+      name: dock
+{{- end }}
