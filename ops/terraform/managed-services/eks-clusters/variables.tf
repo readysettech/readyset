@@ -207,3 +207,9 @@ variable "benchmark_prom_grafana_enabled" {
   description = "Toggles provisioning of the benchmarking initiative's Prometheus and Grafana related resources."
   default     = false
 }
+
+variable "benchmark_prom_pushgw_enabled" {
+  description = "Toggles creation of Prometheus Push Gateway resources for benchmarking."
+  default     = false
+  type        = bool
+}

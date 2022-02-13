@@ -249,6 +249,18 @@ variable "benchmark_ssm_path_grafana_password" {
   default     = "/benchmark/grafana/adminPassword"
 }
 
+variable "benchmark_prom_pushgw_enabled" {
+  description = "Toggles creation of Prometheus Push Gateway resources for benchmarking."
+  default     = true
+  type        = bool
+}
+
+variable "benchmark_prom_pushgw_replicas" {
+  description = "Controls number of replicas of Prometheus Push Gateway."
+  default     = 3
+  type        = number
+}
+
 #-------------- [ Image Pull Secret Refresher ] ---------------------- #
 
 variable "ips_refresher_enabled" {

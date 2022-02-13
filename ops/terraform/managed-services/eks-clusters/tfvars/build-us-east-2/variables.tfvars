@@ -25,6 +25,12 @@ ns_ingress_routing_rules = {
       service     = "prom-stack-kube-prometheus-prometheus",
       servicePort = "9090",
     },
+    // Benchmark Push Gateway
+    {
+      fqdn        = "benchmark-pushgw.build.readyset.name",
+      service     = "prom-pushgw-prometheus-pushgateway",
+      servicePort = "9091",
+    },
     // Benchmark Grafana
     {
       fqdn        = "benchmark-grafana.build.readyset.name",
@@ -89,3 +95,4 @@ external_dns_private_zone_domain = "readyset.name"
 
 # Benchmarking Prom/Grafana Stack
 benchmark_prom_grafana_enabled = true
+benchmark_prom_pushgw_enabled  = true

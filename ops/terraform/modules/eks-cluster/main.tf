@@ -261,6 +261,10 @@ module "benchmark-prom-grafana" {
   count              = var.benchmark_prom_grafana_enabled ? 1 : 0
   helm_chart_version = lookup(local.chart_versions_merged, "bench_prom_grafana")
   grafana_password   = data.aws_ssm_parameter.grafana_pass.value
+
+  # Prometheus Push Gateway
+  pushgw_enabled       = var.benchmark_prom_pushgw_enabled
+  pushgw_replica_count = var.benchmark_prom_pushgw_replicas
 }
 
 # -------------- [ Image Pull Secret Refresher ] ----------------------------- #

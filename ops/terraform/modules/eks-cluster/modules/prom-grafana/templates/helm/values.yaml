@@ -35,3 +35,17 @@ prometheus:
           resources:
             requests:
               storage: ${prom_disk_space_gb}Gi
+    externalLabels:
+      # TODO: is this right?
+      monitor: 'benchmark-noria'
+    additionalScrapeConfigs:
+      - job_name: 'benchmark'
+        scrape_interval: 5s
+        static_configs:
+          - targets: ['${prom_hostname}']
+        honor_labels: true
+      - job_name: 'benchmark-pushgw'
+        scrape_interval: 5s
+        static_configs:
+          - targets: ['${push_gw_hostname}']
+        honor_labels: true
