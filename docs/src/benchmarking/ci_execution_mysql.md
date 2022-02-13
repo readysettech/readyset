@@ -13,6 +13,7 @@ The purpose of this document is to give the reader an understanding of what is h
 5. [Where Are Benchmarks Defined in Code?](#where-are-benchmarks-defined-in-code)
 6. [Viewing CI Benchmark Results](#viewing-ci-benchmark-results)
 7. [What Infrastructure Are Tests Run On?](#what-infrastructure-are-tests-run-on)
+    * [Infrastructure To Know About](#infrastructure-hostnames)
 
 ### Process Automation Overview
 
@@ -101,11 +102,17 @@ QueryBenchmark:
 
 ### Viewing CI Benchmark Results
 
-In the latest rendition of the Benchmarking pipeline, you'll find the results of each benchmark are uploaded as artifacts under the `:pipeline: Run Noria Benchmark in Docker-Compose` step of the pipeline, as seen below:
+There are now two options for viewing benchmark results:
+
+1) Viewing the results in Grafana, using a metric query similar to the below:
+
+  `benchmark_<metric_name_here>{instance="ci-benchmark-${benchmark_pipeline_build_number}-{commit_sha:0:7}"}`
+
+2) Under the artifacts section of the `:pipeline: Run Noria Benchmark in Docker-Compose` step in the benchmark pipeline, as seen below:
 
 ![Artifact Example](./images/ci-results-file-artifact.png)
 
-The goal here is to prevent anyone from needing to dive into the build step output, unless they're an operator or find themselves needing to diagnose or debug a pipeline failure.
+The goal here is to prevent anyone from needing to dive into the build step output, unless they're an operator or find themselves needing to diagnose or debug a pipeline failure. Now that metrics are in the build environment's Prometheus and Grafana infrastructure, this should be even more true today.
 
 ### What Infrastructure Are Tests Run On?
 
@@ -125,3 +132,13 @@ As of writing this document, the `benchmark` queue is currently underpinned by B
   *  10 Gbps
 * EBS Bandwidth:
   * 4,750 Mbps
+
+#### Infrastructure Hostnames
+
+When metrics are emitted by benchmarks running in CI, the following infrastructure is used to store, scrape, buffer, and visualize the data.
+
+| Name                 	| URL 	| Network Controls    	| K8s Namespace 	|
+|-------------------------	|-----	|---------------------	|---------------	|
+| Prometheus (Datastore)  	| https://benchmarks-prometheus.build.readyset.name    	| Internal Only (VPN) 	| `build`       	|
+| Prometheus Push Gateway 	| https://benchmarks-prometheus.build.readyset.name    	| Internal Only (VPN) 	| `build`       	|
+| Grafana                 	| https://benchmarks-prometheus.build.readyset.name    	| Internal Only (VPN) 	| `build`       	|

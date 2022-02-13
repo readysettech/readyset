@@ -49,6 +49,7 @@ steps:
       - 'echo +++ :wrench: Benchmark Env File Setup'
       - echo "ENVIRONMENT=ci" >> ./.buildkite/benchmark.env
       - echo "BUILDKITE_COMMIT=${BUILDKITE_COMMIT}" >> ./.buildkite/benchmark.env
+      - echo "PROM_INSTANCE_LABEL=ci-benchmark-${BUILDKITE_BUILD_NUMBER}-${BUILDKITE_COMMIT:0:7}" >> ./.buildkite/benchmark.env
       - echo "DOCKER_TAG=benchmark-release-${BUILDKITE_COMMIT}" >> ./.buildkite/benchmark.env
       - echo "BENCHMARK_DC_PROJECT_NAME=benchmark-${BUILDKITE_COMMIT:0:7}" >> ./.buildkite/benchmark.env
       - echo "BENCHMARK_DATADIR_S3_KEY=readyset-devops-assets-build-us-east-2/benchmark-datadir-1.4.tgz" >> ./.buildkite/benchmark.env

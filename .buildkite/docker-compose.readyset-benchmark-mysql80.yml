@@ -104,16 +104,16 @@ services:
         READYSET_RUST_UBUNTU2004_BUILDER_BASE_TAG: latest
         BUILDKIT_INLINE_CACHE: 1
     environment:
-      INSTANCE_LABEL: local
+      INSTANCE_LABEL: "${PROM_INSTANCE_LABEL}"
       TARGET_CONN_STR: "mysql://root:root@readyset-adapter:3333"
       SETUP_CONN_STR: "mysql://root:root@mysql/test"
       REPL_AWAIT_SLEEP_DURATION: 60
       IRL_BENCHMARK_DURATION: 60
       FASTLY_READ_BENCHMARK_DURATION: 60
       REPORT_SAVE_DIR: /tmp/artifacts
-      # V2.0 - we'll set these
-      # PROMETHEUS_PUSH_GATEWAY: ""
-      # PROMETHEUS_SERVER: ""
+      # Metrics
+      PROMETHEUS_PUSH_GATEWAY: "https://benchmark-pushgw.build.readyset.name"
+      PROMETHEUS_SERVER: "https://benchmark-prometheus.build.readyset.name"
     volumes:
       - ${HOST_ARTIFACT_PATH}:/tmp/artifacts:rw
     links:
