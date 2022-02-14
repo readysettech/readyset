@@ -461,7 +461,6 @@ impl NoriaConnector {
                         column: nom_sql::Column {
                             name: "name".to_string(),
                             table: None,
-                            function: None,
                         },
                         sql_type: nom_sql::SqlType::Text,
                         constraints: vec![],
@@ -474,7 +473,6 @@ impl NoriaConnector {
                         column: nom_sql::Column {
                             name: "query".to_string(),
                             table: None,
-                            function: None,
                         },
                         sql_type: nom_sql::SqlType::Text,
                         constraints: vec![],
@@ -1650,7 +1648,6 @@ mod tests {
                             column: Column {
                                 name: "x".to_owned(),
                                 table: Some("t".to_owned()),
-                                function: None,
                             },
                             sql_type: SqlType::Int(None),
                             constraints: vec![],
@@ -1666,7 +1663,6 @@ mod tests {
                             column: Column {
                                 name: "y".to_owned(),
                                 table: Some("t".to_owned()),
-                                function: None,
                             },
                             sql_type: SqlType::Text,
                             constraints: vec![],
@@ -1684,7 +1680,6 @@ mod tests {
                             column: Column {
                                 name: "x".to_owned(),
                                 table: Some("t".to_owned()),
-                                function: None,
                             },
                             sql_type: SqlType::Int(None),
                             constraints: vec![],
@@ -1700,7 +1695,6 @@ mod tests {
                             column: Column {
                                 name: "y".to_owned(),
                                 table: Some("t".to_owned()),
-                                function: None,
                             },
                             sql_type: SqlType::Text,
                             constraints: vec![],

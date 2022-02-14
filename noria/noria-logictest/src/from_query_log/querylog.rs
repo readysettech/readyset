@@ -83,13 +83,7 @@ impl ReplaceLiteralsWithPlaceholders for SelectStatement {
             }
             match &mut join.constraint {
                 JoinConstraint::On(expr) => values.append(&mut expr.replace_literals()),
-                JoinConstraint::Using(cols) => {
-                    for col in cols.iter_mut() {
-                        if let Some(expr) = col.function.as_mut() {
-                            values.append(&mut expr.replace_literals());
-                        }
-                    }
-                }
+                JoinConstraint::Using(_) => {}
                 JoinConstraint::Empty => {}
             };
         }
@@ -160,10 +154,7 @@ impl ReplaceLiteralsWithPlaceholders for Expression {
                 }
                 values
             }
-            Expression::Column(c) => match c.function.as_mut() {
-                Some(expr) => expr.replace_literals(),
-                None => vec![],
-            },
+            Expression::Column(_) => vec![],
             Expression::Exists(select) => select.replace_literals(),
             Expression::Between {
                 operand, min, max, ..

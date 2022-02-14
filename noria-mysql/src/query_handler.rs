@@ -63,7 +63,6 @@ impl QueryHandler for MySqlQueryHandler {
                                 column: Column {
                                     name: field_name.clone(),
                                     table: None,
-                                    function: None,
                                 },
                                 comment: None,
                             },

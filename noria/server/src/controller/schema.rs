@@ -199,7 +199,6 @@ pub(super) fn column_schema(
             Column {
                 name: vn.fields()[column_index].to_owned(),
                 table: Some(vn.name().to_owned()),
-                function: None,
             },
             // ? in case we found no schema for this column
             col_type,

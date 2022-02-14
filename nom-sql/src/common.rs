@@ -1163,27 +1163,18 @@ pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Fun
 // Parses a SQL column identifier in the table.column format
 pub fn column_identifier_no_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Column> {
     move |i| {
-        alt((
-            map(column_function(dialect), |f| Column {
-                name: format!("{}", f),
-                table: None,
-                function: Some(Box::new(f)),
-            }),
-            map(
-                pair(
-                    opt(terminated(
-                        dialect.identifier(),
-                        tuple((multispace0, tag("."), multispace0)),
-                    )),
-                    dialect.identifier(),
-                ),
-                |tup| Column {
-                    name: tup.1.to_string(),
-                    table: tup.0.map(|t| t.to_string()),
-                    function: None,
-                },
-            ),
-        ))(i)
+        let (i, table) = opt(terminated(
+            dialect.identifier(),
+            delimited(multispace0, tag("."), multispace0),
+        ))(i)?;
+        let (i, name) = dialect.identifier()(i)?;
+        Ok((
+            i,
+            Column {
+                name: name.to_string(),
+                table: table.map(|t| t.to_string()),
+            },
+        ))
     }
 }
 
@@ -1493,7 +1484,6 @@ mod tests {
             Column {
                 table: Some("foo".to_owned()),
                 name: "bar".to_owned(),
-                function: None,
             }
         )
     }
@@ -1733,7 +1723,6 @@ mod tests {
                 expr: Box::new(Expression::Column(Column {
                     table: Some("lp".to_owned()),
                     name: "start_ddtm".to_owned(),
-                    function: None,
                 })),
                 ty: SqlType::Date,
                 postgres_style: false,
@@ -1783,7 +1772,6 @@ mod tests {
                 expr: Box::new(Expression::Column(Column {
                     table: Some("lp".to_owned()),
                     name: "start_ddtm".to_owned(),
-                    function: None,
                 })),
                 ty: SqlType::Date,
                 postgres_style: false,

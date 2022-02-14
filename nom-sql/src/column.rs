@@ -12,25 +12,20 @@ use nom::{alt, complete, do_parse, named, opt, tag, tag_no_case, IResult};
 use serde::{Deserialize, Serialize};
 
 use crate::common::{column_identifier_no_alias, parse_comment, type_identifier, Literal, SqlType};
-use crate::{Dialect, Double, FunctionExpression};
+use crate::{Dialect, Double};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Column {
     pub name: String,
     pub table: Option<String>,
-    pub function: Option<Box<FunctionExpression>>,
 }
 
 impl fmt::Display for Column {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(ref table) = self.table {
-            write!(f, "`{}`.`{}`", table, self.name)?;
-        } else if let Some(ref function) = self.function {
-            write!(f, "{}", *function)?;
-        } else {
-            write!(f, "`{}`", self.name)?;
+            write!(f, "`{}`.", table)?;
         }
-        Ok(())
+        write!(f, "`{}`", self.name)
     }
 }
 
@@ -40,12 +35,10 @@ impl<'a> From<&'a str> for Column {
             None => Column {
                 name: String::from(c),
                 table: None,
-                function: None,
             },
             Some((table_name, col_name)) => Column {
                 name: String::from(col_name),
                 table: Some(String::from(table_name)),
-                function: None,
             },
         }
     }
@@ -351,7 +344,6 @@ mod tests {
                     column: Column {
                         name: "created_at".to_owned(),
                         table: None,
-                        function: None
                     },
                     sql_type: SqlType::Timestamp,
                     comment: None,
@@ -387,7 +379,6 @@ mod tests {
                     column: Column {
                         name: "created_at".to_owned(),
                         table: None,
-                        function: None
                     },
                     sql_type: SqlType::Timestamp,
                     comment: None,

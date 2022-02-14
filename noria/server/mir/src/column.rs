@@ -56,7 +56,7 @@ impl From<nom_sql::Column> for Column {
             table: c.table,
             aliases: vec![],
             name: c.name,
-            function: c.function,
+            function: None,
         }
     }
 }
@@ -67,7 +67,7 @@ impl<'a> From<&'a nom_sql::Column> for Column {
             aliases: vec![],
             table: c.table.clone(),
             name: c.name.clone(),
-            function: c.function.clone(),
+            function: None,
         }
     }
 }

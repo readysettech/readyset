@@ -468,7 +468,6 @@ impl From<ColumnName> for Column {
         Self {
             name: name.into(),
             table: None,
-            function: None,
         }
     }
 }
@@ -1993,7 +1992,6 @@ fn column_in_query<'state>(state: &mut QueryState<'state>, query: &mut SelectSta
             Column {
                 name: column.into(),
                 table: Some(table_name),
-                function: None,
             }
         }
         None => {
@@ -2003,7 +2001,6 @@ fn column_in_query<'state>(state: &mut QueryState<'state>, query: &mut SelectSta
             Column {
                 name: colname.into(),
                 table: Some(table.name.clone().into()),
-                function: None,
             }
         }
     }
@@ -2044,7 +2041,6 @@ impl QueryOperation {
                 let expr = Box::new(Expression::Column(Column {
                     name: col.into(),
                     table: Some(tbl.name.clone().into()),
-                    function: None,
                 }));
 
                 let func = match *agg {
@@ -2676,7 +2672,6 @@ impl Subquery {
                 rhs: Box::new(Expression::Column(Column {
                     name: right_join_col,
                     table: Some(subquery_name),
-                    function: None,
                 })),
             }),
         })

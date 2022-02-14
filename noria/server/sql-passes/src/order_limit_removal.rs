@@ -162,7 +162,6 @@ mod tests {
             column: Column {
                 name: "c1".to_string(),
                 table: Some("t".to_string()),
-                function: None,
             },
             sql_type: nom_sql::SqlType::Bool,
             constraints: vec![],
@@ -172,7 +171,6 @@ mod tests {
             column: Column {
                 name: "c2".to_string(),
                 table: Some("t".to_string()),
-                function: None,
             },
             sql_type: nom_sql::SqlType::Bool,
             constraints: vec![ColumnConstraint::Unique],
@@ -182,7 +180,6 @@ mod tests {
             column: Column {
                 name: "c3".to_string(),
                 table: Some("t".to_string()),
-                function: None,
             },
             sql_type: nom_sql::SqlType::Bool,
             constraints: vec![],
@@ -192,7 +189,6 @@ mod tests {
             column: Column {
                 name: "c4".to_string(),
                 table: Some("t".to_string()),
-                function: None,
             },
             sql_type: nom_sql::SqlType::Bool,
             constraints: vec![],
@@ -313,12 +309,10 @@ mod tests {
         let col1 = Column {
             name: "c1".to_string(),
             table: Some("t".to_string()),
-            function: None,
         };
         let col2 = Column {
             name: "c2".to_string(),
             table: Some("t".to_string()),
-            function: None,
         };
         let input_query = parse_query(
             Dialect::MySQL,

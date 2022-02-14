@@ -468,9 +468,7 @@ fn make_base_node(
                 column_specs
                     .iter()
                     .position(|(ColumnSpecification { column, .. }, _)| {
-                        column.name == col.name
-                            && column.table == col.table
-                            && column.function == col.function
+                        column.name == col.name && column.table == col.table
                     })
                     .ok_or_else(|| {
                         internal_err(format!("could not find pkey column id for {:?}", col))

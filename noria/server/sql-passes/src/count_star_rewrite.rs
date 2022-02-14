@@ -49,7 +49,6 @@ impl<'ast, 'schema> Visitor<'ast> for CountStarRewriteVisitor<'schema> {
                 expr: Box::new(Expression::Column(Column {
                     name: bogo_column.clone(),
                     table: Some(bogo_table.name.clone()),
-                    function: None,
                 })),
                 distinct: false,
                 count_nulls: true,

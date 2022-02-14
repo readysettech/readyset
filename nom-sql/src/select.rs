@@ -777,7 +777,6 @@ mod tests {
                     expr: Expression::Column(Column {
                         name: String::from("name"),
                         table: None,
-                        function: None,
                     })
                 }],
                 ..Default::default()
@@ -1123,17 +1122,14 @@ mod tests {
                 Expression::Column(Column {
                     name: String::from("a"),
                     table: None,
-                    function: None,
                 }),
                 Expression::Column(Column {
                     name: String::from("b"),
                     table: None,
-                    function: None,
                 }),
                 Expression::Column(Column {
                     name: String::from("c"),
                     table: None,
-                    function: None,
                 }),
             ],
         };
@@ -1147,7 +1143,6 @@ mod tests {
                 FieldDefinitionExpression::from(Column {
                     name: String::from("d"),
                     table: None,
-                    function: None,
                 }),
             ],
             ..Default::default()

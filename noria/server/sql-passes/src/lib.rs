@@ -88,11 +88,7 @@ pub fn map_aggregates(expr: &mut Expression) -> Vec<(FunctionExpression, String)
         Expression::Call(f) if is_aggregate(f) => {
             let name = f.to_string();
             ret.push((f.clone(), name.clone()));
-            *expr = Expression::Column(Column {
-                name,
-                table: None,
-                function: None,
-            });
+            *expr = Expression::Column(Column { name, table: None });
         }
         Expression::CaseWhen {
             condition,

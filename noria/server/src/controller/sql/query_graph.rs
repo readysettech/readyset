@@ -782,7 +782,6 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         Expression::Column(Column {
             table: Some(tbl.into()),
             name: (col.into()),
-            function: None,
         })
     };
 
@@ -999,11 +998,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         qg.aggregates.push((function.clone(), name.clone()));
                         qg.columns.push(OutputColumn::Data {
                             alias: name.clone(),
-                            column: Column {
-                                name,
-                                table: None,
-                                function: None,
-                            },
+                            column: Column { name, table: None },
                         })
                     }
                     _ => {

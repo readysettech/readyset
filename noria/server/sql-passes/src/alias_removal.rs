@@ -52,10 +52,6 @@ fn rewrite_table(table_remap: &HashMap<String, String>, table: &Table) -> Table 
 }
 
 fn rewrite_column(col_table_remap: &HashMap<String, String>, col: &Column) -> Column {
-    let function = col
-        .function
-        .as_ref()
-        .map(|f| Box::new(rewrite_function_expression(col_table_remap, &*f)));
     let table = col.table.as_ref().map(|t| {
         if col_table_remap.contains_key(t) {
             col_table_remap[t].clone()
@@ -66,7 +62,6 @@ fn rewrite_column(col_table_remap: &HashMap<String, String>, col: &Column) -> Co
     Column {
         name: col.name.clone(),
         table,
-        function,
     }
 }
 
@@ -491,33 +486,15 @@ mod tests {
 
     #[test]
     fn it_removes_nested_aliases() {
-        use nom_sql::{BinaryOperator, Expression, FunctionExpression};
+        use nom_sql::{BinaryOperator, Expression};
 
         let col_small = Column {
             name: "count(t.id)".try_into().unwrap(),
             table: None,
-            function: Some(Box::new(FunctionExpression::Count {
-                expr: Box::new(Expression::Column(Column {
-                    name: "id".try_into().unwrap(),
-                    table: Some("t".try_into().unwrap()),
-                    function: None,
-                })),
-                distinct: true,
-                count_nulls: false,
-            })),
         };
         let col_full = Column {
             name: "count(t.id)".try_into().unwrap(),
             table: None,
-            function: Some(Box::new(FunctionExpression::Count {
-                expr: Box::new(Expression::Column(Column {
-                    name: "id".try_into().unwrap(),
-                    table: Some("PaperTag".try_into().unwrap()),
-                    function: None,
-                })),
-                distinct: true,
-                count_nulls: false,
-            })),
         };
         let q = SelectStatement {
             tables: vec![Table {

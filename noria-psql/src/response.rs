@@ -96,7 +96,6 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                                     nom_sql::Column {
                                         name: v.name.clone(),
                                         table: None,
-                                        function: None,
                                     },
                                     SqlType::Text,
                                 ),
@@ -131,7 +130,6 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                                 nom_sql::Column {
                                     name: "name".to_string(),
                                     table: None,
-                                    function: None,
                                 },
                                 SqlType::Text,
                             ),
@@ -142,7 +140,6 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                                 nom_sql::Column {
                                     name: "value".to_string(),
                                     table: None,
-                                    function: None,
                                 },
                                 SqlType::Text,
                             ),
