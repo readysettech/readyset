@@ -23,14 +23,7 @@ pub trait ImpliedTableExpansion {
 // computed columns.
 fn set_table(mut f: Column, table: &Table) -> ReadySetResult<Column> {
     f.table = match f.table {
-        None => match f.function {
-            Some(ref mut f) => internal!(
-                "set_table({}) invoked on computed column {:?}",
-                table.name,
-                f
-            ),
-            None => Some(table.name.clone()),
-        },
+        None => Some(table.name.clone()),
         Some(x) => Some(x),
     };
     Ok(f)

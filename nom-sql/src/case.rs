@@ -50,7 +50,6 @@ mod tests {
         let c1 = Column {
             name: String::from("foo"),
             table: None,
-            function: None,
         };
 
         let exp = Expression::CaseWhen {

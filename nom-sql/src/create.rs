@@ -931,7 +931,6 @@ mod tests {
         let col = |n: &str| Column {
             name: n.into(),
             table: Some("users".into()),
-            function: None,
         };
         assert_eq!(
             res,
@@ -982,7 +981,6 @@ mod tests {
         let col = |n: &str| Column {
             name: n.into(),
             table: Some("addresses".into()),
-            function: None,
         };
         let non_null_col = |n: &str, t: SqlType| {
             ColumnSpecification::with_constraints(col(n), t, vec![ColumnConstraint::NotNull])
@@ -1052,7 +1050,6 @@ mod tests {
         let col = |n: &str| Column {
             name: n.into(),
             table: Some("orders".into()),
-            function: None,
         };
 
         assert_eq!(
@@ -1124,7 +1121,6 @@ mod tests {
         let col = |n: &str| Column {
             name: n.into(),
             table: Some("customers".into()),
-            function: None,
         };
 
         assert_eq!(
@@ -1344,7 +1340,6 @@ mod tests {
                         columns: vec![Column {
                             name: "id".into(),
                             table: Some("django_admin_log".into()),
-                            function: None,
                         }]
                     }]),
                     if_not_exists: false,
@@ -1381,7 +1376,6 @@ mod tests {
                         columns: vec![Column {
                             name: "id".into(),
                             table: Some("auth_group".into()),
-                            function: None,
                         }]
                     }]),
                     if_not_exists: false,
@@ -1542,7 +1536,6 @@ mod tests {
                             columns: vec![Column {
                                 name: "id".into(),
                                 table: Some("comments".into()),
-                                function: None,
                             }]
                         },
                     ]),
@@ -1788,7 +1781,6 @@ mod tests {
                         columns: vec![Column {
                             name: "id".into(),
                             table: Some("django_admin_log".into()),
-                            function: None,
                         }]
                     }]),
                     if_not_exists: false,
@@ -1825,7 +1817,6 @@ mod tests {
                         columns: vec![Column {
                             name: "id".into(),
                             table: Some("auth_group".into()),
-                            function: None,
                         }],
                     }]),
                     if_not_exists: false,
@@ -1952,7 +1943,6 @@ mod tests {
                             columns: vec![Column {
                                 name: "id".into(),
                                 table: Some("comments".into()),
-                                function: None,
                             }]
                         },
                     ]),
@@ -2100,7 +2090,6 @@ mod tests {
         let col = |n: &str| Column {
             name: n.into(),
             table: Some("access_tokens".into()),
-            function: None,
         };
 
         assert_eq!(
@@ -2216,7 +2205,6 @@ mod tests {
         let col = |n: &str| Column {
             name: n.into(),
             table: Some("mentions_posts".into()),
-            function: None,
         };
 
         assert_eq!(

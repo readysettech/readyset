@@ -312,14 +312,12 @@ pub(crate) fn get_limit_parameters(query: &SelectStatement) -> Vec<Column> {
             limit_params.push(Column {
                 name: "__row_count".to_string(),
                 table: None,
-                function: None,
             });
         }
         if let Some(Expression::Literal(Literal::Placeholder(_))) = limit.offset {
             limit_params.push(Column {
                 name: "__offset".to_string(),
                 table: None,
-                function: None,
             });
         }
     }
@@ -576,7 +574,6 @@ mod tests {
             .map(|k| Column {
                 name: String::from(k),
                 table: Some(String::from("T")),
-                function: None,
             })
             .collect();
 

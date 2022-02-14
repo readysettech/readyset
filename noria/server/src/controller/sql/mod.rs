@@ -20,7 +20,7 @@ use noria_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetR
 use noria_sql_passes::alias_removal::TableAliasRewrite;
 use noria_sql_passes::subqueries::SubqueryPosition;
 use noria_sql_passes::{
-    contains_aggregate, is_aggregate, AliasRemoval, CountStarRewrite, DetectProblematicSelfJoins,
+    contains_aggregate, AliasRemoval, CountStarRewrite, DetectProblematicSelfJoins,
     ImpliedTableExpansion, KeyDefinitionCoalescing, NegationRemoval, NormalizeTopKWithAggregate,
     OrderLimitRemoval, RewriteBetween, StarExpansion, StripPostFilters, SubQueries,
 };
@@ -260,9 +260,7 @@ impl SqlIncorporator {
                     let no_grouped_columns = qg.columns.iter().all(|c| match *c {
                         OutputColumn::Literal(_) => true,
                         OutputColumn::Expression(ref ec) => contains_aggregate(&ec.expression),
-                        OutputColumn::Data { column: ref dc, .. } => {
-                            !dc.function.iter().any(|f| is_aggregate(f))
-                        }
+                        OutputColumn::Data { .. } => true,
                     });
 
                     // TODO(grfn): When we want to bring back reuse, revisit the below comment - for
@@ -789,7 +787,6 @@ impl SqlIncorporator {
                 Ok(nom_sql::Column {
                     name: col_name,
                     table: Some(qfp.name),
-                    function: None,
                 })
             };
 
@@ -862,7 +859,6 @@ impl SqlIncorporator {
                             nom_sql::Column {
                                 name: "__exists_count".to_owned(),
                                 table: Some(qfp.name),
-                                function: None,
                             }
                         }
                         _ => internal!("SubqueryPosition::Exists should never contain anything other than Expression::Exists"),
@@ -1367,7 +1363,6 @@ mod tests {
                 &[&Column {
                     name: String::from("votes"),
                     table: None,
-                    function: None,
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
@@ -1876,7 +1871,6 @@ mod tests {
                 &[&Column {
                     name: String::from("count"),
                     table: None,
-                    function: None,
                 }],
             );
             let proj_helper_view = get_node(&inc, mig, &format!("q_{:x}_n0_prj_hlpr", qid));
@@ -1927,7 +1921,6 @@ mod tests {
                 &[&Column {
                     name: String::from("count"),
                     table: None,
-                    function: None,
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
@@ -1976,7 +1969,6 @@ mod tests {
                 &[&Column {
                     name: String::from("count"),
                     table: None,
-                    function: None,
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
@@ -2024,7 +2016,6 @@ mod tests {
                 &[&Column {
                     name: String::from("sum"),
                     table: None,
-                    function: None,
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
@@ -2073,7 +2064,6 @@ mod tests {
                 &[&Column {
                     name: String::from("sum"),
                     table: None,
-                    function: None,
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
@@ -2126,7 +2116,6 @@ mod tests {
                 &[&Column {
                     name: String::from("sum"),
                     table: None,
-                    function: None,
                 }],
             );
 
@@ -2219,7 +2208,6 @@ mod tests {
                 &[&Column {
                     name: String::from("sum"),
                     table: None,
-                    function: None,
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
@@ -2275,7 +2263,6 @@ mod tests {
                 &[&Column {
                     name: String::from("votes"),
                     table: None,
-                    function: None,
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));

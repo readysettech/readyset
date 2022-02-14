@@ -1364,7 +1364,6 @@ where
                     column: nom_sql::Column {
                         name: "proxied query".to_string(),
                         table: None,
-                        function: None,
                     },
                     sql_type: nom_sql::SqlType::Text,
                     constraints: vec![],

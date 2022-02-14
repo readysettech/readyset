@@ -282,7 +282,6 @@ mod tests {
                 column: Column {
                     name: "c".into(),
                     table: None,
-                    function: None,
                 },
                 sql_type: SqlType::Int(Some(32)),
                 comment: None,
@@ -308,7 +307,6 @@ mod tests {
                     column: Column {
                         name: "Email".into(),
                         table: None,
-                        function: None,
                     },
                     sql_type: SqlType::Varchar(Some(255)),
                     constraints: vec![],
@@ -318,7 +316,6 @@ mod tests {
                     column: Column {
                         name: "snailmail".into(),
                         table: None,
-                        function: None,
                     },
                     sql_type: SqlType::Text,
                     constraints: vec![],
@@ -348,7 +345,6 @@ mod tests {
                     column: Column {
                         name: "c".into(),
                         table: None,
-                        function: None,
                     },
                     sql_type: SqlType::Int(None),
                     constraints: vec![],
@@ -373,7 +369,6 @@ mod tests {
                         column: Column {
                             name: "c".into(),
                             table: None,
-                            function: None,
                         },
                         sql_type: SqlType::Int(None),
                         constraints: vec![],
@@ -383,7 +378,6 @@ mod tests {
                         column: Column {
                             name: "d".into(),
                             table: None,
-                            function: None,
                         },
                         sql_type: SqlType::Text,
                         constraints: vec![],
@@ -637,7 +631,6 @@ mod tests {
                     column: Column {
                         name: "c".into(),
                         table: None,
-                        function: None,
                     },
                     sql_type: SqlType::Int(None),
                     constraints: vec![],
@@ -662,7 +655,6 @@ mod tests {
                         column: Column {
                             name: "c".into(),
                             table: None,
-                            function: None,
                         },
                         sql_type: SqlType::Int(None),
                         constraints: vec![],
@@ -672,7 +664,6 @@ mod tests {
                         column: Column {
                             name: "d".into(),
                             table: None,
-                            function: None,
                         },
                         sql_type: SqlType::Text,
                         constraints: vec![],

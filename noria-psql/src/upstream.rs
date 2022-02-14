@@ -302,7 +302,6 @@ mod tests {
         NomColumn {
             name: "t".to_string(),
             table: None,
-            function: None,
         }
     }
 
