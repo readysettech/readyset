@@ -54,3 +54,4 @@ AND `spree_assets`.`type` = 'Spree::Image'
 AND `spree_variants`.`product_id` = 1
 AND `spree_assets`.`viewable_type` = 'Spree::Variant';
 ----
+0
