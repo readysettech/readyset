@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
-use std::ops::Deref;
 use std::vec::Vec;
 
 use ::serde::{Deserialize, Serialize};
@@ -749,7 +748,8 @@ impl SqlToMirConverter {
     fn make_aggregate_node(
         &self,
         name: &str,
-        func_col: &Column,
+        func_col: Column,
+        function: FunctionExpression,
         group_cols: Vec<&Column>,
         parent: MirNodeRef,
         projected_exprs: &HashMap<Expression, String>,
@@ -760,10 +760,10 @@ impl SqlToMirConverter {
 
         let mut out_nodes = Vec::new();
 
-        let mknode = |over: &Column, t: GroupedNodeType, distinct: bool| {
+        let mknode = |over: Column, t: GroupedNodeType, distinct: bool| {
             if distinct {
                 let new_name = format!("{}_d{}", name, out_nodes.len());
-                let mut dist_col = vec![over];
+                let mut dist_col = vec![&over];
                 dist_col.extend(group_cols.clone());
                 let node = self.make_distinct_node(&new_name, parent, dist_col.clone());
                 out_nodes.push(node.clone());
@@ -780,26 +780,20 @@ impl SqlToMirConverter {
             out_nodes
         };
 
-        let func = func_col.function.as_ref().ok_or_else(|| {
-            internal_err(format!(
-                "aggregate col {:?} was not a function",
-                func_col.function
-            ))
-        })?;
-        Ok(match *func.deref() {
+        Ok(match function {
             // TODO: support more types of filter expressions
             // CH: https://app.clubhouse.io/readysettech/story/193
             Sum {
-                expr: box Expression::Column(ref col),
+                expr: box Expression::Column(col),
                 distinct,
             } => mknode(
-                &Column::from(col),
+                Column::from(col),
                 GroupedNodeType::Aggregation(Aggregation::Sum),
                 distinct,
             ),
-            Sum { ref expr, distinct } => mknode(
+            Sum { expr, distinct } => mknode(
                 // TODO(celine): replace with ParentRef
-                &Column::named(projected_exprs.get(expr).cloned().ok_or_else(|| {
+                Column::named(projected_exprs.get(&expr).cloned().ok_or_else(|| {
                     internal_err(format!("projected_exprs does not contain {:?}", expr))
                 })?),
                 GroupedNodeType::Aggregation(Aggregation::Sum),
@@ -809,11 +803,11 @@ impl SqlToMirConverter {
                 internal!("COUNT(*) should have been rewritten earlier!")
             }
             Count {
-                expr: box Expression::Column(ref col),
+                expr: box Expression::Column(col),
                 distinct,
                 count_nulls,
             } => mknode(
-                &Column::from(col),
+                Column::from(col),
                 GroupedNodeType::Aggregation(Aggregation::Count { count_nulls }),
                 distinct,
             ),
@@ -823,23 +817,23 @@ impl SqlToMirConverter {
                 count_nulls,
             } => mknode(
                 // TODO(celine): replace with ParentRef
-                &Column::named(projected_exprs.get(expr).cloned().ok_or_else(|| {
+                Column::named(projected_exprs.get(expr).cloned().ok_or_else(|| {
                     internal_err(format!("projected_exprs does not contain {:?}", expr))
                 })?),
                 GroupedNodeType::Aggregation(Aggregation::Count { count_nulls }),
                 distinct,
             ),
             Avg {
-                expr: box Expression::Column(ref col),
+                expr: box Expression::Column(col),
                 distinct,
             } => mknode(
-                &Column::from(col),
+                Column::from(col),
                 GroupedNodeType::Aggregation(Aggregation::Avg),
                 distinct,
             ),
             Avg { ref expr, distinct } => mknode(
                 // TODO(celine): replace with ParentRef
-                &Column::named(projected_exprs.get(expr).cloned().ok_or_else(|| {
+                Column::named(projected_exprs.get(expr).cloned().ok_or_else(|| {
                     internal_err(format!("projected_exprs does not contain {:?}", expr))
                 })?),
                 GroupedNodeType::Aggregation(Aggregation::Avg),
@@ -847,63 +841,59 @@ impl SqlToMirConverter {
             ),
             // TODO(atsakiris): Support Filters for Extremum/GroupConcat
             // CH: https://app.clubhouse.io/readysettech/story/198
-            Max(box Expression::Column(ref col)) => mknode(
-                &Column::from(col),
+            Max(box Expression::Column(col)) => mknode(
+                Column::from(col),
                 GroupedNodeType::Extremum(Extremum::Max),
                 false,
             ),
             Max(ref expr) => mknode(
                 // TODO(celine): replace with ParentRef
-                &Column::named(projected_exprs.get(expr).cloned().ok_or_else(|| {
+                Column::named(projected_exprs.get(expr).cloned().ok_or_else(|| {
                     internal_err(format!("projected_exprs does not contain {:?}", expr))
                 })?),
                 GroupedNodeType::Extremum(Extremum::Max),
                 false,
             ),
-            Min(box Expression::Column(ref col)) => mknode(
-                &Column::from(col),
+            Min(box Expression::Column(col)) => mknode(
+                Column::from(col),
                 GroupedNodeType::Extremum(Extremum::Min),
                 false,
             ),
             Min(ref expr) => mknode(
                 // TODO(celine): replace with ParentRef
-                &Column::named(projected_exprs.get(expr).cloned().ok_or_else(|| {
+                Column::named(projected_exprs.get(expr).cloned().ok_or_else(|| {
                     internal_err(format!("projected_exprs does not contain {:?}", expr))
                 })?),
                 GroupedNodeType::Extremum(Extremum::Min),
                 false,
             ),
             GroupConcat {
-                expr: box Expression::Column(ref col),
-                ref separator,
+                expr: box Expression::Column(col),
+                separator,
             } => mknode(
-                &Column::from(col),
-                GroupedNodeType::Aggregation(Aggregation::GroupConcat {
-                    separator: separator.clone(),
-                }),
+                Column::from(col),
+                GroupedNodeType::Aggregation(Aggregation::GroupConcat { separator }),
                 false,
             ),
-            _ => internal!("{:?}", func),
+            _ => internal!("not an aggregate: {:?}", function),
         })
     }
 
     fn make_grouped_node(
         &self,
         name: &str,
-        computed_col: &Column,
-        over: (MirNodeRef, &Column),
+        computed_col: Column,
+        (parent_node, over_col): (MirNodeRef, Column),
         group_by: Vec<&Column>,
         node_type: GroupedNodeType,
     ) -> MirNodeRef {
-        let (parent_node, over_col) = over;
-
         // The aggregate node's set of output columns is the group columns plus the function
         // column
         let mut combined_columns = group_by
             .iter()
             .map(|c| (*c).clone())
             .collect::<Vec<Column>>();
-        combined_columns.push(computed_col.clone());
+        combined_columns.push(computed_col);
 
         // make the new operator
         match node_type {
@@ -912,7 +902,7 @@ impl SqlToMirConverter {
                 self.schema_version,
                 combined_columns,
                 MirNodeInner::Aggregation {
-                    on: over_col.clone(),
+                    on: over_col,
                     group_by: group_by.into_iter().cloned().collect(),
                     kind: agg,
                 },
@@ -924,7 +914,7 @@ impl SqlToMirConverter {
                 self.schema_version,
                 combined_columns,
                 MirNodeInner::Extremum {
-                    on: over_col.clone(),
+                    on: over_col,
                     group_by: group_by.into_iter().cloned().collect(),
                     kind: extr,
                 },
@@ -1410,10 +1400,6 @@ impl SqlToMirConverter {
             let mut sorted_rels: Vec<&str> = qg.relations.keys().map(String::as_str).collect();
             sorted_rels.sort_unstable();
             for rel in &sorted_rels {
-                if *rel == "computed_columns" {
-                    continue;
-                }
-
                 let base_for_rel = self.get_view(rel)?;
 
                 base_nodes.push(base_for_rel.clone());
@@ -1474,10 +1460,6 @@ impl SqlToMirConverter {
             let mut column_to_predicates: HashMap<Column, Vec<&Expression>> = HashMap::new();
 
             for rel in &sorted_rels {
-                if *rel == "computed_columns" {
-                    continue;
-                }
-
                 let qgn = qg.relations.get(*rel).ok_or_else(|| {
                     internal_err(format!("couldn't find {:?} in qg relations", rel))
                 })?;
@@ -1526,11 +1508,6 @@ impl SqlToMirConverter {
                 let qgn = qg.relations.get(*rel).ok_or_else(|| {
                     internal_err(format!("qg relations did not contain {:?}", rel))
                 })?;
-                // we've already handled computed columns
-                if *rel == "computed_columns" {
-                    continue;
-                }
-
                 // the following conditional is required to avoid "empty" nodes (without any
                 // projected columns) that are required as inputs to joins
                 if !qgn.predicates.is_empty() {

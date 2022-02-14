@@ -116,10 +116,9 @@ fn chains_to_order(chains: Vec<JoinChain>, order: &mut Vec<JoinRef>) {
     *order = new_order;
 }
 
-fn predicates_for_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> Option<&'a [JoinPredicate]> {
-    match qg.edges[&(jref.src.clone(), jref.dst.clone())] {
-        QueryGraphEdge::Join { ref on } | QueryGraphEdge::LeftJoin { ref on } => Some(on),
-        QueryGraphEdge::GroupBy(_) => None,
+fn predicates_for_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> &'a [JoinPredicate] {
+    match &qg.edges[&(jref.src.clone(), jref.dst.clone())] {
+        QueryGraphEdge::Join { on } | QueryGraphEdge::LeftJoin { on } => on,
     }
 }
 
@@ -147,20 +146,12 @@ pub(super) fn reorder_joins(
                 continue;
             }
 
-            let ejps = if let Some(ejps) = predicates_for_join_ref(existing_jref, eqg) {
-                ejps
-            } else {
-                continue;
-            };
+            let ejps = predicates_for_join_ref(existing_jref, eqg);
 
             // look in the new query graph for an equivalent join predicate.
             let mut found = false;
             for new_jref in qg.join_order.iter() {
-                let njps = if let Some(njps) = predicates_for_join_ref(new_jref, qg) {
-                    njps
-                } else {
-                    continue;
-                };
+                let njps = predicates_for_join_ref(new_jref, qg);
                 // if we find an equivalent join, add it to the new query's join chains
                 if join_predicates_are_equivalent(njps, ejps)? {
                     extend_chains(&mut shared_join_chains, new_jref);

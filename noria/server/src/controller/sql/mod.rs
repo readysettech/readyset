@@ -1035,7 +1035,7 @@ impl<'a> ToFlowParts for &'a str {
 #[cfg(test)]
 mod tests {
     use dataflow::prelude::*;
-    use nom_sql::{BinaryOperator, Column, Dialect, Expression, FunctionExpression, Literal};
+    use nom_sql::{Column, Dialect};
 
     use super::{SqlIncorporator, ToFlowParts};
     use crate::controller::Migration;
@@ -1361,18 +1361,13 @@ mod tests {
             // added the aggregation and the edge view, and a reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Count {
-                expr: Box::new(Expression::Column(Column::from("votes.userid"))),
-                distinct: false,
-                count_nulls: false,
-            });
             let qid = query_id_hash(
-                &["computed_columns", "votes"],
+                &["votes"],
                 &[&Column::from("votes.aid")],
                 &[&Column {
                     name: String::from("votes"),
                     table: None,
-                    function: Some(f),
+                    function: None,
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
@@ -1875,18 +1870,13 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 6);
             // check project helper node
-            let f = Box::new(FunctionExpression::Count {
-                expr: Box::new(Expression::Column(Column::from("votes.userid"))),
-                distinct: false,
-                count_nulls: false,
-            });
             let qid = query_id_hash(
-                &["computed_columns", "votes"],
+                &["votes"],
                 &[],
                 &[&Column {
                     name: String::from("count"),
                     table: None,
-                    function: Some(f),
+                    function: None,
                 }],
             );
             let proj_helper_view = get_node(&inc, mig, &format!("q_{:x}_n0_prj_hlpr", qid));
@@ -1931,18 +1921,13 @@ mod tests {
             // added the aggregation, a project helper, the edge view, and reader
             assert_eq!(mig.graph().node_count(), 5);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Count {
-                expr: Box::new(Expression::Column(Column::from("votes.userid"))),
-                distinct: false,
-                count_nulls: true,
-            });
             let qid = query_id_hash(
-                &["computed_columns", "votes"],
+                &["votes"],
                 &[&Column::from("votes.userid")],
                 &[&Column {
                     name: String::from("count"),
                     table: None,
-                    function: Some(f),
+                    function: None,
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
@@ -1985,28 +1970,13 @@ mod tests {
             // reader
             assert_eq!(mig.graph().node_count(), 6);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Count{
-                expr: Box::new(Expression::CaseWhen {
-                    condition: Box::new(
-                        Expression::BinaryOp {
-                            op: BinaryOperator::Equal,
-                            lhs: Box::new(Expression::Column(Column::from("votes.aid"))),
-                            rhs: Box::new(Expression::Literal(5.into())),
-                        }
-                    ),
-                    then_expr: Box::new(Expression::Column(Column::from("votes.aid"))),
-                    else_expr: None,
-                }),
-                distinct: false,
-                count_nulls: false,
-            });
             let qid = query_id_hash(
-                &["computed_columns", "votes"],
+                &["votes"],
                 &[&Column::from("votes.userid")],
                 &[&Column {
                     name: String::from("count"),
                     table: None,
-                    function: Some(f),
+                    function: None,
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
@@ -2048,26 +2018,13 @@ mod tests {
             // reader
             assert_eq!(mig.graph().node_count(), 6);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Sum{expr: Box::new(Expression::CaseWhen {
-                condition: Box::new(
-                    Expression::BinaryOp {
-                        op: BinaryOperator::Equal,
-                        lhs: Box::new(Expression::Column(Column::from("votes.aid"))),
-                        rhs: Box::new(Expression::Literal(5.into())),
-                    }
-                ),
-                then_expr: Box::new(Expression::Column(Column::from("votes.sign"))),
-                else_expr: None,
-            }),
-                distinct: false
-            });
             let qid = query_id_hash(
-                &["computed_columns", "votes"],
+                &["votes"],
                 &[&Column::from("votes.userid")],
                 &[&Column {
                     name: String::from("sum"),
                     table: None,
-                    function: Some(f),
+                    function: None,
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
@@ -2110,27 +2067,13 @@ mod tests {
             // reader
             assert_eq!(mig.graph().node_count(), 6);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Sum{
-                expr: Box::new(Expression::CaseWhen {
-                    condition: Box::new(
-                        Expression::BinaryOp {
-                            op: BinaryOperator::Equal,
-                            lhs: Box::new(Expression::Column(Column::from("votes.aid"))),
-                            rhs: Box::new(Expression::Literal(5.into())),
-                        }
-                    ),
-                    then_expr: Box::new(Expression::Column(Column::from("votes.sign"))),
-                    else_expr: Some(Box::new(Expression::Literal(Literal::Integer(6)))),
-                }),
-                distinct: false
-            });
             let qid = query_id_hash(
-                &["computed_columns", "votes"],
+                &["votes"],
                 &[&Column::from("votes.userid")],
                 &[&Column {
                     name: String::from("sum"),
                     table: None,
-                    function: Some(f),
+                    function: None,
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
@@ -2177,17 +2120,13 @@ mod tests {
             assert!(res.is_ok());
             // note: the FunctionExpression isn't a sumfilter because it takes the hash before
             // merging
-            let f = Box::new(FunctionExpression::Sum {
-                expr: Box::new(Expression::Column(Column::from("votes.sign"))),
-                distinct: false,
-            });
             let qid = query_id_hash(
-                &["computed_columns", "votes"],
+                &["votes"],
                 &[&Column::from("votes.userid"), &Column::from("votes.aid")],
                 &[&Column {
                     name: String::from("sum"),
                     table: None,
-                    function: Some(f),
+                    function: None,
                 }],
             );
 
@@ -2274,17 +2213,13 @@ mod tests {
             // reader
             assert_eq!(mig.graph().node_count(), 6);
             // check aggregation view
-            let f = Box::new(FunctionExpression::Sum {
-                expr: Box::new(Expression::Column(Column::from("votes.sign"))),
-                distinct: false,
-            });
             let qid = query_id_hash(
-                &["computed_columns", "votes"],
+                &["votes"],
                 &[&Column::from("votes.userid"), &Column::from("sum")],
                 &[&Column {
                     name: String::from("sum"),
                     table: None,
-                    function: Some(f),
+                    function: None,
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
@@ -2334,34 +2269,13 @@ mod tests {
             // reader
             assert_eq!(mig.graph().node_count(), 6);
             // check aggregation view
-            let filter_cond = Expression::BinaryOp {
-                lhs: Box::new(Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column(Column::from("votes.story_id"))),
-                    op: BinaryOperator::Is,
-                    rhs: Box::new(Expression::Literal(Literal::Null)),
-                }),
-                op: BinaryOperator::And,
-                rhs: Box::new(Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column(Column::from("votes.vote"))),
-                    op: BinaryOperator::Equal,
-                    rhs: Box::new(Expression::Literal(Literal::Integer(0))),
-                }),
-            };
-            let f = Box::new(FunctionExpression::Count{expr: Box::new(Expression::CaseWhen {
-                condition: Box::new(filter_cond),
-                then_expr: Box::new(Expression::Column(Column::from("votes.vote"))),
-                else_expr: None,
-            }),
-                distinct: false,
-                count_nulls: false,
-            });
             let qid = query_id_hash(
-                &["computed_columns", "votes"],
+                &["votes"],
                 &[&Column::from("votes.comment_id")],
                 &[&Column {
                     name: String::from("votes"),
                     table: None,
-                    function: Some(f),
+                    function: None,
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));

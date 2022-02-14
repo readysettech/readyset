@@ -119,11 +119,10 @@ impl Signature for QueryGraph {
                         .flat_map(|p| p.referred_columns())
                         .for_each(&mut record_column);
                 }
-                QueryGraphEdge::GroupBy(ref cols) => {
-                    cols.iter().for_each(&mut record_column);
-                }
             }
         }
+
+        self.group_by.iter().for_each(&mut record_column);
 
         // Global predicates are part of the attributes too
         self.global_predicates

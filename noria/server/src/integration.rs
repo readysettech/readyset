@@ -3222,6 +3222,7 @@ async fn recipe_activates_and_migrates_with_join() {
 }
 
 async fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool) {
+    readyset_logging::init_test_logging();
     use std::fs::File;
     use std::io::Read;
 
@@ -3268,7 +3269,8 @@ async fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool) 
         // Add them one by one
         for (_i, q) in lines.iter().enumerate() {
             let changelist = ChangeList::from_str(q).unwrap();
-            assert!(r.activate(mig, changelist).is_ok());
+            let res = r.activate(mig, changelist);
+            assert!(res.is_ok(), "{}", res.err().unwrap());
         }
     })
     .await;
