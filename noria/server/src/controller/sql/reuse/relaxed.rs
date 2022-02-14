@@ -98,42 +98,16 @@ impl Relaxed {
                         _ => return Ok(None),
                     }
                 }
-                _ => continue,
             }
         }
 
         // Checks group by compatibility between queries.
-        for (srcdst, ex_qge) in &existing_qg.edges {
-            match *ex_qge {
-                QueryGraphEdge::GroupBy(ref ex_columns) => {
-                    if !new_qg.edges.contains_key(srcdst) {
-                        return Ok(Some(ReuseType::PrefixReuse));
-                    }
-                    let new_qge = &new_qg.edges[srcdst];
-                    match *new_qge {
-                        QueryGraphEdge::GroupBy(ref new_columns) => {
-                            // GroupBy implication holds if the new QG groups by the same columns as
-                            // the original one, or by a *superset* (as we can always apply more
-                            // grouped operatinos on top of earlier ones)
-                            if new_columns.len() < ex_columns.len() {
-                                // more columns in existing QG's GroupBy, so we're done
-                                // however, we can still reuse joins and predicates.
-                                return Ok(Some(ReuseType::PrefixReuse));
-                            }
-                            for ex_col in ex_columns {
-                                // EQG groups by a column that we don't group by, so we can't reuse
-                                // the group by nodes, but we can still reuse joins and predicates.
-                                if !new_columns.contains(ex_col) {
-                                    return Ok(Some(ReuseType::PrefixReuse));
-                                }
-                            }
-                        }
-                        // If there is no matching GroupBy edge, we cannot reuse the group by clause
-                        _ => return Ok(Some(ReuseType::PrefixReuse)),
-                    }
-                }
-                _ => continue,
-            }
+        // GroupBy implication holds if the new QG groups by the same columns as
+        // the original one, or by a *superset* (as we can always apply more
+        if !new_qg.group_by.is_superset(&existing_qg.group_by) {
+            // EQG groups by a column that we don't group by, so we can't reuse
+            // the group by nodes, but we can still reuse joins and predicates.
+            return Ok(Some(ReuseType::PrefixReuse));
         }
 
         // Check that the new query's predicates imply the existing query's predicate.

@@ -8,7 +8,9 @@ use maplit::hashset;
 use crate::create::CreateCachedQueryStatement;
 use crate::{Column, Expression, FunctionExpression, InValue, SqlQuery, Table};
 
+/// Extension trait providing the `referred_tables` method to various parts of the AST
 pub trait ReferredTables {
+    /// Return a set of all tables referred to in `self`
     fn referred_tables(&self) -> HashSet<Table>;
 }
 
@@ -177,6 +179,18 @@ impl ReferredColumns for Expression {
             exprs_to_visit: vec![self],
             columns_to_visit: vec![],
         }
+    }
+}
+
+impl ReferredColumns for FunctionExpression {
+    fn referred_columns(&self) -> ReferredColumnsIter {
+        let mut iter = ReferredColumnsIter {
+            exprs_to_visit: vec![],
+            columns_to_visit: vec![],
+        };
+        let initial_columns = iter.visit_function_expression(self);
+        iter.columns_to_visit.extend(initial_columns);
+        iter
     }
 }
 

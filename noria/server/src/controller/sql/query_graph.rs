@@ -9,9 +9,9 @@ use std::vec::Vec;
 use common::IndexType;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
-    BinaryOperator, Column, Expression, FieldDefinitionExpression, InValue, ItemPlaceholder,
-    JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderType, SelectStatement, Table,
-    UnaryOperator,
+    BinaryOperator, Column, Expression, FieldDefinitionExpression, FunctionExpression, InValue,
+    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderType,
+    SelectStatement, Table, UnaryOperator,
 };
 use noria::{PlaceholderIdx, ViewPlaceholder};
 use noria_errors::{
@@ -188,7 +188,6 @@ pub struct QueryGraphNode {
 pub enum QueryGraphEdge {
     Join { on: Vec<JoinPredicate> },
     LeftJoin { on: Vec<JoinPredicate> },
-    GroupBy(Vec<Column>),
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
@@ -210,12 +209,19 @@ pub struct ViewKey {
 }
 
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+// NOTE: Keep in mind this struct has a custom Hash impl - when changing it, remember to update that
+// as well!
+// TODO(grfn): impl Arbitrary for this struct so we can make a proptest for that
 pub struct QueryGraph {
     /// Relations mentioned in the query.
     pub relations: HashMap<String, QueryGraphNode>,
-    /// Joins and GroupBys in the query.
+    /// Joins in the query.
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     pub edges: HashMap<(String, String), QueryGraphEdge>,
+    /// Aggregates in the query, represented as a list of (expression, alias) pairs
+    pub aggregates: Vec<(FunctionExpression, String)>,
+    /// Set of columns that appear in the GROUP BY clause
+    pub group_by: HashSet<Column>,
     /// Final set of projected columns in this query; may include literals in addition to the
     /// columns reflected in individual relations' `QueryGraphNode` structures.
     pub columns: Vec<OutputColumn>,
@@ -359,7 +365,12 @@ impl Hash for QueryGraph {
         });
         edges.hash(state);
 
+        let mut group_by = self.group_by.iter().collect::<Vec<_>>();
+        group_by.sort();
+        group_by.hash(state);
+
         // columns and join_order are Vecs, so already ordered
+        self.aggregates.hash(state);
         self.columns.hash(state);
         self.join_order.hash(state);
         self.global_predicates.hash(state);
@@ -963,25 +974,6 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         qg.global_predicates = global_predicates;
     }
 
-    // 4. Add query graph nodes for any computed columns, which won't be represented in the
-    //    nodes corresponding to individual relations.
-    let add_computed_column = |qg: &mut QueryGraph, function, name| {
-        let column = Column {
-            name,
-            table: None,
-            function: Some(Box::new(function)),
-        };
-
-        // add a special node representing the computed columns; if it already
-        // exists, add another computed column to it
-        let n = qg
-            .relations
-            .entry("computed_columns".to_owned())
-            .or_insert_with(|| new_node("computed_columns".to_owned(), vec![], st).unwrap());
-        n.columns.push(column.clone());
-        column
-    };
-
     for field in st.fields.iter() {
         match field {
             FieldDefinitionExpression::All | FieldDefinitionExpression::AllInTable(_) => {
@@ -1004,18 +996,20 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         });
                     }
                     Expression::Call(function) if is_aggregate(function) => {
-                        let column = add_computed_column(&mut qg, function.clone(), name.clone());
+                        qg.aggregates.push((function.clone(), name.clone()));
                         qg.columns.push(OutputColumn::Data {
-                            alias: name,
-                            column,
+                            alias: name.clone(),
+                            column: Column {
+                                name,
+                                table: None,
+                                function: None,
+                            },
                         })
                     }
                     _ => {
                         let mut expr = expr.clone();
                         let aggs = map_aggregates(&mut expr);
-                        for (agg, name) in aggs {
-                            add_computed_column(&mut qg, agg, name);
-                        }
+                        qg.aggregates.extend(aggs);
 
                         qg.columns.push(OutputColumn::Expression(ExpressionColumn {
                             name,
@@ -1028,24 +1022,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         }
     }
 
-    match st.group_by {
-        None => (),
-        Some(ref clause) => {
-            for column in &clause.columns {
-                // add an edge for each relation whose columns appear in the GROUP BY clause
-                let e = qg
-                    .edges
-                    .entry((
-                        String::from("computed_columns"),
-                        column.table.as_ref().unwrap().clone(),
-                    ))
-                    .or_insert_with(|| QueryGraphEdge::GroupBy(vec![]));
-                match *e {
-                    QueryGraphEdge::GroupBy(ref mut cols) => cols.push(column.clone()),
-                    _ => internal!(),
-                }
-            }
-        }
+    if let Some(group_by_clause) = &st.group_by {
+        qg.group_by.extend(group_by_clause.columns.clone());
     }
 
     if let Some(ref order) = st.order {
@@ -1075,10 +1053,14 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                 (_, Some(box func)) => {
                     // This is a function call expression that we need to add to the list of
                     // projected columns
-                    let column = add_computed_column(&mut qg, func.clone(), ord_col.name.clone());
+                    qg.aggregates.push((func.clone(), ord_col.name.clone()));
                     qg.columns.push(OutputColumn::Data {
-                        alias: column.name.clone(),
-                        column,
+                        alias: ord_col.name.clone(),
+                        column: Column {
+                            name: ord_col.name.clone(),
+                            table: None,
+                            function: None,
+                        },
                     })
                 }
             });
@@ -1100,17 +1082,11 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         // Sort the edges to ensure deterministic join order.
         sorted_edges.sort_by(|&(a, _), &(b, _)| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
 
-        for ((src, dst), edge) in sorted_edges {
-            match edge {
-                QueryGraphEdge::Join { .. } | QueryGraphEdge::LeftJoin { .. } => {
-                    qg.join_order.push(JoinRef {
-                        src: src.clone(),
-                        dst: dst.clone(),
-                    })
-                }
-                QueryGraphEdge::GroupBy(_) => continue,
-            }
-        }
+        qg.join_order
+            .extend(sorted_edges.iter().map(|((src, dst), _)| JoinRef {
+                src: src.clone(),
+                dst: dst.clone(),
+            }));
     }
 
     Ok(qg)
@@ -1118,7 +1094,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, Dialect, SqlQuery};
+    use nom_sql::{parse_query, Dialect, FunctionExpression, SqlQuery};
 
     use super::*;
 
@@ -1135,256 +1111,295 @@ mod tests {
     }
 
     #[test]
-    fn bogokey_key() {
-        let qg = make_query_graph("SELECT t.x FROM t");
-        let key = qg.view_key(&Default::default()).unwrap();
-
-        assert_eq!(key.index_type, IndexType::HashMap);
+    fn aggregates() {
+        let qg = make_query_graph("SELECT max(t1.x) FROM t1 JOIN t2 ON t1.id = t2.id");
         assert_eq!(
-            key.columns,
+            qg.relations.keys().cloned().collect::<HashSet<_>>(),
+            HashSet::from(["t1".to_owned(), "t2".to_owned()])
+        );
+        assert_eq!(
+            qg.aggregates,
             vec![(
-                mir::Column::new(None, "bogokey"),
-                ViewPlaceholder::Generated
+                FunctionExpression::Max(Box::new(Expression::Column("t1.x".into()))),
+                "max(`t1`.`x`)".to_owned()
             )]
         );
     }
 
     #[test]
-    fn one_to_one_equal_key() {
-        let qg = make_query_graph("SELECT t.x FROM t WHERE t.x = $1");
-        let key = qg.view_key(&Default::default()).unwrap();
-
-        assert_eq!(key.index_type, IndexType::HashMap);
+    fn aggregates_with_alias() {
+        let qg = make_query_graph("SELECT max(t1.x) AS max_x FROM t1 JOIN t2 ON t1.id = t2.id");
         assert_eq!(
-            key.columns,
-            vec![(
-                mir::Column::new(Some("t"), "x"),
-                ViewPlaceholder::OneToOne(1)
-            )]
-        )
-    }
-
-    #[test]
-    fn double_equality_same_column() {
-        let qg = make_query_graph("SELECT t.x FROM t WHERE t.x = $1 AND t.x = $2");
-        let key = qg.view_key(&Default::default()).unwrap();
-
-        assert_eq!(key.index_type, IndexType::HashMap);
-
-        assert_eq!(
-            key.columns,
-            vec![
-                (
-                    mir::Column::new(Some("t"), "x"),
-                    ViewPlaceholder::OneToOne(2)
-                ),
-                (
-                    mir::Column::new(Some("t"), "x"),
-                    ViewPlaceholder::OneToOne(1)
-                )
-            ]
-        )
-    }
-
-    #[test]
-    fn double_range_same_column() {
-        let qg = make_query_graph("SELECT t.x FROM t WHERE t.x > $1 AND t.x > $2");
-        let key = qg.view_key(&Default::default()).unwrap();
-
-        assert_eq!(key.index_type, IndexType::BTreeMap);
-
-        assert_eq!(
-            key.columns,
-            vec![
-                (
-                    mir::Column::new(Some("t"), "x"),
-                    ViewPlaceholder::OneToOne(1)
-                ),
-                (
-                    mir::Column::new(Some("t"), "x"),
-                    ViewPlaceholder::OneToOne(2)
-                )
-            ]
-        )
-    }
-
-    #[test]
-    fn compound_keys() {
-        let qg = make_query_graph("SELECT Cats.id FROM Cats WHERE Cats.name = $1 AND Cats.id = $2");
-        let key = qg.view_key(&Default::default()).unwrap();
-
-        assert_eq!(key.index_type, IndexType::HashMap);
-        assert_eq!(
-            key.columns,
-            vec![
-                (
-                    mir::Column::new(Some("Cats"), "id"),
-                    ViewPlaceholder::OneToOne(2)
-                ),
-                (
-                    mir::Column::new(Some("Cats"), "name"),
-                    ViewPlaceholder::OneToOne(1)
-                ),
-            ]
+            qg.relations.keys().cloned().collect::<HashSet<_>>(),
+            HashSet::from(["t1".to_owned(), "t2".to_owned()])
         );
-    }
-
-    #[test]
-    fn one_to_one_range_key() {
-        let qg = make_query_graph("SELECT t.x FROM t WHERE t.x > $1");
-        let key = qg.view_key(&Default::default()).unwrap();
-
-        assert_eq!(key.index_type, IndexType::BTreeMap);
         assert_eq!(
-            key.columns,
+            qg.aggregates,
             vec![(
-                mir::Column::new(Some("t"), "x"),
-                ViewPlaceholder::OneToOne(1)
-            )]
-        )
-    }
-
-    #[test]
-    fn between_keys() {
-        let qg = make_query_graph("SELECT t.x FROM t WHERE t.x >= $1 AND t.x <= $2");
-        let key = qg.view_key(&Default::default()).unwrap();
-
-        assert_eq!(key.index_type, IndexType::BTreeMap);
-        assert_eq!(
-            key.columns,
-            vec![(
-                mir::Column::new(Some("t"), "x"),
-                ViewPlaceholder::Between(1, 2)
+                FunctionExpression::Max(Box::new(Expression::Column("t1.x".into()))),
+                "max_x".to_owned()
             )]
         );
     }
 
-    #[test]
-    fn between_keys_reversed() {
-        let qg = make_query_graph("SELECT t.x FROM t WHERE t.x <= $1 AND t.x >= $2");
-        let key = qg.view_key(&Default::default()).unwrap();
+    mod view_key {
+        use super::*;
 
-        assert_eq!(key.index_type, IndexType::BTreeMap);
-        assert_eq!(
-            key.columns,
-            vec![(
-                mir::Column::new(Some("t"), "x"),
-                ViewPlaceholder::Between(2, 1)
-            )]
-        );
-    }
+        #[test]
+        fn bogokey_key() {
+            let qg = make_query_graph("SELECT t.x FROM t");
+            let key = qg.view_key(&Default::default()).unwrap();
 
-    #[test]
-    fn mixed_inclusive_and_equal() {
-        let qg = make_query_graph("SELECT t.x FROM t WHERE t.x >= $1 AND t.y = $2");
-        let key = qg
-            .view_key(&mir::Config {
-                allow_mixed_comparisons: true,
-                ..Default::default()
-            })
-            .unwrap();
+            assert_eq!(key.index_type, IndexType::HashMap);
+            assert_eq!(
+                key.columns,
+                vec![(
+                    mir::Column::new(None, "bogokey"),
+                    ViewPlaceholder::Generated
+                )]
+            );
+        }
 
-        assert_eq!(key.index_type, IndexType::BTreeMap);
-        assert_eq!(
-            key.columns,
-            vec![
-                (
-                    mir::Column::new(Some("t"), "y"),
-                    ViewPlaceholder::OneToOne(2)
-                ),
-                (
+        #[test]
+        fn one_to_one_equal_key() {
+            let qg = make_query_graph("SELECT t.x FROM t WHERE t.x = $1");
+            let key = qg.view_key(&Default::default()).unwrap();
+
+            assert_eq!(key.index_type, IndexType::HashMap);
+            assert_eq!(
+                key.columns,
+                vec![(
                     mir::Column::new(Some("t"), "x"),
                     ViewPlaceholder::OneToOne(1)
-                ),
-            ]
-        );
-    }
+                )]
+            )
+        }
 
-    #[test]
-    fn mixed_opposite_ranges() {
-        let qg = make_query_graph("SELECT t.x FROM t WHERE t.x > $1 AND t.y <= $2 AND t.z = $3");
-        let key = qg
-            .view_key(&mir::Config {
-                allow_mixed_comparisons: true,
-                ..Default::default()
-            })
-            .unwrap();
+        #[test]
+        fn double_equality_same_column() {
+            let qg = make_query_graph("SELECT t.x FROM t WHERE t.x = $1 AND t.x = $2");
+            let key = qg.view_key(&Default::default()).unwrap();
 
-        assert_eq!(key.index_type, IndexType::BTreeMap);
-        assert_eq!(
-            key.columns,
-            vec![
-                (
-                    mir::Column::new(Some("t"), "z"),
-                    ViewPlaceholder::OneToOne(3)
-                ),
-                (
+            assert_eq!(key.index_type, IndexType::HashMap);
+
+            assert_eq!(
+                key.columns,
+                vec![
+                    (
+                        mir::Column::new(Some("t"), "x"),
+                        ViewPlaceholder::OneToOne(2)
+                    ),
+                    (
+                        mir::Column::new(Some("t"), "x"),
+                        ViewPlaceholder::OneToOne(1)
+                    )
+                ]
+            )
+        }
+
+        #[test]
+        fn double_range_same_column() {
+            let qg = make_query_graph("SELECT t.x FROM t WHERE t.x > $1 AND t.x > $2");
+            let key = qg.view_key(&Default::default()).unwrap();
+
+            assert_eq!(key.index_type, IndexType::BTreeMap);
+
+            assert_eq!(
+                key.columns,
+                vec![
+                    (
+                        mir::Column::new(Some("t"), "x"),
+                        ViewPlaceholder::OneToOne(1)
+                    ),
+                    (
+                        mir::Column::new(Some("t"), "x"),
+                        ViewPlaceholder::OneToOne(2)
+                    )
+                ]
+            )
+        }
+
+        #[test]
+        fn compound_keys() {
+            let qg =
+                make_query_graph("SELECT Cats.id FROM Cats WHERE Cats.name = $1 AND Cats.id = $2");
+            let key = qg.view_key(&Default::default()).unwrap();
+
+            assert_eq!(key.index_type, IndexType::HashMap);
+            assert_eq!(
+                key.columns,
+                vec![
+                    (
+                        mir::Column::new(Some("Cats"), "id"),
+                        ViewPlaceholder::OneToOne(2)
+                    ),
+                    (
+                        mir::Column::new(Some("Cats"), "name"),
+                        ViewPlaceholder::OneToOne(1)
+                    ),
+                ]
+            );
+        }
+
+        #[test]
+        fn one_to_one_range_key() {
+            let qg = make_query_graph("SELECT t.x FROM t WHERE t.x > $1");
+            let key = qg.view_key(&Default::default()).unwrap();
+
+            assert_eq!(key.index_type, IndexType::BTreeMap);
+            assert_eq!(
+                key.columns,
+                vec![(
                     mir::Column::new(Some("t"), "x"),
                     ViewPlaceholder::OneToOne(1)
-                ),
-                (
-                    mir::Column::new(Some("t"), "y"),
-                    ViewPlaceholder::OneToOne(2)
-                ),
-            ]
-        );
-    }
+                )]
+            )
+        }
 
-    #[test]
-    fn mixed_equal_and_between() {
-        let qg = make_query_graph("SELECT t.x FROM t WHERE t.x >= $1 AND t.x <= $2 AND t.y = $3");
-        let key = qg
-            .view_key(&mir::Config {
-                allow_mixed_comparisons: true,
-                ..Default::default()
-            })
-            .unwrap();
+        #[test]
+        fn between_keys() {
+            let qg = make_query_graph("SELECT t.x FROM t WHERE t.x >= $1 AND t.x <= $2");
+            let key = qg.view_key(&Default::default()).unwrap();
 
-        assert_eq!(key.index_type, IndexType::BTreeMap);
-        assert_eq!(
-            key.columns,
-            vec![
-                (
-                    mir::Column::new(Some("t"), "y"),
-                    ViewPlaceholder::OneToOne(3)
-                ),
-                (
+            assert_eq!(key.index_type, IndexType::BTreeMap);
+            assert_eq!(
+                key.columns,
+                vec![(
                     mir::Column::new(Some("t"), "x"),
                     ViewPlaceholder::Between(1, 2)
-                )
-            ]
-        );
-    }
+                )]
+            );
+        }
 
-    #[test]
-    fn mixed_equal_range_and_between() {
-        let qg = make_query_graph(
-            "SELECT t.x FROM t WHERE t.x >= $1 AND t.x <= $2 AND t.y < $3 AND t.z = $4",
-        );
-        let key = qg
-            .view_key(&mir::Config {
-                allow_mixed_comparisons: true,
-                ..Default::default()
-            })
-            .unwrap();
+        #[test]
+        fn between_keys_reversed() {
+            let qg = make_query_graph("SELECT t.x FROM t WHERE t.x <= $1 AND t.x >= $2");
+            let key = qg.view_key(&Default::default()).unwrap();
 
-        assert_eq!(key.index_type, IndexType::BTreeMap);
-        assert_eq!(
-            key.columns,
-            vec![
-                (
-                    mir::Column::new(Some("t"), "z"),
-                    ViewPlaceholder::OneToOne(4)
-                ),
-                (
+            assert_eq!(key.index_type, IndexType::BTreeMap);
+            assert_eq!(
+                key.columns,
+                vec![(
                     mir::Column::new(Some("t"), "x"),
-                    ViewPlaceholder::Between(1, 2)
-                ),
-                (
-                    mir::Column::new(Some("t"), "y"),
-                    ViewPlaceholder::OneToOne(3)
-                )
-            ]
-        );
+                    ViewPlaceholder::Between(2, 1)
+                )]
+            );
+        }
+
+        #[test]
+        fn mixed_inclusive_and_equal() {
+            let qg = make_query_graph("SELECT t.x FROM t WHERE t.x >= $1 AND t.y = $2");
+            let key = qg
+                .view_key(&mir::Config {
+                    allow_mixed_comparisons: true,
+                    ..Default::default()
+                })
+                .unwrap();
+
+            assert_eq!(key.index_type, IndexType::BTreeMap);
+            assert_eq!(
+                key.columns,
+                vec![
+                    (
+                        mir::Column::new(Some("t"), "y"),
+                        ViewPlaceholder::OneToOne(2)
+                    ),
+                    (
+                        mir::Column::new(Some("t"), "x"),
+                        ViewPlaceholder::OneToOne(1)
+                    ),
+                ]
+            );
+        }
+
+        #[test]
+        fn mixed_opposite_ranges() {
+            let qg =
+                make_query_graph("SELECT t.x FROM t WHERE t.x > $1 AND t.y <= $2 AND t.z = $3");
+            let key = qg
+                .view_key(&mir::Config {
+                    allow_mixed_comparisons: true,
+                    ..Default::default()
+                })
+                .unwrap();
+
+            assert_eq!(key.index_type, IndexType::BTreeMap);
+            assert_eq!(
+                key.columns,
+                vec![
+                    (
+                        mir::Column::new(Some("t"), "z"),
+                        ViewPlaceholder::OneToOne(3)
+                    ),
+                    (
+                        mir::Column::new(Some("t"), "x"),
+                        ViewPlaceholder::OneToOne(1)
+                    ),
+                    (
+                        mir::Column::new(Some("t"), "y"),
+                        ViewPlaceholder::OneToOne(2)
+                    ),
+                ]
+            );
+        }
+
+        #[test]
+        fn mixed_equal_and_between() {
+            let qg =
+                make_query_graph("SELECT t.x FROM t WHERE t.x >= $1 AND t.x <= $2 AND t.y = $3");
+            let key = qg
+                .view_key(&mir::Config {
+                    allow_mixed_comparisons: true,
+                    ..Default::default()
+                })
+                .unwrap();
+
+            assert_eq!(key.index_type, IndexType::BTreeMap);
+            assert_eq!(
+                key.columns,
+                vec![
+                    (
+                        mir::Column::new(Some("t"), "y"),
+                        ViewPlaceholder::OneToOne(3)
+                    ),
+                    (
+                        mir::Column::new(Some("t"), "x"),
+                        ViewPlaceholder::Between(1, 2)
+                    )
+                ]
+            );
+        }
+
+        #[test]
+        fn mixed_equal_range_and_between() {
+            let qg = make_query_graph(
+                "SELECT t.x FROM t WHERE t.x >= $1 AND t.x <= $2 AND t.y < $3 AND t.z = $4",
+            );
+            let key = qg
+                .view_key(&mir::Config {
+                    allow_mixed_comparisons: true,
+                    ..Default::default()
+                })
+                .unwrap();
+
+            assert_eq!(key.index_type, IndexType::BTreeMap);
+            assert_eq!(
+                key.columns,
+                vec![
+                    (
+                        mir::Column::new(Some("t"), "z"),
+                        ViewPlaceholder::OneToOne(4)
+                    ),
+                    (
+                        mir::Column::new(Some("t"), "x"),
+                        ViewPlaceholder::Between(1, 2)
+                    ),
+                    (
+                        mir::Column::new(Some("t"), "y"),
+                        ViewPlaceholder::OneToOne(3)
+                    )
+                ]
+            );
+        }
     }
 }

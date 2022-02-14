@@ -128,27 +128,6 @@ impl Finkelstein {
             let new_qge = &new_qg.edges[srcdst];
 
             match *ex_qge {
-                QueryGraphEdge::GroupBy(ref ex_columns) => {
-                    match *new_qge {
-                        QueryGraphEdge::GroupBy(ref new_columns) => {
-                            // GroupBy implication holds if the new QG groups by the same columns as
-                            // the original one, or by a *superset* (as we can always apply more
-                            // grouped operatinos on top of earlier ones)
-                            if new_columns.len() < ex_columns.len() {
-                                // more columns in existing QG's GroupBy, so we're done
-                                return Ok(None);
-                            }
-                            for ex_col in ex_columns {
-                                // EQG groups by a column that we don't group by, so we can't reuse
-                                if !new_columns.contains(ex_col) {
-                                    return Ok(None);
-                                }
-                            }
-                        }
-                        // If there is no matching GroupBy edge, we cannot reuse
-                        _ => return Ok(None),
-                    }
-                }
                 QueryGraphEdge::Join { .. } => {
                     match *new_qge {
                         QueryGraphEdge::Join { .. } => {}
@@ -164,6 +143,14 @@ impl Finkelstein {
                     }
                 }
             }
+        }
+
+        // 5. consider group_by
+        // GroupBy implication holds if the new QG groups by the same columns as
+        // the original one, or by a *superset* (as we can always apply more
+        // grouped operatinos on top of earlier ones)
+        if !new_qg.group_by.is_superset(&existing_qg.group_by) {
+            return Ok(None);
         }
 
         // we don't need to check projected columns to reuse a prefix of the query
@@ -183,13 +170,6 @@ impl Finkelstein {
         //         // if so, super -- we can extend directly
         //         return Some(ReuseType::DirectExtension);
         //     } else {
-        //         if name == "computed_columns" {
-        //             // NQG has some extra columns, and they're computed ones
-        //             // (i.e., grouped/function columns).
-        //             // We can recompute those, but not via a backjoin.
-        //             // TODO(malte): be cleverer about this situation
-        //             return None;
-        //         }
 
         //         // find the extra columns in the EQG to identify backjoins required
         //         let backjoin_tables: Vec<_> = new_qgn
