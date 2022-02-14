@@ -2143,9 +2143,9 @@ impl QueryOperation {
             QueryOperation::Distinct => {
                 query.distinct = true;
                 if let Some(order) = &query.order {
-                    for (col, _) in &order.columns {
+                    for (expr, _) in &order.order_by {
                         query.fields.push(FieldDefinitionExpression::Expression {
-                            expr: Expression::Column(col.clone()),
+                            expr: expr.clone(),
                             alias: Some(state.fresh_alias()),
                         })
                     }
@@ -2356,7 +2356,7 @@ impl QueryOperation {
                     ..column_name.into()
                 };
                 query.order = Some(OrderClause {
-                    columns: vec![(column.clone(), *order_type)],
+                    order_by: vec![(Expression::Column(column.clone()), Some(*order_type))],
                 });
 
                 query.limit = Some(LimitClause {
@@ -2777,7 +2777,13 @@ impl QuerySeed {
             }
 
             if let Some(order) = &query.order {
-                for (col, _) in &order.columns {
+                for (expr, _) in &order.order_by {
+                    let col = match expr {
+                        Expression::Column(col) => col,
+                        _ => unreachable!(
+                            "We don't currently ever generate order clauses on expressions"
+                        ),
+                    };
                     if !existing_group_by_cols.contains(col) {
                         group_by.columns.push(col.clone());
                     }

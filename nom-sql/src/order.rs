@@ -1,18 +1,19 @@
 use std::{fmt, str};
 
+use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
-use nom::multi::many0;
-use nom::sequence::{preceded, tuple};
+use nom::multi::separated_nonempty_list;
+use nom::sequence::preceded;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::column::Column;
-use crate::common::{column_identifier_no_alias, ws_sep_comma};
-use crate::Dialect;
+use crate::common::ws_sep_comma;
+use crate::expression::expression;
+use crate::{Dialect, Expression};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum OrderType {
@@ -31,7 +32,7 @@ impl fmt::Display for OrderType {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct OrderClause {
-    pub columns: Vec<(Column, OrderType)>, // TODO(malte): can this be an arbitrary expr?
+    pub order_by: Vec<(Expression, Option<OrderType>)>,
 }
 
 impl fmt::Display for OrderClause {
@@ -40,10 +41,17 @@ impl fmt::Display for OrderClause {
         write!(
             f,
             "{}",
-            self.columns
+            self.order_by
                 .iter()
-                .map(|&(ref c, ref o)| format!("{} {}", c, o))
-                .collect::<Vec<_>>()
+                .map(|&(ref c, ref o)| format!(
+                    "{}{}",
+                    c,
+                    if let Some(ot) = o {
+                        format!(" {}", ot)
+                    } else {
+                        "".to_owned()
+                    }
+                ))
                 .join(", ")
         )
     }
@@ -56,34 +64,27 @@ pub fn order_type(i: &[u8]) -> IResult<&[u8], OrderType> {
     ))(i)
 }
 
-fn order_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Column, OrderType)> {
+fn order_expr(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], (Expression, Option<OrderType>)> {
     move |i| {
-        let (remaining_input, (field_name, ordering, _)) = tuple((
-            column_identifier_no_alias(dialect),
-            opt(preceded(multispace0, order_type)),
-            opt(ws_sep_comma),
-        ))(i)?;
-
-        Ok((
-            remaining_input,
-            (field_name, ordering.unwrap_or(OrderType::OrderAscending)),
-        ))
+        let (i, expr) = expression(dialect)(i)?;
+        let (i, ord_typ) = opt(preceded(multispace1, order_type))(i)?;
+        Ok((i, (expr, ord_typ)))
     }
 }
 
 // Parse ORDER BY clause
 pub fn order_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], OrderClause> {
     move |i| {
-        let (remaining_input, (_, _, _, _, _, columns)) = tuple((
-            multispace0,
-            tag_no_case("order"),
-            multispace1,
-            tag_no_case("by"),
-            multispace1,
-            many0(order_expr(dialect)),
-        ))(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, _) = tag_no_case("order")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, _) = tag_no_case("by")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, order_by) = separated_nonempty_list(ws_sep_comma, order_expr(dialect))(i)?;
 
-        Ok((remaining_input, OrderClause { columns }))
+        Ok((i, OrderClause { order_by }))
     }
 }
 
@@ -99,16 +100,25 @@ mod tests {
         let qstring3 = "select * from users order by name\n";
 
         let expected_ord1 = OrderClause {
-            columns: vec![("name".into(), OrderType::OrderDescending)],
+            order_by: vec![(
+                Expression::Column("name".into()),
+                Some(OrderType::OrderDescending),
+            )],
         };
         let expected_ord2 = OrderClause {
-            columns: vec![
-                ("name".into(), OrderType::OrderAscending),
-                ("age".into(), OrderType::OrderDescending),
+            order_by: vec![
+                (
+                    Expression::Column("name".into()),
+                    Some(OrderType::OrderAscending),
+                ),
+                (
+                    Expression::Column("age".into()),
+                    Some(OrderType::OrderDescending),
+                ),
             ],
         };
         let expected_ord3 = OrderClause {
-            columns: vec![("name".into(), OrderType::OrderAscending)],
+            order_by: vec![(Expression::Column("name".into()), None)],
         };
 
         let res1 = selection(Dialect::MySQL)(qstring1.as_bytes());
@@ -122,7 +132,10 @@ mod tests {
     #[test]
     fn order_prints_column_table() {
         let clause = OrderClause {
-            columns: vec![("t.n".into(), OrderType::OrderDescending)],
+            order_by: vec![(
+                Expression::Column("t.n".into()),
+                Some(OrderType::OrderDescending),
+            )],
         };
         assert_eq!(clause.to_string(), "ORDER BY `t`.`n` DESC");
     }
