@@ -15,7 +15,7 @@ use mir::MirNodeRef;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableStatement, Expression,
-    FieldDefinitionExpression, FunctionExpression, LimitClause, Literal, OrderClause,
+    FieldDefinitionExpression, FunctionExpression, LimitClause, Literal, OrderClause, OrderType,
     SelectStatement, TableKey, UnaryOperator,
 };
 use noria::ViewPlaceholder;
@@ -290,8 +290,11 @@ impl SqlToMirConverter {
             } else {
                 (format!("{}_topk", name), columns.iter().collect())
             };
-            let topk_node =
-                self.make_topk_node(&topk_name, final_node, topk_columns, order, limit)?;
+            let topk_node = self
+                .make_topk_node(&topk_name, final_node, topk_columns, order, limit)?
+                .last()
+                .unwrap()
+                .clone();
             let node_id = (topk_name, self.schema_version);
             self.nodes
                 .entry(node_id)
@@ -1143,21 +1146,40 @@ impl SqlToMirConverter {
     fn make_topk_node(
         &self,
         name: &str,
-        parent: MirNodeRef,
+        mut parent: MirNodeRef,
         group_by: Vec<&Column>,
         order: &Option<OrderClause>,
         limit: &LimitClause,
-    ) -> ReadySetResult<MirNodeRef> {
+    ) -> ReadySetResult<Vec<MirNodeRef>> {
         if !self.config.allow_topk {
             unsupported!("TopK is not supported");
         }
 
         let combined_columns = parent.borrow().columns().to_vec();
 
-        let order = order.as_ref().map(|o| {
-            o.columns
+        // Gather a list of expressions we need to evaluate before the topk node
+        let mut exprs_to_project = vec![];
+        let order = order.as_ref().map(|oc| {
+            oc.order_by
                 .iter()
-                .map(|(c, o)| (Column::from(c), *o))
+                .map(|(expr, ot)| {
+                    (
+                        match expr {
+                            Expression::Column(col) => Column::from(col),
+                            expr => {
+                                let col = Column::named(expr.to_string());
+                                if parent.borrow().column_id_for_column(&col).err().iter().any(
+                                    |err| matches!(err, ReadySetError::NonExistentColumn { .. }),
+                                ) {
+                                    // Only project the expression if we haven't already
+                                    exprs_to_project.push(expr.clone());
+                                }
+                                col
+                            }
+                        },
+                        ot.unwrap_or(OrderType::OrderAscending),
+                    )
+                })
                 .collect()
         });
 
@@ -1169,8 +1191,28 @@ impl SqlToMirConverter {
 
         let k = extract_limit(limit)?;
 
+        let mut nodes = vec![];
+
+        // If we're ordering on non-column expressions, add an extra node to project those first
+        if !exprs_to_project.is_empty() {
+            let parent_columns = parent.borrow().columns().to_vec();
+            let project_node = self.make_project_node(
+                &format!("{}_proj", name),
+                parent.clone(),
+                parent_columns.iter().collect(),
+                exprs_to_project
+                    .into_iter()
+                    .map(|expr| (expr.to_string(), expr))
+                    .collect(),
+                vec![],
+                false,
+            );
+            nodes.push(project_node.clone());
+            parent = project_node;
+        }
+
         // make the new operator and record its metadata
-        Ok(MirNode::new(
+        let topk_node = MirNode::new(
             name,
             self.schema_version,
             combined_columns,
@@ -1182,7 +1224,11 @@ impl SqlToMirConverter {
             },
             vec![MirNodeRef::downgrade(&parent)],
             vec![],
-        ))
+        );
+
+        nodes.push(topk_node);
+
+        Ok(nodes)
     }
 
     fn make_predicate_nodes(
@@ -1646,15 +1692,15 @@ impl SqlToMirConverter {
                         .collect()
                 };
 
-                let topk_node = self.make_topk_node(
+                let topk_nodes = self.make_topk_node(
                     &format!("q_{:x}_n{}", qg.signature().hash, new_node_count),
                     final_node,
                     group_by.iter().collect(),
                     &st.order,
                     limit,
                 )?;
-                func_nodes.push(topk_node.clone());
-                final_node = topk_node;
+                func_nodes.extend(topk_nodes.clone());
+                final_node = topk_nodes.last().unwrap().clone();
                 new_node_count += 1;
             }
 
@@ -1800,10 +1846,18 @@ impl SqlToMirConverter {
                         index_type: view_key.index_type,
                         order_by: st.order.as_ref().map(|order| {
                             order
-                                .columns
+                                .order_by
                                 .iter()
                                 .cloned()
-                                .map(|(col, ot)| (col.into(), ot))
+                                .map(|(expr, ot)| {
+                                    (
+                                        match expr {
+                                            Expression::Column(col) => col.into(),
+                                            expr => Column::named(expr.to_string()),
+                                        },
+                                        ot.unwrap_or(OrderType::OrderAscending),
+                                    )
+                                })
                                 .collect()
                         }),
                         limit: st.limit.as_ref().map(extract_limit).transpose()?,

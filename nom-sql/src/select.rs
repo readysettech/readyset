@@ -494,7 +494,6 @@ mod tests {
     use super::*;
     use crate::column::Column;
     use crate::common::{FieldDefinitionExpression, ItemPlaceholder, Literal, SqlType};
-    use crate::order::OrderType;
     use crate::table::Table;
     use crate::{BinaryOperator, Expression, FunctionExpression, InValue};
 
@@ -1184,7 +1183,7 @@ mod tests {
                 fields: vec![FieldDefinitionExpression::All],
                 where_clause: expected_where_cond,
                 order: Some(OrderClause {
-                    columns: vec![("item.i_title".into(), OrderType::OrderAscending)],
+                    order_by: vec![(Expression::Column("item.i_title".into()), None)],
                 }),
                 limit: Some(LimitClause {
                     limit: Expression::Literal(50.into()),
@@ -1235,7 +1234,7 @@ mod tests {
                 }),
             }],
             order: Some(OrderClause {
-                columns: vec![("contactId".into(), OrderType::OrderAscending)],
+                order_by: vec![(Expression::Column("contactId".into()), None)],
             }),
             ..Default::default()
         };

@@ -279,8 +279,8 @@ pub fn walk_order_clause<'ast, V: Visitor<'ast>>(
     visitor: &mut V,
     order_clause: &'ast mut OrderClause,
 ) -> Result<(), V::Error> {
-    for (col, _) in &mut order_clause.columns {
-        visitor.visit_column(col)?;
+    for (expr, _) in &mut order_clause.order_by {
+        visitor.visit_expression(expr)?;
     }
     Ok(())
 }

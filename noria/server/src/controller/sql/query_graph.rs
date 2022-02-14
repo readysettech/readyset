@@ -192,7 +192,7 @@ pub enum QueryGraphEdge {
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Pagination {
-    pub order: Vec<(Column, OrderType)>,
+    pub order: Vec<(Expression, OrderType)>,
     pub limit: Option<Expression>,
     pub offset: Option<Expression>,
 }
@@ -1029,44 +1029,56 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     if let Some(ref order) = st.order {
         // For each column in the `ORDER BY` clause, check if it needs to be projected
         order
-            .columns
+            .order_by
             .iter()
-            .for_each(|(ord_col, _)| match (&ord_col.table, &ord_col.function) {
-                (None, None) => {
+            .for_each(|(ord_expr, _)| match ord_expr {
+                Expression::Column(Column { table: None, .. }) => {
                     // This is a reference to a projected column, otherwise the table value
                     // would be assigned in the `rewrite_selection` pass
                 }
-                (Some(_), None) => {
+                Expression::Column(col @ Column { table: Some(_), .. }) => {
                     // This is a reference to a column in a table, we need to project it if it is
                     // not yet projected in order to be able to execute `ORDER
                     // BY` post lookup.
-                    if !qg.columns.iter().any(
-                        |e| matches!(e, OutputColumn::Data {  column, .. } if column == ord_col),
-                    ) {
+                    if !qg
+                        .columns
+                        .iter()
+                        .any(|e| matches!(e, OutputColumn::Data {  column, .. } if column == col))
+                    {
                         // The projected column does not already contains that column, so add it
                         qg.columns.push(OutputColumn::Data {
-                            alias: ord_col.name.clone(),
-                            column: ord_col.clone(),
+                            alias: col.name.clone(),
+                            column: col.clone(),
                         })
                     }
                 }
-                (_, Some(box func)) => {
-                    // This is a function call expression that we need to add to the list of
-                    // projected columns
-                    qg.aggregates.push((func.clone(), ord_col.name.clone()));
-                    qg.columns.push(OutputColumn::Data {
-                        alias: ord_col.name.clone(),
-                        column: Column {
-                            name: ord_col.name.clone(),
-                            table: None,
-                            function: None,
-                        },
-                    })
+                Expression::Call(func) if is_aggregate(func) => {
+                    // This is an aggregate expression that we need to add to the list of projected
+                    // columns and aggregates
+                    qg.aggregates.push((func.clone(), func.to_string()));
+                    qg.columns.push(OutputColumn::Expression(ExpressionColumn {
+                        name: ord_expr.to_string(),
+                        table: None,
+                        expression: ord_expr.clone(),
+                    }));
+                }
+                expr => {
+                    // This is an expression that we need to add to the list of projected columns
+                    qg.columns.push(OutputColumn::Expression(ExpressionColumn {
+                        name: expr.to_string(),
+                        table: None,
+                        expression: expr.clone(),
+                    }));
                 }
             });
 
         qg.pagination = Some(Pagination {
-            order: order.columns.clone(),
+            order: order
+                .order_by
+                .iter()
+                .cloned()
+                .map(|(expr, ot)| (expr, ot.unwrap_or(OrderType::OrderAscending)))
+                .collect(),
             limit: st.limit.as_ref().map(|lim| lim.limit.clone()),
             offset: st
                 .limit

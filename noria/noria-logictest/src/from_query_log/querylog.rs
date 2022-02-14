@@ -102,10 +102,8 @@ impl ReplaceLiteralsWithPlaceholders for SelectStatement {
             }
         }
         if let Some(order) = self.order.as_mut() {
-            for (col, _) in order.columns.iter_mut() {
-                if let Some(expr) = col.function.as_mut() {
-                    values.append(&mut expr.replace_literals());
-                }
+            for (expr, _) in order.order_by.iter_mut() {
+                values.append(&mut expr.replace_literals());
             }
         }
         values

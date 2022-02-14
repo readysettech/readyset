@@ -1,5 +1,5 @@
 use nom_sql::analysis::contains_aggregate;
-use nom_sql::{FieldDefinitionExpression, SqlQuery};
+use nom_sql::{Expression, FieldDefinitionExpression, SqlQuery};
 use noria_errors::{ReadySetError, ReadySetResult};
 
 pub trait NormalizeTopKWithAggregate: Sized {
@@ -33,17 +33,22 @@ impl NormalizeTopKWithAggregate for SqlQuery {
                 if !aggs.is_empty() {
                     match &stmt.group_by {
                         Some(group_by) => {
-                            for (order_col, _) in &order.columns {
-                                if !(group_by
-                                    .columns
-                                    .iter()
-                                    .any(|group_by_col| group_by_col == order_col)
-                                    || aggs
-                                        .iter()
-                                        .any(|(_, alias)| alias.as_ref() == Some(&order_col.name)))
-                                {
+                            for (order_expr, _) in &order.order_by {
+                                if !(group_by.columns.iter().any(|group_by_col| {
+                                    matches!(
+                                        order_expr,
+                                        Expression::Column(col) if col == group_by_col
+                                    )
+                                }) || aggs.iter().any(|(agg, alias)| {
+                                    *agg == order_expr
+                                        || matches!(
+                                            order_expr,
+                                            Expression::Column(col)
+                                                if alias.as_ref() == Some(&col.name)
+                                        )
+                                })) {
                                     return Err(ReadySetError::ExpressionNotInGroupBy {
-                                        expression: order_col.to_string(),
+                                        expression: order_expr.to_string(),
                                         position: "ORDER BY".to_owned(),
                                     });
                                 }
@@ -139,7 +144,10 @@ mod tests {
                 assert_eq!(
                     stmt.order,
                     Some(OrderClause {
-                        columns: vec![("column_3".into(), OrderType::OrderAscending)]
+                        order_by: vec![(
+                            Expression::Column("column_3".into()),
+                            Some(OrderType::OrderAscending)
+                        )]
                     })
                 );
 
