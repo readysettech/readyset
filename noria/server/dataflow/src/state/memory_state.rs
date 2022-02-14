@@ -206,11 +206,11 @@ impl State for MemoryState {
                     .collect::<BTreeMap<_, _>>();
                 if columns.iter().all(|c| col_positions.contains_key(c)) {
                     let mut shuffled_key = vec![&DataType::None; key.len()];
-                    for (col, key_pos) in columns.iter().enumerate() {
+                    for (key_pos, col) in columns.iter().enumerate() {
                         let val = key
-                            .get(*key_pos)
+                            .get(key_pos)
                             .expect("Columns and key must have the same len");
-                        let pos = col_positions[&col];
+                        let pos = col_positions[col];
                         shuffled_key[pos] = val;
                     }
                     let key = KeyType::from(shuffled_key);
@@ -568,18 +568,21 @@ mod tests {
     #[test]
     fn shuffled_columns() {
         let mut state = MemoryState::default();
-        state.add_key(Index::hash_map(vec![0, 1]), Some(vec![Tag::new(0)]));
-        state.add_key(Index::hash_map(vec![1, 0]), Some(vec![Tag::new(1)]));
+        state.add_key(Index::hash_map(vec![2, 3]), Some(vec![Tag::new(0)]));
+        state.add_key(Index::hash_map(vec![3, 2]), Some(vec![Tag::new(1)]));
 
         state.mark_filled(KeyComparison::Equal(vec1![1.into(), 1.into()]), Tag::new(0));
-        state.insert(vec![1.into(), 1.into(), 1.into()], Some(Tag::new(0)));
+        state.insert(
+            vec![1.into(), 1.into(), 1.into(), 1.into()],
+            Some(Tag::new(0)),
+        );
 
-        let res = state.lookup(&[1, 0], &KeyType::Double((1.into(), 1.into())));
+        let res = state.lookup(&[3, 2], &KeyType::Double((1.into(), 1.into())));
         assert!(res.is_some());
         let rows = res.unwrap();
         assert_eq!(
             rows,
-            RecordResult::Owned(vec![vec![1.into(), 1.into(), 1.into()]])
+            RecordResult::Owned(vec![vec![1.into(), 1.into(), 1.into(), 1.into()]])
         );
     }
 
