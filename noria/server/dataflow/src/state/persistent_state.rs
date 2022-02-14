@@ -279,9 +279,12 @@ impl State for PersistentState {
                 // options.sync=true,    will it persist the previous write too?
                 // A: No. After the program crashes, writes with option.disableWAL=true will be
                 // lost, if they are not flushed    to SST files.
-                self.db
-                    .flush_cf(self.db.cf_handle(PK_CF).unwrap())
-                    .expect("Flush to disk failed");
+                for index in &self.indices {
+                    self.db
+                        .flush_cf(self.db.cf_handle(&index.column_family).unwrap())
+                        .expect("Flush to disk failed");
+                }
+
                 self.db.flush().expect("Flush to disk failed");
             }
             opts.set_sync(true);
@@ -740,6 +743,22 @@ impl PersistentState {
             }
         }
 
+        // If there are less column families than indices (+1 to account for the default column
+        // family) we must have crashed while enabling the snapshot mode (after dropping a column
+        // family, but before creating a new one). Create the missing cf now.
+        if cf_names.len() < indices.len() + 1 {
+            for index in &indices {
+                if !cf_names.iter().any(|e| e.as_str() == index.column_family) {
+                    // This column family was dropped, but index remains
+                    db.create_cf(
+                        &index.column_family,
+                        &IndexParams::from(&index.index).make_rocksdb_options(&default_options),
+                    )
+                    .unwrap();
+                }
+            }
+        }
+
         let mut state = Self {
             name,
             default_options,
@@ -870,11 +889,6 @@ impl PersistentState {
         db.flush_cf(cf).unwrap();
         // Manually compact the newly created column family
         self.compact_cf(self.indices.last().unwrap());
-        // Reenable auto compactions when done
-        if let Err(err) = db.set_options_cf(cf, &[("disable_auto_compactions", "false")]) {
-            error!(%err, "Error setting cf options");
-        }
-
         info!("Base finished compacting secondary index");
     }
 
@@ -983,58 +997,35 @@ impl PersistentState {
     }
 
     fn enable_snapshot_mode(&mut self) {
-        let main_index = self.indices.first().cloned();
-        // Clear the data
-        while let Some(index_to_drop) = self.indices.pop() {
-            self.persist_meta();
-            self.db.drop_cf(&index_to_drop.column_family).unwrap();
-        }
+        self.replication_offset = None; // Remove any replication offset first (although it should be None already)
+        self.persist_meta();
 
-        // Recreate the original primary index
-        if let Some(main_index) = main_index {
+        // Clear the data by dropping each column family and creating it anew
+        for index in &self.indices {
+            let cf_name = index.column_family.as_str();
+            self.db.drop_cf(cf_name).unwrap();
             self.db
                 .create_cf(
-                    PK_CF,
-                    &IndexParams::from(&main_index.index)
-                        .make_rocksdb_options(&self.default_options),
+                    cf_name,
+                    &IndexParams::from(&index.index).make_rocksdb_options(&self.default_options),
                 )
                 .unwrap();
-            self.indices.push(main_index);
+
+            let cf = self.db.cf_handle(cf_name).expect("just created this cf");
+
+            if let Err(err) = self
+                .db
+                .set_options_cf(cf, &[("disable_auto_compactions", "true")])
+            {
+                error!(%err, "Error setting cf options");
+            }
         }
-
-        // Disable auto compactions for the primary index
-        self.indices.first().and_then(|pi| {
-            self.db.cf_handle(&pi.column_family).map(|cf| {
-                if let Err(err) = self
-                    .db
-                    .set_options_cf(cf, &[("disable_auto_compactions", "true")])
-                {
-                    error!(%err, "Error setting cf options");
-                }
-            })
-        });
-
-        self.replication_offset = None; // Remove any replication offset
-        self.persist_meta();
     }
 
     fn disable_snapshot_mode(&mut self) {
-        let pi = match self.indices.first() {
-            Some(pi) => pi.clone(),
-            None => return,
-        };
-
-        let db = &self.db;
-        let cf = match db.cf_handle(&pi.column_family) {
-            Some(cf) => cf,
-            None => return,
-        };
-
-        // Perform a manual compaction first
-        self.compact_cf(&pi);
-        // Enable auto compactions
-        if let Err(err) = db.set_options_cf(cf, &[("disable_auto_compactions", "false")]) {
-            error!(%err, "Error setting cf options");
+        for index in &self.indices {
+            // Perform a manual compaction for each column family
+            self.compact_cf(index);
         }
     }
 
@@ -1165,6 +1156,11 @@ impl PersistentState {
         db.compact_range_cf_opt(cf, Option::<&[u8]>::None, Option::<&[u8]>::None, &opts);
 
         info!(table = %self.name, cf = %index.column_family, "Compaction finished");
+
+        // Reenable auto compactions when done
+        if let Err(err) = db.set_options_cf(cf, &[("disable_auto_compactions", "false")]) {
+            error!(%err, "Error setting cf options");
+        }
     }
 
     // Our RocksDB keys come in three forms, and are encoded as follows:
