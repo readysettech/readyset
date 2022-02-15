@@ -15,11 +15,14 @@ pub mod subqueries;
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::iter;
 
+use itertools::Either;
 pub use nom_sql::analysis::{contains_aggregate, is_aggregate};
 use nom_sql::{
     BinaryOperator, Column, CommonTableExpression, Expression, FieldDefinitionExpression,
     FunctionExpression, InValue, JoinClause, JoinRightSide, LimitClause, Literal, SelectStatement,
+    Table,
 };
 use noria_errors::{unsupported, ReadySetResult};
 
@@ -35,6 +38,18 @@ pub use crate::rewrite_between::RewriteBetween;
 pub use crate::star_expansion::StarExpansion;
 pub use crate::strip_post_filters::StripPostFilters;
 pub use crate::subqueries::SubQueries;
+
+/// Returns an iterator over all the tables referred to by the *outermost* query in the given
+/// statement (eg not including any subqueries)
+pub fn outermost_referred_tables(stmt: &SelectStatement) -> impl Iterator<Item = &Table> {
+    stmt.tables
+        .iter()
+        .chain(stmt.join.iter().flat_map(|join| match &join.right {
+            JoinRightSide::Table(table) => Either::Left(iter::once(table)),
+            JoinRightSide::Tables(tables) => Either::Right(Either::Left(tables.iter())),
+            JoinRightSide::NestedSelect(..) => Either::Right(Either::Right(iter::empty())),
+        }))
+}
 
 fn field_names(statement: &SelectStatement) -> impl Iterator<Item = &str> {
     statement.fields.iter().filter_map(|field| match &field {
