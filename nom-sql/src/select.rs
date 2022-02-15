@@ -295,9 +295,11 @@ fn join_rhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinRightSide>
                     nested_selection(dialect),
                     preceded(multispace0, tag(")")),
                 ),
-                opt(as_alias(dialect)),
+                as_alias(dialect),
             )),
-            |t| JoinRightSide::NestedSelect(Box::new(t.0), t.1.map(String::from)),
+            |(statement, alias)| {
+                JoinRightSide::NestedSelect(Box::new(statement), alias.into_owned())
+            },
         );
         let table = map(schema_table_reference(dialect), JoinRightSide::Table);
         let tables = map(
@@ -1385,16 +1387,12 @@ mod tests {
 
     #[test]
     fn join_against_nested_select() {
-        let t0 = b"(SELECT ol_i_id FROM order_line)";
         let t1 = b"(SELECT ol_i_id FROM order_line) AS ids";
 
-        assert!(join_rhs(Dialect::MySQL)(t0).is_ok());
         assert!(join_rhs(Dialect::MySQL)(t1).is_ok());
 
-        let t0 = b"JOIN (SELECT ol_i_id FROM order_line) ON (orders.o_id = ol_i_id)";
         let t1 = b"JOIN (SELECT ol_i_id FROM order_line) AS ids ON (orders.o_id = ids.ol_i_id)";
 
-        assert!(join_clause(Dialect::MySQL)(t0).is_ok());
         assert!(join_clause(Dialect::MySQL)(t1).is_ok());
 
         let qstr_with_alias = "SELECT o_id, ol_i_id FROM orders JOIN \
@@ -1414,7 +1412,7 @@ mod tests {
             fields: columns(&["o_id", "ol_i_id"]),
             join: vec![JoinClause {
                 operator: JoinOperator::Join,
-                right: JoinRightSide::NestedSelect(Box::new(inner_select), Some("ids".into())),
+                right: JoinRightSide::NestedSelect(Box::new(inner_select), "ids".into()),
                 constraint: JoinConstraint::On(Expression::BinaryOp {
                     lhs: Box::new(Expression::Column(Column::from("orders.o_id"))),
                     op: BinaryOperator::Equal,

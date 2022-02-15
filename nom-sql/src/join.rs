@@ -20,21 +20,18 @@ pub enum JoinRightSide {
     /// A comma-separated (and implicitly joined) sequence of tables.
     Tables(Vec<Table>),
     /// A nested selection, represented as (query, alias).
-    NestedSelect(Box<SelectStatement>, Option<String>),
+    NestedSelect(Box<SelectStatement>, String),
 }
 
 impl fmt::Display for JoinRightSide {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            JoinRightSide::Table(ref t) => write!(f, "{}", t),
-            JoinRightSide::NestedSelect(ref q, ref a) => {
-                write!(f, "({})", q)?;
-                if let Some(alias) = a {
-                    write!(f, " AS {}", alias)?;
-                }
+        match self {
+            JoinRightSide::Table(t) => write!(f, "{}", t),
+            JoinRightSide::NestedSelect(subquery, alias) => {
+                write!(f, "({}) AS {}", subquery, alias)?;
                 Ok(())
             }
-            JoinRightSide::Tables(ref ts) => write!(f, "({})", ts.iter().join(", ")),
+            JoinRightSide::Tables(ts) => write!(f, "({})", ts.iter().join(", ")),
         }
     }
 }

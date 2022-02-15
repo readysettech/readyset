@@ -815,7 +815,7 @@ impl SqlIncorporator {
                             // subquery correctly and to ensure that distinct subqueries are
                             // treated as separate views in the query graph even if they are "exact
                             // matches" in the sense of QueryGraphReuse::ExactMatch.
-                            let name = alias.clone().unwrap_or(default_name);
+                            let name = alias.clone();
                             let is_name_required = true;
 
                             let qfp = self

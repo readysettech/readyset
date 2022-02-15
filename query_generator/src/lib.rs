@@ -2658,7 +2658,7 @@ impl Subquery {
                 )
             }
             SubqueryPosition::Join(operator) => (
-                JoinRightSide::NestedSelect(Box::new(subquery), Some(subquery_name.clone())),
+                JoinRightSide::NestedSelect(Box::new(subquery), subquery_name.clone()),
                 operator,
             ),
         };
