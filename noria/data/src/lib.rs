@@ -15,6 +15,7 @@ use noria_errors::{internal, ReadySetError, ReadySetResult};
 use proptest::prelude::{prop_oneof, Arbitrary};
 use tokio_postgres::types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 
+mod integer;
 mod serde;
 mod text;
 mod timestamp;
@@ -314,13 +315,10 @@ impl DataType {
     /// Currently, this entails:
     ///
     /// * Coercing values to the type they already are
-    /// * Parsing strings ([`Text`], [`Tinytext`], [`Mediumtext`]) as integers
-    /// * Parsing strings ([`Text`], [`Tinytext`], [`Mediumtext`]) as timestamps
+    /// * Parsing strings
     /// * Changing numeric type sizes (bigint -> int, int -> bigint, etc)
     /// * Converting [`Real`]s with a zero fractional part to an integer
     /// * Removing information from date/time data types (timestamps to dates or times)
-    ///
-    /// More coercions will likely need to be added in the future
     ///
     /// # Examples
     ///
@@ -369,22 +367,6 @@ impl DataType {
             }
         };
 
-        macro_rules! convert_numeric {
-            ($dt: expr, $source_ty: ty, $target_ty: ty) => {{
-                Ok(<$target_ty>::try_from(<$source_ty>::try_from($dt)?)
-                    .map_err(|e| {
-                        mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
-                    })?
-                    .into())
-            }};
-        }
-
-        macro_rules! convert_boolean {
-            ($val: expr) => {{
-                Ok(DataType::from($val != 0))
-            }};
-        }
-
         use SqlType::*;
         match (self, self.sql_type(), ty) {
             (_, None, _) => Ok(DataType::None),
@@ -393,32 +375,12 @@ impl DataType {
             (DataType::Text(t), _, _) => t.coerce_to(ty),
             (DataType::TinyText(tt), _, _) => tt.coerce_to(ty),
             (DataType::TimestampTz(tz), _, _) => tz.coerce_to(ty),
-
-            // Per https://dev.mysql.com/doc/refman/8.0/en/numeric-type-syntax.html, the "number"
-            // argument to integer types only controls the display width, not the max length
-            (_, Some(Int(_)), Int(_) | Serial)
-            | (_, Some(Bigint(_)), Bigint(_) | BigSerial)
-            | (_, Some(UnsignedInt(_)), UnsignedInt(_))
-            | (_, Some(UnsignedBigint(_)), UnsignedBigint(_)) => Ok(self.clone()),
-            (_, Some(Int(_)), Tinyint(_)) => convert_numeric!(self, i64, i8),
-            (_, Some(Int(_)), UnsignedTinyint(_)) => convert_numeric!(self, i64, u8),
-            (_, Some(Int(_)), UnsignedInt(_)) => convert_numeric!(self, i64, u32),
-            (_, Some(Int(_)), Smallint(_)) => convert_numeric!(self, i64, i16),
-            (_, Some(Int(_)), UnsignedSmallint(_)) => convert_numeric!(self, i64, u16),
-            (_, Some(Int(_)), UnsignedBigint(_)) => convert_numeric!(self, i64, u64),
-            (_, Some(Bigint(_)), Tinyint(_)) => convert_numeric!(self, i64, i8),
-            (_, Some(Bigint(_)), UnsignedTinyint(_)) => convert_numeric!(self, i64, u8),
-            (_, Some(Bigint(_)), Smallint(_)) => convert_numeric!(self, i64, i16),
-            (_, Some(Bigint(_)), UnsignedSmallint(_)) => convert_numeric!(self, i64, u16),
-            (_, Some(Bigint(_)), Int(_) | Serial) => convert_numeric!(self, i64, i32),
-            (_, Some(Bigint(_)), UnsignedInt(_)) => convert_numeric!(self, i64, u32),
-            (_, Some(Bigint(_)), UnsignedBigint(_)) => convert_numeric!(self, i64, u64),
-            (Self::Int(n), _, Bool) => convert_boolean!(*n),
-            (Self::UnsignedInt(n), _, Bool) => convert_boolean!(*n),
+            (DataType::Int(v), _, _) => integer::coerce_integer(*v, "Int", ty),
+            (DataType::UnsignedInt(v), _, _) => integer::coerce_integer(*v, "UnsignedInt", ty),
             (_, Some(Float), Float | Real) => Ok(self.clone()),
             (_, Some(Real), Double) =>Ok(self.clone()),
             (_, Some(Numeric(_)), Numeric(_)) => Ok(self.clone()),
-            (_, Some(Int(_) | Bigint(_) | Real | Float), Time) => {
+            (_, Some(Real | Float), Time) => {
                 MysqlTime::try_from(<f64>::try_from(self)?)
                     .map_err(|e| mk_err("Could not parse value as time".to_owned(), Some(e.into())))
                     .map(Self::Time)
@@ -426,7 +388,6 @@ impl DataType {
             (Self::Time(ts), Some(Time), Text | Tinytext | Mediumtext | Varchar(_)) => {
                 Ok(ts.to_string().into())
             }
-            (_, Some(Int(_)), Bigint(_) | BigSerial) => Ok(DataType::Int(i64::try_from(self)?)),
             (Self::Float(f, _), Some(Float), Tinyint(_) | Smallint(_) | Int(_)) => {
                 Ok(DataType::Int(f.round() as i64))
             }
@@ -3428,6 +3389,63 @@ mod tests {
             let input = DataType::from("12:34:56:ab:cd:ef");
             let result = input.coerce_to(&SqlType::MacAddr).unwrap();
             assert_eq!(input, result);
+        }
+
+        #[test]
+
+        fn int_to_text() {
+            assert_eq!(
+                DataType::from(20070523i64)
+                    .coerce_to(&SqlType::Text)
+                    .unwrap(),
+                DataType::from("20070523"),
+            );
+            assert_eq!(
+                DataType::from(20070523i64)
+                    .coerce_to(&SqlType::Varchar(Some(2)))
+                    .unwrap(),
+                DataType::from("20"),
+            );
+            assert_eq!(
+                DataType::from(20070523i64)
+                    .coerce_to(&SqlType::Char(Some(10)))
+                    .unwrap(),
+                DataType::from("20070523  "),
+            );
+        }
+
+        #[test]
+        fn int_to_date_time() {
+            assert_eq!(
+                DataType::from(20070523i64)
+                    .coerce_to(&SqlType::Date)
+                    .unwrap(),
+                DataType::from(NaiveDate::from_ymd(2007, 05, 23))
+            );
+
+            assert_eq!(
+                DataType::from(70523u64).coerce_to(&SqlType::Date).unwrap(),
+                DataType::from(NaiveDate::from_ymd(2007, 05, 23))
+            );
+
+            assert_eq!(
+                DataType::from(19830905132800i64)
+                    .coerce_to(&SqlType::Timestamp)
+                    .unwrap(),
+                DataType::from(NaiveDate::from_ymd(1983, 09, 05).and_hms(13, 28, 00))
+            );
+
+            assert_eq!(
+                DataType::from(830905132800u64)
+                    .coerce_to(&SqlType::DateTime(None))
+                    .unwrap(),
+                DataType::from(NaiveDate::from_ymd(1983, 09, 05).and_hms(13, 28, 00))
+            );
+
+            assert_eq!(
+                DataType::from(101112i64).coerce_to(&SqlType::Time).unwrap(),
+                DataType::from(MysqlTime::from_hmsus(true, 10, 11, 12, 0))
+            );
         }
 
         #[test]
