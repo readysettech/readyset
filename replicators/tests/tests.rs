@@ -26,7 +26,7 @@ const CREATE_SCHEMA: &str = "
 const POPULATE_SCHEMA: &str =
     "INSERT INTO `groups` VALUES (1, 'abc', 2), (2, 'bcd', 3), (40, 'xyz', 4)";
 
-/// A convinience init to convert 3 character byte slice to TinyText noria type
+/// A convenience init to convert 3 character byte slice to TinyText noria type
 const fn tiny<const N: usize>(text: &[u8; N]) -> DataType {
     DataType::TinyText(TinyText::from_arr(text))
 }
