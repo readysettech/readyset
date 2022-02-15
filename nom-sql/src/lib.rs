@@ -69,3 +69,4 @@ mod table;
 mod transaction;
 mod update;
 mod use_statement;
+pub mod whitespace;
