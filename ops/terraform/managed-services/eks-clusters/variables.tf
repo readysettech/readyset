@@ -203,6 +203,7 @@ variable "self_managed_node_group_defaults" {
 }
 
 #-------------- [ Benchmarking Prom + Grafana ] ---------------------- #
+
 variable "benchmark_prom_grafana_enabled" {
   description = "Toggles provisioning of the benchmarking initiative's Prometheus and Grafana related resources."
   default     = false
@@ -212,4 +213,11 @@ variable "benchmark_prom_pushgw_enabled" {
   description = "Toggles creation of Prometheus Push Gateway resources for benchmarking."
   default     = false
   type        = bool
+}
+
+#-------------- [ Node-LocalDNS Configurations ] ---------------------- #
+
+variable "vpc_dns_resolver_ip" {
+  description = "Private IP of the VPC DNS resolver which is hosting the k8s cluster."
+  default     = ""
 }

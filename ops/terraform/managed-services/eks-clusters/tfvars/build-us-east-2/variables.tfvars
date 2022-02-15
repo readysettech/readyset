@@ -5,7 +5,8 @@ resource_tags = {
 environment = "build"
 
 # Build/default VPC ID
-vpc_id = "vpc-0adb26542fc16ab14"
+vpc_id              = "vpc-0adb26542fc16ab14"
+vpc_dns_resolver_ip = "10.3.128.2"
 
 # EKS cluster module inputs
 cluster_name            = "rs-build-us-east-2"
@@ -81,11 +82,20 @@ self_managed_node_group_defaults = {
   }]
 }
 self_managed_node_group_configs = {
-  build-k8s-general = {
+  "build-k8s-general" = {
+    min_size             = 1
+    max_size             = 8,
+    desired_size         = 2,
+    instance_type        = "m5.large",
+    bootstrap_extra_args = "--kubelet-extra-args '--node-labels=readyset.io/worker=general --cluster-dns=169.254.20.10'"
+  }
+  "build-k8s-stateful-1" = {
+    single_az            = "true"
+    min_size             = 1
     max_size             = 5,
     desired_size         = 1,
-    instance_type        = "m5.large",
-    bootstrap_extra_args = "--kubelet-extra-args '--node-labels=readyset.io/worker=general'"
+    instance_type        = "c5.large",
+    bootstrap_extra_args = "--kubelet-extra-args '--node-labels=readyset.io/worker=stateful --register-with-taints stateful=true:NoSchedule  --cluster-dns=169.254.20.10'"
   }
 }
 

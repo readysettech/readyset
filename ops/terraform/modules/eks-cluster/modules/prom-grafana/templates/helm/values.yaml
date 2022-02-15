@@ -23,6 +23,19 @@ prometheus:
       requests:
         cpu: ${request_cpu}
         memory: ${request_mem}
+    tolerations:
+     - key: "stateful"
+       operator: "Exists"
+       effect: "NoSchedule"
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: readyset.io/worker
+              operator: In
+              values:
+              - stateful
     ## How long to retain metrics
     retention: "${metric_reten_days}"
     storageSpec:

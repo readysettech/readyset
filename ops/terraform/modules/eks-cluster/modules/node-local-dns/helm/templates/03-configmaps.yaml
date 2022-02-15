@@ -1,0 +1,46 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: node-local-dns
+  namespace: {{ .Release.Namespace }}
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+data:
+  Corefile: |
+    (common) {
+      bind {{ .Values.dns.localIp }}
+      cache { # Cache DNS responses from forwarded queries
+        success 65536 3600 30 # override max TTL to one hour and min TTL to 30 seconds
+        denial 9984 300 30 # override max negative TTL to 5 minutes and min TTL to 30 seconds
+        prefetch 1 15m 30% # Any name queried at least once in the last 15 minutes should be prefetched before expiring
+      }
+      errors # log all errors
+      reload # reload configuration if the config file is updated
+      loop   # detect forwarding loops
+      prometheus :9253
+      health {{ .Values.dns.localIp }}:8080
+    }
+    cluster.local:53 {
+      import common
+      forward . {{ .Values.dns.dnsServer }} {
+        prefer_udp
+      }
+    }
+    in-addr.arpa:53 {
+      import common
+      forward . {{ .Values.dns.dnsServer }} {
+        prefer_udp
+      }
+    }
+    ip6.arpa:53 {
+      import common
+      forward . {{ .Values.dns.dnsServer }} {
+        prefer_udp
+      }
+    }
+    .:53 {
+      import common
+      forward . {{ .Values.dns.dnsServer }} {
+        prefer_udp
+      }

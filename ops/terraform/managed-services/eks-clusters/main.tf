@@ -23,12 +23,23 @@ module "eks-main" {
   cluster_vpn_cidr_blocks              = var.cluster_vpn_cidr_blocks
 
   # Workers
-  self_managed_node_groups         = var.self_managed_node_group_configs
+  //self_managed_node_groups         = [ for k, v in var.self_managed_node_group_configs : {k = v} if lookup(v, "single_az", "false") !=  "true" ]
+  self_managed_node_groups = {
+    for index, x in var.self_managed_node_group_configs :
+    index => merge(x, {
+      subnet_ids = (
+        lookup(x, "single_az", "") == "true" ? [local.private_subnet_ids_list[0]] : local.private_subnet_ids_list
+      )
+      }
+    )
+  }
+
   self_managed_node_group_defaults = var.self_managed_node_group_defaults
 
   # Networking / Security
   kms_key_arn              = aws_kms_key.eks-main.arn
   vpc_id                   = var.vpc_id
+  vpc_dns_resolver_ip      = var.vpc_dns_resolver_ip
   workers_ssh_cidr_allowed = var.workers_ssh_cidr_allowed
   worker_subnet_ids        = data.aws_subnet_ids.private.ids
 
@@ -54,6 +65,8 @@ module "eks-main" {
 
   # Prometheus / Grafana
   benchmark_prom_grafana_enabled = var.benchmark_prom_grafana_enabled
+
+
 }
 
 # KMS key for Kubernetes Secret Wrapper Encryption

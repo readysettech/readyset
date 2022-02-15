@@ -1,0 +1,8 @@
+apiVersion: v1
+name: node-local-dns
+description: Helm chart for deploying Node-Local-DNS cache servers into a k8s cluster.
+# Important Note:
+# Be sure to increment this number each time you make a change in the chart (./Helm/*)
+# Otherwise Terraform will not detect the change.
+version: 0.1.6
+appVersion: "1.3"

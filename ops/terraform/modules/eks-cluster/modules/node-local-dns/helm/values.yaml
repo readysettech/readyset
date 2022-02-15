@@ -1,0 +1,25 @@
+image:
+  repository: k8s.gcr.io/dns/k8s-dns-node-cache
+  tag: "1.21.1"
+  pullPolicy: IfNotPresent
+
+dns:
+  # -- IP address for local link
+  localIp: "169.254.20.10"
+  # -- Cluster local domain name
+  dnsDomain: "cluster.local"
+  # -- Kube DNS service IP
+  dnsServer: "172.20.0.10"
+  # -- Upstream DNS server
+  dnsUpstream: "${dns_upstream}"
+
+useHostNetwork: true
+
+deployment:
+  maxUnavailable: "20%"
+  type: "RollingUpdate"
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 50Mi

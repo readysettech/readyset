@@ -93,7 +93,7 @@ variable "kms_key_arn" {
 
 variable "self_managed_node_groups" {
   description = "Worker node configurations for the cluster."
-  type        = map(any)
+  type        = any
   default = {
     main = {
       max_size      = 2,
@@ -276,4 +276,11 @@ variable "ips_refresher_authorized_ecr_resource_arns" {
 variable "ips_refresher_ecr_aws_account_id" {
   description = "AWS account ID which ECR repositories exist. There is currently a 1:1 relationship between ECR account and IPS-refresher deployments."
   default     = "305232526136" # build account
+}
+
+#-------------- [ NodeLocal DNS Caching ] --------------------------- #
+
+variable "vpc_dns_resolver_ip" {
+  description = "Private IP of the VPC DNS resolver which is hosting the k8s cluster."
+  default = ""
 }

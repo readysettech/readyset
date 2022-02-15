@@ -105,7 +105,6 @@ module "eks" {
       vpc_security_group_ids       = [aws_security_group.supplemental.id]
       iam_role_additional_policies = ["arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"]
   })
-
   tags = var.resource_tags
 }
 
@@ -287,4 +286,12 @@ module "ips-refresher" {
   # Identity Provider
   oidc_provider_arn = module.eks.oidc_provider_arn
   oidc_issuer_url   = module.eks.cluster_oidc_issuer_url
+}
+
+# -------------- [ Node Local DNS ] -------------------------------- #
+# Node local DNS provides a way of filling conntrack for DNS calls
+# by caching them on each worker node.
+module "node-local-dns" {
+  source              = "./modules/node-local-dns"
+  vpc_dns_resolver_ip = var.vpc_dns_resolver_ip
 }
