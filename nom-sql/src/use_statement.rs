@@ -1,10 +1,10 @@
 use std::fmt;
 
 use nom::bytes::complete::tag_no_case;
-use nom::character::complete::multispace1;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 
+use crate::whitespace::whitespace1;
 use crate::{Dialect, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -27,7 +27,7 @@ impl fmt::Display for UseStatement {
 pub fn use_statement(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], UseStatement> {
     move |i| {
         let (i, _) = tag_no_case("use")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, database) = dialect.identifier()(i)?;
         Ok((i, UseStatement::from_database(database)))
     }

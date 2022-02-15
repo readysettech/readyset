@@ -4,7 +4,7 @@ use std::{fmt, str};
 
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take_until};
-use nom::character::complete::{digit1, multispace0, multispace1};
+use nom::character::complete::digit1;
 use nom::combinator::{map, map_res, opt};
 use nom::multi::many0;
 use nom::sequence::{delimited, preceded, terminated, tuple};
@@ -12,6 +12,7 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{column_identifier_no_alias, parse_comment, type_identifier, Literal, SqlType};
+use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Double, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -182,9 +183,9 @@ fn fixed_point(i: &[u8]) -> IResult<&[u8], Literal> {
 
 fn default(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
     let (remaining_input, (_, _, _, def, _)) = tuple((
-        multispace0,
+        whitespace0,
         tag_no_case("default"),
-        multispace1,
+        whitespace1,
         // TODO(grfn): This really should just be a generic expression parser T.T
         // https://app.clubhouse.io/readysettech/story/101/unify-the-expression-ast
         alt((
@@ -207,7 +208,7 @@ fn default(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
                 |_| Literal::CurrentTimestamp,
             ),
         )),
-        multispace0,
+        whitespace0,
     ))(i)?;
 
     Ok((remaining_input, ColumnConstraint::DefaultValue(def)))
@@ -215,9 +216,9 @@ fn default(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
 
 pub fn on_update_current_timestamp(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
     let (i, _) = tag_no_case("on")(i)?;
-    let (i, _) = multispace1(i)?;
+    let (i, _) = whitespace1(i)?;
     let (i, _) = tag_no_case("update")(i)?;
-    let (i, _) = multispace1(i)?;
+    let (i, _) = whitespace1(i)?;
     let (i, _) = alt((
         tag_no_case("current_timestamp"),
         tag_no_case("now"),
@@ -231,32 +232,32 @@ pub fn on_update_current_timestamp(i: &[u8]) -> IResult<&[u8], ColumnConstraint>
 pub fn column_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ColumnConstraint> {
     move |i| {
         let not_null = map(
-            delimited(multispace0, tag_no_case("not null"), multispace0),
+            delimited(whitespace0, tag_no_case("not null"), whitespace0),
             |_| ColumnConstraint::NotNull,
         );
         let null = map(
-            delimited(multispace0, tag_no_case("null"), multispace0),
+            delimited(whitespace0, tag_no_case("null"), whitespace0),
             |_| ColumnConstraint::Null,
         );
         let auto_increment = map(
-            delimited(multispace0, tag_no_case("auto_increment"), multispace0),
+            delimited(whitespace0, tag_no_case("auto_increment"), whitespace0),
             |_| ColumnConstraint::AutoIncrement,
         );
         let primary_key = map(
-            delimited(multispace0, tag_no_case("primary key"), multispace0),
+            delimited(whitespace0, tag_no_case("primary key"), whitespace0),
             |_| ColumnConstraint::PrimaryKey,
         );
         let unique = map(
             delimited(
-                multispace0,
-                delimited(tag_no_case("unique"), multispace0, opt(tag_no_case("key"))),
-                multispace0,
+                whitespace0,
+                delimited(tag_no_case("unique"), whitespace0, opt(tag_no_case("key"))),
+                whitespace0,
             ),
             |_| ColumnConstraint::Unique,
         );
         let character_set = map(
             preceded(
-                delimited(multispace0, tag_no_case("character set"), multispace1),
+                delimited(whitespace0, tag_no_case("character set"), whitespace1),
                 dialect.identifier(),
             ),
             |cs| {
@@ -266,7 +267,7 @@ pub fn column_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], C
         );
         let collate = map(
             preceded(
-                delimited(multispace0, tag_no_case("collate"), multispace1),
+                delimited(whitespace0, tag_no_case("collate"), whitespace1),
                 dialect.identifier(),
             ),
             |c| {
@@ -297,9 +298,9 @@ pub fn column_specification(
         let (remaining_input, (column, field_type, constraints, comment)) = tuple((
             column_identifier_no_alias(dialect),
             opt(delimited(
-                multispace1,
+                whitespace1,
                 type_identifier(dialect),
-                multispace0,
+                whitespace0,
             )),
             many0(column_constraint(dialect)),
             opt(parse_comment),

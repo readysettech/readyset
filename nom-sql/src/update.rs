@@ -1,7 +1,6 @@
 use std::{fmt, str};
 
 use nom::bytes::complete::tag_no_case;
-use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::opt;
 use nom::sequence::tuple;
 use nom::IResult;
@@ -11,6 +10,7 @@ use crate::column::Column;
 use crate::common::{assignment_expr_list, schema_table_reference_no_alias, statement_terminator};
 use crate::select::where_clause;
 use crate::table::Table;
+use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Expression};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -45,13 +45,13 @@ pub fn updating(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], UpdateStat
     move |i| {
         let (remaining_input, (_, _, table, _, _, _, fields, _, where_clause, _)) = tuple((
             tag_no_case("update"),
-            multispace1,
+            whitespace1,
             schema_table_reference_no_alias(dialect),
-            multispace1,
+            whitespace1,
             tag_no_case("set"),
-            multispace1,
+            whitespace1,
             assignment_expr_list(dialect),
-            multispace0,
+            whitespace0,
             opt(where_clause(dialect)),
             statement_terminator,
         ))(i)?;

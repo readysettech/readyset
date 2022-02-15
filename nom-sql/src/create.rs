@@ -4,7 +4,7 @@ use std::{fmt, str};
 use derive_more::{Display, From};
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case};
-use nom::character::complete::{digit1, multispace0, multispace1};
+use nom::character::complete::digit1;
 use nom::combinator::{map, map_res, opt};
 use nom::multi::{many0, many1, separated_list0};
 use nom::sequence::{delimited, preceded, terminated, tuple};
@@ -22,6 +22,7 @@ use crate::expression::expression;
 use crate::order::{order_type, OrderType};
 use crate::select::{nested_selection, selection, SelectStatement};
 use crate::table::Table;
+use crate::whitespace::{whitespace0, whitespace1};
 use crate::{ColumnConstraint, Dialect, SqlIdentifier};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -164,7 +165,7 @@ pub fn index_col_name(
 ) -> impl Fn(&[u8]) -> IResult<&[u8], (Column, Option<u16>, Option<OrderType>)> {
     move |i| {
         let (remaining_input, (column, len_u8, order)) = tuple((
-            terminated(column_identifier_no_alias(dialect), multispace0),
+            terminated(column_identifier_no_alias(dialect), whitespace0),
             opt(delimited(
                 tag("("),
                 map_res(map_res(digit1, str::from_utf8), u16::from_str),
@@ -206,14 +207,14 @@ fn full_text_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey>
     move |i| {
         let (remaining_input, (_, _, _, _, name, _, columns)) = tuple((
             tag_no_case("fulltext"),
-            multispace1,
+            whitespace1,
             alt((tag_no_case("key"), tag_no_case("index"))),
-            multispace1,
+            whitespace1,
             opt(dialect.identifier()),
-            multispace0,
+            whitespace0,
             delimited(
                 tag("("),
-                delimited(multispace0, index_col_list(dialect), multispace0),
+                delimited(whitespace0, index_col_list(dialect), whitespace0),
                 tag(")"),
             ),
         ))(i)?;
@@ -229,15 +230,15 @@ fn primary_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     move |i| {
         let (remaining_input, (_, name, _, columns, _)) = tuple((
             tag_no_case("primary key"),
-            opt(preceded(multispace1, dialect.identifier())),
-            multispace0,
+            opt(preceded(whitespace1, dialect.identifier())),
+            whitespace0,
             delimited(
                 tag("("),
-                delimited(multispace0, index_col_list(dialect), multispace0),
+                delimited(whitespace0, index_col_list(dialect), whitespace0),
                 tag(")"),
             ),
             opt(map(
-                preceded(multispace1, tag_no_case("auto_increment")),
+                preceded(whitespace1, tag_no_case("auto_increment")),
                 |_| (),
             )),
         ))(i)?;
@@ -250,16 +251,16 @@ fn referential_action(i: &[u8]) -> IResult<&[u8], ReferentialAction> {
     alt((
         map(tag_no_case("cascade"), |_| ReferentialAction::Cascade),
         map(
-            tuple((tag_no_case("set"), multispace1, tag_no_case("null"))),
+            tuple((tag_no_case("set"), whitespace1, tag_no_case("null"))),
             |_| ReferentialAction::SetNull,
         ),
         map(tag_no_case("restrict"), |_| ReferentialAction::Restrict),
         map(
-            tuple((tag_no_case("no"), multispace1, tag_no_case("action"))),
+            tuple((tag_no_case("no"), whitespace1, tag_no_case("action"))),
             |_| ReferentialAction::NoAction,
         ),
         map(
-            tuple((tag_no_case("set"), multispace1, tag_no_case("default"))),
+            tuple((tag_no_case("set"), whitespace1, tag_no_case("default"))),
             |_| ReferentialAction::SetDefault,
         ),
     ))(i)
@@ -271,59 +272,59 @@ fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
         // CONSTRAINT identifier
         let (i, _) = opt(move |i| {
             let (i, _) = tag_no_case("constraint")(i)?;
-            multispace1(i)
+            whitespace1(i)
         })(i)?;
         let (i, name) = opt(dialect.identifier())(i)?;
 
         // FOREIGN KEY identifier
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("foreign")(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("key")(i)?;
-        let (i, index_name) = opt(preceded(multispace1, dialect.identifier()))(i)?;
+        let (i, index_name) = opt(preceded(whitespace1, dialect.identifier()))(i)?;
 
         // (columns)
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = tag("(")(i)?;
         let (i, columns) = separated_list0(
-            terminated(tag(","), multispace0),
+            terminated(tag(","), whitespace0),
             column_identifier_no_alias(dialect),
         )(i)?;
         let (i, _) = tag(")")(i)?;
 
         // REFERENCES
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("references")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, target_table) = schema_table_reference(dialect)(i)?;
 
         // (columns)
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = tag("(")(i)?;
         let (i, target_columns) = separated_list0(
-            terminated(tag(","), multispace0),
+            terminated(tag(","), whitespace0),
             column_identifier_no_alias(dialect),
         )(i)?;
         let (i, _) = tag(")")(i)?;
 
         // ON DELETE
         let (i, on_delete) = opt(move |i| {
-            let (i, _) = multispace0(i)?;
+            let (i, _) = whitespace0(i)?;
             let (i, _) = tag_no_case("on")(i)?;
-            let (i, _) = multispace1(i)?;
+            let (i, _) = whitespace1(i)?;
             let (i, _) = tag_no_case("delete")(i)?;
-            let (i, _) = multispace1(i)?;
+            let (i, _) = whitespace1(i)?;
 
             referential_action(i)
         })(i)?;
 
         // ON UPDATE
         let (i, on_update) = opt(move |i| {
-            let (i, _) = multispace0(i)?;
+            let (i, _) = whitespace0(i)?;
             let (i, _) = tag_no_case("on")(i)?;
-            let (i, _) = multispace1(i)?;
+            let (i, _) = whitespace1(i)?;
             let (i, _) = tag_no_case("update")(i)?;
-            let (i, _) = multispace1(i)?;
+            let (i, _) = whitespace1(i)?;
 
             referential_action(i)
         })(i)?;
@@ -351,9 +352,9 @@ fn index_type(i: &[u8]) -> IResult<&[u8], IndexType> {
 }
 
 fn using_index(i: &[u8]) -> IResult<&[u8], IndexType> {
-    let (i, _) = multispace1(i)?;
+    let (i, _) = whitespace1(i)?;
     let (i, _) = tag_no_case("using")(i)?;
-    let (i, _) = multispace1(i)?;
+    let (i, _) = whitespace1(i)?;
     index_type(i)
 }
 
@@ -361,15 +362,15 @@ fn unique(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     move |i| {
         let (i, _) = tag_no_case("unique")(i)?;
         let (i, _) = opt(preceded(
-            multispace1,
+            whitespace1,
             alt((tag_no_case("key"), tag_no_case("index"))),
         ))(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, name) = opt(dialect.identifier())(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, columns) = delimited(
             tag("("),
-            delimited(multispace0, index_col_list(dialect), multispace0),
+            delimited(whitespace0, index_col_list(dialect), whitespace0),
             tag(")"),
         )(i)?;
         let (i, index_type) = opt(using_index)(i)?;
@@ -388,12 +389,12 @@ fn unique(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
 fn key_or_index(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     move |i| {
         let (i, _) = alt((tag_no_case("key"), tag_no_case("index")))(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, name) = dialect.identifier()(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, columns) = delimited(
             tag("("),
-            delimited(multispace0, index_col_list(dialect), multispace0),
+            delimited(whitespace0, index_col_list(dialect), whitespace0),
             tag(")"),
         )(i)?;
         let (i, index_type) = opt(using_index)(i)?;
@@ -413,22 +414,22 @@ fn check_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableK
     move |i| {
         let (i, name) = map(
             opt(preceded(
-                terminated(tag_no_case("constraint"), multispace1),
-                opt(terminated(dialect.identifier(), multispace1)),
+                terminated(tag_no_case("constraint"), whitespace1),
+                opt(terminated(dialect.identifier(), whitespace1)),
             )),
             Option::flatten,
         )(i)?;
         let (i, _) = tag_no_case("check")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, expr) = delimited(
-            terminated(tag("("), multispace0),
+            terminated(tag("("), whitespace0),
             expression(dialect),
-            preceded(multispace0, tag(")")),
+            preceded(whitespace0, tag(")")),
         )(i)?;
         let (i, enforced) = opt(preceded(
-            multispace1,
+            whitespace1,
             terminated(
-                map(opt(terminated(tag_no_case("not"), multispace1)), |n| {
+                map(opt(terminated(tag_no_case("not"), whitespace1)), |n| {
                     n.is_none()
                 }),
                 tag_no_case("enforced"),
@@ -469,20 +470,20 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
             (_, _, _, _, if_not_exists, table, _, _, _, fields_list, _, keys_list, _, _, _, opt, _),
         ) = tuple((
             tag_no_case("create"),
-            multispace1,
+            whitespace1,
             tag_no_case("table"),
-            multispace1,
+            whitespace1,
             if_not_exists,
             schema_table_reference(dialect),
-            multispace0,
+            whitespace0,
             tag("("),
-            multispace0,
+            whitespace0,
             field_specification_list(dialect),
-            multispace0,
+            whitespace0,
             opt(key_specification_list(dialect)),
-            multispace0,
+            whitespace0,
             tag(")"),
-            multispace0,
+            whitespace0,
             table_options(dialect),
             statement_terminator,
         ))(i)?;
@@ -616,33 +617,33 @@ pub fn create_view_params(i: &[u8]) -> IResult<&[u8], ()> {
         tuple((
             opt(tuple((
                 tag_no_case("ALGORITHM"),
-                multispace0,
+                whitespace0,
                 tag("="),
-                multispace0,
+                whitespace0,
                 alt((
                     tag_no_case("UNDEFINED"),
                     tag_no_case("MERGE"),
                     tag_no_case("TEMPTABLE"),
                 )),
-                multispace1,
+                whitespace1,
             ))),
             opt(tuple((
                 tag_no_case("DEFINER"),
-                multispace0,
+                whitespace0,
                 tag("="),
-                multispace0,
+                whitespace0,
                 delimited(tag("`"), is_not("`"), tag("`")),
                 tag("@"),
                 delimited(tag("`"), is_not("`"), tag("`")),
-                multispace1,
+                whitespace1,
             ))),
             opt(tuple((
                 tag_no_case("SQL"),
-                multispace1,
+                whitespace1,
                 tag_no_case("SECURITY"),
-                multispace1,
+                whitespace1,
                 alt((tag_no_case("DEFINER"), tag_no_case("INVOKER"))),
-                multispace1,
+                whitespace1,
             ))),
         )),
         |_| (),
@@ -668,14 +669,14 @@ pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Creat
     move |i| {
         let (remaining_input, (_, _, _, _, _, name, _, _, _, def, _)) = tuple((
             tag_no_case("create"),
-            multispace1,
+            whitespace1,
             opt(create_view_params),
             tag_no_case("view"),
-            multispace1,
+            whitespace1,
             dialect.identifier(),
-            multispace1,
+            whitespace1,
             tag_no_case("as"),
-            multispace1,
+            whitespace1,
             alt((
                 map(compound_selection(dialect), SelectSpecification::Compound),
                 map(nested_selection(dialect), SelectSpecification::Simple),
@@ -714,14 +715,14 @@ pub fn create_cached_query(
 ) -> impl Fn(&[u8]) -> IResult<&[u8], CreateCachedQueryStatement> {
     move |i| {
         let (i, _) = tag_no_case("create")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("cached")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("query")(i)?;
-        let (i, _) = multispace1(i)?;
-        let (i, name) = opt(terminated(dialect.identifier(), multispace1))(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, name) = opt(terminated(dialect.identifier(), whitespace1))(i)?;
         let (i, _) = tag_no_case("as")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, inner) = cached_query_inner(dialect)(i)?;
         Ok((i, CreateCachedQueryStatement { name, inner }))
     }

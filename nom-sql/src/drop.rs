@@ -1,14 +1,16 @@
 use std::{fmt, str};
 
 use nom::bytes::complete::tag_no_case;
-use nom::character::complete::{multispace0, multispace1};
+use nom::character::complete::anychar;
 use nom::combinator::opt;
+use nom::multi::many0;
 use nom::sequence::{delimited, tuple};
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{statement_terminator, table_list};
 use crate::table::Table;
+use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, SqlIdentifier};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -36,26 +38,27 @@ impl fmt::Display for DropTableStatement {
 
 pub fn drop_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DropTableStatement> {
     move |i| {
-        let (remaining_input, (_, _, _, opt_if_exists, _, tables, _, _, _, _)) = tuple((
+        let (remaining_input, (_, _, _, opt_if_exists, _, tables, _, _, _, _, _)) = tuple((
             tag_no_case("drop"),
-            multispace1,
+            whitespace1,
             tag_no_case("table"),
             opt(tuple((
-                multispace0,
+                whitespace0,
                 tag_no_case("if"),
-                multispace1,
+                whitespace1,
                 tag_no_case("exists"),
-                multispace0,
+                whitespace0,
             ))),
-            multispace0,
+            whitespace0,
             table_list(dialect),
-            multispace0,
+            whitespace0,
             opt(delimited(
-                multispace0,
+                whitespace0,
                 tag_no_case("restricted"),
-                multispace0,
+                whitespace0,
             )),
-            opt(delimited(multispace0, tag_no_case("cascade"), multispace0)),
+            opt(delimited(whitespace0, tag_no_case("cascade"), whitespace0)),
+            opt(many0(anychar)),
             statement_terminator,
         ))(i)?;
 
@@ -85,11 +88,11 @@ pub fn drop_cached_query(
 ) -> impl Fn(&[u8]) -> IResult<&[u8], DropCachedQueryStatement> {
     move |i| {
         let (i, _) = tag_no_case("drop")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("cached")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("query")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, name) = dialect.identifier()(i)?;
         Ok((i, DropCachedQueryStatement { name }))
     }

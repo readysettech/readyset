@@ -2,13 +2,13 @@ use std::{fmt, str};
 
 use itertools::Itertools;
 use nom::bytes::complete::tag_no_case;
-use nom::character::complete::multispace1;
 use nom::multi::separated_list1;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{schema_table_reference, ws_sep_comma};
 use crate::table::Table;
+use crate::whitespace::whitespace1;
 use crate::Dialect;
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -29,9 +29,9 @@ impl fmt::Display for RenameTableStatement {
 pub fn rename_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], RenameTableStatement> {
     move |i| {
         let (i, _) = tag_no_case("rename")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("table")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, ops) = separated_list1(ws_sep_comma, rename_table_operation(dialect))(i)?;
         Ok((i, RenameTableStatement { ops }))
     }
@@ -54,9 +54,9 @@ fn rename_table_operation(
 ) -> impl Fn(&[u8]) -> IResult<&[u8], RenameTableOperation> {
     move |i| {
         let (i, from) = schema_table_reference(dialect)(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("to")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, to) = schema_table_reference(dialect)(i)?;
         Ok((i, RenameTableOperation { from, to }))
     }

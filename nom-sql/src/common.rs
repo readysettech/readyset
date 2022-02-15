@@ -1,5 +1,6 @@
 use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
+use std::ops::{Range, RangeFrom, RangeTo};
 use std::str;
 use std::str::FromStr;
 
@@ -12,7 +13,7 @@ use launchpad::arbitrary::{
 };
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take_until};
-use nom::character::complete::{digit1, line_ending, multispace0, multispace1};
+use nom::character::complete::{digit1, line_ending};
 use nom::combinator::{map, map_parser, map_res, opt, peek, recognize};
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{many0, many1, separated_list0};
@@ -28,6 +29,7 @@ use crate::column::Column;
 use crate::dialect::Dialect;
 use crate::expression::expression;
 use crate::table::Table;
+use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Expression, FunctionExpression, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
@@ -787,7 +789,7 @@ where
 fn precision_helper(i: &[u8]) -> IResult<&[u8], (u8, Option<u8>)> {
     let (remaining_input, (m, d)) = tuple((
         digit1,
-        opt(preceded(tag(","), preceded(multispace0, digit1))),
+        opt(preceded(tag(","), preceded(whitespace0, digit1))),
     ))(i)?;
 
     let m = digit_as_u8(m)?.1;
@@ -812,8 +814,8 @@ pub fn numeric_precision(i: &[u8]) -> IResult<&[u8], (u16, Option<u8>)> {
 pub fn numeric_precision_inner(i: &[u8]) -> IResult<&[u8], (u16, Option<u8>)> {
     let (remaining_input, (m, _, d)) = tuple((
         digit1,
-        multispace0,
-        opt(preceded(tag(","), preceded(multispace0, digit1))),
+        whitespace0,
+        opt(preceded(tag(","), preceded(whitespace0, digit1))),
     ))(i)?;
 
     let m = digit_as_u16(m)?.1;
@@ -848,7 +850,7 @@ where
     G: Fn(Option<u16>) -> SqlType + 'static,
 {
     let (remaining_input, (_, len, _, signed)) =
-        tuple((tag_no_case(tag), opt(delim_u16), multispace0, opt_signed))(i)?;
+        tuple((tag_no_case(tag), opt(delim_u16), whitespace0, opt_signed))(i)?;
 
     if let Some(Sign::Unsigned) = signed {
         Ok((remaining_input, mk_unsigned(len)))
@@ -864,7 +866,7 @@ fn decimal_or_numeric(i: &[u8]) -> IResult<&[u8], SqlType> {
     let (remaining_input, precision) = delimited(
         alt((tag_no_case("decimal"), tag_no_case("numeric"))),
         opt(precision),
-        multispace0,
+        whitespace0,
     )(i)?;
 
     match precision {
@@ -890,16 +892,16 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
             map(
                 tuple((
                     tag_no_case("double"),
-                    opt(preceded(multispace1, tag_no_case("precision"))),
-                    multispace0,
+                    opt(preceded(whitespace1, tag_no_case("precision"))),
+                    whitespace0,
                     opt(precision),
-                    multispace0,
+                    whitespace0,
                     opt_signed,
                 )),
                 |_| SqlType::Double,
             ),
             map(
-                tuple((tag_no_case("numeric"), multispace0, opt(numeric_precision))),
+                tuple((tag_no_case("numeric"), whitespace0, opt(numeric_precision))),
                 |t| SqlType::Numeric(t.2),
             ),
             map(
@@ -908,35 +910,35 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
                         tag_no_case("enum"),
                         delimited(tag("("), value_list(dialect), tag(")")),
                     ),
-                    multispace0,
+                    whitespace0,
                 ),
                 SqlType::Enum,
             ),
             map(
                 tuple((
                     tag_no_case("float"),
-                    multispace0,
+                    whitespace0,
                     opt(precision),
-                    multispace0,
+                    whitespace0,
                 )),
                 |_| SqlType::Float,
             ),
             map(
-                tuple((tag_no_case("real"), multispace0, opt_signed)),
+                tuple((tag_no_case("real"), whitespace0, opt_signed)),
                 |_| SqlType::Real,
             ),
             map(tag_no_case("text"), |_| SqlType::Text),
             map(
                 tuple((
                     tag_no_case("timestamp"),
-                    opt(preceded(multispace0, delim_digit)),
+                    opt(preceded(whitespace0, delim_digit)),
                     preceded(
-                        multispace1,
+                        whitespace1,
                         tuple((
                             tag_no_case("with"),
-                            multispace1,
+                            whitespace1,
                             tag_no_case("time"),
-                            multispace1,
+                            whitespace1,
                             tag_no_case("zone"),
                         )),
                     ),
@@ -946,14 +948,14 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
             map(
                 tuple((
                     tag_no_case("timestamp"),
-                    opt(preceded(multispace0, delim_digit)),
+                    opt(preceded(whitespace0, delim_digit)),
                     opt(preceded(
-                        multispace1,
+                        whitespace1,
                         tuple((
                             tag_no_case("without"),
-                            multispace1,
+                            whitespace1,
                             tag_no_case("time"),
-                            multispace1,
+                            whitespace1,
                             tag_no_case("zone"),
                         )),
                     )),
@@ -965,15 +967,19 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
                     alt((
                         // The alt expects the same type to be returned for both entries,
                         // so both have to be tuples with same number of elements
-                        tuple((tag_no_case("varchar"), multispace0, multispace0)),
+                        tuple((
+                            tag_no_case("varchar"),
+                            map(whitespace0, |_| "".as_bytes()),
+                            map(whitespace0, |_| "".as_bytes()),
+                        )),
                         tuple((
                             tag_no_case("character"),
-                            multispace1,
+                            map(whitespace1, |_| "".as_bytes()),
                             tag_no_case("varying"),
                         )),
                     )),
                     opt(delim_u16),
-                    multispace0,
+                    whitespace0,
                     opt(tag_no_case("binary")),
                 )),
                 |t| SqlType::Varchar(t.1),
@@ -982,7 +988,7 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
                 tuple((
                     tag_no_case("char"),
                     opt(delim_u16),
-                    multispace0,
+                    whitespace0,
                     opt(tag_no_case("binary")),
                 )),
                 |t| SqlType::Char(t.1),
@@ -996,7 +1002,7 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
         map(tag_no_case("time"), |_| SqlType::Time),
         decimal_or_numeric,
         map(
-            tuple((tag_no_case("binary"), opt(delim_u16), multispace0)),
+            tuple((tag_no_case("binary"), opt(delim_u16), whitespace0)),
             |t| SqlType::Binary(t.1),
         ),
         map(tag_no_case("blob"), |_| SqlType::Blob),
@@ -1007,7 +1013,7 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
         map(tag_no_case("tinyblob"), |_| SqlType::Tinyblob),
         map(tag_no_case("tinytext"), |_| SqlType::Tinytext),
         map(
-            tuple((tag_no_case("varbinary"), delim_u16, multispace0)),
+            tuple((tag_no_case("varbinary"), delim_u16, whitespace0)),
             |t| SqlType::Varbinary(t.1),
         ),
         map(tag_no_case("bytea"), |_| SqlType::ByteArray),
@@ -1020,13 +1026,13 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
                 alt((
                     // The alt expects the same type to be returned for both entries,
                     // so both have to be tuples with same number of elements
-                    map(tuple((tag_no_case("varbit"), multispace0)), |_| ()),
+                    map(tuple((tag_no_case("varbit"), whitespace0)), |_| ()),
                     map(
                         tuple((
                             tag_no_case("bit"),
-                            multispace1,
+                            whitespace1,
                             tag_no_case("varying"),
-                            multispace0,
+                            whitespace0,
                         )),
                         |_| (),
                     ),
@@ -1059,7 +1065,7 @@ pub fn agg_function_arguments(
     dialect: Dialect,
 ) -> impl Fn(&[u8]) -> IResult<&[u8], (Expression, bool)> {
     move |i| {
-        let distinct_parser = opt(tuple((tag_no_case("distinct"), multispace1)));
+        let distinct_parser = opt(tuple((tag_no_case("distinct"), whitespace1)));
         let (remaining_input, (distinct, args)) = tuple((distinct_parser, expression(dialect)))(i)?;
         Ok((remaining_input, (args, distinct.is_some())))
     }
@@ -1067,14 +1073,14 @@ pub fn agg_function_arguments(
 
 fn group_concat_fx_helper(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], String> {
     move |i| {
-        let ws_sep = delimited(multispace0, tag_no_case("separator"), multispace0);
+        let ws_sep = delimited(whitespace0, tag_no_case("separator"), whitespace0);
         let (i, sep) = delimited(
             ws_sep,
             opt(map_res(
                 move |i| dialect.string_literal()(i),
                 String::from_utf8,
             )),
-            multispace0,
+            whitespace0,
         )(i)?;
 
         Ok((i, sep.unwrap_or_default()))
@@ -1100,7 +1106,7 @@ fn delim_fx_args(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Expre
             tag("("),
             separated_list0(
                 tag(","),
-                delimited(multispace0, expression(dialect), multispace0),
+                delimited(whitespace0, expression(dialect), whitespace0),
             ),
             tag(")"),
         )(i)
@@ -1158,7 +1164,7 @@ pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Fun
             map(
                 tuple((
                     dialect.function_identifier(),
-                    multispace0,
+                    whitespace0,
                     delim_fx_args(dialect),
                 )),
                 |(name, _, arguments)| FunctionExpression::Call {
@@ -1175,7 +1181,7 @@ pub fn column_identifier_no_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult
     move |i| {
         let (i, table) = opt(terminated(
             dialect.identifier(),
-            delimited(multispace0, tag("."), multispace0),
+            delimited(whitespace0, tag("."), whitespace0),
         ))(i)?;
         let (i, name) = dialect.identifier()(i)?;
         Ok((i, Column { name, table }))
@@ -1193,7 +1199,7 @@ pub(crate) fn eof<I: Copy + InputLength, E: ParseError<I>>(input: I) -> IResult<
 // Parse a terminator that ends a SQL statement.
 pub fn statement_terminator(i: &[u8]) -> IResult<&[u8], ()> {
     let (remaining_input, _) =
-        delimited(multispace0, alt((tag(";"), line_ending, eof)), multispace0)(i)?;
+        delimited(whitespace0, alt((tag(";"), line_ending, eof)), whitespace0)(i)?;
 
     Ok((remaining_input, ()))
 }
@@ -1203,8 +1209,8 @@ pub fn as_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlIdentif
     move |i| {
         map(
             tuple((
-                multispace1,
-                opt(pair(tag_no_case("as"), multispace1)),
+                whitespace1,
+                opt(pair(tag_no_case("as"), whitespace1)),
                 dialect.identifier(),
             )),
             |a| a.2,
@@ -1216,7 +1222,7 @@ fn assignment_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Column
     move |i| {
         separated_pair(
             column_identifier_no_alias(dialect),
-            delimited(multispace0, tag("="), multispace0),
+            delimited(whitespace0, tag("="), whitespace0),
             expression(dialect),
         )(i)
     }
@@ -1224,18 +1230,31 @@ fn assignment_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Column
 
 /// Whitespace surrounded optionally on either side by a comma
 pub(crate) fn ws_sep_comma(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    delimited(multispace0, tag(","), multispace0)(i)
+    delimited(whitespace0, tag(","), whitespace0)(i)
 }
 
-pub(crate) fn ws_sep_equals<'a, I, E>(i: I) -> IResult<I, I, E>
+pub(crate) fn ws_sep_equals<I, E>(i: I) -> IResult<I, I, E>
 where
     E: ParseError<I>,
-    I: nom::InputTakeAtPosition + nom::InputTake + nom::Compare<&'a str>,
+    I: nom::InputTakeAtPosition
+        + nom::InputTake
+        + nom::Compare<&'static str>
+        + nom::FindSubstring<&'static str>
+        + nom::Slice<Range<usize>>
+        + nom::Slice<RangeTo<usize>>
+        + nom::Slice<RangeFrom<usize>>
+        + nom::InputIter
+        + InputLength
+        + Default
+        + Clone
+        + PartialEq,
+    &'static str: nom::FindToken<<I as nom::InputTakeAtPosition>::Item>,
+    <I as nom::InputIter>::Item: nom::AsChar + Clone,
     // Compare required by tag
     <I as nom::InputTakeAtPosition>::Item: nom::AsChar + Clone,
-    // AsChar and Clone required by multispace0
+    // AsChar and Clone required by whitespace0
 {
-    delimited(multispace0, tag("="), multispace0)(i)
+    delimited(whitespace0, tag("="), whitespace0)(i)
 }
 
 pub fn assignment_expr_list(
@@ -1388,7 +1407,7 @@ pub fn literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
 
 // Parse a list of values (e.g., for INSERT syntax).
 pub fn value_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Literal>> {
-    move |i| many0(delimited(multispace0, literal(dialect), opt(ws_sep_comma)))(i)
+    move |i| many0(delimited(whitespace0, literal(dialect), opt(ws_sep_comma)))(i)
 }
 
 // Parse a reference to a named schema.table, with an optional alias
@@ -1431,11 +1450,11 @@ pub fn schema_table_reference_no_alias(
 pub(crate) fn if_not_exists(i: &[u8]) -> IResult<&[u8], bool> {
     let (i, s) = opt(move |i| {
         let (i, _) = tag_no_case("if")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("not")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("exists")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
 
         Ok((i, ()))
     })(i)?;
@@ -1460,7 +1479,7 @@ pub fn table_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Tab
 pub fn parse_comment(i: &[u8]) -> IResult<&[u8], String> {
     map(
         preceded(
-            delimited(multispace0, tag_no_case("comment"), multispace1),
+            delimited(whitespace0, tag_no_case("comment"), whitespace1),
             map_res(
                 delimited(tag("'"), take_until("'"), tag("'")),
                 str::from_utf8,

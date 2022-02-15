@@ -11,12 +11,9 @@ use std::fs::read_to_string;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Context};
-use nom::branch::alt;
-use nom::bytes::complete::{tag, take_until, take_while};
-use nom::character::complete::multispace1;
-use nom::combinator::{map, opt};
 use nom::multi::many1;
-use nom::sequence::{preceded, terminated, tuple};
+use nom::sequence::{preceded, terminated};
+use nom_sql::whitespace::whitespace0;
 use nom_sql::{sql_query, Dialect, Expression, SqlQuery};
 use query_generator::{TableName, TableSpec};
 
@@ -70,27 +67,14 @@ pub struct DatabaseSchema {
     tables: HashMap<TableName, TableGenerationSpec>,
 }
 
-fn comments(i: &[u8]) -> nom::IResult<&[u8], ()> {
-    map(
-        many1(tuple((
-            opt(alt((
-                map(tuple((tag("/*"), take_until("*/;"), tag("*/;"))), |_| ()),
-                map(tuple((tag("--"), take_while(|c| c != b'\n'))), |_| ()),
-            ))),
-            multispace1,
-        ))),
-        |_| (),
-    )(i)
-}
-
 fn parse_ddl(input: &[u8]) -> anyhow::Result<Vec<SqlQuery>> {
     let (remain, query) = terminated(
         many1(preceded(
             // Skip comments, newlines, variables
-            opt(comments),
+            whitespace0,
             sql_query(Dialect::MySQL),
         )),
-        opt(comments),
+        whitespace0,
     )(input)
     .map_err(|err| anyhow!("Error parsing ddl into SqlQuery {:?}", err))?;
 

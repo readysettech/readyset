@@ -3,7 +3,6 @@ use std::{fmt, str};
 use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
-use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
 use nom::error::ErrorKind;
 use nom::multi::{many0, separated_list1};
@@ -19,6 +18,7 @@ use crate::expression::expression;
 use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use crate::order::{order_clause, OrderClause};
 use crate::table::Table;
+use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Column, Dialect, Expression, FunctionExpression, Literal, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Default, Serialize, Deserialize)]
@@ -180,9 +180,9 @@ impl fmt::Display for SelectStatement {
 fn having_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
     move |i| {
         let (remaining_input, (_, _, _, expr)) = tuple((
-            multispace0,
+            whitespace0,
             tag_no_case("having"),
-            multispace1,
+            whitespace1,
             expression(dialect),
         ))(i)?;
 
@@ -194,11 +194,11 @@ fn having_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expressio
 pub fn group_by_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], GroupByClause> {
     move |i| {
         let (remaining_input, (_, _, _, _, _, columns, having)) = tuple((
-            multispace0,
+            whitespace0,
             tag_no_case("group"),
-            multispace1,
+            whitespace1,
             tag_no_case("by"),
-            multispace1,
+            whitespace1,
             field_list(dialect),
             opt(having_clause(dialect)),
         ))(i)?;
@@ -209,9 +209,9 @@ pub fn group_by_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Gro
 
 fn offset_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
     move |i| {
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("offset")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         literal(dialect)(i)
     }
 }
@@ -219,9 +219,9 @@ fn offset_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> 
 // Parse LIMIT clause
 pub fn limit_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], LimitClause> {
     move |i| {
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("limit")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, limit) = literal(dialect)(i)?;
         let (i, offset) = opt(offset_clause(dialect))(i)?;
 
@@ -234,22 +234,22 @@ fn join_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinCon
         let using_clause = map(
             tuple((
                 tag_no_case("using"),
-                multispace1,
+                whitespace1,
                 delimited(
-                    terminated(tag("("), multispace0),
+                    terminated(tag("("), whitespace0),
                     field_list(dialect),
-                    preceded(multispace0, tag(")")),
+                    preceded(whitespace0, tag(")")),
                 ),
             )),
             |t| JoinConstraint::Using(t.2),
         );
         let on_condition = alt((
             delimited(
-                terminated(tag("("), multispace0),
+                terminated(tag("("), whitespace0),
                 expression(dialect),
-                preceded(multispace0, tag(")")),
+                preceded(whitespace0, tag(")")),
             ),
-            preceded(multispace1, expression(dialect)),
+            preceded(whitespace1, expression(dialect)),
         ));
         let on_clause = map(tuple((tag_no_case("on"), on_condition)), |t| {
             JoinConstraint::On(t.1)
@@ -263,12 +263,12 @@ fn join_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinCon
 fn join_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinClause> {
     move |i| {
         let (remaining_input, (_, _natural, operator, _, right, _, constraint)) = tuple((
-            multispace0,
-            opt(terminated(tag_no_case("natural"), multispace1)),
+            whitespace0,
+            opt(terminated(tag_no_case("natural"), whitespace1)),
             join_operator,
-            multispace1,
+            whitespace1,
             join_rhs(dialect),
-            multispace0,
+            whitespace0,
             join_constraint(dialect),
         ))(i)?;
 
@@ -288,9 +288,9 @@ fn join_rhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinRightSide>
         let nested_select = map(
             tuple((
                 delimited(
-                    terminated(tag("("), multispace0),
+                    terminated(tag("("), whitespace0),
                     nested_selection(dialect),
-                    preceded(multispace0, tag(")")),
+                    preceded(whitespace0, tag(")")),
                 ),
                 as_alias(dialect),
             )),
@@ -309,9 +309,9 @@ fn join_rhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinRightSide>
 pub fn where_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
     move |i| {
         let (remaining_input, (_, _, _, where_condition)) = tuple((
-            multispace0,
+            whitespace0,
             tag_no_case("where"),
-            multispace1,
+            whitespace1,
             expression(dialect),
         ))(i)?;
 
@@ -377,9 +377,9 @@ impl FromClause {
 fn nested_select(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause> {
     move |i| {
         let (i, _) = tag("(")(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, selection) = nested_selection(dialect)(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = tag(")")(i)?;
 
         let (i, alias) = opt(as_alias(dialect))(i)?;
@@ -389,10 +389,10 @@ fn nested_select(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClaus
 
 fn from_clause_join(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause> {
     move |i| {
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, lhs) = nested_from_clause(dialect)(i)?;
         let (i, join_clause) = join_clause(dialect)(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         Ok((
             i,
             FromClause::Join {
@@ -426,9 +426,9 @@ fn from_clause_tree(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromCl
 
 fn from_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause> {
     move |i| {
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("from")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         from_clause_tree(dialect)(i)
     }
 }
@@ -436,14 +436,14 @@ fn from_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause>
 fn cte(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CommonTableExpression> {
     move |i| {
         let (i, name) = dialect.identifier()(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("as")(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
 
         let (i, _) = tag("(")(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, statement) = nested_selection(dialect)(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = tag(")")(i)?;
 
         Ok((i, CommonTableExpression { name, statement }))
@@ -453,9 +453,9 @@ fn cte(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CommonTableExpressi
 fn ctes(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<CommonTableExpression>> {
     move |i| {
         let (i, _) = tag_no_case("with")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, ctes) = separated_list1(ws_sep_comma, cte(dialect))(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
 
         Ok((i, ctes))
     }
@@ -465,9 +465,9 @@ pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Se
     move |i| {
         let (i, ctes) = opt(ctes(dialect))(i)?;
         let (i, _) = tag_no_case("select")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, distinct) = opt(tag_no_case("distinct"))(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, fields) = field_definition_expr(dialect)(i)?;
 
         let (i, from_clause) = opt(move |i| {

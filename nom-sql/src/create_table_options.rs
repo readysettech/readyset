@@ -1,9 +1,10 @@
 use std::fmt;
+use std::ops::{Range, RangeFrom, RangeTo};
 use std::str::FromStr;
 
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
-use nom::character::complete::{alphanumeric1, digit1, multispace0, multispace1};
+use nom::character::complete::{alphanumeric1, digit1};
 use nom::combinator::{map, map_res, opt};
 use nom::error::ParseError;
 use nom::multi::separated_list0;
@@ -12,6 +13,7 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{integer_literal, ws_sep_comma, ws_sep_equals, Literal};
+use crate::whitespace::{whitespace0, whitespace1};
 use crate::Dialect;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
@@ -46,7 +48,10 @@ pub fn table_options(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<C
 }
 
 fn table_options_separator(i: &[u8]) -> IResult<&[u8], ()> {
-    map(alt((multispace1, ws_sep_comma)), |_| ())(i)
+    map(
+        alt((map(whitespace1, |_| "".as_bytes()), ws_sep_comma)),
+        |_| (),
+    )(i)
 }
 
 fn create_option(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTableOption> {
@@ -76,7 +81,20 @@ pub fn create_option_equals_pair<'a, I, O1, O2, E: ParseError<I>, F, G>(
 where
     F: FnMut(I) -> IResult<I, O1, E>,
     G: FnMut(I) -> IResult<I, O2, E>,
-    I: nom::InputTakeAtPosition + nom::InputTake + nom::Compare<&'a str>,
+    I: nom::InputTakeAtPosition
+        + nom::InputTake
+        + nom::Compare<&'static str>
+        + nom::FindSubstring<&'static str>
+        + nom::Slice<Range<usize>>
+        + nom::Slice<RangeTo<usize>>
+        + nom::Slice<RangeFrom<usize>>
+        + nom::InputIter
+        + nom::InputLength
+        + Default
+        + Clone
+        + PartialEq,
+    &'static str: nom::FindToken<<I as nom::InputTakeAtPosition>::Item>,
+    <I as nom::InputIter>::Item: nom::AsChar + Clone,
     <I as nom::InputTakeAtPosition>::Item: nom::AsChar + Clone,
 {
     move |i: I| {
@@ -88,19 +106,31 @@ where
 
 /// Helper to parse space-separated create option pairs.
 /// Throws away the create option and value
-pub fn create_option_spaced_pair<'a, I, O1, O2, E: ParseError<I>, F, G>(
+pub fn create_option_spaced_pair<I, O1, O2, E: ParseError<I>, F, G>(
     mut first: F,
     mut second: G,
 ) -> impl FnMut(I) -> IResult<I, O2, E>
 where
     F: FnMut(I) -> IResult<I, O1, E>,
     G: FnMut(I) -> IResult<I, O2, E>,
-    I: nom::InputTakeAtPosition + nom::InputTake + nom::Compare<&'a str>,
+    I: nom::InputTakeAtPosition
+        + nom::InputTake
+        + nom::Compare<&'static str>
+        + nom::FindSubstring<&'static str>
+        + nom::Slice<Range<usize>>
+        + nom::Slice<RangeTo<usize>>
+        + nom::Slice<RangeFrom<usize>>
+        + nom::InputIter
+        + nom::InputLength
+        + Default
+        + Clone,
+    &'static str: nom::FindToken<<I as nom::InputTakeAtPosition>::Item>,
+    <I as nom::InputIter>::Item: nom::AsChar + Clone,
     <I as nom::InputTakeAtPosition>::Item: nom::AsChar + Clone,
 {
     move |i: I| {
         let (i, _o1) = first(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         second(i)
     }
 }
@@ -230,9 +260,9 @@ fn create_option_avg_row_length(i: &[u8]) -> IResult<&[u8], Literal> {
 fn create_option_row_format(i: &[u8]) -> IResult<&[u8], &[u8]> {
     tuple((
         tag_no_case("row_format"),
-        multispace0,
+        whitespace0,
         opt(tag("=")),
-        multispace0,
+        whitespace0,
         alt((
             tag_no_case("DEFAULT"),
             tag_no_case("DYNAMIC"),
@@ -248,9 +278,9 @@ fn create_option_row_format(i: &[u8]) -> IResult<&[u8], &[u8]> {
 fn create_option_key_block_size(i: &[u8]) -> IResult<&[u8], Literal> {
     tuple((
         tag_no_case("key_block_size"),
-        multispace0,
+        whitespace0,
         opt(tag("=")),
-        multispace0,
+        whitespace0,
         integer_literal,
     ))(i)
     .map(|(i, t)| (i, t.4))

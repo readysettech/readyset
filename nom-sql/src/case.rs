@@ -1,10 +1,10 @@
 use nom::bytes::complete::tag_no_case;
-use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::opt;
 use nom::sequence::{delimited, terminated, tuple};
 use nom::IResult;
 
 use crate::expression::expression;
+use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Expression};
 
 pub fn case_when(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
@@ -12,19 +12,19 @@ pub fn case_when(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expressio
         let (remaining_input, (_, _, _, _, condition, _, _, _, then_expr, _, else_expr, _)) =
             tuple((
                 tag_no_case("case"),
-                multispace1,
+                whitespace1,
                 tag_no_case("when"),
-                multispace0,
+                whitespace0,
                 expression(dialect),
-                multispace0,
+                whitespace0,
                 tag_no_case("then"),
-                multispace0,
+                whitespace0,
                 expression(dialect),
-                multispace0,
+                whitespace0,
                 opt(delimited(
-                    terminated(tag_no_case("else"), multispace0),
+                    terminated(tag_no_case("else"), whitespace0),
                     expression(dialect),
-                    multispace0,
+                    whitespace0,
                 )),
                 tag_no_case("end"),
             ))(i)?;

@@ -13,11 +13,11 @@ use clap::{Parser, ValueHint};
 use database_utils::DatabaseURL;
 use futures::StreamExt;
 use itertools::Itertools;
-use nom::character::complete::multispace0;
 use nom::multi::many1;
 use nom::sequence::delimited;
 use nom::IResult;
 use nom_sql::parser::{sql_query, SqlQuery};
+use nom_sql::whitespace::whitespace0;
 use nom_sql::Dialect;
 use noria_client::backend::Backend;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
@@ -45,9 +45,9 @@ pub struct DataGenerator {
 
 fn multi_ddl(input: &[u8]) -> IResult<&[u8], Vec<SqlQuery>> {
     many1(delimited(
-        multispace0,
+        whitespace0,
         sql_query(Dialect::MySQL),
-        multispace0,
+        whitespace0,
     ))(input)
 }
 
