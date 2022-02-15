@@ -74,7 +74,7 @@ pub(self) fn subquery_schemas<'a>(
     ctes.iter()
         .map(|cte| (cte.name.as_str(), &cte.statement))
         .chain(join.iter().filter_map(|join| match &join.right {
-            JoinRightSide::NestedSelect(stmt, Some(name)) => Some((name.as_str(), stmt.as_ref())),
+            JoinRightSide::NestedSelect(stmt, name) => Some((name.as_str(), stmt.as_ref())),
             _ => None,
         }))
         .map(|(name, stmt)| (name, field_names(stmt).collect()))

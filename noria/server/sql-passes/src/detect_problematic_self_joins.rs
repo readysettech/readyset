@@ -116,7 +116,7 @@ fn check_select_statement<'a>(
                             break;
                         }
                     }
-                    JoinRightSide::NestedSelect(stmt, Some(t)) if t == table_alias => {
+                    JoinRightSide::NestedSelect(stmt, t) if t == table_alias => {
                         res = Some(Either::Right(trace_subquery(
                             stmt,
                             table_alias,
