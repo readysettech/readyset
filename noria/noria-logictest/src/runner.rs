@@ -90,15 +90,6 @@ impl Default for RunOptions {
     }
 }
 
-impl RunOptions {
-    fn db_name(&self) -> &str {
-        self.upstream_database_url
-            .as_ref()
-            .and_then(|url| url.db_name())
-            .unwrap_or("noria")
-    }
-}
-
 pub struct NoriaOptions {
     pub authority: Arc<Authority>,
 }
@@ -474,8 +465,7 @@ impl TestScript {
             }
 
             if let Some(replication_url) = &run_opts.replication_url {
-                // Add the data base name to the url, and set as replication source
-                builder.set_replicator_url(format!("{}/{}", replication_url, run_opts.db_name()));
+                builder.set_replicator_url(replication_url.to_owned());
             }
 
             builder.set_keep_prior_recipes(false);
