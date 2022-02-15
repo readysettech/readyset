@@ -344,6 +344,12 @@ impl PostgresWalConnector {
     }
 }
 
+impl Drop for PostgresWalConnector {
+    fn drop(&mut self) {
+        self.connection_handle.abort();
+    }
+}
+
 #[async_trait]
 impl Connector for PostgresWalConnector {
     /// Process WAL events and batch them into actions
