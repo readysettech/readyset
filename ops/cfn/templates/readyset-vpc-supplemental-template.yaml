@@ -287,6 +287,14 @@ Resources:
             Condition:
               "Null":
                 aws:ResourceTag/ReadySet:ServerInstance: "false"
+          # For Bastion Hosts
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - ec2:AssociateAddress
+              - ec2:DescribeAddresses
+            Resource:
+              - '*'
           # For Consul Server
           - Effect: Allow
             Principal: '*'

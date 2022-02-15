@@ -43,11 +43,11 @@ parameters=(
   "ParameterKey=DatabaseUsername,ParameterValue=readyset"
   "ParameterKey=DatabaseName,ParameterValue=readyset"
   "ParameterKey=ReadySetDeploymentName,ParameterValue=${stack_name}"
+  "ParameterKey=AdditionalAdapterCIDR,ParameterValue=10.0.0.0/18"
   "ParameterKey=SSMParameterKmsKeyArn,ParameterValue=arn:aws:kms:us-east-2:069491470376:key/5cb3afeb-e9dd-40df-98cf-a82bb53ee78b"
   "ParameterKey=SSMPathRDSDatabasePassword,ParameterValue=/readyset/sandbox/dbPassword"
 )
 
-# --template-body "file://$(realpath -s "./readyset-mysql-super-template.yaml")" \
 aws cloudformation create-stack \
   --region "$AWS_REGION" \
   --stack-name "$stack_name" \

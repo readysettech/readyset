@@ -19,7 +19,10 @@ Metadata:
         Parameters:
           - KeyPairName
           - BastionInstanceType
+          - NumBastionHosts
     ParameterLabels:
+      NumBastionHosts:
+        default: Number of bastions to deploy
       BastionInstanceType:
         default: Bastion instance type
       KeyPairName:
@@ -62,6 +65,16 @@ Parameters:
       - m4.4xlarge
     Default: t2.micro
 
+  NumBastionHosts:
+    Description: The number of bastion hosts to create. The maximum number is four.
+    Type: String
+    AllowedValues:
+      - "1"
+      - "2"
+      - "3"
+      - "4"
+    Default: "1"
+
   KeyPairName:
     Description: Name of an existing public/private key pair. If you do not have one in this AWS Region, please create it before continuing.
     Type: AWS::EC2::KeyPair::KeyName
@@ -93,6 +106,24 @@ Mappings:
     us-west-2:
       READYSETBASTION: #@ {readyset_bastion_us_west_2}
 
+Conditions:
+  2BastionCondition: !Or
+    - !Equals
+      - !Ref NumBastionHosts
+      - "2"
+    - !Condition 3BastionCondition
+    - !Condition 4BastionCondition
+
+  3BastionCondition: !Or
+    - !Equals
+      - !Ref NumBastionHosts
+      - "3"
+    - !Condition 4BastionCondition
+
+  4BastionCondition: !Equals
+    - !Ref NumBastionHosts
+    - "4"
+
 Resources:
   BastionMainLogGroup:
     Type: AWS::Logs::LogGroup
@@ -119,6 +150,28 @@ Resources:
                 - !Sub 'ec2.${AWS::URLSuffix}'
             Effect: Allow
         Version: "2012-10-17"
+      Policies:
+        - PolicyName: AssociateEIP
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Set hostname IAM
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeImages
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeAddresses
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ec2:AssociateAddress
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    ec2:ResourceTag/aws:cloudformation:stack-id: !Ref AWS::StackId
       ManagedPolicyArns:
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy'
@@ -135,10 +188,28 @@ Resources:
     Properties:
       Domain: vpc
 
+  EIP2:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+    Condition: 2BastionCondition
+
+  EIP3:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+    Condition: 3BastionCondition
+
+  EIP4:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+    Condition: 4BastionCondition
+
   BastionAutoScalingGroup:
     CreationPolicy:
       ResourceSignal:
-        Count: 1
+        Count: !Ref NumBastionHosts
         Timeout: PT20M
       AutoScalingCreationPolicy:
         MinSuccessfulInstancesPercent: 100
@@ -151,10 +222,10 @@ Resources:
       VPCZoneIdentifier:
         - !Ref PublicSubnet1ID
         - !Ref PublicSubnet2ID
-      MinSize: 1
-      MaxSize: 1
+      MinSize: !Ref NumBastionHosts
+      MaxSize: !Ref NumBastionHosts
       Cooldown: "900"
-      DesiredCapacity: 1
+      DesiredCapacity: !Ref NumBastionHosts
       Tags:
         - Key: Name
           Value: !Join ['-', [!Ref "AWS::StackName", Readyset-Bastion]]
@@ -192,9 +263,21 @@ Resources:
             export AWS_CLOUDFORMATION_STACK="${AWS::StackName}"
             export AWS_CLOUDFORMATION_RESOURCE="BastionAutoScalingGroup"
             export AWS_CLOUDFORMATION_REGION="${AWS::Region}"
+            export EIP_LIST="${EIP1},${EIP2},${EIP3},${EIP4}"
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
-          - {}
+          - EIP2: !If
+              - 2BastionCondition
+              - !Ref EIP2
+              - "Null"
+            EIP3: !If
+              - 3BastionCondition
+              - !Ref EIP3
+              - "Null"
+            EIP4: !If
+              - 4BastionCondition
+              - !Ref EIP4
+              - "Null"
 
   BastionSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -210,19 +293,45 @@ Resources:
           FromPort: -1
           ToPort: -1
           CidrIp: !Ref RemoteAccessCIDR
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
 
 Outputs:
   BastionAutoScalingGroup:
     Description: Auto Scaling group reference ID.
     Value: !Ref BastionAutoScalingGroup
     Export:
-      Name: !Sub '${AWS::StackName}-BastionAutoScalingGroup'
+      Name: !Sub '${AWS::StackName}-Bastion-ASG'
 
   EIP1:
-    Description: Elastic IP 1 for bastion.
+    Description: Elastic IP for bastion node 1.
     Value: !Ref EIP1
     Export:
-      Name: !Sub '${AWS::StackName}-EIP1'
+      Name: !Sub '${AWS::StackName}-Bastion-EIP1'
+
+  EIP2:
+    Description: Elastic IP for bastion node 2.
+    Value: !Ref EIP2
+    Export:
+      Name: !Sub '${AWS::StackName}-Bastion-EIP2'
+    Condition: 2BastionCondition
+
+  EIP3:
+    Description: Elastic IP for bastion node 3.
+    Value: !Ref EIP3
+    Export:
+      Name: !Sub '${AWS::StackName}-Bastion-EIP3'
+    Condition: 3BastionCondition
+
+  EIP4:
+    Description: Elastic IP for bastion node 4.
+    Value: !Ref EIP4
+    Export:
+      Name: !Sub '${AWS::StackName}-Bastion-EIP4'
+    Condition: 4BastionCondition
 
   CloudWatchLogs:
     Description: CloudWatch Logs GroupName. Your SSH logs will be stored here.
