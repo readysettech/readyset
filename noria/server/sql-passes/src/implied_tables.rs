@@ -1,89 +1,20 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::mem;
 
-use nom_sql::{
-    Column, CommonTableExpression, Expression, FieldDefinitionExpression, FunctionExpression,
-    InValue, JoinClause, JoinRightSide, SelectStatement, SqlQuery, Table,
+use nom_sql::analysis::visit::{
+    walk_group_by_clause, walk_order_clause, walk_select_statement, Visitor,
 };
-use noria_errors::{internal, ReadySetResult};
+use nom_sql::{Column, FieldDefinitionExpression, SelectStatement, SqlQuery, Table};
+use noria_errors::{internal, ReadySetError, ReadySetResult};
 use tracing::warn;
+
+use crate::outermost_referred_tables;
 
 pub trait ImpliedTableExpansion {
     fn expand_implied_tables(
         self,
         write_schemas: &HashMap<String, Vec<String>>,
     ) -> ReadySetResult<SqlQuery>;
-}
-
-fn rewrite_expression<F>(expand_columns: &F, expr: &mut Expression)
-where
-    F: Fn(&mut Column),
-{
-    match expr {
-        Expression::Call(f)
-        | Expression::Column(Column {
-            function: Some(box f),
-            ..
-        }) => match f {
-            FunctionExpression::CountStar => {}
-            FunctionExpression::Avg { box expr, .. }
-            | FunctionExpression::Count { box expr, .. }
-            | FunctionExpression::Sum { box expr, .. }
-            | FunctionExpression::Max(box expr)
-            | FunctionExpression::Min(box expr)
-            | FunctionExpression::GroupConcat { box expr, .. } => {
-                rewrite_expression(expand_columns, expr);
-            }
-            FunctionExpression::Call { arguments, .. } => {
-                for expr in arguments.iter_mut() {
-                    rewrite_expression(expand_columns, expr);
-                }
-            }
-        },
-        Expression::Literal(_) => {}
-        Expression::CaseWhen {
-            condition,
-            then_expr,
-            else_expr,
-        } => {
-            rewrite_expression(expand_columns, condition);
-            rewrite_expression(expand_columns, then_expr);
-            if let Some(else_expr) = else_expr {
-                rewrite_expression(expand_columns, else_expr);
-            }
-        }
-        Expression::Column(col) => {
-            expand_columns(col);
-        }
-        Expression::BinaryOp { lhs, rhs, .. } => {
-            rewrite_expression(expand_columns, lhs);
-            rewrite_expression(expand_columns, rhs);
-        }
-        Expression::UnaryOp { rhs: expr, .. } | Expression::Cast { expr, .. } => {
-            rewrite_expression(expand_columns, expr);
-        }
-        Expression::Between {
-            operand, min, max, ..
-        } => {
-            rewrite_expression(expand_columns, operand);
-            rewrite_expression(expand_columns, min);
-            rewrite_expression(expand_columns, max);
-        }
-        Expression::In { lhs, rhs, .. } => {
-            rewrite_expression(expand_columns, lhs);
-            match rhs {
-                InValue::Subquery(_) => {}
-                InValue::List(exprs) => {
-                    for expr in exprs {
-                        rewrite_expression(expand_columns, expr);
-                    }
-                }
-            }
-        }
-        Expression::Exists(_) => {}
-        Expression::NestedSelect(_) => {}
-        Expression::Variable(_) => {}
-    }
 }
 
 // Sets the table for the `Column` in `f`to `table`. This is mostly useful for CREATE TABLE
@@ -105,68 +36,26 @@ fn set_table(mut f: Column, table: &Table) -> ReadySetResult<Column> {
     Ok(f)
 }
 
-fn rewrite_selection(
-    mut sq: SelectStatement,
-    write_schemas: &HashMap<String, Vec<String>>,
-) -> ReadySetResult<SelectStatement> {
-    use nom_sql::FunctionExpression::*;
+#[derive(Debug)]
+struct ExpandImpliedTablesVisitor<'schema> {
+    schema: &'schema HashMap<String, Vec<String>>,
+    subquery_schemas: HashMap<String, Vec<String>>,
+    tables: HashSet<String>,
+    aliases: HashSet<String>,
+    // Are we currently in a position in the query that can reference aliases in the projected
+    // field list?
+    can_reference_aliases: bool,
+}
 
-    // Expand within CTEs
-    sq.ctes = mem::take(&mut sq.ctes)
-        .into_iter()
-        .map(|cte| -> ReadySetResult<_> {
-            Ok(CommonTableExpression {
-                statement: rewrite_selection(cte.statement, write_schemas)?,
-                ..cte
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    // Expand within subqueries in joins
-    sq.join = mem::take(&mut sq.join)
-        .into_iter()
-        .map(|join| -> ReadySetResult<_> {
-            Ok(JoinClause {
-                right: match join.right {
-                    JoinRightSide::NestedSelect(stmt, name) => JoinRightSide::NestedSelect(
-                        Box::new(rewrite_selection(*stmt, write_schemas)?),
-                        name,
-                    ),
-                    right => right,
-                },
-                ..join
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let mut tables: Vec<&str> = sq.tables.iter().map(|t| t.name.as_str()).collect();
-    // Keep track of fields that have aliases so we will not assign tables to alias references later
-    let mut known_aliases: Vec<&str> = Vec::new();
-    // tables mentioned in JOINs are also available for expansion
-    for jc in sq.join.iter() {
-        match &jc.right {
-            JoinRightSide::Table(Table { name, .. }) => tables.push(name),
-            JoinRightSide::Tables(join_tables) => {
-                tables.extend(join_tables.iter().map(|t| t.name.as_str()))
-            }
-            JoinRightSide::NestedSelect(_, Some(name)) => tables.push(name),
-            _ => {}
-        }
-    }
-
-    let subquery_schemas = super::subquery_schemas(&sq.ctes, &sq.join);
-
-    // Tries to find a table with a matching column in the `tables_in_query` (information
-    // passed as `write_schemas`; this is not something the parser or the expansion pass can
-    // know on their own). Panics if no match is found or the match is ambiguous.
-    let find_table = |f: &Column| -> Option<String> {
-        let mut matches = write_schemas
+impl<'schema> ExpandImpliedTablesVisitor<'schema> {
+    fn find_table(&self, column_name: &str) -> Option<String> {
+        let mut matches = self
+            .schema
             .iter()
-            .map(|(k, v)| (k.as_str(), v.iter().map(String::as_str).collect()))
-            .chain(subquery_schemas.iter().map(|(k, v)| (*k, v.clone())))
-            .filter(|&(t, _)| tables.is_empty() || tables.contains(&t))
+            .chain(self.subquery_schemas.iter())
+            .filter(|&(t, _)| self.tables.is_empty() || self.tables.contains(t))
             .filter_map(|(t, ws)| {
-                let num_matching = ws.iter().filter(|c| **c == f.name).count();
+                let num_matching = ws.iter().filter(|c| **c == column_name).count();
                 assert!(num_matching <= 1);
                 if num_matching == 1 {
                     Some(t.to_owned())
@@ -178,7 +67,7 @@ fn rewrite_selection(
         if matches.len() > 1 {
             warn!(
                 "Ambiguous column {} exists in tables: {} -- picking a random one",
-                f.name,
+                column_name,
                 matches.as_slice().join(", ")
             );
             Some(matches.pop().unwrap())
@@ -191,120 +80,99 @@ fn rewrite_selection(
             // exactly one match
             Some(matches.pop().unwrap())
         }
+    }
+}
+
+impl<'ast, 'schema> Visitor<'ast> for ExpandImpliedTablesVisitor<'schema> {
+    type Error = ReadySetError;
+
+    fn visit_select_statement(
+        &mut self,
+        select_statement: &'ast mut SelectStatement,
+    ) -> Result<(), Self::Error> {
+        let orig_tables = mem::replace(
+            &mut self.tables,
+            outermost_referred_tables(select_statement)
+                .map(|tbl| tbl.alias.as_ref().unwrap_or(&tbl.name))
+                .cloned()
+                .collect(),
+        );
+        let orig_subquery_schemas = mem::replace(
+            &mut self.subquery_schemas,
+            super::subquery_schemas(&select_statement.ctes, &select_statement.join)
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v.into_iter().map(|s| s.to_owned()).collect()))
+                .collect(),
+        );
+        let orig_aliases = mem::replace(
+            &mut self.aliases,
+            select_statement
+                .fields
+                .iter()
+                .filter_map(|fde| match fde {
+                    FieldDefinitionExpression::Expression {
+                        alias: Some(alias), ..
+                    } => Some(alias.clone()),
+                    _ => None,
+                })
+                .collect(),
+        );
+        walk_select_statement(self, select_statement)?;
+
+        self.tables = orig_tables;
+        self.subquery_schemas = orig_subquery_schemas;
+        self.aliases = orig_aliases;
+
+        Ok(())
+    }
+
+    fn visit_order_clause(
+        &mut self,
+        order: &'ast mut nom_sql::OrderClause,
+    ) -> Result<(), Self::Error> {
+        self.can_reference_aliases = true;
+        walk_order_clause(self, order)?;
+        self.can_reference_aliases = false;
+        Ok(())
+    }
+
+    fn visit_group_by_clause(
+        &mut self,
+        group_by: &'ast mut nom_sql::GroupByClause,
+    ) -> Result<(), Self::Error> {
+        self.can_reference_aliases = true;
+        walk_group_by_clause(self, group_by)?;
+        self.can_reference_aliases = false;
+        Ok(())
+    }
+
+    fn visit_column(&mut self, column: &'ast mut Column) -> Result<(), Self::Error> {
+        if column.table.is_some() {
+            return Ok(());
+        }
+
+        if !(self.can_reference_aliases && self.aliases.contains(&column.name)) {
+            column.table = self.find_table(&column.name)
+        }
+
+        Ok(())
+    }
+}
+
+fn rewrite_select(
+    mut select_statement: SelectStatement,
+    schema: &HashMap<String, Vec<String>>,
+) -> ReadySetResult<SelectStatement> {
+    let mut visitor = ExpandImpliedTablesVisitor {
+        schema,
+        subquery_schemas: Default::default(),
+        tables: Default::default(),
+        aliases: Default::default(),
+        can_reference_aliases: false,
     };
 
-    // Traverses a query and calls `find_table` on any column that has no explicit table set,
-    // including computed columns. Should not be used for CREATE TABLE and INSERT queries,
-    // which can use the simpler `set_table`.
-    let expand_columns = |col: &mut Column| {
-        if col.table.is_none() {
-            col.table = match col.function {
-                Some(ref mut f) => {
-                    // There is no implied table (other than "self") for anonymous function
-                    // columns, but we have to peek inside the function to expand implied
-                    // tables in its specification
-                    match **f {
-                        Avg {
-                            expr: box Expression::Column(ref mut fe),
-                            ..
-                        }
-                        | Count {
-                            expr:
-                                box Expression::CaseWhen {
-                                    then_expr: box Expression::Column(ref mut fe),
-                                    ..
-                                },
-                            ..
-                        }
-                        | Count {
-                            expr: box Expression::Column(ref mut fe),
-                            ..
-                        }
-                        | Sum {
-                            expr:
-                                box Expression::CaseWhen {
-                                    then_expr: box Expression::Column(ref mut fe),
-                                    ..
-                                },
-                            ..
-                        }
-                        | Sum {
-                            expr: box Expression::Column(ref mut fe),
-                            ..
-                        }
-                        | Min(box Expression::Column(ref mut fe))
-                        | Max(box Expression::Column(ref mut fe))
-                        | GroupConcat {
-                            expr: box Expression::Column(ref mut fe),
-                            ..
-                        } => {
-                            if fe.table.is_none() {
-                                fe.table = find_table(fe);
-                            }
-                        }
-                        Call {
-                            ref mut arguments, ..
-                        } => {
-                            for arg in arguments.iter_mut() {
-                                if let Expression::Column(ref mut fe) = arg {
-                                    if fe.table.is_none() {
-                                        fe.table = find_table(fe);
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                    None
-                }
-                None => find_table(col),
-            }
-        }
-    };
-
-    // Expand within field list
-    for field in sq.fields.iter_mut() {
-        match *field {
-            FieldDefinitionExpression::All | FieldDefinitionExpression::AllInTable(_) => {
-                internal!("Must apply StarExpansion pass before ImpliedTableExpansion")
-            }
-            FieldDefinitionExpression::Expression {
-                ref mut expr,
-                ref alias,
-            } => {
-                rewrite_expression(&expand_columns, expr);
-                if let Some(alias) = alias.as_deref() {
-                    known_aliases.push(alias);
-                }
-            }
-        }
-    }
-
-    // Expand within WHERE clause
-    if let Some(wc) = &mut sq.where_clause {
-        rewrite_expression(&expand_columns, wc);
-    }
-
-    // Expand within GROUP BY clause
-    if let Some(gbc) = &mut sq.group_by {
-        for col in &mut gbc.columns {
-            expand_columns(col)
-        }
-        if let Some(hc) = &mut gbc.having {
-            rewrite_expression(&expand_columns, hc)
-        }
-    }
-
-    // Expand within ORDER BY clause
-    if let Some(oc) = &mut sq.order {
-        for (col, _) in &mut oc.columns {
-            if col.function.is_some() || !known_aliases.contains(&col.name.as_str()) {
-                expand_columns(col);
-            }
-        }
-    }
-
-    Ok(sq)
+    visitor.visit_select_statement(&mut select_statement)?;
+    Ok(select_statement)
 }
 
 impl ImpliedTableExpansion for SqlQuery {
@@ -318,11 +186,11 @@ impl ImpliedTableExpansion for SqlQuery {
                 csq.selects = csq
                     .selects
                     .into_iter()
-                    .map(|(op, sq)| Ok((op, rewrite_selection(sq, write_schemas)?)))
+                    .map(|(op, sq)| Ok((op, rewrite_select(sq, write_schemas)?)))
                     .collect::<ReadySetResult<Vec<_>>>()?;
                 SqlQuery::CompoundSelect(csq)
             }
-            SqlQuery::Select(sq) => SqlQuery::Select(rewrite_selection(sq, write_schemas)?),
+            SqlQuery::Select(sq) => SqlQuery::Select(rewrite_select(sq, write_schemas)?),
             SqlQuery::Insert(mut iq) => {
                 let table = iq.table.clone();
                 // Expand within field list
@@ -342,7 +210,9 @@ mod tests {
     use std::collections::HashMap;
 
     use maplit::hashmap;
-    use nom_sql::{parse_query, Column, Dialect, FieldDefinitionExpression, SqlQuery, Table};
+    use nom_sql::{
+        parse_query, Column, Dialect, Expression, FieldDefinitionExpression, SqlQuery, Table,
+    };
 
     use super::*;
 
@@ -398,6 +268,31 @@ mod tests {
             // if we get anything other than a selection query back, something really weird is up
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn doesnt_expand_order_referencing_projected_field() {
+        let orig = parse_query(
+            Dialect::MySQL,
+            "select value in (2, 3) as value from t1 order by value;",
+        )
+        .unwrap();
+        // `value` here references the *projected field*, not `t1.value`, so we shouldn't qualify it
+        let expected = parse_query(
+            Dialect::MySQL,
+            "select t1.value in (2, 3) as value from t1 order by value;",
+        )
+        .unwrap();
+
+        let schema = hashmap! {
+            "t1".into() => vec![
+                "id".into(),
+                "value".into(),
+            ]
+        };
+
+        let res = orig.expand_implied_tables(&schema).unwrap();
+        assert_eq!(res, expected);
     }
 
     #[test]
