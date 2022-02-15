@@ -2,13 +2,13 @@ use std::fmt;
 
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::character::complete::multispace1;
 use nom::combinator::{map, opt};
 use nom::sequence::tuple;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::expression;
+use crate::whitespace::whitespace1;
 use crate::{Dialect, Expression};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -36,19 +36,19 @@ impl fmt::Display for ShowStatement {
 pub fn show(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ShowStatement> {
     move |i| {
         let (i, _) = tag_no_case("show")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, statement) = alt((
             //ReadySet specific show statement
             map(
-                tuple((tag_no_case("cached"), multispace1, tag_no_case("queries"))),
+                tuple((tag_no_case("cached"), whitespace1, tag_no_case("queries"))),
                 |_| ShowStatement::CachedQueries,
             ),
             map(
-                tuple((tag_no_case("proxied"), multispace1, tag_no_case("queries"))),
+                tuple((tag_no_case("proxied"), whitespace1, tag_no_case("queries"))),
                 |_| ShowStatement::ProxiedQueries,
             ),
             map(
-                tuple((tag_no_case("readyset"), multispace1, tag_no_case("status"))),
+                tuple((tag_no_case("readyset"), whitespace1, tag_no_case("status"))),
                 |_| ShowStatement::ReadySetStatus,
             ),
             map(show_tables(dialect), ShowStatement::Tables),
@@ -83,15 +83,15 @@ impl fmt::Display for Tables {
 
 fn show_tables(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Tables> {
     move |i| {
-        let (i, full) = map(opt(tuple((tag_no_case("full"), multispace1))), |full| {
+        let (i, full) = map(opt(tuple((tag_no_case("full"), whitespace1))), |full| {
             full.is_some()
         })(i)?;
         let (i, _) = tag_no_case("tables")(i)?;
         let (i, from_db) = opt(map(
             tuple((
-                multispace1,
+                whitespace1,
                 tag_no_case("from"),
-                multispace1,
+                whitespace1,
                 dialect.identifier(),
             )),
             |(_, _, _, from_db)| from_db.to_string(),
@@ -125,14 +125,14 @@ impl fmt::Display for FilterPredicate {
 
 fn filter_predicate(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FilterPredicate> {
     move |i| {
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, predicate) = alt((
             map(
-                tuple((tag_no_case("like"), multispace1, dialect.string_literal())),
+                tuple((tag_no_case("like"), whitespace1, dialect.string_literal())),
                 |(_, _, s)| FilterPredicate::Like(String::from_utf8(s).unwrap_or_default()),
             ),
             map(
-                tuple((tag_no_case("where"), multispace1, expression(dialect))),
+                tuple((tag_no_case("where"), whitespace1, expression(dialect))),
                 |(_, _, expr)| FilterPredicate::Where(expr),
             ),
         ))(i)?;

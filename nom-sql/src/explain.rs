@@ -2,13 +2,13 @@ use std::fmt::{self, Display};
 
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::character::complete::multispace1;
 use nom::combinator::{map, opt};
 use nom::sequence::{terminated, tuple};
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::statement_terminator;
+use crate::whitespace::whitespace1;
 
 /// EXPLAIN statements
 ///
@@ -37,7 +37,7 @@ impl Display for ExplainStatement {
 }
 
 fn explain_graphviz(i: &[u8]) -> IResult<&[u8], ExplainStatement> {
-    let (i, simplified) = opt(terminated(tag_no_case("simplified"), multispace1))(i)?;
+    let (i, simplified) = opt(terminated(tag_no_case("simplified"), whitespace1))(i)?;
     let (i, _) = tag_no_case("graphviz")(i)?;
     Ok((
         i,
@@ -49,11 +49,11 @@ fn explain_graphviz(i: &[u8]) -> IResult<&[u8], ExplainStatement> {
 
 pub(crate) fn explain_statement(i: &[u8]) -> IResult<&[u8], ExplainStatement> {
     let (i, _) = tag_no_case("explain")(i)?;
-    let (i, _) = multispace1(i)?;
+    let (i, _) = whitespace1(i)?;
     let (i, stmt) = alt((
         explain_graphviz,
         map(
-            tuple((tag_no_case("last"), multispace1, tag_no_case("statement"))),
+            tuple((tag_no_case("last"), whitespace1, tag_no_case("statement"))),
             |_| ExplainStatement::LastStatement,
         ),
     ))(i)?;

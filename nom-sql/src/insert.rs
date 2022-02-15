@@ -1,7 +1,6 @@
 use std::{fmt, str};
 
 use nom::bytes::complete::{tag, tag_no_case};
-use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::opt;
 use nom::multi::many1;
 use nom::sequence::{delimited, preceded, tuple};
@@ -14,6 +13,7 @@ use crate::common::{
     value_list, ws_sep_comma, Literal,
 };
 use crate::table::Table;
+use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Expression};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -61,9 +61,9 @@ impl fmt::Display for InsertStatement {
 fn fields(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Column>> {
     move |i| {
         delimited(
-            preceded(tag("("), multispace0),
+            preceded(tag("("), whitespace0),
             field_list(dialect),
-            delimited(multispace0, tag(")"), multispace1),
+            delimited(whitespace0, tag(")"), whitespace1),
         )(i)
     }
 }
@@ -81,10 +81,10 @@ fn data(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Literal>> {
 fn on_duplicate(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(Column, Expression)>> {
     move |i| {
         preceded(
-            multispace0,
+            whitespace0,
             preceded(
                 tag_no_case("on duplicate key update"),
-                preceded(multispace1, assignment_expr_list(dialect)),
+                preceded(whitespace1, assignment_expr_list(dialect)),
             ),
         )(i)
     }
@@ -99,15 +99,15 @@ pub fn insertion(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], InsertSta
             (_, ignore_res, _, _, _, table, _, fields, _, _, data, on_duplicate, _),
         ) = tuple((
             tag_no_case("insert"),
-            opt(preceded(multispace1, tag_no_case("ignore"))),
-            multispace1,
+            opt(preceded(whitespace1, tag_no_case("ignore"))),
+            whitespace1,
             tag_no_case("into"),
-            multispace1,
+            whitespace1,
             schema_table_reference_no_alias(dialect),
-            multispace0,
+            whitespace0,
             opt(fields(dialect)),
             tag_no_case("values"),
-            multispace0,
+            whitespace0,
             many1(data(dialect)),
             opt(on_duplicate(dialect)),
             statement_terminator,

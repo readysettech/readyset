@@ -5,7 +5,7 @@ use derive_more::From;
 use itertools::{Either, Itertools};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
-use nom::character::complete::{char, multispace0, multispace1};
+use nom::character::complete::char;
 use nom::combinator::{complete, map, opt};
 use nom::multi::{many0, separated_list0};
 use nom::sequence::{delimited, pair, preceded, terminated, tuple};
@@ -20,6 +20,7 @@ use crate::common::{
 };
 use crate::select::nested_selection;
 use crate::set::Variable;
+use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Column, Dialect, Literal, SelectStatement, SqlType};
 
 /// Function call expressions
@@ -419,28 +420,28 @@ enum TokenTree {
 
 fn infix_no_and_or(i: &[u8]) -> IResult<&[u8], TokenTree> {
     let (i, operator) = alt((
-        map(terminated(tag_no_case("like"), multispace1), |_| {
+        map(terminated(tag_no_case("like"), whitespace1), |_| {
             BinaryOperator::Like
         }),
         move |i| {
             let (i, _) = tag_no_case("not")(i)?;
-            let (i, _) = multispace1(i)?;
+            let (i, _) = whitespace1(i)?;
             let (i, _) = tag_no_case("like")(i)?;
-            let (i, _) = multispace1(i)?;
+            let (i, _) = whitespace1(i)?;
 
             Ok((i, BinaryOperator::NotLike))
         },
         move |i| {
             let (i, _) = tag_no_case("ilike")(i)?;
-            let (i, _) = multispace1(i)?;
+            let (i, _) = whitespace1(i)?;
 
             Ok((i, BinaryOperator::ILike))
         },
         move |i| {
             let (i, _) = tag_no_case("not")(i)?;
-            let (i, _) = multispace1(i)?;
+            let (i, _) = whitespace1(i)?;
             let (i, _) = tag_no_case("ilike")(i)?;
-            let (i, _) = multispace1(i)?;
+            let (i, _) = whitespace1(i)?;
 
             Ok((i, BinaryOperator::NotLike))
         },
@@ -453,13 +454,13 @@ fn infix_no_and_or(i: &[u8]) -> IResult<&[u8], TokenTree> {
         map(char('<'), |_| BinaryOperator::Less),
         move |i| {
             let (i, _) = tag_no_case("is")(i)?;
-            let (i, _) = multispace1(i)?;
+            let (i, _) = whitespace1(i)?;
             let (i, _) = tag_no_case("not")(i)?;
-            let (i, _) = multispace1(i)?;
+            let (i, _) = whitespace1(i)?;
 
             Ok((i, BinaryOperator::IsNot))
         },
-        map(pair(tag_no_case("is"), multispace1), |_| BinaryOperator::Is),
+        map(pair(tag_no_case("is"), whitespace1), |_| BinaryOperator::Is),
         map(char('+'), |_| BinaryOperator::Add),
         map(char('-'), |_| BinaryOperator::Subtract),
         map(char('*'), |_| BinaryOperator::Multiply),
@@ -471,10 +472,10 @@ fn infix_no_and_or(i: &[u8]) -> IResult<&[u8], TokenTree> {
 
 fn infix(i: &[u8]) -> IResult<&[u8], TokenTree> {
     complete(alt((
-        map(terminated(tag_no_case("and"), multispace1), |_| {
+        map(terminated(tag_no_case("and"), whitespace1), |_| {
             TokenTree::Infix(BinaryOperator::And)
         }),
-        map(terminated(tag_no_case("or"), multispace1), |_| {
+        map(terminated(tag_no_case("or"), whitespace1), |_| {
             TokenTree::Infix(BinaryOperator::Or)
         }),
         infix_no_and_or,
@@ -485,7 +486,7 @@ fn prefix(i: &[u8]) -> IResult<&[u8], TokenTree> {
     map(
         alt((
             map(complete(char('-')), |_| UnaryOperator::Neg),
-            map(terminated(tag_no_case("not"), multispace1), |_| {
+            map(terminated(tag_no_case("not"), whitespace1), |_| {
                 UnaryOperator::Not
             }),
         )),
@@ -498,15 +499,15 @@ fn primary_inner(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TokenTree
         alt((
             move |i| {
                 let (i, _) = char('(')(i)?;
-                let (i, _) = multispace0(i)?;
+                let (i, _) = whitespace0(i)?;
                 let (i, tree) = token_tree(dialect)(i)?;
-                let (i, _) = multispace0(i)?;
+                let (i, _) = whitespace0(i)?;
                 let (i, _) = char(')')(i)?;
 
                 Ok((i, TokenTree::Group(tree)))
             },
             move |i| {
-                let (i, _) = multispace0(i)?;
+                let (i, _) = whitespace0(i)?;
                 let (i, expr) = simple_expr(dialect)(i)?;
                 Ok((i, TokenTree::Primary(expr)))
             },
@@ -518,9 +519,9 @@ fn primary(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TokenTree> {
     move |i| {
         let (i, expr) = primary_inner(dialect)(i)?;
         let (i, t) = opt(move |i| {
-            let (i, _) = multispace0(i)?;
+            let (i, _) = whitespace0(i)?;
             let (i, _) = tag("::")(i)?;
-            let (i, _) = multispace0(i)?;
+            let (i, _) = whitespace0(i)?;
             type_identifier(dialect)(i)
         })(i)?;
 
@@ -537,11 +538,11 @@ fn rest(
 ) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(TokenTree, Vec<TokenTree>, TokenTree)>> {
     move |i| {
         many0(move |i| {
-            let (i, _) = multispace0(i)?;
+            let (i, _) = whitespace0(i)?;
             let (i, infix_tree) = infix(i)?;
-            let (i, _) = multispace0(i)?;
+            let (i, _) = whitespace0(i)?;
             let (i, prefix_tree) = many0(prefix)(i)?;
-            let (i, _) = multispace0(i)?;
+            let (i, _) = whitespace0(i)?;
             let (i, primary_tree) = primary(dialect)(i)?;
 
             Ok((i, (infix_tree, prefix_tree, primary_tree)))
@@ -570,8 +571,8 @@ fn rest_no_and_or(
 ) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(TokenTree, Vec<TokenTree>, TokenTree)>> {
     move |i| {
         many0(tuple((
-            preceded(multispace0, infix_no_and_or),
-            delimited(multispace0, many0(prefix), multispace0),
+            preceded(whitespace0, infix_no_and_or),
+            delimited(whitespace0, many0(prefix), whitespace0),
             primary(dialect),
         )))(i)
     }
@@ -724,16 +725,16 @@ fn in_rhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], InValue> {
 
 fn in_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
     move |i| {
-        let (i, lhs) = terminated(in_lhs(dialect), multispace1)(i)?;
+        let (i, lhs) = terminated(in_lhs(dialect), whitespace1)(i)?;
 
-        let (i, not) = opt(terminated(tag_no_case("not"), multispace1))(i)?;
+        let (i, not) = opt(terminated(tag_no_case("not"), whitespace1))(i)?;
         let (i, _) = tag_no_case("in")(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
 
         let (i, _) = char('(')(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, rhs) = in_rhs(dialect)(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = char(')')(i)?;
 
         Ok((
@@ -773,14 +774,14 @@ fn between_max(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression>
 fn between_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
     move |i| {
         let (i, operand) = map(between_operand(dialect), Box::new)(i)?;
-        let (i, _) = multispace1(i)?;
-        let (i, not) = opt(terminated(tag_no_case("not"), multispace1))(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, not) = opt(terminated(tag_no_case("not"), whitespace1))(i)?;
         let (i, _) = tag_no_case("between")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, min) = map(simple_expr(dialect), Box::new)(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("and")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, max) = map(between_max(dialect), Box::new)(i)?;
 
         Ok((
@@ -798,12 +799,12 @@ fn between_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression
 fn exists_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
     move |i| {
         let (i, _) = tag_no_case("exists")(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
 
         let (i, _) = char('(')(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, statement) = nested_selection(dialect)(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = char(')')(i)?;
 
         Ok((i, Expression::Exists(Box::new(statement))))
@@ -813,13 +814,13 @@ fn exists_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression>
 fn cast(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
     move |i| {
         let (i, _) = tag_no_case("cast")(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = char('(')(i)?;
 
         let (i, arg) = expression(dialect)(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("as")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
 
         let (i, ty) = type_identifier(dialect)(i)?;
 
@@ -839,9 +840,9 @@ fn cast(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
 fn nested_select(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
     move |i| {
         let (i, _) = char('(')(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, statement) = nested_selection(dialect)(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = char(')')(i)?;
 
         Ok((i, Expression::NestedSelect(Box::new(statement))))
@@ -851,9 +852,9 @@ fn nested_select(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expressio
 fn parenthesized_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
     move |i| {
         let (i, _) = char('(')(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, expr) = expression(dialect)(i)?;
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = char(')')(i)?;
 
         Ok((i, expr))

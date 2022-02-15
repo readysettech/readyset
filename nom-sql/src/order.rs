@@ -3,7 +3,6 @@ use std::{fmt, str};
 use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::preceded;
@@ -13,6 +12,7 @@ use test_strategy::Arbitrary;
 
 use crate::common::ws_sep_comma;
 use crate::expression::expression;
+use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Expression};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
@@ -69,7 +69,7 @@ fn order_expr(
 ) -> impl Fn(&[u8]) -> IResult<&[u8], (Expression, Option<OrderType>)> {
     move |i| {
         let (i, expr) = expression(dialect)(i)?;
-        let (i, ord_typ) = opt(preceded(multispace1, order_type))(i)?;
+        let (i, ord_typ) = opt(preceded(whitespace1, order_type))(i)?;
         Ok((i, (expr, ord_typ)))
     }
 }
@@ -77,11 +77,11 @@ fn order_expr(
 // Parse ORDER BY clause
 pub fn order_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], OrderClause> {
     move |i| {
-        let (i, _) = multispace0(i)?;
+        let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("order")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("by")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, order_by) = separated_list1(ws_sep_comma, order_expr(dialect))(i)?;
 
         Ok((i, OrderClause { order_by }))

@@ -1149,11 +1149,9 @@ async fn writes_survive_restarts() {
 // replication for, and validate that the relevant metric records the failure
 #[clustertest]
 async fn replication_failure_metrics() {
-    // TODO(ENG-92): Replace DROP table with a different schema failure when
-    // supported.
     replication_test_inner(
         "ct_replication_failure_metrics",
-        "CREATE TABLE t1 (id int); DROP TABLE t1",
+        "CREATE TABLE t1 (id int); ALTER TABLE t1 ENGINE = InnoDB;",
         recorded::REPLICATOR_FAILURE,
     )
     .await;

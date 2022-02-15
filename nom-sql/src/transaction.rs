@@ -2,12 +2,12 @@ use std::fmt;
 
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
 use nom::sequence::tuple;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 
+use crate::whitespace::{whitespace0, whitespace1};
 use crate::Dialect;
 
 // TODO(peter): Handle dialect differences.
@@ -45,12 +45,12 @@ pub fn start_transaction(
 ) -> impl Fn(&[u8]) -> IResult<&[u8], StartTransactionStatement> {
     move |i| {
         let (remaining_input, (_, _)) = tuple((
-            multispace0,
+            whitespace0,
             alt((
                 map(
                     tuple((
                         tag_no_case("start"),
-                        multispace1,
+                        whitespace1,
                         tag_no_case("transaction"),
                     )),
                     |_| (),
@@ -58,7 +58,7 @@ pub fn start_transaction(
                 map(
                     tuple((
                         tag_no_case("begin"),
-                        opt(tuple((multispace1, tag_no_case("work")))),
+                        opt(tuple((whitespace1, tag_no_case("work")))),
                     )),
                     |_| (),
                 ),
@@ -74,10 +74,10 @@ pub fn start_transaction(
 pub fn commit(_: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CommitStatement> {
     move |i| {
         let (remaining_input, (_, _)) = tuple((
-            multispace0,
+            whitespace0,
             tuple((
                 tag_no_case("commit"),
-                opt(tuple((multispace1, tag_no_case("work")))),
+                opt(tuple((whitespace1, tag_no_case("work")))),
             )),
         ))(i)?;
 
@@ -90,10 +90,10 @@ pub fn commit(_: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CommitStatement> {
 pub fn rollback(_: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], RollbackStatement> {
     move |i| {
         let (remaining_input, (_, _)) = tuple((
-            multispace0,
+            whitespace0,
             tuple((
                 tag_no_case("rollback"),
-                opt(tuple((multispace1, tag_no_case("work")))),
+                opt(tuple((whitespace1, tag_no_case("work")))),
             )),
         ))(i)?;
 

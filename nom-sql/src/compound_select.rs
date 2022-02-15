@@ -2,7 +2,6 @@ use std::{fmt, str};
 
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
-use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
 use nom::multi::many1;
 use nom::sequence::{delimited, preceded, tuple};
@@ -12,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::common::{opt_delimited, statement_terminator};
 use crate::order::{order_clause, OrderClause};
 use crate::select::{limit_clause, nested_selection, LimitClause, SelectStatement};
+use crate::whitespace::{whitespace0, whitespace1};
 use crate::Dialect;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
@@ -65,7 +65,7 @@ fn compound_op(i: &[u8]) -> IResult<&[u8], CompoundSelectOperator> {
             preceded(
                 tag_no_case("union"),
                 opt(preceded(
-                    multispace1,
+                    whitespace1,
                     alt((
                         map(tag_no_case("all"), |_| false),
                         map(tag_no_case("distinct"), |_| true),
@@ -96,12 +96,12 @@ fn other_selects(
 ) -> impl Fn(&[u8]) -> IResult<&[u8], (Option<CompoundSelectOperator>, SelectStatement)> {
     move |i| {
         let (remaining_input, (_, op, _, select)) = tuple((
-            multispace0,
+            whitespace0,
             compound_op,
-            multispace1,
+            whitespace1,
             opt_delimited(
                 tag("("),
-                delimited(multispace0, nested_selection(dialect), multispace0),
+                delimited(whitespace0, nested_selection(dialect), whitespace0),
                 tag(")"),
             ),
         ))(i)?;
@@ -118,7 +118,7 @@ pub fn compound_selection(
         let (remaining_input, (first_select, other_selects, _, order, limit, _)) = tuple((
             opt_delimited(tag("("), nested_selection(dialect), tag(")")),
             many1(other_selects(dialect)),
-            multispace0,
+            whitespace0,
             opt(order_clause(dialect)),
             opt(limit_clause(dialect)),
             statement_terminator,

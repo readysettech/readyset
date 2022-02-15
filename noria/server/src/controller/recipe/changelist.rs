@@ -124,24 +124,25 @@ mod parse {
     fn query_prefix(input: &str) -> nom::IResult<&str, (bool, Option<&str>)> {
         use nom::branch::alt;
         use nom::bytes::complete::tag_no_case;
-        use nom::character::complete::{char, multispace0, space1};
+        use nom::character::complete::{char, space1};
         use nom::combinator::opt;
         use nom::sequence::{pair, terminated};
+        use nom_sql::whitespace::whitespace0;
         let (input, public) = opt(pair(
             alt((tag_no_case("query"), tag_no_case("view"))),
             space1,
         ))(input)?;
-        let (input, _) = multispace0(input)?;
-        let (input, name) = opt(terminated(ident, multispace0))(input)?;
-        let (input, _) = multispace0(input)?;
+        let (input, _) = whitespace0(input)?;
+        let (input, name) = opt(terminated(ident, whitespace0))(input)?;
+        let (input, _) = whitespace0(input)?;
         let (input, _) = char(':')(input)?;
-        let (input, _) = multispace0(input)?;
+        let (input, _) = whitespace0(input)?;
         Ok((input, (public.is_some(), name)))
     }
 
     fn query_expr(input: &str) -> nom::IResult<&str, (bool, Option<&str>, SqlQuery)> {
-        use nom::character::complete::multispace0;
         use nom::combinator::opt;
+        use nom_sql::whitespace::whitespace0;
         let (input, prefix) = opt(query_prefix)(input)?;
         // NOTE: some massaging since nom_sql operates on &[u8], not &str
         let (input, expr) = match sql_parser::sql_query(CANONICAL_DIALECT)(input.as_bytes()) {
@@ -160,7 +161,7 @@ mod parse {
                 }))
             }
         }?;
-        let (input, _) = multispace0(input)?;
+        let (input, _) = whitespace0(input)?;
         Ok((
             input,
             match prefix {

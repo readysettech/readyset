@@ -3,7 +3,6 @@ use std::{fmt, str};
 use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
-use nom::character::complete::{multispace0, multispace1};
 use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::{separated_pair, terminated, tuple};
@@ -12,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::statement_terminator;
 use crate::expression::{expression, scoped_var};
+use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Expression};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -119,15 +119,15 @@ pub fn varkind(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Variable> {
         let (i, scope) = alt((
             scoped_var(dialect),
             map(
-                separated_pair(tag_no_case("GLOBAL"), multispace1, dialect.identifier()),
+                separated_pair(tag_no_case("GLOBAL"), whitespace1, dialect.identifier()),
                 |(_, ident)| Variable::Global(ident.to_ascii_lowercase()),
             ),
             map(
-                separated_pair(tag_no_case("SESSION"), multispace1, dialect.identifier()),
+                separated_pair(tag_no_case("SESSION"), whitespace1, dialect.identifier()),
                 |(_, ident)| Variable::Session(ident.to_ascii_lowercase()),
             ),
             map(
-                separated_pair(tag_no_case("LOCAL"), multispace1, dialect.identifier()),
+                separated_pair(tag_no_case("LOCAL"), whitespace1, dialect.identifier()),
                 |(_, ident)| Variable::Local(ident.to_ascii_lowercase()),
             ),
             map(dialect.identifier(), |ident| {
@@ -135,8 +135,8 @@ pub fn varkind(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Variable> {
             }),
         ))(i)?;
 
-        //scope may be followed by '.' or multispace
-        let (i, _) = alt((tag("."), multispace0))(i)?;
+        //scope may be followed by '.' or whitespace
+        let (i, _) = alt((tag("."), map(whitespace0, |_| "".as_bytes())))(i)?;
         Ok((i, scope))
     }
 }
@@ -144,7 +144,7 @@ pub fn varkind(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Variable> {
 pub fn set(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetStatement> {
     move |i| {
         let (i, _) = tag_no_case("set")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, statement) = alt((
             map(set_variable(dialect), SetStatement::Variable),
             map(set_names(dialect), SetStatement::Names),
@@ -158,13 +158,13 @@ fn set_variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetVariabl
     move |i| {
         let (remaining_input, variables) = terminated(
             separated_list1(
-                tuple((tag_no_case(","), multispace0)),
+                tuple((tag_no_case(","), whitespace0)),
                 map(
                     tuple((
                         varkind(dialect),
-                        multispace0,
+                        whitespace0,
                         alt((tag_no_case("="), tag_no_case(":="))),
-                        multispace0,
+                        whitespace0,
                         expression(dialect),
                     )),
                     |(variable, _, _, _, value)| (variable, value),
@@ -180,12 +180,12 @@ fn set_variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetVariabl
 fn set_names(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetNames> {
     move |i| {
         let (i, _) = tag_no_case("names")(i)?;
-        let (i, _) = multispace1(i)?;
+        let (i, _) = whitespace1(i)?;
         let (i, charset) = dialect.utf8_string_literal()(i)?;
         let (i, collation) = opt(move |i| {
-            let (i, _) = multispace1(i)?;
+            let (i, _) = whitespace1(i)?;
             let (i, _) = tag_no_case("collate")(i)?;
-            let (i, _) = multispace1(i)?;
+            let (i, _) = whitespace1(i)?;
             let (i, collation) = dialect.utf8_string_literal()(i)?;
             Ok((i, collation))
         })(i)?;

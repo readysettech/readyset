@@ -1,7 +1,6 @@
 use std::{fmt, str};
 
 use nom::bytes::complete::tag_no_case;
-use nom::character::complete::multispace1;
 use nom::combinator::opt;
 use nom::sequence::{delimited, tuple};
 use nom::IResult;
@@ -10,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::common::{schema_table_reference, statement_terminator};
 use crate::select::where_clause;
 use crate::table::Table;
+use crate::whitespace::whitespace1;
 use crate::{Dialect, Expression};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -33,7 +33,7 @@ pub fn deletion(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DeleteStat
     move |i| {
         let (remaining_input, (_, _, table, where_clause, _)) = tuple((
             tag_no_case("delete"),
-            delimited(multispace1, tag_no_case("from"), multispace1),
+            delimited(whitespace1, tag_no_case("from"), whitespace1),
             schema_table_reference(dialect),
             opt(where_clause(dialect)),
             statement_terminator,
