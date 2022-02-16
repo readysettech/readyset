@@ -23,7 +23,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::Notify;
 use tracing::{error, info, warn};
 
-use crate::controller::state::DataflowStateHandle;
+use crate::controller::state::{DataflowState, DataflowStateHandle};
 use crate::controller::{ControllerRequest, ControllerState, Worker, WorkerIdentifier};
 use crate::coordination::DomainDescriptor;
 use crate::worker::WorkerRequestKind;
@@ -359,6 +359,21 @@ impl Leader {
                         },
                     };
                     return_serialized!(status);
+                }
+                (&Method::POST, "/dry_run") => {
+                    let body: RecipeSpec = bincode::deserialize(&body)?;
+                    if body.require_leader_ready() {
+                        require_leader_ready()?;
+                    }
+                    let ret = futures::executor::block_on(async move {
+                        let mut state_copy: DataflowState = {
+                            let reader = self.dataflow_state_handle.read().await;
+                            check_quorum!(reader);
+                            reader.clone()
+                        };
+                        state_copy.extend_recipe(body, true).await
+                    })?;
+                    return_serialized!(ret);
                 }
 
                 _ => {}
