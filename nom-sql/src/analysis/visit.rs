@@ -6,8 +6,8 @@
 use crate::set::Variable;
 use crate::{
     Column, CommonTableExpression, Expression, FieldDefinitionExpression, FunctionExpression,
-    GroupByClause, InValue, JoinClause, JoinRightSide, LimitClause, Literal, OrderClause,
-    SelectStatement, SqlType, Table,
+    GroupByClause, InValue, JoinClause, JoinConstraint, JoinRightSide, LimitClause, Literal,
+    OrderClause, SelectStatement, SqlType, Table,
 };
 
 /// Each method of the `Visitor` trait is a hook to be potentially overridden when recursively
@@ -115,6 +115,13 @@ pub trait Visitor<'ast>: Sized {
 
     fn visit_join_clause(&mut self, join: &'ast mut JoinClause) -> Result<(), Self::Error> {
         walk_join_clause(self, join)
+    }
+
+    fn visit_join_constraint(
+        &mut self,
+        join_constraint: &'ast mut JoinConstraint,
+    ) -> Result<(), Self::Error> {
+        walk_join_constraint(self, join_constraint)
     }
 
     fn visit_group_by_clause(
@@ -249,16 +256,33 @@ pub fn walk_join_clause<'ast, V: Visitor<'ast>>(
     join: &'ast mut JoinClause,
 ) -> Result<(), V::Error> {
     match &mut join.right {
-        JoinRightSide::Table(table) => visitor.visit_table(table),
+        JoinRightSide::Table(table) => visitor.visit_table(table)?,
         JoinRightSide::Tables(tables) => {
             for table in tables {
                 visitor.visit_table(table)?;
             }
-            Ok(())
         }
         JoinRightSide::NestedSelect(statement, _) => {
-            visitor.visit_select_statement(statement.as_mut())
+            visitor.visit_select_statement(statement.as_mut())?
         }
+    }
+
+    visitor.visit_join_constraint(&mut join.constraint)
+}
+
+pub fn walk_join_constraint<'ast, V: Visitor<'ast>>(
+    visitor: &mut V,
+    join_constraint: &'ast mut JoinConstraint,
+) -> Result<(), V::Error> {
+    match join_constraint {
+        JoinConstraint::On(expr) => visitor.visit_expression(expr),
+        JoinConstraint::Using(cols) => {
+            for col in cols {
+                visitor.visit_column(col)?;
+            }
+            Ok(())
+        }
+        JoinConstraint::Empty => Ok(()),
     }
 }
 
@@ -391,6 +415,14 @@ mod tests {
             walk_join_clause(self, join)
         }
 
+        fn visit_join_constraint(
+            &mut self,
+            join_constraint: &'ast mut JoinConstraint,
+        ) -> Result<(), Self::Error> {
+            self.0 += 1;
+            walk_join_constraint(self, join_constraint)
+        }
+
         fn visit_group_by_clause(
             &mut self,
             group_by: &'ast mut GroupByClause,
@@ -455,7 +487,7 @@ mod tests {
             node_count(
                 "SELECT id, name FROM users join (select id from users) s on users.id = s.id"
             ),
-            14
+            20
         )
     }
 }

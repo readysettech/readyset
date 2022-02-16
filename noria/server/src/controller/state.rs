@@ -723,7 +723,6 @@ impl DataflowState {
             added: Default::default(),
             columns: Default::default(),
             readers: Default::default(),
-            context: Default::default(),
             worker: None,
             start: time::Instant::now(),
         };

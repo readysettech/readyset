@@ -380,9 +380,6 @@ pub struct Migration<'dataflow> {
     pub(super) worker: Option<WorkerIdentifier>,
 
     pub(super) start: Instant,
-
-    /// Additional migration information provided by the client
-    pub(super) context: HashMap<String, DataType>,
 }
 
 impl<'dataflow> Migration<'dataflow> {
@@ -478,11 +475,6 @@ impl<'dataflow> Migration<'dataflow> {
         if !self.added.contains(&ni) {
             unimplemented!("marking existing node as beyond materialization frontier");
         }
-    }
-
-    /// Returns the context of this migration
-    pub(super) fn context(&self) -> &HashMap<String, DataType> {
-        &self.context
     }
 
     /// Add a new column to a base node.
