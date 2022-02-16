@@ -245,31 +245,6 @@ steps:
           login: true
           retries: 3
 
-  - label: 'Run logictest with MySQL replication'
-    key: logictest-binlog
-    command:
-    - 'echo +++ Running noria-logictest with MySQL replication'
-    - cargo --locked run --bin noria-logictest -- verify --replication-url mysql://root:noria@mysql/sqllogictest logictests
-    - cargo --locked run --bin noria-logictest -- verify -r --replication-url  mysql://root:noria@mysql/sqllogictest logictests/requires-fallback
-    timeout_in_minutes: 60
-    depends_on:
-    - build-image
-    plugins:
-      - docker-compose#v3.7.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
-          run: app
-          environment:
-          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
-          - CACHEPOT_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
-          config:
-            - docker-compose.yml
-            - build/docker-compose.ci-test.yaml
-          pull-retries: 3
-      - ecr#v2.5.0:
-          login: true
-          retries: 3
-
   - label: 'Run clustertests'
     key: noria-clustertest
     command:
