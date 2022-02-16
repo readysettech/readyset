@@ -16,7 +16,6 @@ pub mod multi_thread;
 pub mod path;
 pub mod prometheus;
 pub mod query;
-pub mod random;
 pub mod spec;
 
 pub fn us_to_ms(us: u64) -> f64 {

@@ -217,7 +217,7 @@ impl MultithreadBenchmark for FallbackBenchmark {
         let opts = mysql_async::Opts::from_url(&params.mysql_conn_str).unwrap();
         let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
 
-        let prepared_statement = params.query.prepared_statement(&mut conn).await?;
+        let mut prepared_statement = params.query.prepared_statement(&mut conn).await?;
 
         let mut throttle_interval =
             multi_thread::throttle_interval(params.target_qps, params.threads);

@@ -58,7 +58,7 @@ impl BenchmarkControl for WriteLatencyBenchmark {
             .await?;
         info!("Rows inserted");
 
-        let prepared_statement = self.update_query.prepared_statement(&mut db).await?;
+        let mut prepared_statement = self.update_query.prepared_statement(&mut db).await?;
         let parsed_query =
             parse_query(Dialect::MySQL, &prepared_statement.query).map_err(|e| anyhow!("{}", e))?;
         let table: TableName = match parsed_query {

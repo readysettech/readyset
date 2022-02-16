@@ -311,8 +311,9 @@ impl MultithreadBenchmark for ReadWriteBenchmark {
         // Prepare the query to retrieve the query schema.
         let opts = mysql_async::Opts::from_url(&params.mysql_conn_str).unwrap();
         let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-        let read_prepared_statement = params.read_query.prepared_statement(&mut conn).await?;
-        let update_prepared_statement = params.update_query.prepared_statement(&mut conn).await?;
+        let mut read_prepared_statement = params.read_query.prepared_statement(&mut conn).await?;
+        let mut update_prepared_statement =
+            params.update_query.prepared_statement(&mut conn).await?;
 
         let mut throttle_interval = multi_thread::throttle_interval(
             Some(params.target_read_qps + params.target_update_qps),

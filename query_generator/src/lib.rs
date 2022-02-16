@@ -97,6 +97,7 @@ use parking_lot::Mutex;
 use proptest::arbitrary::{any, any_with, Arbitrary};
 use proptest::strategy::{BoxedStrategy, Strategy};
 use rand::distributions::{Distribution, Standard};
+use rand::seq::SliceRandom;
 use rand::Rng;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -793,13 +794,22 @@ pub struct ZipfianGenerator {
     max: DataType,
     alpha: f64,
     dist: ZipfDistribution,
+    mapping: Vec<DataType>,
 }
 
 impl ZipfianGenerator {
     fn new(min: DataType, max: DataType, alpha: f64) -> Self {
-        let num_elements: u64 = match (&min, &max) {
-            (DataType::Int(i), DataType::Int(j)) => (j - i) as u64,
-            (DataType::UnsignedInt(i), DataType::UnsignedInt(j)) => (j - i) as u64,
+        let (num_elements, mapping): (u64, Vec<DataType>) = match (&min, &max) {
+            (DataType::Int(i), DataType::Int(j)) => {
+                let mut mapping: Vec<_> = (*i..*j).map(DataType::Int).collect();
+                mapping.shuffle(&mut rand::thread_rng());
+                ((j - i) as u64, mapping)
+            }
+            (DataType::UnsignedInt(i), DataType::UnsignedInt(j)) => {
+                let mut mapping: Vec<_> = (*i..*j).map(DataType::UnsignedInt).collect();
+                mapping.shuffle(&mut rand::thread_rng());
+                ((j - i) as u64, mapping)
+            }
             (_, _) => unimplemented!("DataTypes unsupported for discrete zipfian value generation"),
         };
 
@@ -808,18 +818,14 @@ impl ZipfianGenerator {
             max,
             alpha,
             dist: zipf::ZipfDistribution::new(num_elements as usize, alpha).unwrap(),
+            mapping,
         }
     }
 
     fn gen(&mut self) -> DataType {
         let mut rng = rand::thread_rng();
         let offset = self.dist.sample(&mut rng);
-
-        match self.min {
-            DataType::Int(i) => DataType::Int(i + offset as i64),
-            DataType::UnsignedInt(i) => DataType::UnsignedInt(i + offset as u64),
-            _ => unimplemented!("DataType unsupported for discrete zipfian value generation."),
-        }
+        self.mapping.get(offset).unwrap().clone()
     }
 }
 

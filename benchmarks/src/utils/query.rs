@@ -23,7 +23,6 @@ use query_generator::{ColumnGenerator, DistributionAnnotation};
 use serde::{Deserialize, Serialize};
 
 use crate::utils::path::benchmark_path;
-use crate::utils::random::random_value_for_sql_type;
 
 /// The number of times we will try to generate a cache miss using the random
 /// generator before giving up. It is possible that we have generated cache hits
@@ -175,7 +174,7 @@ pub(crate) fn column_to_sqltype(c: &ColumnType) -> SqlType {
 
 pub struct ParameterGenerationSpec {
     pub column_type: SqlType,
-    pub annotation: Option<DistributionAnnotation>,
+    pub generator: ColumnGenerator,
 }
 
 /// A query prepared against MySQL and the corresponding specification for
@@ -192,9 +191,12 @@ impl PreparedStatement {
             params: stmt
                 .params()
                 .iter()
-                .map(|c| ParameterGenerationSpec {
-                    column_type: column_to_sqltype(&c.column_type()),
-                    annotation: None,
+                .map(|c| {
+                    let sql_type = column_to_sqltype(&c.column_type());
+                    ParameterGenerationSpec {
+                        column_type: sql_type.clone(),
+                        generator: ColumnGenerator::Random(sql_type.into()),
+                    }
                 })
                 .collect(),
         }
@@ -209,9 +211,12 @@ impl PreparedStatement {
             .params()
             .iter()
             .zip(spec.0.into_iter())
-            .map(|(column, annotation)| ParameterGenerationSpec {
-                column_type: column_to_sqltype(&column.column_type()),
-                annotation: Some(annotation),
+            .map(|(column, annotation)| {
+                let sql_type = column_to_sqltype(&column.column_type());
+                ParameterGenerationSpec {
+                    column_type: sql_type.clone(),
+                    generator: annotation.spec.generator_for_col(sql_type),
+                }
             })
             .collect();
 
@@ -220,11 +225,11 @@ impl PreparedStatement {
 
     /// Returns the query text and a set of parameters that can be used to
     /// execute this prepared statement.
-    pub fn generate_query(&self) -> (String, Vec<Value>) {
+    pub fn generate_query(&mut self) -> (String, Vec<Value>) {
         (self.query.clone(), self.generate_parameters())
     }
 
-    pub fn generate_ad_hoc_query(&self) -> String {
+    pub fn generate_ad_hoc_query(&mut self) -> String {
         let params = self.generate_parameters();
         let q = self
             .query
@@ -246,33 +251,15 @@ impl PreparedStatement {
     pub fn query_generators(&self) -> (String, GeneratorSet) {
         (
             self.query.clone(),
-            GeneratorSet(
-                self.params
-                    .iter()
-                    .map(|t| match &t.annotation {
-                        None => ColumnGenerator::Random(t.column_type.clone().into()),
-                        Some(annotation) => {
-                            annotation.spec.generator_for_col(t.column_type.clone())
-                        }
-                    })
-                    .collect(),
-            ),
+            GeneratorSet(self.params.iter().map(|t| t.generator.clone()).collect()),
         )
     }
 
     /// Returns just the parameters to execute our prepared statement
-    pub fn generate_parameters(&self) -> Vec<Value> {
+    pub fn generate_parameters(&mut self) -> Vec<Value> {
         self.params
-            .iter()
-            .map(|t| match &t.annotation {
-                None => random_value_for_sql_type(&t.column_type),
-                Some(annotation) => annotation
-                    .spec
-                    .generator_for_col(t.column_type.clone())
-                    .gen()
-                    .try_into()
-                    .unwrap(),
-            })
+            .iter_mut()
+            .map(|t| t.generator.gen().try_into().unwrap())
             .collect()
     }
 }

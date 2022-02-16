@@ -4,6 +4,7 @@
 //! evaluate a ReadySet deployment at various loads and request patterns.
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -12,6 +13,7 @@ use clap::Parser;
 use metrics::Unit;
 use mysql_async::prelude::Queryable;
 use mysql_async::Row;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error};
@@ -20,7 +22,7 @@ use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters}
 use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
-use crate::utils::query::ArbitraryQueryParameters;
+use crate::utils::query::{ArbitraryQueryParameters, PreparedStatement};
 use crate::utils::us_to_ms;
 use crate::{benchmark_counter, benchmark_histogram, benchmark_increment_counter};
 
@@ -54,10 +56,10 @@ pub struct QueryBenchmark {
 
 #[derive(Clone)]
 pub struct QueryBenchmarkThreadParams {
-    query: ArbitraryQueryParameters,
     target_qps: Option<u64>,
     threads: u64,
     mysql_conn_str: String,
+    prepared_statement: Arc<Mutex<PreparedStatement>>,
 }
 
 #[async_trait]
@@ -97,12 +99,14 @@ impl BenchmarkControl for QueryBenchmark {
         // For now drop the result of migrate as CREATE CACHED QUERY does not support
         // non-select queries.
         let _ = self.query.migrate(&mut conn).await;
+        let prepared_statement =
+            Arc::new(Mutex::new(self.query.prepared_statement(&mut conn).await?));
 
         let thread_data = QueryBenchmarkThreadParams {
-            query: self.query.clone(),
             target_qps: self.target_qps,
             threads: self.threads,
             mysql_conn_str: deployment.target_conn_str.clone(),
+            prepared_statement: prepared_statement.clone(),
         };
         benchmark_counter!(
             "query_benchmark.queries_executed",
@@ -215,7 +219,6 @@ impl MultithreadBenchmark for QueryBenchmark {
         // Prepare the query to retrieve the query schema.
         let opts = mysql_async::Opts::from_url(&params.mysql_conn_str).unwrap();
         let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-        let prepared_statement = params.query.prepared_statement(&mut conn).await?;
 
         let mut throttle_interval =
             multi_thread::throttle_interval(params.target_qps, params.threads);
@@ -234,7 +237,7 @@ impl MultithreadBenchmark for QueryBenchmark {
                 interval.tick().await;
             }
 
-            let (query, params) = prepared_statement.generate_query();
+            let (query, params) = params.prepared_statement.lock().generate_query();
             let start = Instant::now();
             let res: mysql_async::Result<Vec<Row>> = conn.exec(query, params).await;
             if let Err(e) = res {
