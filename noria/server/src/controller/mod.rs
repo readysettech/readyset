@@ -366,7 +366,7 @@ impl Controller {
                 if let Some(ref mut inner) = *guard {
                     let mut writer = inner.dataflow_state_handle.write().await;
                     let ds = writer.as_mut();
-                    let ret = ds.migrate(move |m| func(m)).await?;
+                    let ret = ds.migrate(false, move |m| func(m)).await?;
                     inner
                         .dataflow_state_handle
                         .commit(writer, &self.authority)

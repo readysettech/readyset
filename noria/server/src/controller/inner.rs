@@ -386,7 +386,7 @@ impl Leader {
                 let ret = futures::executor::block_on(async move {
                     let mut writer = self.dataflow_state_handle.write().await;
                     check_quorum!(writer.as_ref());
-                    let r = writer.as_mut().extend_recipe(body).await?;
+                    let r = writer.as_mut().extend_recipe(body, false).await?;
                     self.dataflow_state_handle.commit(writer, authority).await?;
                     Ok(r)
                 })?;

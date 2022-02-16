@@ -622,7 +622,7 @@ impl<'dataflow> Migration<'dataflow> {
     }
 
     /// Build a `MigrationPlan` for this migration, and apply it if the planning stage succeeds.
-    pub(super) async fn commit(self) -> ReadySetResult<()> {
+    pub(super) async fn commit(self, dry_run: bool) -> ReadySetResult<()> {
         let start = self.start;
 
         let plan = self
@@ -630,6 +630,10 @@ impl<'dataflow> Migration<'dataflow> {
             .map_err(|e| ReadySetError::MigrationPlanFailed {
                 source: Box::new(e),
             })?;
+        // We skip the actual migration when we run in dry-run mode.
+        if dry_run {
+            return Ok(());
+        }
         plan.apply().await?;
 
         histogram!(
