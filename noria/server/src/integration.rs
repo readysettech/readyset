@@ -32,7 +32,7 @@ use noria::consistency::Timestamp;
 use noria::internal::LocalNodeIndex;
 use noria::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery, ViewRequest};
 use noria_data::DataType;
-use noria_errors::ReadySetError::MigrationPlanFailed;
+use noria_errors::ReadySetError::{MigrationPlanFailed, RpcFailed};
 use rusty_fork::rusty_fork_test;
 use tempfile::TempDir;
 use test_utils::skip_with_flaky_finder;
@@ -8240,4 +8240,42 @@ async fn create_and_drop_table() {
     assert!(g.table("table_2").await.is_err());
     assert!(g.table("table_3").await.is_ok());
     assert!(g.table("table_4").await.is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn simple_dry_run() {
+    let mut g = start_simple("simple_dry_run").await;
+    let query = "
+        # base tables
+        CREATE TABLE table_1 (column_1 INT);
+        QUERY t1: SELECT * FROM table_1;
+    ";
+    let res = g.dry_run(query).await;
+    assert!(res.is_ok());
+    assert!(g.table("table_1").await.is_err());
+    assert!(g.view("t1").await.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn simple_dry_run_unsupported() {
+    let mut g = start_simple("simple_dry_run").await;
+    let query = "
+        # base tables
+        CREATE TABLE table_1 (column_1 INT);
+        QUERY t1: SELECT * FROM table_1;
+    ";
+    g.install_recipe(query).await.unwrap();
+
+    assert!(g.table("table_1").await.is_ok());
+    assert!(g.view("t1").await.is_ok());
+
+    let unsupported_query = "ALTER TABLE table_1 ADD COLUMN column_2 INT";
+    let res = g.dry_run(unsupported_query).await;
+    assert!(matches!(
+        res,
+        Err(RpcFailed {
+            source: box ReadySetError::Unsupported(_),
+            ..
+        })
+    ));
 }

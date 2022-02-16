@@ -534,6 +534,21 @@ impl ControllerHandle {
         self.rpc("flush_partial", (), self.request_timeout)
     }
 
+    /// Performs a dry-run migration with the given set of queries.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn dry_run(
+        &mut self,
+        recipe_addition: &str,
+    ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
+        let request = RecipeSpec {
+            recipe: recipe_addition,
+            ..Default::default()
+        };
+
+        self.rpc("dry_run", request, self.migration_timeout)
+    }
+
     /// Extend the existing recipe with the given set of queries.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
