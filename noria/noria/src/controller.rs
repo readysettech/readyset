@@ -558,7 +558,7 @@ impl ControllerHandle {
     ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
         let request = RecipeSpec {
             recipe: recipe_addition,
-            require_leader_ready: Some(false),
+            require_leader_ready: false,
             ..Default::default()
         };
 
@@ -577,7 +577,7 @@ impl ControllerHandle {
         let request = RecipeSpec {
             recipe: recipe_addition,
             replication_offset: Some(Cow::Borrowed(replication_offset)),
-            require_leader_ready: Some(require_leader_ready),
+            require_leader_ready,
         };
 
         self.rpc("extend_recipe", request, self.migration_timeout)
