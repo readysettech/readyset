@@ -712,7 +712,7 @@ impl DataflowState {
 
     /// Perform a new query schema migration.
     #[instrument(level = "info", name = "migrate", skip(self, f))]
-    pub(crate) async fn migrate<F, T>(&mut self, f: F) -> Result<T, ReadySetError>
+    pub(crate) async fn migrate<F, T>(&mut self, dry_run: bool, f: F) -> Result<T, ReadySetError>
     where
         F: FnOnce(&mut Migration<'_>) -> T,
     {
@@ -727,7 +727,7 @@ impl DataflowState {
             start: time::Instant::now(),
         };
         let r = f(&mut m);
-        m.commit().await?;
+        m.commit(dry_run).await?;
         info!("finished migration");
         gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS, 0.0);
         Ok(r)
@@ -820,7 +820,7 @@ impl DataflowState {
         // The migration will take care of creating the domains and
         // sending them to the specified worker (or distribute them along all
         // workers if no worker was specified).
-        self.migrate(move |mig| {
+        self.migrate(false, move |mig| {
             mig.worker = worker_addr;
             for (node_index, reader_index) in reader_nodes {
                 mig.added.insert(reader_index);
@@ -1235,11 +1235,14 @@ impl DataflowState {
     pub(super) async fn apply_recipe(
         &mut self,
         changelist: ChangeList,
+        dry_run: bool,
     ) -> Result<ActivationResult, ReadySetError> {
         // I hate this, but there's no way around for now, as migrations
         // are super entangled with the recipe and the graph.
         let mut new = self.recipe.clone();
-        let r = self.migrate(|mig| new.activate(mig, changelist)).await?;
+        let r = self
+            .migrate(dry_run, |mig| new.activate(mig, changelist))
+            .await?;
 
         match r {
             Ok(ref ra) => {
@@ -1293,6 +1296,7 @@ impl DataflowState {
     pub(super) async fn extend_recipe(
         &mut self,
         add_txt_spec: RecipeSpec<'_>,
+        dry_run: bool,
     ) -> Result<ActivationResult, ReadySetError> {
         // Drop recipes from the replicator that we have already processed.
         if let (Some(new), Some(current)) = (
@@ -1307,7 +1311,7 @@ impl DataflowState {
 
         let changelist = ChangeList::from_str(add_txt_spec.recipe)?;
 
-        match self.apply_recipe(changelist).await {
+        match self.apply_recipe(changelist, dry_run).await {
             Ok(x) => {
                 if let Some(offset) = &add_txt_spec.replication_offset {
                     offset.try_max_into(&mut self.schema_replication_offset)?
@@ -1329,7 +1333,7 @@ impl DataflowState {
         match ChangeList::from_str(r_txt) {
             Ok(cl) => {
                 remove_all.extend(cl);
-                match self.apply_recipe(remove_all).await {
+                match self.apply_recipe(remove_all, false).await {
                     Ok(x) => {
                         self.schema_replication_offset =
                             r_txt_spec.replication_offset.as_deref().cloned();
@@ -1351,7 +1355,7 @@ impl DataflowState {
             Some(changelist) => changelist,
         };
 
-        if let Err(error) = self.apply_recipe(changelist).await {
+        if let Err(error) = self.apply_recipe(changelist, false).await {
             error!(%error, "Failed to apply recipe");
             return Err(error);
         }
