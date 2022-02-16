@@ -239,6 +239,7 @@ pub mod status;
 mod table;
 mod view;
 use std::convert::TryFrom;
+use std::default::Default;
 pub mod replication;
 
 #[doc(hidden)]
@@ -375,16 +376,16 @@ pub struct ReaderReplicationResult {
 }
 
 /// Represents a request to install or extend a recipe
-#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RecipeSpec<'a> {
     /// The recipe string
     pub recipe: &'a str,
     /// Optional replication offset if recipe is installed from replication or binlog
     pub replication_offset: Option<Cow<'a, ReplicationOffset>>,
-    /// Optional parameter that indicates if the leader is required to be ready before handling
+    /// Parameter that indicates if the leader is required to be ready before handling
     /// this RecipeSpec.
-    /// If not supplied, defaults to true.
-    require_leader_ready: Option<bool>,
+    /// Defaults to true.
+    require_leader_ready: bool,
 }
 
 /// Filters that can be used to filter the type of
@@ -413,7 +414,17 @@ impl<'a> RecipeSpec<'a> {
     /// Translates the internal require_leader_ready field into a simple boolean by defaulting
     /// anything other then Some(false) to true.
     pub fn require_leader_ready(&self) -> bool {
-        !matches!(self.require_leader_ready, Some(false))
+        self.require_leader_ready
+    }
+}
+
+impl<'a> Default for RecipeSpec<'a> {
+    fn default() -> Self {
+        RecipeSpec {
+            recipe: Default::default(),
+            replication_offset: None,
+            require_leader_ready: true,
+        }
     }
 }
 
