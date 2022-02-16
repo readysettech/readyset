@@ -14,7 +14,8 @@ pub use self::common::{
 };
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 pub use self::create::{
-    CreateCachedQueryStatement, CreateTableStatement, CreateViewStatement, SelectSpecification,
+    CachedQueryInner, CreateCachedQueryStatement, CreateTableStatement, CreateViewStatement,
+    SelectSpecification,
 };
 pub use self::delete::DeleteStatement;
 pub use self::dialect::Dialect;
