@@ -15,6 +15,7 @@ use noria_errors::{internal, ReadySetError, ReadySetResult};
 use proptest::prelude::{prop_oneof, Arbitrary};
 use tokio_postgres::types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 
+mod float;
 mod integer;
 mod serde;
 mod text;
@@ -348,193 +349,42 @@ impl DataType {
     pub fn coerce_to(&self, ty: &SqlType) -> ReadySetResult<DataType> {
         use crate::text::TextCoerce;
 
-        let mk_err = |message: String, source: Option<anyhow::Error>| {
-            ReadySetError::DataTypeConversionError {
-                src_type: "DataType".to_string(),
-                target_type: format!("{:?}", ty),
-                details: format!(
-                    "{}{}",
-                    message,
-                    source
-                        .map(|err| format!(" (caused by: {})", err))
-                        .unwrap_or_default()
-                ),
-            }
+        let mk_err = || ReadySetError::DataTypeConversionError {
+            src_type: format!("{:?}", DataTypeKind::from(self)),
+            target_type: ty.to_string(),
+            details: "unsupported".into(),
         };
 
-        use SqlType::*;
-        match (self, self.sql_type(), ty) {
-            (_, None, _) => Ok(DataType::None),
-            (_, Some(src_type), tgt_type) if src_type == *tgt_type => Ok(self.clone()),
-
-            (DataType::Text(t), _, _) => t.coerce_to(ty),
-            (DataType::TinyText(tt), _, _) => tt.coerce_to(ty),
-            (DataType::TimestampTz(tz), _, _) => tz.coerce_to(ty),
-            (DataType::Int(v), _, _) => integer::coerce_integer(*v, "Int", ty),
-            (DataType::UnsignedInt(v), _, _) => integer::coerce_integer(*v, "UnsignedInt", ty),
-            (_, Some(Float), Float | Real) => Ok(self.clone()),
-            (_, Some(Real), Double) =>Ok(self.clone()),
-            (_, Some(Numeric(_)), Numeric(_)) => Ok(self.clone()),
-            (_, Some(Real | Float), Time) => {
-                MysqlTime::try_from(<f64>::try_from(self)?)
-                    .map_err(|e| mk_err("Could not parse value as time".to_owned(), Some(e.into())))
-                    .map(Self::Time)
-            }
-            (Self::Time(ts), Some(Time), Text | Tinytext | Mediumtext | Varchar(_)) => {
+        match self {
+            DataType::None => Ok(DataType::None),
+            dt if dt.sql_type().as_ref() == Some(ty) => Ok(self.clone()),
+            DataType::Text(t) => t.coerce_to(ty),
+            DataType::TinyText(tt) => tt.coerce_to(ty),
+            DataType::TimestampTz(tz) => tz.coerce_to(ty),
+            DataType::Int(v) => integer::coerce_integer(*v, "Int", ty),
+            DataType::UnsignedInt(v) => integer::coerce_integer(*v, "UnsignedInt", ty),
+            // We can coerce f32 as f64, because casting to the latter doesn't increase precision
+            // and therfore is equivalent
+            DataType::Float(f) => float::coerce_f64(*f as f64, ty),
+            DataType::Double(f) => float::coerce_f64(*f, ty),
+            DataType::Numeric(d) => float::coerce_decimal(d.as_ref(), ty),
+            DataType::Time(ts)
+                if matches!(
+                    ty,
+                    SqlType::Text | SqlType::Tinytext | SqlType::Mediumtext | SqlType::Varchar(_)
+                ) =>
+            {
                 Ok(ts.to_string().into())
             }
-            (Self::Float(f), Some(Float), Tinyint(_) | Smallint(_) | Int(_)) => {
-                Ok(DataType::Int(f.round() as i64))
-            }
-            (Self::Float(f), Some(_), Bigint(_) | BigSerial) => {
-                Ok(DataType::Int(f.round() as i64))
-            }
-            (Self::Float(f), Some(_), Double) => {
-                Ok(DataType::Double(*f as f64))
-            }
-            (Self::Float(f), Some(_), Numeric(_)) => rust_decimal::Decimal::from_f32(*f)
-                .ok_or_else(|| mk_err(
-                    format!(
-                        "Could not convert float to numeric due to overflow. Float value: {}",
-                        f
-                    ),
-                    None,
-                ))
-                .map( DataType::from),
-            (
-                Self::Float(f),
-                Some(Float),
-                UnsignedTinyint(_) | UnsignedSmallint(_) | UnsignedInt(_),
-            ) => Ok(DataType::UnsignedInt(
-                u64::try_from(f.round() as i32).map_err(|e| {
-                    mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
-                })?,
-            )),
-            (Self::Double(f), Some(Real), Tinyint(_) | Smallint(_) | Int(_) | Serial) => Ok(
-                DataType::Int(f.round() as i64)
-            ),
-            (Self::Double(f), Some(_), Float) => {
-                let float = *f as f32;
-                if float.is_finite() {
-                    Ok(DataType::Float(*f as f32))
-                } else {
-                    Err(mk_err(
-                        "Could not convert numeric types: infinite value is not supported"
-                            .to_owned(),
-                        None,
-                    ))
-                }
-            }
-            (Self::Double(f), Some(_), Numeric(_)) => rust_decimal::Decimal::from_f64(*f)
-                .ok_or_else(|| mk_err(
-                    format!(
-                        "Could not convert double to numeric due to overflow. Double value: {}",
-                        f
-                    ),
-                    None,
-                ))
-                .map(DataType::from),
-            (Self::Double(f), Some(_), Bigint(_) | BigSerial) => {
-                Ok(DataType::Int(f.round() as i64))
-            }
-            (
-                Self::Double(f),
-                Some(Real),
-                UnsignedTinyint(_) | UnsignedSmallint(_) | UnsignedInt(_),
-            ) => Ok(DataType::UnsignedInt(
-                u64::try_from(f.round() as i64).map_err(|e| {
-                    mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
-                })?,
-            )),
-            (Self::Double(f), Some(Real), UnsignedBigint(_)) => Ok(
-                DataType::UnsignedInt(u64::try_from(f.round() as i64).map_err(|e| {
-                    mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
-                })?),
-            ),
-            (Self::Numeric(d), Some(Numeric(_)), Tinyint(_) | Smallint(_) | Int(_) | Serial) => d
-                .to_i64()
-                .ok_or_else(|| mk_err(
-                    format!(
-                        "Could not convert numeric to int due to overflow. Numeric value: {}",
-                        d
-                    ),
-                    None,
-                ))
-                .map(DataType::Int),
-            (Self::Numeric(d), Some(_), Float) => d
-                .to_f32()
-                .ok_or_else(|| mk_err(
-                    format!(
-                        "Could not convert numeric to float due to overflow. Numeric value: {}",
-                        d
-                    ),
-                    None,
-                ))
-                .map( DataType::Float),
-            (Self::Numeric(d), Some(_), Double) => d.to_f64()
-                .ok_or_else(|| mk_err(
-                    format!(
-                        "Could not convert numeric to double due to overflow. Numeric value: {}",
-                        d
-                    ),
-                    None,
-                ))
-                .map( DataType::Double),
-            (Self::Numeric(d), Some(_), Bigint(_) | BigSerial) => d
-                .to_i64()
-                .ok_or_else(|| mk_err(
-                    format!(
-                        "Could not convert numeric to big int due to overflow. Numeric value: {}",
-                        d
-                    ),
-                    None,
-                ))
-                .map(DataType::from),
-            (
-                Self::Numeric(d),
-                Some(Numeric(_)),
-                UnsignedTinyint(_) | UnsignedSmallint(_) | UnsignedInt(_),
-            ) => d
-                .to_u64()
-                .ok_or_else(|| mk_err(
-                    format!(
-                        "Could not convert numeric to unsigned int due to overflow. Numeric value: {}",
-                        d
-                    ),
-                    None,
-                ))
-                .map(DataType::from),
-            (Self::Numeric(d), Some(Numeric(_)), UnsignedBigint(_)) => d
-                .to_u64()
-                .ok_or_else(|| mk_err(
-                    format!(
-                        "Could not convert numeric to unsigned  int due to overflow. Numeric value: {}",
-                        d
-                    ),
-                    None,
-                ))
-                .map(DataType::from),
-            (Self::BitVector(_), Some(Bit(size_opt)), Varbit(max_size_opt)) => {
-                let size = size_opt.unwrap_or(1);
-                match max_size_opt {
-                    Some(max_size) if size > *max_size =>
-                        Err(mk_err(format!("Cannot coerce BIT({}) to VARBIT({})", size, max_size), None)),
-                    _ => Ok(self.clone())
-                }
-            }
-            (Self::BitVector(ref bits), Some(Varbit(max_size_opt)), Bit(size_opt)) => {
-                let size = size_opt.unwrap_or(1);
-                match max_size_opt {
-                    Some(max_size) if size > max_size =>
-                        Err(mk_err(format!("Cannot coerce VARBIT({}) to BIT({})", size, max_size), None)),
-                    _ => if bits.len() as u16 != size {
-                        Err(mk_err(format!("Cannot coerce VARBIT to BIT({}). VARBIT has length {}", size, bits.len()), None))
-                    } else {
-                        Ok(self.clone())
-                    }
-                }
-            }
-            (_, Some(_), _) => Err(mk_err("Cannot coerce with these types".to_owned(), None)),
+            DataType::BitVector(vec) => match ty {
+                SqlType::Varbit(None) => Ok(self.clone()),
+                SqlType::Varbit(max_size_opt) => match max_size_opt {
+                    Some(max_size) if vec.len() > *max_size as usize => Err(mk_err()),
+                    _ => Ok(self.clone()),
+                },
+                _ => Err(mk_err()),
+            },
+            DataType::Time(_) | DataType::ByteArray(_) | DataType::Max => Err(mk_err()),
         }
     }
 
@@ -3124,8 +2974,6 @@ mod tests {
         use launchpad::arbitrary::{
             arbitrary_naive_date, arbitrary_naive_date_time, arbitrary_naive_time,
         };
-        use proptest::sample::select;
-        use proptest::strategy::Strategy;
         use test_strategy::proptest;
         use SqlType::*;
 
@@ -3259,95 +3107,7 @@ mod tests {
 
         real_conversion!(float_to_double, f32, f64, Double);
 
-        #[proptest]
-        fn float_to_numeric(source: f32) {
-            let expected = rust_decimal::Decimal::from_f32(source);
-            if expected.is_some() {
-                assert_eq!(
-                    DataType::try_from(source)
-                        .unwrap()
-                        .coerce_to(&SqlType::Numeric(None))
-                        .unwrap(),
-                    DataType::from(expected.unwrap())
-                );
-            } else {
-                assert!(DataType::try_from(source)
-                    .unwrap()
-                    .coerce_to(&SqlType::Numeric(None))
-                    .is_err());
-            }
-        }
-
         real_conversion!(double_to_float, f64, f32, Float);
-
-        #[proptest]
-        fn double_to_numeric(source: f64) {
-            let expected = rust_decimal::Decimal::from_f64(source);
-            if expected.is_some() {
-                assert_eq!(
-                    DataType::try_from(source)
-                        .unwrap()
-                        .coerce_to(&SqlType::Numeric(None))
-                        .unwrap(),
-                    DataType::from(expected.unwrap())
-                );
-            } else {
-                assert!(DataType::try_from(source)
-                    .unwrap()
-                    .coerce_to(&SqlType::Numeric(None))
-                    .is_err());
-            }
-        }
-
-        fn int_type() -> impl Strategy<Value = SqlType> {
-            use SqlType::*;
-            select(vec![Tinyint(None), Smallint(None), Int(None), Bigint(None)])
-        }
-
-        #[proptest]
-        fn double_to_int(whole_part: i32, #[strategy(int_type())] int_type: SqlType) {
-            let double = DataType::Double(whole_part as f64);
-            let result = double.coerce_to(&int_type).unwrap();
-            assert_eq!(i32::try_from(result).unwrap(), whole_part);
-        }
-
-        #[proptest]
-        fn numeric_to_int(whole_part: i32, #[strategy(int_type())] int_type: SqlType) {
-            let decimal = rust_decimal::Decimal::from_i32(whole_part);
-            prop_assume!(decimal.is_some());
-            let decimal = decimal.unwrap();
-            let result = DataType::from(decimal).coerce_to(&int_type).unwrap();
-            assert_eq!(i32::try_from(result).unwrap(), whole_part)
-        }
-
-        fn unsigned_type() -> impl Strategy<Value = SqlType> {
-            use SqlType::*;
-            select(vec![
-                UnsignedTinyint(None),
-                UnsignedSmallint(None),
-                UnsignedInt(None),
-                UnsignedBigint(None),
-            ])
-        }
-
-        #[proptest]
-        fn double_to_unsigned(
-            whole_part: u32,
-            #[strategy(unsigned_type())] unsigned_type: SqlType,
-        ) {
-            let double = DataType::Double(whole_part as f64);
-            let result = double.coerce_to(&unsigned_type).unwrap();
-            assert_eq!(u32::try_from(result).unwrap(), whole_part);
-        }
-
-        #[proptest]
-        fn numeric_to_unsigned(whole_part: u8, #[strategy(int_type())] int_type: SqlType) {
-            let decimal = rust_decimal::Decimal::from_u8(whole_part);
-            prop_assume!(decimal.is_some());
-            let decimal = decimal.unwrap();
-            let result = DataType::from(decimal).coerce_to(&int_type).unwrap();
-            assert_eq!(u32::try_from(result).unwrap(), whole_part as u32)
-        }
 
         #[proptest]
         fn char_equal_length(#[strategy("a{1,30}")] text: String) {
