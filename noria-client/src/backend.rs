@@ -79,9 +79,9 @@ use std::time::{Duration, Instant};
 use futures::future::{self, OptionFuture};
 use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
-    CreateCachedQueryStatement, DeleteStatement, Dialect, DropCachedQueryStatement, Expression,
-    InsertStatement, Literal, SelectStatement, ShowStatement, SqlIdentifier, SqlQuery,
-    UpdateStatement,
+    CachedQueryInner, CreateCachedQueryStatement, DeleteStatement, Dialect,
+    DropCachedQueryStatement, Expression, InsertStatement, Literal, SelectStatement, ShowStatement,
+    SqlIdentifier, SqlQuery, UpdateStatement,
 };
 use noria::consistency::Timestamp;
 use noria::results::Results;
@@ -91,7 +91,7 @@ use noria_client_metrics::{
 };
 use noria_data::DataType;
 use noria_errors::ReadySetError::{self, PreparedStatementMissing};
-use noria_errors::{internal, internal_err, unsupported, ReadySetResult};
+use noria_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, instrument, trace, warn};
@@ -1439,9 +1439,16 @@ where
             SqlQuery::Explain(nom_sql::ExplainStatement::Graphviz { simplified }) => {
                 self.noria.graphviz(*simplified).await
             }
-            SqlQuery::CreateCachedQuery(CreateCachedQueryStatement { name, statement }) => {
-                self.create_cached_query(name.as_deref(), statement.clone())
-                    .await
+            SqlQuery::CreateCachedQuery(CreateCachedQueryStatement { name, inner }) => {
+                let st = match inner {
+                    CachedQueryInner::Statement(st) => st,
+                    _ => {
+                        return Some(Err(unsupported_err(
+                            "CREATE CACHED QUERY AS <query_id> is not yet implemented",
+                        )))
+                    }
+                };
+                self.create_cached_query(name.as_deref(), *st.clone()).await
             }
             SqlQuery::DropCachedQuery(DropCachedQueryStatement { name }) => {
                 self.drop_cached_query(name.as_str()).await

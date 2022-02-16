@@ -1,6 +1,7 @@
 use std::str::FromStr;
 use std::{fmt, str};
 
+use derive_more::{Display, From};
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case};
 use nom::character::complete::{digit1, multispace0, multispace1};
@@ -130,13 +131,20 @@ impl fmt::Display for CreateViewStatement {
     }
 }
 
+/// The SelectStatement or query ID referenced in a [`CreateCachedQueryStatement`]
+#[derive(Clone, Debug, Display, Eq, Hash, PartialEq, Serialize, Deserialize, From)]
+pub enum CachedQueryInner {
+    Statement(Box<SelectStatement>),
+    Id(SqlIdentifier),
+}
+
 /// `CREATE CACHED QUERY [<name>] AS ...`
 ///
 /// This is a non-standard ReadySet specific extension to SQL
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateCachedQueryStatement {
     pub name: Option<SqlIdentifier>,
-    pub statement: SelectStatement,
+    pub inner: CachedQueryInner,
 }
 
 impl fmt::Display for CreateCachedQueryStatement {
@@ -145,7 +153,7 @@ impl fmt::Display for CreateCachedQueryStatement {
         if let Some(name) = &self.name {
             write!(f, "`{}` ", name)?;
         }
-        write!(f, "AS {}", self.statement)
+        write!(f, "AS {}", self.inner)
     }
 }
 
@@ -676,6 +684,17 @@ pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Creat
     }
 }
 
+/// Extract the [`SelectStatement`] or Query ID from a CREATE CACHED QUERY statement. Query ID is
+/// parsed as a SqlIdentifier
+pub fn cached_query_inner(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CachedQueryInner> {
+    move |i| {
+        alt((
+            map(map(selection(dialect), Box::new), CachedQueryInner::from),
+            map(dialect.identifier(), CachedQueryInner::from),
+        ))(i)
+    }
+}
+
 /// Parse a [`CreateCachedQueryStatement`]
 pub fn create_cached_query(
     dialect: Dialect,
@@ -690,8 +709,8 @@ pub fn create_cached_query(
         let (i, name) = opt(terminated(dialect.identifier(), multispace1))(i)?;
         let (i, _) = tag_no_case("as")(i)?;
         let (i, _) = multispace1(i)?;
-        let (i, statement) = selection(dialect)(i)?;
-        Ok((i, CreateCachedQueryStatement { name, statement }))
+        let (i, inner) = cached_query_inner(dialect)(i)?;
+        Ok((i, CreateCachedQueryStatement { name, inner }))
     }
 }
 
@@ -1414,23 +1433,59 @@ mod tests {
         }
 
         #[test]
-        fn create_query_cache_with_name() {
+        fn create_cached_query_with_name() {
             let res = test_parse!(
                 create_cached_query(Dialect::MySQL),
                 b"CREATE CACHED QUERY foo AS SELECT id FROM users WHERE name = ?"
             );
             assert_eq!(res.name, Some("foo".into()));
-            assert_eq!(res.statement.tables, vec!["users".into()]);
+            let statement = match res.inner {
+                CachedQueryInner::Statement(s) => s,
+                _ => panic!(),
+            };
+            assert_eq!(statement.tables, vec!["users".into()]);
         }
 
         #[test]
-        fn create_query_cache_without_name() {
+        fn create_cached_query_without_name() {
             let res = test_parse!(
                 create_cached_query(Dialect::MySQL),
                 b"CREATE CACHED QUERY AS SELECT id FROM users WHERE name = ?"
             );
             assert_eq!(res.name, None);
-            assert_eq!(res.statement.tables, vec!["users".into()]);
+            let statement = match res.inner {
+                CachedQueryInner::Statement(s) => s,
+                _ => panic!(),
+            };
+            assert_eq!(statement.tables, vec!["users".into()]);
+        }
+
+        #[test]
+        fn create_cached_query_from_id_with_name() {
+            let res = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHED QUERY foo AS q_0123456789ABCDEF"
+            );
+            assert_eq!(res.name.unwrap(), "foo");
+            let id = match res.inner {
+                CachedQueryInner::Id(s) => s,
+                _ => panic!(),
+            };
+            assert_eq!(id.as_str(), "q_0123456789ABCDEF")
+        }
+
+        #[test]
+        fn create_cached_query_from_id_without_name() {
+            let res = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHED QUERY AS q_0123456789ABCDEF"
+            );
+            assert!(res.name.is_none());
+            let id = match res.inner {
+                CachedQueryInner::Id(s) => s,
+                _ => panic!(),
+            };
+            assert_eq!(id.as_str(), "q_0123456789ABCDEF")
         }
 
         #[test]

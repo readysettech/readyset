@@ -5,10 +5,9 @@ use std::iter;
 
 use maplit::hashset;
 
-use crate::create::CreateCachedQueryStatement;
 use crate::{
-    Column, Expression, FieldDefinitionExpression, FunctionExpression, InValue, JoinConstraint,
-    SelectStatement, SqlQuery, Table,
+    CachedQueryInner, Column, CreateCachedQueryStatement, Expression, FieldDefinitionExpression,
+    FunctionExpression, InValue, JoinConstraint, SelectStatement, SqlQuery, Table,
 };
 
 /// Extension trait providing the `referred_tables` method to various parts of the AST
@@ -23,10 +22,12 @@ impl ReferredTables for SqlQuery {
             SqlQuery::CreateTable(ref ctq) => hashset![ctq.table.clone()],
             SqlQuery::AlterTable(ref atq) => hashset![atq.table.clone()],
             SqlQuery::Insert(ref iq) => hashset![iq.table.clone()],
-            SqlQuery::Select(ref sq)
-            | SqlQuery::CreateCachedQuery(CreateCachedQueryStatement {
-                statement: ref sq, ..
-            }) => sq.tables.iter().cloned().collect(),
+            SqlQuery::Select(ref sq) => sq.tables.iter().cloned().collect(),
+            SqlQuery::CreateCachedQuery(CreateCachedQueryStatement { inner: ref i, .. }) => match i
+            {
+                CachedQueryInner::Statement(sq) => sq.tables.iter().cloned().collect(),
+                CachedQueryInner::Id(_) => HashSet::new(),
+            },
             SqlQuery::CompoundSelect(ref csq) => csq
                 .selects
                 .iter()
