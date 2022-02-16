@@ -11,7 +11,6 @@ mod order_limit_removal;
 mod rewrite_between;
 mod star_expansion;
 mod strip_post_filters;
-pub mod subqueries;
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -37,7 +36,6 @@ pub use crate::order_limit_removal::OrderLimitRemoval;
 pub use crate::rewrite_between::RewriteBetween;
 pub use crate::star_expansion::StarExpansion;
 pub use crate::strip_post_filters::StripPostFilters;
-pub use crate::subqueries::SubQueries;
 
 /// Returns an iterator over all the tables referred to by the *outermost* query in the given
 /// statement (eg not including any subqueries)

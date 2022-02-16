@@ -24,10 +24,13 @@ impl Column {
         }
     }
 
-    pub fn named(name: String) -> Self {
+    pub fn named<N>(name: N) -> Self
+    where
+        N: Into<String>,
+    {
         Self {
             table: None,
-            name,
+            name: name.into(),
             function: None,
             aliases: vec![],
         }
