@@ -880,7 +880,7 @@ impl SqlIncorporator {
         // Remove all table aliases from 'fq'. Create named views in cases where the alias must be
         // replaced with a view rather than the table itself in order to prevent ambiguity. (This
         // may occur when a single table is referenced using more than one alias).
-        let table_alias_rewrites = q.rewrite_table_aliases(query_name, mig.context());
+        let table_alias_rewrites = q.rewrite_table_aliases(query_name);
         for r in table_alias_rewrites {
             match r {
                 TableAliasRewrite::View {

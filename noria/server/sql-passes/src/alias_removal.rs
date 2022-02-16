@@ -1,11 +1,9 @@
 use std::collections::HashMap;
+use std::mem;
 
 use itertools::Itertools;
-use nom_sql::{
-    Column, CommonTableExpression, Expression, FieldDefinitionExpression, FunctionExpression,
-    InValue, JoinConstraint, JoinRightSide, SelectStatement, SqlQuery, Table,
-};
-use noria_data::DataType;
+use nom_sql::analysis::visit::{walk_select_statement, Visitor};
+use nom_sql::{Column, CommonTableExpression, JoinRightSide, SelectStatement, SqlQuery, Table};
 
 #[derive(Debug, PartialEq)]
 pub enum TableAliasRewrite {
@@ -31,361 +29,162 @@ pub trait AliasRemoval {
     /// Remove all table aliases, leaving tables unaliased if possible but rewriting the table name
     /// to a new view name derived from 'query_name' when necessary (ie when a single table is
     /// referenced by more than one alias). Return a list of the rewrites performed.
-    fn rewrite_table_aliases(
+    fn rewrite_table_aliases(&mut self, query_name: &str) -> Vec<TableAliasRewrite>;
+}
+
+struct RemoveAliasesVisitor<'a> {
+    query_name: &'a str,
+    table_remap: HashMap<String, String>,
+    col_table_remap: HashMap<String, String>,
+    out: Vec<TableAliasRewrite>,
+}
+
+impl<'ast, 'a> Visitor<'ast> for RemoveAliasesVisitor<'a> {
+    type Error = !;
+
+    fn visit_select_statement(
         &mut self,
-        query_name: &str,
-        context: &HashMap<String, DataType>,
-    ) -> Vec<TableAliasRewrite>;
-}
+        select_statement: &'ast mut SelectStatement,
+    ) -> Result<(), Self::Error> {
+        // Identify the unique table references for every table appearing in the query FROM and
+        // JOIN clauses, and group by table name. Both None (ie unaliased) and Some(alias)
+        // reference types are included.
+        let table_refs = select_statement
+            .tables
+            .iter()
+            .cloned()
+            .chain(select_statement.join.iter().flat_map(|j| match j.right {
+                JoinRightSide::Table(ref table) => vec![table.clone()],
+                JoinRightSide::Tables(ref ts) => ts.clone(),
+                _ => vec![],
+            }))
+            .map(|t| (t.name, t.alias))
+            .unique()
+            .into_group_map();
 
-fn rewrite_table(table_remap: &HashMap<String, String>, table: &Table) -> Table {
-    let name = table
-        .alias
-        .as_ref()
-        .and_then(|t| table_remap.get(t))
-        .unwrap_or(&table.name);
-    Table {
-        name: name.clone(),
-        alias: None,
-        schema: table.schema.clone(),
+        // Use the map of unique table references to identify any necessary alias rewrites.
+        let table_alias_rewrites: Vec<TableAliasRewrite> = table_refs
+            .into_iter()
+            .flat_map(|(name, aliases)| match aliases[..] {
+                [None] => {
+                    // The table is never referred to by an alias. No rewrite is needed.
+                    vec![]
+                }
+
+                [Some(ref alias)] => {
+                    // The table is only ever referred to using one specific alias. Rewrite
+                    // to remove the alias and refer to the table itself.
+                    vec![TableAliasRewrite::Table {
+                        from: alias.clone(),
+                        to_table: name,
+                    }]
+                }
+
+                _ => aliases
+                    .into_iter()
+                    .flatten()
+                    .map(|alias| {
+                        // The alias is one among multiple distinct references to the
+                        // table. Create a globally unique view name, derived from the
+                        // query name, and rewrite to remove the alias and refer to this
+                        // view.
+                        TableAliasRewrite::View {
+                            from: alias.clone(),
+                            to_view: format!("__{}__{}", self.query_name, alias),
+                            for_table: name.clone(),
+                        }
+                    })
+                    .collect(),
+            })
+            .chain(select_statement.ctes.drain(..).map(
+                |CommonTableExpression { name, statement }| TableAliasRewrite::Cte {
+                    to_view: format!("__{}__{}", self.query_name, name),
+                    from: name,
+                    for_statement: Box::new(statement),
+                },
+            ))
+            .collect();
+
+        // Extract remappings for FROM and JOIN table references from the alias rewrites.
+        let new_table_remap = self
+            .table_remap
+            .clone()
+            .into_iter()
+            .chain(table_alias_rewrites.iter().filter_map(|r| match r {
+                TableAliasRewrite::View { from, to_view, .. } => {
+                    Some((from.clone(), to_view.clone()))
+                }
+                _ => None,
+            }))
+            .collect();
+        let orig_table_remap = mem::replace(&mut self.table_remap, new_table_remap);
+
+        // Extract remappings for column tables from the alias rewrites.
+        let new_col_table_remap = self
+            .col_table_remap
+            .clone()
+            .into_iter()
+            .chain(table_alias_rewrites.iter().map(|r| match r {
+                TableAliasRewrite::Table { from, to_table } => (from.clone(), to_table.clone()),
+                TableAliasRewrite::View { from, to_view, .. } => (from.clone(), to_view.clone()),
+                TableAliasRewrite::Cte { from, to_view, .. } => (from.clone(), to_view.clone()),
+            }))
+            .collect();
+        let orig_col_table_remap = mem::replace(&mut self.col_table_remap, new_col_table_remap);
+
+        walk_select_statement(self, select_statement)?;
+
+        self.table_remap = orig_table_remap;
+        self.col_table_remap = orig_col_table_remap;
+
+        self.out.extend(table_alias_rewrites);
+
+        Ok(())
     }
-}
 
-fn rewrite_column(col_table_remap: &HashMap<String, String>, col: &Column) -> Column {
-    let table = col.table.as_ref().map(|t| {
-        if col_table_remap.contains_key(t) {
-            col_table_remap[t].clone()
-        } else {
-            t.clone()
+    fn visit_table(&mut self, table: &'ast mut Table) -> Result<(), Self::Error> {
+        if let Some(name) = table
+            .alias
+            .as_ref()
+            .and_then(|t| self.table_remap.get(t))
+            .cloned()
+        {
+            table.name = name
+        } else if let Some(name) = self.col_table_remap.get(&table.name) {
+            table.name = name.clone();
         }
-    });
-    Column {
-        name: col.name.clone(),
-        table,
+        table.alias = None;
+
+        Ok(())
     }
-}
 
-fn rewrite_expression(col_table_remap: &HashMap<String, String>, expr: &Expression) -> Expression {
-    match expr {
-        Expression::Column(col) => Expression::Column(rewrite_column(col_table_remap, col)),
-        Expression::CaseWhen {
-            condition,
-            then_expr,
-            else_expr,
-        } => Expression::CaseWhen {
-            condition: Box::new(rewrite_expression(col_table_remap, condition)),
-            then_expr: Box::new(rewrite_expression(col_table_remap, then_expr)),
-            else_expr: else_expr
-                .as_ref()
-                .map(|e| Box::new(rewrite_expression(col_table_remap, e))),
-        },
-        Expression::Literal(_) => expr.clone(),
-        Expression::Call(fun) => {
-            Expression::Call(rewrite_function_expression(col_table_remap, fun))
+    fn visit_column(&mut self, column: &'ast mut Column) -> Result<(), Self::Error> {
+        if let Some(table) = column
+            .table
+            .as_ref()
+            .and_then(|t| self.col_table_remap.get(t))
+            .cloned()
+        {
+            column.table = Some(table)
         }
-        Expression::BinaryOp { lhs, op, rhs } => Expression::BinaryOp {
-            lhs: Box::new(rewrite_expression(col_table_remap, lhs)),
-            op: *op,
-            rhs: Box::new(rewrite_expression(col_table_remap, rhs)),
-        },
-        Expression::UnaryOp { op, rhs } => Expression::UnaryOp {
-            op: *op,
-            rhs: Box::new(rewrite_expression(col_table_remap, rhs)),
-        },
-        Expression::Cast {
-            expr,
-            ty,
-            postgres_style,
-        } => Expression::Cast {
-            expr: Box::new(rewrite_expression(col_table_remap, expr)),
-            ty: ty.clone(),
-            postgres_style: *postgres_style,
-        },
-        Expression::Exists(_) | Expression::NestedSelect(_) => expr.clone(),
-        Expression::Between {
-            operand,
-            min,
-            max,
-            negated,
-        } => Expression::Between {
-            operand: Box::new(rewrite_expression(col_table_remap, operand)),
-            min: Box::new(rewrite_expression(col_table_remap, min)),
-            max: Box::new(rewrite_expression(col_table_remap, max)),
-            negated: *negated,
-        },
-        Expression::In { lhs, rhs, negated } => Expression::In {
-            lhs: Box::new(rewrite_expression(col_table_remap, lhs)),
-            rhs: match rhs {
-                InValue::Subquery(_) => rhs.clone(),
-                InValue::List(exprs) => InValue::List(
-                    exprs
-                        .iter()
-                        .map(|expr| rewrite_expression(col_table_remap, expr))
-                        .collect(),
-                ),
-            },
-            negated: *negated,
-        },
-        Expression::Variable(_) => expr.clone(),
-    }
-}
 
-fn rewrite_function_expression(
-    col_table_remap: &HashMap<String, String>,
-    function: &FunctionExpression,
-) -> FunctionExpression {
-    match function {
-        FunctionExpression::Avg { expr, distinct } => FunctionExpression::Avg {
-            expr: Box::new(rewrite_expression(col_table_remap, expr)),
-            distinct: *distinct,
-        },
-        FunctionExpression::Count {
-            expr,
-            distinct,
-            count_nulls,
-        } => FunctionExpression::Count {
-            expr: Box::new(rewrite_expression(col_table_remap, expr)),
-            distinct: *distinct,
-            count_nulls: *count_nulls,
-        },
-        FunctionExpression::CountStar => FunctionExpression::CountStar,
-        FunctionExpression::Sum { expr, distinct } => FunctionExpression::Sum {
-            expr: Box::new(rewrite_expression(col_table_remap, expr)),
-            distinct: *distinct,
-        },
-        FunctionExpression::Max(arg) => {
-            FunctionExpression::Max(Box::new(rewrite_expression(col_table_remap, arg)))
-        }
-        FunctionExpression::Min(arg) => {
-            FunctionExpression::Min(Box::new(rewrite_expression(col_table_remap, arg)))
-        }
-        FunctionExpression::GroupConcat { expr, separator } => FunctionExpression::GroupConcat {
-            expr: Box::new(rewrite_expression(col_table_remap, expr)),
-            separator: separator.clone(),
-        },
-        FunctionExpression::Call { name, arguments } => FunctionExpression::Call {
-            name: name.clone(),
-            arguments: arguments
-                .iter()
-                .map(|arg| rewrite_expression(col_table_remap, arg))
-                .collect(),
-        },
-    }
-}
-
-fn rewrite_field(
-    col_table_remap: &HashMap<String, String>,
-    field: &FieldDefinitionExpression,
-) -> FieldDefinitionExpression {
-    match field {
-        FieldDefinitionExpression::Expression { expr, alias } => {
-            FieldDefinitionExpression::Expression {
-                expr: rewrite_expression(col_table_remap, expr),
-                alias: alias.clone(),
-            }
-        }
-        FieldDefinitionExpression::AllInTable(t) => {
-            if col_table_remap.contains_key(t) {
-                FieldDefinitionExpression::AllInTable(col_table_remap[t].clone())
-            } else {
-                FieldDefinitionExpression::AllInTable(t.clone())
-            }
-        }
-        FieldDefinitionExpression::All => FieldDefinitionExpression::All,
+        Ok(())
     }
 }
 
 impl AliasRemoval for SqlQuery {
-    fn rewrite_table_aliases(
-        &mut self,
-        query_name: &str,
-        context: &HashMap<String, DataType>,
-    ) -> Vec<TableAliasRewrite> {
+    fn rewrite_table_aliases(&mut self, query_name: &str) -> Vec<TableAliasRewrite> {
         if let SqlQuery::Select(ref mut sq) = self {
-            // Identify the unique table references for every table appearing in the query FROM and
-            // JOIN clauses, and group by table name. Both None (ie unaliased) and Some(alias)
-            // reference types are included.
-            let table_refs = sq
-                .tables
-                .iter()
-                .cloned()
-                .chain(sq.join.iter().flat_map(|j| match j.right {
-                    JoinRightSide::Table(ref table) => vec![table.clone()],
-                    JoinRightSide::Tables(ref ts) => ts.clone(),
-                    _ => vec![],
-                }))
-                .map(|t| (t.name, t.alias))
-                .unique()
-                .into_group_map();
-
-            // Use the map of unique table references to identify any necessary alias rewrites.
-            let table_alias_rewrites: Vec<TableAliasRewrite> = table_refs
-                .into_iter()
-                .flat_map(|(name, aliases)| match aliases[..] {
-                    [None] => {
-                        // The table is never referred to by an alias. No rewrite is needed.
-                        vec![]
-                    }
-
-                    [Some(ref alias)] => {
-                        // The table is only ever referred to using one specific alias. Rewrite
-                        // to remove the alias and refer to the table itself.
-                        vec![TableAliasRewrite::Table {
-                            from: alias.clone(),
-                            to_table: name,
-                        }]
-                    }
-
-                    _ => aliases
-                        .into_iter()
-                        .flatten()
-                        .map(|alias| {
-                            // The alias is one among multiple distinct references to the
-                            // table. Create a globally unique view name, derived from the
-                            // query name, and rewrite to remove the alias and refer to this
-                            // view.
-                            TableAliasRewrite::View {
-                                from: alias.clone(),
-                                to_view: format!("__{}__{}", query_name, alias),
-                                for_table: name.clone(),
-                            }
-                        })
-                        .collect(),
-                })
-                .chain(
-                    sq.ctes
-                        .drain(..)
-                        .map(
-                            |CommonTableExpression { name, statement }| TableAliasRewrite::Cte {
-                                to_view: format!("__{}__{}", query_name, name),
-                                from: name,
-                                for_statement: Box::new(statement),
-                            },
-                        ),
-                )
-                .collect();
-
-            // Add an alias for any universe context table.
-            let universe_rewrite = if let Some(universe_id) = context.get("id") {
-                if let Some(g) = context.get("group") {
-                    Some((
-                        "GroupContext".to_string(),
-                        format!("GroupContext_{}_{}", g, universe_id),
-                    ))
-                } else {
-                    Some((
-                        "UserContext".to_string(),
-                        format!("UserContext_{}", universe_id),
-                    ))
-                }
-            } else {
-                None
+            let mut visitor = RemoveAliasesVisitor {
+                query_name,
+                table_remap: Default::default(),
+                col_table_remap: Default::default(),
+                out: Default::default(),
             };
 
-            // Extract remappings for column tables from the alias rewrites.
-            let col_table_remap = table_alias_rewrites
-                .iter()
-                .map(|r| match r {
-                    TableAliasRewrite::Table { from, to_table } => (from.clone(), to_table.clone()),
-                    TableAliasRewrite::View { from, to_view, .. } => {
-                        (from.clone(), to_view.clone())
-                    }
-                    TableAliasRewrite::Cte { from, to_view, .. } => (from.clone(), to_view.clone()),
-                })
-                .chain(universe_rewrite.into_iter())
-                .collect();
+            let Ok(_) = visitor.visit_select_statement(sq);
 
-            // Rewrite column table aliases in fields.
-            sq.fields = sq
-                .fields
-                .iter()
-                .map(|field| rewrite_field(&col_table_remap, field))
-                .collect();
-
-            // Rewrite column table aliases in join constraints.
-            sq.join = sq
-                .join
-                .iter()
-                .map(|jc| {
-                    let mut jc = jc.clone();
-                    match jc.right {
-                        JoinRightSide::Table(Table { ref mut name, .. }) => {
-                            if let Some(new_name) = col_table_remap.get(name) {
-                                *name = new_name.clone()
-                            }
-                        }
-                        JoinRightSide::Tables(ref mut tables) => {
-                            for Table { ref mut name, .. } in tables {
-                                if let Some(new_name) = col_table_remap.get(name) {
-                                    *name = new_name.clone()
-                                }
-                            }
-                        }
-                        JoinRightSide::NestedSelect(_, _) => {}
-                    }
-
-                    jc.constraint = match jc.constraint {
-                        JoinConstraint::On(ref cond) => {
-                            JoinConstraint::On(rewrite_expression(&col_table_remap, cond))
-                        }
-                        c @ JoinConstraint::Using(..) | c @ JoinConstraint::Empty => c,
-                    };
-                    jc
-                })
-                .collect();
-
-            // Rewrite column table aliases in conditions.
-            sq.where_clause = sq
-                .where_clause
-                .as_ref()
-                .map(|wc| rewrite_expression(&col_table_remap, wc));
-
-            // Extract remappings for FROM and JOIN table references from the alias rewrites.
-            let table_remap = table_alias_rewrites
-                .iter()
-                .filter_map(|r| match r {
-                    TableAliasRewrite::View { from, to_view, .. } => {
-                        Some((from.clone(), to_view.clone()))
-                    }
-                    _ => None,
-                })
-                .collect();
-
-            // Rewrite tables in FROM clause.
-            sq.tables = sq
-                .tables
-                .iter()
-                .map(|t| rewrite_table(&table_remap, t))
-                .collect();
-
-            // Rewrite tables in JOIN clauses.
-            sq.join = sq
-                .join
-                .iter()
-                .map(|jc| {
-                    let mut jc = jc.clone();
-                    jc.right = match jc.right {
-                        JoinRightSide::Table(ref t) => {
-                            JoinRightSide::Table(rewrite_table(&table_remap, t))
-                        }
-                        JoinRightSide::Tables(ts) => JoinRightSide::Tables(
-                            ts.iter().map(|t| rewrite_table(&table_remap, t)).collect(),
-                        ),
-                        r @ JoinRightSide::NestedSelect(_, _) => r,
-                    };
-                    jc
-                })
-                .collect();
-
-            if let Some(group_by) = &mut sq.group_by {
-                group_by.columns = group_by
-                    .columns
-                    .iter()
-                    .map(|col| rewrite_column(&col_table_remap, col))
-                    .collect();
-            }
-
-            table_alias_rewrites
+            visitor.out
         } else {
             // nothing to do for other query types, as they cannot have aliases
             vec![]
@@ -395,10 +194,8 @@ impl AliasRemoval for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::convert::TryInto;
 
-    use maplit::hashmap;
     use nom_sql::{
         parse_query, parser, BinaryOperator, Column, Dialect, Expression,
         FieldDefinitionExpression, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator,
@@ -411,8 +208,7 @@ mod tests {
         ($before: expr, $after: expr) => {{
             let mut res = parse_query(Dialect::MySQL, $before).unwrap();
             let expected = parse_query(Dialect::MySQL, $after).unwrap();
-            let context = hashmap! {"t1".to_owned() => "global".try_into().unwrap()};
-            res.rewrite_table_aliases("query", &context);
+            res.rewrite_table_aliases("query");
             assert_eq!(
                 res, expected,
                 "\n     expected: {} \n\
@@ -441,10 +237,8 @@ mod tests {
             }),
             ..Default::default()
         };
-        let mut context = HashMap::new();
-        context.insert(String::from("id"), "global".try_into().unwrap());
         let mut res = SqlQuery::Select(q);
-        let rewrites = res.rewrite_table_aliases("query", &context);
+        let rewrites = res.rewrite_table_aliases("query");
         // Table alias removed in field list
         match res {
             SqlQuery::Select(tq) => {
@@ -512,10 +306,8 @@ mod tests {
             }),
             ..Default::default()
         };
-        let mut context = HashMap::new();
-        context.insert(String::from("id"), "global".try_into().unwrap());
         let mut res = SqlQuery::Select(q);
-        let rewrites = res.rewrite_table_aliases("query", &context);
+        let rewrites = res.rewrite_table_aliases("query");
         // Table alias removed in field list
         match res {
             SqlQuery::Select(tq) => {
@@ -562,9 +354,7 @@ mod tests {
             "SELECT t1.id, t2.name FROM tab t1 JOIN tab t2 ON (t1.other = t2.id)",
         )
         .unwrap();
-        let mut context = HashMap::new();
-        context.insert(String::from("id"), "global".try_into().unwrap());
-        let rewrites = res.rewrite_table_aliases("query_name", &context);
+        let rewrites = res.rewrite_table_aliases("query_name");
         match res {
             SqlQuery::Select(tq) => {
                 assert_eq!(
@@ -636,5 +426,74 @@ mod tests {
             "SELECT id FROM tbl t1 WHERE t1.x - t1.y > 0",
             "SELECT id FROM tbl WHERE tbl.x - tbl.y > 0"
         );
+    }
+
+    #[test]
+    fn joined_subquery() {
+        rewrites_to!(
+            "SELECT
+                 u.id, post_count.count
+             FROM users u
+             JOIN (
+                 SELECT p.author_id, count(p.id) AS count
+                 FROM posts p
+                 GROUP BY p.author_id
+             ) post_count
+             ON u.id = post_count.author_id",
+            "SELECT
+                 users.id, post_count.count
+             FROM users
+             JOIN (
+                 SELECT posts.author_id, count(posts.id) AS count
+                 FROM posts
+                 GROUP BY posts.author_id
+             ) post_count
+             ON users.id = post_count.author_id"
+        )
+    }
+
+    #[test]
+    fn correlated_subquery() {
+        rewrites_to!(
+            "SELECT u.id
+             FROM users u
+             WHERE EXISTS (select p.id from posts p where p.author_id = u.id)",
+            "SELECT users.id
+             FROM users
+             WHERE EXISTS (select posts.id from posts where posts.author_id = users.id)"
+        )
+    }
+
+    #[test]
+    fn cte() {
+        let mut res = parse_query(
+            Dialect::MySQL,
+            "WITH max_val AS (SELECT max(t1.value) as value FROM t1)
+             SELECT t2.name FROM t2 JOIN max_val ON max_val.value = t2.value;",
+        )
+        .unwrap();
+        let expected = parse_query(
+            Dialect::MySQL,
+            "SELECT t2.name FROM t2 JOIN __query__max_val ON __query__max_val.value = t2.value;",
+        )
+        .unwrap();
+        let rewritten = res.rewrite_table_aliases("query");
+        assert_eq!(
+            rewritten,
+            vec![TableAliasRewrite::Cte {
+                from: "max_val".to_owned(),
+                to_view: "__query__max_val".to_owned(),
+                for_statement: match parse_query(
+                    Dialect::MySQL,
+                    "SELECT max(t1.value) as value FROM t1"
+                )
+                .unwrap()
+                {
+                    SqlQuery::Select(stmt) => Box::new(stmt),
+                    _ => panic!(),
+                }
+            }]
+        );
+        assert_eq!(res, expected, "\n\n   {}\n!= {}", res, expected);
     }
 }
