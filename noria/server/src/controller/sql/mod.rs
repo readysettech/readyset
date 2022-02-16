@@ -1,7 +1,7 @@
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
+use std::str;
 use std::vec::Vec;
-use std::{mem, str};
 
 use ::mir::node::node_inner::MirNodeInner;
 use ::mir::query::{MirQuery, QueryFlowParts};
@@ -12,17 +12,15 @@ use ::serde::{Deserialize, Serialize};
 use nom_sql::analysis::ReferredTables;
 use nom_sql::{
     parser as sql_parser, BinaryOperator, CompoundSelectOperator, CompoundSelectStatement,
-    CreateTableStatement, Expression, FieldDefinitionExpression, FunctionExpression, InValue,
-    JoinRightSide, Literal, SelectStatement, SqlQuery, Table,
+    CreateTableStatement, FieldDefinitionExpression, SelectStatement, SqlQuery, Table,
 };
 use noria::internal::IndexType;
 use noria_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
 use noria_sql_passes::alias_removal::TableAliasRewrite;
-use noria_sql_passes::subqueries::SubqueryPosition;
 use noria_sql_passes::{
     contains_aggregate, AliasRemoval, CountStarRewrite, DetectProblematicSelfJoins,
     ImpliedTableExpansion, KeyDefinitionCoalescing, NegationRemoval, NormalizeTopKWithAggregate,
-    OrderLimitRemoval, RewriteBetween, StarExpansion, StripPostFilters, SubQueries,
+    OrderLimitRemoval, RewriteBetween, StarExpansion, StripPostFilters,
 };
 use petgraph::graph::NodeIndex;
 use tracing::{debug, trace, warn};
@@ -743,139 +741,7 @@ impl SqlIncorporator {
             .detect_problematic_self_joins()?
             .order_limit_removal(&self.base_schemas)?;
 
-        // need to increment here so that each subquery has a unique name.
-        // (subqueries call recursively into `nodes_for_named_query` via `add_parsed_query` below,
-        // so we will end up incrementing this for every subquery.
         self.num_queries += 1;
-
-        // flattens out the query by replacing subqueries for references
-        // to existing views in the graph
-        let mut extra_tables = vec![];
-        for sq in q.extract_subqueries()? {
-            let default_name = format!("q_{}", self.num_queries);
-
-            let mut subquery_column = |stmt: &SelectStatement| -> ReadySetResult<_> {
-                if stmt.fields.len() != 1 {
-                    unsupported!("Operand must contain exactly 1 column")
-                }
-
-                #[allow(clippy::unwrap_used)] // just checked len is 1 above
-                let field = stmt.fields.first().unwrap();
-
-                let col_name = match field {
-                    FieldDefinitionExpression::Expression {
-                        alias: Some(name), ..
-                    }
-                    | FieldDefinitionExpression::Expression {
-                        expr: Expression::Column(nom_sql::Column { name, .. }),
-                        alias: None,
-                    } => name.clone(),
-                    FieldDefinitionExpression::Expression { expr, .. } => expr.to_string(),
-                    FieldDefinitionExpression::All | FieldDefinitionExpression::AllInTable(_) => {
-                        internal!("extract_subqueries must be run after expand_stars")
-                    }
-                };
-
-                let qfp = self.nodes_for_named_query(
-                    SqlQuery::Select(stmt.clone()),
-                    default_name.clone(),
-                    false,
-                    false,
-                    mig,
-                )?;
-
-                Ok(nom_sql::Column {
-                    name: col_name,
-                    table: Some(qfp.name),
-                })
-            };
-
-            match sq {
-                SubqueryPosition::Expr(expr) => {
-                    let column = match expr {
-                        Expression::NestedSelect(stmt) => subquery_column(stmt)?,
-                        _ => internal!("SubqueryPosition::Expression should never contain anything other than Expression::NestedQuery"),
-                    };
-
-                    *expr = Expression::Column(column);
-                }
-                SubqueryPosition::In(in_val) => {
-                    let column = match in_val {
-                        InValue::Subquery(stmt) => subquery_column(stmt)?,
-                        _ => internal!("SubqueryPosition::In should never contain anything other than InValue::Subquery"),
-                    };
-
-                    *in_val = InValue::List(vec![Expression::Column(column)])
-                }
-                SubqueryPosition::Join(join_right_side) => {
-                    *join_right_side = match *join_right_side {
-                        JoinRightSide::NestedSelect(ref ns, ref alias) => {
-                            // Ensure the specified name is actually used for the subquery. This is
-                            // necessary to ensure that existing column references can refer to the
-                            // subquery correctly and to ensure that distinct subqueries are
-                            // treated as separate views in the query graph even if they are "exact
-                            // matches" in the sense of QueryGraphReuse::ExactMatch.
-                            let name = alias.clone();
-                            let is_name_required = true;
-
-                            let qfp = self
-                                .nodes_for_named_query(
-                                    SqlQuery::Select((**ns).clone()),
-                                    name,
-                                    is_name_required,
-                                    false,
-                                    mig,
-                                )?;
-                            JoinRightSide::Table(Table {
-                                name: qfp.name.clone(),
-                                alias: None,
-                                schema: None,
-                            })
-                        }
-                        _ => internal!("SubqueryPosition::Join should never contain anything other than JoinRightSide::NestedSelect"),
-                    }
-                }
-                SubqueryPosition::Exists(expr) => {
-                    let column = match mem::replace(
-                        expr,
-                        Expression::Literal(Literal::Integer(0))
-                    ) {
-                        Expression::Exists(mut stmt) => {
-                            stmt.fields = vec![FieldDefinitionExpression::Expression {
-                                expr: Expression::Call(FunctionExpression::CountStar),
-                                alias: Some("__exists_count".to_owned()),
-                            }];
-
-                            let qfp = self.nodes_for_named_query(
-                                SqlQuery::Select(*stmt),
-                                default_name.clone(),
-                                false,
-                                false,
-                                mig
-                            )?;
-
-                            extra_tables.push(Table::from(qfp.name.clone()));
-
-                            nom_sql::Column {
-                                name: "__exists_count".to_owned(),
-                                table: Some(qfp.name),
-                            }
-                        }
-                        _ => internal!("SubqueryPosition::Exists should never contain anything other than Expression::Exists"),
-                    };
-
-                    *expr = Expression::BinaryOp {
-                        lhs: Box::new(Expression::Column(column)),
-                        op: BinaryOperator::Greater,
-                        rhs: Box::new(Expression::Literal(Literal::Integer(0))),
-                    };
-                }
-            }
-        }
-
-        if let SqlQuery::Select(stmt) = &mut q {
-            stmt.tables.extend(extra_tables);
-        }
 
         // Remove all table aliases from 'fq'. Create named views in cases where the alias must be
         // replaced with a view rather than the table itself in order to prevent ambiguity. (This
@@ -2458,8 +2324,16 @@ mod tests {
             assert!(res.is_ok(), "{}", res.as_ref().unwrap_err());
             let qfp = res.unwrap();
 
+            eprintln!(
+                "{:?}",
+                qfp.new_nodes
+                    .iter()
+                    .map(|n| mig.graph().node_weight(*n).unwrap().description(true))
+                    .collect::<Vec<_>>()
+            );
+
             // Check join node
-            let join = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
+            let join = mig.graph().node_weight(qfp.new_nodes[1]).unwrap();
             assert_eq!(join.fields(), &["id", "friend", "friend"]);
             assert_eq!(join.description(true), "[1:0, 1:1, 2:1] 1:(1) ⋈ 2:(0)");
 
@@ -2563,6 +2437,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_join_with_nested_query() {
+        readyset_logging::init_test_logging();
         let mut g = integration_utils::start_simple("it_incorporates_join_with_nested_query").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();

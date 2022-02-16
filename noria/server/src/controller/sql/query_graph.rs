@@ -182,6 +182,10 @@ pub struct QueryGraphNode {
     pub predicates: Vec<Expression>,
     pub columns: Vec<Column>,
     pub parameters: Vec<Parameter>,
+    /// If this query graph relation refers to a subquery, the graph of that subquery and the AST
+    /// for the query itself
+    // TODO(grfn): Just pass around the SelectStatement as a field of the QueryGraph
+    pub subgraph: Option<(Box<QueryGraph>, SelectStatement)>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
@@ -647,7 +651,11 @@ fn classify_conditionals(
         } => {
             internal!("negation should have been removed earlier");
         }
-        Expression::Exists(_) => unsupported!("EXISTS not supported yet"),
+        Expression::Exists(_) => {
+            // TODO(grfn): Look into the query for correlated references to see if it's actually a
+            // local predicate in disguise
+            global.push(ce.clone())
+        }
         Expression::Between { .. } => {
             internal!("Between should have been removed earlier")
         }
@@ -749,6 +757,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                 .flatten()
                 .collect(),
             parameters: Vec::new(),
+            subgraph: None,
         })
     };
 
@@ -762,8 +771,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         );
     }
     for jc in &st.join {
-        match jc.right {
-            JoinRightSide::Table(ref table) => {
+        match &jc.right {
+            JoinRightSide::Table(table) => {
                 if !qg.relations.contains_key(&table.name) {
                     qg.relations.insert(
                         table.name.clone(),
@@ -771,7 +780,14 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     );
                 }
             }
-            _ => unsupported!("only tables are supported on the RHS of a JOIN"),
+            JoinRightSide::NestedSelect(subquery, alias) => {
+                if !qg.relations.contains_key(alias) {
+                    let mut node = new_node(alias.clone(), vec![], st)?;
+                    node.subgraph = Some((Box::new(to_query_graph(subquery)?), *subquery.clone()));
+                    qg.relations.insert(alias.clone(), node);
+                }
+            }
+            JoinRightSide::Tables(_) => unsupported!("JoinRightSide::Tables not yet implemented"),
         }
     }
 
@@ -789,102 +805,102 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     // The table specified in the query is available for USING joins.
     let prev_table = Some(st.tables.last().as_ref().unwrap().name.clone());
     for jc in &st.join {
-        match jc.right {
-            JoinRightSide::Table(ref table) => {
-                // will be defined by join constraint
-                let left_table;
-                let right_table;
+        let rhs_name = match &jc.right {
+            JoinRightSide::Table(table) => &table.name,
+            JoinRightSide::NestedSelect(_, alias) => alias,
+            _ => internal!(),
+        };
+        // will be defined by join constraint
+        let left_table;
+        let right_table;
 
-                let join_preds = match &jc.constraint {
-                    JoinConstraint::On(cond) => {
-                        use nom_sql::analysis::ReferredTables;
+        let join_preds = match &jc.constraint {
+            JoinConstraint::On(cond) => {
+                use nom_sql::analysis::ReferredTables;
 
-                        // find all distinct tables mentioned in the condition
-                        // conditions for now.
-                        let mut tables_mentioned: Vec<String> =
-                            cond.referred_tables().into_iter().map(|t| t.name).collect();
+                // find all distinct tables mentioned in the condition
+                // conditions for now.
+                let mut tables_mentioned: Vec<String> =
+                    cond.referred_tables().into_iter().map(|t| t.name).collect();
 
-                        let mut join_preds = vec![];
-                        collect_join_predicates(cond.clone(), &mut join_preds)?;
+                let mut join_preds = vec![];
+                collect_join_predicates(cond.clone(), &mut join_preds)?;
 
-                        if tables_mentioned.len() == 2 {
-                            // tables can appear in any order in the join predicate, but
-                            // we cannot just rely on that order, since it may lead us to
-                            // flip LEFT JOINs by accident (yes, this happened)
-                            if tables_mentioned[1] != table.name {
-                                // tables are in the wrong order in join predicate, swap
-                                tables_mentioned.swap(0, 1);
-                                invariant_eq!(tables_mentioned[1], table.name);
-                            }
-                            left_table = tables_mentioned.remove(0);
-                            right_table = tables_mentioned.remove(0);
-                        } else if tables_mentioned.len() == 1 {
-                            // just one table mentioned --> this is a self-join
-                            left_table = tables_mentioned.remove(0);
-                            right_table = left_table.clone();
-                        } else {
-                            unsupported!("more than 2 tables mentioned in join condition!");
-                        };
-
-                        for pred in join_preds.iter_mut() {
-                            // the condition tree might specify tables in opposite order to
-                            // their join order in the query; if so, flip them
-                            // TODO(malte): this only deals with simple, flat join
-                            // conditions for now.
-                            let l = match &pred.left {
-                                Expression::Column(f) => f,
-                                ref x => unsupported!("join condition not supported: {:?}", x),
-                            };
-                            let r = match &pred.right {
-                                Expression::Column(f) => f,
-                                ref x => unsupported!("join condition not supported: {:?}", x),
-                            };
-                            if *l.table.as_ref().unwrap() == right_table
-                                && *r.table.as_ref().unwrap() == left_table
-                            {
-                                mem::swap(&mut pred.left, &mut pred.right);
-                            }
-                        }
-
-                        join_preds
+                if tables_mentioned.len() == 2 {
+                    // tables can appear in any order in the join predicate, but
+                    // we cannot just rely on that order, since it may lead us to
+                    // flip LEFT JOINs by accident (yes, this happened)
+                    if tables_mentioned[1] != *rhs_name {
+                        // tables are in the wrong order in join predicate, swap
+                        tables_mentioned.swap(0, 1);
+                        invariant_eq!(tables_mentioned[1], *rhs_name);
                     }
-                    JoinConstraint::Using(cols) => {
-                        invariant_eq!(cols.len(), 1);
-                        let col = cols.iter().next().unwrap();
-
-                        left_table = prev_table.as_ref().unwrap().clone();
-                        right_table = table.name.clone();
-
-                        vec![JoinPredicate {
-                            left: col_expr(&left_table, &col.name),
-                            right: col_expr(&right_table, &col.name),
-                        }]
-                    }
-                    JoinConstraint::Empty => {
-                        left_table = prev_table.as_ref().unwrap().clone();
-                        right_table = table.name.clone();
-                        // An empty predicate indicates a cartesian product is expected
-                        vec![]
-                    }
+                    left_table = tables_mentioned.remove(0);
+                    right_table = tables_mentioned.remove(0);
+                } else if tables_mentioned.len() == 1 {
+                    // just one table mentioned --> this is a self-join
+                    left_table = tables_mentioned.remove(0);
+                    right_table = left_table.clone();
+                } else {
+                    unsupported!("more than 2 tables mentioned in join condition!");
                 };
 
-                // add edge for join
-                // FIXME(eta): inefficient cloning!
-                if let std::collections::hash_map::Entry::Vacant(e) =
-                    qg.edges.entry((left_table.clone(), right_table.clone()))
-                {
-                    e.insert(match jc.operator {
-                        JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin => {
-                            QueryGraphEdge::LeftJoin { on: join_preds }
-                        }
-                        JoinOperator::Join | JoinOperator::InnerJoin => {
-                            QueryGraphEdge::Join { on: join_preds }
-                        }
-                        _ => unsupported!("join operator not supported"),
-                    });
+                for pred in join_preds.iter_mut() {
+                    // the condition tree might specify tables in opposite order to
+                    // their join order in the query; if so, flip them
+                    // TODO(malte): this only deals with simple, flat join
+                    // conditions for now.
+                    let l = match &pred.left {
+                        Expression::Column(f) => f,
+                        ref x => unsupported!("join condition not supported: {:?}", x),
+                    };
+                    let r = match &pred.right {
+                        Expression::Column(f) => f,
+                        ref x => unsupported!("join condition not supported: {:?}", x),
+                    };
+                    if *l.table.as_ref().unwrap() == right_table
+                        && *r.table.as_ref().unwrap() == left_table
+                    {
+                        mem::swap(&mut pred.left, &mut pred.right);
+                    }
                 }
+
+                join_preds
             }
-            _ => internal!(),
+            JoinConstraint::Using(cols) => {
+                invariant_eq!(cols.len(), 1);
+                let col = cols.iter().next().unwrap();
+
+                left_table = prev_table.as_ref().unwrap().clone();
+                right_table = rhs_name.clone();
+
+                vec![JoinPredicate {
+                    left: col_expr(&left_table, &col.name),
+                    right: col_expr(&right_table, &col.name),
+                }]
+            }
+            JoinConstraint::Empty => {
+                left_table = prev_table.as_ref().unwrap().clone();
+                right_table = rhs_name.clone();
+                // An empty predicate indicates a cartesian product is expected
+                vec![]
+            }
+        };
+
+        // add edge for join
+        // FIXME(eta): inefficient cloning!
+        if let std::collections::hash_map::Entry::Vacant(e) =
+            qg.edges.entry((left_table.clone(), right_table.clone()))
+        {
+            e.insert(match jc.operator {
+                JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin => {
+                    QueryGraphEdge::LeftJoin { on: join_preds }
+                }
+                JoinOperator::Join | JoinOperator::InnerJoin => {
+                    QueryGraphEdge::Join { on: join_preds }
+                }
+                _ => unsupported!("join operator not supported"),
+            });
         }
     }
 
@@ -1147,6 +1163,21 @@ mod tests {
                 "max_x".to_owned()
             )]
         );
+    }
+
+    #[test]
+    fn with_subquery() {
+        let qg = make_query_graph(
+            "SELECT t.x, sq.y FROM t JOIN (SELECT t2.id, t2.z FROM t2) sq ON t.id = sq.id",
+        );
+
+        assert_eq!(
+            qg.relations.keys().cloned().collect::<HashSet<_>>(),
+            HashSet::from(["t".to_owned(), "sq".to_owned()])
+        );
+
+        let subquery_rel = qg.relations.get("sq").unwrap();
+        assert!(subquery_rel.subgraph.is_some());
     }
 
     mod view_key {

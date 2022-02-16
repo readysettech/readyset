@@ -4,6 +4,7 @@ use std::vec::Vec;
 
 use ::serde::{Deserialize, Serialize};
 use common::IndexType;
+use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::join::JoinType;
 use dataflow::ops::union;
 use itertools::Itertools;
@@ -26,9 +27,12 @@ use petgraph::graph::NodeIndex;
 use tracing::{debug, error, trace, warn};
 
 use super::query_graph::JoinPredicate;
-use crate::controller::sql::mir::grouped::post_lookup_aggregates;
-use crate::controller::sql::mir::join::make_cross_joins;
-use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
+use crate::controller::sql::mir::grouped::{
+    make_expressions_above_grouped, make_grouped, make_predicates_above_grouped,
+    post_lookup_aggregates,
+};
+use crate::controller::sql::mir::join::{make_cross_joins, make_joins};
+use crate::controller::sql::query_graph::{to_query_graph, OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
 use crate::ReadySetResult;
 
@@ -757,7 +761,6 @@ impl SqlToMirConverter {
         parent: MirNodeRef,
         projected_exprs: &HashMap<Expression, String>,
     ) -> ReadySetResult<Vec<MirNodeRef>> {
-        use dataflow::ops::grouped::aggregate::Aggregation;
         use dataflow::ops::grouped::extremum::Extremum;
         use nom_sql::FunctionExpression::*;
 
@@ -1305,14 +1308,86 @@ impl SqlToMirConverter {
                 pred_nodes.push(f);
             }
             Expression::Between { .. } => internal!("BETWEEN should have been removed earlier"),
-            Expression::Exists(_) => unsupported!("exists unsupported"),
+            Expression::Exists(subquery) => {
+                let qg = to_query_graph(subquery)?;
+                let nodes = self.make_nodes_for_selection(name, subquery, &qg, false)?;
+                let subquery_leaf = nodes
+                    .iter()
+                    .find(|n| n.borrow().children().is_empty())
+                    .ok_or_else(|| internal_err("MIR query missing leaf!"))?
+                    .clone();
+                pred_nodes.extend(nodes);
+
+                // -> π[lit: 0, lit: 0]
+                let group_proj = self.make_project_node(
+                    &format!("{}_prj_hlpr", name),
+                    subquery_leaf,
+                    vec![],
+                    vec![],
+                    vec![
+                        ("__count_val".to_owned(), DataType::from(0u32)),
+                        ("__count_grp".to_owned(), DataType::from(0u32)),
+                    ],
+                    false,
+                );
+                pred_nodes.push(group_proj.clone());
+                // -> [0, 0] for each row
+
+                // -> |0| γ[1]
+                let exists_count_col = Column::named("__exists_count");
+                let exists_count_node = self.make_grouped_node(
+                    &format!("{}_count", name),
+                    exists_count_col,
+                    (group_proj, Column::named("__count_val")),
+                    vec![&Column::named("__count_grp")],
+                    GroupedNodeType::Aggregation(Aggregation::Count { count_nulls: true }),
+                );
+                pred_nodes.push(exists_count_node.clone());
+                // -> [0, <count>] for each row
+
+                // -> σ[c1 > 0]
+                let gt_0_filter = self.make_filter_node(
+                    &format!("{}_count_gt_0", name),
+                    exists_count_node,
+                    Expression::BinaryOp {
+                        lhs: Box::new(Expression::Column("__exists_count".into())),
+                        op: BinaryOperator::Greater,
+                        rhs: Box::new(Expression::Literal(Literal::Integer(0))),
+                    },
+                );
+                pred_nodes.push(gt_0_filter.clone());
+
+                // left -> π[...left, lit: 0]
+                let parent_columns = parent.borrow().columns().to_vec();
+                let left_literal_join_key_proj = self.make_project_node(
+                    &format!("{}_join_key", name),
+                    parent,
+                    parent_columns.iter().collect(),
+                    vec![],
+                    vec![("__exists_join_key".to_owned(), DataType::from(0u32))],
+                    false,
+                );
+                pred_nodes.push(left_literal_join_key_proj.clone());
+
+                // -> ⋈ on: l.__exists_join_key ≡ r.__count_grp
+                let exists_join = self.make_join_node(
+                    &format!("{}_join", name),
+                    &[JoinPredicate {
+                        left: Expression::Column("__exists_join_key".into()),
+                        right: Expression::Column("__count_grp".into()),
+                    }],
+                    left_literal_join_key_proj,
+                    gt_0_filter,
+                    JoinType::Inner,
+                )?;
+
+                pred_nodes.push(exists_join);
+            }
             Expression::Call(_) => {
                 internal!("Function calls should have been handled by projection earlier")
             }
             Expression::NestedSelect(_) => unsupported!("Nested selects not supported in filters"),
             _ => {
-                // currently, we only support filter-like
-                // comparison operations, no nested-selections
                 let f = self.make_filter_node(&format!("{}_f{}", name, nc), parent, ce.clone());
                 pred_nodes.push(f);
             }
@@ -1417,19 +1492,15 @@ impl SqlToMirConverter {
     /// Returns list of nodes added
     #[allow(clippy::cognitive_complexity)]
     fn make_nodes_for_selection(
-        &mut self,
+        &self,
         name: &str,
         st: &SelectStatement,
         qg: &QueryGraph,
         has_leaf: bool,
     ) -> Result<Vec<MirNodeRef>, ReadySetError> {
         // TODO: make this take &self!
-        use crate::controller::sql::mir::grouped::{
-            make_expressions_above_grouped, make_grouped, make_predicates_above_grouped,
-        };
-        use crate::controller::sql::mir::join::make_joins;
 
-        let mut nodes_added: Vec<MirNodeRef>;
+        let mut nodes_added: Vec<MirNodeRef> = vec![];
         let mut new_node_count = 0;
 
         // Canonical operator order: B-J-F-G-P-R
@@ -1445,11 +1516,24 @@ impl SqlToMirConverter {
             let mut base_nodes: Vec<MirNodeRef> = Vec::new();
             let mut sorted_rels: Vec<&str> = qg.relations.keys().map(String::as_str).collect();
             sorted_rels.sort_unstable();
-            for rel in &sorted_rels {
-                let base_for_rel = self.get_view(rel)?;
+            for rel_name in &sorted_rels {
+                let base_for_rel =
+                    if let Some((subgraph, subquery)) = &qg.relations[*rel_name].subgraph {
+                        let sub_nodes =
+                            self.make_nodes_for_selection(rel_name, subquery, subgraph, false)?;
+                        let leaf = sub_nodes
+                            .iter()
+                            .find(|n| n.borrow().children().is_empty())
+                            .ok_or_else(|| internal_err("MIR query missing leaf!"))?
+                            .clone();
+                        nodes_added.extend(sub_nodes);
+                        leaf
+                    } else {
+                        self.get_view(rel_name)?
+                    };
 
                 base_nodes.push(base_for_rel.clone());
-                node_for_rel.insert(*rel, base_for_rel);
+                node_for_rel.insert(*rel_name, base_for_rel);
             }
 
             let join_nodes = make_joins(
@@ -1536,11 +1620,12 @@ impl SqlToMirConverter {
 
             new_node_count += predicates_above_group_by_nodes.len();
 
-            nodes_added = base_nodes
-                .into_iter()
-                .chain(join_nodes.into_iter())
-                .chain(predicates_above_group_by_nodes.into_iter())
-                .collect();
+            nodes_added.extend(
+                base_nodes
+                    .into_iter()
+                    .chain(join_nodes.into_iter())
+                    .chain(predicates_above_group_by_nodes.into_iter()),
+            );
             let mut added_bogokey = false;
 
             let mut predicate_nodes = Vec::new();
