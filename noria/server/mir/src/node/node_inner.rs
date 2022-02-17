@@ -65,6 +65,21 @@ pub enum MirNodeInner {
         on_right: Vec<Column>,
         project: Vec<Column>,
     },
+    /// Join where nodes in the right-hand side depend on columns in the left-hand side
+    /// (referencing tables in `dependent_tables`). These are created during compilation for
+    /// correlated subqueries, and must be removed entirely by rewrite passes before lowering
+    /// to dataflow (any dependent joins occurring during dataflow lowering will cause the
+    /// compilation to error).
+    ///
+    /// See [The Complete Story of Joins (in HyPer), §3.1 Dependent Join][hyper-joins] for more
+    /// information.
+    ///
+    /// [hyper-joins]: http://btw2017.informatik.uni-stuttgart.de/slidesandpapers/F1-10-37/paper_web.pdf
+    DependentJoin {
+        on_left: Vec<Column>,
+        on_right: Vec<Column>,
+        project: Vec<Column>,
+    },
     /// group columns
     // currently unused
     #[allow(dead_code)]
@@ -528,6 +543,22 @@ impl Debug for MirNodeInner {
                         .collect::<Vec<_>>()
                         .join(", "),
                     jc
+                )
+            }
+            MirNodeInner::DependentJoin {
+                ref on_left,
+                ref on_right,
+                ref project,
+            } => {
+                write!(
+                    f,
+                    "⧑ | {} on: {}",
+                    project.iter().map(|c| &c.name).join(", "),
+                    on_left
+                        .iter()
+                        .zip(on_right)
+                        .map(|(l, r)| format!("{}:{}", l.name, r.name))
+                        .join(", ")
                 )
             }
             MirNodeInner::Latest { ref group_by } => {

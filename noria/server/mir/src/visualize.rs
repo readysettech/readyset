@@ -200,6 +200,21 @@ impl GraphViz for MirNodeInner {
                     .join(", ");
                 write!(f, "⋉  | on: {}", jc)
             }
+            MirNodeInner::DependentJoin {
+                ref on_left,
+                ref on_right,
+                ..
+            } => {
+                write!(
+                    f,
+                    "⧑ | on: {}",
+                    on_left
+                        .iter()
+                        .zip(on_right)
+                        .map(|(l, r)| format!("{}:{}", print_col(l), print_col(r)))
+                        .join(", ")
+                )
+            }
             MirNodeInner::Latest { ref group_by } => {
                 let key_cols = group_by
                     .iter()

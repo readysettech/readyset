@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use dataflow::ops::join::JoinType;
 use mir::MirNodeRef;
 use nom_sql::SqlIdentifier;
-use noria_errors::{internal_err, invariant};
+use noria_errors::{internal, internal_err, invariant};
 
+use super::JoinKind;
 use crate::controller::sql::mir::SqlToMirConverter;
 use crate::controller::sql::query_graph::{JoinPredicate, JoinRef, QueryGraph, QueryGraphEdge};
 use crate::ReadySetResult;
@@ -39,6 +39,7 @@ pub(super) fn make_joins(
     name: &SqlIdentifier,
     qg: &QueryGraph,
     node_for_rel: &HashMap<&SqlIdentifier, MirNodeRef>,
+    correlated_nodes: &HashSet<&SqlIdentifier>,
     node_count: usize,
 ) -> ReadySetResult<Vec<MirNodeRef>> {
     let mut join_nodes: Vec<MirNodeRef> = Vec::new();
@@ -46,16 +47,30 @@ pub(super) fn make_joins(
     let mut node_count = node_count;
 
     for jref in qg.join_order.iter() {
-        let (join_type, jps) = from_join_ref(jref, qg);
+        let (mut join_kind, jps) = from_join_ref(jref, qg);
+
         let (left_chain, right_chain) =
             pick_join_chains(&jref.src, &jref.dst, &mut join_chains, node_for_rel);
+
+        if correlated_nodes.contains(right_chain.last_node.borrow().name()) {
+            match join_kind {
+                JoinKind::Left => internal!(
+                    "Dependent left join not yet supported (when joining to {})",
+                    jref.dst
+                ),
+                JoinKind::Inner => {
+                    join_kind = JoinKind::Dependent;
+                }
+                JoinKind::Dependent => {}
+            }
+        }
 
         let jn = mir_converter.make_join_node(
             &format!("{}_n{}", name, node_count).into(),
             jps,
             left_chain.last_node.clone(),
             right_chain.last_node.clone(),
-            join_type,
+            join_kind,
         )?;
 
         // merge node chains
@@ -81,6 +96,7 @@ pub(super) fn make_cross_joins(
     name: &str,
     node_count: &mut usize,
     nodes: Vec<MirNodeRef>,
+    correlated_nodes: &HashSet<&SqlIdentifier>,
 ) -> ReadySetResult<Vec<MirNodeRef>> {
     let mut join_nodes = vec![];
     let mut nodes = nodes.into_iter();
@@ -89,12 +105,18 @@ pub(super) fn make_cross_joins(
         .ok_or_else(|| internal_err("make_cross_joins called with empty nodes"))?;
     nodes.try_fold(first_node, |n1, n2| -> ReadySetResult<_> {
         *node_count += 1;
+        let join_kind = if correlated_nodes.contains(n2.borrow().name()) {
+            JoinKind::Dependent
+        } else {
+            JoinKind::Inner
+        };
+
         let node = mir_converter.make_join_node(
             &format!("{}_n{}", name, node_count).into(),
             &[],
             n1,
             n2,
-            JoinType::Inner,
+            join_kind,
         )?;
         join_nodes.push(node.clone());
         Ok(node)
@@ -139,10 +161,10 @@ pub(super) fn make_joins_for_aggregates(
     Ok(join_nodes)
 }
 
-fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> (JoinType, &'a [JoinPredicate]) {
+fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> (JoinKind, &'a [JoinPredicate]) {
     match &qg.edges[&(jref.src.clone(), jref.dst.clone())] {
-        QueryGraphEdge::Join { on } => (JoinType::Inner, on),
-        QueryGraphEdge::LeftJoin { on } => (JoinType::Left, on),
+        QueryGraphEdge::Join { on } => (JoinKind::Inner, on),
+        QueryGraphEdge::LeftJoin { on } => (JoinKind::Left, on),
     }
 }
 

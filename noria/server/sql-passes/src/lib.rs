@@ -12,7 +12,7 @@ mod rewrite_between;
 mod star_expansion;
 mod strip_post_filters;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::iter;
 
@@ -45,6 +45,18 @@ pub fn outermost_referred_tables(stmt: &SelectStatement) -> impl Iterator<Item =
             JoinRightSide::Tables(tables) => Either::Right(Either::Left(tables.iter())),
             JoinRightSide::NestedSelect(..) => Either::Right(Either::Right(iter::empty())),
         }))
+}
+
+/// Returns true if the given select statement is *correlated* if used as a subquery, eg if it
+/// refers to tables not explicitly mentioned in the query
+pub fn is_correlated(statement: &SelectStatement) -> bool {
+    let tables = outermost_referred_tables(statement)
+        .map(|tbl| tbl.alias.as_ref().unwrap_or(&tbl.name))
+        .collect::<HashSet<_>>();
+
+    statement
+        .outermost_referred_columns()
+        .any(|col| col.table.iter().any(|tbl| !tables.contains(tbl)))
 }
 
 fn field_names(statement: &SelectStatement) -> impl Iterator<Item = &SqlIdentifier> {
@@ -177,6 +189,43 @@ impl TryFrom<BinaryOperator> for LogicalOp {
             BinaryOperator::And => Ok(Self::And),
             BinaryOperator::Or => Ok(Self::Or),
             _ => Err(value),
+        }
+    }
+}
+
+/// Test helper: parse the given string as a SQL query, panicking if it's anything other than a
+/// [`SelectStatement`]
+#[cfg(test)]
+fn parse_select_statement(q: &str) -> SelectStatement {
+    use nom_sql::{parse_query, Dialect, SqlQuery};
+
+    let q = parse_query(Dialect::MySQL, q).unwrap();
+    match q {
+        SqlQuery::Select(stmt) => stmt,
+        _ => panic!(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod is_correlated {
+        use super::*;
+
+        #[test]
+        fn uncorrelated_query() {
+            let query = parse_select_statement(
+                "SELECT * FROM t JOIN u ON t.w = u.a WHERE t.x = t.y AND t.z = 4",
+            );
+            assert!(!is_correlated(&query));
+        }
+
+        #[test]
+        fn correlated_query() {
+            let query =
+                parse_select_statement("SELECT * FROM t WHERE t.x = t.y AND t.z = 4 AND t.w = u.a");
+            assert!(is_correlated(&query));
         }
     }
 }

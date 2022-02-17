@@ -6,7 +6,10 @@ use std::iter;
 use maplit::hashset;
 
 use crate::create::CreateCachedQueryStatement;
-use crate::{Column, Expression, FunctionExpression, InValue, SqlQuery, Table};
+use crate::{
+    Column, Expression, FieldDefinitionExpression, FunctionExpression, InValue, JoinConstraint,
+    SelectStatement, SqlQuery, Table,
+};
 
 /// Extension trait providing the `referred_tables` method to various parts of the AST
 pub trait ReferredTables {
@@ -191,6 +194,47 @@ impl ReferredColumns for FunctionExpression {
         let initial_columns = iter.visit_function_expression(self);
         iter.columns_to_visit.extend(initial_columns);
         iter
+    }
+}
+
+impl SelectStatement {
+    /// Construct an iterator over all the columns referred to in self, without recursing into
+    /// subqueries in any position.
+    pub fn outermost_referred_columns(&self) -> ReferredColumnsIter {
+        let mut columns_to_visit = vec![];
+        let exprs_to_visit = self
+            .fields
+            .iter()
+            .filter_map(|fde| match fde {
+                FieldDefinitionExpression::Expression { expr, .. } => Some(expr),
+                FieldDefinitionExpression::All | FieldDefinitionExpression::AllInTable(_) => None,
+            })
+            .chain(self.join.iter().filter_map(|join| match &join.constraint {
+                JoinConstraint::On(expr) => Some(expr),
+                JoinConstraint::Using(cols) => {
+                    columns_to_visit.extend(cols);
+                    None
+                }
+                JoinConstraint::Empty => None,
+            }))
+            .chain(&self.where_clause)
+            .chain(self.group_by.iter().flat_map(|gbc| &gbc.having))
+            .chain(
+                self.limit
+                    .iter()
+                    .flat_map(|limit| limit.offset.iter().chain(iter::once(&limit.limit))),
+            )
+            .chain(
+                self.order
+                    .iter()
+                    .flat_map(|oc| oc.order_by.iter().map(|(expr, _)| expr)),
+            )
+            .collect();
+
+        ReferredColumnsIter {
+            exprs_to_visit,
+            columns_to_visit,
+        }
     }
 }
 

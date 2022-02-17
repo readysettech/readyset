@@ -5,7 +5,6 @@ use std::vec::Vec;
 use ::serde::{Deserialize, Serialize};
 use common::IndexType;
 use dataflow::ops::grouped::aggregate::Aggregation;
-use dataflow::ops::join::JoinType;
 use dataflow::ops::union;
 use itertools::Itertools;
 use lazy_static::lazy_static;
@@ -23,6 +22,7 @@ use nom_sql::{
 use noria::ViewPlaceholder;
 use noria_data::DataType;
 use noria_errors::{internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError};
+use noria_sql_passes::is_correlated;
 use petgraph::graph::NodeIndex;
 use tracing::{debug, error, trace, warn};
 
@@ -115,6 +115,17 @@ fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DataType>> {
             })
             .collect(),
     )
+}
+
+/// Kinds of joins in MIR
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JoinKind {
+    /// Inner joins - see [`MirNodeInner::InnerJoin`]
+    Inner,
+    /// Left joins - see [`MirNodeInner::LeftJoin`]
+    Left,
+    /// Dependent joins - see [`MirNodeInner::DependentJoin`]
+    Dependent,
 }
 
 /// Configuration for how SQL is converted to MIR
@@ -989,7 +1000,7 @@ impl SqlToMirConverter {
         join_predicates: &[JoinPredicate],
         left_node: MirNodeRef,
         right_node: MirNodeRef,
-        kind: JoinType,
+        kind: JoinKind,
     ) -> ReadySetResult<MirNodeRef> {
         // TODO(malte): this is where we overproject join columns in order to increase reuse
         // opportunities. Technically, we need to only project those columns here that the query
@@ -1016,7 +1027,7 @@ impl SqlToMirConverter {
                 _ => unsupported!("no multi-level joins yet"),
             };
 
-            if kind == JoinType::Inner {
+            if kind == JoinKind::Inner {
                 // for inner joins, don't duplicate the join column in the output, but instead add
                 // aliases to the columns that represent it going forward (viz., the left-side join
                 // column)
@@ -1050,12 +1061,17 @@ impl SqlToMirConverter {
 
         invariant_eq!(left_join_columns.len(), right_join_columns.len());
         let inner = match kind {
-            JoinType::Inner => MirNodeInner::Join {
+            JoinKind::Inner => MirNodeInner::Join {
                 on_left: left_join_columns,
                 on_right: right_join_columns,
                 project: fields.clone(),
             },
-            JoinType::Left => MirNodeInner::LeftJoin {
+            JoinKind::Left => MirNodeInner::LeftJoin {
+                on_left: left_join_columns,
+                on_right: right_join_columns,
+                project: fields.clone(),
+            },
+            JoinKind::Dependent => MirNodeInner::DependentJoin {
                 on_left: left_join_columns,
                 on_right: right_join_columns,
                 project: fields.clone(),
@@ -1450,7 +1466,11 @@ impl SqlToMirConverter {
                     }],
                     left_literal_join_key_proj,
                     gt_0_filter,
-                    JoinType::Inner,
+                    if is_correlated(subquery) {
+                        JoinKind::Dependent
+                    } else {
+                        JoinKind::Inner
+                    },
                 )?;
 
                 pred_nodes.push(exists_join);
@@ -1581,6 +1601,7 @@ impl SqlToMirConverter {
         // (Base, Join, Filter, GroupBy, Project, Reader)
         {
             let mut node_for_rel: HashMap<&SqlIdentifier, MirNodeRef> = HashMap::default();
+            let mut correlated_relations: HashSet<&SqlIdentifier> = Default::default();
 
             // Convert the query parameters to an ordered list of columns that will comprise the
             // lookup key if a leaf node is attached.
@@ -1601,6 +1622,9 @@ impl SqlToMirConverter {
                             .ok_or_else(|| internal_err("MIR query missing leaf!"))?
                             .clone();
                         nodes_added.extend(sub_nodes);
+                        if is_correlated(subquery) {
+                            correlated_relations.insert(rel_name);
+                        }
                         leaf
                     } else {
                         self.get_view(rel_name)?
@@ -1615,6 +1639,7 @@ impl SqlToMirConverter {
                 &format!("q_{:x}", qg.signature().hash).into(),
                 qg,
                 &node_for_rel,
+                &correlated_relations,
                 new_node_count,
             )?;
 
@@ -1635,6 +1660,7 @@ impl SqlToMirConverter {
                             &format!("q_{:x}", qg.signature().hash),
                             &mut new_node_count,
                             base_nodes.clone(),
+                            &correlated_relations,
                         )?
                         .last()
                         .cloned()

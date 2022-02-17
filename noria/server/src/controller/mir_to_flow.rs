@@ -221,6 +221,10 @@ fn mir_node_to_flow_parts(
                     let right = mir_node.ancestors[1].upgrade().unwrap();
                     make_join_aggregates_node(&name, left, right, mir_node.columns.as_slice(), mig)?
                 }
+                MirNodeInner::DependentJoin { .. } => {
+                    // See the docstring for MirNodeInner::DependentJoin
+                    internal!("Encountered dependent join when lowering to dataflow")
+                }
                 MirNodeInner::Latest { ref group_by } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     #[allow(clippy::unwrap_used)] // checked by above invariant
