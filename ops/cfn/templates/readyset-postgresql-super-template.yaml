@@ -6,6 +6,10 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
+          default: Availability Zone Configuration
+        Parameters:
+          - AvailabilityZones
+      - Label:
           default: VPC Network Configuration
         Parameters:
           - VPCCIDR
@@ -17,7 +21,6 @@ Metadata:
           - PrivateSubnet1CIDR
           - PrivateSubnet2CIDR
           - PrivateSubnet3CIDR
-          - AvailabilityZones
       - Label:
           default: SSH Access Configuration
         Parameters:
@@ -36,7 +39,11 @@ Metadata:
           - DatabaseAllocatedStorage
           - DatabaseName
           - DatabaseUsername
-          - DatabasePassword
+      - Label:
+          default: Secret Configuration
+        Parameters:
+          - SSMParameterKmsKeyArn
+          - SSMPathRDSDatabasePassword
       - Label:
           default: ReadySet Configuration
         Parameters:
@@ -80,46 +87,46 @@ Parameters:
     Type: String
     Default: /readyset/
     AllowedPattern: ^[0-9a-zA-Z-/]*$
-    ConstraintDescription: ReadySet bucket name can include numbers, lowercase letters, uppercase letters, and hyphens (-) and forward slashes (/).
+    ConstraintDescription: ReadySet S3 key prefix can include numbers, lowercase letters, uppercase letters, and hyphens (-) and forward slashes (/).
 
   PrivateSubnet1CIDR:
-    Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone
+    Description: CIDR block for private subnet 1 located in Availability Zone 1.
     Type: String
     Default: 10.0.0.0/19
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
 
   PrivateSubnet2CIDR:
-    Description: Please enter the IP range (CIDR notation) for the private subnet in the second Availability Zone
+    Description: CIDR block for private subnet 2 located in Availability Zone 2.
     Type: String
     Default: 10.0.32.0/19
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
 
   PrivateSubnet3CIDR:
-    Description: Please enter the IP range (CIDR notation) for the private subnet in the third Availability Zone
+    Description: CIDR block for private subnet 3 located in Availability Zone 3.
     Type: String
     Default: 10.0.64.0/19
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
 
   PublicSubnet1CIDR:
-    Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
+    Description: CIDR block for the public DMZ subnet 1 located in Availability Zone 1
     Type: String
     Default: 10.0.128.0/20
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
 
   PublicSubnet2CIDR:
-    Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
+    Description: CIDR block for the public DMZ subnet 2 located in Availability Zone 2
     Type: String
     Default: 10.0.144.0/20
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
 
   PublicSubnet3CIDR:
-    Description: Please enter the IP range (CIDR notation) for the public subnet in the third Availability Zone
+    Description: CIDR block for the public DMZ subnet 3 located in Availability Zone 3
     Type: String
     Default: 10.0.160.0/20
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
 
   VPCCIDR:
-    Description: Please enter the IP range (CIDR notation) for this VPC
+    Description: CIDR block for the VPC
     Type: String
     Default: 10.0.0.0/16
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
@@ -162,8 +169,6 @@ Parameters:
     Description: The EC2 instance type to use for the ReadySet adapter instances.
     Type: String
     Default: c5.large
-    AllowedPattern: ^(\w)5.*
-    ConstraintDescription: Instance type must be 5th generation
 
   ReadySetAdapterNodes:
     Description: Number of adapter nodes to create
@@ -171,7 +176,7 @@ Parameters:
     Default: 3
 
   ReadySetServerInstanceType:
-    Description: The EC2 instance type to use for ReadySet server instances.
+    Description: The EC2 instance type to use for server instances.
     Type: String
     Default: c5.large
     AllowedPattern: ^(\w)5.*
@@ -195,7 +200,7 @@ Parameters:
   DatabaseInstanceClass:
     Description: Database instance class
     Type: String
-    Default: db.t3.medium
+    Default: db.m5.large
 
   DatabaseAllocatedStorage:
     Description: The size of the database (GiB)
@@ -217,13 +222,6 @@ Parameters:
     Type: String
     MinLength: 1
     MaxLength: 16
-
-  DatabasePassword:
-    Description: Password to log into the PostgreSQL Database
-    Type: String
-    NoEcho: true
-    MinLength: 8
-    MaxLength: 41
 
   ReadySetMemoryLimitGB:
     Description: Memory limit for readyset server instances, in gigabytes. This should generally be set to around 80% of the memory available on the instance. A memory limit of 0 (the default) disables eviction entirely.
@@ -252,9 +250,17 @@ Parameters:
     Default: "true"
 
   ReadySetServerMaxVolumeSizeGB:
-    Description: Maximum volume size, in gigabytes, to grow the volume to. If set to zero the volume will have no maximum size. Ignored if ReadySetServerAutoGrowVolume is false
+    Description: Maximum volume size, in gigabytes, to grow the volume to. If set to zero the volume will have no maximum size. Ignored if ReadySetServerAutoGrowVolume is false.
     Type: Number
     Default: 0
+
+  SSMParameterKmsKeyArn:
+    Description: ARN of KMS key that was used to encrypt SSM parameters referenced within this template.
+    Type: String
+
+  SSMPathRDSDatabasePassword:
+    Description: Path to SSM secure string parameter that contains the backend database password.
+    Type: String
 
 Resources:
   # Base VPC to deploy resources into
@@ -276,7 +282,6 @@ Resources:
         PublicSubnet2CIDR: !Ref PublicSubnet2CIDR
         PublicSubnet3CIDR: !Ref PublicSubnet3CIDR
         VPCCIDR: !Ref VPCCIDR
-        AdditionalAdapterCIDR: !Ref AdditionalAdapterCIDR
         CreateNATGateways: !Ref VPCCreateNATGateways
 
   # Bastion stack for secure access
@@ -293,7 +298,6 @@ Resources:
         PublicSubnet2ID: !GetAtt VPCStack.Outputs.PublicSubnet2ID
         RemoteAccessCIDR: !Ref AccessCIDR
         VPCID: !GetAtt VPCStack.Outputs.VPCID
-        EnableTCPForwarding: true
 
   # Supplemental VPC resources
 
@@ -306,6 +310,7 @@ Resources:
         VPCPrivateSubnetIds: !Join [',', [!GetAtt VPCStack.Outputs.PrivateSubnet1AID, !GetAtt VPCStack.Outputs.PrivateSubnet2AID, !GetAtt VPCStack.Outputs.PrivateSubnet3AID]]
         VPCID: !GetAtt VPCStack.Outputs.VPCID
         VPCCIDR: !Ref VPCCIDR
+        AdditionalAdapterCIDR: !Ref AdditionalAdapterCIDR
         BastionSecurityGroupID: !GetAtt BastionStack.Outputs.BastionSecurityGroupID
 
   # Consul Cluster
@@ -341,7 +346,7 @@ Resources:
         DatabaseAllocatedStorage: !Ref DatabaseAllocatedStorage
         DatabaseName: !Ref DatabaseName
         DatabaseUsername: !Ref DatabaseUsername
-        DatabasePassword: !Ref DatabasePassword
+        SSMPathRDSDatabasePassword: !Ref SSMPathRDSDatabasePassword
 
   # ReadySet for PostgreSQL
 
@@ -357,11 +362,8 @@ Resources:
         ConsulEc2RetryJoinTagKey: !GetAtt ReadySetConsulStack.Outputs.ConsulEc2RetryJoinTagKey
         ConsulEc2RetryJoinTagValue: !GetAtt ReadySetConsulStack.Outputs.ConsulEc2RetryJoinTagValue
         KeyPairName: !Ref KeyPairName
-        PostgresDatabaseURL: !GetAtt ReadySetRDSPostgreSQLStack.Outputs.DatabaseURL
         ReadySetAdapterInstanceType: !Ref ReadySetAdapterInstanceType
         ReadySetAdapterNodes: !Ref ReadySetAdapterNodes
-        ReadySetPostgresAdapterUsername: !Ref DatabaseUsername
-        ReadySetPostgresAdapterPassword: !Ref DatabasePassword
         ReadySetServerInstanceType: !Ref ReadySetServerInstanceType
         ReadySetServerNodes: !Ref ReadySetServerNodes
         ReadySetServerInitialVolumeSizeGB: !Ref ReadySetServerInitialVolumeSizeGB
@@ -374,6 +376,13 @@ Resources:
         ReadySetServerSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetServerSecurityGroupID
         ReadySetAdapterSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetAdapterSecurityGroupID
         ReadySetMonitoringSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetMonitoringSecurityGroupID
+        # Backend DB Inputs
+        SSMParameterKmsKeyArn: !Ref SSMParameterKmsKeyArn
+        SSMPathRDSDatabasePassword: !Ref SSMPathRDSDatabasePassword
+        DatabaseName: !Ref DatabaseName
+        DatabaseHostname: !GetAtt ReadySetRDSPostgreSQLStack.Outputs.DatabaseHostname
+        DatabaseAdapterUsername: !Ref DatabaseUsername
+        DatabasePort: !GetAtt ReadySetRDSPostgreSQLStack.Outputs.DatabasePort
 
 Outputs:
   ReadySetPostgreSQLVPCEndpointService:

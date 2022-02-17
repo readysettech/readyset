@@ -13,7 +13,11 @@ on_error() {
 trap 'on_error' ERR
 
 /usr/local/bin/cfn-init-wrapper.sh
+/usr/local/bin/set-host-description.sh
 /usr/local/bin/configure-consul-client.sh
+# Build connection string from inputs
+source /usr/local/bin/get-connection-string.sh
+UPSTREAM_DB_URL=${DB_URL}
 
 cat > /etc/default/readyset-psql-adapter <<EOF
 UPSTREAM_DB_URL=${UPSTREAM_DB_URL}
@@ -24,9 +28,8 @@ ALLOWED_PASSWORD=${PASSWORD}
 EOF
 chmod 600 /etc/default/readyset-psql-adapter
 
-IMDS_TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
-SERVER_ADDRESS=`curl -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/local-ipv4`
-
+IMDS_TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+SERVER_ADDRESS=$(curl -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/local-ipv4)
 
 cat >> /etc/vector.d/env <<EOF
 NORIA_DEPLOYMENT=${DEPLOYMENT}

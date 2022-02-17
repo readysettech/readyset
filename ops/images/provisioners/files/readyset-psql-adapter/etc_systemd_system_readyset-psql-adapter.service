@@ -4,7 +4,7 @@ Description=ReadySet PostgreSQL Adapter
 StartLimitIntervalSec=0
 
 [Service]
-ExecStart=/usr/local/bin/readyset-psql-adapter --address 0.0.0.0:5432 --prometheus-metrics --authority consul --log-format json --query-log --live-qca --use-aws-external-address
+ExecStart=/usr/local/bin/readyset-psql-adapter --address 0.0.0.0:5432 --prometheus-metrics --authority consul --log-format json --query-log --explicit-migrations --outputs-polling-interval 180 --use-aws-external-address
 EnvironmentFile=/etc/default/readyset-psql-adapter
 Restart=on-failure
 RestartSec=1

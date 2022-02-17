@@ -34,11 +34,17 @@ Metadata:
           - ReadySetServerAutoGrowVolume
           - ReadySetServerMaxVolumeSizeGB
           - ReadySetMonitorInstanceType
-          - PostgresDatabaseURL
           - ReadySetMemoryLimitGB
           - ReadySetDeploymentName
-          - ReadySetPostgresAdapterUsername
-          - ReadySetPostgresAdapterPassword
+      - Label:
+          default: DB Configuration
+        Parameters:
+          - DatabaseHostname
+          - DatabasePort
+          - DatabaseName
+          - DatabaseAdapterUsername
+          - SSMParameterKmsKeyArn
+          - SSMPathRDSDatabasePassword
 
 Parameters:
   ReadySetAdapterInstanceType:
@@ -148,19 +154,40 @@ Parameters:
     Default: Server
     ConstraintDescription: Must match EC2 Tag Value requirements.
 
-  PostgresDatabaseURL:
-    Description: Existing Database URL connection string, e.g. postgresql://username:password@localhost:5432/mydatabase
+  DatabaseHostname:
+    Description: Hostname of the MySQL server to front with ReadySet.
     Type: String
-    NoEcho: True
 
-  ReadySetPostgresAdapterUsername:
+  DatabasePort:
+    Description: TCP port of the MySQL server to front with ReadySet.
+    Type: Number
+    Default: 5432
+
+  DatabaseProtocol:
+    Description: Database connection protocol prefix for connection strings.
+    Type: String
+    Default: postgres
+
+  SSMParameterKmsKeyArn:
+    Description: ARN of KMS key that was used to encrypt ssm-secure parameters.
+    Type: String
+
+  DatabaseName:
+    Description: Database name
+    Type: String
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: Must be less than 63 characters, begin with a letter, and contain only alphanumeric characters.
+
+  DatabaseAdapterUsername:
     Description: Username to use to authenticate to the ReadySet adapter.
     Type: String
-
-  ReadySetPostgresAdapterPassword:
-    Description: Password to use to authenticate to the ReadySet adapter.
-    Type: String
     NoEcho: true
+
+  SSMPathRDSDatabasePassword:
+    Description: Path to SSM secure string parameter that contains the backend database password.
+    Type: String
 
 Mappings:
   AWSAMIRegionMap:
@@ -190,6 +217,26 @@ Resources:
               Service: ec2.amazonaws.com
             Effect: Allow
             Sid: ""
+      Policies:
+        - PolicyName: SSMPermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter*
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SSMPathRDSDatabasePassword}"
+        - PolicyName: KMSPermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt*
+                  - kms:Generate*
+                Resource:
+                  - !Ref SSMParameterKmsKeyArn
 
   ReadySetPostgreSQLAdapterProfile:
     Type: AWS::IAM::InstanceProfile
@@ -236,10 +283,14 @@ Resources:
             export AWS_CLOUDFORMATION_REGION="${AWS::Region}"
             export CONSUL_TAG_KEY="${ConsulEc2RetryJoinTagKey}"
             export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
-            export UPSTREAM_DB_URL="${PostgresDatabaseURL}"
             export DEPLOYMENT="${ReadySetDeploymentName}"
-            export USERNAME="${ReadySetPostgresAdapterUsername}"
-            export PASSWORD="${ReadySetPostgresAdapterPassword}"
+            # Connection Parameters
+            export SSM_PATH_DB_PASSWORD=${SSMPathRDSDatabasePassword}
+            export USERNAME=${DatabaseAdapterUsername}
+            export DB_PROTO=${DatabaseProtocol}
+            export DB_HOST=${DatabaseHostname}
+            export DB_PORT=${DatabasePort}
+            export DB_NAME=${DatabaseName}
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - {}
@@ -276,7 +327,6 @@ Resources:
     Properties:
       Type: network
       Scheme: internal
-      IpAddressType: ipv4
       Subnets: !Ref VPCPrivateSubnetIds
 
   ReadySetPostgreSQLAdapterListener:
@@ -368,6 +418,33 @@ Resources:
                 Action:
                   - autoscaling:CompleteLifecycleAction
                 Resource: '*'
+        - PolicyName: ReadySetServerHealthCheckPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:SetInstanceHealth
+                Resource: '*'
+        - PolicyName: SSMPermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter*
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SSMPathRDSDatabasePassword}"
+        - PolicyName: KMSPermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt*
+                  - kms:Generate*
+                Resource:
+                  - !Ref SSMParameterKmsKeyArn
 
   ReadySetServerProfile:
     Type: AWS::IAM::InstanceProfile
@@ -411,10 +488,16 @@ Resources:
             export NORIA_QUORUM="${ReadySetServerNodes}"
             export NORIA_REGION="${AWS::Region}"
             export NORIA_SHARDS="0"
-            export REPLICATION_URL="${PostgresDatabaseURL}"
             export INITIAL_VOLUME_SIZE_GB="${ReadySetServerInitialVolumeSizeGB}"
             export AUTO_GROW_VOLUME="${ReadySetServerAutoGrowVolume}"
             export MAX_VOLUME_SIZE_GB="${ReadySetServerMaxVolumeSizeGB}"
+            # Connection Parameters
+            export SSM_PATH_DB_PASSWORD=${SSMPathRDSDatabasePassword}
+            export USERNAME=${DatabaseAdapterUsername}
+            export DB_PROTO=${DatabaseProtocol}
+            export DB_HOST=${DatabaseHostname}
+            export DB_PORT=${DatabasePort}
+            export DB_NAME=${DatabaseName}
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - SqsQueueUrl: !Ref ReadySetServerASGLifecycleTerminateSQS

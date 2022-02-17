@@ -20,7 +20,6 @@ Metadata:
           - DatabaseInstanceMultiAZ
           - DatabaseName
           - DatabaseUsername
-          - DatabasePassword
           - DatabasePort
 
 Parameters:
@@ -77,12 +76,9 @@ Parameters:
     MinLength: 1
     MaxLength: 16
 
-  DatabasePassword:
-    Description: Password to log into the PostgreSQL Database
+  SSMPathRDSDatabasePassword:
+    Description: Path to SSM secure string parameter that contains the backend database password.
     Type: String
-    NoEcho: true
-    MinLength: 8
-    MaxLength: 63
 
   DatabasePort:
     Description: TCP port for the RDS instance to serve traffic on
@@ -131,7 +127,7 @@ Resources:
       StorageType: !Ref DatabaseStorageType
       DBName: !Ref DatabaseName
       MasterUsername: !Ref DatabaseUsername
-      MasterUserPassword: !Ref DatabasePassword
+      MasterUserPassword: !Sub "{{resolve:ssm-secure:${SSMPathRDSDatabasePassword}}}"
       MultiAZ: !Ref DatabaseInstanceMultiAZ
       VPCSecurityGroups:
         - !Ref DatabaseSecurityGroup
@@ -142,9 +138,10 @@ Outputs:
     Description: Identifier of the created RDS instance
     Value: !Ref DatabaseInstance
 
-  DatabaseURL:
-    Description: Database connection URL for RDS instance
-    Value: !Sub
-      - postgres://${DatabaseUsername}:${DatabasePassword}@${EndpointAddress}:${EndpointPort}/${DatabaseName}
-      - EndpointAddress: !GetAtt DatabaseInstance.Endpoint.Address
-        EndpointPort: !GetAtt DatabaseInstance.Endpoint.Port
+  DatabaseHostname:
+    Description: Hostname of the created RDS instance
+    Value: !GetAtt DatabaseInstance.Endpoint.Address
+
+  DatabasePort:
+    Description: TCP port of the RDS instance listener
+    Value: !GetAtt DatabaseInstance.Endpoint.Port

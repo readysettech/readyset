@@ -41,6 +41,27 @@ Resources:
           FromPort: 22
           ToPort: 22
           SourceSecurityGroupId: !Ref BastionSecurityGroupID
+        # Consul Server: Server RPC address (TCP Only)
+        # No other security groups need 8300.
+        - IpProtocol: tcp
+          FromPort: 8300
+          ToPort: 8300
+          CidrIp: !Ref VPCCIDR
+        # Consul LAN Serf: 8301 UDP/TCP.
+        # Omit port 8302 because WAN advertising is disabled
+        - IpProtocol: tcp
+          FromPort: 8301
+          ToPort: 8301
+          CidrIp: !Ref VPCCIDR
+        # HTTP API (TCP Only)
+        - IpProtocol: tcp
+          FromPort: 8500
+          ToPort: 8500
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: udp
+          FromPort: 8301
+          ToPort: 8301
+          CidrIp: !Ref VPCCIDR
         - IpProtocol: tcp
           FromPort: 0
           ToPort: 65535
@@ -67,8 +88,13 @@ Resources:
           ToPort: 6034
           CidrIp: !Ref VPCCIDR
           Description: Adapter HTTP server port, required for health checks.
+        # Consul LAN Serf: 8301 UDP/TCP
         - IpProtocol: tcp
-          FromPort: 8300
+          FromPort: 8301
+          ToPort: 8301
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: udp
+          FromPort: 8301
           ToPort: 8301
           CidrIp: !Ref VPCCIDR
         - IpProtocol: tcp
@@ -119,13 +145,23 @@ Resources:
           FromPort: 22
           ToPort: 22
           SourceSecurityGroupId: !Ref BastionSecurityGroupID
+        # Consul LAN Serf: 8301 UDP/TCP
         - IpProtocol: tcp
-          FromPort: 8300
+          FromPort: 8301
+          ToPort: 8301
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: udp
+          FromPort: 8301
           ToPort: 8301
           CidrIp: !Ref VPCCIDR
         - IpProtocol: tcp
           FromPort: 6033
           ToPort: 6033
+          SourceSecurityGroupId: !GetAtt ReadySetAdapterSecurityGroup.GroupId
+          # Postgres Adapter
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
           SourceSecurityGroupId: !GetAtt ReadySetAdapterSecurityGroup.GroupId
         - IpProtocol: tcp
           FromPort: 32768 # https://en.wikipedia.org/wiki/Ephemeral_port
@@ -213,8 +249,13 @@ Resources:
           ToPort: 6035
           CidrIp: !Ref VPCCIDR
           Description: Allow connections to the metrics aggregator within the VPC
+        # Consul LAN Serf: 8301 UDP/TCP
         - IpProtocol: tcp
-          FromPort: 8300
+          FromPort: 8301
+          ToPort: 8301
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: udp
+          FromPort: 8301
           ToPort: 8301
           CidrIp: !Ref VPCCIDR
       SecurityGroupEgress:

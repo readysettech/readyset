@@ -62,3 +62,7 @@ sudo install -o root -g root -m 755 \
 sudo install -o root -g root -m 755 \
   /tmp/external-base/aws/usr_local_bin_get-connection-string.sh \
   /usr/local/bin/get-connection-string.sh
+
+# Ensure that RDS' CA bundle is included
+sudo curl -o /usr/local/share/ca-certificates/rds-global-bundle.crt https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+sudo update-ca-certificates
