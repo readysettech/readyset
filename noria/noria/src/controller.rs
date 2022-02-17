@@ -16,9 +16,9 @@ use parking_lot::RwLock;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 use tower::buffer::Buffer;
-use tower::timeout::Timeout;
 use tower::ServiceExt;
 use tower_service::Service;
+use tracing::trace;
 use url::Url;
 
 use crate::consensus::{Authority, AuthorityControl};
@@ -85,6 +85,7 @@ impl Service<ControllerRequest> for Controller {
     }
 
     fn call(&mut self, req: ControllerRequest) -> Self::Future {
+        trace!(?req, "Issuing controller RPC");
         let client = self.client.clone();
         let auth = self.authority.clone();
         let leader_url = self.leader_url.clone();
@@ -191,7 +192,7 @@ impl Service<ControllerRequest> for Controller {
 // TODO: this should be renamed to NoriaHandle, or maybe just Connection, since it also provides
 // reads and writes, which aren't controller actions!
 pub struct ControllerHandle {
-    handle: Buffer<Timeout<Controller>, ControllerRequest>,
+    handle: Buffer<Controller, ControllerRequest>,
     domains: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>,
     views: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
     tracer: tracing::Dispatch,
@@ -238,20 +239,17 @@ impl ControllerHandle {
             views: Default::default(),
             domains: Default::default(),
             handle: Buffer::new(
-                Timeout::new(
-                    Controller {
-                        authority,
-                        client: hyper::Client::builder()
-                            .http2_only(true)
-                            // Sets to the keep alive default if request_timeout is not specified.
-                            .http2_keep_alive_timeout(
-                                request_timeout.unwrap_or(Duration::from_secs(20)),
-                            )
-                            .build(http_connector),
-                        leader_url: Arc::new(RwLock::new(None)),
-                    },
-                    request_timeout.unwrap_or(Duration::MAX),
-                ),
+                Controller {
+                    authority,
+                    client: hyper::Client::builder()
+                        .http2_only(true)
+                        // Sets to the keep alive default if request_timeout is not specified.
+                        .http2_keep_alive_timeout(
+                            request_timeout.unwrap_or(Duration::from_secs(20)),
+                        )
+                        .build(http_connector),
+                    leader_url: Arc::new(RwLock::new(None)),
+                },
                 CONTROLLER_BUFFER_SIZE,
             ),
             tracer,
