@@ -280,8 +280,8 @@ where
             Ok::<ControllerHandle, ReadySetError>(
                 ControllerHandle::with_timeouts(
                     authority,
-                    Some(Duration::from_millis(migration_request_timeout)),
                     Some(Duration::from_millis(controller_request_timeout)),
+                    Some(Duration::from_millis(migration_request_timeout)),
                 )
                 .instrument(rs_connect.clone())
                 .await,
