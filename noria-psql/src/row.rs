@@ -97,8 +97,8 @@ mod tests {
             values: vec![
                 DataType::Int(43),
                 DataType::Text("abcde".into()),
-                DataType::Double(10.000000222, 9),
-                DataType::Float(8.99, 2),
+                DataType::Double(10.000000222),
+                DataType::Float(8.99),
                 DataType::from(Decimal::new(35901234, 4)), // 3590.1234
             ],
             project_fields: Arc::new(vec![0, 1, 2, 3, 4]),
@@ -128,8 +128,8 @@ mod tests {
             values: vec![
                 DataType::Int(43),
                 DataType::Text("abcde".into()),
-                DataType::Double(10.000000222, 9),
-                DataType::Float(8.99, 2),
+                DataType::Double(10.000000222),
+                DataType::Float(8.99),
                 DataType::from(Decimal::new(35901234, 4)), // 3590.1234
                 DataType::Int(0),
             ],
@@ -164,8 +164,8 @@ mod tests {
                 DataType::Text("abcde".into()),
                 DataType::Int(0),
                 DataType::Int(0),
-                DataType::Double(10.000000222, 9),
-                DataType::Float(8.99, 2),
+                DataType::Double(10.000000222),
+                DataType::Float(8.99),
                 DataType::from(Decimal::new(35901234, 4)), // 3590.1234
                 DataType::Int(0),
             ],

@@ -303,8 +303,8 @@ async fn check_query(
                         DataType::None | DataType::Max => "NULL".to_owned(),
                         DataType::Int(i) => i.to_string(),
                         DataType::UnsignedInt(i) => i.to_string(),
-                        DataType::Float(f, _) => format!("{}", f),
-                        DataType::Double(f, _) => format!("{}", f),
+                        DataType::Float(f) => format!("{}", f),
+                        DataType::Double(f) => format!("{}", f),
                         DataType::Numeric(ref d) => d.to_string(),
                         DataType::Text(_) | DataType::TinyText(_) => {
                             let s: &str = (&v).try_into().unwrap();

@@ -523,11 +523,11 @@ mod tests {
         // TEXT to FLOAT
         assert_eq!(
             DataType::from("50").coerce_to(&SqlType::Real).unwrap(),
-            DataType::Float(50.0, 255),
+            DataType::Float(50.0),
         );
         assert_eq!(
             DataType::from("-50.5").coerce_to(&SqlType::Double).unwrap(),
-            DataType::Double(-50.5, 255),
+            DataType::Double(-50.5),
         );
 
         // TEXT to UUID

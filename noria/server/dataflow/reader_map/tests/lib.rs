@@ -1042,7 +1042,6 @@ fn eviction_random() {
     w.insert(2, "d");
     w.insert(3, "c");
 
-    let mut rng = rand::thread_rng();
     let removed = loop {
         // Since random eviction is non deterministric it may very well not evict anything on the
         // first try

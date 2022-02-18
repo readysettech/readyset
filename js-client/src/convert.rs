@@ -110,8 +110,8 @@ where
         DataType::None | DataType::Max => Ok(cx.null().upcast::<JsValue>()),
         DataType::Int(n) => Ok(cx.number(*n as f64).upcast::<JsValue>()),
         DataType::UnsignedInt(n) => Ok(cx.number(*n as f64).upcast::<JsValue>()),
-        DataType::Float(float, _) => Ok(cx.number(*float).upcast::<JsValue>()),
-        DataType::Double(double, _) => Ok(cx.number(*double).upcast::<JsValue>()),
+        DataType::Float(float) => Ok(cx.number(*float).upcast::<JsValue>()),
+        DataType::Double(double) => Ok(cx.number(*double).upcast::<JsValue>()),
         DataType::Text(_) => {
             let s = String::try_from(d).or_else(|e| cx.throw_error(e.to_string()))?;
             Ok(cx.string(s).upcast::<JsValue>())

@@ -437,8 +437,8 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
         }
         // a bit hacky: send all NULL values to the first shard
         DataType::None | DataType::Max => 0,
-        DataType::Float(_, _)
-        | DataType::Double(_, _)
+        DataType::Float(_)
+        | DataType::Double(_)
         | DataType::Time(_)
         | DataType::ByteArray(_)
         | DataType::Numeric(_)

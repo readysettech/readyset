@@ -1,7 +1,6 @@
 mod like;
 
 use std::borrow::Borrow;
-use std::cmp::min;
 use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Formatter;
@@ -383,8 +382,8 @@ impl Expression {
                     let rnd_prec = match non_null!(param2) {
                         DataType::Int(inner) => *inner as i32,
                         DataType::UnsignedInt(inner) => *inner as i32,
-                        DataType::Float(f, _) => f.round() as i32,
-                        DataType::Double(f, _) => f.round() as i32,
+                        DataType::Float(f) => f.round() as i32,
+                        DataType::Double(f) => f.round() as i32,
                         DataType::Numeric(ref d) => {
                             // TODO(fran): I don't know if this is the right thing to do.
                             d.round().to_i32().ok_or_else(|| {
@@ -398,17 +397,16 @@ impl Expression {
                     };
 
                     macro_rules! round {
-                        ($real:expr, $prec:expr, $real_type:ty) => {{
+                        ($real:expr, $real_type:ty) => {{
                             let base: $real_type = 10.0;
                             if rnd_prec > 0 {
                                 // If rounding precision is positive, than we keep the returned
                                 // type as a float. We never return greater precision than was
                                 // stored so we choose the minimum of stored precision or rounded
                                 // precision.
-                                let out_prec = min(*$prec, rnd_prec as u8);
-                                let rounded_float = ($real * base.powf(out_prec as $real_type))
+                                let rounded_float = ($real * base.powf(rnd_prec as $real_type))
                                     .round()
-                                    / base.powf(out_prec as $real_type);
+                                    / base.powf(rnd_prec as $real_type);
                                 let real = DataType::try_from(rounded_float).unwrap();
                                 Ok(real)
                             } else {
@@ -423,8 +421,8 @@ impl Expression {
                     }
 
                     match non_null!(expr) {
-                        DataType::Float(float, prec) => round!(float, prec, f32),
-                        DataType::Double(double, prec) => round!(double, prec, f64),
+                        DataType::Float(float) => round!(float, f32),
+                        DataType::Double(double) => round!(double, f64),
                         DataType::Int(val) => {
                             let rounded = integer_rnd(*val as i128, rnd_prec) as i64;
                             Ok(DataType::Int(rounded))
@@ -477,7 +475,7 @@ impl Expression {
                         // Precision is positive so we will continue to return a Real.
                         Ok(Some($sql_type))
                     }
-                    Expression::Literal(DataType::Double(f, _)) => {
+                    Expression::Literal(DataType::Double(f)) => {
                         if f.is_sign_negative() {
                             // Precision is negative, which means that we will be returning a
                             // rounded Int.
@@ -487,7 +485,7 @@ impl Expression {
                             Ok(Some($sql_type))
                         }
                     }
-                    Expression::Literal(DataType::Float(f, _)) => {
+                    Expression::Literal(DataType::Float(f)) => {
                         if f.is_sign_negative() {
                             // Precision is negative, which means that we will be returning a
                             // rounded Int.
@@ -517,12 +515,8 @@ impl Expression {
                 BuiltinFunction::Timediff(_, _) => Ok(Some(SqlType::Time)),
                 BuiltinFunction::Addtime(e1, _) => e1.sql_type(parent_column_type),
                 BuiltinFunction::Round(e1, prec) => match **e1 {
-                    Expression::Literal(DataType::Float(_, _)) => {
-                        round!(e1, **prec, SqlType::Float)
-                    }
-                    Expression::Literal(DataType::Double(_, _)) => {
-                        round!(e1, **prec, SqlType::Real)
-                    }
+                    Expression::Literal(DataType::Float(_)) => round!(e1, **prec, SqlType::Float),
+                    Expression::Literal(DataType::Double(_)) => round!(e1, **prec, SqlType::Real),
                     // For all other numeric types we always return the same type as they are.
                     Expression::Literal(DataType::UnsignedInt(_)) => {
                         Ok(Some(SqlType::UnsignedInt(None)))
