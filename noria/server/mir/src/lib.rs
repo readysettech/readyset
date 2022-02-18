@@ -1,6 +1,6 @@
 #![warn(clippy::panic)]
 #![deny(unused_extern_crates, macro_use_extern_crate)]
-#![feature(stmt_expr_attributes)]
+#![feature(stmt_expr_attributes, box_patterns)]
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};

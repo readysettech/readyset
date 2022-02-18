@@ -3897,6 +3897,7 @@ dependencies = [
  "noria-dataflow",
  "noria-errors",
  "petgraph",
+ "readyset-logging",
  "regex",
  "serde",
  "tracing",
