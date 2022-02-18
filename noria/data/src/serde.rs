@@ -7,7 +7,6 @@ use chrono::NaiveDateTime;
 use mysql_time::MysqlTime;
 use rust_decimal::Decimal;
 use serde::de::{EnumAccess, VariantAccess, Visitor};
-use serde::ser::SerializeTupleVariant;
 use serde::{Deserialize, Deserializer};
 use serde_bytes::{ByteBuf, Bytes};
 use strum::VariantNames;
@@ -48,21 +47,6 @@ where
     serializer.serialize_newtype_variant("DataType", variant as _, variant_name, value)
 }
 
-#[inline(always)]
-fn serialize_tuple<S>(
-    serializer: S,
-    variant: Field,
-    len: usize,
-) -> Result<S::SerializeTupleVariant, S::Error>
-where
-    S: serde::ser::Serializer,
-{
-    // The compiler should be able to inline the constant name here, so no lookups are done at
-    // runtime
-    let variant_name = Field::VARIANTS[variant as usize];
-    serializer.serialize_tuple_variant("DataType", variant as _, variant_name, len)
-}
-
 impl serde::ser::Serialize for DataType {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -76,18 +60,8 @@ impl serde::ser::Serialize for DataType {
             ),
             DataType::Int(v) => serialize_variant(serializer, Field::Int, &i128::from(*v)),
             DataType::UnsignedInt(v) => serialize_variant(serializer, Field::Int, &i128::from(*v)),
-            DataType::Float(f, prec) => {
-                let mut tv = serialize_tuple(serializer, Field::Float, 2)?;
-                tv.serialize_field(f)?;
-                tv.serialize_field(prec)?;
-                tv.end()
-            }
-            DataType::Double(f, prec) => {
-                let mut tv = serialize_tuple(serializer, Field::Double, 2)?;
-                tv.serialize_field(f)?;
-                tv.serialize_field(prec)?;
-                tv.end()
-            }
+            DataType::Float(f) => serialize_variant(serializer, Field::Float, &f.to_bits()),
+            DataType::Double(f) => serialize_variant(serializer, Field::Double, &f.to_bits()),
             DataType::Text(v) => {
                 serialize_variant(serializer, Field::Text, Bytes::new(v.as_bytes()))
             }
@@ -198,70 +172,10 @@ impl<'de> Deserialize<'de> for DataType {
                                 )
                             })
                         }),
-                    (Field::Float, variant) => {
-                        struct Visitor;
-                        impl<'de> serde::de::Visitor<'de> for Visitor {
-                            type Value = DataType;
-                            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                                fmt::Formatter::write_str(
-                                    formatter,
-                                    "tuple variant DataType::Float",
-                                )
-                            }
-                            #[inline]
-                            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-                            where
-                                A: serde::de::SeqAccess<'de>,
-                            {
-                                let f = seq.next_element()?.ok_or_else(|| {
-                                    serde::de::Error::invalid_length(
-                                        0usize,
-                                        &"tuple variant DataType::Float with 2 elements",
-                                    )
-                                })?;
-                                let prec = seq.next_element()?.ok_or_else(|| {
-                                    serde::de::Error::invalid_length(
-                                        0usize,
-                                        &"tuple variant DataType::Float with 2 elements",
-                                    )
-                                })?;
-                                Ok(DataType::Float(f, prec))
-                            }
-                        }
-                        VariantAccess::tuple_variant(variant, 4usize, Visitor)
-                    }
-                    (Field::Double, variant) => {
-                        struct Visitor;
-                        impl<'de> serde::de::Visitor<'de> for Visitor {
-                            type Value = DataType;
-                            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                                fmt::Formatter::write_str(
-                                    formatter,
-                                    "tuple variant DataType::Double",
-                                )
-                            }
-                            #[inline]
-                            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-                            where
-                                A: serde::de::SeqAccess<'de>,
-                            {
-                                let f = seq.next_element()?.ok_or_else(|| {
-                                    serde::de::Error::invalid_length(
-                                        0usize,
-                                        &"tuple variant DataType::Double with 2 elements",
-                                    )
-                                })?;
-                                let prec = seq.next_element()?.ok_or_else(|| {
-                                    serde::de::Error::invalid_length(
-                                        0usize,
-                                        &"tuple variant DataType::Double with 2 elements",
-                                    )
-                                })?;
-                                Ok(DataType::Double(f, prec))
-                            }
-                        }
-                        VariantAccess::tuple_variant(variant, 4usize, Visitor)
-                    }
+                    (Field::Float, variant) => VariantAccess::newtype_variant::<u32>(variant)
+                        .map(|b| DataType::Float(f32::from_bits(b))),
+                    (Field::Double, variant) => VariantAccess::newtype_variant::<u64>(variant)
+                        .map(|b| DataType::Double(f64::from_bits(b))),
                     (Field::Numeric, variant) => VariantAccess::newtype_variant::<Decimal>(variant)
                         .map(|d| DataType::Numeric(Arc::new(d))),
                     (Field::Text, variant) => {

@@ -41,9 +41,9 @@ impl TryFrom<Value> for ps::Value {
             (Type::INT4, DataType::UnsignedInt(v)) => Ok(ps::Value::Int(v as _)),
             (Type::INT8, DataType::UnsignedInt(v)) => Ok(ps::Value::Bigint(v as _)),
 
-            (Type::FLOAT4, DataType::Float(f, _)) => Ok(ps::Value::Float(f)),
-            (Type::FLOAT8, DataType::Double(f, _)) => Ok(ps::Value::Double(f)),
-            (Type::NUMERIC, DataType::Double(f, _)) => Ok(ps::Value::Numeric(
+            (Type::FLOAT4, DataType::Float(f)) => Ok(ps::Value::Float(f)),
+            (Type::FLOAT8, DataType::Double(f)) => Ok(ps::Value::Double(f)),
+            (Type::NUMERIC, DataType::Double(f)) => Ok(ps::Value::Numeric(
                 <Decimal>::try_from(f).map_err(|e| ps::Error::InternalError(e.to_string()))?,
             )),
             (Type::NUMERIC, DataType::Numeric(ref d)) => Ok(ps::Value::Numeric(*d.as_ref())),

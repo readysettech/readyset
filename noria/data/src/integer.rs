@@ -174,8 +174,8 @@ where
             Ok(mysql_time::MysqlTime::from_hmsus(true, hh as _, mm as _, ss as _, 0).into())
         }
 
-        SqlType::Double => Ok(DataType::Double(val.to_f64(), u8::MAX)),
-        SqlType::Real | SqlType::Float => Ok(DataType::Float(val.to_f32(), u8::MAX)),
+        SqlType::Double => Ok(DataType::Double(val.to_f64())),
+        SqlType::Real | SqlType::Float => Ok(DataType::Float(val.to_f32())),
         SqlType::Numeric(_) | SqlType::Decimal(_, _) => Ok(DataType::Numeric(Arc::new(val.into()))),
 
         SqlType::Enum(_)

@@ -353,10 +353,8 @@ impl TimestampTz {
                 Ok(DataType::UnsignedInt(self.date_as_int() as _))
             }
 
-            SqlType::Double => Ok(DataType::Double(self.datetime_as_int() as _, u8::MAX)),
-            SqlType::Float | SqlType::Real => {
-                Ok(DataType::Float(self.datetime_as_int() as _, u8::MAX))
-            }
+            SqlType::Double => Ok(DataType::Double(self.datetime_as_int() as _)),
+            SqlType::Float | SqlType::Real => Ok(DataType::Float(self.datetime_as_int() as _)),
             SqlType::Decimal(_, _) | SqlType::Numeric(_) => Ok(DataType::Numeric(
                 std::sync::Arc::new(self.datetime_as_int().into()),
             )),
@@ -499,7 +497,7 @@ mod tests {
 
         assert_eq!(
             ts.coerce_to(&SqlType::Double).unwrap(),
-            DataType::Double(20220209131415.0f64, u8::MAX)
+            DataType::Double(20220209131415.0f64)
         );
 
         assert_eq!(
