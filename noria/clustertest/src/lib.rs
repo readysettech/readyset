@@ -350,6 +350,10 @@ pub struct DeploymentBuilder {
     mysql_root_password: String,
     /// Are async migrations enabled on the adapter.
     async_migration_interval: Option<u64>,
+    /// Enables explicit migrations, and passes in an interval for running dry run migrations that
+    /// determine whether queries that weren't explicitly migrated would be supported by Noria.
+    /// Exposed via the `SHOW PROXIED QUERIES` command.
+    dry_run_migration_interval: Option<u64>,
     /// The max time in seconds that a query may continuously fail until we enter a recovery
     /// period. None if not enabled.
     query_max_failure_seconds: Option<u64>,
@@ -392,6 +396,7 @@ impl DeploymentBuilder {
             mysql_port: env.mysql_port,
             mysql_root_password: env.mysql_root_password,
             async_migration_interval: None,
+            dry_run_migration_interval: None,
             query_max_failure_seconds: None,
             fallback_recovery_seconds: None,
         }
@@ -452,6 +457,14 @@ impl DeploymentBuilder {
     /// [`Self::deploy_mysql_adapter`] to be set on this deployment.
     pub fn async_migrations(mut self, interval_ms: u64) -> Self {
         self.async_migration_interval = Some(interval_ms);
+        self
+    }
+
+    /// Whether to enable the explicit migrations feature in the adapter. Requires
+    /// [`Self::deploy_mysql_adapter`] to be set on this deployment.
+    /// Must supply an interval for the dry run loop.
+    pub fn explicit_migrations(mut self, interval_ms: u64) -> Self {
+        self.dry_run_migration_interval = Some(interval_ms);
         self
     }
 
@@ -570,6 +583,7 @@ impl DeploymentBuilder {
                 metrics_port,
                 upstream_mysql_addr.as_ref(),
                 self.async_migration_interval,
+                self.dry_run_migration_interval,
                 self.query_max_failure_seconds,
                 self.fallback_recovery_seconds,
             )?;
@@ -969,6 +983,7 @@ fn start_mysql_adapter(
     metrics_port: u16,
     mysql: Option<&String>,
     async_migration_interval: Option<u64>,
+    dry_run_migration_interval: Option<u64>,
     query_max_failure_seconds: Option<u64>,
     fallback_recovery_seconds: Option<u64>,
 ) -> Result<ProcessHandle> {
@@ -982,6 +997,10 @@ fn start_mysql_adapter(
 
     if let Some(interval) = async_migration_interval {
         builder = builder.async_migrations(interval);
+    }
+
+    if let Some(interval) = dry_run_migration_interval {
+        builder = builder.explicit_migrations(interval);
     }
 
     if let Some(secs) = query_max_failure_seconds {

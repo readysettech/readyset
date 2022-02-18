@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use metrics::counter;
 use nom_sql::SelectStatement;
-use noria::ReadySetResult;
+use noria::{ControllerHandle, ReadySetResult};
 use noria_client_metrics::recorded;
 use tokio::select;
 use tracing::{error, info, instrument, warn};
@@ -19,11 +19,14 @@ use tracing::{error, info, instrument, warn};
 use crate::backend::{noria_connector, NoriaConnector};
 use crate::query_status_cache::{MigrationState, QueryStatusCache};
 use crate::upstream_database::{IsFatalError, NoriaCompare};
-use crate::UpstreamDatabase;
+use crate::{utils, UpstreamDatabase};
 
 pub struct MigrationHandler<DB> {
     /// Connection used to issue prepare requests to Noria.
     noria: NoriaConnector,
+
+    /// The noria connector used to query if we are configured to run in dry_run mode.
+    controller: Option<ControllerHandle>,
 
     /// Connector used to issue prepares to the upstream db.
     upstream: DB,
@@ -58,9 +61,11 @@ impl<DB> MigrationHandler<DB>
 where
     DB: UpstreamDatabase,
 {
+    #[allow(clippy::too_many_arguments)] // Only one over. Designing away that for a single over arg seems like over-engineering.
     pub fn new(
         noria: NoriaConnector,
         upstream: DB,
+        controller: Option<ControllerHandle>,
         query_status_cache: Arc<QueryStatusCache>,
         validate_queries: bool,
         min_poll_interval: std::time::Duration,
@@ -70,6 +75,7 @@ where
         MigrationHandler {
             noria,
             upstream,
+            controller,
             query_status_cache,
             validate_queries,
             min_poll_interval,
@@ -86,9 +92,15 @@ where
             select! {
                 _ = interval.tick() => {
                     let to_process = self.query_status_cache.pending_migration();
-
-                    for q in &to_process {
-                        self.perform_migration(q).await
+                    if self.controller.is_some() {
+                        // Dry run mode because we were given a controller handle.
+                        for q in &to_process {
+                            self.perform_dry_run_migration(q).await
+                        }
+                    } else {
+                        for q in &to_process {
+                            self.perform_migration(q).await
+                        }
                     }
 
                     counter!(recorded::MIGRATION_HANDLER_PROCESSED, to_process.len() as u64);
@@ -201,6 +213,33 @@ where
                         .update_query_migration_state(stmt, MigrationState::Unsupported);
                 }
             }
+        }
+    }
+
+    async fn perform_dry_run_migration(&mut self, stmt: &SelectStatement) {
+        let controller = if let Some(ref mut c) = self.controller {
+            c
+        } else {
+            return;
+        };
+        let start_time = self
+            .start_time
+            .entry(stmt.clone())
+            .or_insert_with(Instant::now);
+        if Instant::now() - *start_time > self.max_retry {
+            // We've exceeded the max amount of times we'll try running dry runs with this query.
+            // It's probably unsupported, but we'll allow a proper migration determine that.
+            return;
+        }
+        let qname = utils::generate_query_name(stmt);
+        if controller
+            .dry_run(&format!("QUERY {}: {}", qname, &stmt))
+            .await
+            .is_ok()
+        {
+            self.start_time.remove(stmt);
+            self.query_status_cache
+                .update_query_migration_state(stmt, MigrationState::DryRunSucceeded);
         }
     }
 }

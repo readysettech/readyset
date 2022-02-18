@@ -13,7 +13,7 @@ use crate::rewrite::anonymize_literals;
 /// Each query is uniquely identifier by its select statement
 type Query = SelectStatement;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryStatus {
     pub migration_state: MigrationState,
     pub execution_info: Option<ExecutionInfo>,
@@ -31,7 +31,7 @@ impl QueryStatus {
 /// Represents the current migration state of a given query. This state should be updated any time
 /// a migration is performed, or we learn that the migration state has changed, i.e. we receive a
 /// ViewNotFound error indicating a query is not migrated.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MigrationState {
     /// A migration has not been completed for this query. There may be one in progress depending
     /// on the adapters MigrationMode.
@@ -40,9 +40,21 @@ pub enum MigrationState {
     Successful,
     /// This query is not supported and should not be tried against Noria.
     Unsupported,
+    /// Indicates that a dry run of the query has succeeded. It's very likely but not guaranteed
+    /// that migration of the query will succeed if it's attempted.
+    DryRunSucceeded,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl MigrationState {
+    pub fn is_pending(&self) -> bool {
+        matches!(
+            self,
+            MigrationState::Pending | MigrationState::DryRunSucceeded
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionInfo {
     pub state: ExecutionState,
     pub last_transition_time: Instant,
@@ -133,7 +145,7 @@ impl ExecutionInfo {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExecutionState {
     Successful,
     NetworkFailure,
@@ -143,7 +155,7 @@ pub enum ExecutionState {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct QueryList {
-    queries: Vec<Query>,
+    queries: Vec<(Query, QueryStatus)>,
 }
 
 impl QueryList {
@@ -156,14 +168,14 @@ impl QueryList {
     }
 }
 
-impl From<Vec<Query>> for QueryList {
-    fn from(queries: Vec<Query>) -> Self {
+impl From<Vec<(Query, QueryStatus)>> for QueryList {
+    fn from(queries: Vec<(Query, QueryStatus)>) -> Self {
         QueryList { queries }
     }
 }
 
 impl IntoIterator for QueryList {
-    type Item = Query;
+    type Item = (Query, QueryStatus);
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -176,12 +188,12 @@ impl Serialize for QueryList {
     where
         S: Serializer,
     {
-        let mut sanitized = self.queries.clone();
-        sanitized.iter_mut().for_each(anonymize_literals);
+        let mut seq = serializer.serialize_seq(Some(self.queries.len()))?;
 
-        let mut seq = serializer.serialize_seq(Some(sanitized.len()))?;
-        for q in sanitized {
-            seq.serialize_element(&q.to_string())?;
+        for q in &self.queries {
+            let mut stmt = q.0.clone();
+            anonymize_literals(&mut stmt);
+            seq.serialize_element(&stmt.to_string())?;
         }
         seq.end()
     }
@@ -408,8 +420,8 @@ impl QueryStatusCache {
         self.inner
             .iter()
             .filter(|r| matches!(r.value().migration_state, MigrationState::Successful))
-            .map(|r| r.key().clone())
-            .collect::<Vec<Query>>()
+            .map(|r| (r.key().clone(), r.value().clone()))
+            .collect::<Vec<(Query, QueryStatus)>>()
             .into()
     }
 
@@ -420,8 +432,8 @@ impl QueryStatusCache {
                 .inner
                 .iter()
                 .filter(|r| matches!(r.value().migration_state, MigrationState::Unsupported))
-                .map(|r| r.key().clone())
-                .collect::<Vec<Query>>()
+                .map(|r| (r.key().clone(), r.value().clone()))
+                .collect::<Vec<(Query, QueryStatus)>>()
                 .into(),
             MigrationStyle::Explicit => self
                 .inner
@@ -429,11 +441,13 @@ impl QueryStatusCache {
                 .filter(|r| {
                     matches!(
                         r.value().migration_state,
-                        MigrationState::Unsupported | MigrationState::Pending
+                        MigrationState::Unsupported
+                            | MigrationState::Pending
+                            | MigrationState::DryRunSucceeded
                     )
                 })
-                .map(|r| r.key().clone())
-                .collect::<Vec<Query>>()
+                .map(|r| (r.key().clone(), r.value().clone()))
+                .collect::<Vec<(Query, QueryStatus)>>()
                 .into(),
         }
     }

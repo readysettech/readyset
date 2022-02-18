@@ -161,6 +161,14 @@ impl AdapterBuilder {
         )
     }
 
+    pub fn explicit_migrations(mut self, dry_run_task_interval: u64) -> Self {
+        self.args.push("--explicit-migrations".to_string());
+        self.push_arg(
+            "--migration-task-interval",
+            &dry_run_task_interval.to_string(),
+        )
+    }
+
     pub fn query_max_failure_seconds(self, secs: u64) -> Self {
         self.push_arg("--query-max-failure-seconds", &secs.to_string())
     }

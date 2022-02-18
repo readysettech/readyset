@@ -1105,7 +1105,7 @@ where
         cached_entry: &mut CachedPreparedStatement<DB>,
         id: u32,
     ) -> ReadySetResult<()> {
-        assert_eq!(cached_entry.migration_state, MigrationState::Pending);
+        debug_assert!(cached_entry.migration_state.is_pending());
 
         let upstream_prep: UpstreamPrepare<DB> = match &cached_entry.prep {
             PrepareResult::Upstream(UpstreamPrepare { statement_id, meta }) => UpstreamPrepare {
@@ -1193,7 +1193,7 @@ where
         let noria = &mut self.noria;
         let ticket = self.ticket.clone();
 
-        if cached_statement.migration_state == MigrationState::Pending {
+        if cached_statement.migration_state.is_pending() {
             // We got a statement with a pending migration, we want to check if migration is
             // finished by now
             let new_migration_state = self.query_status_cache.query_migration_state(
@@ -1356,30 +1356,65 @@ where
     async fn show_proxied_queries(
         &mut self,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let queries = self.query_status_cache.deny_list();
+        let queries = self
+            .query_status_cache
+            .deny_list()
+            .into_iter()
+            .map(|(q, status)| {
+                (
+                    q,
+                    if let MigrationState::DryRunSucceeded = status.migration_state {
+                        "yes".to_string()
+                    } else {
+                        "pending".to_string()
+                    },
+                )
+            });
         let select_schema = SelectSchema {
             use_bogo: false,
-            schema: Cow::Owned(vec![ColumnSchema {
-                spec: nom_sql::ColumnSpecification {
-                    column: nom_sql::Column {
-                        name: "proxied query".to_string(),
-                        table: None,
+            schema: Cow::Owned(vec![
+                ColumnSchema {
+                    spec: nom_sql::ColumnSpecification {
+                        column: nom_sql::Column {
+                            name: "proxied query".to_string(),
+                            table: None,
+                        },
+                        sql_type: nom_sql::SqlType::Text,
+                        constraints: vec![],
+                        comment: None,
                     },
-                    sql_type: nom_sql::SqlType::Text,
-                    constraints: vec![],
-                    comment: None,
+                    base: None,
                 },
-                base: None,
-            }]),
+                ColumnSchema {
+                    spec: nom_sql::ColumnSpecification {
+                        column: nom_sql::Column {
+                            name: "readyset supported".to_string(),
+                            table: None,
+                        },
+                        sql_type: nom_sql::SqlType::Text,
+                        constraints: vec![],
+                        comment: None,
+                    },
+                    base: None,
+                },
+            ]),
 
-            columns: Cow::Owned(vec!["proxied query".to_string()]),
+            columns: Cow::Owned(vec![
+                "proxied query".to_string(),
+                "readyset supported".to_string(),
+            ]),
         };
 
         let data = queries
-            .into_iter()
-            .map(|q| vec![DataType::from(q.to_string())])
+            .map(|(q, status)| vec![DataType::from(q.to_string()), DataType::from(status)])
             .collect::<Vec<_>>();
-        let data = vec![Results::new(data, Arc::new(["proxied query".to_string()]))];
+        let data = vec![Results::new(
+            data,
+            Arc::new([
+                "proxied query".to_string(),
+                "readyset supported".to_string(),
+            ]),
+        )];
         Ok(noria_connector::QueryResult::Select {
             data,
             select_schema,

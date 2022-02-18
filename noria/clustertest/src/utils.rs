@@ -122,6 +122,48 @@ where
     }
 }
 
+/// The same as query_until_expected but takes a string slice for the query and no params. Allows
+/// us to test our own custom commands that may take time to resolve, and aren't undertood as being
+/// StatementLike.
+pub async fn query_until_expected_str<T>(
+    conn: &mut Conn,
+    query: &str,
+    results: &EventuallyConsistentResults<T>,
+    timeout: Duration,
+) -> bool
+where
+    T: FromRow + std::cmp::PartialEq + std::marker::Send + std::fmt::Debug + Clone + 'static,
+{
+    let mut last: Option<Vec<T>> = None;
+    let start = Instant::now();
+    loop {
+        if start.elapsed() > timeout {
+            println!("query_until_expected timed out, last: {:?}", last);
+            return false;
+        }
+        let remaining = std::cmp::min(Duration::from_secs(5), timeout - start.elapsed());
+        let result = tokio::time::timeout(remaining, conn.query(query)).await;
+        match result {
+            Ok(Ok(r)) => {
+                if equal_rows(&r, &results.expected) {
+                    return true;
+                }
+                last = Some(r.clone());
+            }
+            Ok(Err(_)) => {
+                // Returned an error when querying for results, which may be intermittent. We'll
+                // try again.
+                continue;
+            }
+            Err(_) => {
+                println!("Timed out when querying conn.");
+            }
+        }
+
+        sleep(Duration::from_millis(100)).await;
+    }
+}
+
 async fn get_num_view_queries(metrics: &mut MetricsClient) -> u32 {
     match metrics.get_metrics().await {
         Ok(metrics) => metrics

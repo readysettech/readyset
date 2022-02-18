@@ -863,10 +863,6 @@ impl NoriaConnector {
     }
 }
 
-fn generate_query_name(statement: &nom_sql::SelectStatement) -> String {
-    format!("q_{:x}", utils::hash_select_query(statement))
-}
-
 impl NoriaConnector {
     /// This function handles CREATE CACHED QUERY statements. When explicit-migrations is enabled,
     /// this function is the only way to create a view in noria.
@@ -875,7 +871,10 @@ impl NoriaConnector {
         name: Option<&str>,
         statement: &nom_sql::SelectStatement,
     ) -> ReadySetResult<()> {
-        let name = name.map_or_else(|| Cow::Owned(generate_query_name(statement)), Cow::Borrowed);
+        let name = name.map_or_else(
+            || Cow::Owned(utils::generate_query_name(statement)),
+            Cow::Borrowed,
+        );
         noria_await!(
             self.inner.get_mut().await?,
             self.inner
@@ -901,7 +900,7 @@ impl NoriaConnector {
     ) -> ReadySetResult<String> {
         match self.view_cache.statement_name(q) {
             None => {
-                let qname = generate_query_name(q);
+                let qname = utils::generate_query_name(q);
 
                 // add the query to Noria
                 if create_if_not_exist {
