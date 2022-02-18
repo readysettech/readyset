@@ -17,6 +17,7 @@ md5 = "0.7.0"
 mysql_async = "0.29"
 mysql = "22.0.0"
 mysql_common = { version = "0.28.0", features = ["chrono"] }
+tikv-jemallocator = "0.4"
 
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
 postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }

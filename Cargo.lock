@@ -1185,6 +1185,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "cloudflare-zlib"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2cfcefb5df07f146eb15756342a135eb7d76b8bb609eff9c111f7539d060f94d"
+dependencies = [
+ "cloudflare-zlib-sys",
+]
+
+[[package]]
+name = "cloudflare-zlib-sys"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2040b6d1edfee6d75f172d81e2d2a7807534f3f294ce18184c70e7bb0105cd6f"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "clustertest"
 version = "0.1.0"
 dependencies = [
@@ -3507,6 +3525,7 @@ dependencies = [
  "byteorder",
  "bytes 1.1.0",
  "chrono",
+ "cloudflare-zlib",
  "consulrs",
  "dataflow_expression",
  "derive_more",
@@ -3556,7 +3575,6 @@ dependencies = [
  "uuid",
  "vec1",
  "vec_map",
- "yazi",
  "zookeeper-async",
 ]
 
@@ -3858,6 +3876,7 @@ dependencies = [
  "readyset-logging",
  "rust_decimal",
  "tempfile",
+ "tikv-jemallocator",
  "tokio",
  "tokio-postgres",
  "walkdir",
@@ -6821,12 +6840,6 @@ checksum = "56c1936c4cc7a1c9ab21a1ebb602eb942ba868cbd44a99cb7cdc5892335e1c85"
 dependencies = [
  "linked-hash-map",
 ]
-
-[[package]]
-name = "yazi"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c03b3e19c937b5b9bd8e52b1c88f30cce5c0d33d676cf174866175bb794ff658"
 
 [[package]]
 name = "zeroize"
