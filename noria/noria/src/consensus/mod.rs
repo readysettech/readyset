@@ -217,3 +217,21 @@ impl AuthorityType {
         }
     }
 }
+
+/// A wrapper around a gzip compressor
+pub(crate) struct Compressor(cloudflare_zlib::Deflate);
+
+impl Compressor {
+    fn new() -> Self {
+        Compressor(
+            cloudflare_zlib::Deflate::new(6, cloudflare_zlib::Z_DEFAULT_STRATEGY, 15)
+                .expect("Can't fail with valid params"),
+        )
+    }
+
+    pub(crate) fn compress(data: &[u8]) -> Vec<u8> {
+        let mut comp = Self::new();
+        comp.0.compress(data).expect("Can't fail");
+        comp.0.finish().expect("Can't fail")
+    }
+}

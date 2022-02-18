@@ -35,6 +35,10 @@ use crate::permute::Permute;
 use crate::runner::{NoriaOptions, RunOptions, TestScript};
 use crate::upstream::{DatabaseType, DatabaseURL};
 
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 #[derive(Parser)]
 struct Opts {
     #[clap(subcommand)]

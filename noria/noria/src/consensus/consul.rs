@@ -166,11 +166,6 @@ const SESSION_TTL: &str = "20s";
 /// The size of each chunk stored in Consul. Consul converts the chunk's bytes to base64
 /// encoding, the encoded base64 bytes must be less than 512KB.
 const CHUNK_SIZE: usize = 256000;
-/// The format used by yazi for compression and decompression of controller state.
-const COMPRESSION_FORMAT: yazi::Format = yazi::Format::Zlib;
-/// The compression level used for compression of controller state.
-const COMPRESSION_LEVEL: yazi::CompressionLevel = yazi::CompressionLevel::Default;
-
 struct ConsulAuthorityInner {
     session: Option<String>,
     /// The last index that the controller key was modified or
@@ -468,7 +463,7 @@ impl ConsulAuthority {
             match kv::read(&self.consul, &self.prefix_with_deployment(STATE_KEY), None).await {
                 Ok(r) => {
                     let bytes: Vec<u8> = get_value_as_bytes(r)?;
-                    let (data, _) = yazi::decompress(&bytes, COMPRESSION_FORMAT)
+                    let data = cloudflare_zlib::inflate(&bytes)
                         .map_err(|_| anyhow!("Failure during decompress"))?;
                     Some(rmp_serde::from_slice(&data)?)
                 }
@@ -502,8 +497,7 @@ impl ConsulAuthority {
         }
 
         let new_val = rmp_serde::to_vec(&input)?;
-        let compressed = yazi::compress(&new_val, COMPRESSION_FORMAT, COMPRESSION_LEVEL)
-            .map_err(|_| ConsulAuthorityError::CompressionFailed)?;
+        let compressed = super::Compressor::compress(&new_val);
 
         match kv::set(
             &self.consul,
@@ -554,7 +548,7 @@ impl ConsulAuthority {
             }
             StateValue::Data(d) => (d, None),
         };
-        let (data, _) = yazi::decompress(&state_bytes, COMPRESSION_FORMAT)
+        let data = cloudflare_zlib::inflate(&state_bytes)
             .map_err(|_| ConsulAuthorityError::CompressionFailed)?;
         Ok((rmp_serde::from_slice(&data)?, value))
     }
@@ -572,8 +566,8 @@ impl ConsulAuthority {
         let my_session = Some(self.get_session()?);
 
         let new_val = rmp_serde::to_vec(&controller_state)?;
-        let compressed = yazi::compress(&new_val, COMPRESSION_FORMAT, COMPRESSION_LEVEL)
-            .map_err(|_| ConsulAuthorityError::CompressionFailed)?;
+        let compressed = super::Compressor::compress(&new_val);
+
         gauge!(recorded::DATAFLOW_STATE_SERIALIZED, compressed.len() as f64);
 
         let chunked = ChunkedState::from(compressed);
