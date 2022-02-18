@@ -359,7 +359,7 @@ where
         };
         let query_status_cache = Arc::new(QueryStatusCache::with_style(migration_style));
 
-        if options.async_migrations {
+        if options.async_migrations || options.explicit_migrations {
             #[allow(clippy::unwrap_used)] // async_migrations requires upstream_db_url
             let upstream_db_url = options.upstream_db_url.as_ref().unwrap().0.clone();
             let ch = ch.clone();
@@ -369,6 +369,7 @@ where
             let max_retry = options.max_processing_minutes;
             let validate_queries = options.validate_queries;
             let cache = query_status_cache.clone();
+            let dry_run = options.explicit_migrations;
 
             let fut = async move {
                 let connection = span!(Level::INFO, "migration task upstream database connection");
@@ -393,15 +394,18 @@ where
                     }))
                     .await;
 
+                let controller_handle = dry_run.then(|| ch.clone());
                 let mut migration_handler = MigrationHandler::new(
                     noria,
                     upstream,
+                    controller_handle,
                     cache,
                     validate_queries,
                     std::time::Duration::from_millis(loop_interval),
                     std::time::Duration::from_secs(max_retry * 60),
                     shutdown_recv,
                 );
+
                 migration_handler.run().await
             };
 

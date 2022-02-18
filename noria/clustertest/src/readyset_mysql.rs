@@ -413,6 +413,58 @@ async fn test_fallback_recovery_period() {
     deployment.teardown().await.unwrap();
 }
 
+#[clustertest]
+async fn dry_run_evaluates_support() {
+    let mut deployment = readyset_mysql("dry_run_evaluates_support")
+        .add_server(ServerParams::default())
+        .explicit_migrations(500)
+        .start()
+        .await
+        .unwrap();
+
+    let mut adapter = deployment.adapter().await;
+    adapter
+        .query_drop(
+            r"CREATE TABLE t1 (
+        uid INT NOT NULL,
+        value INT NOT NULL
+    );",
+        )
+        .await
+        .unwrap();
+    adapter
+        .query_drop(r"INSERT INTO t1 VALUES (1, 4), (2, 5);")
+        .await
+        .unwrap();
+
+    assert!(
+        query_until_expected(
+            &mut adapter,
+            r"SELECT * FROM t1 WHERE uid = ?;",
+            (2,),
+            &EventuallyConsistentResults::empty_or(&[(2, 5)]),
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
+
+    // Now check that we confirm we can support this query.
+    assert!(
+        query_until_expected_str(
+            &mut adapter,
+            r"SHOW PROXIED QUERIES;",
+            &EventuallyConsistentResults::empty_or(&[(
+                "SELECT * FROM `t1` WHERE (`uid` = $1)".to_string(),
+                "yes".to_string()
+            )]),
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
+
+    deployment.teardown().await.unwrap();
+}
+
 /// Creates a two servers deployment and performs a failure and recovery on one
 /// of the servers. After the failure, we verify that we can still perform the
 /// query on Noria and we return the correct results.

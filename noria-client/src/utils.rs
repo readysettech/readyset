@@ -553,6 +553,10 @@ pub(crate) fn coerce_params(
     }
 }
 
+pub(crate) fn generate_query_name(statement: &nom_sql::SelectStatement) -> String {
+    format!("q_{:x}", hash_select_query(statement))
+}
+
 #[cfg(test)]
 mod tests {
     use nom_sql::{self, Dialect, SqlQuery};
