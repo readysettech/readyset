@@ -5,6 +5,8 @@ use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
 use dataflow::ops::union;
 use itertools::Itertools;
+use lazy_static::lazy_static;
+use regex::Regex;
 
 use crate::column::Column;
 use crate::node::node_inner::MirNodeInner;
@@ -19,6 +21,24 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.graphviz_fmt(f)
+    }
+}
+
+pub struct Sanitized<T>(T);
+
+impl<T> Display for Sanitized<T>
+where
+    T: Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        lazy_static! {
+            static ref SANITIZE_RE: Regex = Regex::new("([<>])").unwrap();
+        };
+        write!(
+            f,
+            "{}",
+            SANITIZE_RE.replace_all(&self.0.to_string(), "\\$1")
+        )
     }
 }
 
@@ -52,7 +72,7 @@ impl GraphViz for MirQuery {
                 "\"{}\" [label=\"{{ {} | {} }}\"]",
                 vn,
                 vn,
-                n.borrow().to_graphviz(),
+                Sanitized(n.borrow().to_graphviz()),
             )?;
 
             for child in n.borrow().children.iter() {
