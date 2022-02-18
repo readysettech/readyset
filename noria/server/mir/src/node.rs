@@ -1,16 +1,18 @@
 use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::{Debug, Display, Error, Formatter};
+use std::mem;
 use std::rc::Rc;
 
 use dataflow::ops;
 use dataflow::prelude::ReadySetError;
-use node_inner::MirNodeInner;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{ColumnSpecification, SqlIdentifier};
 use noria_errors::{internal, internal_err, ReadySetResult};
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 
+pub use self::node_inner::MirNodeInner;
 use crate::column::Column;
 use crate::{FlowNode, MirNodeRef, MirNodeWeakRef};
 
@@ -153,26 +155,29 @@ impl MirNode {
         have_all_columns && self.inner.can_reuse_as(&for_node.inner)
     }
 
-    // currently unused
-    #[allow(dead_code)]
+    /// Add a new MIR node to the set of ancestors for this node.
+    ///
+    /// Note that this does *not* add this node to the set of children for that node - that is the
+    /// responsibility of the caller!
     pub fn add_ancestor(&mut self, a: MirNodeRef) {
         self.ancestors.push(MirNodeRef::downgrade(&a))
     }
 
     pub fn remove_ancestor(&mut self, a: MirNodeRef) {
-        match self
+        if let Some(idx) = self
             .ancestors
             .iter()
             .map(|n| n.upgrade().unwrap())
             .position(|x| x.borrow().versioned_name() == a.borrow().versioned_name())
         {
-            None => (),
-            Some(idx) => {
-                self.ancestors.remove(idx);
-            }
+            self.ancestors.remove(idx);
         }
     }
 
+    /// Add a new MIR node to the set of children for this node.
+    ///
+    /// Note that this does *not* add this node to the set of ancestors for that node - that is the
+    /// responsibility of the caller!
     pub fn add_child(&mut self, c: MirNodeRef) {
         self.children.push(c)
     }
@@ -188,6 +193,57 @@ impl MirNode {
                 self.children.remove(idx);
             }
         }
+    }
+
+    /// Remove the given MIR node from the graph, replacing all references its children have to it
+    /// with references to its own ancestors
+    ///
+    /// This cannot be called on any node with more than 1 parent.
+    pub fn remove(node: MirNodeRef) {
+        assert_eq!(node.borrow().ancestors().len(), 1);
+        let ancestor = node
+            .borrow()
+            .ancestors()
+            .first()
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        ancestor.borrow_mut().remove_child(node.clone());
+        for child in node.borrow().children() {
+            child.borrow_mut().remove_ancestor(node.clone());
+            child.borrow_mut().add_ancestor(ancestor.clone());
+            ancestor.borrow_mut().add_child(child.clone())
+        }
+
+        node.borrow_mut().children = vec![];
+        node.borrow_mut().ancestors = vec![];
+    }
+
+    /// Insert the `child` node as a new child between `node` and its children
+    ///
+    /// For example, if we have:
+    ///
+    /// ```dot
+    /// node -> n_child_1
+    /// node -> n_child_2
+    /// ```
+    ///
+    /// After this function is called we will have:
+    ///
+    /// ```dot
+    /// node -> new_child
+    /// new_child -> n_child_1
+    /// new_child -> n_child_2
+    /// ```
+    pub fn splice_child_below(node: MirNodeRef, new_child: MirNodeRef) {
+        let old_children = mem::take(&mut node.borrow_mut().children);
+        for child in old_children {
+            child.borrow_mut().remove_ancestor(node.clone());
+            child.borrow_mut().add_ancestor(new_child.clone());
+            new_child.borrow_mut().add_child(child.clone());
+        }
+        node.borrow_mut().add_child(new_child.clone());
+        new_child.borrow_mut().add_ancestor(node);
     }
 
     /// Add a new column to the set of emitted columns for this node, and return the resulting index
@@ -426,6 +482,60 @@ impl MirNode {
             children: Default::default(),
             flow_node: self.flow_node.clone(),
         }
+    }
+
+    /// Return an iterator over all the transitive ancestors of this node in topological order
+    ///
+    /// This iterator will yield nodes children first, starting at the ancestors of this node (but
+    /// not including this node itself).
+    pub fn topo_ancestors(&self) -> TopoAncestors {
+        TopoAncestors {
+            queue: self
+                .ancestors()
+                .iter()
+                .map(|n| n.upgrade().unwrap())
+                .collect(),
+            in_edge_counts: Default::default(),
+        }
+    }
+
+    /// Return an iterator over all transitive root ancestors of this node (ancestor nodes which
+    /// themselves don't have parents).
+    pub fn root_ancestors(&self) -> impl Iterator<Item = MirNodeRef> {
+        self.topo_ancestors()
+            .filter(|n| n.borrow().ancestors().is_empty())
+    }
+}
+
+/// An iterator over the transitive ancestors of a node in a MIR graph. Constructed via the
+/// [`Node::topo_ancestors`] function
+pub struct TopoAncestors {
+    queue: VecDeque<MirNodeRef>,
+    in_edge_counts: HashMap<String, usize>,
+}
+
+impl Iterator for TopoAncestors {
+    type Item = MirNodeRef;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.queue.pop_front().map(|n| {
+            for parent in n.borrow().ancestors() {
+                let parent = parent.upgrade().unwrap();
+                let nd = parent.borrow().versioned_name();
+                let in_edges = if let Some(in_edges) = self.in_edge_counts.get(&nd) {
+                    *in_edges
+                } else {
+                    parent.borrow().children().len()
+                };
+
+                assert!(in_edges >= 1, "{} has no incoming edges!", nd);
+                if in_edges == 1 {
+                    self.queue.push_back(parent.clone());
+                }
+                self.in_edge_counts.insert(nd, in_edges - 1);
+            }
+            n
+        })
     }
 }
 

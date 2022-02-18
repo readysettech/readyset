@@ -4,6 +4,8 @@ CREATE TABLE users (
     deleted_at datetime default null
 );
 
+# Uncorrellated
+
 statement ok
 CREATE TABLE posts (
     id int primary key,
@@ -29,6 +31,7 @@ where exists (select id from posts where title = 'test1');
 statement ok
 insert into posts (id, title) values (1, 'test2');
 
+
 query I nosort
 select id from users
 where exists (select id from posts where title = 'test1');
@@ -42,3 +45,27 @@ select id from users
 where exists (select id from posts where title = 'test1');
 ----
 1
+
+# Correlated
+
+statement ok
+CREATE TABLE votes (
+    user_id int,
+    post_id int
+);
+
+query I nosort
+SELECT id FROM posts
+WHERE promoted = 1
+AND EXISTS (
+    SELECT id FROM votes
+    JOIN users ON votes.user_id = users.id
+    WHERE posts.author_id = users.id
+    AND votes.post_id = posts.id
+    AND deleted_at IS NULL
+)
+AND author_id = ?;
+? = 1
+----
+
+graphviz

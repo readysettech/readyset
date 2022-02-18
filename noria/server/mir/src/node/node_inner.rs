@@ -424,6 +424,13 @@ impl MirNodeInner {
             _ => unimplemented!(),
         }
     }
+
+    /// Returns `true` if self is a [`DependentJoin`].
+    ///
+    /// [`DependentJoin`]: MirNodeInner::DependentJoin
+    pub fn is_dependent_join(&self) -> bool {
+        matches!(self, Self::DependentJoin { .. })
+    }
 }
 
 impl Debug for MirNodeInner {

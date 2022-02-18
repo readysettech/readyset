@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::fmt::{Display, Error, Formatter};
 
 use nom_sql::SqlIdentifier;
-use noria::ReadySetResult;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 
@@ -36,7 +35,6 @@ impl MirQuery {
         }
     }
 
-    #[cfg(test)]
     pub fn topo_nodes(&self) -> Vec<MirNodeRef> {
         use std::collections::VecDeque;
 
@@ -69,15 +67,6 @@ impl MirQuery {
             }
         }
         nodes
-    }
-
-    /// Try to mutate our MirQuery in order to optimize it, for example by
-    /// merging certain nodes together, and return it.
-    /// Also return a list of any new nodes created so that the
-    /// caller can add them to any other internal representations.
-    pub fn optimize(mut self) -> ReadySetResult<MirQuery> {
-        super::rewrite::pull_required_base_columns(&mut self)?;
-        Ok(self)
     }
 }
 

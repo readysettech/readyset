@@ -29,3 +29,6 @@ noria-data = { path = "../../../noria/data" }
 # local deps
 common = { path = "../common", package = "noria-common" }
 dataflow = { path = "../dataflow", package = "noria-dataflow" }
+
+[dev-dependencies]
+readyset-logging = { path = "../../../readyset-logging" }
