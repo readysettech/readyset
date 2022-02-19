@@ -1406,6 +1406,30 @@ impl DataflowState {
 
         dmp.apply(self).await
     }
+
+    /// This method is a hack to make sure the [`ControllerState`] "persisted" in the
+    /// [`LocalAuthority`] is stored similarly to the way it would be, if it were serialized and
+    /// then deserailized, but without paying the extreme performance penalty actually serializing
+    /// it costs. Esentially we either clear or assign defaults to the fields that are marked as
+    /// #[serde::skip], thus making sure things are consistent whever they are stored after
+    /// serialization or after this method is applied.
+    /// If called prior to serialization or after desiarialization this would effectively be a noop,
+    /// so don't bother calling it in authorities that serialize.
+    pub(crate) fn touch_up(&mut self) {
+        self.domains = Default::default();
+        self.channel_coordinator = Default::default();
+        self.read_addrs = Default::default();
+        self.workers = Default::default();
+
+        let mut new_materializations = Materializations::new();
+        new_materializations.paths = self.materializations.paths.clone();
+        new_materializations.redundant_partial = self.materializations.redundant_partial.clone();
+        new_materializations.tag_generator = self.materializations.tag_generator;
+        new_materializations.config = self.materializations.config.clone();
+        new_materializations.pending_recovery = true;
+
+        self.materializations = new_materializations;
+    }
 }
 
 /// This structure acts as a wrapper for a [`DataflowStateReader`] in order to guarantee
@@ -1529,16 +1553,21 @@ impl DataflowStateHandle {
             state: writer.state,
         };
         authority
-            .update_controller_state(|state: Option<ControllerState>| match state {
-                None => {
-                    eprintln!("There's no controller state to update");
-                    Err(())
-                }
-                Some(mut state) => {
-                    state.dataflow_state = persistable_ds.state.clone();
-                    Ok(state)
-                }
-            })
+            .update_controller_state(
+                |state: Option<ControllerState>| match state {
+                    None => {
+                        eprintln!("There's no controller state to update");
+                        Err(())
+                    }
+                    Some(mut state) => {
+                        state.dataflow_state = persistable_ds.state.clone();
+                        Ok(state)
+                    }
+                },
+                |state: &mut ControllerState| {
+                    state.dataflow_state.touch_up();
+                },
+            )
             .await
             .map_err(|e| internal_err(format!("Unable to update state: {}", e)))?
             .map_err(|_| internal_err("Unable to update state"))?;

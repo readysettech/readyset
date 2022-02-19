@@ -130,22 +130,22 @@ pub(in crate::controller) struct Materializations {
 
     /// A list of replay paths for each node, indexed by tag.
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
-    paths: HashMap<NodeIndex, HashMap<Tag, Vec<NodeIndex>>>,
+    pub(in crate::controller) paths: HashMap<NodeIndex, HashMap<Tag, Vec<NodeIndex>>>,
 
     /// Map of full nodes that are duplicates of partial nodes. Entries are added when we perform
     /// rerouting of full nodes found below partial nodes in migration planning.
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
-    redundant_partial: HashMap<NodeIndex, NodeIndex>,
+    pub(in crate::controller) redundant_partial: HashMap<NodeIndex, NodeIndex>,
 
     // Skipping this field as we will rebuild the [`Materializations`] state
     // upon recovery.
     #[serde(skip)]
     partial: HashSet<NodeIndex>,
 
-    tag_generator: usize,
+    pub(in crate::controller) tag_generator: usize,
 
     #[serde(skip, default = "get_pending_recovery")]
-    pending_recovery: bool,
+    pub(in crate::controller) pending_recovery: bool,
 
     pub(crate) config: Config,
 }

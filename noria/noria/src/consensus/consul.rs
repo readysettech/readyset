@@ -817,9 +817,14 @@ impl AuthorityControl for ConsulAuthority {
     /// Updates the controller state only if we are the leader. This is guaranteed by holding a
     /// session that locks both the leader key and the state key. If the leader session dies
     /// both locks will be released.
-    async fn update_controller_state<F, P, E>(&self, mut f: F) -> Result<Result<P, E>, Error>
+    async fn update_controller_state<F, U, P, E>(
+        &self,
+        mut f: F,
+        _: U,
+    ) -> Result<Result<P, E>, Error>
     where
         F: Send + FnMut(Option<P>) -> Result<P, E>,
+        U: Send,
         P: Send + Serialize + DeserializeOwned,
         E: Send,
     {
@@ -1290,15 +1295,18 @@ mod tests {
         assert_eq!(
             0,
             authority
-                .update_controller_state(|n: Option<u32>| -> Result<u32, ()> {
-                    match n {
-                        None => Ok(0),
-                        Some(mut n) => Ok({
-                            n += 1;
-                            n
-                        }),
-                    }
-                })
+                .update_controller_state(
+                    |n: Option<u32>| -> Result<u32, ()> {
+                        match n {
+                            None => Ok(0),
+                            Some(mut n) => Ok({
+                                n += 1;
+                                n
+                            }),
+                        }
+                    },
+                    |_| {}
+                )
                 .await
                 .unwrap()
                 .unwrap()
@@ -1308,15 +1316,18 @@ mod tests {
         authority_new.init().await.unwrap();
 
         assert!(authority_new
-            .update_controller_state(|n: Option<u32>| -> Result<u32, ()> {
-                match n {
-                    None => Ok(40),
-                    Some(mut n) => Ok({
-                        n += 1;
-                        n
-                    }),
-                }
-            })
+            .update_controller_state(
+                |n: Option<u32>| -> Result<u32, ()> {
+                    match n {
+                        None => Ok(40),
+                        Some(mut n) => Ok({
+                            n += 1;
+                            n
+                        }),
+                    }
+                },
+                |_| ()
+            )
             .await
             .is_err());
 
@@ -1335,15 +1346,18 @@ mod tests {
         assert_eq!(
             1,
             authority_new
-                .update_controller_state(|n: Option<u32>| -> Result<u32, ()> {
-                    match n {
-                        None => Ok(0),
-                        Some(mut n) => Ok({
-                            n += 1;
-                            n
-                        }),
-                    }
-                })
+                .update_controller_state(
+                    |n: Option<u32>| -> Result<u32, ()> {
+                        match n {
+                            None => Ok(0),
+                            Some(mut n) => Ok({
+                                n += 1;
+                                n
+                            }),
+                        }
+                    },
+                    |_| ()
+                )
                 .await
                 .unwrap()
                 .unwrap()
@@ -1574,17 +1588,20 @@ mod tests {
             // Varies from 1-3 chunks with MessagePack + zlib compression.
             last_bytes = Some(
                 authority
-                    .update_controller_state(move |n: Option<String>| -> Result<String, ()> {
-                        assert_eq!(n, last_bytes);
+                    .update_controller_state(
+                        move |n: Option<String>| -> Result<String, ()> {
+                            assert_eq!(n, last_bytes);
 
-                        let mut rng = thread_rng();
-                        let length = rng.gen_range(0..CHUNK_SIZE * 3);
-                        Ok(iter::repeat(())
-                            .map(|()| rng.sample(Alphanumeric))
-                            .map(char::from)
-                            .take(length)
-                            .collect())
-                    })
+                            let mut rng = thread_rng();
+                            let length = rng.gen_range(0..CHUNK_SIZE * 3);
+                            Ok(iter::repeat(())
+                                .map(|()| rng.sample(Alphanumeric))
+                                .map(char::from)
+                                .take(length)
+                                .collect())
+                        },
+                        |_| {},
+                    )
                     .await
                     .unwrap()
                     .unwrap(),

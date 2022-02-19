@@ -149,10 +149,17 @@ pub trait AuthorityControl: Send + Sync {
     /// and finally a write back to the node if it hasn't changed from when it was originally
     /// written. The process aborts when a write succeeds or a call to `f` returns `Err`. In either
     /// case, returns the last value produced by `f`.
-    async fn update_controller_state<F, P, E>(&self, f: F) -> Result<Result<P, E>, Error>
+    /// In addition some implementors of the trait may apply the method `u` to the stored copy of
+    /// the value only.
+    async fn update_controller_state<F, U, P: 'static, E>(
+        &self,
+        f: F,
+        u: U,
+    ) -> Result<Result<P, E>, Error>
     where
         F: Send + FnMut(Option<P>) -> Result<P, E>,
-        P: Send + Serialize + DeserializeOwned,
+        U: Send + FnMut(&mut P),
+        P: Send + Serialize + DeserializeOwned + Clone,
         E: Send;
 
     /// Register an adapters http port.
