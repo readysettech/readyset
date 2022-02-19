@@ -12,6 +12,7 @@
 //! The LocalAuthority supports ephemeral keys, instead of tying these keys to
 //! an active session similar to Zookeeper, the authority will drop ephemeral
 //! keys it created when it is dropped.
+use std::any::Any;
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::SocketAddr;
@@ -29,10 +30,10 @@ use super::{
 };
 
 pub const CONTROLLER_KEY: &str = "/controller";
-pub const STATE_KEY: &str = "/state";
 pub const WORKER_PATH: &str = "/workers";
 
 struct LocalAuthorityStoreInner {
+    state: Option<Box<dyn Any + Send>>,
     keys: BTreeMap<String, Vec<u8>>,
     leader_epoch: u64,
     next_worker_id: u64,
@@ -65,6 +66,7 @@ impl LocalAuthorityStore {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(LocalAuthorityStoreInner {
+                state: None,
                 keys: BTreeMap::default(),
                 leader_epoch: 0,
                 next_worker_id: 0,
@@ -324,25 +326,30 @@ impl AuthorityControl for LocalAuthority {
         Ok(r)
     }
 
-    // The controller state, unlike other keys, is serialized using MessagePack and compressed.
-    async fn update_controller_state<F, P, E>(&self, mut f: F) -> Result<Result<P, E>, Error>
+    async fn update_controller_state<F, U, P: 'static, E>(
+        &self,
+        mut f: F,
+        mut u: U,
+    ) -> Result<Result<P, E>, Error>
     where
         F: Send + FnMut(Option<P>) -> Result<P, E>,
-        P: Send + Serialize + DeserializeOwned,
+        U: Send + FnMut(&mut P),
+        P: Send + Serialize + DeserializeOwned + Clone,
         E: Send,
     {
         let mut store_inner = self.store.inner_lock()?;
 
-        let r = f(store_inner.keys.get(STATE_KEY).and_then(|data| {
-            let compr = cloudflare_zlib::inflate(data).ok();
-            compr.and_then(|data| rmp_serde::from_slice(&data).ok())
-        }));
+        let r = f(store_inner
+            .state
+            .as_ref()
+            .and_then(|data| data.downcast_ref::<P>().map(Clone::clone)));
 
         if let Ok(ref p) = r {
-            let val = rmp_serde::to_vec(&p)?;
-            let compressed = super::Compressor::compress(&val);
-            store_inner.keys.insert(STATE_KEY.to_owned(), compressed);
+            let mut p = Box::new(p.clone());
+            u(&mut p);
+            store_inner.state.replace(p);
         }
+
         Ok(r)
     }
 

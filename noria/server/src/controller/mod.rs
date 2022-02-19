@@ -692,6 +692,9 @@ impl AuthorityLeaderElectionState {
                             }
                         }
                     },
+                    |state: &mut ControllerState| {
+                        state.dataflow_state.touch_up();
+                    }
                 )
                 .await?;
             if state.is_err() {

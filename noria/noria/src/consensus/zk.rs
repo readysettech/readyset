@@ -341,9 +341,10 @@ impl AuthorityControl for ZookeeperAuthority {
         }
     }
 
-    async fn update_controller_state<F, P, E>(&self, f: F) -> Result<Result<P, E>, Error>
+    async fn update_controller_state<F, U, P, E>(&self, f: F, _: U) -> Result<Result<P, E>, Error>
     where
         F: Send + FnMut(Option<P>) -> Result<P, E>,
+        U: Send,
         P: Send + Serialize + DeserializeOwned,
         E: Send,
     {
