@@ -11,7 +11,7 @@ use test_strategy::Arbitrary;
 use crate::column::Column;
 use crate::select::SelectStatement;
 use crate::table::Table;
-use crate::Expression;
+use crate::{Expression, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum JoinRightSide {
@@ -20,7 +20,7 @@ pub enum JoinRightSide {
     /// A comma-separated (and implicitly joined) sequence of tables.
     Tables(Vec<Table>),
     /// A nested selection, represented as (query, alias).
-    NestedSelect(Box<SelectStatement>, String),
+    NestedSelect(Box<SelectStatement>, SqlIdentifier),
 }
 
 impl fmt::Display for JoinRightSide {

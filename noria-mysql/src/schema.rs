@@ -144,8 +144,8 @@ pub(crate) fn convert_column(
     }
 
     Ok(msql_srv::Column {
-        table: col.column.table.clone().unwrap_or_default(),
-        column: col.column.name.clone(),
+        table: col.column.table.clone().unwrap_or_default().to_string(),
+        column: col.column.name.to_string(),
         coltype,
         colflags,
     })

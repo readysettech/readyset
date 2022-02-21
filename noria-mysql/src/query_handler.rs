@@ -2,7 +2,8 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use nom_sql::{
-    Column, ColumnSpecification, Expression, FieldDefinitionExpression, SqlQuery, SqlType,
+    Column, ColumnSpecification, Expression, FieldDefinitionExpression, SqlIdentifier, SqlQuery,
+    SqlType,
 };
 use noria::results::Results;
 use noria::ColumnSchema;
@@ -48,7 +49,8 @@ impl QueryHandler for MySqlQueryHandler {
                     } if var.as_non_user_var() == Some(MAX_ALLOWED_PACKET_VARIABLE_NAME))
                 }) =>
             {
-                let field_name = format!("@@{}", MAX_ALLOWED_PACKET_VARIABLE_NAME);
+                let field_name: SqlIdentifier =
+                    format!("@@{}", MAX_ALLOWED_PACKET_VARIABLE_NAME).into();
                 (
                     vec![Results::new(
                         vec![vec![MAX_ALLOWED_PACKET_DEFAULT]],

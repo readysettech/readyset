@@ -6,6 +6,8 @@
 #[macro_use]
 extern crate pretty_assertions;
 
+pub use sql_identifier::SqlIdentifier;
+
 pub use self::column::{Column, ColumnConstraint, ColumnSpecification};
 pub use self::common::{
     Double, FieldDefinitionExpression, Float, ItemPlaceholder, Literal, SqlType, TableKey,
@@ -61,6 +63,7 @@ mod rename;
 mod select;
 mod set;
 mod show;
+mod sql_identifier;
 mod table;
 mod transaction;
 mod update;

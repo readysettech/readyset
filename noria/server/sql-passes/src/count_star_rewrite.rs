@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
 use nom_sql::analysis::visit::{walk_select_statement, Visitor};
-use nom_sql::{Column, Expression, FunctionExpression, SelectStatement, SqlQuery, Table};
+use nom_sql::{
+    Column, Expression, FunctionExpression, SelectStatement, SqlIdentifier, SqlQuery, Table,
+};
 use noria_errors::{internal_err, ReadySetError, ReadySetResult};
 
 #[derive(Debug)]
 pub struct CountStarRewriteVisitor<'schema> {
-    schemas: &'schema HashMap<String, Vec<String>>,
+    schemas: &'schema HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
     tables: Option<Vec<Table>>,
 }
 
@@ -62,14 +64,14 @@ impl<'ast, 'schema> Visitor<'ast> for CountStarRewriteVisitor<'schema> {
 pub trait CountStarRewrite: Sized {
     fn rewrite_count_star(
         self,
-        write_schemas: &HashMap<String, Vec<String>>,
+        write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<Self>;
 }
 
 impl CountStarRewrite for SqlQuery {
     fn rewrite_count_star(
         self,
-        write_schemas: &HashMap<String, Vec<String>>,
+        write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<SqlQuery> {
         match self {
             SqlQuery::Select(mut sq) => {
@@ -165,8 +167,8 @@ mod tests {
     fn nested_in_expression() {
         let q = parse_query(Dialect::MySQL, "SELECT COUNT(*) + 1 FROM users;").unwrap();
         let schema = HashMap::from([(
-            "users".to_owned(),
-            vec!["id".to_owned(), "name".to_owned(), "age".to_owned()],
+            "users".into(),
+            vec!["id".into(), "name".into(), "age".into()],
         )]);
 
         let res = q.rewrite_count_star(&schema).unwrap();

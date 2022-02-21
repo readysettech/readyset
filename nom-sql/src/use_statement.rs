@@ -5,18 +5,16 @@ use nom::character::complete::multispace1;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 
-use crate::Dialect;
+use crate::{Dialect, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct UseStatement {
-    pub database: String,
+    pub database: SqlIdentifier,
 }
 
 impl UseStatement {
-    fn from_database(database: impl Into<String>) -> Self {
-        Self {
-            database: database.into(),
-        }
+    fn from_database(database: SqlIdentifier) -> Self {
+        Self { database }
     }
 }
 
@@ -57,9 +55,9 @@ mod tests {
         let res4 = use_statement(Dialect::MySQL)(qstring4.as_bytes())
             .unwrap()
             .1;
-        assert_eq!(res1, UseStatement::from_database("db1"));
-        assert_eq!(res2, UseStatement::from_database("db2"));
-        assert_eq!(res3, UseStatement::from_database("test"));
-        assert_eq!(res4, UseStatement::from_database("noria"));
+        assert_eq!(res1, UseStatement::from_database("db1".into()));
+        assert_eq!(res2, UseStatement::from_database("db2".into()));
+        assert_eq!(res3, UseStatement::from_database("test".into()));
+        assert_eq!(res4, UseStatement::from_database("noria".into()));
     }
 }

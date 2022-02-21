@@ -47,7 +47,7 @@ impl<'a> TryFrom<NoriaSchema<'a>> for Vec<ps::Column> {
         s.0.iter()
             .map(|c| {
                 Ok(ps::Column {
-                    name: c.spec.column.name.clone(),
+                    name: c.spec.column.name.to_string(),
                     col_type: type_to_pgsql(&c.spec.sql_type)?,
                 })
             })

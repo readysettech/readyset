@@ -7,7 +7,7 @@ use mir::node::node_inner::MirNodeInner;
 use mir::{Column, MirNodeRef};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::FunctionExpression::*;
-use nom_sql::{self, Expression, FieldDefinitionExpression, SelectStatement};
+use nom_sql::{self, Expression, FieldDefinitionExpression, SelectStatement, SqlIdentifier};
 use noria_errors::{unsupported, ReadySetError};
 use noria_sql_passes::is_aggregate;
 
@@ -19,9 +19,9 @@ use crate::ReadySetResult;
 // Move predicates above grouped_by nodes
 pub(super) fn make_predicates_above_grouped<'a>(
     mir_converter: &SqlToMirConverter,
-    name: &str,
+    name: &SqlIdentifier,
     qg: &QueryGraph,
-    node_for_rel: &HashMap<&str, MirNodeRef>,
+    node_for_rel: &HashMap<&SqlIdentifier, MirNodeRef>,
     node_count: usize,
     column_to_predicates: &HashMap<Column, Vec<&'a Expression>>,
     prev_node: &mut Option<MirNodeRef>,
@@ -35,8 +35,7 @@ pub(super) fn make_predicates_above_grouped<'a>(
             let over_table = over_col
                 .table
                 .as_ref()
-                .ok_or_else(|| ReadySetError::NoSuchColumn(over_col.name.clone()))?
-                .as_str();
+                .ok_or_else(|| ReadySetError::NoSuchColumn(over_col.name.to_string()))?;
             let col = Column::from(over_col.clone());
 
             if column_to_predicates.contains_key(&col) {
@@ -46,7 +45,7 @@ pub(super) fn make_predicates_above_grouped<'a>(
                 };
 
                 let new_mpns = mir_converter.predicates_above_group_by(
-                    &format!("{}_n{}", name, node_count),
+                    &format!("{}_n{}", name, node_count).into(),
                     column_to_predicates,
                     col,
                     parent,
@@ -79,7 +78,7 @@ pub(super) fn make_expressions_above_grouped(
     qg: &QueryGraph,
     node_count: usize,
     prev_node: &mut Option<MirNodeRef>,
-) -> HashMap<Expression, String> {
+) -> HashMap<Expression, SqlIdentifier> {
     let exprs: Vec<_> = qg
         .aggregates
         .iter()
@@ -88,14 +87,14 @@ pub(super) fn make_expressions_above_grouped(
         .flat_map(|f| f.arguments())
         // We don't need to do any work for bare column expressions
         .filter(|arg| !matches!(arg, Expression::Column(_)))
-        .map(|expr| (expr.to_string(), expr.clone()))
+        .map(|expr| (SqlIdentifier::from(expr.to_string()), expr.clone()))
         .collect();
 
     if !exprs.is_empty() {
         let cols = prev_node.as_ref().unwrap().borrow().columns.to_vec();
 
         let node = mir_converter.make_project_node(
-            &format!("{}_n{}", name, node_count),
+            &format!("{}_n{}", name, node_count).into(),
             prev_node.clone().unwrap(),
             cols.iter().collect(),
             exprs.clone(),
@@ -111,12 +110,12 @@ pub(super) fn make_expressions_above_grouped(
 
 pub(super) fn make_grouped(
     mir_converter: &SqlToMirConverter,
-    name: &str,
+    name: &SqlIdentifier,
     qg: &QueryGraph,
-    node_for_rel: &HashMap<&str, MirNodeRef>,
+    node_for_rel: &HashMap<&SqlIdentifier, MirNodeRef>,
     node_count: usize,
     prev_node: &mut Option<MirNodeRef>,
-    projected_exprs: &HashMap<Expression, String>,
+    projected_exprs: &HashMap<Expression, SqlIdentifier>,
 ) -> ReadySetResult<Vec<MirNodeRef>> {
     let mut agg_nodes: Vec<MirNodeRef> = Vec::new();
     let mut node_count = node_count;
@@ -136,14 +135,14 @@ pub(super) fn make_grouped(
                 // If we don't have a parent node yet, that means no joins or unions can
                 // have happened yet, which means there *must* only be one table referred in
                 // the aggregate expression. Let's just take the first.
-                node_for_rel[over_cols.peek().unwrap().table.as_ref().unwrap().as_str()].clone()
+                node_for_rel[over_cols.peek().unwrap().table.as_ref().unwrap()].clone()
             }
             // We have an explicit parent node (likely a projection
             // helper), so use that
             Some(ref node) => node.clone(),
         };
 
-        let name = &format!("{}_n{}", name, node_count);
+        let name = format!("{}_n{}", name, node_count).into();
 
         let (parent_node, group_cols) = if !qg.group_by.is_empty() {
             // get any parameter columns that aren't also in the group-by
@@ -208,7 +207,7 @@ pub(super) fn make_grouped(
                 // table on which we compute has no projected columns in the
                 // output, we make one up a group column by adding an extra
                 // projection node
-                let proj_name = format!("{}_prj_hlpr", name);
+                let proj_name = format!("{}_prj_hlpr", name).into();
                 let fn_cols: Vec<_> = function
                     .referred_columns()
                     .map(|c| Column::from(c.clone()))
@@ -232,7 +231,7 @@ pub(super) fn make_grouped(
         };
 
         let nodes: Vec<MirNodeRef> = mir_converter.make_aggregate_node(
-            name,
+            &name,
             Column::named(alias.clone()),
             function.clone(),
             group_cols.iter().collect(),

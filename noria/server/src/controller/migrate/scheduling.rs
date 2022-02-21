@@ -130,7 +130,7 @@ impl<'state> Scheduler<'state> {
                     self.dataflow_state
                         .node_restrictions
                         .get(&NodeRestrictionKey {
-                            node_name: node_name.into(),
+                            node_name: node_name.clone(),
                             shard,
                         })
                 })

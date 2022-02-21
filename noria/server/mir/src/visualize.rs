@@ -84,7 +84,7 @@ impl GraphViz for MirNode {
             self.columns
                 .iter()
                 .map(|c| match c.table {
-                    None => c.name.clone(),
+                    None => c.name.to_string(),
                     Some(ref t) => format!("{}.{}", t, c.name),
                 })
                 .collect::<Vec<_>>()
@@ -97,7 +97,7 @@ impl GraphViz for MirNodeInner {
     fn graphviz_fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let print_col = |c: &Column| -> String {
             match c.table {
-                None => c.name.clone(),
+                None => c.name.to_string(),
                 Some(ref t) => format!("{}.{}", t, c.name),
             }
         };

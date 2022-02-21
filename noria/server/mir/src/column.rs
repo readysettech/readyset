@@ -1,15 +1,15 @@
 use std::cmp::Ordering;
 use std::mem;
 
-use nom_sql::{self, FunctionExpression};
+use nom_sql::{self, FunctionExpression, SqlIdentifier};
 use serde::{Deserialize, Serialize};
 
 // FIXME: this is _not_ okay! malte knows about it
 #[allow(clippy::derive_hash_xor_eq)]
 #[derive(Clone, Debug, Hash, Serialize, Deserialize)]
 pub struct Column {
-    pub table: Option<String>,
-    pub name: String,
+    pub table: Option<SqlIdentifier>,
+    pub name: SqlIdentifier,
     pub function: Option<Box<FunctionExpression>>,
     pub aliases: Vec<Column>,
 }
@@ -17,16 +17,16 @@ pub struct Column {
 impl Column {
     pub fn new(table: Option<&str>, name: &str) -> Self {
         Column {
-            table: table.map(ToOwned::to_owned),
-            name: name.to_owned(),
+            table: table.map(Into::into),
+            name: name.into(),
             function: None,
             aliases: vec![],
         }
     }
 
-    pub fn named<N>(name: N) -> Self
+    pub fn named<S>(name: S) -> Self
     where
-        N: Into<String>,
+        S: Into<SqlIdentifier>,
     {
         Self {
             table: None,
@@ -41,7 +41,7 @@ impl Column {
     }
 
     #[must_use]
-    pub fn aliased_as(mut self, alias: String) -> Self {
+    pub fn aliased_as(mut self, alias: SqlIdentifier) -> Self {
         let name = mem::replace(&mut self.name, alias);
         self.aliases.push(Column {
             name,
@@ -56,7 +56,7 @@ impl Column {
 impl From<nom_sql::Column> for Column {
     fn from(c: nom_sql::Column) -> Column {
         Column {
-            table: c.table,
+            table: c.table.map(Into::into),
             aliases: vec![],
             name: c.name,
             function: None,
@@ -67,8 +67,8 @@ impl From<nom_sql::Column> for Column {
 impl<'a> From<&'a nom_sql::Column> for Column {
     fn from(c: &'a nom_sql::Column) -> Column {
         Column {
+            table: c.table.as_deref().map(Into::into),
             aliases: vec![],
-            table: c.table.clone(),
             name: c.name.clone(),
             function: None,
         }
@@ -81,13 +81,13 @@ impl<'a> From<&'a str> for Column {
         match c.find('.') {
             None => Column {
                 table: None,
-                name: String::from(c),
+                name: c.into(),
                 function: None,
                 aliases: vec![],
             },
             Some(i) => Column {
-                name: String::from(&c[i + 1..]),
-                table: Some(String::from(&c[0..i])),
+                name: c[i + 1..].into(),
+                table: Some(c[0..i].into()),
                 function: None,
                 aliases: vec![],
             },
@@ -105,7 +105,7 @@ impl PartialEq for Column {
 
 impl PartialEq<nom_sql::Column> for Column {
     fn eq(&self, other: &nom_sql::Column) -> bool {
-        (self.name == other.name && self.table == other.table)
+        (self.name == other.name && self.table.as_deref() == other.table.as_deref())
             || self.aliases.iter().any(|c| c == other)
     }
 }

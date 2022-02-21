@@ -32,6 +32,7 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::FutureExt;
 use lazy_static::lazy_static;
 use metrics::{gauge, histogram};
+use nom_sql::SqlIdentifier;
 use noria::builders::{ReplicaShard, TableBuilder, ViewBuilder, ViewReplica};
 use noria::consensus::{Authority, AuthorityControl};
 use noria::debug::info::{DomainKey, GraphInfo};
@@ -198,7 +199,7 @@ impl DataflowState {
     ///
     /// Input nodes are here all nodes of type `Table`. The addresses returned by this function will
     /// all have been returned as a key in the map from `commit` at some point in the past.
-    pub(super) fn inputs(&self) -> BTreeMap<String, NodeIndex> {
+    pub(super) fn inputs(&self) -> BTreeMap<SqlIdentifier, NodeIndex> {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -209,7 +210,7 @@ impl DataflowState {
                     None
                 } else {
                     assert!(base.is_base());
-                    Some((base.name().to_owned(), n))
+                    Some((base.name().clone(), n))
                 }
             })
             .collect()
@@ -220,7 +221,7 @@ impl DataflowState {
     ///
     /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
     /// to calling `.maintain` or `.stream` for a node during a migration.
-    pub(super) fn outputs(&self) -> BTreeMap<String, NodeIndex> {
+    pub(super) fn outputs(&self) -> BTreeMap<SqlIdentifier, NodeIndex> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -240,7 +241,7 @@ impl DataflowState {
     ///
     /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
     /// to calling `.maintain` or `.stream` for a node during a migration
-    pub(super) fn verbose_outputs(&self) -> BTreeMap<String, nom_sql::SqlQuery> {
+    pub(super) fn verbose_outputs(&self) -> BTreeMap<SqlIdentifier, nom_sql::SqlQuery> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -265,7 +266,7 @@ impl DataflowState {
     pub(super) fn find_readers_for(
         &self,
         node: NodeIndex,
-        name: &str,
+        name: &SqlIdentifier,
         filter: &Option<ViewFilter>,
     ) -> Vec<NodeIndex> {
         // reader should be a child of the given node. however, due to sharding, it may not be an
@@ -310,13 +311,13 @@ impl DataflowState {
     ) -> Result<Option<ViewBuilder>, ReadySetError> {
         // first try to resolve the node via the recipe, which handles aliasing between identical
         // queries.
-        let name = view_req.name.as_str();
-        let node = match self.recipe.node_addr_for(name) {
+        let name = view_req.name;
+        let node = match self.recipe.node_addr_for(&name) {
             Ok(ni) => ni,
             Err(_) => {
                 // if the recipe doesn't know about this query, traverse the graph.
                 // we need this do deal with manually constructed graphs (e.g., in tests).
-                if let Some(res) = self.outputs().get(name) {
+                if let Some(res) = self.outputs().get(&name) {
                     *res
                 } else {
                     return Ok(None);
@@ -324,8 +325,8 @@ impl DataflowState {
             }
         };
 
-        let name = match self.recipe.resolve_alias(name) {
-            None => name,
+        let name = match self.recipe.resolve_alias(&name) {
+            None => &name,
             Some(alias) => alias,
         };
 
@@ -398,9 +399,9 @@ impl DataflowState {
         }
 
         Ok(Some(ViewBuilder {
-            name: name.to_owned(),
+            name: name.clone(),
             replicas: Vec1::try_from_vec(replicas)
-                .map_err(|_| ReadySetError::ViewNotFound(view_req.name))?,
+                .map_err(|_| ReadySetError::ViewNotFound(name.to_string()))?,
             view_request_timeout: self.domain_config.view_request_timeout,
         }))
     }
@@ -450,7 +451,7 @@ impl DataflowState {
     /// Obtain a TableBuilder that can be used to construct a Table to perform writes and deletes
     /// from the given named base node.
     pub(super) fn table_builder(&self, base: &str) -> ReadySetResult<Option<TableBuilder>> {
-        let ni = match self.recipe.node_addr_for(base) {
+        let ni = match self.recipe.node_addr_for(&base.into()) {
             Ok(ni) => ni,
             Err(_) => *self
                 .inputs()
@@ -507,7 +508,7 @@ impl DataflowState {
         let base_operator = node
             .get_base()
             .ok_or_else(|| internal_err("asked to get table for non-base node"))?;
-        let columns: Vec<String> = node
+        let columns: Vec<SqlIdentifier> = node
             .fields()
             .iter()
             .enumerate()
@@ -536,7 +537,7 @@ impl DataflowState {
             key,
             key_is_primary: is_primary,
             dropped: base_operator.get_dropped(),
-            table_name: node.name().to_owned(),
+            table_name: node.name().clone(),
             columns,
             schema,
             table_request_timeout: self.domain_config.table_request_timeout,
@@ -634,8 +635,8 @@ impl DataflowState {
                             })?;
                             #[allow(clippy::indexing_slicing)] // internal invariant
                             let table_name = self.ingredients[*ni].name();
-                            acc.tables.insert(table_name.to_owned(), offset); // TODO min of all
-                                                                              // shards
+                            acc.tables.insert(table_name.clone(), offset); // TODO min of all
+                                                                           // shards
                         }
                     }
                     Ok(acc)
@@ -667,7 +668,7 @@ impl DataflowState {
     }
 
     /// Returns a list of all table names that are currently involved in snapshotting.
-    pub(super) async fn snapshotting_tables(&self) -> ReadySetResult<HashSet<String>> {
+    pub(super) async fn snapshotting_tables(&self) -> ReadySetResult<HashSet<SqlIdentifier>> {
         let domains = self.domains_with_base_tables().await?;
 
         let table_indices: Vec<(DomainIndex, LocalNodeIndex)> = stream::iter(domains)
@@ -695,7 +696,7 @@ impl DataflowState {
 
         table_indices
             .iter()
-            .map(|(di, lni)| -> ReadySetResult<String> {
+            .map(|(di, lni)| -> ReadySetResult<SqlIdentifier> {
                 #[allow(clippy::indexing_slicing)] // just came from self.domains
                 let li = *self.domain_nodes[di].get(*lni).ok_or_else(|| {
                     internal_err(format!("Domain {} returned nonexistent node {}", di, lni))
@@ -703,7 +704,7 @@ impl DataflowState {
                 #[allow(clippy::indexing_slicing)] // internal invariant
                 let node = &self.ingredients[li];
                 debug_assert!(node.is_base());
-                Ok(node.name().to_owned())
+                Ok(node.name().clone())
             })
             .collect()
     }
@@ -782,7 +783,7 @@ impl DataflowState {
                 #[allow(clippy::indexing_slicing)] // just came out of self.ingredients
                 let child: &Node = &self.ingredients[child_index];
                 if let Some(r) = child.as_reader() {
-                    if r.is_for() == node_index && child.name() == query_name {
+                    if r.is_for() == node_index && *query_name == child.name() {
                         // Now the child is the reader node of the query we are looking at.
                         // Here, we extract its [`PostLookup`] and use it to create a new
                         // mirror node.

@@ -115,7 +115,7 @@ async fn write_meta_table<W: AsyncWrite + Unpin>(
         .iter()
         .map(|v| Column {
             table: "".to_owned(),
-            column: v.name.clone(),
+            column: v.name.to_string(),
             coltype: ColumnType::MYSQL_TYPE_STRING,
             colflags: ColumnFlags::empty(),
         })
@@ -154,7 +154,7 @@ async fn write_meta_variables<W: AsyncWrite + Unpin>(
     ];
     let mut writer = results.start(&cols).await?;
     for v in vars {
-        writer.write_col(v.name)?;
+        writer.write_col(v.name.as_str())?;
         writer.write_col(v.value)?;
         writer.end_row()?;
     }
@@ -344,7 +344,12 @@ where
                     // Now append the right position too
                     let column_map = mysql_schema
                         .iter()
-                        .map(|c| select_schema.columns.iter().position(|f| f == &c.column))
+                        .map(|c| {
+                            select_schema
+                                .columns
+                                .iter()
+                                .position(|f| c.column == f.as_str())
+                        })
                         .collect::<Vec<_>>();
 
                     drop(select_schema);
@@ -537,7 +542,11 @@ where
                 for resultsets in data {
                     for r in resultsets {
                         for c in &schema {
-                            match select_schema.columns.iter().position(|f| f == &c.column) {
+                            match select_schema
+                                .columns
+                                .iter()
+                                .position(|f| f.as_str() == c.column)
+                            {
                                 Some(coli) => {
                                     if let Err(e) = write_column(&mut rw, &r[coli], c).await {
                                         return handle_column_write_err(e, rw).await;

@@ -12,7 +12,8 @@ use ::serde::{Deserialize, Serialize};
 use nom_sql::analysis::ReferredTables;
 use nom_sql::{
     parser as sql_parser, BinaryOperator, CompoundSelectOperator, CompoundSelectStatement,
-    CreateTableStatement, FieldDefinitionExpression, SelectStatement, SqlQuery, Table,
+    CreateTableStatement, FieldDefinitionExpression, SelectStatement, SqlIdentifier, SqlQuery,
+    Table,
 };
 use noria::internal::IndexType;
 use noria_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
@@ -72,16 +73,16 @@ impl Default for Config {
 // crate viz for tests
 pub(crate) struct SqlIncorporator {
     mir_converter: SqlToMirConverter,
-    leaf_addresses: HashMap<String, NodeIndex>,
+    leaf_addresses: HashMap<SqlIdentifier, NodeIndex>,
 
-    named_queries: HashMap<String, u64>,
+    named_queries: HashMap<SqlIdentifier, u64>,
     query_graphs: HashMap<u64, QueryGraph>,
-    base_mir_queries: HashMap<String, MirQuery>,
+    base_mir_queries: HashMap<SqlIdentifier, MirQuery>,
     mir_queries: HashMap<u64, MirQuery>,
     num_queries: usize,
 
-    base_schemas: HashMap<String, CreateTableStatement>,
-    view_schemas: HashMap<String, Vec<String>>,
+    base_schemas: HashMap<SqlIdentifier, CreateTableStatement>,
+    view_schemas: HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
 
     pub(crate) config: Config,
 }
@@ -128,7 +129,7 @@ impl SqlIncorporator {
         name: Option<String>,
         mig: &mut Migration<'_>,
     ) -> Result<QueryFlowParts, ReadySetError> {
-        query.to_flow_parts(self, name, mig)
+        query.to_flow_parts(self, name.map(SqlIdentifier::from), mig)
     }
 
     /// Incorporates a single query into via the flow graph migration in `mig`. The `query`
@@ -141,7 +142,7 @@ impl SqlIncorporator {
     pub(super) fn add_parsed_query(
         &mut self,
         query: SqlQuery,
-        name: Option<String>,
+        name: Option<SqlIdentifier>,
         is_leaf: bool,
         mig: &mut Migration<'_>,
     ) -> Result<QueryFlowParts, ReadySetError> {
@@ -156,17 +157,19 @@ impl SqlIncorporator {
     }
 
     pub(super) fn get_view_schema(&self, name: &str) -> Option<Vec<String>> {
-        self.view_schemas.get(name).cloned()
+        self.view_schemas
+            .get(name)
+            .map(|s| s.iter().map(SqlIdentifier::to_string).collect())
     }
 
     #[cfg(test)]
-    fn get_flow_node_address(&self, name: &str, v: usize) -> Option<NodeIndex> {
+    fn get_flow_node_address(&self, name: &SqlIdentifier, v: usize) -> Option<NodeIndex> {
         self.mir_converter.get_flow_node_address(name, v)
     }
 
     /// Retrieves the flow node associated with a given query's leaf view.
     #[allow(unused)]
-    pub(super) fn get_query_address(&self, name: &str) -> Option<NodeIndex> {
+    pub(super) fn get_query_address(&self, name: &SqlIdentifier) -> Option<NodeIndex> {
         match self.leaf_addresses.get(name) {
             None => self.mir_converter.get_leaf(name),
             Some(na) => Some(*na),
@@ -437,7 +440,7 @@ impl SqlIncorporator {
 
     fn add_base_via_mir(
         &mut self,
-        query_name: &str,
+        query_name: &SqlIdentifier,
         stmt: CreateTableStatement,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<QueryFlowParts> {
@@ -455,7 +458,7 @@ impl SqlIncorporator {
         // on base table schema change, we will overwrite the existing schema here.
         // TODO(malte): this means that requests for this will always return the *latest* schema
         // for a base.
-        self.base_schemas.insert(query_name.to_owned(), stmt);
+        self.base_schemas.insert(query_name.clone(), stmt);
 
         self.register_query(query_name, None, &mir);
 
@@ -464,7 +467,7 @@ impl SqlIncorporator {
 
     fn add_compound_query(
         &mut self,
-        query_name: &str,
+        query_name: &SqlIdentifier,
         is_name_required: bool,
         query: &CompoundSelectStatement,
         is_leaf: bool,
@@ -477,7 +480,7 @@ impl SqlIncorporator {
             .map(|(i, sq)| {
                 Ok(self
                     .add_select_query(
-                        &format!("{}_csq_{}", query_name, i),
+                        &format!("{}_csq_{}", query_name, i).into(),
                         is_name_required,
                         &sq.1,
                         false,
@@ -505,7 +508,7 @@ impl SqlIncorporator {
 
     fn select_query_to_mir(
         &mut self,
-        query_name: &str,
+        query_name: &SqlIdentifier,
         is_name_required: bool,
         sq: &SelectStatement,
         is_leaf: bool,
@@ -554,14 +557,14 @@ impl SqlIncorporator {
     /// and MIR nodes that were added
     fn add_select_query(
         &mut self,
-        query_name: &str,
+        query_name: &SqlIdentifier,
         is_name_required: bool,
         sq: &SelectStatement,
         is_leaf: bool,
         mig: &mut Migration<'_>,
     ) -> Result<(QueryFlowParts, MirQuery), ReadySetError> {
         let on_err = |e| ReadySetError::SelectQueryCreationFailed {
-            qname: query_name.into(),
+            qname: query_name.to_string(),
             source: Box::new(e),
         };
 
@@ -578,7 +581,10 @@ impl SqlIncorporator {
         Ok((qfp, opt_mir))
     }
 
-    pub(super) fn remove_query(&mut self, query_name: &str) -> ReadySetResult<Option<NodeIndex>> {
+    pub(super) fn remove_query(
+        &mut self,
+        query_name: &SqlIdentifier,
+    ) -> ReadySetResult<Option<NodeIndex>> {
         let nodeid = self
             .leaf_addresses
             .remove(query_name)
@@ -613,7 +619,7 @@ impl SqlIncorporator {
         }
     }
 
-    pub(super) fn remove_base(&mut self, name: &str) -> ReadySetResult<()> {
+    pub(super) fn remove_base(&mut self, name: &SqlIdentifier) -> ReadySetResult<()> {
         debug!(%name, "Removing base from SqlIncorporator");
         if self.base_schemas.remove(name).is_none() {
             warn!(
@@ -639,7 +645,12 @@ impl SqlIncorporator {
         self.mir_converter.remove_base(name, &mir)
     }
 
-    fn register_query(&mut self, query_name: &str, qg: Option<QueryGraph>, mir: &MirQuery) {
+    fn register_query(
+        &mut self,
+        query_name: &SqlIdentifier,
+        qg: Option<QueryGraph>,
+        mir: &MirQuery,
+    ) {
         // TODO(malte): we currently need to remember these for local state, but should figure out
         // a better plan (see below)
         let fields = mir
@@ -647,12 +658,12 @@ impl SqlIncorporator {
             .borrow()
             .columns()
             .iter()
-            .map(|c| String::from(c.name.as_str()))
+            .map(|c| c.name.clone())
             .collect::<Vec<_>>();
 
         // TODO(malte): get rid of duplication and figure out where to track this state
         debug!(%query_name, "registering query");
-        self.view_schemas.insert(String::from(query_name), fields);
+        self.view_schemas.insert(query_name.clone(), fields);
 
         // We made a new query, so store the query graph and the corresponding leaf MIR node.
         // TODO(malte): we currently store nothing if there is no QG (e.g., for compound queries).
@@ -662,11 +673,11 @@ impl SqlIncorporator {
                 let qg_hash = qg.signature().hash;
                 self.query_graphs.insert(qg_hash, qg);
                 self.mir_queries.insert(qg_hash, mir.clone());
-                self.named_queries.insert(query_name.to_owned(), qg_hash);
+                self.named_queries.insert(query_name.clone(), qg_hash);
             }
             None => {
                 self.base_mir_queries
-                    .insert(query_name.to_owned(), mir.clone());
+                    .insert(query_name.clone(), mir.clone());
             }
         }
     }
@@ -680,7 +691,9 @@ impl SqlIncorporator {
         let name = match q {
             SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
             SqlQuery::CreateView(ref cvq) => cvq.name.clone(),
-            SqlQuery::Select(_) | SqlQuery::CompoundSelect(_) => format!("q_{}", self.num_queries),
+            SqlQuery::Select(_) | SqlQuery::CompoundSelect(_) => {
+                format!("q_{}", self.num_queries).into()
+            }
             _ => unsupported!("only CREATE TABLE and SELECT queries can be added to the graph!"),
         };
         self.nodes_for_named_query(q, name, false, is_leaf, mig)
@@ -690,7 +703,7 @@ impl SqlIncorporator {
     fn rewrite_query(
         &mut self,
         q: SqlQuery,
-        query_name: &str,
+        query_name: &SqlIdentifier,
         mig: &mut Migration<'_>,
     ) -> Result<SqlQuery, ReadySetError> {
         // TODO: make this not take &mut self
@@ -723,7 +736,7 @@ impl SqlIncorporator {
             | ref q @ SqlQuery::CreateCachedQuery(_) => {
                 for t in &q.referred_tables() {
                     if !self.view_schemas.contains_key(&t.name) {
-                        return Err(ReadySetError::TableNotFound(t.name.clone()));
+                        return Err(ReadySetError::TableNotFound(t.name.to_string()));
                     }
                 }
             }
@@ -783,7 +796,7 @@ impl SqlIncorporator {
     fn nodes_for_named_query(
         &mut self,
         q: SqlQuery,
-        query_name: String,
+        query_name: SqlIdentifier,
         is_name_required: bool,
         is_leaf: bool,
         mig: &mut Migration<'_>,
@@ -838,7 +851,7 @@ impl SqlIncorporator {
 
         // record info about query
         self.leaf_addresses
-            .insert(String::from(query_name.as_str()), qfp.query_leaf);
+            .insert(query_name.clone(), qfp.query_leaf);
 
         Ok(qfp)
     }
@@ -854,11 +867,11 @@ impl SqlIncorporator {
 trait ToFlowParts {
     /// Turn a SQL query into a set of nodes inserted into the Soup graph managed by
     /// the `SqlIncorporator` in the second argument. The query can optionally be named by the
-    /// string in the `Option<String>` in the third argument.
+    /// string in the `Option<SqlIdentifier>` in the third argument.
     fn to_flow_parts(
         &self,
         inc: &mut SqlIncorporator,
-        name: Option<String>,
+        name: Option<SqlIdentifier>,
         mig: &mut Migration<'_>,
     ) -> Result<QueryFlowParts, ReadySetError>;
 }
@@ -867,7 +880,7 @@ impl<'a> ToFlowParts for &'a String {
     fn to_flow_parts(
         &self,
         inc: &mut SqlIncorporator,
-        name: Option<String>,
+        name: Option<SqlIdentifier>,
         mig: &mut Migration<'_>,
     ) -> Result<QueryFlowParts, ReadySetError> {
         self.as_str().to_flow_parts(inc, name, mig)
@@ -878,7 +891,7 @@ impl<'a> ToFlowParts for &'a str {
     fn to_flow_parts(
         &self,
         inc: &mut SqlIncorporator,
-        name: Option<String>,
+        name: Option<SqlIdentifier>,
         mig: &mut Migration<'_>,
     ) -> Result<QueryFlowParts, ReadySetError> {
         // try parsing the incoming SQL
@@ -897,7 +910,7 @@ impl<'a> ToFlowParts for &'a str {
 #[cfg(test)]
 mod tests {
     use dataflow::prelude::*;
-    use nom_sql::{Column, Dialect};
+    use nom_sql::{Column, Dialect, SqlIdentifier};
 
     use super::{SqlIncorporator, ToFlowParts};
     use crate::controller::Migration;
@@ -906,14 +919,14 @@ mod tests {
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration<'_>, name: &str) -> &'a Node {
         let na = inc
-            .get_flow_node_address(name, 0)
+            .get_flow_node_address(&SqlIdentifier::from(name), 0)
             .unwrap_or_else(|| panic!("No node named \"{}\" exists", name));
         mig.graph().node_weight(na).unwrap()
     }
 
     fn get_reader<'a>(inc: &SqlIncorporator, mig: &'a Migration<'_>, name: &str) -> &'a Node {
         let na = inc
-            .get_flow_node_address(name, 0)
+            .get_flow_node_address(&SqlIdentifier::from(name), 0)
             .unwrap_or_else(|| panic!("No node named \"{}\" exists", name));
         let children: Vec<_> = mig
             .graph()
@@ -1227,7 +1240,7 @@ mod tests {
                 &["votes"],
                 &[&Column::from("votes.aid")],
                 &[&Column {
-                    name: String::from("votes"),
+                    name: "votes".into(),
                     table: None,
                 }],
             );
@@ -1404,7 +1417,7 @@ mod tests {
                     mig
                 )
                 .is_ok());
-            let base_address = inc.get_flow_node_address("users", 0).unwrap();
+            let base_address = inc.get_flow_node_address(&"users".into(), 0).unwrap();
 
             // Add a new "full table" query. The view is expected to contain projected columns plus
             // the special 'bogokey' literal column.
@@ -1492,7 +1505,7 @@ mod tests {
                     mig
                 )
                 .is_ok());
-            let base_address = inc.get_flow_node_address("users", 0).unwrap();
+            let base_address = inc.get_flow_node_address(&"users".into(), 0).unwrap();
 
             // Add a new parameterized query.
             let res = inc.add_query("SELECT id, name FROM users WHERE users.id = ?;", None, mig);
@@ -1661,7 +1674,7 @@ mod tests {
                     mig
                 )
                 .is_ok());
-            let base_address = inc.get_flow_node_address("users", 0).unwrap();
+            let base_address = inc.get_flow_node_address(&"users".into(), 0).unwrap();
 
             // Add a query with a parameter and a literal projection.
             let res = inc.add_query(
@@ -1735,7 +1748,7 @@ mod tests {
                 &["votes"],
                 &[],
                 &[&Column {
-                    name: String::from("count"),
+                    name: "count".into(),
                     table: None,
                 }],
             );
@@ -1785,7 +1798,7 @@ mod tests {
                 &["votes"],
                 &[&Column::from("votes.userid")],
                 &[&Column {
-                    name: String::from("count"),
+                    name: "count".into(),
                     table: None,
                 }],
             );
@@ -1833,7 +1846,7 @@ mod tests {
                 &["votes"],
                 &[&Column::from("votes.userid")],
                 &[&Column {
-                    name: String::from("count"),
+                    name: "count".into(),
                     table: None,
                 }],
             );
@@ -1880,7 +1893,7 @@ mod tests {
                 &["votes"],
                 &[&Column::from("votes.userid")],
                 &[&Column {
-                    name: String::from("sum"),
+                    name: "sum".into(),
                     table: None,
                 }],
             );
@@ -1928,7 +1941,7 @@ mod tests {
                 &["votes"],
                 &[&Column::from("votes.userid")],
                 &[&Column {
-                    name: String::from("sum"),
+                    name: "sum".into(),
                     table: None,
                 }],
             );
@@ -1980,7 +1993,7 @@ mod tests {
                 &["votes"],
                 &[&Column::from("votes.userid"), &Column::from("votes.aid")],
                 &[&Column {
-                    name: String::from("sum"),
+                    name: "sum".into(),
                     table: None,
                 }],
             );
@@ -2072,7 +2085,7 @@ mod tests {
                 &["votes"],
                 &[&Column::from("votes.userid"), &Column::from("sum")],
                 &[&Column {
-                    name: String::from("sum"),
+                    name: "sum".into(),
                     table: None,
                 }],
             );
@@ -2127,7 +2140,7 @@ mod tests {
                 &["votes"],
                 &[&Column::from("votes.comment_id")],
                 &[&Column {
-                    name: String::from("votes"),
+                    name: "votes".into(),
                     table: None,
                 }],
             );

@@ -21,7 +21,7 @@ use std::str::FromStr;
 
 use mir::query::MirQuery;
 use mir::MirNodeRef;
-use nom_sql::CreateTableStatement;
+use nom_sql::{CreateTableStatement, SqlIdentifier};
 use petgraph::graph::NodeIndex;
 use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::ser::SerializeStruct;
@@ -34,7 +34,7 @@ use crate::sql::{Config, SqlIncorporator};
 
 #[derive(Serialize, Deserialize)]
 struct SerializableMirQuery {
-    name: String,
+    name: SqlIdentifier,
     roots: Vec<MirNodeId>,
     leaf: MirNodeId,
 }
@@ -75,7 +75,10 @@ impl Serialize for SqlIncorporator {
         for (qg_hash, query) in self.mir_queries.iter() {
             // We have to transform the map key into a string, since the serializers might panic
             // if the key is not a string (i.e., the serde::json).
-            mir_queries.insert(qg_hash.to_string(), serialize_mir_query(query));
+            mir_queries.insert(
+                SqlIdentifier::from(qg_hash.to_string()),
+                serialize_mir_query(query),
+            );
         }
         let mut state = serializer.serialize_struct("SqlIncorporator", 10)?;
         state.serialize_field("mir_converter", &self.mir_converter)?;
@@ -324,8 +327,8 @@ impl<'de> serde::Deserialize<'de> for SqlIncorporator {
 
 fn extract_mir_query_elements<E>(
     mut mir_query: SerializableMirQuery,
-    nodes: &HashMap<(String, usize), MirNodeRef>,
-) -> Result<(String, Vec<MirNodeRef>, MirNodeRef), E>
+    nodes: &HashMap<(SqlIdentifier, usize), MirNodeRef>,
+) -> Result<(SqlIdentifier, Vec<MirNodeRef>, MirNodeRef), E>
 where
     E: serde::de::Error,
 {
@@ -348,14 +351,14 @@ where
 
 fn deserialize_into_sql_incorporator<E>(
     mir_converter: SqlToMirConverter,
-    leaf_addresses: HashMap<String, NodeIndex>,
-    named_queries: HashMap<String, u64>,
+    leaf_addresses: HashMap<SqlIdentifier, NodeIndex>,
+    named_queries: HashMap<SqlIdentifier, u64>,
     query_graphs: HashMap<u64, QueryGraph>,
-    mut base_mir_queries: HashMap<String, SerializableMirQuery>,
-    mut mir_queries: HashMap<String, SerializableMirQuery>,
+    mut base_mir_queries: HashMap<SqlIdentifier, SerializableMirQuery>,
+    mut mir_queries: HashMap<SqlIdentifier, SerializableMirQuery>,
     num_queries: usize,
-    base_schemas: HashMap<String, CreateTableStatement>,
-    view_schemas: HashMap<String, Vec<String>>,
+    base_schemas: HashMap<SqlIdentifier, CreateTableStatement>,
+    view_schemas: HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
     config: Config,
 ) -> Result<SqlIncorporator, E>
 where

@@ -6,7 +6,7 @@ use dataflow::ops::grouped::extremum::Extremum;
 use dataflow::ops::union;
 use dataflow::post_lookup::PostLookupAggregates;
 use itertools::Itertools;
-use nom_sql::{ColumnSpecification, Expression, OrderType};
+use nom_sql::{ColumnSpecification, Expression, OrderType, SqlIdentifier};
 use noria::ViewPlaceholder;
 use noria_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -74,8 +74,8 @@ pub enum MirNodeInner {
     /// emit columns
     Project {
         emit: Vec<Column>,
-        expressions: Vec<(String, Expression)>,
-        literals: Vec<(String, DataType)>,
+        expressions: Vec<(SqlIdentifier, Expression)>,
+        literals: Vec<(SqlIdentifier, DataType)>,
     },
     /// emit columns
     Union {
@@ -527,12 +527,12 @@ impl Debug for MirNodeInner {
                     .chain(
                         expressions
                             .iter()
-                            .map(|&(ref n, ref e)| format!("{}: {}", n, e))
+                            .map(|&(ref n, ref e)| format!("{}: {}", n, e).into())
                     )
                     .chain(
                         literals
                             .iter()
-                            .map(|&(ref n, ref v)| format!("{}: {}", n, v))
+                            .map(|&(ref n, ref v)| format!("{}: {}", n, v).into())
                     )
                     .collect::<Vec<_>>()
                     .join(", "),

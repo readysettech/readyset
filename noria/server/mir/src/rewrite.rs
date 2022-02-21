@@ -100,7 +100,7 @@ mod tests {
         #[test]
         fn changing_index() {
             let base = MirNode::new(
-                "base",
+                "base".into(),
                 0,
                 vec!["a".into(), "b".into(), "c".into()],
                 MirNodeInner::Base {
@@ -143,7 +143,7 @@ mod tests {
 
             // SUM(b)
             let grp = MirNode::new(
-                "grp",
+                "grp".into(),
                 0,
                 vec!["agg".into()],
                 MirNodeInner::Aggregation {
@@ -163,7 +163,7 @@ mod tests {
 
             // σ[a = 1]
             let fil = MirNode::new(
-                "fil",
+                "fil".into(),
                 0,
                 vec!["a".into(), "agg".into()],
                 MirNodeInner::Filter {
@@ -175,13 +175,13 @@ mod tests {
 
             // a, agg, IFNULL(c, 0) as c0
             let prj = MirNode::new(
-                "prj",
+                "prj".into(),
                 0,
                 vec!["a".into(), "agg".into(), "c0".into()],
                 MirNodeInner::Project {
                     emit: vec!["a".into(), "agg".into()],
                     expressions: vec![(
-                        "c0".to_owned(),
+                        "c0".into(),
                         Expression::Call(FunctionExpression::Call {
                             name: "ifnull".to_owned(),
                             arguments: vec![
@@ -197,7 +197,7 @@ mod tests {
             );
 
             let mut query = MirQuery {
-                name: "changing_index".to_owned(),
+                name: "changing_index".into(),
                 roots: vec![base],
                 leaf: prj,
             };

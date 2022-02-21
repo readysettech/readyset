@@ -15,6 +15,7 @@ use futures_util::future;
 use futures_util::future::{Either, FutureExt, TryFutureExt};
 use futures_util::stream::{StreamExt, TryStreamExt};
 use launchpad::intervals;
+use nom_sql::SqlIdentifier;
 use noria::consistency::Timestamp;
 use noria::metrics::recorded;
 use noria::{KeyComparison, ReadQuery, ReadReply, Tagged, ViewQuery};
@@ -37,7 +38,7 @@ const TRIGGER_TIMEOUT_MS: u64 = 20;
 
 task_local! {
     static READERS: RefCell<HashMap<
-        (NodeIndex, String, usize),
+        (NodeIndex, SqlIdentifier, usize),
         SingleReadHandle,
     >>;
 }
@@ -95,7 +96,7 @@ impl ReadRequestHandler {
     fn handle_normal_read_query(
         &mut self,
         tag: u32,
-        target: (NodeIndex, String, usize),
+        target: (NodeIndex, SqlIdentifier, usize),
         query: ViewQuery,
     ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
         let ViewQuery {
@@ -300,7 +301,7 @@ impl ReadRequestHandler {
     fn handle_size_query(
         &mut self,
         tag: u32,
-        target: (NodeIndex, String, usize),
+        target: (NodeIndex, SqlIdentifier, usize),
     ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
         let size = READERS.with(|readers_cache| {
             let mut readers_cache = readers_cache.borrow_mut();
@@ -321,7 +322,7 @@ impl ReadRequestHandler {
     fn handle_keys_query(
         &mut self,
         tag: u32,
-        target: (NodeIndex, String, usize),
+        target: (NodeIndex, SqlIdentifier, usize),
     ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
         let keys = READERS.with(|readers_cache| {
             let mut readers_cache = readers_cache.borrow_mut();
@@ -502,7 +503,7 @@ fn has_sufficient_timestamp(reader: &SingleReadHandle, timestamp: &Option<Timest
 #[pin_project]
 struct BlockingRead {
     tag: u32,
-    target: (NodeIndex, String, usize),
+    target: (NodeIndex, SqlIdentifier, usize),
     // serialized records for keys we have already read
     read: Vec<SerializedReadReplyBatch>,
     // keys we have yet to read and their corresponding indices in the reader

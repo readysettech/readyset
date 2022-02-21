@@ -390,7 +390,7 @@ impl MySqlReplicator {
 
         // For each table we spawn a new task to parallelize the replication process
         for table_name in self.tables.clone().unwrap() {
-            if replication_offsets.has_table(&table_name) {
+            if replication_offsets.has_table(table_name.as_str()) {
                 info!(%table_name, "Replication offset already exists for table, skipping snapshot");
             } else {
                 replication_tasks.push(self.dumper_task_for_table(noria, table_name).await?);

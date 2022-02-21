@@ -15,6 +15,7 @@ use crate::common::{
 };
 use crate::create::key_specification;
 use crate::table::Table;
+use crate::SqlIdentifier;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum AlterColumnOperation {
@@ -54,15 +55,15 @@ pub enum AlterTableDefinition {
     AddColumn(ColumnSpecification),
     AddKey(TableKey),
     AlterColumn {
-        name: String,
+        name: SqlIdentifier,
         operation: AlterColumnOperation,
     },
     DropColumn {
-        name: String,
+        name: SqlIdentifier,
         behavior: Option<DropBehavior>,
     },
     ChangeColumn {
-        name: String,
+        name: SqlIdentifier,
         spec: ColumnSpecification,
     },
     // TODO(grfn): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#add%20table%20constraint%20definition
@@ -157,10 +158,7 @@ named_with_dialect!(
             >> multispace1
             >> name: call!(dialect.identifier())
             >> behavior: opt!(preceded!(multispace1, drop_behavior))
-            >> (AlterTableDefinition::DropColumn {
-                name: name.to_string(),
-                behavior,
-            })
+            >> (AlterTableDefinition::DropColumn { name, behavior })
     )
 );
 
@@ -200,10 +198,7 @@ named_with_dialect!(
             >> name: call!(dialect.identifier())
             >> multispace1
             >> operation: call!(alter_column_operation(dialect))
-            >> (AlterTableDefinition::AlterColumn {
-                name: name.to_string(),
-                operation
-            })
+            >> (AlterTableDefinition::AlterColumn { name, operation })
     )
 );
 
@@ -218,10 +213,7 @@ named_with_dialect!(
             >> spec: call!(column_specification(dialect))
             // TODO:  FIRST
             // TODO:  AFTER col_name
-            >> (AlterTableDefinition::ChangeColumn{
-                name: name.to_string(),
-                spec
-            })
+            >> (AlterTableDefinition::ChangeColumn{ name, spec })
     )
 );
 

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::{statement_terminator, table_list};
 use crate::table::Table;
-use crate::Dialect;
+use crate::{Dialect, SqlIdentifier};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DropTableStatement {
@@ -71,7 +71,7 @@ pub fn drop_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DropTabl
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DropCachedQueryStatement {
-    pub name: String,
+    pub name: SqlIdentifier,
 }
 
 impl fmt::Display for DropCachedQueryStatement {
@@ -91,12 +91,7 @@ pub fn drop_cached_query(
         let (i, _) = tag_no_case("query")(i)?;
         let (i, _) = multispace1(i)?;
         let (i, name) = dialect.identifier()(i)?;
-        Ok((
-            i,
-            DropCachedQueryStatement {
-                name: name.into_owned(),
-            },
-        ))
+        Ok((i, DropCachedQueryStatement { name }))
     }
 }
 
@@ -129,13 +124,13 @@ mod tests {
     #[test]
     fn parse_drop_cached_query() {
         let res = test_parse!(drop_cached_query(Dialect::MySQL), b"DROP CACHED QUERY test");
-        assert_eq!(res.name, "test".to_owned());
+        assert_eq!(res.name, "test");
     }
 
     #[test]
     fn format_drop_cached_query() {
         let res = DropCachedQueryStatement {
-            name: "test".to_owned(),
+            name: "test".into(),
         }
         .to_string();
         assert_eq!(res, "DROP CACHED QUERY `test`");

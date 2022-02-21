@@ -41,7 +41,7 @@ use std::rc::Rc;
 
 use mir::node::node_inner::MirNodeInner;
 use mir::node::MirNode;
-use nom_sql::ColumnSpecification;
+use nom_sql::{ColumnSpecification, SqlIdentifier};
 use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
@@ -50,7 +50,7 @@ use crate::sql::mir::{Config, SqlToMirConverter};
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash)]
 pub(in crate::controller::sql) struct MirNodeId {
-    pub(in crate::controller::sql) name: String,
+    pub(in crate::controller::sql) name: SqlIdentifier,
     pub(in crate::controller::sql) version: usize,
 }
 
@@ -115,7 +115,7 @@ impl Serialize for SqlToMirConverter {
             }
             (all_nodes, children)
         }
-        let mut nodes: Vec<(String, usize)> = Vec::new();
+        let mut nodes: Vec<(SqlIdentifier, usize)> = Vec::new();
         let mut stack: Vec<MirNode> = Vec::new();
         for ((name, version), node) in self.nodes.iter() {
             let node = node.borrow();
@@ -194,10 +194,10 @@ impl<'de> serde::Deserialize<'de> for SqlToMirConverter {
                 let config: Config = seq
                     .next_element()?
                     .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
-                let base_schemas: HashMap<String, Vec<(usize, Vec<ColumnSpecification>)>> = seq
-                    .next_element()?
-                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
-                let current: HashMap<String, usize> = seq
+                let base_schemas: HashMap<SqlIdentifier, Vec<(usize, Vec<ColumnSpecification>)>> =
+                    seq.next_element()?
+                        .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                let current: HashMap<SqlIdentifier, usize> = seq
                     .next_element()?
                     .ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
                 let nodes: Vec<MirNodeId> = seq
@@ -329,8 +329,8 @@ impl<'de> serde::Deserialize<'de> for SqlToMirConverter {
 /// creates an instance of it (thus effectively deserializing it).
 fn deserialize_into_sql_to_mir_converter<E>(
     config: Config,
-    base_schemas: HashMap<String, Vec<(usize, Vec<ColumnSpecification>)>>,
-    current: HashMap<String, usize>,
+    base_schemas: HashMap<SqlIdentifier, Vec<(usize, Vec<ColumnSpecification>)>>,
+    current: HashMap<SqlIdentifier, usize>,
     mut nodes: Vec<MirNodeId>,
     mut all_nodes: Vec<(MirNodeId, MirNode)>,
     mut children: Vec<(MirNodeId, Vec<MirNodeId>)>,

@@ -51,8 +51,7 @@ impl QueryInstaller {
 
         println!("Waiting for noria");
         handle.install_recipe(&test_sql_string).await.unwrap();
-        let mut getter = handle.view(&self.query).await.unwrap();
-
+        let mut getter = handle.view(self.query).await.unwrap();
         let results = getter.lookup(&[0.into()], true).await.unwrap();
         println!("Results: {:?}", results);
         Ok(())

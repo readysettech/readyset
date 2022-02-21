@@ -457,7 +457,9 @@ impl NoriaAdapter {
             table_mutator.update_timestamp(timestamp).await?;
         }
 
-        self.replication_offsets.tables.insert(table, Some(pos));
+        self.replication_offsets
+            .tables
+            .insert(table.into(), Some(pos));
 
         Ok(())
     }

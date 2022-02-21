@@ -12,6 +12,7 @@ use futures_util::StreamExt;
 use hyper::http::{Method, StatusCode};
 use launchpad::select;
 use metrics::{counter, gauge, histogram};
+use nom_sql::SqlIdentifier;
 use noria::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult,
     WorkerDescriptor, WorkerId,
@@ -65,7 +66,7 @@ pub struct DomainPlacementRestriction {
 /// Each dataflow node, shard pair may have a DomainPlacementRestriction.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Debug)]
 pub struct NodeRestrictionKey {
-    node_name: String,
+    node_name: SqlIdentifier,
     shard: usize,
 }
 

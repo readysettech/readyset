@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expression, SqlQuery, Table,
-    TableKey,
+    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expression, SqlIdentifier,
+    SqlQuery, Table, TableKey,
 };
 use noria_errors::{ReadySetError, ReadySetResult};
 
@@ -14,13 +14,13 @@ pub trait OrderLimitRemoval: Sized {
     /// column have an associated table name.
     fn order_limit_removal(
         self,
-        base_schemas: &HashMap<String, CreateTableStatement>,
+        base_schemas: &HashMap<SqlIdentifier, CreateTableStatement>,
     ) -> ReadySetResult<Self>;
 }
 
 fn is_unique_or_primary(
     col: &Column,
-    base_schemas: &HashMap<String, CreateTableStatement>,
+    base_schemas: &HashMap<SqlIdentifier, CreateTableStatement>,
     tables: &[Table],
 ) -> ReadySetResult<bool> {
     // This assumes that we will find exactly one table matching col.table and exactly one col
@@ -94,7 +94,7 @@ fn is_unique_or_primary(
 
 fn compares_unique_key_against_literal(
     expr: &Expression,
-    base_schemas: &HashMap<String, CreateTableStatement>,
+    base_schemas: &HashMap<SqlIdentifier, CreateTableStatement>,
     tables: &[Table],
 ) -> ReadySetResult<bool> {
     match expr {
@@ -125,7 +125,7 @@ fn compares_unique_key_against_literal(
 impl OrderLimitRemoval for SqlQuery {
     fn order_limit_removal(
         mut self,
-        base_schemas: &HashMap<String, CreateTableStatement>,
+        base_schemas: &HashMap<SqlIdentifier, CreateTableStatement>,
     ) -> ReadySetResult<Self> {
         // If the query uses an equality filter on a column that has a unique or primary key
         // index, remove order and limit
@@ -151,17 +151,17 @@ mod tests {
 
     use super::*;
 
-    fn generate_base_schemas() -> HashMap<String, CreateTableStatement> {
+    fn generate_base_schemas() -> HashMap<SqlIdentifier, CreateTableStatement> {
         let table = Table {
-            name: "t".to_string(),
+            name: "t".into(),
             alias: None,
             schema: None,
         };
 
         let col1 = ColumnSpecification {
             column: Column {
-                name: "c1".to_string(),
-                table: Some("t".to_string()),
+                name: "c1".into(),
+                table: Some("t".into()),
             },
             sql_type: nom_sql::SqlType::Bool,
             constraints: vec![],
@@ -169,8 +169,8 @@ mod tests {
         };
         let col2 = ColumnSpecification {
             column: Column {
-                name: "c2".to_string(),
-                table: Some("t".to_string()),
+                name: "c2".into(),
+                table: Some("t".into()),
             },
             sql_type: nom_sql::SqlType::Bool,
             constraints: vec![ColumnConstraint::Unique],
@@ -178,8 +178,8 @@ mod tests {
         };
         let col3 = ColumnSpecification {
             column: Column {
-                name: "c3".to_string(),
-                table: Some("t".to_string()),
+                name: "c3".into(),
+                table: Some("t".into()),
             },
             sql_type: nom_sql::SqlType::Bool,
             constraints: vec![],
@@ -187,8 +187,8 @@ mod tests {
         };
         let col4 = ColumnSpecification {
             column: Column {
-                name: "c4".to_string(),
-                table: Some("t".to_string()),
+                name: "c4".into(),
+                table: Some("t".into()),
             },
             sql_type: nom_sql::SqlType::Bool,
             constraints: vec![],
@@ -211,7 +211,7 @@ mod tests {
 
         let mut base_schemas = HashMap::new();
         base_schemas.insert(
-            "t".to_string(),
+            "t".into(),
             CreateTableStatement {
                 table,
                 fields,
@@ -307,12 +307,12 @@ mod tests {
         // condition on primary/unique key with compound primary/unique key
         let mut base_schema = generate_base_schemas();
         let col1 = Column {
-            name: "c1".to_string(),
-            table: Some("t".to_string()),
+            name: "c1".into(),
+            table: Some("t".into()),
         };
         let col2 = Column {
-            name: "c2".to_string(),
-            table: Some("t".to_string()),
+            name: "c2".into(),
+            table: Some("t".into()),
         };
         let input_query = parse_query(
             Dialect::MySQL,

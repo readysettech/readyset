@@ -197,8 +197,8 @@ pub(super) fn column_schema(
         // found something, so return a ColumnSpecification
         let cs = ColumnSpecification::new(
             Column {
-                name: vn.fields()[column_index].to_owned(),
-                table: Some(vn.name().to_owned()),
+                name: vn.fields()[column_index].as_str().into(),
+                table: Some(vn.name().into()),
             },
             // ? in case we found no schema for this column
             col_type,

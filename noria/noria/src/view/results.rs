@@ -2,20 +2,21 @@ use std::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use nom_sql::SqlIdentifier;
 use noria_data::DataType;
 
 /// A result set from a Noria query.
 #[derive(PartialEq, Eq)]
 pub struct Results {
     results: Vec<Vec<DataType>>,
-    columns: Arc<[String]>,
+    columns: Arc<[SqlIdentifier]>,
 }
 
 impl Results {
     // NOTE: should be pub(crate), but that triggers:
     // https://github.com/rust-lang/rust/issues/69785
     #[doc(hidden)]
-    pub fn new(results: Vec<Vec<DataType>>, columns: Arc<[String]>) -> Self {
+    pub fn new(results: Vec<Vec<DataType>>, columns: Arc<[SqlIdentifier]>) -> Self {
         Self { results, columns }
     }
 
@@ -56,11 +57,11 @@ impl PartialEq<&'_ Vec<Vec<DataType>>> for Results {
 #[derive(PartialEq, Eq)]
 pub struct ResultRow<'a> {
     result: &'a [DataType],
-    columns: &'a [String],
+    columns: &'a [SqlIdentifier],
 }
 
 impl<'a> ResultRow<'a> {
-    fn new(row: &'a [DataType], columns: &'a [String]) -> Self {
+    fn new(row: &'a [DataType], columns: &'a [SqlIdentifier]) -> Self {
         Self {
             result: row,
             columns,
@@ -80,7 +81,7 @@ impl<'a> ResultRow<'a> {
     ///
     /// Returns `None` if the given field does not exist.
     pub fn get(&self, field: &str) -> Option<&DataType> {
-        let index = self.columns.iter().position(|col| col == field)?;
+        let index = self.columns.iter().position(|col| *col == field)?;
         self.result.get(index)
     }
 }
@@ -137,7 +138,7 @@ impl AsRef<[Vec<DataType>]> for Results {
 
 pub struct ResultIter<'a> {
     results: std::slice::Iter<'a, Vec<DataType>>,
-    columns: &'a [String],
+    columns: &'a [SqlIdentifier],
 }
 
 impl<'a> IntoIterator for &'a Results {
@@ -175,7 +176,7 @@ impl DoubleEndedIterator for ResultIter<'_> {
 
 pub struct ResultIntoIter {
     results: std::vec::IntoIter<Vec<DataType>>,
-    columns: Arc<[String]>,
+    columns: Arc<[SqlIdentifier]>,
 }
 
 impl IntoIterator for Results {
@@ -218,11 +219,11 @@ impl DoubleEndedIterator for ResultIntoIter {
 #[derive(PartialEq, Eq)]
 pub struct Row {
     row: Vec<DataType>,
-    columns: Arc<[String]>,
+    columns: Arc<[SqlIdentifier]>,
 }
 
 impl Row {
-    fn new(row: Vec<DataType>, columns: &Arc<[String]>) -> Self {
+    fn new(row: Vec<DataType>, columns: &Arc<[SqlIdentifier]>) -> Self {
         Self {
             row,
             columns: Arc::clone(columns),
@@ -295,7 +296,7 @@ impl Row {
     ///
     /// Returns `None` if the given field does not exist.
     pub fn get(&self, field: &str) -> Option<&DataType> {
-        let index = self.columns.iter().position(|col| col == field)?;
+        let index = self.columns.iter().position(|col| *col == field)?;
         self.row.get(index)
     }
 
@@ -303,7 +304,7 @@ impl Row {
     ///
     /// Returns `None` if the given field does not exist.
     pub fn take(&mut self, field: &str) -> Option<DataType> {
-        let index = self.columns.iter().position(|col| col == field)?;
+        let index = self.columns.iter().position(|col| *col == field)?;
         self.row
             .get_mut(index)
             .map(|r| std::mem::replace(r, DataType::None))

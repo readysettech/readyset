@@ -218,7 +218,7 @@ mod tests {
             )
         };
         let a = MirNode::new(
-            "a",
+            "a".into(),
             0,
             vec![Column::from("aa"), Column::from("ab")],
             MirNodeInner::Base {
@@ -231,7 +231,7 @@ mod tests {
             vec![],
         );
         let b = MirNode::new(
-            "b",
+            "b".into(),
             0,
             vec![Column::from("ba"), Column::from("bb")],
             MirNodeInner::Base {
@@ -244,7 +244,7 @@ mod tests {
             vec![],
         );
         let c = MirNode::new(
-            "c",
+            "c".into(),
             0,
             vec![Column::from("aa"), Column::from("ba")],
             MirNodeInner::Join {
@@ -256,7 +256,7 @@ mod tests {
             vec![],
         );
         let d = MirNode::new(
-            "d",
+            "d".into(),
             0,
             vec![Column::from("aa"), Column::from("ba")],
             MirNodeInner::leaf(
@@ -286,7 +286,7 @@ mod tests {
         d.borrow_mut().add_ancestor(c);
 
         let mq1 = MirQuery {
-            name: String::from("q1"),
+            name: "q1".into(),
             roots: vec![reuse_a, b],
             leaf: d,
         };
@@ -303,7 +303,7 @@ mod tests {
 
         let (a, b, c, d) = make_nodes();
         let e = MirNode::new(
-            "e",
+            "e".into(),
             0,
             vec![Column::from("aa")],
             MirNodeInner::Project {
@@ -322,13 +322,13 @@ mod tests {
 
         // let's merge with a test query that is a simple extension of q1
         let mq2 = MirQuery {
-            name: String::from("q2"),
+            name: "q2".into(),
             roots: vec![a, b],
             leaf: d,
         };
         let (merged_extension, _) = merge_mir_for_queries(&mq2, &mq1);
         for n in merged_extension.topo_nodes() {
-            match n.borrow().name() {
+            match n.borrow().name().as_str() {
                 // first three nodes (2x base, 1x join) should have been reused
                 "a" | "b" | "c" => assert!(n.borrow().is_reused()),
                 // new projection (e) and leaf node (d) should NOT have been reused
