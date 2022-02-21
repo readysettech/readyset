@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::vec::Vec;
 
+use nom_sql::SqlIdentifier;
+
 use super::super::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
 use super::helpers::predicate_implication::join_predicates_are_equivalent;
 use super::ReuseType;
@@ -10,7 +12,7 @@ use crate::ReadySetResult;
 #[derive(Debug, Clone)]
 struct JoinChain {
     join_order: Vec<JoinRef>,
-    tables: HashSet<String>,
+    tables: HashSet<SqlIdentifier>,
     stopped: bool,
 }
 

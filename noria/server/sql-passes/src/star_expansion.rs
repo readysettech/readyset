@@ -3,7 +3,7 @@ use std::mem;
 
 use nom_sql::{
     Column, CommonTableExpression, Expression, FieldDefinitionExpression, JoinClause,
-    JoinRightSide, SelectStatement, SqlQuery, Table,
+    JoinRightSide, SelectStatement, SqlIdentifier, SqlQuery, Table,
 };
 use noria_errors::{ReadySetError, ReadySetResult};
 
@@ -18,13 +18,16 @@ fn extract_tables_from_join(joins: &[JoinClause]) -> impl Iterator<Item = &Table
 }
 
 pub trait StarExpansion: Sized {
-    fn expand_stars(self, write_schemas: &HashMap<String, Vec<String>>) -> ReadySetResult<Self>;
+    fn expand_stars(
+        self,
+        write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+    ) -> ReadySetResult<Self>;
 }
 
 impl StarExpansion for SelectStatement {
     fn expand_stars(
         mut self,
-        write_schemas: &HashMap<String, Vec<String>>,
+        write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<Self> {
         self.ctes = mem::take(&mut self.ctes)
             .into_iter()
@@ -55,12 +58,12 @@ impl StarExpansion for SelectStatement {
         let fields = mem::take(&mut self.fields);
         let subquery_schemas = super::subquery_schemas(&self.ctes, &self.join);
 
-        let expand_table = move |table_name: String| -> ReadySetResult<_> {
+        let expand_table = move |table_name: SqlIdentifier| -> ReadySetResult<_> {
             Ok(write_schemas
                 .get(&table_name)
-                .map(|fs| fs.iter().map(String::as_str).collect())
-                .or_else(|| subquery_schemas.get(table_name.as_str()).cloned())
-                .ok_or_else(|| ReadySetError::TableNotFound(table_name.clone()))?
+                .map(|fs| fs.iter().collect())
+                .or_else(|| subquery_schemas.get(&table_name).cloned())
+                .ok_or_else(|| ReadySetError::TableNotFound(table_name.to_string()))?
                 .into_iter()
                 .map(move |f| FieldDefinitionExpression::Expression {
                     expr: Expression::Column(Column::from(
@@ -100,7 +103,10 @@ impl StarExpansion for SelectStatement {
 }
 
 impl StarExpansion for SqlQuery {
-    fn expand_stars(self, write_schemas: &HashMap<String, Vec<String>>) -> ReadySetResult<Self> {
+    fn expand_stars(
+        self,
+        write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+    ) -> ReadySetResult<Self> {
         Ok(match self {
             SqlQuery::Select(sq) => SqlQuery::Select(sq.expand_stars(write_schemas)?),
             _ => self,

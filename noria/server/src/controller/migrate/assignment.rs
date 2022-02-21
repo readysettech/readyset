@@ -169,11 +169,11 @@ pub fn assign(dataflow_state: &mut DataflowState, new_nodes: &[NodeIndex]) -> Re
                     let compatible = |new_node: &Node, existing_node: &Node| {
                         for i in 0..num_shards {
                             let new_node_key = NodeRestrictionKey {
-                                node_name: new_node.name().into(),
+                                node_name: new_node.name().clone(),
                                 shard: i,
                             };
                             let existing_node_key = NodeRestrictionKey {
-                                node_name: existing_node.name().into(),
+                                node_name: existing_node.name().clone(),
                                 shard: i,
                             };
 

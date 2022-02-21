@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use futures_util::future;
 use futures_util::future::Either;
 use hyper::client::HttpConnector;
+use nom_sql::SqlIdentifier;
 use noria_errors::{
     internal, internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult,
 };
@@ -354,9 +355,14 @@ impl ControllerHandle {
     /// Obtain a `View` that allows you to query the given external view.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn view<'a>(&'a mut self, name: &str) -> impl Future<Output = ReadySetResult<View>> + 'a {
-        let name = name.to_string();
-        let request = ViewRequest { name, filter: None };
+    pub fn view<I: Into<SqlIdentifier>>(
+        &mut self,
+        name: I,
+    ) -> impl Future<Output = ReadySetResult<View>> + '_ {
+        let request = ViewRequest {
+            name: name.into(),
+            filter: None,
+        };
         self.request_view(request)
     }
 
@@ -364,14 +370,13 @@ impl ControllerHandle {
     /// view.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn view_from_workers<'a>(
-        &'a mut self,
-        name: &str,
+    pub fn view_from_workers<I: Into<SqlIdentifier>>(
+        &mut self,
+        name: I,
         workers: Vec<Url>,
-    ) -> impl Future<Output = ReadySetResult<View>> + 'a {
-        let name = name.to_string();
+    ) -> impl Future<Output = ReadySetResult<View>> + '_ {
         let request = ViewRequest {
-            name,
+            name: name.into(),
             filter: Some(ViewFilter::Workers(workers)),
         };
         self.request_view(request)
@@ -382,14 +387,13 @@ impl ControllerHandle {
     /// found is returned.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn view_from_region<'a>(
+    pub fn view_from_region<'a, I: Into<SqlIdentifier>>(
         &'a mut self,
-        name: &str,
+        name: I,
         region: &str,
     ) -> impl Future<Output = ReadySetResult<View>> + 'a {
-        let name = name.to_string();
         let request = ViewRequest {
-            name,
+            name: name.into(),
             filter: Some(ViewFilter::Region(region.to_string())),
         };
         self.request_view(request)
@@ -421,12 +425,14 @@ impl ControllerHandle {
             None => match view_request.filter {
                 Some(f) => match f {
                     ViewFilter::Workers(w) => Err(ReadySetError::ViewNotFoundInWorkers {
-                        name: view_request.name,
+                        name: view_request.name.to_string(),
                         workers: w,
                     }),
-                    ViewFilter::Region(_) => Err(ReadySetError::ViewNotFound(view_request.name)),
+                    ViewFilter::Region(_) => {
+                        Err(ReadySetError::ViewNotFound(view_request.name.to_string()))
+                    }
                 },
-                None => Err(ReadySetError::ViewNotFound(view_request.name)),
+                None => Err(ReadySetError::ViewNotFound(view_request.name.to_string())),
             },
         }
     }
@@ -664,7 +670,10 @@ impl ControllerHandle {
         worker_uri: Option<Url>,
     ) -> impl Future<Output = ReadySetResult<ReaderReplicationResult>> + '_ {
         let request = ReaderReplicationSpec {
-            queries,
+            queries: queries
+                .into_iter()
+                .map(nom_sql::SqlIdentifier::from)
+                .collect(),
             worker_uri,
         };
         self.rpc("replicate_readers", request, self.migration_timeout)

@@ -4,7 +4,7 @@ use std::mem;
 use nom_sql::analysis::visit::{
     walk_group_by_clause, walk_order_clause, walk_select_statement, Visitor,
 };
-use nom_sql::{Column, FieldDefinitionExpression, SelectStatement, SqlQuery, Table};
+use nom_sql::{Column, FieldDefinitionExpression, SelectStatement, SqlIdentifier, SqlQuery, Table};
 use noria_errors::{internal, ReadySetError, ReadySetResult};
 use tracing::warn;
 
@@ -13,7 +13,7 @@ use crate::outermost_referred_tables;
 pub trait ImpliedTableExpansion {
     fn expand_implied_tables(
         self,
-        write_schemas: &HashMap<String, Vec<String>>,
+        write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<SqlQuery>;
 }
 
@@ -31,17 +31,17 @@ fn set_table(mut f: Column, table: &Table) -> ReadySetResult<Column> {
 
 #[derive(Debug)]
 struct ExpandImpliedTablesVisitor<'schema> {
-    schema: &'schema HashMap<String, Vec<String>>,
-    subquery_schemas: HashMap<String, Vec<String>>,
-    tables: HashSet<String>,
-    aliases: HashSet<String>,
+    schema: &'schema HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+    subquery_schemas: HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+    tables: HashSet<SqlIdentifier>,
+    aliases: HashSet<SqlIdentifier>,
     // Are we currently in a position in the query that can reference aliases in the projected
     // field list?
     can_reference_aliases: bool,
 }
 
 impl<'schema> ExpandImpliedTablesVisitor<'schema> {
-    fn find_table(&self, column_name: &str) -> Option<String> {
+    fn find_table(&self, column_name: &str) -> Option<SqlIdentifier> {
         let mut matches = self
             .schema
             .iter()
@@ -51,12 +51,13 @@ impl<'schema> ExpandImpliedTablesVisitor<'schema> {
                 let num_matching = ws.iter().filter(|c| **c == column_name).count();
                 assert!(num_matching <= 1);
                 if num_matching == 1 {
-                    Some(t.to_owned())
+                    Some(SqlIdentifier::from(t))
                 } else {
                     None
                 }
             })
-            .collect::<Vec<String>>();
+            .collect::<Vec<SqlIdentifier>>();
+
         if matches.len() > 1 {
             warn!(
                 "Ambiguous column {} exists in tables: {} -- picking a random one",
@@ -94,7 +95,7 @@ impl<'ast, 'schema> Visitor<'ast> for ExpandImpliedTablesVisitor<'schema> {
             &mut self.subquery_schemas,
             super::subquery_schemas(&select_statement.ctes, &select_statement.join)
                 .into_iter()
-                .map(|(k, v)| (k.to_owned(), v.into_iter().map(|s| s.to_owned()).collect()))
+                .map(|(k, v)| (k.into(), v.into_iter().map(|s| s.into()).collect()))
                 .collect(),
         );
         let orig_aliases = mem::replace(
@@ -154,7 +155,7 @@ impl<'ast, 'schema> Visitor<'ast> for ExpandImpliedTablesVisitor<'schema> {
 
 fn rewrite_select(
     mut select_statement: SelectStatement,
-    schema: &HashMap<String, Vec<String>>,
+    schema: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
 ) -> ReadySetResult<SelectStatement> {
     let mut visitor = ExpandImpliedTablesVisitor {
         schema,
@@ -171,7 +172,7 @@ fn rewrite_select(
 impl ImpliedTableExpansion for SqlQuery {
     fn expand_implied_tables(
         self,
-        write_schemas: &HashMap<String, Vec<String>>,
+        write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<SqlQuery> {
         Ok(match self {
             SqlQuery::CreateTable(..) => self,

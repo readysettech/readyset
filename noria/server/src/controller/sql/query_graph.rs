@@ -3,7 +3,6 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::hash::{Hash, Hasher};
 use std::mem;
-use std::string::String;
 use std::vec::Vec;
 
 use common::IndexType;
@@ -11,7 +10,7 @@ use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, Column, Expression, FieldDefinitionExpression, FunctionExpression, InValue,
     ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderType,
-    SelectStatement, Table, UnaryOperator,
+    SelectStatement, SqlIdentifier, Table, UnaryOperator,
 };
 use noria::{PlaceholderIdx, ViewPlaceholder};
 use noria_errors::{
@@ -24,21 +23,24 @@ use super::mir;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct LiteralColumn {
-    pub name: String,
-    pub table: Option<String>,
+    pub name: SqlIdentifier,
+    pub table: Option<SqlIdentifier>,
     pub value: Literal,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct ExpressionColumn {
-    pub name: String,
-    pub table: Option<String>,
+    pub name: SqlIdentifier,
+    pub table: Option<SqlIdentifier>,
     pub expression: Expression,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum OutputColumn {
-    Data { alias: String, column: Column },
+    Data {
+        alias: SqlIdentifier,
+        column: Column,
+    },
     Literal(LiteralColumn),
     Expression(ExpressionColumn),
 }
@@ -157,8 +159,8 @@ impl PartialOrd for OutputColumn {
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct JoinRef {
-    pub src: String,
-    pub dst: String,
+    pub src: SqlIdentifier,
+    pub dst: SqlIdentifier,
 }
 
 /// An equality predicate on two expressions, used as the key for a join
@@ -178,7 +180,7 @@ pub struct Parameter {
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct QueryGraphNode {
-    pub rel_name: String,
+    pub rel_name: SqlIdentifier,
     pub predicates: Vec<Expression>,
     pub columns: Vec<Column>,
     pub parameters: Vec<Parameter>,
@@ -218,12 +220,12 @@ pub struct ViewKey {
 // TODO(grfn): impl Arbitrary for this struct so we can make a proptest for that
 pub struct QueryGraph {
     /// Relations mentioned in the query.
-    pub relations: HashMap<String, QueryGraphNode>,
+    pub relations: HashMap<SqlIdentifier, QueryGraphNode>,
     /// Joins in the query.
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
-    pub edges: HashMap<(String, String), QueryGraphEdge>,
+    pub edges: HashMap<(SqlIdentifier, SqlIdentifier), QueryGraphEdge>,
     /// Aggregates in the query, represented as a list of (expression, alias) pairs
-    pub aggregates: Vec<(FunctionExpression, String)>,
+    pub aggregates: Vec<(FunctionExpression, SqlIdentifier)>,
     /// Set of columns that appear in the GROUP BY clause
     pub group_by: HashSet<Column>,
     /// Final set of projected columns in this query; may include literals in addition to the
@@ -359,10 +361,11 @@ impl QueryGraph {
 impl Hash for QueryGraph {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // sorted iteration over relations, edges to ensure consistent hash
-        let mut rels: Vec<(&String, &QueryGraphNode)> = self.relations.iter().collect();
+        let mut rels: Vec<(&SqlIdentifier, &QueryGraphNode)> = self.relations.iter().collect();
         rels.sort_by(|a, b| a.0.cmp(b.0));
         rels.hash(state);
-        let mut edges: Vec<(&(String, String), &QueryGraphEdge)> = self.edges.iter().collect();
+        let mut edges: Vec<(&(SqlIdentifier, SqlIdentifier), &QueryGraphEdge)> =
+            self.edges.iter().collect();
         edges.sort_by(|a, b| match (a.0).0.cmp(&(b.0).0) {
             Ordering::Equal => (a.0).1.cmp(&(b.0).1),
             x => x,
@@ -413,7 +416,7 @@ fn split_conjunctions(ces: Vec<Expression>) -> Vec<Expression> {
 fn classify_conditionals(
     ce: &Expression,
     tables: &[Table],
-    local: &mut HashMap<String, Vec<Expression>>,
+    local: &mut HashMap<SqlIdentifier, Vec<Expression>>,
     join: &mut Vec<JoinPredicate>,
     global: &mut Vec<Expression>,
     params: &mut Vec<Parameter>,
@@ -475,10 +478,10 @@ fn classify_conditionals(
                                     rhs: Box::new(ces.last().unwrap().clone()),
                                 };
 
-                                let e = local.entry(t.to_string()).or_default();
+                                let e = local.entry(t).or_default();
                                 e.push(new_ce);
                             } else {
-                                let e = local.entry(t.to_string()).or_default();
+                                let e = local.entry(t).or_default();
                                 e.extend(ces);
                             }
                         }
@@ -710,7 +713,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     }
 
     // a handy closure for making new relation nodes
-    let new_node = |rel: String,
+    let new_node = |rel: SqlIdentifier,
                     preds: Vec<Expression>,
                     st: &SelectStatement|
      -> ReadySetResult<QueryGraphNode> {
@@ -820,7 +823,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
                 // find all distinct tables mentioned in the condition
                 // conditions for now.
-                let mut tables_mentioned: Vec<String> =
+                let mut tables_mentioned: Vec<SqlIdentifier> =
                     cond.referred_tables().into_iter().map(|t| t.name).collect();
 
                 let mut join_preds = vec![];
@@ -995,7 +998,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                 internal!("Stars should have been expanded by now!")
             }
             FieldDefinitionExpression::Expression { expr, alias } => {
-                let name = alias.clone().unwrap_or_else(|| expr.to_string());
+                let name: SqlIdentifier = alias.clone().unwrap_or_else(|| expr.to_string().into());
                 match expr {
                     Expression::Literal(l) => {
                         qg.columns.push(OutputColumn::Literal(LiteralColumn {
@@ -1066,9 +1069,9 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                 Expression::Call(func) if is_aggregate(func) => {
                     // This is an aggregate expression that we need to add to the list of projected
                     // columns and aggregates
-                    qg.aggregates.push((func.clone(), func.to_string()));
+                    qg.aggregates.push((func.clone(), func.to_string().into()));
                     qg.columns.push(OutputColumn::Expression(ExpressionColumn {
-                        name: ord_expr.to_string(),
+                        name: ord_expr.to_string().into(),
                         table: None,
                         expression: ord_expr.clone(),
                     }));
@@ -1076,7 +1079,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                 expr => {
                     // This is an expression that we need to add to the list of projected columns
                     qg.columns.push(OutputColumn::Expression(ExpressionColumn {
-                        name: expr.to_string(),
+                        name: expr.to_string().into(),
                         table: None,
                         expression: expr.clone(),
                     }));
@@ -1101,7 +1104,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
     // create initial join order
     {
-        let mut sorted_edges: Vec<(&(String, String), &QueryGraphEdge)> = qg.edges.iter().collect();
+        let mut sorted_edges: Vec<(&(SqlIdentifier, SqlIdentifier), &QueryGraphEdge)> =
+            qg.edges.iter().collect();
         // Sort the edges to ensure deterministic join order.
         sorted_edges.sort_by(|&(a, _), &(b, _)| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
 
@@ -1138,13 +1142,13 @@ mod tests {
         let qg = make_query_graph("SELECT max(t1.x) FROM t1 JOIN t2 ON t1.id = t2.id");
         assert_eq!(
             qg.relations.keys().cloned().collect::<HashSet<_>>(),
-            HashSet::from(["t1".to_owned(), "t2".to_owned()])
+            HashSet::from(["t1".into(), "t2".into()])
         );
         assert_eq!(
             qg.aggregates,
             vec![(
                 FunctionExpression::Max(Box::new(Expression::Column("t1.x".into()))),
-                "max(`t1`.`x`)".to_owned()
+                "max(`t1`.`x`)".into()
             )]
         );
     }
@@ -1154,13 +1158,13 @@ mod tests {
         let qg = make_query_graph("SELECT max(t1.x) AS max_x FROM t1 JOIN t2 ON t1.id = t2.id");
         assert_eq!(
             qg.relations.keys().cloned().collect::<HashSet<_>>(),
-            HashSet::from(["t1".to_owned(), "t2".to_owned()])
+            HashSet::from(["t1".into(), "t2".into()])
         );
         assert_eq!(
             qg.aggregates,
             vec![(
                 FunctionExpression::Max(Box::new(Expression::Column("t1.x".into()))),
-                "max_x".to_owned()
+                "max_x".into()
             )]
         );
     }
@@ -1173,7 +1177,7 @@ mod tests {
 
         assert_eq!(
             qg.relations.keys().cloned().collect::<HashSet<_>>(),
-            HashSet::from(["t".to_owned(), "sq".to_owned()])
+            HashSet::from(["t".into(), "sq".into()])
         );
 
         let subquery_rel = qg.relations.get("sq").unwrap();

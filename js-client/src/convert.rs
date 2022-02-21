@@ -155,7 +155,7 @@ where
             let row_vec: Vec<_> = row_struct.into();
             let js_current_row = cx.empty_object();
             for (i, col_name) in col_names.iter().enumerate() {
-                if select_schema.use_bogo && col_name == "bogokey" {
+                if select_schema.use_bogo && *col_name == "bogokey" {
                     continue;
                 }
                 let js_datum = convert_datum(cx, &row_vec[i])?;
@@ -214,7 +214,7 @@ where
             let js_data = cx.empty_array();
             for (row_num, row) in vars.into_iter().enumerate() {
                 let js_current_row = cx.empty_object();
-                let datum = convert_datum(cx, &row.name.into())?;
+                let datum = convert_datum(cx, &row.name.as_str().into())?;
                 utils::set_jsval_field(cx, &js_current_row, "name", datum)?;
                 js_data.set(cx, row_num as u32, js_current_row)?;
 

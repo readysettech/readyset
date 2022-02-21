@@ -80,7 +80,8 @@ use futures::future::{self, OptionFuture};
 use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
     CreateCachedQueryStatement, DeleteStatement, Dialect, DropCachedQueryStatement, Expression,
-    InsertStatement, Literal, SelectStatement, ShowStatement, SqlQuery, UpdateStatement,
+    InsertStatement, Literal, SelectStatement, ShowStatement, SqlIdentifier, SqlQuery,
+    UpdateStatement,
 };
 use noria::consistency::Timestamp;
 use noria::results::Results;
@@ -524,7 +525,7 @@ pub enum MigrationMode {
 pub struct SelectSchema<'a> {
     pub use_bogo: bool,
     pub schema: Cow<'a, [ColumnSchema]>,
-    pub columns: Cow<'a, [String]>,
+    pub columns: Cow<'a, [SqlIdentifier]>,
 }
 
 impl<'a> SelectSchema<'a> {
@@ -1376,7 +1377,7 @@ where
                 ColumnSchema {
                     spec: nom_sql::ColumnSpecification {
                         column: nom_sql::Column {
-                            name: "proxied query".to_string(),
+                            name: "proxied query".into(),
                             table: None,
                         },
                         sql_type: nom_sql::SqlType::Text,
@@ -1388,7 +1389,7 @@ where
                 ColumnSchema {
                     spec: nom_sql::ColumnSpecification {
                         column: nom_sql::Column {
-                            name: "readyset supported".to_string(),
+                            name: "readyset supported".into(),
                             table: None,
                         },
                         sql_type: nom_sql::SqlType::Text,
@@ -1399,10 +1400,7 @@ where
                 },
             ]),
 
-            columns: Cow::Owned(vec![
-                "proxied query".to_string(),
-                "readyset supported".to_string(),
-            ]),
+            columns: Cow::Owned(vec!["proxied query".into(), "readyset supported".into()]),
         };
 
         let data = queries
@@ -1410,10 +1408,7 @@ where
             .collect::<Vec<_>>();
         let data = vec![Results::new(
             data,
-            Arc::new([
-                "proxied query".to_string(),
-                "readyset supported".to_string(),
-            ]),
+            Arc::new(["proxied query".into(), "readyset supported".into()]),
         )];
         Ok(noria_connector::QueryResult::Select {
             data,
@@ -1800,7 +1795,7 @@ where
                     }
                     SqlQuery::Use(stmt) => {
                         match self.upstream.as_ref().and_then(|u| u.database()) {
-                            Some(db) if db == stmt.database => {
+                            Some(db) if stmt.database == db => {
                                 Ok(QueryResult::Noria(noria_connector::QueryResult::Empty))
                             }
                             _ => {

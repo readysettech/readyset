@@ -300,7 +300,7 @@ mod tests {
 
     fn test_column() -> NomColumn {
         NomColumn {
-            name: "t".to_string(),
+            name: "t".into(),
             table: None,
         }
     }
@@ -310,7 +310,7 @@ mod tests {
         let s: StatementMeta = StatementMeta {
             params: vec![Type::BOOL, Type::INT8],
             schema: vec![Column {
-                name: "c1".to_string(),
+                name: "c1".into(),
                 col_type: Type::VARCHAR,
             }],
         };
@@ -318,17 +318,17 @@ mod tests {
         let param_specs = vec![
             ColumnSchema::from_base(
                 ColumnSpecification::new(test_column(), SqlType::Bool),
-                "table1".to_string(),
+                "table1".into(),
             ),
             ColumnSchema::from_base(
                 ColumnSpecification::new(test_column(), SqlType::Bigint(Some(10))),
-                "table1".to_string(),
+                "table1".into(),
             ),
         ];
 
         let schema_spec = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::Varchar(Some(8))),
-            "table1".to_string(),
+            "table1".into(),
         )];
 
         assert!(s.compare(&schema_spec, &param_specs).is_ok());
@@ -339,19 +339,19 @@ mod tests {
         let s: StatementMeta = StatementMeta {
             params: vec![Type::BOOL, Type::INT8],
             schema: vec![Column {
-                name: "c1".to_string(),
+                name: "c1".into(),
                 col_type: Type::VARCHAR,
             }],
         };
 
         let param_specs = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::Bool),
-            "table1".to_string(),
+            "table1".into(),
         )];
 
         let schema_spec = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::Varchar(Some(8))),
-            "table1".to_string(),
+            "table1".into(),
         )];
 
         assert!(s.compare(&schema_spec, &param_specs).is_err());
@@ -363,7 +363,7 @@ mod tests {
         let s: StatementMeta = StatementMeta {
             params: vec![Type::BOOL, Type::INT8],
             schema: vec![Column {
-                name: "c1".to_string(),
+                name: "c1".into(),
                 col_type: Type::VARCHAR,
             }],
         };
@@ -371,17 +371,17 @@ mod tests {
         let param_specs = vec![
             ColumnSchema::from_base(
                 ColumnSpecification::new(test_column(), SqlType::Bool),
-                "table1".to_string(),
+                "table1".into(),
             ),
             ColumnSchema::from_base(
                 ColumnSpecification::new(test_column(), SqlType::Varchar(Some(10))),
-                "table1".to_string(),
+                "table1".into(),
             ),
         ];
 
         let schema_spec = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::Varchar(Some(8))),
-            "table1".to_string(),
+            "table1".into(),
         )];
 
         assert!(s.compare(&schema_spec, &param_specs).is_err());

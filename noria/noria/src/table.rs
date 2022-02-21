@@ -14,7 +14,7 @@ use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::TryStreamExt;
 use futures_util::{future, ready};
 use itertools::Either;
-use nom_sql::CreateTableStatement;
+use nom_sql::{CreateTableStatement, SqlIdentifier};
 use noria_data::DataType;
 use noria_errors::{
     internal, internal_err, rpc_err, table_err, unsupported, ReadySetError, ReadySetResult,
@@ -284,8 +284,8 @@ pub struct TableBuilder {
     pub key: Vec<usize>,
     pub dropped: VecMap<DataType>,
 
-    pub table_name: String,
-    pub columns: Vec<String>,
+    pub table_name: SqlIdentifier,
+    pub columns: Vec<SqlIdentifier>,
     pub schema: Option<CreateTableStatement>,
 
     /// The amount of time before a table request RPC is terminated.
@@ -362,9 +362,9 @@ pub struct Table {
     pub node: LocalNodeIndex,
     key_is_primary: bool,
     key: Vec<usize>,
-    columns: Vec<String>,
+    columns: Vec<SqlIdentifier>,
     dropped: VecMap<DataType>,
-    table_name: String,
+    table_name: SqlIdentifier,
     schema: Option<CreateTableStatement>,
     dst_is_local: bool,
     shards: Vec<TableRpc>,
@@ -679,7 +679,7 @@ impl Table {
     ///
     /// Note that this will *not* be updated if the underlying recipe changes and adds or removes
     /// columns!
-    pub fn columns(&self) -> &[String] {
+    pub fn columns(&self) -> &[SqlIdentifier] {
         &self.columns
     }
 

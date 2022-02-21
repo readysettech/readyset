@@ -66,17 +66,18 @@ fn do_flatten_conditional(
             let with_space = flattened
                 .iter()
                 .find(|key| {
-                    key.len() < pkey.len() && !key.iter().any(|&(ref name, _)| name == &c.name)
+                    key.len() < pkey.len()
+                        && !key.iter().any(|&(ref name, _)| name == c.name.as_str())
                 })
                 .cloned();
 
             if let Some(mut key) = with_space {
                 flattened.remove(&key);
-                key.push((c.name.clone(), value));
+                key.push((c.name.to_string(), value));
                 flattened.insert(key);
             } else {
                 // There were no existing keys with space, so let's create a new one:
-                flattened.insert(vec![(c.name.clone(), value)]);
+                flattened.insert(vec![(c.name.to_string(), value)]);
             }
 
             true
@@ -310,13 +311,13 @@ pub(crate) fn get_limit_parameters(query: &SelectStatement) -> Vec<Column> {
     if let Some(ref limit) = query.limit {
         if let Expression::Literal(Literal::Placeholder(_)) = limit.limit {
             limit_params.push(Column {
-                name: "__row_count".to_string(),
+                name: "__row_count".into(),
                 table: None,
             });
         }
         if let Some(Expression::Literal(Literal::Placeholder(_))) = limit.offset {
             limit_params.push(Column {
-                name: "__offset".to_string(),
+                name: "__offset".into(),
                 table: None,
             });
         }
@@ -404,7 +405,7 @@ where
                     })?,
                 v => DataType::try_from(v)?,
             };
-            let oldv = col2v.insert(c.name, v);
+            let oldv = col2v.insert(c.name.to_string(), v);
             invariant!(oldv.is_none());
         }
         Expression::BinaryOp {
@@ -491,7 +492,7 @@ where
     walk_pkey_where(&mut col_to_val, &mut params, where_clause)?;
     pkey.iter()
         .map(|&(_, c)| {
-            col_to_val.remove(&c.name).ok_or_else(|| {
+            col_to_val.remove(c.name.as_str()).ok_or_else(|| {
                 unsupported_err(
                     "UPDATE or DELETE on columns other than the primary key are not supported",
                 )
@@ -576,8 +577,8 @@ mod tests {
         let pkey: Vec<Column> = key
             .into_iter()
             .map(|k| Column {
-                name: String::from(k),
-                table: Some(String::from("T")),
+                name: k.into(),
+                table: Some("T".into()),
             })
             .collect();
 

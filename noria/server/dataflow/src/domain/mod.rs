@@ -1314,7 +1314,7 @@ impl Domain {
                     .get(node)
                     .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
                     .borrow_mut();
-                n.add_column(&field);
+                n.add_column(field);
                 if let Some(b) = n.get_base_mut() {
                     b.add_column(default)?;
                 } else if n.is_ingress() {
@@ -1535,7 +1535,7 @@ impl Domain {
 
                         #[allow(clippy::indexing_slicing)] // checked node exists above
                         let mut n = self.nodes[node].borrow_mut();
-                        let name = n.name().to_owned();
+                        let name = n.name().clone();
                         #[allow(clippy::unwrap_used)] // checked it was a reader above
                         let r = n.as_mut_reader().unwrap();
                         r_part.post_lookup = r.post_lookup().clone();
@@ -1579,7 +1579,7 @@ impl Domain {
                             .get(node)
                             .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
                             .borrow_mut();
-                        let name = n.name().to_owned();
+                        let name = n.name().clone();
 
                         #[allow(clippy::unwrap_used)] // checked it was a reader above
                         let r = n.as_mut_reader().unwrap();

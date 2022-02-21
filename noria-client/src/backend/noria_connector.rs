@@ -9,7 +9,7 @@ use dataflow_expression::Expression as DataflowExpression;
 use itertools::Itertools;
 use nom_sql::{
     self, BinaryOperator, ColumnConstraint, DeleteStatement, Expression, InsertStatement, Literal,
-    SelectStatement, SqlQuery, UpdateStatement,
+    SelectStatement, SqlIdentifier, SqlQuery, UpdateStatement,
 };
 use noria::consistency::Timestamp;
 use noria::internal::LocalNodeIndex;
@@ -178,12 +178,12 @@ impl PrepareResult {
 #[derive(Debug)]
 pub struct MetaVariable {
     /// The variable name.
-    pub name: String,
+    pub name: SqlIdentifier,
     /// The value associated with the variable.
     pub value: String,
 }
 
-impl<N: Into<String>, V: Into<String>> From<(N, V)> for MetaVariable {
+impl<N: Into<SqlIdentifier>, V: Into<String>> From<(N, V)> for MetaVariable {
     fn from((name, value): (N, V)) -> Self {
         MetaVariable {
             name: name.into(),
@@ -459,7 +459,7 @@ impl NoriaConnector {
                 ColumnSchema {
                     spec: nom_sql::ColumnSpecification {
                         column: nom_sql::Column {
-                            name: "name".to_string(),
+                            name: "name".into(),
                             table: None,
                         },
                         sql_type: nom_sql::SqlType::Text,
@@ -471,7 +471,7 @@ impl NoriaConnector {
                 ColumnSchema {
                     spec: nom_sql::ColumnSpecification {
                         column: nom_sql::Column {
-                            name: "query".to_string(),
+                            name: "query".into(),
                             table: None,
                         },
                         sql_type: nom_sql::SqlType::Text,
@@ -482,7 +482,7 @@ impl NoriaConnector {
                 },
             ]),
 
-            columns: Cow::Owned(vec!["name".to_string(), "query".to_string()]),
+            columns: Cow::Owned(vec!["name".into(), "query".into()]),
         };
         let data = outputs
             .into_iter()
@@ -490,7 +490,7 @@ impl NoriaConnector {
             .collect::<Vec<_>>();
         let data = vec![Results::new(
             data,
-            Arc::new(["name".to_string(), "query".to_string()]),
+            Arc::new(["name".into(), "query".into()]),
         )];
         Ok(QueryResult::Select {
             data,
@@ -923,7 +923,7 @@ impl NoriaConnector {
                     }
                 } else if let Err(e) = noria_await!(
                     self.inner.get_mut().await?,
-                    self.inner.get_mut().await?.noria.view(&qname)
+                    self.inner.get_mut().await?.noria.view(qname.as_str())
                 ) {
                     error!(error = %e, "getting view from noria failed");
                     return Err(e);
@@ -987,17 +987,20 @@ impl NoriaConnector {
             .collect();
         if auto_increment_columns.len() > 1 {
             // can only have zero or one AUTO_INCREMENT columns
-            return Err(table_err(table, ReadySetError::MultipleAutoIncrement));
+            return Err(table_err(
+                table.to_string(),
+                ReadySetError::MultipleAutoIncrement,
+            ));
         }
 
         let ai = &mut self.auto_increments;
         tokio::task::block_in_place(|| {
             let ai_lock = ai.read().unwrap();
-            if ai_lock.get(table).is_none() {
+            if ai_lock.get(table.as_str()).is_none() {
                 drop(ai_lock);
                 ai.write()
                     .unwrap()
-                    .entry(table.to_owned())
+                    .entry(table.to_string())
                     .or_insert_with(|| atomic::AtomicUsize::new(0));
             }
         });
@@ -1005,7 +1008,7 @@ impl NoriaConnector {
         let mut first_inserted_id = None;
         tokio::task::block_in_place(|| -> ReadySetResult<_> {
             let ai_lock = ai.read().unwrap();
-            let last_insert_id = &ai_lock[table];
+            let last_insert_id = &ai_lock[table.as_str()];
 
             // handle default values
             trace!("insert::default values");
@@ -1031,7 +1034,10 @@ impl NoriaConnector {
                         .iter()
                         .position(|f| f == *col)
                         .ok_or_else(|| {
-                            table_err(table, ReadySetError::NoSuchColumn(col.column.name.clone()))
+                            table_err(
+                                table,
+                                ReadySetError::NoSuchColumn(col.column.name.to_string()),
+                            )
                         })?;
                     // query can specify an explicit AUTO_INCREMENT value
                     if !columns_specified.contains(&col.column) {
@@ -1049,7 +1055,7 @@ impl NoriaConnector {
                         .iter()
                         .position(|f| f.column == c)
                         .ok_or_else(|| {
-                            table_err(table, ReadySetError::NoSuchColumn(c.name.clone()))
+                            table_err(table, ReadySetError::NoSuchColumn(c.name.to_string()))
                         })?;
                     // only use default value if query doesn't specify one
                     if !columns_specified.contains(&c) {
@@ -1065,7 +1071,7 @@ impl NoriaConnector {
                         .ok_or_else(|| {
                             table_err(
                                 &schema.table.name,
-                                ReadySetError::NoSuchColumn(c.name.clone()),
+                                ReadySetError::NoSuchColumn(c.name.to_string()),
                             )
                         })?;
                     let value = row
@@ -1283,14 +1289,14 @@ impl NoriaConnector {
             .into_iter()
             .map(|cs| {
                 let mut cs = cs.clone();
-                cs.spec.column.table = Some(qname.clone());
+                cs.spec.column.table = Some(qname.as_str().into());
                 cs
             })
             .collect();
 
         trace!(id = statement_id, "select::registered");
         let ps = PreparedSelectStatement {
-            name: qname,
+            name: qname.to_string(),
             statement: Box::new(statement),
             processed_query_params,
         };
@@ -1418,7 +1424,7 @@ fn build_view_query(
             let column = projected_schema
                 .iter()
                 .position(|x| x.spec.column.name == col.name)
-                .ok_or_else(|| ReadySetError::NoSuchColumn(col.name.clone()))?;
+                .ok_or_else(|| ReadySetError::NoSuchColumn(col.name.to_string()))?;
             let value = key[idx].coerce_to(key_types.remove(idx))?;
             if !key.is_empty() {
                 // the LIKE/ILIKE isn't our only key, add the rest back to `keys`
@@ -1645,31 +1651,31 @@ mod tests {
                     ColumnSchema {
                         spec: ColumnSpecification {
                             column: Column {
-                                name: "x".to_owned(),
-                                table: Some("t".to_owned()),
+                                name: "x".into(),
+                                table: Some("t".into()),
                             },
                             sql_type: SqlType::Int(None),
                             constraints: vec![],
                             comment: None,
                         },
                         base: Some(ColumnBase {
-                            table: "t".to_owned(),
-                            column: "x".to_owned(),
+                            table: "t".into(),
+                            column: "x".into(),
                         }),
                     },
                     ColumnSchema {
                         spec: ColumnSpecification {
                             column: Column {
-                                name: "y".to_owned(),
-                                table: Some("t".to_owned()),
+                                name: "y".into(),
+                                table: Some("t".into()),
                             },
                             sql_type: SqlType::Text,
                             constraints: vec![],
                             comment: None,
                         },
                         base: Some(ColumnBase {
-                            table: "t".to_owned(),
-                            column: "y".to_owned(),
+                            table: "t".into(),
+                            column: "y".into(),
                         }),
                     }
                 ],
@@ -1677,31 +1683,31 @@ mod tests {
                     ColumnSchema {
                         spec: ColumnSpecification {
                             column: Column {
-                                name: "x".to_owned(),
-                                table: Some("t".to_owned()),
+                                name: "x".into(),
+                                table: Some("t".into()),
                             },
                             sql_type: SqlType::Int(None),
                             constraints: vec![],
                             comment: None,
                         },
                         base: Some(ColumnBase {
-                            table: "t".to_owned(),
-                            column: "x".to_owned(),
+                            table: "t".into(),
+                            column: "x".into(),
                         }),
                     },
                     ColumnSchema {
                         spec: ColumnSpecification {
                             column: Column {
-                                name: "y".to_owned(),
-                                table: Some("t".to_owned()),
+                                name: "y".into(),
+                                table: Some("t".into()),
                             },
                             sql_type: SqlType::Text,
                             constraints: vec![],
                             comment: None,
                         },
                         base: Some(ColumnBase {
-                            table: "t".to_owned(),
-                            column: "y".to_owned(),
+                            table: "t".into(),
+                            column: "y".into(),
                         }),
                     }
                 ],

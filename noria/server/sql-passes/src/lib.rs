@@ -21,7 +21,7 @@ pub use nom_sql::analysis::{contains_aggregate, is_aggregate};
 use nom_sql::{
     BinaryOperator, Column, CommonTableExpression, Expression, FieldDefinitionExpression,
     FunctionExpression, InValue, JoinClause, JoinRightSide, LimitClause, Literal, SelectStatement,
-    Table,
+    SqlIdentifier, Table,
 };
 use noria_errors::{unsupported, ReadySetResult};
 
@@ -49,15 +49,15 @@ pub fn outermost_referred_tables(stmt: &SelectStatement) -> impl Iterator<Item =
         }))
 }
 
-fn field_names(statement: &SelectStatement) -> impl Iterator<Item = &str> {
+fn field_names(statement: &SelectStatement) -> impl Iterator<Item = &SqlIdentifier> {
     statement.fields.iter().filter_map(|field| match &field {
         FieldDefinitionExpression::Expression {
             alias: Some(alias), ..
-        } => Some(alias.as_str()),
+        } => Some(alias),
         FieldDefinitionExpression::Expression {
             expr: Expression::Column(Column { name, .. }),
             ..
-        } => Some(name.as_str()),
+        } => Some(name),
         _ => None,
     })
 }
@@ -68,11 +68,11 @@ fn field_names(statement: &SelectStatement) -> impl Iterator<Item = &str> {
 pub(self) fn subquery_schemas<'a>(
     ctes: &'a [CommonTableExpression],
     join: &'a [JoinClause],
-) -> HashMap<&'a str, Vec<&'a str>> {
+) -> HashMap<&'a SqlIdentifier, Vec<&'a SqlIdentifier>> {
     ctes.iter()
-        .map(|cte| (cte.name.as_str(), &cte.statement))
+        .map(|cte| (&cte.name, &cte.statement))
         .chain(join.iter().filter_map(|join| match &join.right {
-            JoinRightSide::NestedSelect(stmt, name) => Some((name.as_str(), stmt.as_ref())),
+            JoinRightSide::NestedSelect(stmt, name) => Some((name, stmt.as_ref())),
             _ => None,
         }))
         .map(|(name, stmt)| (name, field_names(stmt).collect()))
@@ -80,11 +80,11 @@ pub(self) fn subquery_schemas<'a>(
 }
 
 #[must_use]
-pub fn map_aggregates(expr: &mut Expression) -> Vec<(FunctionExpression, String)> {
+pub fn map_aggregates(expr: &mut Expression) -> Vec<(FunctionExpression, SqlIdentifier)> {
     let mut ret = Vec::new();
     match expr {
         Expression::Call(f) if is_aggregate(f) => {
-            let name = f.to_string();
+            let name: SqlIdentifier = f.to_string().into();
             ret.push((f.clone(), name.clone()));
             *expr = Expression::Column(Column { name, table: None });
         }

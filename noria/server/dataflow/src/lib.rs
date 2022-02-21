@@ -40,12 +40,14 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use derivative::Derivative;
+use nom_sql::SqlIdentifier;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub use crate::backlog::{LookupError, SingleReadHandle};
-pub type Readers =
-    Arc<Mutex<HashMap<(petgraph::graph::NodeIndex, String, usize), backlog::SingleReadHandle>>>;
+pub type Readers = Arc<
+    Mutex<HashMap<(petgraph::graph::NodeIndex, SqlIdentifier, usize), backlog::SingleReadHandle>>,
+>;
 pub type DomainConfig = domain::Config;
 
 pub use dataflow_expression::{BuiltinFunction, Expression};

@@ -128,7 +128,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                         ColumnSchema {
                             spec: ColumnSpecification::new(
                                 nom_sql::Column {
-                                    name: "name".to_string(),
+                                    name: "name".into(),
                                     table: None,
                                 },
                                 SqlType::Text,
@@ -138,7 +138,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                         ColumnSchema {
                             spec: ColumnSpecification::new(
                                 nom_sql::Column {
-                                    name: "value".to_string(),
+                                    name: "value".into(),
                                     table: None,
                                 },
                                 SqlType::Text,
@@ -146,17 +146,17 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                             base: None,
                         },
                     ]),
-                    columns: Cow::Owned(vec!["name".to_owned(), "value".to_owned()]),
+                    columns: Cow::Owned(vec!["name".into(), "value".into()]),
                 });
                 let mut rows: Vec<Vec<noria_data::DataType>> = Vec::new();
                 for v in vars {
-                    rows.push(vec![v.name.into(), v.value.into()]);
+                    rows.push(vec![v.name.as_str().into(), v.value.into()]);
                 }
 
                 let resultset = Resultset::try_new(
                     vec![Results::new(
                         rows,
-                        Arc::new(["name".to_owned(), "value".to_owned()]),
+                        Arc::new(["name".into(), "value".into()]),
                     )],
                     &select_schema,
                 )?;

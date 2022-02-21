@@ -23,7 +23,7 @@ use mir::query::{MirQuery, QueryFlowParts};
 use mir::{Column, FlowNode, MirNodeRef};
 use nom_sql::{
     BinaryOperator, ColumnConstraint, ColumnSpecification, Expression, FunctionExpression, InValue,
-    OrderType, UnaryOperator,
+    OrderType, SqlIdentifier, UnaryOperator,
 };
 use noria::internal::{Index, IndexType};
 use noria::ViewPlaceholder;
@@ -67,7 +67,7 @@ pub(super) fn mir_query_to_flow_parts(
         };
         let flow_node = mir_node_to_flow_parts(&mut n.borrow_mut(), mig).map_err(|e| {
             ReadySetError::MirNodeCreationFailed {
-                name,
+                name: name.to_string(),
                 from_version,
                 source: Box::new(e),
             }
@@ -393,7 +393,7 @@ fn adapt_base_node(
                 break;
             }
         }
-        let column_id = mig.add_column(na, &a.column.name, default_value)?;
+        let column_id = mig.add_column(na, a.column.name.clone(), default_value)?;
 
         // store the new column ID in the column specs for this node
         for &mut (ref cs, ref mut cid) in column_specs.iter_mut() {
@@ -527,7 +527,7 @@ fn make_union_node(
         emit_column_id.insert(ni, emit_cols);
     }
     let node = mig.add_ingredient(
-        String::from(name),
+        name,
         column_names.as_slice(),
         ops::union::Union::new(emit_column_id, duplicate_mode)?,
     );
@@ -547,7 +547,7 @@ fn make_filter_node(
     let filter_conditions = lower_expression(&parent, conditions)?;
 
     let node = mig.add_ingredient(
-        String::from(name),
+        name,
         column_names.as_slice(),
         ops::filter::Filter::new(parent_na, filter_conditions),
     );
@@ -581,15 +581,15 @@ fn make_grouped_node(
         // aggregation before we pattern match for a generic aggregation.
         GroupedNodeType::Aggregation(Aggregation::GroupConcat { separator: sep }) => {
             let gc = GroupConcat::new(parent_na, over_col_indx, group_col_indx, sep)?;
-            mig.add_ingredient(String::from(name), column_names.as_slice(), gc)
+            mig.add_ingredient(name, column_names.as_slice(), gc)
         }
         GroupedNodeType::Aggregation(agg) => mig.add_ingredient(
-            String::from(name),
+            name,
             column_names.as_slice(),
             agg.over(parent_na, over_col_indx, group_col_indx.as_slice())?,
         ),
         GroupedNodeType::Extremum(extr) => mig.add_ingredient(
-            String::from(name),
+            name,
             column_names.as_slice(),
             extr.over(parent_na, over_col_indx, group_col_indx.as_slice()),
         ),
@@ -738,7 +738,7 @@ fn make_join_node(
     if join_col_mappings.is_empty() {
         let mut make_cross_join_bogokey = |node: MirNodeRef| {
             let mut node_columns = node.borrow().columns().to_vec();
-            node_columns.push(Column::named("cross_join_bogokey".to_owned()));
+            node_columns.push(Column::named("cross_join_bogokey"));
 
             make_project_node(
                 &format!("{}_cross_join_bogokey", node.borrow().name()),
@@ -746,7 +746,7 @@ fn make_join_node(
                 &node_columns,
                 node.borrow().columns(),
                 &[],
-                &[("cross_join_bogokey".to_owned(), DataType::from(0))],
+                &[("cross_join_bogokey".into(), DataType::from(0))],
                 mig,
             )
         };
@@ -998,8 +998,8 @@ fn make_project_node(
     parent: MirNodeRef,
     source_columns: &[Column],
     emit: &[Column],
-    expressions: &[(String, Expression)],
-    literals: &[(String, DataType)],
+    expressions: &[(SqlIdentifier, Expression)],
+    literals: &[(SqlIdentifier, DataType)],
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
@@ -1025,7 +1025,7 @@ fn make_project_node(
         .collect::<Result<Vec<_>, _>>()?;
 
     let n = mig.add_ingredient(
-        String::from(name),
+        name,
         column_names.as_slice(),
         Project::new(
             parent_na,
@@ -1183,7 +1183,7 @@ fn make_post_lookup(
 
 fn materialize_leaf_node(
     parent: &MirNodeRef,
-    name: String,
+    name: SqlIdentifier,
     key_cols: &[(Column, ViewPlaceholder)],
     index_type: IndexType,
     post_lookup: PostLookup,

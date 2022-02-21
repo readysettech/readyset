@@ -2,11 +2,13 @@ use std::{fmt, str};
 
 use serde::{Deserialize, Serialize};
 
+use crate::SqlIdentifier;
+
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Table {
-    pub name: String,
-    pub alias: Option<String>,
-    pub schema: Option<String>,
+    pub name: SqlIdentifier,
+    pub alias: Option<SqlIdentifier>,
+    pub schema: Option<SqlIdentifier>,
 }
 
 impl fmt::Display for Table {
@@ -22,10 +24,20 @@ impl fmt::Display for Table {
     }
 }
 
-impl From<String> for Table {
-    fn from(name: String) -> Self {
+impl From<SqlIdentifier> for Table {
+    fn from(name: SqlIdentifier) -> Self {
         Table {
             name,
+            alias: None,
+            schema: None,
+        }
+    }
+}
+
+impl From<&SqlIdentifier> for Table {
+    fn from(name: &SqlIdentifier) -> Self {
+        Table {
+            name: name.clone(),
             alias: None,
             schema: None,
         }
@@ -35,7 +47,7 @@ impl From<String> for Table {
 impl<'a> From<&'a str> for Table {
     fn from(t: &str) -> Table {
         Table {
-            name: String::from(t),
+            name: t.into(),
             alias: None,
             schema: None,
         }
@@ -44,9 +56,9 @@ impl<'a> From<&'a str> for Table {
 impl<'a> From<(&'a str, &'a str)> for Table {
     fn from(t: (&str, &str)) -> Table {
         Table {
-            name: String::from(t.1),
+            name: t.1.into(),
             alias: None,
-            schema: Some(String::from(t.0)),
+            schema: Some(t.0.into()),
         }
     }
 }

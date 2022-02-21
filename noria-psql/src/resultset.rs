@@ -2,6 +2,7 @@ use std::convert::TryFrom;
 use std::iter;
 use std::sync::Arc;
 
+use nom_sql::SqlIdentifier;
 use noria::results::Results;
 use noria_data::DataType;
 use psql_srv as ps;
@@ -46,7 +47,7 @@ impl Resultset {
                         .0
                         .columns
                         .iter()
-                        .position(|name| name == &col.spec.column.name)
+                        .position(|name| col.spec.column.name == name)
                         .ok_or_else(|| ps::Error::InternalError("inconsistent schema".to_string()))
                 })
                 .collect::<Result<Vec<usize>, ps::Error>>()?,
@@ -119,7 +120,7 @@ impl TryFrom<Vec<tokio_postgres::Row>> for Resultset {
             }
             result_rows.push(result_row);
         }
-        let column_names: Vec<String> = columns.iter().map(|c| c.name().to_owned()).collect();
+        let column_names: Vec<SqlIdentifier> = columns.iter().map(|c| c.name().into()).collect();
         let column_types: Vec<Type> = columns.iter().map(|c| c.type_().clone()).collect();
         Ok(Resultset {
             results: vec![Results::new(result_rows, Arc::from(&column_names[..]))],
@@ -166,7 +167,7 @@ mod tests {
                 },
                 base: None,
             }]),
-            columns: Cow::Owned(vec!["col1".to_string()]),
+            columns: Cow::Owned(vec!["col1".into()]),
         });
         let resultset = Resultset::try_new(results, &schema).unwrap();
         assert_eq!(resultset.results, Vec::<Results>::new());
@@ -178,7 +179,7 @@ mod tests {
     fn iterate_resultset() {
         let results = vec![Results::new(
             vec![vec![DataType::Int(10)]],
-            Arc::new(["col1".to_string()]),
+            Arc::new(["col1".into()]),
         )];
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: false,
@@ -191,7 +192,7 @@ mod tests {
                 },
                 base: None,
             }]),
-            columns: Cow::Owned(vec!["col1".to_string()]),
+            columns: Cow::Owned(vec!["col1".into()]),
         });
         let resultset = Resultset::try_new(results, &schema).unwrap();
         assert_eq!(
@@ -203,14 +204,11 @@ mod tests {
     #[test]
     fn iterate_resultset_with_multiple_results() {
         let results = vec![
-            Results::new(
-                vec![vec![DataType::Int(10)]],
-                Arc::new(["col1".to_string()]),
-            ),
-            Results::new(Vec::<Vec<DataType>>::new(), Arc::new(["col1".to_string()])),
+            Results::new(vec![vec![DataType::Int(10)]], Arc::new(["col1".into()])),
+            Results::new(Vec::<Vec<DataType>>::new(), Arc::new(["col1".into()])),
             Results::new(
                 vec![vec![DataType::Int(11)], vec![DataType::Int(12)]],
-                Arc::new(["col1".to_string()]),
+                Arc::new(["col1".into()]),
             ),
         ];
         let schema = SelectSchema(cl::SelectSchema {
@@ -224,7 +222,7 @@ mod tests {
                 },
                 base: None,
             }]),
-            columns: Cow::Owned(vec!["col1".to_string()]),
+            columns: Cow::Owned(vec!["col1".into()]),
         });
         let resultset = Resultset::try_new(results, &schema).unwrap();
         assert_eq!(
@@ -263,10 +261,10 @@ mod tests {
                 },
             ]),
             columns: Cow::Owned(vec![
-                "col1".to_string(),
-                "col3".to_string(),
-                "col2".to_string(),
-                "bogokey".to_string(),
+                "col1".into(),
+                "col3".into(),
+                "col2".into(),
+                "bogokey".into(),
             ]),
         });
         let resultset = Resultset::try_new(results, &schema).unwrap();
@@ -298,10 +296,10 @@ mod tests {
                 ],
             ],
             Arc::new([
-                "col1".to_string(),
-                "col3".to_string(),
-                "col2".to_string(),
-                "bogokey".to_string(),
+                "col1".into(),
+                "col3".into(),
+                "col2".into(),
+                "bogokey".into(),
             ]),
         )];
         let schema = SelectSchema(cl::SelectSchema {
@@ -327,10 +325,10 @@ mod tests {
                 },
             ]),
             columns: Cow::Owned(vec![
-                "col1".to_string(),
-                "col3".to_string(),
-                "col2".to_string(),
-                "bogokey".to_string(),
+                "col1".into(),
+                "col3".into(),
+                "col2".into(),
+                "bogokey".into(),
             ]),
         });
         let resultset = Resultset::try_new(results, &schema).unwrap();

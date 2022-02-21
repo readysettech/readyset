@@ -17,7 +17,7 @@ use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::{StreamExt, TryStreamExt};
 use futures_util::{future, ready};
 use launchpad::intervals::{cmp_start_end, BoundPair};
-use nom_sql::{BinaryOperator, Column, ColumnSpecification, SqlType};
+use nom_sql::{BinaryOperator, Column, ColumnSpecification, SqlIdentifier, SqlType};
 use noria_data::DataType;
 use noria_errors::{internal_err, rpc_err, view_err, ReadySetError, ReadySetResult};
 use petgraph::graph::NodeIndex;
@@ -86,9 +86,9 @@ struct Endpoint {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ColumnBase {
     /// The name of the column in the base table
-    pub column: String,
+    pub column: SqlIdentifier,
     /// The name of the base table for this column
-    pub table: String,
+    pub table: SqlIdentifier,
 }
 
 /// Combines the specification for a columns with its base name
@@ -103,7 +103,7 @@ pub struct ColumnSchema {
 impl ColumnSchema {
     /// Create a new ColumnSchema from a ColumnSpecification representing a column directly in a
     /// base table with the given name.
-    pub fn from_base(spec: ColumnSpecification, table: String) -> Self {
+    pub fn from_base(spec: ColumnSpecification, table: SqlIdentifier) -> Self {
         Self {
             base: Some(ColumnBase {
                 column: spec.column.name.clone(),
@@ -688,21 +688,21 @@ pub enum ReadQuery {
     /// Read from a leaf view
     Normal {
         /// Where to read from
-        target: (NodeIndex, String, usize),
+        target: (NodeIndex, SqlIdentifier, usize),
         /// View query to run
         query: ViewQuery,
     },
     /// Read the size of a leaf view
     Size {
         /// Where to read from
-        target: (NodeIndex, String, usize),
+        target: (NodeIndex, SqlIdentifier, usize),
     },
     /// Read all keys from a leaf view (for debugging)
     /// TODO(alex): queries with this value are not totally implemented, and might not actually
     /// work
     Keys {
         /// Where to read from
-        target: (NodeIndex, String, usize),
+        target: (NodeIndex, SqlIdentifier, usize),
     },
 }
 
@@ -731,7 +731,7 @@ impl<D> ReadReply<D> {
 #[doc(hidden)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ViewBuilder {
-    pub name: String,
+    pub name: SqlIdentifier,
     /// Set of replicas for a view, this will only include one element
     /// if there is no reader replication.
     pub replicas: Vec1<ViewReplica>,
@@ -745,7 +745,7 @@ pub struct ViewBuilder {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ViewReplica {
     pub node: NodeIndex,
-    pub columns: Arc<[String]>,
+    pub columns: Arc<[SqlIdentifier]>,
     pub schema: Option<ViewSchema>,
     pub shards: Vec<ReplicaShard>,
     /// (view_placeholder, key_column_index) pairs according to their mapping. Contains exactly one
@@ -865,9 +865,9 @@ impl ViewBuilder {
 /// share connections to the Soup workers.
 #[derive(Clone)]
 pub struct View {
-    name: String,
+    name: SqlIdentifier,
     node: NodeIndex,
-    columns: Arc<[String]>,
+    columns: Arc<[SqlIdentifier]>,
     schema: Option<ViewSchema>,
     /// (view_placeholder, key_column_index) pairs according to their mapping. Contains exactly
     /// one entry for each key column at the reader.
@@ -1070,7 +1070,7 @@ impl Service<ViewQuery> for View {
 #[allow(clippy::len_without_is_empty)]
 impl View {
     /// Get the list of columns in this view.
-    pub fn columns(&self) -> &[String] {
+    pub fn columns(&self) -> &[SqlIdentifier] {
         &*self.columns
     }
 

@@ -90,7 +90,7 @@ use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpression,
     CreateTableStatement, Expression, FieldDefinitionExpression, FunctionExpression, InValue,
     ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal,
-    OrderClause, OrderType, SelectStatement, SqlType, Table, TableKey,
+    OrderClause, OrderType, SelectStatement, SqlIdentifier, SqlType, Table, TableKey,
 };
 use noria_data::DataType;
 use parking_lot::Mutex;
@@ -415,13 +415,7 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, From, Into, Display, Clone)]
 #[repr(transparent)]
-pub struct TableName(String);
-
-impl Borrow<String> for TableName {
-    fn borrow(&self) -> &String {
-        &self.0
-    }
-}
+pub struct TableName(SqlIdentifier);
 
 impl Borrow<str> for TableName {
     fn borrow(&self) -> &str {
@@ -432,7 +426,7 @@ impl Borrow<str> for TableName {
 impl From<TableName> for Table {
     fn from(name: TableName) -> Self {
         Table {
-            name: name.into(),
+            name: name.0,
             alias: None,
             schema: None,
         }
@@ -451,6 +445,12 @@ impl From<&str> for TableName {
     }
 }
 
+impl From<&SqlIdentifier> for TableName {
+    fn from(tn: &SqlIdentifier) -> Self {
+        TableName(tn.clone())
+    }
+}
+
 impl FromStr for TableName {
     type Err = !;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -462,12 +462,12 @@ impl FromStr for TableName {
     Debug, Eq, PartialEq, Ord, PartialOrd, Hash, From, Into, Display, Clone, Serialize, Deserialize,
 )]
 #[repr(transparent)]
-pub struct ColumnName(String);
+pub struct ColumnName(SqlIdentifier);
 
 impl From<ColumnName> for Column {
     fn from(name: ColumnName) -> Self {
         Self {
-            name: name.into(),
+            name: name.0,
             table: None,
         }
     }
@@ -476,6 +476,12 @@ impl From<ColumnName> for Column {
 impl From<&str> for ColumnName {
     fn from(col: &str) -> Self {
         Self(col.into())
+    }
+}
+
+impl From<&SqlIdentifier> for ColumnName {
+    fn from(tn: &SqlIdentifier) -> Self {
+        ColumnName(tn.clone())
     }
 }
 
@@ -1055,7 +1061,7 @@ impl TableSpec {
     /// Generate a new, unique column in this table with the specified type and return its name.
     pub fn fresh_column_with_type(&mut self, col_type: SqlType) -> ColumnName {
         self.column_name_counter += 1;
-        let column_name = ColumnName(format!("column_{}", self.column_name_counter));
+        let column_name = ColumnName(format!("column_{}", self.column_name_counter).into());
         self.columns.insert(
             column_name.clone(),
             ColumnSpec {
@@ -1252,7 +1258,7 @@ impl GeneratorState {
     /// Create a new, unique, empty table, and return a mutable reference to that table
     pub fn fresh_table_mut(&mut self) -> &mut TableSpec {
         self.table_name_counter += 1;
-        let table_name = TableName(format!("table_{}", self.table_name_counter));
+        let table_name: TableName = format!("table_{}", self.table_name_counter).as_str().into();
         self.tables
             .entry(table_name)
             .or_insert_with_key(|tn| TableSpec::new(tn.clone()))
@@ -1262,7 +1268,7 @@ impl GeneratorState {
     pub fn table<'a, TN>(&'a self, name: &TN) -> Option<&'a TableSpec>
     where
         TableName: Borrow<TN>,
-        TN: Eq + Hash,
+        TN: Eq + Hash + ?Sized,
     {
         self.tables.get(name)
     }
@@ -1271,7 +1277,7 @@ impl GeneratorState {
     pub fn table_mut<'a, TN>(&'a mut self, name: &TN) -> Option<&'a mut TableSpec>
     where
         TableName: Borrow<TN>,
-        TN: Eq + Hash,
+        TN: Eq + Hash + ?Sized,
     {
         self.tables.get_mut(name)
     }
@@ -1387,9 +1393,9 @@ impl<'a> QueryState<'a> {
     }
 
     /// Generate a new, unique column alias for the query
-    pub fn fresh_alias(&mut self) -> String {
+    pub fn fresh_alias(&mut self) -> nom_sql::SqlIdentifier {
         self.alias_counter += 1;
-        format!("alias_{}", self.alias_counter)
+        format!("alias_{}", self.alias_counter).into()
     }
 
     /// Return a mutable reference to *some* table in the schema - the implication being that the
@@ -1415,7 +1421,7 @@ impl<'a> QueryState<'a> {
             }))
             .next()
         {
-            Some(tbl) => self.gen.table_mut(&tbl.name).unwrap(),
+            Some(tbl) => self.gen.table_mut(tbl.name.as_str()).unwrap(),
             None => self.some_table_mut(),
         }
     }
@@ -1994,7 +2000,11 @@ fn column_in_query<'state>(state: &mut QueryState<'state>, query: &mut SelectSta
     match query.tables.first() {
         Some(table) => {
             let table_name = table.name.clone();
-            let column = state.gen.table_mut(&table_name).unwrap().some_column_name();
+            let column = state
+                .gen
+                .table_mut(table_name.as_str())
+                .unwrap()
+                .some_column_name();
             Column {
                 name: column.into(),
                 table: Some(table_name),
@@ -2085,7 +2095,7 @@ impl QueryOperation {
                 }
 
                 let col_expr = Expression::Column(Column {
-                    table: Some(tbl.name.clone().into()),
+                    table: Some(tbl.name.to_string().into()),
                     ..col.clone().into()
                 });
 
@@ -2247,7 +2257,7 @@ impl QueryOperation {
                 );
                 tbl.set_column_generator_spec(
                     col.clone(),
-                    ColumnGenerationSpec::Uniform(1.into(), 20.into()),
+                    ColumnGenerationSpec::Uniform(1i32.into(), 20i32.into()),
                 );
                 let tbl_name = tbl.name.clone();
                 state.add_parameter_with_value(tbl_name, col, 10i32);

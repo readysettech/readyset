@@ -257,7 +257,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 #[doc(hidden)]
-pub use nom_sql::ColumnConstraint;
+pub use nom_sql::{ColumnConstraint, SqlIdentifier};
 use noria_data::DataType;
 pub use noria_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -350,7 +350,7 @@ pub mod debug;
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct ActivationResult {
     /// Map of query names to `NodeIndex` handles for reads/writes.
-    pub new_nodes: HashMap<String, NodeIndex>,
+    pub new_nodes: HashMap<SqlIdentifier, NodeIndex>,
     /// List of leaf nodes that were removed.
     pub removed_leaves: Vec<NodeIndex>,
     /// Number of expressions the recipe added compared to the prior recipe.
@@ -363,7 +363,7 @@ pub struct ActivationResult {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ReaderReplicationSpec {
     /// Name of the queries that will have their reader nodes replicated.
-    pub queries: Vec<String>,
+    pub queries: Vec<SqlIdentifier>,
     /// Worker URI.
     pub worker_uri: Option<Url>,
 }
@@ -372,7 +372,7 @@ pub struct ReaderReplicationSpec {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ReaderReplicationResult {
     /// Map of query names to the new `DomainIndex`es and their `NodeIndex`es.
-    pub new_readers: HashMap<String, HashMap<DomainIndex, Vec<NodeIndex>>>,
+    pub new_readers: HashMap<SqlIdentifier, HashMap<DomainIndex, Vec<NodeIndex>>>,
 }
 
 /// Represents a request to install or extend a recipe
@@ -405,7 +405,7 @@ pub enum ViewFilter {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ViewRequest {
     /// Name of the view being requested.
-    pub name: String,
+    pub name: SqlIdentifier,
     /// Filter to be applied when searching for a view.
     pub filter: Option<ViewFilter>,
 }

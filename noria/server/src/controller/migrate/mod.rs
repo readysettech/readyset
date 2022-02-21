@@ -38,6 +38,7 @@ use dataflow::post_lookup::PostLookup;
 use dataflow::prelude::*;
 use dataflow::{node, DomainRequest};
 use metrics::{counter, histogram};
+use nom_sql::SqlIdentifier;
 use noria::metrics::recorded;
 use noria::{KeyColumnIdx, ReadySetError, ViewPlaceholder};
 use tracing::{debug, debug_span, error, info, info_span, instrument, trace};
@@ -318,7 +319,7 @@ fn topo_order(dataflow_state: &DataflowState, new: &HashSet<NodeIndex>) -> Vec<N
 
 #[derive(Clone)]
 pub(super) enum ColumnChange {
-    Add(String, DataType),
+    Add(SqlIdentifier, DataType),
     Drop(usize),
 }
 
@@ -390,12 +391,12 @@ impl<'dataflow> Migration<'dataflow> {
     /// `ancestors`.
     pub fn add_ingredient<S1, FS, S2, I>(&mut self, name: S1, fields: FS, i: I) -> NodeIndex
     where
-        S1: ToString,
-        S2: ToString,
+        S1: Into<SqlIdentifier>,
+        S2: Into<SqlIdentifier>,
         FS: IntoIterator<Item = S2>,
         I: Into<NodeOperator>,
     {
-        let mut i = node::Node::new(name.to_string(), fields, i.into());
+        let mut i = node::Node::new(name, fields, i.into());
         i.on_connected(&self.dataflow_state.ingredients);
         // TODO(peter): Should we change this function signature to return a ReadySetResult?
         #[allow(clippy::unwrap_used)]
@@ -430,15 +431,15 @@ impl<'dataflow> Migration<'dataflow> {
         b: node::special::Base,
     ) -> NodeIndex
     where
-        S1: ToString,
-        S2: ToString,
+        S1: Into<SqlIdentifier>,
+        S2: Into<SqlIdentifier>,
         FS: IntoIterator<Item = S2>,
     {
         // add to the graph
-        let ni =
-            self.dataflow_state
-                .ingredients
-                .add_node(node::Node::new(name.to_string(), fields, b));
+        let ni = self
+            .dataflow_state
+            .ingredients
+            .add_node(node::Node::new(name, fields, b));
         debug!(node = ni.index(), "adding new base");
 
         // keep track of the fact that it's new
@@ -478,22 +479,21 @@ impl<'dataflow> Migration<'dataflow> {
     }
 
     /// Add a new column to a base node.
-    pub fn add_column<S: ToString>(
+    pub fn add_column(
         &mut self,
         node: NodeIndex,
-        field: S,
+        field: SqlIdentifier,
         default: DataType,
     ) -> ReadySetResult<usize> {
         // not allowed to add columns to new nodes
         invariant!(!self.added.contains(&node));
 
-        let field = field.to_string();
         let base = &mut self.dataflow_state.ingredients[node];
         invariant!(base.is_base());
 
         // we need to tell the base about its new column and its default, so that old writes that
         // do not have it get the additional value added to them.
-        let col_i1 = base.add_column(&field);
+        let col_i1 = base.add_column(field.clone());
         // we can't rely on DerefMut, since it disallows mutating Taken nodes
         {
             let col_i2 = base.get_base_mut().unwrap().add_column(default.clone())?;
@@ -600,13 +600,13 @@ impl<'dataflow> Migration<'dataflow> {
     /// To query into the maintained state, use `Leader::get_getter`.
     pub fn maintain(
         &mut self,
-        name: String,
+        name: SqlIdentifier,
         n: NodeIndex,
         index: &Index,
         post_lookup: PostLookup,
         placeholder_map: Vec<(ViewPlaceholder, KeyColumnIdx)>,
     ) {
-        let ri = self.ensure_reader_for(n, Some(name), post_lookup);
+        let ri = self.ensure_reader_for(n, Some(name.to_string()), post_lookup);
 
         #[allow(clippy::unwrap_used)] // we know it's a reader - we just made it!
         self.dataflow_state.ingredients[ri]

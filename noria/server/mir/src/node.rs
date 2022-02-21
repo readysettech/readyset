@@ -6,7 +6,7 @@ use dataflow::ops;
 use dataflow::prelude::ReadySetError;
 use node_inner::MirNodeInner;
 use nom_sql::analysis::ReferredColumns;
-use nom_sql::ColumnSpecification;
+use nom_sql::{ColumnSpecification, SqlIdentifier};
 use noria_errors::{internal, internal_err, ReadySetResult};
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
@@ -24,7 +24,7 @@ pub enum GroupedNodeType {
 
 #[derive(Serialize, Deserialize)]
 pub struct MirNode {
-    pub name: String,
+    pub name: SqlIdentifier,
     pub from_version: usize,
     pub columns: Vec<Column>,
     pub inner: MirNodeInner,
@@ -37,7 +37,7 @@ pub struct MirNode {
 
 impl MirNode {
     pub fn new(
-        name: &str,
+        name: SqlIdentifier,
         v: usize,
         columns: Vec<Column>,
         inner: MirNodeInner,
@@ -45,7 +45,7 @@ impl MirNode {
         children: Vec<MirNodeRef>,
     ) -> MirNodeRef {
         let mn = MirNode {
-            name: String::from(name),
+            name,
             from_version: v,
             columns,
             inner,
@@ -110,7 +110,7 @@ impl MirNode {
                     }),
                 };
                 MirNode::new(
-                    &over_node.name,
+                    over_node.name.clone(),
                     over_node.from_version,
                     new_columns,
                     new_inner,
@@ -281,8 +281,8 @@ impl MirNode {
                 .rposition(|cs| Column::from(&cs.0.column) == *c)
             {
                 None => Err(ReadySetError::NonExistentColumn {
-                    column: c.name.clone(),
-                    node: self.name.clone(),
+                    column: c.name.to_string(),
+                    node: self.name.to_string(),
                 }),
                 Some(id) => Ok(column_specs[id]
                     .1
@@ -300,8 +300,8 @@ impl MirNode {
             } {
                 Some(id) => Ok(id),
                 None => Err(ReadySetError::NonExistentColumn {
-                    column: c.name.clone(),
-                    node: self.name.clone(),
+                    column: c.name.to_string(),
+                    node: self.name.to_string(),
                 }),
             },
         }
@@ -333,7 +333,7 @@ impl MirNode {
         matches!(self.inner, MirNodeInner::Reuse { .. })
     }
 
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &SqlIdentifier {
         &self.name
     }
 
@@ -474,7 +474,7 @@ mod tests {
             let parent_columns = vec![Column::from("c1"), Column::from("c2"), Column::from("c3")];
 
             let a = MirNode {
-                name: "a".to_string(),
+                name: "a".into(),
                 from_version: 0,
                 columns: parent_columns,
                 inner: MirNodeInner::Base {
@@ -499,31 +499,31 @@ mod tests {
         #[test]
         fn with_alias() {
             let c1 = Column {
-                table: Some("table".to_string()),
-                name: "c1".to_string(),
+                table: Some("table".into()),
+                name: "c1".into(),
                 function: None,
                 aliases: vec![],
             };
             let c2 = Column {
-                table: Some("table".to_string()),
-                name: "c2".to_string(),
+                table: Some("table".into()),
+                name: "c2".into(),
                 function: None,
                 aliases: vec![],
             };
             let c3 = Column {
-                table: Some("table".to_string()),
-                name: "c3".to_string(),
+                table: Some("table".into()),
+                name: "c3".into(),
                 function: None,
                 aliases: vec![],
             };
 
             let child_column = Column {
-                table: Some("table".to_string()),
-                name: "child".to_string(),
+                table: Some("table".into()),
+                name: "child".into(),
                 function: None,
                 aliases: vec![Column {
-                    table: Some("table".to_string()),
-                    name: "c3".to_string(),
+                    table: Some("table".into()),
+                    name: "c3".into(),
                     function: None,
                     aliases: vec![],
                 }],
@@ -539,7 +539,7 @@ mod tests {
             let parent_columns = vec![c1, c2, c3];
 
             let a = MirNode {
-                name: "a".to_string(),
+                name: "a".into(),
                 from_version: 0,
                 columns: parent_columns,
                 inner: MirNodeInner::Base {
@@ -564,19 +564,19 @@ mod tests {
         #[test]
         fn with_alias_to_parent_column() {
             let c1 = Column {
-                table: Some("table".to_string()),
-                name: "c1".to_string(),
+                table: Some("table".into()),
+                name: "c1".into(),
                 function: None,
                 aliases: vec![],
             };
 
             let child_column = Column {
-                table: Some("table".to_string()),
-                name: "c1".to_string(),
+                table: Some("table".into()),
+                name: "c1".into(),
                 function: None,
                 aliases: vec![Column {
-                    table: Some("table".to_string()),
-                    name: "other_name".to_string(),
+                    table: Some("table".into()),
+                    name: "other_name".into(),
                     function: None,
                     aliases: vec![],
                 }],
@@ -592,7 +592,7 @@ mod tests {
             let parent_columns = vec![c1];
 
             let a = MirNode {
-                name: "a".to_string(),
+                name: "a".into(),
                 from_version: 0,
                 columns: parent_columns,
                 inner: MirNodeInner::Base {
@@ -628,7 +628,7 @@ mod tests {
             };
 
             let parent = MirNode::new(
-                "parent",
+                "parent".into(),
                 0,
                 vec!["x".into(), "agg".into()],
                 MirNodeInner::Aggregation {
@@ -642,7 +642,7 @@ mod tests {
 
             // σ [x = 1]
             let filter = MirNode::new(
-                "filter",
+                "filter".into(),
                 0,
                 vec!["x".into(), "agg".into()],
                 MirNodeInner::Filter {
@@ -707,7 +707,7 @@ mod tests {
         fn topk_follows_parent_ordering() {
             // count(z) group by (x)
             let parent = MirNode::new(
-                "parent",
+                "parent".into(),
                 0,
                 vec!["x".into(), "agg".into()],
                 MirNodeInner::Aggregation {
@@ -721,7 +721,7 @@ mod tests {
 
             // TopK γ[x]
             let node = MirNode::new(
-                "topk",
+                "topk".into(),
                 0,
                 vec!["x".into(), "agg".into()],
                 MirNodeInner::TopK {

@@ -3488,6 +3488,7 @@ name = "nom-sql"
 version = "0.0.11"
 dependencies = [
  "assert_approx_eq",
+ "bincode",
  "bit-vec",
  "derive_more",
  "eui48",
@@ -3505,6 +3506,7 @@ dependencies = [
  "serde_json",
  "test-strategy",
  "thiserror",
+ "triomphe",
  "uuid",
 ]
 
@@ -3890,6 +3892,7 @@ dependencies = [
  "nom-sql",
  "noria",
  "noria-common",
+ "noria-data",
  "noria-dataflow",
  "noria-errors",
  "petgraph",

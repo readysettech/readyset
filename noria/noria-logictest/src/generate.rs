@@ -73,11 +73,11 @@ impl TryFrom<PathBuf> for Seed {
                     // TODO(grfn): Make dialect configurable
                     match parse_query(Dialect::MySQL, command).map_err(|s| anyhow!("{}", s))? {
                         SqlQuery::CreateTable(tbl) => {
-                            relations_to_drop.push(Relation::Table(tbl.table.name.clone()));
+                            relations_to_drop.push(Relation::Table(tbl.table.name.to_string()));
                             tables.push(tbl)
                         }
                         SqlQuery::CreateView(view) => {
-                            relations_to_drop.push(Relation::View(view.name.clone()));
+                            relations_to_drop.push(Relation::View(view.name.to_string()));
                         }
                         _ => {}
                     }
@@ -165,7 +165,7 @@ impl TryFrom<Vec<QuerySeed>> for Seed {
                 conditionals: vec![],
             }));
             tables.push(create_stmt);
-            relations_to_drop.push(Relation::Table(name.clone().into()));
+            relations_to_drop.push(Relation::Table(name.to_string()));
         }
 
         Ok(Seed {
@@ -260,7 +260,7 @@ impl Seed {
             .clone()
             .into_iter()
             .map(|table_name| {
-                let spec = self.generator.table_mut(&table_name).unwrap();
+                let spec = self.generator.table_mut(table_name.as_str()).unwrap();
                 (
                     table_name,
                     spec.generate_data(opts.rows_per_table, opts.random),
@@ -271,7 +271,7 @@ impl Seed {
         let insert_statements = data
             .iter()
             .map(|(table_name, data)| {
-                let spec = self.generator.table(table_name).unwrap();
+                let spec = self.generator.table(table_name.as_str()).unwrap();
                 let columns = spec.columns.keys().collect::<Vec<_>>();
                 nom_sql::InsertStatement {
                     table: spec.name.clone().into(),
@@ -327,7 +327,7 @@ impl Seed {
             let delete_statements: Vec<DeleteStatement> = data
                 .iter()
                 .map(|(table_name, data)| {
-                    let spec = self.generator.table(table_name).unwrap();
+                    let spec = self.generator.table(table_name.as_str()).unwrap();
                     let table: Table = spec.name.clone().into();
                     let pk = spec.primary_key.clone().ok_or_else(|| {
                         anyhow!(

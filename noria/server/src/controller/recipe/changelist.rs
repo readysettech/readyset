@@ -17,7 +17,7 @@ use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
 
-use nom_sql::SqlQuery;
+use nom_sql::{SqlIdentifier, SqlQuery};
 use noria_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
@@ -47,7 +47,7 @@ pub enum Change {
 #[derive(PartialEq, Eq, Clone, Serialize, Deserialize, Debug)]
 pub struct SqlExpression {
     /// Query name, if it has one.
-    pub name: Option<String>,
+    pub name: Option<SqlIdentifier>,
     /// The SQL query.
     pub query: SqlQuery,
     /// Whether or not the query has a reader.
@@ -237,7 +237,7 @@ impl FromStr for ChangeList {
                     (None, SqlQuery::CreateTable(query)) => {
                         (Some(query.table.name.clone()), is_leaf)
                     }
-                    (_, _) => (r.map(|s| s.to_owned()), is_leaf),
+                    (_, _) => (r.map(|s| s.into()), is_leaf),
                 };
 
                 Ok(SqlExpression {

@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::str::FromStr;
 use std::{fmt, str};
 
@@ -22,7 +21,7 @@ use crate::expression::expression;
 use crate::order::{order_type, OrderType};
 use crate::select::{nested_selection, selection, SelectStatement};
 use crate::table::Table;
-use crate::{ColumnConstraint, Dialect};
+use crate::{ColumnConstraint, Dialect, SqlIdentifier};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateTableStatement {
@@ -105,7 +104,7 @@ impl fmt::Display for SelectSpecification {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateViewStatement {
-    pub name: String,
+    pub name: SqlIdentifier,
     pub fields: Vec<Column>,
     pub definition: Box<SelectSpecification>,
 }
@@ -136,7 +135,7 @@ impl fmt::Display for CreateViewStatement {
 /// This is a non-standard ReadySet specific extension to SQL
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateCachedQueryStatement {
-    pub name: Option<String>,
+    pub name: Option<SqlIdentifier>,
     pub statement: SelectStatement,
 }
 
@@ -212,10 +211,7 @@ fn full_text_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey>
         ))(i)?;
 
         match name {
-            Some(name) => {
-                let n = String::from(name);
-                Ok((remaining_input, TableKey::FulltextKey(Some(n), columns)))
-            }
+            Some(name) => Ok((remaining_input, TableKey::FulltextKey(Some(name), columns))),
             None => Ok((remaining_input, TableKey::FulltextKey(None, columns))),
         }
     }
@@ -238,13 +234,7 @@ fn primary_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
             )),
         ))(i)?;
 
-        Ok((
-            remaining_input,
-            TableKey::PrimaryKey {
-                name: name.map(|s| s.to_string()),
-                columns,
-            },
-        ))
+        Ok((remaining_input, TableKey::PrimaryKey { name, columns }))
     }
 }
 
@@ -320,8 +310,8 @@ fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
                         call!(referential_action)
                     ))
                 >> (TableKey::ForeignKey {
-                    name: name.map(String::from),
-                    index_name: index_name.map(String::from),
+                    name,
+                    index_name,
                     columns,
                     target_table,
                     target_columns,
@@ -366,7 +356,7 @@ fn unique(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
         Ok((
             i,
             TableKey::UniqueKey {
-                name: name.map(|n| n.into()),
+                name,
                 columns,
                 index_type,
             },
@@ -378,7 +368,7 @@ fn key_or_index(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> 
     move |i| {
         let (i, _) = alt((tag_no_case("key"), tag_no_case("index")))(i)?;
         let (i, _) = multispace0(i)?;
-        let (i, name) = map(dialect.identifier(), String::from)(i)?;
+        let (i, name) = dialect.identifier()(i)?;
         let (i, _) = multispace0(i)?;
         let (i, columns) = delimited(
             tag("("),
@@ -403,10 +393,7 @@ fn check_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableK
         let (i, name) = map(
             opt(preceded(
                 terminated(tag_no_case("constraint"), multispace1),
-                opt(terminated(
-                    map(dialect.identifier(), |c| c.to_string()),
-                    multispace1,
-                )),
+                opt(terminated(dialect.identifier(), multispace1)),
             )),
             Option::flatten,
         )(i)?;
@@ -489,7 +476,7 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
             .into_iter()
             .map(|field| {
                 let column = Column {
-                    table: Some(table.name.clone()),
+                    table: Some(table.name.as_str().into()),
                     ..field.column
                 };
 
@@ -515,7 +502,7 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
                         columns
                             .into_iter()
                             .map(|column| Column {
-                                table: Some(table.name.clone()),
+                                table: Some(table.name.as_str().into()),
                                 ..column
                             })
                             .collect()
@@ -658,7 +645,7 @@ pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Creat
     // SELECT * FROM employees
 
     move |i| {
-        let (remaining_input, (_, _, _, _, _, name_slice, _, _, _, def, _)) = tuple((
+        let (remaining_input, (_, _, _, _, _, name, _, _, _, def, _)) = tuple((
             tag_no_case("create"),
             multispace1,
             opt(create_view_params),
@@ -675,7 +662,6 @@ pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Creat
             statement_terminator,
         ))(i)?;
 
-        let name = String::from(name_slice);
         let fields = vec![]; // TODO(malte): support
         let definition = Box::new(def);
 
@@ -705,13 +691,7 @@ pub fn create_cached_query(
         let (i, _) = tag_no_case("as")(i)?;
         let (i, _) = multispace1(i)?;
         let (i, statement) = selection(dialect)(i)?;
-        Ok((
-            i,
-            CreateCachedQueryStatement {
-                name: name.map(Cow::into_owned),
-                statement,
-            },
-        ))
+        Ok((i, CreateCachedQueryStatement { name, statement }))
     }
 }
 
@@ -869,7 +849,7 @@ mod tests {
                     ),
                 ],
                 keys: Some(vec![TableKey::UniqueKey {
-                    name: Some(String::from("id_k")),
+                    name: Some("id_k".into()),
                     columns: vec![Column::from("users.id")],
                     index_type: None
                 },]),
@@ -889,7 +869,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             CreateViewStatement {
-                name: String::from("v"),
+                name: "v".into(),
                 fields: vec![],
                 definition: Box::new(SelectSpecification::Compound(CompoundSelectStatement {
                     selects: vec![
@@ -1204,7 +1184,7 @@ mod tests {
         assert_eq!(
             res,
             TableKey::CheckConstraint {
-                name: Some("foo".to_owned()),
+                name: Some("foo".into()),
                 expr: Expression::BinaryOp {
                     lhs: Box::new(Expression::Column("x".into())),
                     op: BinaryOperator::Greater,
@@ -1222,7 +1202,7 @@ mod tests {
         assert_eq!(
             res,
             TableKey::CheckConstraint {
-                name: Some("foo".to_owned()),
+                name: Some("foo".into()),
                 expr: Expression::BinaryOp {
                     lhs: Box::new(Expression::Column("x".into())),
                     op: BinaryOperator::Greater,
@@ -1409,7 +1389,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateViewStatement {
-                    name: String::from("v"),
+                    name: "v".into(),
                     fields: vec![],
                     definition: Box::new(SelectSpecification::Simple(SelectStatement {
                         tables: vec![Table::from("users")],
@@ -1439,7 +1419,7 @@ mod tests {
                 create_cached_query(Dialect::MySQL),
                 b"CREATE CACHED QUERY foo AS SELECT id FROM users WHERE name = ?"
             );
-            assert_eq!(res.name, Some("foo".to_owned()));
+            assert_eq!(res.name, Some("foo".into()));
             assert_eq!(res.statement.tables, vec!["users".into()]);
         }
 
@@ -1849,7 +1829,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 CreateViewStatement {
-                    name: String::from("v"),
+                    name: "v".into(),
                     fields: vec![],
                     definition: Box::new(SelectSpecification::Simple(SelectStatement {
                         tables: vec![Table::from("users")],

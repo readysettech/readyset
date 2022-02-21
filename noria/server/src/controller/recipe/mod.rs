@@ -3,7 +3,7 @@ use std::str;
 use std::vec::Vec;
 
 use changelist::ChangeList;
-use nom_sql::{CreateTableStatement, Dialect, SqlQuery};
+use nom_sql::{CreateTableStatement, Dialect, SqlIdentifier, SqlQuery};
 use noria::ActivationResult;
 use noria_errors::{internal, internal_err, ReadySetError};
 use petgraph::graph::NodeIndex;
@@ -36,7 +36,7 @@ pub(crate) struct Recipe {
     expression_order: Vec<QueryID>,
     /// Aliases assigned to read query and CreateTable expressions. Each alias maps
     /// to a `QueryId` in the expressions of the recipe.
-    aliases: HashMap<String, QueryID>,
+    aliases: HashMap<SqlIdentifier, QueryID>,
 
     /// Maintains lower-level state, but not the graph itself. Lazily initialized.
     inc: SqlIncorporator,
@@ -132,14 +132,17 @@ impl Recipe {
         self.inc.enable_reuse(reuse_type)
     }
 
-    pub(in crate::controller) fn resolve_alias(&self, alias: &str) -> Option<&str> {
+    pub(in crate::controller) fn resolve_alias(&self, alias: &str) -> Option<&SqlIdentifier> {
         self.aliases
             .get(alias)
-            .map(|qid| self.expressions[qid].name.as_ref().unwrap().as_str())
+            .map(|qid| self.expressions[qid].name.as_ref().unwrap())
     }
 
     /// Obtains the `NodeIndex` for the node corresponding to a named query or a write type.
-    pub(in crate::controller) fn node_addr_for(&self, name: &str) -> Result<NodeIndex, String> {
+    pub(in crate::controller) fn node_addr_for(
+        &self,
+        name: &SqlIdentifier,
+    ) -> Result<NodeIndex, String> {
         // `name` might be an alias for another identical query, so resolve if needed
         let na = match self.resolve_alias(name) {
             None => self.inc.get_query_address(name),
@@ -242,7 +245,7 @@ impl Recipe {
                                 // As far as I know, we can't name CREATE TABLE statements, which
                                 // are being assigned the table name
                                 // as query name (based on the MIR code I've seen).
-                                match self.aliases.get(&table.name) {
+                                match self.aliases.get(table.name.as_str()) {
                                     Some(remove_qid) => {
                                         to_remove.push(*remove_qid);
                                     }
@@ -310,7 +313,7 @@ impl Recipe {
 
     /// Returns the query expressions in the recipe.
     // crate viz for tests
-    pub(crate) fn expressions(&self) -> Vec<(Option<&String>, &SqlQuery)> {
+    pub(crate) fn expressions(&self) -> Vec<(Option<&SqlIdentifier>, &SqlQuery)> {
         self.expressions
             .values()
             .map(|expr| (expr.name.as_ref(), &expr.query))
@@ -351,7 +354,7 @@ impl Recipe {
     /// addr for `query`.
     ///
     /// Returns an Err if `query` is not found in the recipe
-    pub(super) fn alias_query(&mut self, query: &str, alias: String) -> Result<(), String> {
+    pub(super) fn alias_query(&mut self, query: &str, alias: SqlIdentifier) -> Result<(), String> {
         // NOTE: this is (consciously) O(n) because we don't have a reverse index from query name to
         // QueryID and I don't feel like it's worth the time-space tradeoff given this is only
         // called on migration

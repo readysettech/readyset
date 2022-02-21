@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::fmt;
 
+use nom_sql::SqlIdentifier;
 use noria::internal::LocalOrNot;
 use noria::{self, KeyComparison, PacketData, PacketTrace};
 use serde::{Deserialize, Serialize};
@@ -96,7 +97,7 @@ pub enum DomainRequest {
     /// Add a new column to an existing `Base` node.
     AddBaseColumn {
         node: LocalNodeIndex,
-        field: String,
+        field: SqlIdentifier,
         default: DataType,
     },
 

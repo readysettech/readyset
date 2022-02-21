@@ -5,6 +5,7 @@ use std::cmp::{min_by_key, Ordering};
 use std::collections::HashMap;
 use std::hash::Hash;
 
+use nom_sql::SqlIdentifier;
 use noria_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
@@ -73,7 +74,7 @@ pub struct ReplicationOffsets {
     /// Replication offset for each individual table, if any.
     ///
     /// A table with [`None`] as its replication offset has not yet been snapshotted successfully
-    pub tables: HashMap<String, Option<ReplicationOffset>>,
+    pub tables: HashMap<SqlIdentifier, Option<ReplicationOffset>>,
 }
 
 impl ReplicationOffsets {
@@ -110,9 +111,7 @@ impl ReplicationOffsets {
     /// use noria::replication::ReplicationOffsets;
     ///
     /// let mut replication_offsets = ReplicationOffsets::default();
-    /// replication_offsets
-    ///     .tables
-    ///     .insert("table_1".to_string(), None);
+    /// replication_offsets.tables.insert("table_1".into(), None);
     /// assert!(!replication_offsets.has_table("table_1"));
     /// ```
     ///
@@ -123,7 +122,7 @@ impl ReplicationOffsets {
     ///
     /// let mut replication_offsets = ReplicationOffsets::default();
     /// replication_offsets.tables.insert(
-    ///     "table_1".to_string(),
+    ///     "table_1".into(),
     ///     Some(ReplicationOffset {
     ///         replication_log_name: "binlog".to_string(),
     ///         offset: 1,
@@ -134,7 +133,7 @@ impl ReplicationOffsets {
     pub fn has_table<T>(&self, table_name: &T) -> bool
     where
         T: ?Sized,
-        String: Borrow<T>,
+        SqlIdentifier: Borrow<T>,
         T: Hash + Eq,
     {
         self.tables.get(table_name).iter().any(|o| o.is_some())
@@ -228,14 +227,14 @@ mod tests {
                 }),
                 tables: HashMap::from([
                     (
-                        "t1".to_owned(),
+                        "t1".into(),
                         Some(ReplicationOffset {
                             offset: 2,
                             replication_log_name: "test".to_owned(),
                         }),
                     ),
                     (
-                        "t2".to_owned(),
+                        "t2".into(),
                         Some(ReplicationOffset {
                             offset: 3,
                             replication_log_name: "test".to_owned(),
@@ -257,14 +256,14 @@ mod tests {
                 }),
                 tables: HashMap::from([
                     (
-                        "t1".to_owned(),
+                        "t1".into(),
                         Some(ReplicationOffset {
                             offset: 2,
                             replication_log_name: "test".to_owned(),
                         }),
                     ),
                     (
-                        "t2".to_owned(),
+                        "t2".into(),
                         Some(ReplicationOffset {
                             offset: 3,
                             replication_log_name: "test".to_owned(),
@@ -282,14 +281,14 @@ mod tests {
                 schema: None,
                 tables: HashMap::from([
                     (
-                        "t1".to_owned(),
+                        "t1".into(),
                         Some(ReplicationOffset {
                             offset: 2,
                             replication_log_name: "test".to_owned(),
                         }),
                     ),
                     (
-                        "t2".to_owned(),
+                        "t2".into(),
                         Some(ReplicationOffset {
                             offset: 3,
                             replication_log_name: "test".to_owned(),
@@ -310,13 +309,13 @@ mod tests {
                 }),
                 tables: HashMap::from([
                     (
-                        "t1".to_owned(),
+                        "t1".into(),
                         Some(ReplicationOffset {
                             offset: 2,
                             replication_log_name: "test".to_owned(),
                         }),
                     ),
-                    ("t2".to_owned(), None),
+                    ("t2".into(), None),
                 ]),
             };
             let res = offsets.max_offset().unwrap();

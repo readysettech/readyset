@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 
 use nom_sql::analysis::ReferredColumns;
-use nom_sql::Column;
+use nom_sql::{Column, SqlIdentifier};
 
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph, QueryGraphEdge};
 
@@ -89,10 +89,14 @@ impl Signature for QueryGraph {
         use std::collections::hash_map::DefaultHasher;
 
         let mut hasher = DefaultHasher::new();
-        let rels = self.relations.keys().map(|r| String::as_str(r)).collect();
+        let rels = self
+            .relations
+            .keys()
+            .map(|r| SqlIdentifier::as_str(r))
+            .collect();
 
         // Compute relations part of hash
-        let mut r_vec: Vec<&str> = self.relations.keys().map(String::as_str).collect();
+        let mut r_vec: Vec<&str> = self.relations.keys().map(SqlIdentifier::as_str).collect();
         r_vec.sort_unstable();
         for r in &r_vec {
             r.hash(&mut hasher);

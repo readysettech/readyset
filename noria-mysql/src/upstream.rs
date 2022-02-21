@@ -321,7 +321,7 @@ mod tests {
 
     fn test_column() -> NomColumn {
         NomColumn {
-            name: "t".to_string(),
+            name: "t".into(),
             table: None,
         }
     }
@@ -339,17 +339,17 @@ mod tests {
         let param_specs = vec![
             ColumnSchema::from_base(
                 ColumnSpecification::new(test_column(), SqlType::Varchar(Some(10))),
-                "table1".to_string(),
+                "table1".into(),
             ),
             ColumnSchema::from_base(
                 ColumnSpecification::new(test_column(), SqlType::Double),
-                "table1".to_string(),
+                "table1".into(),
             ),
         ];
 
         let schema_spec = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::Int(None)),
-            "table1".to_string(),
+            "table1".into(),
         )];
 
         assert!(s.compare(&schema_spec, &param_specs).is_ok());
@@ -367,12 +367,12 @@ mod tests {
 
         let param_specs = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::Varchar(Some(10))),
-            "table1".to_string(),
+            "table1".into(),
         )];
 
         let schema_spec = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::Int(None)),
-            "table1".to_string(),
+            "table1".into(),
         )];
 
         assert!(s.compare(&schema_spec, &param_specs).is_err());
@@ -392,17 +392,17 @@ mod tests {
         let param_specs = vec![
             ColumnSchema::from_base(
                 ColumnSpecification::new(test_column(), SqlType::Bool),
-                "table1".to_string(),
+                "table1".into(),
             ),
             ColumnSchema::from_base(
                 ColumnSpecification::new(test_column(), SqlType::Double),
-                "table1".to_string(),
+                "table1".into(),
             ),
         ];
 
         let schema_spec = vec![ColumnSchema::from_base(
             ColumnSpecification::new(test_column(), SqlType::Varchar(Some(8))),
-            "table1".to_string(),
+            "table1".into(),
         )];
 
         assert!(s.compare(&schema_spec, &param_specs).is_err());

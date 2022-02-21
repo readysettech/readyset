@@ -3,24 +3,29 @@ use std::mem;
 
 use itertools::Itertools;
 use nom_sql::analysis::visit::{walk_select_statement, Visitor};
-use nom_sql::{Column, CommonTableExpression, JoinRightSide, SelectStatement, SqlQuery, Table};
+use nom_sql::{
+    Column, CommonTableExpression, JoinRightSide, SelectStatement, SqlIdentifier, SqlQuery, Table,
+};
 
 #[derive(Debug, PartialEq)]
 pub enum TableAliasRewrite {
     /// An alias to a base table was rewritten
-    Table { from: String, to_table: String },
+    Table {
+        from: SqlIdentifier,
+        to_table: SqlIdentifier,
+    },
 
     /// An alias to a view was rewritten
     View {
-        from: String,
-        to_view: String,
-        for_table: String,
+        from: SqlIdentifier,
+        to_view: SqlIdentifier,
+        for_table: SqlIdentifier,
     },
 
     /// An alias to a common table expression was rewritten
     Cte {
-        from: String,
-        to_view: String,
+        from: SqlIdentifier,
+        to_view: SqlIdentifier,
         for_statement: Box<SelectStatement>, // box for perf
     },
 }
@@ -34,8 +39,8 @@ pub trait AliasRemoval {
 
 struct RemoveAliasesVisitor<'a> {
     query_name: &'a str,
-    table_remap: HashMap<String, String>,
-    col_table_remap: HashMap<String, String>,
+    table_remap: HashMap<SqlIdentifier, SqlIdentifier>,
+    col_table_remap: HashMap<SqlIdentifier, SqlIdentifier>,
     out: Vec<TableAliasRewrite>,
 }
 
@@ -90,7 +95,7 @@ impl<'ast, 'a> Visitor<'ast> for RemoveAliasesVisitor<'a> {
                         // view.
                         TableAliasRewrite::View {
                             from: alias.clone(),
-                            to_view: format!("__{}__{}", self.query_name, alias),
+                            to_view: format!("__{}__{}", self.query_name, alias).into(),
                             for_table: name.clone(),
                         }
                     })
@@ -98,7 +103,7 @@ impl<'ast, 'a> Visitor<'ast> for RemoveAliasesVisitor<'a> {
             })
             .chain(select_statement.ctes.drain(..).map(
                 |CommonTableExpression { name, statement }| TableAliasRewrite::Cte {
-                    to_view: format!("__{}__{}", self.query_name, name),
+                    to_view: format!("__{}__{}", self.query_name, name).into(),
                     from: name,
                     for_statement: Box::new(statement),
                 },
@@ -223,8 +228,8 @@ mod tests {
     fn it_removes_aliases() {
         let q = SelectStatement {
             tables: vec![Table {
-                name: String::from("PaperTag"),
-                alias: Some(String::from("t")),
+                name: "PaperTag".into(),
+                alias: Some("t".into()),
                 schema: None,
             }],
             fields: vec![FieldDefinitionExpression::from(Column::from("t.id"))],
@@ -259,7 +264,7 @@ mod tests {
                 assert_eq!(
                     tq.tables,
                     vec![Table {
-                        name: String::from("PaperTag"),
+                        name: "PaperTag".into(),
                         alias: None,
                         schema: None,
                     }]
@@ -272,8 +277,8 @@ mod tests {
         assert_eq!(
             rewrites,
             vec![TableAliasRewrite::Table {
-                from: String::from("t"),
-                to_table: String::from("PaperTag")
+                from: "t".into(),
+                to_table: "PaperTag".into(),
             }]
         );
     }
@@ -292,8 +297,8 @@ mod tests {
         };
         let q = SelectStatement {
             tables: vec![Table {
-                name: String::from("PaperTag"),
-                alias: Some(String::from("t")),
+                name: "PaperTag".into(),
+                alias: Some("t".into()),
                 schema: None,
             }],
             fields: vec![FieldDefinitionExpression::from(col_small.clone())],
@@ -328,7 +333,7 @@ mod tests {
                 assert_eq!(
                     tq.tables,
                     vec![Table {
-                        name: String::from("PaperTag"),
+                        name: "PaperTag".into(),
                         alias: None,
                         schema: None,
                     }]
@@ -341,8 +346,8 @@ mod tests {
         assert_eq!(
             rewrites,
             vec![TableAliasRewrite::Table {
-                from: String::from("t"),
-                to_table: String::from("PaperTag")
+                from: "t".into(),
+                to_table: "PaperTag".into()
             }]
         );
     }
@@ -367,7 +372,7 @@ mod tests {
                 assert_eq!(
                     tq.tables,
                     vec![Table {
-                        name: String::from("__query_name__t1"),
+                        name: "__query_name__t1".into(),
                         alias: None,
                         schema: None,
                     }]
@@ -377,7 +382,7 @@ mod tests {
                     vec![JoinClause {
                         operator: JoinOperator::Join,
                         right: JoinRightSide::Table(Table {
-                            name: String::from("__query_name__t2"),
+                            name: "__query_name__t2".into(),
                             alias: None,
                             schema: None,
                         }),
@@ -399,14 +404,14 @@ mod tests {
             rewrites,
             vec![
                 TableAliasRewrite::View {
-                    from: String::from("t1"),
-                    to_view: String::from("__query_name__t1"),
-                    for_table: String::from("tab")
+                    from: "t1".into(),
+                    to_view: "__query_name__t1".into(),
+                    for_table: "tab".into(),
                 },
                 TableAliasRewrite::View {
-                    from: String::from("t2"),
-                    to_view: String::from("__query_name__t2"),
-                    for_table: String::from("tab")
+                    from: "t2".into(),
+                    to_view: "__query_name__t2".into(),
+                    for_table: "tab".into()
                 }
             ]
         );
@@ -481,8 +486,8 @@ mod tests {
         assert_eq!(
             rewritten,
             vec![TableAliasRewrite::Cte {
-                from: "max_val".to_owned(),
-                to_view: "__query__max_val".to_owned(),
+                from: "max_val".into(),
+                to_view: "__query__max_val".into(),
                 for_statement: match parse_query(
                     Dialect::MySQL,
                     "SELECT max(t1.value) as value FROM t1"

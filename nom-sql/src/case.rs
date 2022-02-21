@@ -48,7 +48,7 @@ mod tests {
     #[test]
     fn it_displays() {
         let c1 = Column {
-            name: String::from("foo"),
+            name: "foo".into(),
             table: None,
         };
 

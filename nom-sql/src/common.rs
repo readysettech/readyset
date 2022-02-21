@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
 use std::str;
@@ -29,7 +28,7 @@ use crate::column::Column;
 use crate::dialect::Dialect;
 use crate::expression::expression;
 use crate::table::Table;
-use crate::{Expression, FunctionExpression};
+use crate::{Expression, FunctionExpression, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum SqlType {
@@ -495,23 +494,23 @@ impl fmt::Display for ReferentialAction {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum TableKey {
     PrimaryKey {
-        name: Option<String>,
+        name: Option<SqlIdentifier>,
         columns: Vec<Column>,
     },
     UniqueKey {
-        name: Option<String>,
+        name: Option<SqlIdentifier>,
         columns: Vec<Column>,
         index_type: Option<IndexType>,
     },
-    FulltextKey(Option<String>, Vec<Column>),
+    FulltextKey(Option<SqlIdentifier>, Vec<Column>),
     Key {
-        name: String,
+        name: SqlIdentifier,
         columns: Vec<Column>,
         index_type: Option<IndexType>,
     },
     ForeignKey {
-        name: Option<String>,
-        index_name: Option<String>,
+        name: Option<SqlIdentifier>,
+        index_name: Option<SqlIdentifier>,
         columns: Vec<Column>,
         target_table: Table,
         target_columns: Vec<Column>,
@@ -519,7 +518,7 @@ pub enum TableKey {
         on_update: Option<ReferentialAction>,
     },
     CheckConstraint {
-        name: Option<String>,
+        name: Option<SqlIdentifier>,
         expr: Expression,
         enforced: Option<bool>,
     },
@@ -659,10 +658,10 @@ impl fmt::Display for TableKey {
 #[allow(clippy::large_enum_variant)] // NOTE(grfn): do we actually care about this?
 pub enum FieldDefinitionExpression {
     All,
-    AllInTable(String),
+    AllInTable(SqlIdentifier),
     Expression {
         expr: Expression,
-        alias: Option<String>,
+        alias: Option<SqlIdentifier>,
     },
 }
 
@@ -1168,13 +1167,7 @@ pub fn column_identifier_no_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult
             delimited(multispace0, tag("."), multispace0),
         ))(i)?;
         let (i, name) = dialect.identifier()(i)?;
-        Ok((
-            i,
-            Column {
-                name: name.to_string(),
-                table: table.map(|t| t.to_string()),
-            },
-        ))
+        Ok((i, Column { name, table }))
     }
 }
 
@@ -1195,7 +1188,7 @@ pub fn statement_terminator(i: &[u8]) -> IResult<&[u8], ()> {
 }
 
 // Parse rule for AS-based aliases for SQL entities.
-pub fn as_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Cow<str>> {
+pub fn as_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlIdentifier> {
     move |i| {
         map(
             tuple((
@@ -1256,7 +1249,7 @@ fn expression_field(
         do_parse!(
             i,
             expr: call!(expression(dialect))
-                >> alias: opt!(map!(as_alias(dialect), |a| a.to_string()))
+                >> alias: opt!(as_alias(dialect))
                 >> (FieldDefinitionExpression::Expression { expr, alias })
         )
     }
@@ -1399,9 +1392,9 @@ pub fn schema_table_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
                 opt(as_alias(dialect)),
             )),
             |tup| Table {
-                name: String::from(tup.1),
-                alias: tup.2.map(String::from),
-                schema: tup.0.map(|(s, _)| s.to_string()),
+                name: tup.1,
+                alias: tup.2,
+                schema: tup.0.map(|(s, _)| s),
             },
         )(i)
     }
@@ -1418,9 +1411,9 @@ pub fn schema_table_reference_no_alias(
                 dialect.identifier(),
             )),
             |tup| Table {
-                name: String::from(tup.1),
+                name: tup.1,
                 alias: None,
-                schema: tup.0.map(|(s, _)| s.to_string()),
+                schema: tup.0.map(|(s, _)| s),
             },
         )(i)
     }
@@ -1441,8 +1434,8 @@ pub fn table_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Tab
     move |i| {
         map(pair(dialect.identifier(), opt(as_alias(dialect))), |tup| {
             Table {
-                name: String::from(tup.0),
-                alias: tup.1.map(String::from),
+                name: tup.0,
+                alias: tup.1.as_deref().map(Into::into),
                 schema: None,
             }
         })(i)
@@ -1482,8 +1475,8 @@ mod tests {
         assert_eq!(
             res,
             Column {
-                table: Some("foo".to_owned()),
-                name: "bar".to_owned(),
+                table: Some("foo".into()),
+                name: "bar".into(),
             }
         )
     }
@@ -1721,8 +1714,8 @@ mod tests {
             let qs = b"cast(`lp`.`start_ddtm` as date)";
             let expected = Expression::Cast {
                 expr: Box::new(Expression::Column(Column {
-                    table: Some("lp".to_owned()),
-                    name: "start_ddtm".to_owned(),
+                    table: Some("lp".into()),
+                    name: "start_ddtm".into(),
                 })),
                 ty: SqlType::Date,
                 postgres_style: false,
@@ -1770,8 +1763,8 @@ mod tests {
             let qs = b"cast(\"lp\".\"start_ddtm\" as date)";
             let expected = Expression::Cast {
                 expr: Box::new(Expression::Column(Column {
-                    table: Some("lp".to_owned()),
-                    name: "start_ddtm".to_owned(),
+                    table: Some("lp".into()),
+                    name: "start_ddtm".into(),
                 })),
                 ty: SqlType::Date,
                 postgres_style: false,

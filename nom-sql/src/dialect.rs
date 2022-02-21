@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::str::{self, FromStr};
 
 use bit_vec::BitVec;
@@ -14,6 +13,7 @@ use nom::IResult;
 use thiserror::Error;
 
 use crate::keywords::{sql_keyword, sql_keyword_or_builtin_function, POSTGRES_NOT_RESERVED};
+use crate::SqlIdentifier;
 
 #[inline]
 fn is_sql_identifier(chr: u8) -> bool {
@@ -138,7 +138,7 @@ impl FromStr for Dialect {
 
 impl Dialect {
     /// Parse a SQL identifier using this Dialect
-    pub fn identifier(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], Cow<str>> {
+    pub fn identifier(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], SqlIdentifier> {
         move |i| match self {
             Dialect::MySQL => map_res(
                 alt((
@@ -149,7 +149,7 @@ impl Dialect {
                     delimited(tag("`"), take_while1(|c| c != 0 && c != b'`'), tag("`")),
                     delimited(tag("["), take_while1(is_sql_identifier), tag("]")),
                 )),
-                |v| str::from_utf8(v).map(Cow::Borrowed),
+                |v| str::from_utf8(v).map(Into::into),
             )(i),
             Dialect::PostgreSQL => alt((
                 map_res(
@@ -166,12 +166,12 @@ impl Dialect {
                     |v| {
                         str::from_utf8(v)
                             .map(str::to_ascii_lowercase)
-                            .map(Cow::Owned)
+                            .map(Into::into)
                     },
                 ),
                 map_res(
                     delimited(tag("\""), take_while1(|c| c != 0 && c != b'"'), tag("\"")),
-                    |v| str::from_utf8(v).map(Cow::Borrowed),
+                    |v| str::from_utf8(v).map(Into::into),
                 ),
             ))(i),
         }

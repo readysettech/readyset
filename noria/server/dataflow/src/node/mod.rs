@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use nom_sql::SqlIdentifier;
 use noria::consistency::Timestamp;
 use serde::{Deserialize, Serialize};
 
@@ -29,11 +30,11 @@ pub use process::bench;
 #[must_use]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
-    name: String,
+    name: SqlIdentifier,
     index: Option<IndexPair>,
     domain: Option<DomainIndex>,
 
-    fields: Vec<String>,
+    fields: Vec<SqlIdentifier>,
     parents: Vec<LocalNodeIndex>,
     children: Vec<LocalNodeIndex>,
     inner: NodeType,
@@ -62,17 +63,17 @@ pub struct Node {
 impl Node {
     pub fn new<S1, FS, S2, NT>(name: S1, fields: FS, inner: NT) -> Node
     where
-        S1: ToString,
-        S2: ToString,
+        S1: Into<SqlIdentifier>,
+        S2: Into<SqlIdentifier>,
         FS: IntoIterator<Item = S2>,
         NT: Into<NodeType>,
     {
         Node {
-            name: name.to_string(),
+            name: name.into(),
             index: None,
             domain: None,
 
-            fields: fields.into_iter().map(|s| s.to_string()).collect(),
+            fields: fields.into_iter().map(|s| s.into()).collect(),
             parents: Vec::new(),
             children: Vec::new(),
             inner: inner.into(),
@@ -86,7 +87,7 @@ impl Node {
     }
 
     pub fn mirror<NT: Into<NodeType>>(&self, n: NT) -> Node {
-        Self::new(&*self.name, &self.fields, n)
+        Self::new(self.name.clone(), &self.fields, n)
     }
 
     pub fn named_mirror<NT: Into<NodeType>>(&self, n: NT, name: String) -> Node {
@@ -293,11 +294,11 @@ impl Node {
 
 // publicly accessible attributes
 impl Node {
-    pub fn name(&self) -> &str {
-        &*self.name
+    pub fn name(&self) -> &SqlIdentifier {
+        &self.name
     }
 
-    pub fn fields(&self) -> &[String] {
+    pub fn fields(&self) -> &[SqlIdentifier] {
         &self.fields[..]
     }
 
@@ -462,8 +463,8 @@ impl Node {
         false
     }
 
-    pub fn add_column(&mut self, field: &str) -> usize {
-        self.fields.push(field.to_string());
+    pub fn add_column(&mut self, field: SqlIdentifier) -> usize {
+        self.fields.push(field);
         self.fields.len() - 1
     }
 

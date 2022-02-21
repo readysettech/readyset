@@ -12,12 +12,12 @@ use nom::{alt, complete, do_parse, named, opt, tag, tag_no_case, IResult};
 use serde::{Deserialize, Serialize};
 
 use crate::common::{column_identifier_no_alias, parse_comment, type_identifier, Literal, SqlType};
-use crate::{Dialect, Double};
+use crate::{Dialect, Double, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Column {
-    pub name: String,
-    pub table: Option<String>,
+    pub name: SqlIdentifier,
+    pub table: Option<SqlIdentifier>,
 }
 
 impl fmt::Display for Column {
@@ -33,12 +33,12 @@ impl<'a> From<&'a str> for Column {
     fn from(c: &str) -> Column {
         match c.split_once('.') {
             None => Column {
-                name: String::from(c),
+                name: c.into(),
                 table: None,
             },
             Some((table_name, col_name)) => Column {
-                name: String::from(col_name),
-                table: Some(String::from(table_name)),
+                name: col_name.into(),
+                table: Some(table_name.into()),
             },
         }
     }
@@ -342,7 +342,7 @@ mod tests {
                 res,
                 ColumnSpecification {
                     column: Column {
-                        name: "created_at".to_owned(),
+                        name: "created_at".into(),
                         table: None,
                     },
                     sql_type: SqlType::Timestamp,
@@ -377,7 +377,7 @@ mod tests {
                 res,
                 ColumnSpecification {
                     column: Column {
-                        name: "created_at".to_owned(),
+                        name: "created_at".into(),
                         table: None,
                     },
                     sql_type: SqlType::Timestamp,

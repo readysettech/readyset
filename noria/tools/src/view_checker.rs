@@ -30,7 +30,7 @@ impl ViewChecker {
         handle.ready().await.unwrap();
 
         println!("Waiting for noria");
-        let mut getter = handle.view(&self.query).await?;
+        let mut getter = handle.view(self.query).await?;
         let results = getter.lookup(&[0.into()], true).await?;
         println!("Results: {:?}", results);
 

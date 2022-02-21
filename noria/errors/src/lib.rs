@@ -783,9 +783,9 @@ pub fn view_err<A: Into<NodeIndex>, B: Into<ReadySetError>>(idx: A, err: B) -> R
 }
 
 /// Make a new `ReadySetError::TableError` with the provided `name` and `err` values.
-pub fn table_err<A: Into<String>, B: Into<ReadySetError>>(name: A, err: B) -> ReadySetError {
+pub fn table_err<A: ToString, B: Into<ReadySetError>>(name: A, err: B) -> ReadySetError {
     ReadySetError::TableError {
-        name: name.into(),
+        name: name.to_string(),
         source: Box::new(err.into()),
     }
 }

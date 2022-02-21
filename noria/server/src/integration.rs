@@ -342,7 +342,7 @@ async fn broad_recursing_upquery() {
         );
         // reader, sharded by the lookup column, which is the third column on x
         mig.maintain(
-            "reader".to_string(),
+            "reader".into(),
             join,
             &Index::hash_map(vec![2]),
             Default::default(),
@@ -1960,7 +1960,7 @@ async fn add_columns() {
 
     // add a third column to a
     g.migrate(move |mig| {
-        mig.add_column(a, "c", 3.into()).unwrap();
+        mig.add_column(a, "c".into(), 3.into()).unwrap();
     })
     .await;
     sleep().await;
@@ -2018,7 +2018,7 @@ async fn migrate_added_columns() {
     // add a third column to a, and a view that uses it
     let _ = g
         .migrate(move |mig| {
-            mig.add_column(a, "c", 3.into()).unwrap();
+            mig.add_column(a, "c".into(), 3.into()).unwrap();
             let b = mig.add_ingredient("x", &["c", "b"], Project::new(a, &[2, 0], None, None));
             mig.maintain_anonymous(b, &Index::hash_map(vec![1]));
             b
@@ -2107,7 +2107,8 @@ async fn migrate_drop_columns() {
 
     // add a new column
     g.migrate(move |mig| {
-        mig.add_column(a, "c", "c".try_into().unwrap()).unwrap();
+        mig.add_column(a, "c".into(), "c".try_into().unwrap())
+            .unwrap();
     })
     .await;
 
@@ -2168,7 +2169,7 @@ async fn key_on_added() {
     // add a maintained view keyed on newly added column
     let _ = g
         .migrate(move |mig| {
-            mig.add_column(a, "c", 3.into()).unwrap();
+            mig.add_column(a, "c".into(), 3.into()).unwrap();
             let b = mig.add_ingredient("x", &["c", "b"], Project::new(a, &[2, 1], None, None));
             mig.maintain_anonymous(b, &Index::hash_map(vec![0]));
             b
@@ -4354,7 +4355,7 @@ async fn range_upquery_after_point_queries() {
         );
 
         mig.maintain(
-            "btree_reader".to_string(),
+            "btree_reader".into(),
             join,
             &Index::btree_map(vec![0]),
             Default::default(),
@@ -4367,7 +4368,7 @@ async fn range_upquery_after_point_queries() {
         let hash_id = mig.add_ingredient("hash_id", &["a", "a_b", "a_c"], Identity::new(join));
 
         mig.maintain(
-            "hash_reader".to_string(),
+            "hash_reader".into(),
             hash_id,
             &Index::hash_map(vec![0]),
             Default::default(),
