@@ -252,7 +252,7 @@ impl Miss {
 
 /// Which kind of index to use when performing lookups as part of processing for an Ingredient.
 ///
-/// The variants of this enum correspond to the variants of the [`SuggestedIndex`] enum - see the
+/// The variants of this enum correspond to the variants of the [`LookupIndex`] enum - see the
 /// documentation for that enum, and [the documentation for the State
 /// trait](trait@crate::state::State) for more information.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -402,16 +402,16 @@ impl ColumnSource {
     }
 }
 
-/// A request from an [`Ingredient`] for an index into the state of a node
+/// A description of an index that can be used to do a lookup directly into a node.
 ///
 /// For more information about the different kinds of indices, see [the documentation for the State
 /// trait](trait@crate::state::State)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
-pub enum SuggestedIndex {
-    /// Request for a regular (strict) index
+pub enum LookupIndex {
+    /// A regular (strict) index
     Strict(Index),
 
-    /// Request for a weak index.
+    /// A weak index
     ///
     /// Because lookups into weak indices during replays are forbidden, a request for a weak index
     /// will *also* create a [`Strict`] index with the same index type and columns.
@@ -419,21 +419,21 @@ pub enum SuggestedIndex {
 }
 
 #[allow(clippy::len_without_is_empty)]
-impl SuggestedIndex {
+impl LookupIndex {
     /// Return a reference to the underlying [`Index`]
     pub fn index(&self) -> &Index {
         match self {
-            SuggestedIndex::Strict(idx) => idx,
-            SuggestedIndex::Weak(idx) => idx,
+            LookupIndex::Strict(idx) => idx,
+            LookupIndex::Weak(idx) => idx,
         }
     }
 
-    /// Convert this SuggestedIndex into the underlying index, discarding information about whether
+    /// Convert this LookupIndex into the underlying index, discarding information about whether
     /// it's weak or strict
     pub fn into_index(self) -> Index {
         match self {
-            SuggestedIndex::Strict(idx) => idx,
-            SuggestedIndex::Weak(idx) => idx,
+            LookupIndex::Strict(idx) => idx,
+            LookupIndex::Weak(idx) => idx,
         }
     }
 
@@ -447,13 +447,13 @@ impl SuggestedIndex {
         self.index().len()
     }
 
-    /// Returns `true` if the suggested index is [`Weak`].
+    /// Returns `true` if the lookup index is [`Weak`].
     pub fn is_weak(&self) -> bool {
         matches!(self, Self::Weak(..))
     }
 }
 
-impl std::ops::Index<usize> for SuggestedIndex {
+impl std::ops::Index<usize> for LookupIndex {
     type Output = usize;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -588,7 +588,7 @@ where
     ///
     /// Note that a vector of length > 1 for any one node means that that node should be given a
     /// *compound* key, *not* that multiple columns should be independently indexed.
-    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex>;
+    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, LookupIndex>;
 
     /// Provide information about where the `cols` come from for the materialization planner
     /// (among other things) to make use of. (See the [`ColumnSource`] docs for more.)

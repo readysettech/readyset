@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tracing::error;
 
 use crate::prelude::*;
-use crate::processing::{ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex};
+use crate::processing::{ColumnSource, IngredientLookupResult, LookupIndex, LookupMode};
 
 /// Permutes or omits columns from its source node, or adds additional columns whose values are
 /// given by expressions
@@ -230,7 +230,7 @@ impl Ingredient for Project {
         })
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
         HashMap::new()
     }
 

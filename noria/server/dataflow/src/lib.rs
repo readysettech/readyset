@@ -56,7 +56,7 @@ pub use crate::domain::{Domain, DomainBuilder, DomainIndex};
 pub use crate::node::special::reader::post_lookup;
 pub use crate::node_map::NodeMap;
 pub use crate::payload::{DomainRequest, Packet, PacketDiscriminants};
-pub use crate::processing::SuggestedIndex;
+pub use crate::processing::LookupIndex;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Sharding {

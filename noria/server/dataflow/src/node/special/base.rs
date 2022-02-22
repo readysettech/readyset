@@ -14,7 +14,7 @@ use tracing::warn;
 use vec_map::VecMap;
 
 use crate::prelude::*;
-use crate::processing::SuggestedIndex;
+use crate::processing::LookupIndex;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum SetSnapshotMode {
@@ -440,13 +440,10 @@ impl Base {
         })
     }
 
-    pub(in crate::node) fn suggest_indexes(
-        &self,
-        n: NodeIndex,
-    ) -> HashMap<NodeIndex, SuggestedIndex> {
+    pub(in crate::node) fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
         if let Some(pk) = &self.primary_key {
             hashmap! {
-                n => SuggestedIndex::Strict(Index::hash_map(pk.as_ref().to_vec()))
+                n => LookupIndex::Strict(Index::hash_map(pk.as_ref().to_vec()))
             }
         } else {
             HashMap::new()
@@ -605,10 +602,10 @@ mod tests {
             graph.node_weight_mut(global).unwrap().on_commit(&remap);
             graph.node_weight_mut(global).unwrap().add_to(0.into());
 
-            for (_, suggested_index) in graph[global].suggest_indexes(global) {
-                match suggested_index {
-                    SuggestedIndex::Strict(index) => state.add_key(index, None),
-                    SuggestedIndex::Weak(index) => state.add_weak_key(index),
+            for (_, lookup_index) in graph[global].suggest_indexes(global) {
+                match lookup_index {
+                    LookupIndex::Strict(index) => state.add_key(index, None),
+                    LookupIndex::Weak(index) => state.add_weak_key(index),
                 }
             }
 

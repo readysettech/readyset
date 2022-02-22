@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use vec1::vec1;
 
 use crate::prelude::*;
-use crate::processing::{ColumnSource, SuggestedIndex};
+use crate::processing::{ColumnSource, LookupIndex};
 
 /// Latest provides an operator that will maintain the last record for every group.
 ///
@@ -130,10 +130,10 @@ impl Ingredient for Latest {
         })
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
         // index all key columns
         hashmap! {
-            this => SuggestedIndex::Strict(Index::hash_map(vec![self.key]))
+            this => LookupIndex::Strict(Index::hash_map(vec![self.key]))
         }
     }
 
@@ -272,7 +272,7 @@ mod tests {
         assert!(idx.contains_key(&me));
 
         // should only index on the group-by column
-        assert_eq!(idx[&me], SuggestedIndex::Strict(Index::hash_map(vec![1])));
+        assert_eq!(idx[&me], LookupIndex::Strict(Index::hash_map(vec![1])));
     }
 
     #[test]

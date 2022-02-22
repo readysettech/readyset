@@ -16,7 +16,7 @@ use tracing::trace;
 
 use crate::ops::utils::Order;
 use crate::prelude::*;
-use crate::processing::{ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex};
+use crate::processing::{ColumnSource, IngredientLookupResult, LookupIndex, LookupMode};
 
 /// Data structure used internally to topk to track rows currently within a group. Contains a
 /// reference to the `order` of the topk itself to allow for a custom Ord implementation, which
@@ -426,11 +426,11 @@ impl Ingredient for TopK {
         })
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
         hashmap! {
-            this => SuggestedIndex::Strict(internal::Index::hash_map(self.group_by.clone())),
+            this => LookupIndex::Strict(internal::Index::hash_map(self.group_by.clone())),
             self.src.as_global() =>
-            SuggestedIndex::Strict(internal::Index::hash_map(self.group_by.clone())),
+            LookupIndex::Strict(internal::Index::hash_map(self.group_by.clone())),
         }
     }
 
@@ -670,11 +670,11 @@ mod tests {
         assert_eq!(idx.len(), 2);
         assert_eq!(
             &idx[&me],
-            &SuggestedIndex::Strict(noria::internal::Index::hash_map(vec![1]))
+            &LookupIndex::Strict(noria::internal::Index::hash_map(vec![1]))
         );
         assert_eq!(
             &idx[&parent],
-            &SuggestedIndex::Strict(noria::internal::Index::hash_map(vec![1]))
+            &LookupIndex::Strict(noria::internal::Index::hash_map(vec![1]))
         );
     }
 

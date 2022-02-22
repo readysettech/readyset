@@ -214,7 +214,7 @@ mod tests {
     use std::convert::TryInto;
 
     use super::*;
-    use crate::{ops, SuggestedIndex};
+    use crate::{ops, LookupIndex};
 
     fn setup(mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
@@ -396,7 +396,7 @@ mod tests {
         assert!(idx.contains_key(&me));
 
         // should only index on the group-by column
-        assert_eq!(idx[&me], SuggestedIndex::Strict(Index::hash_map(vec![0])));
+        assert_eq!(idx[&me], LookupIndex::Strict(Index::hash_map(vec![0])));
     }
 
     #[test]
