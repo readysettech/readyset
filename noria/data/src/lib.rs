@@ -16,6 +16,7 @@ use tokio_postgres::types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Typ
 
 mod float;
 mod integer;
+pub mod noria_type;
 mod serde;
 mod text;
 mod timestamp;
