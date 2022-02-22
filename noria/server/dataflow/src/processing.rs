@@ -693,7 +693,6 @@ where
     #[allow(clippy::too_many_arguments)]
     fn on_input(
         &mut self,
-        executor: &mut dyn Executor,
         from: LocalNodeIndex,
         data: Records,
         replay: &ReplayContext,
@@ -704,7 +703,6 @@ where
     #[allow(clippy::too_many_arguments)]
     fn on_input_raw(
         &mut self,
-        executor: &mut dyn Executor,
         from: LocalNodeIndex,
         data: Records,
         replay: ReplayContext,
@@ -712,7 +710,7 @@ where
         states: &StateMap,
     ) -> ReadySetResult<RawProcessingResult> {
         Ok(RawProcessingResult::Regular(
-            self.on_input(executor, from, data, &replay, domain, states)?,
+            self.on_input(from, data, &replay, domain, states)?,
         ))
     }
 

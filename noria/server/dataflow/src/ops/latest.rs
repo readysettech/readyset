@@ -53,7 +53,6 @@ impl Ingredient for Latest {
 
     fn on_input(
         &mut self,
-        _: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
         replay: &ReplayContext,

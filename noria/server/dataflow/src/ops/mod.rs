@@ -148,25 +148,23 @@ impl Ingredient for NodeOperator {
     }
     fn on_input(
         &mut self,
-        ex: &mut dyn Executor,
         from: LocalNodeIndex,
         data: Records,
         replay: &ReplayContext,
         domain: &DomainNodes,
         states: &StateMap,
     ) -> ReadySetResult<ProcessingResult> {
-        impl_ingredient_fn_mut!(self, on_input, ex, from, data, replay, domain, states)
+        impl_ingredient_fn_mut!(self, on_input, from, data, replay, domain, states)
     }
     fn on_input_raw(
         &mut self,
-        ex: &mut dyn Executor,
         from: LocalNodeIndex,
         data: Records,
         replay: ReplayContext,
         domain: &DomainNodes,
         states: &StateMap,
     ) -> ReadySetResult<RawProcessingResult> {
-        impl_ingredient_fn_mut!(self, on_input_raw, ex, from, data, replay, domain, states)
+        impl_ingredient_fn_mut!(self, on_input_raw, from, data, replay, domain, states)
     }
     fn on_eviction(&mut self, from: LocalNodeIndex, tag: Tag, keys: &[KeyComparison]) {
         impl_ingredient_fn_mut!(self, on_eviction, from, tag, keys)
@@ -414,19 +412,13 @@ pub mod test {
             assert!(self.nut.is_some());
             assert!(!remember || self.states.contains_key(*self.nut.unwrap()));
 
-            struct Ex;
-
-            impl Executor for Ex {
-                fn send(&mut self, _: ReplicaAddr, _: Box<Packet>) {}
-            }
-
             let tag = replay.tag();
             let mut res = {
                 let id = self.nut.unwrap();
                 let mut n = self.nodes[*id].borrow_mut();
                 n.as_mut_internal()
                     .unwrap()
-                    .on_input_raw(&mut Ex, *src, u.into(), replay, &self.nodes, &self.states)
+                    .on_input_raw(*src, u.into(), replay, &self.nodes, &self.states)
                     .unwrap()
             };
 

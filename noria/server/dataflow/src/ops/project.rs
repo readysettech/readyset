@@ -191,7 +191,6 @@ impl Ingredient for Project {
 
     fn on_input(
         &mut self,
-        _: &mut dyn Executor,
         from: LocalNodeIndex,
         mut rs: Records,
         _: &ReplayContext,
