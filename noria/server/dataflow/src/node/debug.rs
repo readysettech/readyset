@@ -56,7 +56,7 @@ impl Node {
                 NodeType::Sharder(ref sharder) => {
                     s.push_str(&format!(
                         "[style=bold, shape=Msquare, label=\"shard by {}\"]\n",
-                        Self::escape(&self.fields[sharder.sharded_by()]),
+                        Self::escape(&self.columns[sharder.sharded_by()].name),
                     ));
                 }
                 NodeType::Reader(_) => {
@@ -137,7 +137,9 @@ impl Node {
             };
 
             let sharding = match self.sharded_by {
-                Sharding::ByColumn(k, w) => format!("shard ⚷: {} / {}-way", self.fields[k], w),
+                Sharding::ByColumn(k, w) => {
+                    format!("shard ⚷: {} / {}-way", self.columns[k].name, w)
+                }
                 Sharding::Random(_) => "shard randomly".to_owned(),
                 Sharding::None => "unsharded".to_owned(),
                 Sharding::ForcedNone => "desharded to avoid SS".to_owned(),
@@ -164,10 +166,10 @@ impl Node {
                         Self::escape(self.name()),
                         "B",
                         materialized,
-                        self.fields()
+                        self.columns()
                             .iter()
                             .enumerate()
-                            .map(|(i, f)| format!("{}: {}", i, f))
+                            .map(|(i, c)| format!("{}: {}", i, c.name))
                             .join(", \\n"),
                         sharding
                     ));
@@ -182,7 +184,7 @@ impl Node {
                 NodeType::Sharder(ref sharder) => s.push_str(&format!(
                     "{{ {} | shard by {} | {} }}",
                     addr,
-                    self.fields[sharder.sharded_by()],
+                    self.columns[sharder.sharded_by()].name,
                     sharding
                 )),
                 NodeType::Reader(ref r) => {
@@ -214,10 +216,10 @@ impl Node {
                     // Output node outputs. Second row.
                     s.push_str(&format!(
                         " | {}",
-                        self.fields()
+                        self.columns()
                             .iter()
                             .enumerate()
-                            .map(|(i, f)| format!("{}: {}", i, f))
+                            .map(|(i, c)| format!("{}: {}", i, c.name))
                             .join(", \\n"),
                     ));
                     s.push_str(&format!(" | {}", sharding));

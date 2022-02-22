@@ -214,6 +214,7 @@ pub mod test {
     use crate::node;
     use crate::prelude::*;
     use crate::processing::LookupIndex;
+    use crate::utils::make_columns;
 
     pub(super) struct MockGraph {
         graph: Graph,
@@ -230,7 +231,7 @@ pub mod test {
             let mut graph = Graph::new();
             let source = graph.add_node(Node::new(
                 "source",
-                &["because-type-inference"],
+                make_columns(&[""]),
                 node::NodeType::Source,
             ));
             MockGraph {
@@ -255,7 +256,9 @@ pub mod test {
         ) -> IndexPair {
             use crate::node::special::Base;
             let i = Base::new().with_default_values(defaults);
-            let global = self.graph.add_node(Node::new(name, fields, i));
+            let global = self
+                .graph
+                .add_node(Node::new(name, make_columns(fields), i));
             self.graph.add_edge(self.source, global, ());
             let mut remap = HashMap::new();
             let local = unsafe { LocalNodeIndex::make(self.remap.len() as u32) };
@@ -287,7 +290,9 @@ pub mod test {
             assert!(!parents.is_empty(), "node under test should have ancestors");
 
             let i: NodeOperator = i.into();
-            let global = self.graph.add_node(Node::new(name, fields, i));
+            let global = self
+                .graph
+                .add_node(Node::new(name, make_columns(fields), i));
             let local = unsafe { LocalNodeIndex::make(self.remap.len() as u32) };
             if materialized {
                 self.states

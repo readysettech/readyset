@@ -592,6 +592,7 @@ fn trace(
 
 #[cfg(test)]
 mod tests {
+    use dataflow::utils::make_columns;
     use dataflow::{node, ops};
     use nom_sql::OrderType;
 
@@ -601,20 +602,20 @@ mod tests {
         let mut g = petgraph::Graph::new();
         let src = g.add_node(node::Node::new(
             "source",
-            &["because-type-inference"],
+            make_columns(&[""]),
             node::special::Source,
         ));
 
         let a = g.add_node(node::Node::new(
             "a",
-            &["a1", "a2"],
+            make_columns(&["a1", "a2"]),
             node::special::Base::default(),
         ));
         g.add_edge(src, a, ());
 
         let b = g.add_node(node::Node::new(
             "b",
-            &["b1", "b2"],
+            make_columns(&["b1", "b2"]),
             node::special::Base::default(),
         ));
         g.add_edge(src, b, ());
@@ -694,7 +695,11 @@ mod tests {
     fn internal_passthrough() {
         let (mut g, a, _) = bases();
 
-        let x = g.add_node(node::Node::new("x", &["x1", "x2"], node::special::Ingress));
+        let x = g.add_node(node::Node::new(
+            "x",
+            make_columns(&["x1", "x2"]),
+            node::special::Ingress,
+        ));
         g.add_edge(a, x, ());
 
         assert_eq!(
@@ -736,7 +741,7 @@ mod tests {
 
         let x = g.add_node(node::Node::new(
             "x",
-            &["x2", "x1"],
+            make_columns(&["x2", "x1"]),
             ops::NodeOperator::Project(ops::project::Project::new(a, &[1, 0], None, None)),
         ));
         g.add_edge(a, x, ());
@@ -781,7 +786,7 @@ mod tests {
 
         let x = g.add_node(node::Node::new(
             "x",
-            &["x1", "foo"],
+            make_columns(&["x1", "foo"]),
             ops::NodeOperator::Project(ops::project::Project::new(
                 a,
                 &[0],
@@ -844,7 +849,7 @@ mod tests {
 
         let x = g.add_node(node::Node::new(
             "x",
-            &["x1", "x2"],
+            make_columns(&["x1", "x2"]),
             ops::NodeOperator::Union(
                 ops::union::Union::new(
                     vec![(a, vec![0, 1]), (b, vec![0, 1])].into_iter().collect(),
@@ -911,7 +916,7 @@ mod tests {
 
         let x = g.add_node(node::Node::new(
             "x",
-            &["a1", "a2b1", "b2"],
+            make_columns(&["a1", "a2b1", "b2"]),
             ops::NodeOperator::Join(ops::join::Join::new(
                 a,
                 b,
@@ -1024,7 +1029,7 @@ mod tests {
 
         let x = g.add_node(node::Node::new(
             "x",
-            &["a1", "a2b1", "b2"],
+            make_columns(&["a1", "a2b1", "b2"]),
             ops::NodeOperator::Join(ops::join::Join::new(
                 a,
                 b,
@@ -1041,7 +1046,7 @@ mod tests {
 
         let reader = g.add_node(node::Node::new(
             "reader",
-            &["a1", "a2b1", "b2"],
+            make_columns(&["a1", "a2b1", "b2"]),
             node::special::Reader::new(x, Default::default())
                 .with_index(&Index::hash_map(vec![0, 2])),
         ));
@@ -1121,7 +1126,7 @@ mod tests {
 
         let mut paginate_node = node::Node::new(
             "paginate",
-            &["a1", "a2", "__page_number"],
+            make_columns(&["a1", "a2", "__page_number"]),
             ops::NodeOperator::Paginate(ops::paginate::Paginate::new(
                 a,
                 vec![(0, OrderType::OrderAscending)],
@@ -1146,7 +1151,7 @@ mod tests {
 
         let reader = g.add_node(node::Node::new(
             "reader",
-            &["a1", "a2", "__page_number"],
+            make_columns(&["a1", "a2", "__page_number"]),
             node::special::Reader::new(paginate, Default::default())
                 .with_index(&Index::hash_map(vec![1, 2])),
         ));

@@ -942,7 +942,7 @@ impl Materializations {
                 if let Sharding::ByColumn(col, _) = psharding {
                     // we want to resolve col all the way to its nearest materialized ancestor.
                     // and then check whether any other cols of the parent alias that source column
-                    let columns: Vec<_> = (0..n.fields().len()).collect();
+                    let columns: Vec<_> = (0..n.columns().len()).collect();
                     for path in keys::provenance_of(graph, parent, &columns[..])? {
                         let (mat_anc, cols) = path
                             .into_iter()

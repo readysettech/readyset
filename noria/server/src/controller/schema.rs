@@ -28,7 +28,7 @@ fn type_for_internal_column(
         }),
         NodeOperator::Aggregation(ref grouped_op) => {
             // computed column is always emitted last
-            if column_index == node.fields().len() - 1 {
+            if column_index == node.columns().len() - 1 {
                 if let Some(res) = grouped_op.output_col_type() {
                     Ok(Some(res))
                 } else {
@@ -48,7 +48,7 @@ fn type_for_internal_column(
         }
         NodeOperator::Extremum(ref o) => {
             // use type of the "over" column
-            if column_index == node.fields().len() - 1 {
+            if column_index == node.columns().len() - 1 {
                 Ok(
                     column_schema(graph, next_node_on_path, recipe, o.over_column())?
                         .map(ColumnSchema::take_type),
@@ -62,7 +62,7 @@ fn type_for_internal_column(
         }
         NodeOperator::Concat(_) => {
             // group_concat always outputs a string as the last column
-            if column_index == node.fields().len() - 1 {
+            if column_index == node.columns().len() - 1 {
                 Ok(Some(SqlType::Text))
             } else {
                 Ok(
@@ -77,7 +77,7 @@ fn type_for_internal_column(
             Ok(None)
         }
         NodeOperator::Paginate(_) => {
-            if column_index == node.fields().len() - 1 {
+            if column_index == node.columns().len() - 1 {
                 Ok(Some(SqlType::Bigint(None)))
             } else {
                 Ok(
@@ -197,8 +197,8 @@ pub(super) fn column_schema(
         // found something, so return a ColumnSpecification
         let cs = ColumnSpecification::new(
             Column {
-                name: vn.fields()[column_index].as_str().into(),
-                table: Some(vn.name().into()),
+                name: vn.columns()[column_index].name().into(),
+                table: Some(vn.name().to_owned()),
             },
             // ? in case we found no schema for this column
             col_type,

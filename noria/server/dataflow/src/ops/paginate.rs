@@ -162,7 +162,7 @@ impl Ingredient for Paginate {
     }
 
     fn on_connected(&mut self, graph: &Graph) {
-        self.page_number_col = Some(graph[self.src.as_global()].fields().len());
+        self.page_number_col = Some(graph[self.src.as_global()].columns().len());
     }
 
     fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {

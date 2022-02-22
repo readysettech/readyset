@@ -16,6 +16,7 @@ use assert_approx_eq::assert_approx_eq;
 use common::Index;
 use dataflow::node::special::Base;
 use dataflow::ops::union::{self, Union};
+use dataflow::utils::make_columns;
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::internal::DomainIndex;
 use noria::metrics::{recorded, DumpedMetricValue, MetricsDump};
@@ -44,14 +45,22 @@ async fn it_works_basic() {
 
     let _ = g
         .migrate(|mig| {
-            let a = mig.add_base("a", &["a", "b"], Base::new().with_primary_key([0]));
-            let b = mig.add_base("b", &["a", "b"], Base::new().with_primary_key([0]));
+            let a = mig.add_base(
+                "a",
+                make_columns(&["a", "b"]),
+                Base::new().with_primary_key([0]),
+            );
+            let b = mig.add_base(
+                "b",
+                make_columns(&["a", "b"]),
+                Base::new().with_primary_key([0]),
+            );
 
             let mut emits = HashMap::new();
             emits.insert(a, vec![0, 1]);
             emits.insert(b, vec![0, 1]);
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
-            let c = mig.add_ingredient("c", &["a", "b"], u);
+            let c = mig.add_ingredient("c", make_columns(&["a", "b"]), u);
             mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
             (a, b, c)
         })

@@ -2,13 +2,13 @@ use std::collections::HashSet;
 use std::fmt::{self, Display};
 
 use itertools::Itertools;
-use nom_sql::SqlIdentifier;
 use noria::internal::LocalOrNot;
 use noria::{self, KeyComparison, PacketData, PacketTrace};
 use serde::{Deserialize, Serialize};
 use strum_macros::{EnumCount, EnumDiscriminants, EnumIter, IntoStaticStr};
 use vec1::Vec1;
 
+use crate::node::Column;
 use crate::prelude::*;
 
 /// A single segment (node that is passed through) of a replay path within a particular domain
@@ -160,7 +160,7 @@ pub enum DomainRequest {
     /// Add a new column to an existing `Base` node.
     AddBaseColumn {
         node: LocalNodeIndex,
-        field: SqlIdentifier,
+        column: Column,
         default: DataType,
     },
 

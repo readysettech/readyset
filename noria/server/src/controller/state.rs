@@ -347,12 +347,12 @@ impl DataflowState {
                 .post_lookup()
                 .returned_cols
                 .clone()
-                .unwrap_or_else(|| (0..self.ingredients[r].fields().len()).collect());
+                .unwrap_or_else(|| (0..self.ingredients[r].columns().len()).collect());
             #[allow(clippy::indexing_slicing)] // just came from self
-            let fields = self.ingredients[r].fields();
+            let columns = self.ingredients[r].columns();
             let columns = returned_cols
                 .iter()
-                .map(|idx| fields.get(*idx).cloned())
+                .map(|idx| columns.get(*idx).map(|c| c.name().into()))
                 .collect::<Option<Vec<_>>>()
                 .ok_or_else(|| internal_err("Schema expects valid column indices"))?;
 
@@ -422,9 +422,9 @@ impl DataflowState {
             .post_lookup()
             .returned_cols
             .clone()
-            .unwrap_or_else(|| (0..n.fields().len()).collect());
+            .unwrap_or_else(|| (0..n.columns().len()).collect());
 
-        let projected_schema = (0..n.fields().len())
+        let projected_schema = (0..n.columns().len())
             .map(|i| schema::column_schema(&self.ingredients, view_ni, &self.recipe, i))
             .collect::<Result<Vec<_>, ReadySetError>>()?
             .into_iter()
@@ -505,15 +505,20 @@ impl DataflowState {
             .get_base()
             .ok_or_else(|| internal_err("asked to get table for non-base node"))?;
         let columns: Vec<SqlIdentifier> = node
-            .fields()
+            .columns()
             .iter()
             .enumerate()
-            .filter(|&(n, _)| !base_operator.get_dropped().contains_key(n))
-            .map(|(_, s)| s.clone())
+            .filter_map(|(n, s)| {
+                if base_operator.get_dropped().contains_key(n) {
+                    None
+                } else {
+                    Some(s.name().into())
+                }
+            })
             .collect();
         invariant_eq!(
             columns.len(),
-            node.fields().len() - base_operator.get_dropped().len()
+            node.columns().len() - base_operator.get_dropped().len()
         );
         let schema = self
             .recipe

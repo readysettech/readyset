@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use nom_sql::SqlIdentifier;
 use noria::consistency::Timestamp;
+use noria_data::noria_type::Type;
 use serde::{Deserialize, Serialize};
 
 use crate::ops;
@@ -27,14 +28,63 @@ pub use process::bench;
 // NOTE(jfrg): the migration code should probably move into the dataflow crate...
 // it is the reason why so much stuff here is pub
 
+/// Dataflow column representation
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct Column {
+    /// Column name
+    name: SqlIdentifier,
+    /// Column type
+    ty: Type,
+    /// The node or table where this column originates.
+    ///
+    /// TODO: Use this information to lookup the column specification required for returning a
+    /// resultset to the client.
+    source: Option<SqlIdentifier>,
+}
+
+impl Column {
+    pub fn new(name: SqlIdentifier, ty: Type, source: Option<SqlIdentifier>) -> Self {
+        Self { name, ty, source }
+    }
+
+    /// Column name
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
+
+    /// Type of the column
+    pub fn ty(&self) -> &Type {
+        &self.ty
+    }
+
+    /// Originating column
+    pub fn source(&self) -> Option<&SqlIdentifier> {
+        self.source.as_ref()
+    }
+
+    /// Sets this column's name
+    pub fn set_name(&mut self, name: SqlIdentifier) {
+        self.name = name;
+    }
+}
+
+impl From<nom_sql::ColumnSpecification> for Column {
+    fn from(col: nom_sql::ColumnSpecification) -> Self {
+        Self {
+            name: col.column.name,
+            ty: col.sql_type.into(),
+            source: col.column.table,
+        }
+    }
+}
+
 #[must_use]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
     name: SqlIdentifier,
     index: Option<IndexPair>,
     domain: Option<DomainIndex>,
-
-    fields: Vec<SqlIdentifier>,
+    columns: Vec<Column>,
     parents: Vec<LocalNodeIndex>,
     children: Vec<LocalNodeIndex>,
     inner: NodeType,
@@ -61,19 +111,18 @@ pub struct Node {
 
 // constructors
 impl Node {
-    pub fn new<S1, FS, S2, NT>(name: S1, fields: FS, inner: NT) -> Node
+    pub fn new<S1, S2, CS, NT>(name: S1, columns: CS, inner: NT) -> Node
     where
         S1: Into<SqlIdentifier>,
-        S2: Into<SqlIdentifier>,
-        FS: IntoIterator<Item = S2>,
+        S2: Into<Column>,
+        CS: IntoIterator<Item = S2>,
         NT: Into<NodeType>,
     {
         Node {
             name: name.into(),
             index: None,
             domain: None,
-
-            fields: fields.into_iter().map(|s| s.into()).collect(),
+            columns: columns.into_iter().map(|c| c.into()).collect(),
             parents: Vec::new(),
             children: Vec::new(),
             inner: inner.into(),
@@ -87,11 +136,11 @@ impl Node {
     }
 
     pub fn mirror<NT: Into<NodeType>>(&self, n: NT) -> Node {
-        Self::new(self.name.clone(), &self.fields, n)
+        Self::new(self.name.clone(), self.columns.clone(), n)
     }
 
     pub fn named_mirror<NT: Into<NodeType>>(&self, n: NT, name: String) -> Node {
-        Self::new(name, &self.fields, n)
+        Self::new(name, self.columns.clone(), n)
     }
 
     /// Duplicates the existing node, clearing the index, taken flag, and timestamps
@@ -298,8 +347,8 @@ impl Node {
         &self.name
     }
 
-    pub fn fields(&self) -> &[SqlIdentifier] {
-        &self.fields[..]
+    pub fn columns(&self) -> &[Column] {
+        &self.columns[..]
     }
 
     pub fn sharded_by(&self) -> Sharding {
@@ -463,9 +512,9 @@ impl Node {
         false
     }
 
-    pub fn add_column(&mut self, field: SqlIdentifier) -> usize {
-        self.fields.push(field);
-        self.fields.len() - 1
+    pub fn add_column(&mut self, column: Column) -> usize {
+        self.columns.push(column);
+        self.columns.len() - 1
     }
 
     pub fn has_domain(&self) -> bool {

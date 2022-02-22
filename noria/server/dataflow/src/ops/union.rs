@@ -312,7 +312,7 @@ impl Ingredient for Union {
             ..
         } = self.emit
         {
-            cols.extend(emit.keys().map(|&n| (n, g[n.as_global()].fields().len())));
+            cols.extend(emit.keys().map(|&n| (n, g[n.as_global()].columns().len())));
         }
     }
 
