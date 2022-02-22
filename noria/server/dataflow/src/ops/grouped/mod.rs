@@ -10,7 +10,7 @@ use noria_errors::{internal_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 use crate::prelude::*;
-use crate::processing::{ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex};
+use crate::processing::{ColumnSource, IngredientLookupResult, LookupIndex, LookupMode};
 
 // pub mod latest;
 pub mod aggregate;
@@ -382,12 +382,12 @@ where
         })
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
         hashmap! {
             // index the parent for state repopulation purposes
-            self.src.as_global() => SuggestedIndex::Strict(Index::hash_map(self.group_by.clone())),
+            self.src.as_global() => LookupIndex::Strict(Index::hash_map(self.group_by.clone())),
             // index by our primary key
-            this => SuggestedIndex::Strict(Index::hash_map(self.out_key.clone()))
+            this => LookupIndex::Strict(Index::hash_map(self.out_key.clone()))
         }
     }
 

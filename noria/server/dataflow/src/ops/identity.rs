@@ -5,7 +5,7 @@ use noria_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
 
 use crate::prelude::*;
-use crate::processing::{ColumnSource, SuggestedIndex};
+use crate::processing::{ColumnSource, LookupIndex};
 
 /// Applies the identity operation to the view. Since the identity does nothing,
 /// it is the simplest possible operation. Primary intended as a reference
@@ -50,7 +50,7 @@ impl Ingredient for Identity {
         })
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
         HashMap::new()
     }
 

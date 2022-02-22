@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ops::utils::Order;
 use crate::prelude::*;
-use crate::processing::SuggestedIndex;
+use crate::processing::LookupIndex;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Paginate {
@@ -81,7 +81,7 @@ impl Ingredient for Paginate {
     }
 
     #[allow(clippy::todo)]
-    fn suggest_indexes(&self, _this: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
+    fn suggest_indexes(&self, _this: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
         todo!()
     }
 

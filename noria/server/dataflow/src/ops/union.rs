@@ -16,7 +16,7 @@ use vec1::Vec1;
 
 use super::Side;
 use crate::prelude::*;
-use crate::processing::{ColumnRef, ColumnSource, SuggestedIndex};
+use crate::processing::{ColumnRef, ColumnSource, LookupIndex};
 
 /// Specification for how the union operator should operate with respect to rows that exist in both
 /// the left and right parents.
@@ -976,7 +976,7 @@ impl Ingredient for Union {
         }
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
         // index nothing (?)
         HashMap::new()
     }

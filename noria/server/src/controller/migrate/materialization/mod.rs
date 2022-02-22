@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 
 use dataflow::prelude::*;
-use dataflow::{DomainRequest, SuggestedIndex};
+use dataflow::{DomainRequest, LookupIndex};
 use maplit::hashmap;
 use noria_errors::{internal, internal_err, invariant, ReadySetError, ReadySetResult};
 use petgraph::graph::NodeIndex;
@@ -59,7 +59,7 @@ enum IndexObligation {
     ///
     /// A lookup obligation can be created either if a node asks for its own state to be
     /// materialized, or if a node indicates that it will perform lookups on its ancestors
-    Lookup(SuggestedIndex),
+    Lookup(LookupIndex),
 
     /// An obligation to index a particular set of columns for replays into a node
     ///
@@ -248,7 +248,7 @@ impl Materializations {
         //
 
         // Holds all lookup obligations. Keyed by the node that should be materialized.
-        let mut lookup_obligations: HashMap<NodeIndex, HashSet<SuggestedIndex>> = HashMap::new();
+        let mut lookup_obligations: HashMap<NodeIndex, HashSet<LookupIndex>> = HashMap::new();
 
         // Holds all replay obligations. Keyed by the node whose *parent* should be materialized.
         let mut replay_obligations: HashMap<NodeIndex, Indices> = HashMap::new();
@@ -272,7 +272,7 @@ impl Materializations {
             } else {
                 n.suggest_indexes(ni)
                     .into_iter()
-                    .map(|(n, suggested_index)| (n, IndexObligation::Lookup(suggested_index)))
+                    .map(|(n, lookup_index)| (n, IndexObligation::Lookup(lookup_index)))
                     .collect()
             };
 
@@ -281,7 +281,7 @@ impl Materializations {
                 // so, just make up some column to index on
                 indices.insert(
                     ni,
-                    IndexObligation::Lookup(SuggestedIndex::Strict(Index::hash_map(vec![0]))),
+                    IndexObligation::Lookup(LookupIndex::Strict(Index::hash_map(vec![0]))),
                 );
             }
 
@@ -304,15 +304,15 @@ impl Materializations {
         }
 
         // map all the indices to the corresponding columns in the parent
-        fn map_indices(
+        fn map_lookup_indices(
             n: &Node,
             parent: NodeIndex,
-            indices: &HashSet<SuggestedIndex>,
-        ) -> ReadySetResult<HashSet<SuggestedIndex>> {
+            indices: &HashSet<LookupIndex>,
+        ) -> ReadySetResult<HashSet<LookupIndex>> {
             indices
                 .iter()
-                .map(|suggested_index| {
-                    let index = suggested_index.index();
+                .map(|lookup_index| {
+                    let index = lookup_index.index();
                     let index = Index::new(
                         index.index_type,
                         index
@@ -344,9 +344,9 @@ impl Materializations {
                             })
                             .collect::<ReadySetResult<Vec<usize>>>()?,
                     );
-                    Ok(match suggested_index {
-                        SuggestedIndex::Strict(_) => SuggestedIndex::Strict(index),
-                        SuggestedIndex::Weak(_) => SuggestedIndex::Weak(index),
+                    Ok(match lookup_index {
+                        LookupIndex::Strict(_) => LookupIndex::Strict(index),
+                        LookupIndex::Weak(_) => LookupIndex::Weak(index),
                     })
                 })
                 .collect()
@@ -389,7 +389,7 @@ impl Materializations {
                     "hoisting indexing obligations"
                 );
                 mi = parent;
-                indices = map_indices(m, mi, &indices).unwrap();
+                indices = map_lookup_indices(m, mi, &indices).unwrap();
                 m = &graph[mi];
             }
 

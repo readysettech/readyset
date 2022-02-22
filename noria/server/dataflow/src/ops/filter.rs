@@ -7,7 +7,7 @@ use noria_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
 
 use crate::prelude::*;
-use crate::processing::{ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex};
+use crate::processing::{ColumnSource, IngredientLookupResult, LookupIndex, LookupMode};
 
 /// The filter operator
 ///
@@ -63,7 +63,7 @@ impl Ingredient for Filter {
         })
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
         HashMap::new()
     }
 

@@ -186,9 +186,9 @@ pub fn shard(
                     // lookups based on any *other* columns in any ancestor. if we do, we must
                     // force no sharding :(
                     let mut ok = true;
-                    for (ni, suggested_index) in &need_sharding {
-                        invariant_eq!(suggested_index.len(), 1);
-                        let lookup_col = suggested_index[0];
+                    for (ni, lookup_index) in &need_sharding {
+                        invariant_eq!(lookup_index.len(), 1);
+                        let lookup_col = lookup_index[0];
 
                         if let Some(&in_shard_col) = want_sharding_input.get(ni) {
                             if in_shard_col != lookup_col {

@@ -20,7 +20,7 @@ pub(crate) mod utils;
 
 use crate::ops::grouped::concat::GroupConcat;
 use crate::processing::{
-    ColumnMiss, ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex,
+    ColumnMiss, ColumnSource, IngredientLookupResult, LookupIndex, LookupMode,
 };
 
 /// Enum for distinguishing between the two parents of a union or join
@@ -122,7 +122,7 @@ impl Ingredient for NodeOperator {
     fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
         impl_ingredient_fn_ref!(self, must_replay_among,)
     }
-    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
+    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
         impl_ingredient_fn_ref!(self, suggest_indexes, you)
     }
     fn column_source(&self, cols: &[usize]) -> ColumnSource {
@@ -212,7 +212,7 @@ pub mod test {
 
     use crate::node;
     use crate::prelude::*;
-    use crate::processing::SuggestedIndex;
+    use crate::processing::LookupIndex;
     use crate::state::MaterializedNodeState;
 
     pub(super) struct MockGraph {
@@ -310,12 +310,12 @@ pub mod test {
 
             // we need to set the indices for all the base tables so they *actually* store things.
             let idx = self.graph[global].suggest_indexes(global);
-            for (tbl, suggested_index) in idx {
+            for (tbl, lookup_index) in idx {
                 if let Some(ref mut s) = self.states.get_mut(self.graph[tbl].local_addr()) {
-                    if suggested_index.is_weak() {
-                        s.add_weak_key(suggested_index.index().clone())
+                    if lookup_index.is_weak() {
+                        s.add_weak_key(lookup_index.index().clone())
                     }
-                    s.add_key(suggested_index.into_index(), None);
+                    s.add_key(lookup_index.into_index(), None);
                 }
             }
             // and get rid of states we don't need
@@ -389,11 +389,11 @@ pub mod test {
             let global = self.nut.unwrap().as_global();
             let idx = self.graph[global].suggest_indexes(global);
             let mut state = MemoryState::default();
-            for (tbl, suggested_index) in idx {
+            for (tbl, lookup_index) in idx {
                 if tbl == base.as_global() {
-                    match suggested_index {
-                        SuggestedIndex::Strict(index) => state.add_key(index, None),
-                        SuggestedIndex::Weak(index) => state.add_weak_key(index),
+                    match lookup_index {
+                        LookupIndex::Strict(index) => state.add_key(index, None),
+                        LookupIndex::Weak(index) => state.add_weak_key(index),
                     }
                 }
             }

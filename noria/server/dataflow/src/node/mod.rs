@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ops;
 use crate::prelude::*;
-use crate::processing::SuggestedIndex;
+use crate::processing::LookupIndex;
 
 mod process;
 #[cfg(test)]
@@ -423,7 +423,7 @@ impl Node {
         }
     }
 
-    pub fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
+    pub fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
         match self.inner {
             NodeType::Internal(ref i) => i.suggest_indexes(n),
             NodeType::Base(ref b) => b.suggest_indexes(n),

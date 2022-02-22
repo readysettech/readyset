@@ -14,7 +14,7 @@ use vec1::{vec1, Vec1};
 use super::Side;
 use crate::prelude::*;
 use crate::processing::{
-    ColumnMiss, ColumnRef, ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex,
+    ColumnMiss, ColumnRef, ColumnSource, IngredientLookupResult, LookupIndex, LookupMode,
 };
 
 /// Kind of join
@@ -753,14 +753,14 @@ impl Ingredient for Join {
         })
     }
 
-    fn suggest_indexes(&self, _this: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
+    fn suggest_indexes(&self, _this: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {
         // Replays might have happened through our parents into keys *other* than the join key, and
         // we need to find those rows when looking up values to perform the join as part of forward
         // processing of normal writes - so we use a weak index here to avoid dropping writes in
         // that case.
         hashmap! {
-            self.left.as_global() => SuggestedIndex::Weak(Index::hash_map(self.on_left())),
-            self.right.as_global() => SuggestedIndex::Weak(Index::hash_map(self.on_right())),
+            self.left.as_global() => LookupIndex::Weak(Index::hash_map(self.on_left())),
+            self.right.as_global() => LookupIndex::Weak(Index::hash_map(self.on_right())),
         }
     }
 
@@ -1197,8 +1197,8 @@ mod tests {
         let me = 2.into();
         let (g, l, r) = setup();
         let expected = hashmap! {
-            l.as_global() => SuggestedIndex::Weak(Index::hash_map(vec![0])), // join column for left
-            r.as_global() => SuggestedIndex::Weak(Index::hash_map(vec![0])), // join column for right
+            l.as_global() => LookupIndex::Weak(Index::hash_map(vec![0])), // join column for left
+            r.as_global() => LookupIndex::Weak(Index::hash_map(vec![0])), // join column for right
         };
         assert_eq!(g.node().suggest_indexes(me), expected);
     }
