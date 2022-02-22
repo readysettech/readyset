@@ -2629,6 +2629,12 @@ impl OperationList {
     }
 }
 
+impl From<Vec<Vec<QueryOperation>>> for OperationList {
+    fn from(ops: Vec<Vec<QueryOperation>>) -> Self {
+        Self(ops.into_iter().map(|ops| ops.into()).collect())
+    }
+}
+
 /// A specification for a subquery included in a query
 #[derive(Debug, Clone, PartialEq, Eq, Arbitrary)]
 pub struct Subquery {
@@ -2902,23 +2908,34 @@ impl GenerateOpts {
                         .iter()
                         .cloned()
                         .map(|position| {
-                            available_ops
-                                .clone()
-                                .into_iter()
-                                .map(|mut ops| {
-                                    ops.retain(|op| op.supported_in_subqueries());
-                                    ops
-                                })
-                                .flat_map(|operations| {
-                                    make_seeds(
-                                        subquery_depth - 1,
-                                        operations,
-                                        subqueries.clone(),
-                                        available_ops.clone(),
-                                    )
-                                })
-                                .map(|seed| Subquery { position, seed })
-                                .collect::<Vec<_>>()
+                            if available_ops.is_empty() {
+                                Either::Left(make_seeds(
+                                    subquery_depth - 1,
+                                    vec![],
+                                    subqueries.clone(),
+                                    vec![],
+                                ))
+                            } else {
+                                Either::Right(
+                                    available_ops
+                                        .clone()
+                                        .into_iter()
+                                        .map(|mut ops| {
+                                            ops.retain(|op| op.supported_in_subqueries());
+                                            ops
+                                        })
+                                        .flat_map(|operations| {
+                                            make_seeds(
+                                                subquery_depth - 1,
+                                                operations,
+                                                subqueries.clone(),
+                                                available_ops.clone(),
+                                            )
+                                        }),
+                                )
+                            }
+                            .map(|seed| Subquery { position, seed })
+                            .collect::<Vec<_>>()
                         })
                         .multi_cartesian_product()
                         .map(move |subqueries| QuerySeed {
@@ -2930,14 +2947,24 @@ impl GenerateOpts {
         }
 
         let subquery_depth = self.subquery_depth;
-        available_ops.clone().into_iter().flat_map(move |ops| {
-            make_seeds(
+
+        if operations.is_empty() {
+            Either::Left(make_seeds(
                 subquery_depth,
-                ops,
-                subqueries.clone(),
-                available_ops.clone(),
-            )
-        })
+                operations,
+                subqueries,
+                available_ops,
+            ))
+        } else {
+            Either::Right(available_ops.clone().into_iter().flat_map(move |ops| {
+                make_seeds(
+                    subquery_depth,
+                    ops,
+                    subqueries.clone(),
+                    available_ops.clone(),
+                )
+            }))
+        }
     }
 }
 
@@ -3088,5 +3115,35 @@ mod tests {
 
         let key = query.state.key();
         assert_eq!(key.len(), 3);
+    }
+
+    #[test]
+    fn into_query_seeds_just_subquery() {
+        let opts = GenerateOpts {
+            operations: Some(
+                vec![vec![QueryOperation::Subquery(SubqueryPosition::Cte(
+                    JoinOperator::InnerJoin,
+                ))]]
+                .into(),
+            ),
+            subquery_depth: 1,
+            num_operations: None,
+        };
+
+        let seeds = opts.into_query_seeds().collect::<Vec<_>>();
+        assert_eq!(seeds.len(), 1);
+        assert_eq!(
+            seeds.first().unwrap(),
+            &QuerySeed {
+                operations: vec![],
+                subqueries: vec![Subquery {
+                    position: SubqueryPosition::Cte(JoinOperator::InnerJoin),
+                    seed: QuerySeed {
+                        operations: vec![],
+                        subqueries: vec![]
+                    }
+                }]
+            }
+        )
     }
 }
