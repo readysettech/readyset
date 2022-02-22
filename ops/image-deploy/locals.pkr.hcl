@@ -23,6 +23,7 @@ locals {
     "121756176268", # Alex Graham Demo
     "615242630409", # Richard Crowley Demo
     "286292902993", # Joshua Skrypek Demo
+    "501778030520", # 2-23 orchestrator walkthrough
   ]
 
   ami_users = concat(local.internal_account_ids, local.customer_account_ids)
