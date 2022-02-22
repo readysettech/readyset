@@ -38,7 +38,6 @@ members = [
     "unbounded-interval-tree",
     "launchpad",
     "replicators",
-    "readyset-logging",
     "query_generator",
     "maths",
     "benchmarks",
@@ -49,6 +48,7 @@ members = [
     "metrics-aggregator",
     "test_utils",
     "installer",
+    "readyset-tracing",
 ]
 resolver = "2"
 

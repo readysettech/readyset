@@ -18,7 +18,7 @@ mysql_async = "0.29"
 nom-sql = { path = "../../nom-sql" }
 noria = { path = "../server", package = "noria-server" }
 noria-data = { path = "../data" }
-readyset-logging = { path = "../../readyset-logging" }
+readyset-tracing = { path = "../../readyset-tracing" }
 num_cpus = "1"
 rand = "0.7"
 regex = "1.0.0"

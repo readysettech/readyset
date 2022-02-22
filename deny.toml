@@ -197,7 +197,8 @@ skip-tree = [
     { name = "prometheus-http-query", version = "0.3.0" },
     { name = "mysql_common", version = "0.28.0" },
     { name = "consulrs", version = "0.1.0" },
-    { name = "neon", version = "0.9.1" }
+    { name = "neon", version = "0.9.1" },
+    { name = "ordered-float", version = "1.1.1" }
 ]
 
 # This section is considered when running `cargo deny check sources`.

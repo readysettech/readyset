@@ -136,7 +136,9 @@ where
 {
     // Run with VERBOSE=1 for log output.
     if env::var("VERBOSE").is_ok() {
-        readyset_logging::init_test_logging();
+        readyset_tracing::init_test_logging();
+    } else {
+        readyset_tracing::init_test_presampler();
     }
 
     if fallback.is_some() && recreate_database {

@@ -63,11 +63,11 @@ pub struct Options {
     reconciler_loop_interval: u64,
 
     #[clap(flatten)]
-    logging: readyset_logging::Options,
+    tracing: readyset_tracing::Options,
 }
 
 pub fn run(options: Options) -> anyhow::Result<()> {
-    options.logging.init()?;
+    options.tracing.init("metrics-aggregator")?;
     info!(commit_hash = %env!("CARGO_PKG_VERSION", "version not set"));
 
     let prom_address_res: Vec<SocketAddr> = options.prom_address.to_socket_addrs()?.collect();

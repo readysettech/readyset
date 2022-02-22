@@ -177,7 +177,7 @@ pub struct Options {
     use_aws_external_address: bool,
 
     #[clap(flatten)]
-    logging: readyset_logging::Options,
+    tracing: readyset_tracing::Options,
 
     /// Test feature to fail invalidated queries in the serving path instead of going
     /// to fallback.
@@ -246,7 +246,8 @@ where
     H: ConnectionHandler + Clone + Send + Sync + 'static,
 {
     pub fn run(&mut self, options: Options) -> anyhow::Result<()> {
-        options.logging.init()?;
+        let rt = tokio::runtime::Runtime::new()?;
+        rt.block_on(async { options.tracing.init("adapter") })?;
         info!(?options, "Starting ReadySet adapter");
         let users: &'static HashMap<String, String> = Box::leak(Box::new(
             if !options.allow_unauthenticated_connections {
@@ -263,7 +264,6 @@ where
         ));
         info!(commit_hash = %env!("CARGO_PKG_VERSION", "version not set"));
 
-        let rt = tokio::runtime::Runtime::new()?;
         let listen_address = options.address.unwrap_or(self.default_address);
         let listener = rt.block_on(tokio::net::TcpListener::bind(&listen_address))?;
 

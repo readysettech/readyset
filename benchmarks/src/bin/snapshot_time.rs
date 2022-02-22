@@ -26,7 +26,7 @@ struct SnapshotBenchmark {
 
 impl SnapshotBenchmark {
     async fn run(self) -> anyhow::Result<()> {
-        readyset_logging::init_test_logging();
+        readyset_tracing::init_test_logging();
         init_metrics_recorder();
 
         for _ in 0..self.iterations {

@@ -34,7 +34,7 @@ noria-psql = { path = "../../noria-psql" }
 maths = { path = "../../maths" }
 query_generator = { path = "../../query_generator" }
 mysql-time = { path = "../../mysql-time" }
-readyset-logging = { path = "../../readyset-logging" }
+readyset-tracing = { path = "../../readyset-tracing" }
 noria-data = { path = "../../noria/data" }
 tokio = { version = "1.15", features = ["signal", "rt-multi-thread", "time", "net"] }
 itertools = "0.10.0"

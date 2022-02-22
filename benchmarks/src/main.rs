@@ -39,7 +39,7 @@ struct BenchmarkRunner {
     only_to_spec: Option<PathBuf>,
 
     #[clap(flatten)]
-    logging: readyset_logging::Options,
+    tracing: readyset_tracing::Options,
 
     #[clap(flatten)]
     deployment_params: DeploymentParameters,
@@ -368,7 +368,7 @@ impl BenchmarkRunner {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let benchmark_cmd_runner = BenchmarkRunner::parse();
-    benchmark_cmd_runner.logging.init()?;
+    benchmark_cmd_runner.tracing.init("benchmarks")?;
 
     benchmark_cmd_runner.run().await
 }

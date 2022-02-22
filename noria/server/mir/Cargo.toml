@@ -31,4 +31,4 @@ common = { path = "../common", package = "noria-common" }
 dataflow = { path = "../dataflow", package = "noria-dataflow" }
 
 [dev-dependencies]
-readyset-logging = { path = "../../../readyset-logging" }
+readyset-tracing = { path = "../../../readyset-tracing" }

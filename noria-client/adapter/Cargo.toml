@@ -15,7 +15,7 @@ metrics-exporter-prometheus = "0.8"
 tokio = { version = "1.15", features = ["signal", "rt-multi-thread", "time", "net"] }
 tokio-stream = { version = "0.1.5", features = ["net"] }
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
-tracing-subscriber = "0.2.20"
+tracing-subscriber = "0.3.9"
 tracing-futures = "0.2.5"
 stream-cancel = "0.8.0"
 reqwest = { version = "0.11", features = ["json"] }
@@ -26,5 +26,5 @@ nom-sql = { path = "../../nom-sql" }
 noria = { path = "../../noria/noria/" }
 noria-client = { path = ".." }
 noria-client-metrics = { path = "../metrics" }
-readyset-logging = { path = "../../readyset-logging" }
+readyset-tracing = { path = "../../readyset-tracing" }
 chrono = "0.4"

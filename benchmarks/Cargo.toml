@@ -51,7 +51,7 @@ noria-logictest = { path = "../noria/noria-logictest" }
 noria-client = { path = "../noria-client" }
 noria-server = { path = "../noria/server" }
 noria-mysql = { path = "../noria-mysql" }
-readyset-logging = { path = "../readyset-logging" }
+readyset-tracing = { path = "../readyset-tracing" }
 noria-client-test-helpers = { path = "../noria-client/test-helpers", features = ["mysql"] }
 
 [lib]

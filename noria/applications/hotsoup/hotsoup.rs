@@ -114,7 +114,9 @@ async fn main() {
 
     use clap::{App, Arg};
 
-    readyset_logging::Options::default().init().unwrap();
+    readyset_tracing::Options::default()
+        .init("hotsoup")
+        .unwrap();
 
     let matches = App::new("hotsoup")
         .version("0.1")

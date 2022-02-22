@@ -81,7 +81,7 @@ Both noria-server and noria-mysql output INFO and ERROR logs by default.
 
 Logging can be configured to filter different spans/events, and emit logs
 in different formats (json, pretty, full, compact) via command-line arguments
-or environment variables. See `//readysetelogging/src/lib.rs` for a
+or environment variables. See `//readyset-tracing/src/lib.rs` for a
 complete set of options.
 
 During development it can be helpful to enable logs at the `DEBUG` or `TRACE`
