@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 
 use dataflow::prelude::*;
-use dataflow::DomainRequest;
+use dataflow::{DomainRequest, SuggestedIndex};
 use maplit::hashmap;
 use noria_errors::{internal, internal_err, invariant, ReadySetError, ReadySetResult};
 use petgraph::graph::NodeIndex;
@@ -59,7 +59,7 @@ enum IndexObligation {
     ///
     /// A lookup obligation can be created either if a node asks for its own state to be
     /// materialized, or if a node indicates that it will perform lookups on its ancestors
-    Lookup(Index),
+    Lookup(SuggestedIndex),
 
     /// An obligation to index a particular set of columns for replays into a node
     ///
@@ -248,7 +248,7 @@ impl Materializations {
         //
 
         // Holds all lookup obligations. Keyed by the node that should be materialized.
-        let mut lookup_obligations: HashMap<NodeIndex, Indices> = HashMap::new();
+        let mut lookup_obligations: HashMap<NodeIndex, HashSet<SuggestedIndex>> = HashMap::new();
 
         // Holds all replay obligations. Keyed by the node whose *parent* should be materialized.
         let mut replay_obligations: HashMap<NodeIndex, Indices> = HashMap::new();
@@ -272,26 +272,17 @@ impl Materializations {
             } else {
                 n.suggest_indexes(ni)
                     .into_iter()
-                    .map(|(n, suggested_index)| {
-                        // Since lookups into weak indices are forbidden when processing replays,
-                        // any weak index that we add needs to *also* have a corresponding strict
-                        // index of the same type and columns.
-                        if suggested_index.is_weak() {
-                            self.added_weak
-                                .entry(n)
-                                .or_default()
-                                .insert(suggested_index.index().clone());
-                        }
-
-                        (n, IndexObligation::Lookup(suggested_index.into_index()))
-                    })
+                    .map(|(n, suggested_index)| (n, IndexObligation::Lookup(suggested_index)))
                     .collect()
             };
 
             if indices.is_empty() && n.is_base() {
                 // we must *always* materialize base nodes
                 // so, just make up some column to index on
-                indices.insert(ni, IndexObligation::Lookup(Index::hash_map(vec![0])));
+                indices.insert(
+                    ni,
+                    IndexObligation::Lookup(SuggestedIndex::Strict(Index::hash_map(vec![0]))),
+                );
             }
 
             for (ni, obligation) in indices {
@@ -313,11 +304,16 @@ impl Materializations {
         }
 
         // map all the indices to the corresponding columns in the parent
-        fn map_indices(n: &Node, parent: NodeIndex, indices: &Indices) -> ReadySetResult<Indices> {
+        fn map_indices(
+            n: &Node,
+            parent: NodeIndex,
+            indices: &HashSet<SuggestedIndex>,
+        ) -> ReadySetResult<HashSet<SuggestedIndex>> {
             indices
                 .iter()
-                .map(|index| {
-                    Ok(Index::new(
+                .map(|suggested_index| {
+                    let index = suggested_index.index();
+                    let index = Index::new(
                         index.index_type,
                         index
                             .columns
@@ -347,7 +343,11 @@ impl Materializations {
                                 })
                             })
                             .collect::<ReadySetResult<Vec<usize>>>()?,
-                    ))
+                    );
+                    Ok(match suggested_index {
+                        SuggestedIndex::Strict(_) => SuggestedIndex::Strict(index),
+                        SuggestedIndex::Weak(_) => SuggestedIndex::Weak(index),
+                    })
                 })
                 .collect()
         }
@@ -393,21 +393,36 @@ impl Materializations {
                 m = &graph[mi];
             }
 
-            for columns in indices {
+            for index in indices {
                 debug!(
-                    node = %ni.index(),
-                    ?columns,
+                    node = %mi.index(),
+                    ?index,
                     "adding lookup index to view"
                 );
 
-                if self.have.entry(mi).or_default().insert(columns.clone()) {
+                // Since lookups into weak indices are forbidden when processing replays, any weak
+                // index that we add needs to *also* have a corresponding strict index of the same
+                // type and columns.
+                if index.is_weak() {
+                    self.added_weak
+                        .entry(mi)
+                        .or_default()
+                        .insert(index.index().clone());
+                }
+
+                if self
+                    .have
+                    .entry(mi)
+                    .or_default()
+                    .insert(index.index().clone())
+                {
                     // also add a replay obligation to enable partial
                     replay_obligations
                         .entry(mi)
                         .or_default()
-                        .insert(columns.clone());
+                        .insert(index.index().clone());
 
-                    self.added.entry(mi).or_default().insert(columns);
+                    self.added.entry(mi).or_default().insert(index.into_index());
                 }
             }
         }
