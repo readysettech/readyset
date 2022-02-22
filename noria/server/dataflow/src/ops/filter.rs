@@ -44,7 +44,6 @@ impl Ingredient for Filter {
 
     fn on_input(
         &mut self,
-        _: &mut dyn Executor,
         _: LocalNodeIndex,
         rs: Records,
         _: &ReplayContext,

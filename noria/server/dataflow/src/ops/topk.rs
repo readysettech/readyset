@@ -244,7 +244,6 @@ impl Ingredient for TopK {
     #[allow(clippy::cognitive_complexity)]
     fn on_input<'a>(
         &mut self,
-        _: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
         replay: &ReplayContext,

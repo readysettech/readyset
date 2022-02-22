@@ -71,7 +71,6 @@ impl Ingredient for Paginate {
     #[allow(clippy::todo)]
     fn on_input<'a>(
         &mut self,
-        _: &mut dyn Executor,
         _from: LocalNodeIndex,
         _rs: Records,
         _replay: &ReplayContext,

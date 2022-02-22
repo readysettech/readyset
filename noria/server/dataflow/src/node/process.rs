@@ -277,7 +277,7 @@ impl Node {
                     // we need to own the data
                     let old_data = mem::take(data);
 
-                    match i.on_input_raw(ex, from, old_data, replay, nodes, state)? {
+                    match i.on_input_raw(from, old_data, replay, nodes, state)? {
                         RawProcessingResult::Regular(m) => {
                             *data = m.results;
                             lookups = m.lookups;
