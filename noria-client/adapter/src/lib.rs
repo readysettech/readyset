@@ -489,7 +489,7 @@ where
         }
 
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
-            let connection = span!(Level::INFO, "connection", addr = ?s.peer_addr().unwrap());
+            let connection = span!(Level::DEBUG, "connection", addr = ?s.peer_addr().unwrap());
             connection.in_scope(|| info!("Accepted new connection"));
 
             // bunch of stuff to move into the async block below
@@ -528,7 +528,7 @@ where
                         UPSTREAM_CONNECTION_TIMEOUT,
                         H::UpstreamDatabase::connect(upstream_db_url.0.clone()),
                     )
-                    .instrument(info_span!("Connecting to upstream database"))
+                    .instrument(debug_span!("Connecting to upstream database"))
                     .await
                     .map_err(|_| "Connection timed out".to_owned())
                     .and_then(|r| r.map_err(|e| e.to_string()))

@@ -229,6 +229,7 @@ use std::collections::HashMap;
 
 use nom_sql::SqlType;
 use petgraph::graph::NodeIndex;
+use readyset_tracing::propagation::Instrumented;
 use replication::ReplicationOffset;
 use tokio_tower::multiplex;
 
@@ -306,6 +307,21 @@ impl<Request, Response> multiplex::TagStore<Tagged<Request>, Tagged<Response>> f
     fn assign_tag(mut self: Pin<&mut Self>, r: &mut Tagged<Request>) -> Self::Tag {
         r.tag = self.0.insert(()) as u32;
         r.tag
+    }
+    fn finish_tag(mut self: Pin<&mut Self>, r: &Tagged<Response>) -> Self::Tag {
+        self.0.remove(r.tag as usize);
+        r.tag
+    }
+}
+
+impl<Request, Response> multiplex::TagStore<Instrumented<Tagged<Request>>, Tagged<Response>>
+    for Tagger
+{
+    type Tag = u32;
+
+    fn assign_tag(mut self: Pin<&mut Self>, r: &mut Instrumented<Tagged<Request>>) -> Self::Tag {
+        r.inner_mut().tag = self.0.insert(()) as u32;
+        r.inner_mut().tag
     }
     fn finish_tag(mut self: Pin<&mut Self>, r: &Tagged<Response>) -> Self::Tag {
         self.0.remove(r.tag as usize);

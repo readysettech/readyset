@@ -22,6 +22,8 @@ use noria_data::DataType;
 use noria_errors::{internal_err, rpc_err, view_err, ReadySetError, ReadySetResult};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
+use readyset_tracing::presampled::instrument_if_enabled;
+use readyset_tracing::propagation::Instrumented;
 use serde::{Deserialize, Serialize};
 use tokio_tower::multiplex;
 use tower::balance::p2c::Balance;
@@ -29,8 +31,10 @@ use tower::buffer::Buffer;
 use tower::limit::concurrency::ConcurrencyLimit;
 use tower::timeout::Timeout;
 use tower_service::Service;
-use tracing::error;
+use tracing::{error, instrument};
+use tracing_futures::Instrument;
 use vec1::Vec1;
+
 pub(crate) mod results;
 
 use self::results::{Results, Row};
@@ -40,7 +44,7 @@ use crate::{Tagged, Tagger};
 type Transport = AsyncBincodeStream<
     tokio::net::TcpStream,
     Tagged<ReadReply>,
-    Tagged<ReadQuery>,
+    Instrumented<Tagged<ReadQuery>>,
     AsyncDestination,
 >;
 
@@ -146,8 +150,11 @@ pub enum SchemaType {
 
 type InnerService = multiplex::Client<
     multiplex::MultiplexTransport<Transport, Tagger>,
-    tokio_tower::Error<multiplex::MultiplexTransport<Transport, Tagger>, Tagged<ReadQuery>>,
-    Tagged<ReadQuery>,
+    tokio_tower::Error<
+        multiplex::MultiplexTransport<Transport, Tagger>,
+        Instrumented<Tagged<ReadQuery>>,
+    >,
+    Instrumented<Tagged<ReadQuery>>,
 >;
 
 impl Service<()> for Endpoint {
@@ -293,8 +300,10 @@ type Discover = impl tower::discover::Discover<Key = usize, Service = InnerServi
     + Unpin
     + Send;
 
-pub(crate) type ViewRpc =
-    Buffer<Timeout<ConcurrencyLimit<Balance<Discover, Tagged<ReadQuery>>>>, Tagged<ReadQuery>>;
+pub(crate) type ViewRpc = Buffer<
+    Timeout<ConcurrencyLimit<Balance<Discover, Instrumented<Tagged<ReadQuery>>>>>,
+    Instrumented<Tagged<ReadQuery>>,
+>;
 
 /// Representation for a comparison predicate against a set of keys
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -907,7 +916,6 @@ impl ViewBuilder {
                         ),
                         crate::BUFFER_TO_POOL,
                     );
-                    use tracing_futures::Instrument;
                     tokio::spawn(w.instrument(tracing::debug_span!(
                         "view_worker",
                         addr = %shard.addr,
@@ -1026,24 +1034,17 @@ impl Service<ViewQuery> for View {
 
     fn call(&mut self, mut query: ViewQuery) -> Self::Future {
         let ni = self.node;
-        let span = if crate::trace_next_op() {
-            Some(tracing::trace_span!(
-                "view-request",
-                ?query.key_comparisons,
-                node = self.node.index()
-            ))
-        } else {
-            None
-        };
+        let span = readyset_tracing::child_span!(INFO, "view-request", ?query.key_comparisons, node = self.node.index());
 
         let columns = Arc::clone(&self.columns);
         if self.shards.len() == 1 {
-            let request = Tagged::from(ReadQuery::Normal {
-                target: (self.node, self.name.clone(), 0),
-                query,
+            let request = span.in_scope(|| {
+                Instrumented::from(Tagged::from(ReadQuery::Normal {
+                    target: (self.node, self.name.clone(), 0),
+                    query,
+                }))
             });
 
-            let _guard = span.as_ref().map(tracing::Span::enter);
             tracing::trace!("submit request");
 
             return future::Either::Left(
@@ -1051,30 +1052,31 @@ impl Service<ViewQuery> for View {
                     .first_mut()
                     .call(request)
                     .map_err(rpc_err!("<View as Service<ViewQuery>>::call"))
-                    .and_then(move |reply| async move {
-                        reply
-                            .v
-                            .into_normal()
-                            .ok_or_else(|| {
-                                internal_err("Unexpected response type from reader service")
-                            })?
-                            .map(|l| {
-                                l.map_results(|rows, stats| {
-                                    Results::with_stats(
-                                        rows.into(),
-                                        Arc::clone(&columns),
-                                        stats.clone(),
-                                    )
+                    .and_then(move |reply| {
+                        let future = async move {
+                            reply
+                                .v
+                                .into_normal()
+                                .ok_or_else(|| {
+                                    internal_err("Unexpected response type from reader service")
+                                })?
+                                .map(|l| {
+                                    l.map_results(|rows, stats| {
+                                        Results::with_stats(
+                                            rows.into(),
+                                            Arc::clone(&columns),
+                                            stats.clone(),
+                                        )
+                                    })
                                 })
-                            })
+                        };
+                        instrument_if_enabled(future, span)
                     })
                     .map_err(move |e| view_err(ni, e)),
             );
         }
 
-        if let Some(ref span) = span {
-            span.in_scope(|| tracing::trace!("shard request"));
-        }
+        span.in_scope(|| tracing::trace!("shard request"));
         let mut shard_queries = vec![Vec::new(); self.shards.len()];
         for comparison in query.key_comparisons.drain(..) {
             for shard in comparison.shard_keys(self.shards.len()) {
@@ -1104,7 +1106,14 @@ impl Service<ViewQuery> for View {
                     }
                 })
                 .map(move |((shardi, shard), shard_queries)| {
-                    let request = Tagged::from(ReadQuery::Normal {
+                    // The double-enter here is used to crate an inner span for the "view-shard"
+                    // portion of the request, and ensure that its parent is the "view-request"
+                    // span.
+                    let _guard = tracing::Span::enter(&span);
+                    let span = readyset_tracing::child_span!(INFO, "view-shard", shardi);
+                    let _guard = tracing::Span::enter(&span);
+
+                    let request = Instrumented::from(Tagged::from(ReadQuery::Normal {
                         target: (node, name.clone(), shardi),
                         query: ViewQuery {
                             key_comparisons: shard_queries,
@@ -1112,16 +1121,8 @@ impl Service<ViewQuery> for View {
                             filter: query.filter.clone(),
                             timestamp: query.timestamp.clone(),
                         },
-                    });
+                    }));
 
-                    let _guard = span.as_ref().map(tracing::Span::enter);
-                    // make a span per shard
-                    let span = if span.is_some() {
-                        Some(tracing::trace_span!("view-shard", shardi))
-                    } else {
-                        None
-                    };
-                    let _guard = span.as_ref().map(tracing::Span::enter);
                     tracing::trace!("submit request shard");
 
                     shard
@@ -1186,6 +1187,7 @@ impl View {
     /// Get the current size of this view.
     ///
     /// Note that you must also continue to poll this `View` for the returned future to resolve.
+    #[instrument(level = "info", skip(self))]
     pub async fn len(&mut self) -> ReadySetResult<usize> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
 
@@ -1196,9 +1198,9 @@ impl View {
             .iter_mut()
             .enumerate()
             .map(|(shardi, shard)| {
-                shard.call(Tagged::from(ReadQuery::Size {
+                shard.call(Instrumented::from(Tagged::from(ReadQuery::Size {
                     target: (node, name.clone(), shardi),
-                }))
+                })))
             })
             .collect::<FuturesUnordered<_>>();
 
@@ -1226,6 +1228,7 @@ impl View {
     }
 
     /// Get the current keys of this view. For debugging only.
+    #[instrument(level = "info", skip(self))]
     pub async fn keys(&mut self) -> ReadySetResult<Vec<Vec<DataType>>> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
 
@@ -1236,9 +1239,9 @@ impl View {
             .iter_mut()
             .enumerate()
             .map(|(shardi, shard)| {
-                shard.call(Tagged::from(ReadQuery::Keys {
+                shard.call(Instrumented::from(Tagged::from(ReadQuery::Keys {
                     target: (node, name.clone(), shardi),
-                }))
+                })))
             })
             .collect::<FuturesUnordered<_>>();
 
