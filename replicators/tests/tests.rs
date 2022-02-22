@@ -174,7 +174,7 @@ impl TestHandle {
         url: String,
         authority: Arc<Authority>,
     ) -> ReadySetResult<TestHandle> {
-        readyset_logging::init_test_logging();
+        readyset_tracing::init_test_logging();
         let mut builder = Builder::for_tests();
         let mut persistence = noria_server::PersistenceParameters::default();
         persistence.mode = noria_server::DurabilityMode::DeleteOnExit;

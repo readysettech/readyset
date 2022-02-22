@@ -183,7 +183,7 @@ struct Opts {
     enable_experimental_paginate_support: bool,
 
     #[clap(flatten)]
-    logging: readyset_logging::Options,
+    tracing: readyset_tracing::Options,
 
     /// Sets the server id when acquiring a binlog replication slot.
     #[clap(long, hide = true)]
@@ -201,8 +201,17 @@ struct Opts {
 
 fn main() -> anyhow::Result<()> {
     let opts: Opts = Opts::parse();
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name("worker")
+        .build()?;
 
-    opts.logging.init()?;
+    rt.block_on(async {
+        if let Err(error) = opts.tracing.init("noria") {
+            error!(%error, "Error initializing tracing");
+            process::exit(1)
+        }
+    });
     info!(?opts, "Starting ReadySet server");
 
     info!(commit_hash = %env!("CARGO_PKG_VERSION", "version not set"));
@@ -305,11 +314,6 @@ fn main() -> anyhow::Result<()> {
     if let Some(url) = opts.replication_url {
         builder.set_replicator_url(url.0);
     }
-
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_name("worker")
-        .build()?;
 
     let authority = opts.authority;
     let authority_addr = opts.authority_address;

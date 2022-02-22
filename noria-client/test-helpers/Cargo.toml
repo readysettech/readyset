@@ -18,7 +18,7 @@ nom-sql = { path = "../../nom-sql" }
 noria = { path = "../../noria/noria/" }
 noria-client = { path = "../" }
 noria-server = { path = "../../noria/server/" }
-readyset-logging = { path = "../../readyset-logging" }
+readyset-tracing = { path = "../../readyset-tracing" }
 noria-mysql = { path = "../../noria-mysql", optional = true }
 noria-psql = { path = "../../noria-psql", optional = true }
 mysql-srv = { path = "../../mysql-srv", optional = true }

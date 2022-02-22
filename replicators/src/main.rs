@@ -27,7 +27,7 @@ struct Opts {
     subcmd: DbOpts,
 
     #[clap(flatten)]
-    logging: readyset_logging::Options,
+    tracing: readyset_tracing::Options,
 }
 
 #[derive(Parser, Debug)]
@@ -134,7 +134,7 @@ impl From<PostgresOpts> for AdapterOpts {
 async fn main() -> anyhow::Result<!> {
     let opts: Opts = Opts::parse();
 
-    opts.logging.init()?;
+    opts.tracing.init("replicators")?;
 
     let options = match opts.subcmd {
         DbOpts::Url(opts) => opts.url,

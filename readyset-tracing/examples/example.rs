@@ -1,10 +1,10 @@
 use clap::Parser;
-use readyset_logging::Options;
+use readyset_tracing::Options;
 use tracing::{debug, error, info, span, trace, warn, Level};
 
 fn main() -> anyhow::Result<()> {
     let opts = Options::parse();
-    opts.init()?;
+    opts.init("example")?;
     trace!("A trace level event");
     debug!("A debug level event");
     info!("An info level event");

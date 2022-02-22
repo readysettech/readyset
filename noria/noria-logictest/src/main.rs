@@ -281,9 +281,9 @@ struct Verify {
     #[clap(long)]
     time: bool,
 
-    /// Logging options
+    /// Logging/tracing options
     #[clap(flatten)]
-    log: readyset_logging::Options,
+    tracing: readyset_tracing::Options,
 
     /// Authority connection string. This parameter is ignored if
     /// authority is "local".
@@ -388,7 +388,7 @@ impl Verify {
 
     #[tokio::main]
     async fn run(&self) -> anyhow::Result<()> {
-        self.log.init()?;
+        self.tracing.init("noria-logictest")?;
 
         let result = Arc::new(Mutex::new(VerifyResult::default()));
         let mut tasks = FuturesUnordered::new();

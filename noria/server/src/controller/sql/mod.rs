@@ -2458,7 +2458,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_join_with_nested_query() {
-        readyset_logging::init_test_logging();
+        readyset_tracing::init_test_logging();
         let mut g = integration_utils::start_simple("it_incorporates_join_with_nested_query").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();

@@ -91,7 +91,9 @@ fn main() {
 
     use clap::{App, Arg};
 
-    readyset_logging::Options::default().init().unwrap();
+    readyset_tracing::Options::default()
+        .init("hotsoup/extract_queries")
+        .unwrap();
 
     let matches = App::new("extract_queries")
         .version("0.1")

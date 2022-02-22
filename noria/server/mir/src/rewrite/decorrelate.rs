@@ -360,7 +360,7 @@ mod tests {
 
     #[test]
     fn exists_ish() {
-        readyset_logging::init_test_logging();
+        readyset_tracing::init_test_logging();
         // query looks something like:
         //     SELECT t1.a FROM t1 WHERE EXISTS (SELECT * FROM t2 WHERE t2.a = t1.a)
 
@@ -583,7 +583,7 @@ mod tests {
 
     #[test]
     fn multiple_filters_after_agg() {
-        readyset_logging::init_test_logging();
+        readyset_tracing::init_test_logging();
         // query looks something like:
         //     SELECT t1.a FROM t1
         //     WHERE EXISTS (

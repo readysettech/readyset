@@ -32,7 +32,7 @@ mysql_common = "0.28.0"
 nom-sql = { path = "../nom-sql" }
 noria = { path = "../noria/noria", package = "noria" }
 launchpad = { path = "../launchpad" }
-readyset-logging = { path = "../readyset-logging" }
+readyset-tracing = { path = "../readyset-tracing" }
 mysql-time = { path = "../mysql-time" }
 noria-data = { path = "../noria/data" }
 

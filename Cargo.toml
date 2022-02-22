@@ -34,11 +34,11 @@ members = [
     "unbounded-interval-tree",
     "launchpad",
     "replicators",
-    "readyset-logging",
     "query_generator",
     "maths",
     "metrics-aggregator",
     "test_utils",
+    "readyset-tracing",
 ]
 resolver = "2"
 

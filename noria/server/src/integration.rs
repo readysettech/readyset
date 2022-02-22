@@ -3229,7 +3229,7 @@ async fn recipe_activates_and_migrates_with_join() {
 }
 
 async fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool) {
-    readyset_logging::init_test_logging();
+    readyset_tracing::init_test_logging();
     use std::fs::File;
     use std::io::Read;
 
@@ -6752,7 +6752,7 @@ async fn join_straddled_columns() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore] // with full materialization, needs post-lookup filters or it returns too many rows
 async fn straddled_join_range_query() {
-    readyset_logging::init_test_logging();
+    readyset_tracing::init_test_logging();
     let mut g = start_simple("straddled_join_range_query").await;
 
     g.install_recipe(
@@ -6814,7 +6814,7 @@ async fn straddled_join_range_query() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 20)]
 #[ignore]
 async fn overlapping_range_queries() {
-    readyset_logging::init_test_logging();
+    readyset_tracing::init_test_logging();
     let mut g = start_simple("straddled_join_range_query").await;
 
     g.install_recipe(
@@ -6882,7 +6882,7 @@ async fn overlapping_range_queries() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 20)]
 #[ignore]
 async fn overlapping_remapped_range_queries() {
-    readyset_logging::init_test_logging();
+    readyset_tracing::init_test_logging();
     let mut g = start_simple("overlapping_remapped_range_queries").await;
 
     g.install_recipe(
@@ -6958,7 +6958,7 @@ async fn overlapping_remapped_range_queries() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn range_query_through_union() {
-    readyset_logging::init_test_logging();
+    readyset_tracing::init_test_logging();
     let mut g = start_simple("range_query_through_union").await;
 
     g.install_recipe(
@@ -7006,7 +7006,7 @@ async fn range_query_through_union() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mixed_inclusive_range_and_equality() {
-    readyset_logging::init_test_logging();
+    readyset_tracing::init_test_logging();
 
     let mut g = {
         let mut builder = Builder::for_tests();
@@ -7683,7 +7683,7 @@ rusty_fork_test! {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn partial_ingress_above_full_reader() {
-    readyset_logging::init_test_logging();
+    readyset_tracing::init_test_logging();
     let mut g = start_simple("partial_ingress_above_full_reader").await;
     g.install_recipe("CREATE TABLE t1 (a INT, b INT);")
         .await
@@ -7735,7 +7735,7 @@ async fn partial_ingress_above_full_reader() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn reroutes_recursively() {
-    readyset_logging::init_test_logging();
+    readyset_tracing::init_test_logging();
     let mut g = start_simple("reroutes_twice").await;
     let sql = "
         create table t1 (a int, b int);
@@ -7774,7 +7774,7 @@ async fn reroutes_recursively() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn reroutes_two_children_at_once() {
-    readyset_logging::init_test_logging();
+    readyset_tracing::init_test_logging();
     let mut g = start_simple("reroutes_two_children_at_once").await;
     let sql = "
         create table t1 (a int, b int);
@@ -7836,7 +7836,7 @@ async fn reroutes_two_children_at_once() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn reroutes_same_migration() {
-    readyset_logging::init_test_logging();
+    readyset_tracing::init_test_logging();
     let mut g = start_simple_reuse_unsharded("reroutes_same_migration").await;
     let sql = "
         create table t1 (a int, b int);
@@ -7887,7 +7887,7 @@ async fn reroutes_same_migration() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn reroutes_dependent_children() {
-    readyset_logging::init_test_logging();
+    readyset_tracing::init_test_logging();
     let mut g = start_simple("reroutes_dependent_children").await;
     let sql = "
         create table t1 (a int, b int);
@@ -7944,7 +7944,7 @@ async fn reroutes_dependent_children() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn reroutes_count() {
-    readyset_logging::init_test_logging();
+    readyset_tracing::init_test_logging();
     let mut g = start_simple_reuse_unsharded("reroutes_count").await;
     let sql = "
             create table votes (user INT, id INT);
@@ -7979,7 +7979,7 @@ async fn reroutes_count() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn multi_diamond_union() {
-    readyset_logging::init_test_logging();
+    readyset_tracing::init_test_logging();
 
     let mut g = start_simple("double_diamond_union").await;
     let create_table = "

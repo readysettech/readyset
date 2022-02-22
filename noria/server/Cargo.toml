@@ -66,6 +66,7 @@ tokio-stream = "0.1.5"
 lazy_static = "1.4.0"
 regex = "1.5.4"
 tracing-futures = "0.2.5"
+tracing-subscriber = "0.3.9"
 parking_lot = "0.11.2"
 tikv-jemalloc-ctl = "0.4"
 scopeguard = "1.1.0"
@@ -90,7 +91,7 @@ noria-errors = { path = "../errors" }
 noria-data = { path = "../data" }
 launchpad = { path = "../../launchpad" }
 replicators = { path = "../../replicators" }
-readyset-logging = { path = "../../readyset-logging" }
+readyset-tracing = { path = "../../readyset-tracing" }
 noria-sql-passes = { path = "sql-passes" }
 
 [dev-dependencies]
