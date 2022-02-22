@@ -4814,6 +4814,7 @@ dependencies = [
  "noria",
  "noria-data",
  "noria-server",
+ "noria-sql-passes",
  "parking_lot",
  "prettytable-rs",
  "proptest",

@@ -15,14 +15,14 @@ use nom::{
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
-    as_alias, field_definition_expr, field_list, schema_table_reference, statement_terminator,
-    table_list, ws_sep_comma, FieldDefinitionExpression,
+    as_alias, field_definition_expr, field_list, literal, schema_table_reference,
+    statement_terminator, table_list, ws_sep_comma, FieldDefinitionExpression,
 };
 use crate::expression::expression;
 use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use crate::order::{order_clause, OrderClause};
 use crate::table::Table;
-use crate::{Column, Dialect, Expression, FunctionExpression, SqlIdentifier};
+use crate::{Column, Dialect, Expression, FunctionExpression, Literal, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Default, Serialize, Deserialize)]
 pub struct GroupByClause {
@@ -67,8 +67,8 @@ impl fmt::Display for JoinClause {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct LimitClause {
-    pub limit: Expression,
-    pub offset: Option<Expression>,
+    pub limit: Literal,
+    pub offset: Option<Literal>,
 }
 
 impl fmt::Display for LimitClause {
@@ -210,12 +210,12 @@ pub fn group_by_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Gro
     }
 }
 
-fn offset_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+fn offset_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
     move |i| {
         let (i, _) = multispace0(i)?;
         let (i, _) = tag_no_case("offset")(i)?;
         let (i, _) = multispace1(i)?;
-        expression(dialect)(i)
+        literal(dialect)(i)
     }
 }
 
@@ -225,7 +225,7 @@ pub fn limit_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], LimitC
         let (i, _) = multispace0(i)?;
         let (i, _) = tag_no_case("limit")(i)?;
         let (i, _) = multispace1(i)?;
-        let (i, limit) = expression(dialect)(i)?;
+        let (i, limit) = literal(dialect)(i)?;
         let (i, offset) = opt(offset_clause(dialect))(i)?;
 
         Ok((i, LimitClause { limit, offset }))
@@ -671,12 +671,12 @@ mod tests {
         let qstring2 = "select * from users limit 10 offset 10\n";
 
         let expected_lim1 = LimitClause {
-            limit: Expression::Literal(10.into()),
+            limit: 10.into(),
             offset: None,
         };
         let expected_lim2 = LimitClause {
-            limit: Expression::Literal(10.into()),
-            offset: Some(Expression::Literal(10.into())),
+            limit: 10.into(),
+            offset: Some(10.into()),
         };
 
         let res1 = test_parse!(selection(Dialect::MySQL), qstring1.as_bytes());
@@ -859,7 +859,7 @@ mod tests {
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
 
         let expected_lim = Some(LimitClause {
-            limit: Expression::Literal(10.into()),
+            limit: 10.into(),
             offset: None,
         });
         let ct = Expression::BinaryOp {
@@ -888,7 +888,7 @@ mod tests {
         let res = test_parse!(selection(Dialect::MySQL), b"select * from users limit ?");
         assert_eq!(
             res.limit.unwrap().limit,
-            Expression::Literal(Literal::Placeholder(ItemPlaceholder::QuestionMark))
+            Literal::Placeholder(ItemPlaceholder::QuestionMark)
         )
     }
 
@@ -1178,7 +1178,7 @@ mod tests {
                     order_by: vec![(Expression::Column("item.i_title".into()), None)],
                 }),
                 limit: Some(LimitClause {
-                    limit: Expression::Literal(50.into()),
+                    limit: 50.into(),
                     offset: None,
                 }),
                 ..Default::default()

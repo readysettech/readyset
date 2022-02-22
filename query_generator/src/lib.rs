@@ -93,6 +93,7 @@ use nom_sql::{
     OrderClause, OrderType, SelectStatement, SqlIdentifier, SqlType, Table, TableKey,
 };
 use noria_data::DataType;
+use noria_sql_passes::outermost_referred_tables;
 use parking_lot::Mutex;
 use proptest::arbitrary::{any, any_with, Arbitrary};
 use proptest::strategy::{BoxedStrategy, Strategy};
@@ -1401,7 +1402,7 @@ impl<'a> QueryState<'a> {
     /// Return a mutable reference to *some* table in the schema - the implication being that the
     /// caller doesn't care which table
     pub fn some_table_mut(&mut self) -> &mut TableSpec {
-        if let Some(table) = self.tables.iter().next() {
+        if let Some(table) = self.tables.iter().last() {
             self.gen.table_mut(table).unwrap()
         } else {
             let table = self.gen.some_table_mut();
@@ -1423,6 +1424,25 @@ impl<'a> QueryState<'a> {
         {
             Some(tbl) => self.gen.table_mut(tbl.name.as_str()).unwrap(),
             None => self.some_table_mut(),
+        }
+    }
+
+    /// Returns a mutable reference to some table *not* referenced in the given query
+    pub fn some_table_not_in_query_mut<'b>(
+        &'b mut self,
+        query: &SelectStatement,
+    ) -> &'b mut TableSpec {
+        let tables_in_query = outermost_referred_tables(query)
+            .map(|tbl| tbl.alias.as_ref().unwrap_or(&tbl.name))
+            .collect::<HashSet<_>>();
+        if let Some(table) = self
+            .tables
+            .iter()
+            .find(|tbl| !tables_in_query.contains(&tbl.0))
+        {
+            self.gen.table_mut(table).unwrap()
+        } else {
+            self.fresh_table_mut()
         }
     }
 
@@ -1781,10 +1801,18 @@ pub enum BuiltinFunction {
 /// A representation for where in a query a subquery is located
 ///
 /// When we support them, subqueries in `IN` clauses should go here as well
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize, Arbitrary)]
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
 pub enum SubqueryPosition {
     Cte(JoinOperator),
     Join(JoinOperator),
+    /// TODO, once we support them:
+    ///
+    /// - `extend_where_with: LogicalOp`
+    /// - `negated: bool`
+    Exists {
+        /// If correlated, contains the type of the column that is compared
+        correlated: Option<SqlType>,
+    },
 }
 
 /// Parameters for generating an arbitrary [`QueryOperation`]
@@ -1997,7 +2025,7 @@ fn query_has_aggregate(query: &SelectStatement) -> bool {
 }
 
 fn column_in_query<'state>(state: &mut QueryState<'state>, query: &mut SelectStatement) -> Column {
-    match query.tables.first() {
+    match query.tables.last() {
         Some(table) => {
             let table_name = table.name.clone();
             let column = state
@@ -2372,7 +2400,7 @@ impl QueryOperation {
                 });
 
                 query.limit = Some(LimitClause {
-                    limit: Expression::Literal(Literal::Integer(*limit as _)),
+                    limit: Literal::Integer(*limit as _),
                     offset: None,
                 });
 
@@ -2436,6 +2464,7 @@ impl QueryOperation {
 /// | cte                                     | CTEs (WITH statements)            |
 /// | join_subquery                           | JOIN to a subquery directly       |
 /// | topk                                    | ORDER BY combined with LIMIT      |
+/// | exists                                  | EXISTS with a subquery            |
 #[repr(transparent)]
 #[derive(Debug, PartialEq, Eq, Clone, From, Into)]
 pub struct Operations(pub Vec<QueryOperation>);
@@ -2563,6 +2592,13 @@ impl FromStr for Operations {
             "join_subquery" => {
                 Ok(vec![Subquery(SubqueryPosition::Join(JoinOperator::InnerJoin))].into())
             }
+            "exists" => Ok(vec![
+                Subquery(SubqueryPosition::Exists { correlated: None }),
+                Subquery(SubqueryPosition::Exists {
+                    correlated: Some(SqlType::Int(None)),
+                }),
+            ]
+            .into()),
             "topk" => Ok(ALL_TOPK.to_vec().into()),
             s => Err(anyhow!("unknown query operation: {}", s)),
         }
@@ -2648,6 +2684,9 @@ pub struct Subquery {
 
 impl Subquery {
     fn add_to_query<'state>(self, state: &mut QueryState<'state>, query: &mut SelectStatement) {
+        // perturb the generator to make a new table, so that we don't get the same table in the
+        // subquery that we got in the outer query
+        state.fresh_table_mut();
         let mut subquery = self.seed.generate(state);
         // just use the first selected column as the join key (maybe change this later)
         let right_join_col = match subquery.fields.first_mut() {
@@ -2683,6 +2722,45 @@ impl Subquery {
                 JoinRightSide::NestedSelect(Box::new(subquery), subquery_name.clone()),
                 operator,
             ),
+
+            SubqueryPosition::Exists { correlated } => {
+                if let Some(col_type) = correlated {
+                    let outer_table = state.some_table_in_query_mut(query);
+                    let outer_col = outer_table.some_column_with_type(col_type.clone());
+                    let outer_col = Column {
+                        table: Some(outer_table.name.clone().into()),
+                        name: outer_col.into(),
+                    };
+
+                    let subquery_table = if let Some(table) = subquery.tables.first() {
+                        table.name.clone().into()
+                    } else {
+                        let subquery_table = state.some_table_not_in_query_mut(query);
+                        subquery.tables.push(subquery_table.name.clone().into());
+                        subquery_table.name.clone()
+                    };
+                    let subquery_col = state
+                        .gen
+                        .table_mut(&subquery_table)
+                        .unwrap()
+                        .some_column_with_type(col_type);
+
+                    and_where(
+                        &mut subquery,
+                        Expression::BinaryOp {
+                            lhs: Box::new(Expression::Column(Column {
+                                table: Some(subquery_table.into()),
+                                name: subquery_col.into(),
+                            })),
+                            op: BinaryOperator::Equal,
+                            rhs: Box::new(Expression::Column(outer_col)),
+                        },
+                    );
+                }
+
+                and_where(query, Expression::Exists(Box::new(subquery)));
+                return;
+            }
         };
 
         query.join.push(JoinClause {
@@ -2934,7 +3012,10 @@ impl GenerateOpts {
                                         }),
                                 )
                             }
-                            .map(|seed| Subquery { position, seed })
+                            .map(|seed| Subquery {
+                                position: position.clone(),
+                                seed,
+                            })
                             .collect::<Vec<_>>()
                         })
                         .multi_cartesian_product()
