@@ -75,8 +75,6 @@ pub struct TopK {
 
     /// The index of this node
     our_index: Option<IndexPair>,
-    /// The number of columns in the node
-    cols: usize,
 
     /// The list of column indices that we're grouping by.
     group_by: Vec<usize>,
@@ -102,10 +100,7 @@ impl TopK {
     ) -> Self {
         TopK {
             src: src.into(),
-
             our_index: None,
-            cols: 0,
-
             group_by,
             order: order.into(),
             k,
@@ -236,11 +231,6 @@ impl Ingredient for TopK {
 
     fn ancestors(&self) -> Vec<NodeIndex> {
         vec![self.src.as_global()]
-    }
-
-    fn on_connected(&mut self, g: &Graph) {
-        let srcn = &g[self.src.as_global()];
-        self.cols = srcn.fields().len();
     }
 
     fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
