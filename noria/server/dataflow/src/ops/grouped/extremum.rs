@@ -70,7 +70,7 @@ impl GroupedOperation for ExtremumOperator {
 
     fn setup(&mut self, parent: &Node) -> ReadySetResult<()> {
         invariant!(
-            self.over < parent.fields().len(),
+            self.over < parent.columns().len(),
             "cannot aggregate over non-existing column"
         );
         Ok(())

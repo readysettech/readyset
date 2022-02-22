@@ -34,6 +34,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
+use dataflow::node::Column;
 use dataflow::post_lookup::PostLookup;
 use dataflow::prelude::*;
 use dataflow::{node, DomainRequest};
@@ -341,7 +342,7 @@ fn topo_order(dataflow_state: &DataflowState, nodes: &HashSet<NodeIndex>) -> Vec
 
 #[derive(Clone)]
 pub(super) enum ColumnChange {
-    Add(SqlIdentifier, DataType),
+    Add(Column, DataType),
     Drop(usize),
 }
 
@@ -377,9 +378,9 @@ fn inform_col_changes(
             #[allow(clippy::indexing_slicing)]
             let n = &ingredients[ni];
             let m = match change.clone() {
-                ColumnChange::Add(field, default) => DomainRequest::AddBaseColumn {
+                ColumnChange::Add(column, default) => DomainRequest::AddBaseColumn {
                     node: n.local_addr(),
-                    field,
+                    column,
                     default,
                 },
                 ColumnChange::Drop(column) => DomainRequest::DropBaseColumn {
@@ -414,14 +415,14 @@ impl<'dataflow> Migration<'dataflow> {
     /// The returned identifier can later be used to refer to the added ingredient.
     /// Edges in the data flow graph are automatically added based on the ingredient's reported
     /// `ancestors`.
-    pub fn add_ingredient<S1, FS, S2, I>(&mut self, name: S1, fields: FS, i: I) -> NodeIndex
+    pub fn add_ingredient<S1, S2, CS, I>(&mut self, name: S1, columns: CS, i: I) -> NodeIndex
     where
         S1: Into<SqlIdentifier>,
-        S2: Into<SqlIdentifier>,
-        FS: IntoIterator<Item = S2>,
+        S2: Into<Column>,
+        CS: IntoIterator<Item = S2>,
         I: Into<NodeOperator>,
     {
-        let mut i = node::Node::new(name, fields, i.into());
+        let mut i = node::Node::new::<S1, S2, CS, _>(name, columns, i.into());
         i.on_connected(&self.dataflow_state.ingredients);
         // ancestors() will not return an error since i is an internal node
         #[allow(clippy::unwrap_used)]
@@ -453,22 +454,22 @@ impl<'dataflow> Migration<'dataflow> {
     /// Add the given `Base` to the dataflow graph.
     ///
     /// The returned identifier can later be used to refer to the added ingredient.
-    pub fn add_base<S1, FS, S2>(
+    pub fn add_base<S1, S2, CS>(
         &mut self,
         name: S1,
-        fields: FS,
+        columns: CS,
         b: node::special::Base,
     ) -> NodeIndex
     where
         S1: Into<SqlIdentifier>,
-        S2: Into<SqlIdentifier>,
-        FS: IntoIterator<Item = S2>,
+        S2: Into<Column>,
+        CS: IntoIterator<Item = S2>,
     {
         // add to the graph
         let ni = self
             .dataflow_state
             .ingredients
-            .add_node(node::Node::new(name, fields, b));
+            .add_node(node::Node::new(name, columns, b));
         debug!(node = ni.index(), "adding new base");
 
         // keep track of the fact that it's new
@@ -515,7 +516,7 @@ impl<'dataflow> Migration<'dataflow> {
     pub fn add_column(
         &mut self,
         node: NodeIndex,
-        field: SqlIdentifier,
+        column: Column,
         default: DataType,
     ) -> ReadySetResult<usize> {
         // not allowed to add columns to new nodes
@@ -527,7 +528,7 @@ impl<'dataflow> Migration<'dataflow> {
 
         // we need to tell the base about its new column and its default, so that old writes that
         // do not have it get the additional value added to them.
-        let col_i1 = base.add_column(field.clone());
+        let col_i1 = base.add_column(column.clone());
         // we can't rely on DerefMut, since it disallows mutating Taken nodes
         {
             #[allow(clippy::unwrap_used)] // previously called invariant!(base.is_base())
@@ -536,7 +537,8 @@ impl<'dataflow> Migration<'dataflow> {
         }
 
         // also eventually propagate to domain clone
-        self.columns.push((node, ColumnChange::Add(field, default)));
+        self.columns
+            .push((node, ColumnChange::Add(column, default)));
 
         Ok(col_i1)
     }

@@ -167,7 +167,7 @@ impl Ingredient for Project {
     }
 
     fn on_connected(&mut self, g: &Graph) {
-        self.cols = g[self.src.as_global()].fields().len();
+        self.cols = g[self.src.as_global()].columns().len();
     }
 
     fn on_commit(&mut self, us: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {

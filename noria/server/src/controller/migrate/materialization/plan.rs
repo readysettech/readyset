@@ -856,7 +856,7 @@ impl<'a> Plan<'a> {
                 // the node index we were created with is in graph...
                 InitialState::PartialGlobal {
                     gid: self.node,
-                    cols: self.graph[self.node].fields().len(),
+                    cols: self.graph[self.node].columns().len(),
                     index,
                     trigger_domain: (last_domain, num_shards),
                 }
@@ -864,7 +864,7 @@ impl<'a> Plan<'a> {
                 #[allow(clippy::indexing_slicing)]
                 // the node index we were created with is in graph...
                 InitialState::Global {
-                    cols: self.graph[self.node].fields().len(),
+                    cols: self.graph[self.node].columns().len(),
                     index,
                     gid: self.node,
                 }

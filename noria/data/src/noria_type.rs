@@ -2,7 +2,7 @@ use nom_sql::SqlType;
 use serde::{Deserialize, Serialize};
 
 /// noria representation of SqlType.
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub enum Type {
     /// One of `nom_sql::SqlType`
     Sql(SqlType),
@@ -19,6 +19,15 @@ impl From<SqlType> for Type {
 impl From<Option<SqlType>> for Type {
     fn from(ty: Option<SqlType>) -> Self {
         ty.map(Self::Sql).unwrap_or(Self::Unknown)
+    }
+}
+
+impl From<Type> for Option<SqlType> {
+    fn from(val: Type) -> Self {
+        match val {
+            Type::Sql(ty) => Some(ty),
+            Type::Unknown => None,
+        }
     }
 }
 

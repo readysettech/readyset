@@ -28,6 +28,7 @@ pub mod node;
 pub mod ops;
 pub mod payload; // it makes me _really_ sad that this has to be pub
 pub mod prelude;
+pub mod utils;
 
 mod domain;
 mod node_map;

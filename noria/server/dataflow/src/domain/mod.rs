@@ -1226,7 +1226,7 @@ impl Domain {
             }
             DomainRequest::AddBaseColumn {
                 node,
-                field,
+                column,
                 default,
             } => {
                 let mut n = self
@@ -1234,13 +1234,13 @@ impl Domain {
                     .get(node)
                     .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
                     .borrow_mut();
-                n.add_column(field);
+                n.add_column(column);
                 if let Some(b) = n.get_base_mut() {
                     b.add_column(default)?;
                 } else if n.is_ingress() {
                     self.ingress_inject
                         .entry(node)
-                        .or_insert_with(|| (n.fields().len(), Vec::new()))
+                        .or_insert_with(|| (n.columns().len(), Vec::new()))
                         .1
                         .push(default);
                 } else {

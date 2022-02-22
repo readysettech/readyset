@@ -166,7 +166,7 @@ where
         self.inner.setup(srcn).unwrap();
 
         // group by all columns
-        self.cols = srcn.fields().len();
+        self.cols = srcn.columns().len();
         self.group_by.extend(self.inner.group_by().iter().cloned());
         // cache the range of our output keys
         self.out_key = (0..self.group_by.len()).collect();

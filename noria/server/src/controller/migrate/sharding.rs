@@ -42,7 +42,7 @@ pub fn shard(
                 .key()
                 .and_then(|c| {
                     if c.len() == 1 {
-                        if graph[node].fields()[c[0]] == "bogokey" {
+                        if graph[node].columns()[c[0]].name() == "bogokey" {
                             Some(Sharding::ForcedNone)
                         } else {
                             Some(Sharding::ByColumn(c[0], sharding_factor))
@@ -92,7 +92,7 @@ pub fn shard(
                 if let Sharding::ByColumn(c, shards) = s {
                     // remap c according to node's semantics
                     let n = &graph[node];
-                    let src = (0..n.fields().len()).try_find(|&col| -> ReadySetResult<bool> {
+                    let src = (0..n.columns().len()).try_find(|&col| -> ReadySetResult<bool> {
                         Ok(if let Some(src) = n.parent_columns(col)[0].1 {
                             src == c
                         } else {
@@ -133,7 +133,7 @@ pub fn shard(
             assert_eq!(want_sharding.len(), 1);
             let want_sharding = want_sharding[0];
 
-            if graph[node].fields()[want_sharding] == "bogokey" {
+            if graph[node].columns()[want_sharding].name() == "bogokey" {
                 debug!("de-sharding node that operates on bogokey");
                 for (ni, s) in input_shardings.iter_mut() {
                     reshard(new, &mut swaps, graph, *ni, node, Sharding::ForcedNone)?;
@@ -249,7 +249,7 @@ pub fn shard(
 
             // you can think of this loop as happening inside each of the ifs below, just hoisted
             // up to share some code.
-            'outer: for col in 0..graph[node].fields().len() {
+            'outer: for col in 0..graph[node].columns().len() {
                 let srcs = if graph[node].is_base() {
                     vec![(node, None)]
                 } else {
@@ -715,7 +715,7 @@ pub fn validate(
             if nd.is_internal() || nd.is_base() {
                 if let Sharding::ByColumn(c, shards) = ps {
                     // remap c according to node's semantics
-                    let src = (0..nd.fields().len()).try_find(|&col| -> ReadySetResult<bool> {
+                    let src = (0..nd.columns().len()).try_find(|&col| -> ReadySetResult<bool> {
                         for pc in nd.parent_columns(col) {
                             if let (p, Some(src)) = pc {
                                 // found column c in parent pni

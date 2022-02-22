@@ -940,7 +940,8 @@ impl<'a> ToFlowParts for &'a str {
 #[cfg(test)]
 mod tests {
     use dataflow::prelude::*;
-    use nom_sql::{Column, Dialect, SqlIdentifier};
+    use nom_sql::{Column, Dialect, SqlIdentifier, SqlType};
+    use noria_data::noria_type::Type;
 
     use super::{SqlIncorporator, ToFlowParts};
     use crate::controller::Migration;
@@ -1054,7 +1055,10 @@ mod tests {
             assert_eq!(qfp.new_nodes.len(), 1);
             let node = get_node(&inc, mig, &qfp.name);
             // fields should be projected correctly in query order
-            assert_eq!(node.fields(), &["id", "name"]);
+            assert_eq!(
+                node.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
+                &["id", "name"]
+            );
             assert_eq!(node.description(true), "π[0, 1]");
             // reader key column should be correct
             let n = get_reader(&inc, mig, &qfp.name);
@@ -1085,7 +1089,10 @@ mod tests {
             let node = get_node(&inc, mig, &qfp.name);
             // fields should be projected correctly in query order, with the
             // absent parameter column included
-            assert_eq!(node.fields(), &["id", "name"]);
+            assert_eq!(
+                node.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
+                &["id", "name"]
+            );
             assert_eq!(node.description(true), "π[0, 1]");
             // reader key column should be correct
             let n = get_reader(&inc, mig, &qfp.name);
@@ -1130,7 +1137,14 @@ mod tests {
             // Check projection node
             let projection = get_node(&inc, mig, &qfp.name);
             // fields should be projected correctly in query order
-            assert_eq!(projection.fields(), &["id", "name"]);
+            assert_eq!(
+                projection
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "name"]
+            );
             assert_eq!(projection.description(true), "π[0, 1]");
 
             // TODO Check that the filter and projection nodes are ordered properly.
@@ -1156,7 +1170,14 @@ mod tests {
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
-            assert_eq!(get_node(&inc, mig, "users").fields(), &["id", "name"]);
+            assert_eq!(
+                get_node(&inc, mig, "users")
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "name"]
+            );
             assert!(get_node(&inc, mig, "users").is_base());
 
             // Establish a base write type for "articles"
@@ -1171,7 +1192,11 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 3);
             assert_eq!(get_node(&inc, mig, "articles").name(), "articles");
             assert_eq!(
-                get_node(&inc, mig, "articles").fields(),
+                get_node(&inc, mig, "articles")
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
                 &["id", "author", "title"]
             );
             assert!(get_node(&inc, mig, "articles").is_base());
@@ -1189,10 +1214,24 @@ mod tests {
             );
             // join node
             let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(new_join_view.fields(), &["id", "author", "title", "name"]);
+            assert_eq!(
+                new_join_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "author", "title", "name"]
+            );
             // leaf node
             let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
-            assert_eq!(new_leaf_view.fields(), &["name", "title", "bogokey"]);
+            assert_eq!(
+                new_leaf_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["name", "title", "bogokey"]
+            );
             assert_eq!(new_leaf_view.description(true), "π[3, 2, lit: 0]");
         })
         .await;
@@ -1211,7 +1250,14 @@ mod tests {
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
-            assert_eq!(get_node(&inc, mig, "users").fields(), &["id", "name"]);
+            assert_eq!(
+                get_node(&inc, mig, "users")
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "name"]
+            );
             assert!(get_node(&inc, mig, "users").is_base());
 
             // Try a simple query
@@ -1229,11 +1275,21 @@ mod tests {
             );
             // filter node
             let filter = get_node(&inc, mig, &format!("q_{:x}_n0_p0_f0", qid));
-            assert_eq!(filter.fields(), &["id", "name"]);
+            assert_eq!(
+                filter
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "name"]
+            );
             assert_eq!(filter.description(true), "σ[(0 = (lit: 42))]");
             // leaf view node
             let edge = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge.fields(), &["name", "bogokey"]);
+            assert_eq!(
+                edge.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
+                &["name", "bogokey"]
+            );
             assert_eq!(edge.description(true), "π[1, lit: 0]");
         })
         .await;
@@ -1252,7 +1308,14 @@ mod tests {
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
-            assert_eq!(get_node(&inc, mig, "votes").fields(), &["aid", "userid"]);
+            assert_eq!(
+                get_node(&inc, mig, "votes")
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["aid", "userid"]
+            );
             assert!(get_node(&inc, mig, "votes").is_base());
 
             // Try a simple COUNT function
@@ -1275,11 +1338,25 @@ mod tests {
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(agg_view.fields(), &["aid", "votes"]);
+            assert_eq!(
+                agg_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["aid", "votes"]
+            );
             assert_eq!(agg_view.description(true), "|*| γ[0]");
             // check edge view
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge_view.fields(), &["votes", "bogokey"]);
+            assert_eq!(
+                edge_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["votes", "bogokey"]
+            );
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         })
         .await;
@@ -1328,7 +1405,14 @@ mod tests {
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
-            assert_eq!(get_node(&inc, mig, "users").fields(), &["id", "name"]);
+            assert_eq!(
+                get_node(&inc, mig, "users")
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "name"]
+            );
             assert!(get_node(&inc, mig, "users").is_base());
 
             // Add a new query
@@ -1376,7 +1460,11 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
             assert_eq!(
-                get_node(&inc, mig, "users").fields(),
+                get_node(&inc, mig, "users")
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
                 &["id", "name", "address"]
             );
             assert!(get_node(&inc, mig, "users").is_base());
@@ -1456,7 +1544,14 @@ mod tests {
             let qfp = res.unwrap();
             // Check projection
             let projection = get_node(&inc, mig, &qfp.name);
-            assert_eq!(projection.fields(), &["id", "name", "bogokey"]);
+            assert_eq!(
+                projection
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "name", "bogokey"]
+            );
             assert_eq!(projection.description(true), "π[0, 1, lit: 0]");
             let leaf = qfp.query_leaf;
             // Check reader column
@@ -1475,7 +1570,14 @@ mod tests {
             let qfp = res.unwrap();
             // Check projection
             let projection = get_node(&inc, mig, &qfp.name);
-            assert_eq!(projection.fields(), &["name", "id"]);
+            assert_eq!(
+                projection
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["name", "id"]
+            );
             assert_eq!(projection.description(true), "π[1, 0]");
             // should have added two more nodes (project and reader)
             assert_eq!(mig.graph().node_count(), ncount + 2);
@@ -1501,7 +1603,14 @@ mod tests {
             let qfp = res.unwrap();
             // Check projection
             let projection = get_node(&inc, mig, &qfp.name);
-            assert_eq!(projection.fields(), &["id", "name", "address"]);
+            assert_eq!(
+                projection
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "name", "address"]
+            );
             assert_eq!(projection.description(true), "π[0, 1, 2]");
             // should have added two more nodes (project and reader)
             assert_eq!(mig.graph().node_count(), ncount + 2);
@@ -1543,7 +1652,14 @@ mod tests {
             let qfp = res.unwrap();
             // Check projection
             let projection = get_node(&inc, mig, &qfp.name);
-            assert_eq!(projection.fields(), &["id", "name"]);
+            assert_eq!(
+                projection
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "name"]
+            );
             assert_eq!(projection.description(true), "π[0, 1]");
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
@@ -1556,7 +1672,14 @@ mod tests {
             let qfp = res.unwrap();
             // Check projection
             let projection = get_node(&inc, mig, &qfp.name);
-            assert_eq!(projection.fields(), &["id", "name", "bogokey"]);
+            assert_eq!(
+                projection
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "name", "bogokey"]
+            );
             assert_eq!(projection.description(true), "π[0, 1, lit: 0]");
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
@@ -1597,7 +1720,14 @@ mod tests {
             let param_address = inc.get_flow_node_address(&qfp.name, 0).unwrap();
             // Check projection
             let projection = get_node(&inc, mig, &qfp.name);
-            assert_eq!(projection.fields(), &["id", "name"]);
+            assert_eq!(
+                projection
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "name"]
+            );
             assert_eq!(projection.description(true), "π[0, 1]");
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
@@ -1615,7 +1745,14 @@ mod tests {
             let qfp = res.unwrap();
             // Check projection
             let identity = get_node(&inc, mig, &qfp.name);
-            assert_eq!(identity.fields(), &["id", "name"]);
+            assert_eq!(
+                identity
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "name"]
+            );
             assert_eq!(identity.description(true), "≡");
             // should NOT have ended up with the same leaf node
             assert_ne!(qfp.query_leaf, leaf);
@@ -1716,7 +1853,14 @@ mod tests {
             let qfp = res.unwrap();
             // Check projection
             let projection = get_node(&inc, mig, &qfp.name);
-            assert_eq!(projection.fields(), &["id", "name", "one"]);
+            assert_eq!(
+                projection
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "name", "one"]
+            );
             assert_eq!(projection.description(true), "π[0, 1, lit: 1]");
             let leaf = qfp.query_leaf;
             // Check reader column
@@ -1735,7 +1879,14 @@ mod tests {
             let qfp = res.unwrap();
             // Check projection
             let projection = get_node(&inc, mig, &qfp.name);
-            assert_eq!(projection.fields(), &["id", "name", "address", "one"]);
+            assert_eq!(
+                projection
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "name", "address", "one"]
+            );
             assert_eq!(projection.description(true), "π[0, 1, 2, lit: 1]");
             // should have added two more nodes (identity and reader)
             assert_eq!(mig.graph().node_count(), ncount + 2);
@@ -1766,7 +1917,14 @@ mod tests {
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
-            assert_eq!(get_node(&inc, mig, "votes").fields(), &["aid", "userid"]);
+            assert_eq!(
+                get_node(&inc, mig, "votes")
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["aid", "userid"]
+            );
             assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function without a GROUP BY clause
             let res = inc.add_query("SELECT COUNT(votes.userid) AS count FROM votes;", None, mig);
@@ -1783,17 +1941,38 @@ mod tests {
                 }],
             );
             let proj_helper_view = get_node(&inc, mig, &format!("q_{:x}_n0_prj_hlpr", qid));
-            assert_eq!(proj_helper_view.fields(), &["userid", "grp"]);
+            assert_eq!(
+                proj_helper_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["userid", "grp"]
+            );
             assert_eq!(proj_helper_view.description(true), "π[1, lit: 0]");
             // check aggregation view
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(agg_view.fields(), &["grp", "count"]);
+            assert_eq!(
+                agg_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["grp", "count"]
+            );
             assert_eq!(agg_view.description(true), "|*| γ[1]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge_view.fields(), &["count", "bogokey"]);
+            assert_eq!(
+                edge_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["count", "bogokey"]
+            );
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         })
         .await;
@@ -1812,7 +1991,14 @@ mod tests {
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
-            assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid"]);
+            assert_eq!(
+                get_node(&inc, mig, "votes")
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["userid", "aid"]
+            );
             assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function
             let res = inc.add_query(
@@ -1833,13 +2019,27 @@ mod tests {
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(agg_view.fields(), &["userid", "count"]);
+            assert_eq!(
+                agg_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["userid", "count"]
+            );
             assert_eq!(agg_view.description(true), "|*| γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge_view.fields(), &["count", "bogokey"]);
+            assert_eq!(
+                edge_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["count", "bogokey"]
+            );
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         })
         .await;
@@ -1859,7 +2059,7 @@ mod tests {
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
-            assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid"]);
+            assert_eq!(get_node(&inc, mig, "votes").columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["userid", "aid"]);
             assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function
             let res = inc.add_query(
@@ -1881,13 +2081,13 @@ mod tests {
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
-            assert_eq!(agg_view.fields(), &["userid", "count"]);
+            assert_eq!(agg_view.columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["userid", "count"]);
             assert_eq!(agg_view.description(true), "|*| γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge_view.fields(), &["count", "bogokey"]);
+            assert_eq!(edge_view.columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["count", "bogokey"]);
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         })
             .await;
@@ -1906,7 +2106,7 @@ mod tests {
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
-            assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid", "sign"]);
+            assert_eq!(get_node(&inc, mig, "votes").columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["userid", "aid", "sign"]);
             assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function
             let res = inc.add_query(
@@ -1928,13 +2128,13 @@ mod tests {
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
-            assert_eq!(agg_view.fields(), &["userid", "sum"]);
+            assert_eq!(agg_view.columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["userid", "sum"]);
             assert_eq!(agg_view.description(true), "𝛴(3) γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge_view.fields(), &["sum", "bogokey"]);
+            assert_eq!(edge_view.columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["sum", "bogokey"]);
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         })
             .await;
@@ -1954,7 +2154,7 @@ mod tests {
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
-            assert_eq!(get_node(&inc, mig, "votes").fields(), &["userid", "aid", "sign"]);
+            assert_eq!(get_node(&inc, mig, "votes").columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["userid", "aid", "sign"]);
             assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function
             let res = inc.add_query(
@@ -1976,13 +2176,13 @@ mod tests {
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
-            assert_eq!(agg_view.fields(), &["userid", "sum"]);
+            assert_eq!(agg_view.columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["userid", "sum"]);
             assert_eq!(agg_view.description(true), "𝛴(3) γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge_view.fields(), &["sum", "bogokey"]);
+            assert_eq!(edge_view.columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["sum", "bogokey"]);
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         })
             .await;
@@ -2007,7 +2207,11 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(
-                get_node(&inc, mig, "votes").fields(),
+                get_node(&inc, mig, "votes")
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
                 &["userid", "aid", "sign"]
             );
             assert!(get_node(&inc, mig, "votes").is_base());
@@ -2029,13 +2233,27 @@ mod tests {
             );
 
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1_p0_f0_filteragg", qid));
-            assert_eq!(agg_view.fields(), &["userid", "aid", "sum"]);
+            assert_eq!(
+                agg_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["userid", "aid", "sum"]
+            );
             assert_eq!(agg_view.description(true), "𝛴(σ(2)) γ[0, 1]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge_view.fields(), &["sum", "bogokey"]);
+            assert_eq!(
+                edge_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["sum", "bogokey"]
+            );
             assert_eq!(edge_view.description(true), "π[2, lit: 0]");
         })
         .await;
@@ -2061,7 +2279,11 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(
-                get_node(&inc, mig, "votes").fields(),
+                get_node(&inc, mig, "votes")
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
                 &["userid", "aid", "sign"]
             );
             assert!(get_node(&inc, mig, "votes").is_base());
@@ -2097,7 +2319,11 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(
-                get_node(&inc, mig, "votes").fields(),
+                get_node(&inc, mig, "votes")
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
                 &["userid", "aid", "sign"]
             );
             assert!(get_node(&inc, mig, "votes").is_base());
@@ -2120,13 +2346,27 @@ mod tests {
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(agg_view.fields(), &["userid", "sum"]);
+            assert_eq!(
+                agg_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["userid", "sum"]
+            );
             assert_eq!(agg_view.description(true), "𝛴(2) γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge_view.fields(), &["sum", "bogokey"]);
+            assert_eq!(
+                edge_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["sum", "bogokey"]
+            );
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         })
         .await;
@@ -2150,7 +2390,7 @@ mod tests {
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
-            assert_eq!(get_node(&inc, mig, "votes").fields(), &["story_id", "comment_id", "vote"]);
+            assert_eq!(get_node(&inc, mig, "votes").columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["story_id", "comment_id", "vote"]);
             assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function
             let res = inc.add_query(
@@ -2175,13 +2415,13 @@ mod tests {
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
-            assert_eq!(agg_view.fields(), &["comment_id", "votes"]);
+            assert_eq!(agg_view.columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["comment_id", "votes"]);
             assert_eq!(agg_view.description(true), "|*| γ[1]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
             let edge_view = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge_view.fields(), &["votes", "bogokey"]);
+            assert_eq!(edge_view.columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["votes", "bogokey"]);
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         })
             .await;
@@ -2234,7 +2474,14 @@ mod tests {
             // views
             // leaf view
             let leaf_view = get_node(&inc, mig, "q_3");
-            assert_eq!(leaf_view.fields(), &["name", "title", "uid", "bogokey"]);
+            assert_eq!(
+                leaf_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["name", "title", "uid", "bogokey"]
+            );
         })
         .await;
     }
@@ -2286,16 +2533,34 @@ mod tests {
             );
             let join1_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             // articles join users
-            assert_eq!(join1_view.fields(), &["aid", "title", "author", "name"]);
+            assert_eq!(
+                join1_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["aid", "title", "author", "name"]
+            );
             let join2_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
             // join1_view join vptes
             assert_eq!(
-                join2_view.fields(),
+                join2_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
                 &["aid", "title", "author", "name", "uid"]
             );
             // leaf view
             let leaf_view = get_node(&inc, mig, "q_3");
-            assert_eq!(leaf_view.fields(), &["name", "title", "uid", "bogokey"]);
+            assert_eq!(
+                leaf_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["name", "title", "uid", "bogokey"]
+            );
         })
         .await;
     }
@@ -2335,11 +2600,22 @@ mod tests {
             );
             // join node
             let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(new_join_view.fields(), &["id", "author", "title", "name"]);
+            assert_eq!(
+                new_join_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "author", "title", "name"]
+            );
             // leaf node
             let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
             assert_eq!(
-                new_leaf_view.fields(),
+                new_leaf_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
                 &["id", "name", "author", "title", "bogokey"]
             );
             assert_eq!(new_leaf_view.description(true), "π[1, 3, 1, 2, lit: 0]");
@@ -2376,13 +2652,24 @@ mod tests {
             );
 
             // Check join node
+            // TODO(DAN): Why was this changed from new_nodes[0] to new_nodes[1]?
             let join = mig.graph().node_weight(qfp.new_nodes[1]).unwrap();
-            assert_eq!(join.fields(), &["id", "friend", "friend"]);
+            assert_eq!(
+                join.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
+                &["id", "friend", "friend"]
+            );
             assert_eq!(join.description(true), "[1:0, 1:1, 2:1] 1:(1) ⋈ 2:(0)");
 
             // Check leaf projection node
             let leaf_view = get_node(&inc, mig, "q_1");
-            assert_eq!(leaf_view.fields(), &["id", "fof"]);
+            assert_eq!(
+                leaf_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "fof"]
+            );
             assert_eq!(leaf_view.description(true), "π[0, 2]");
         })
         .await;
@@ -2403,7 +2690,10 @@ mod tests {
 
             // leaf view node
             let edge = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge.fields(), &["name", "1", "bogokey"]);
+            assert_eq!(
+                edge.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
+                &["name", "1", "bogokey"]
+            );
             assert_eq!(edge.description(true), "π[1, lit: 1, lit: 0]");
         })
         .await;
@@ -2428,7 +2718,10 @@ mod tests {
 
             // leaf view node
             let edge = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge.fields(), &["(2 * `users`.`age`)", "twenty", "bogokey"]);
+            assert_eq!(
+                edge.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
+                &["(2 * `users`.`age`)", "twenty", "bogokey"]
+            );
             assert_eq!(
                 edge.description(true),
                 "π[((lit: 2) * 1), ((lit: 2) * (lit: 10)), lit: 0]"
@@ -2465,7 +2758,10 @@ mod tests {
 
             // Check projection node
             let node = get_node(&inc, mig, &qfp.name);
-            assert_eq!(node.fields(), &["name", "(2 * `users`.`age`)", "twenty"]);
+            assert_eq!(
+                node.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
+                &["name", "(2 * `users`.`age`)", "twenty"]
+            );
             assert_eq!(
                 node.description(true),
                 "π[2, ((lit: 2) * 1), ((lit: 2) * (lit: 10))]"
@@ -2513,10 +2809,24 @@ mod tests {
             );
             // join node
             let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(new_join_view.fields(), &["id", "author", "title", "name"]);
+            assert_eq!(
+                new_join_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "author", "title", "name"]
+            );
             // leaf node
             let new_leaf_view = get_node(&inc, mig, &q.name);
-            assert_eq!(new_leaf_view.fields(), &["name", "title", "bogokey"]);
+            assert_eq!(
+                new_leaf_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["name", "title", "bogokey"]
+            );
             assert_eq!(new_leaf_view.description(true), "π[3, 2, lit: 0]");
         })
         .await;
@@ -2563,10 +2873,24 @@ mod tests {
             );
             // join node
             let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(new_join_view.fields(), &["id", "author", "title", "name"]);
+            assert_eq!(
+                new_join_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "author", "title", "name"]
+            );
             // leaf node
             let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
-            assert_eq!(new_leaf_view.fields(), &["name", "title", "bogokey"]);
+            assert_eq!(
+                new_leaf_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["name", "title", "bogokey"]
+            );
             assert_eq!(new_leaf_view.description(true), "π[3, 2, lit: 0]");
         })
         .await;
@@ -2595,7 +2919,14 @@ mod tests {
 
             // the leaf of this query (node above the reader) is a union
             let union_view = get_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(union_view.fields(), &["id", "name"]);
+            assert_eq!(
+                union_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "name"]
+            );
             assert_eq!(union_view.description(true), "3:[0, 1] ⋃ 6:[0, 1]");
         })
         .await;
@@ -2614,7 +2945,14 @@ mod tests {
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
-            assert_eq!(get_node(&inc, mig, "users").fields(), &["id", "name"]);
+            assert_eq!(
+                get_node(&inc, mig, "users")
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["id", "name"]
+            );
             assert!(get_node(&inc, mig, "users").is_base());
 
             // Add a new query
@@ -2720,6 +3058,250 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             let res = inc.add_query("SELECT count(*) FROM foo;", None, mig);
             assert!(res.is_err());
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn infers_type_for_topk() {
+        // set up graph
+        let mut g = integration_utils::start_simple("infers_type_for_topk").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            inc.set_mir_config(super::mir::Config {
+                allow_topk: true,
+                ..Default::default()
+            });
+            // Must have a base node for type inference to work, so make one manually
+            assert!("CREATE TABLE t1 (a int, b float, c Text);"
+                .to_flow_parts(&mut inc, None, mig)
+                .is_ok());
+
+            let _ = inc
+                .add_query("SELECT t1.a from t1 LIMIT 3", None, mig)
+                .unwrap();
+
+            let g = &mig.dataflow_state.ingredients;
+            g.node_indices().for_each(|idx| {
+                if matches!(g[idx].as_internal(), Some(NodeOperator::TopK(_))) {
+                    let truth = vec![
+                        &Type::Sql(SqlType::Int(None)),    // a
+                        &Type::Sql(SqlType::Float),        // b
+                        &Type::Sql(SqlType::Text),         // c
+                        &Type::Sql(SqlType::Bigint(None)), // bogokey projection
+                    ];
+                    let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
+                    assert_eq!(truth, types);
+                }
+            });
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn infers_type_for_filter() {
+        // set up graph
+        let mut g = integration_utils::start_simple("infers_type_for_filter").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            inc.set_mir_config(super::mir::Config {
+                allow_topk: true,
+                ..Default::default()
+            });
+            // Must have a base node for type inference to work, so make one manually
+            assert!("CREATE TABLE t1 (a int, b float, c Text);"
+                .to_flow_parts(&mut inc, None, mig)
+                .is_ok());
+
+            let _ = inc
+                .add_query("SELECT t1.a from t1 where t1.a = t1.b", None, mig)
+                .unwrap();
+
+            let g = &mig.dataflow_state.ingredients;
+            g.node_indices().for_each(|idx| {
+                if matches!(g[idx].as_internal(), Some(NodeOperator::Filter(_))) {
+                    let truth = vec![
+                        &Type::Sql(SqlType::Int(None)), // a
+                        &Type::Sql(SqlType::Float),     // b
+                        &Type::Sql(SqlType::Text),      // c
+                    ];
+                    let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
+                    assert_eq!(truth, types);
+                }
+            });
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn infers_type_for_grouped() {
+        // set up graph
+        let mut g = integration_utils::start_simple("infers_type_for_grouped").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            inc.set_mir_config(super::mir::Config {
+                allow_topk: true,
+                ..Default::default()
+            });
+            // Must have a base node for type inference to work, so make one manually
+            assert!("CREATE TABLE t1 (a int, b float, c Text, d Text);"
+                .to_flow_parts(&mut inc, None, mig)
+                .is_ok());
+
+            let _ = inc
+                .add_query(
+                    "SELECT sum(t1.a), max(t1.b), group_concat(c separator ' ') from t1",
+                    None,
+                    mig,
+                )
+                .unwrap();
+
+            let g = &mig.dataflow_state.ingredients;
+            g.node_indices().for_each(|idx| {
+                if matches!(g[idx].as_internal(), Some(NodeOperator::Aggregation(_))) {
+                    let truth = vec![
+                        &Type::Sql(SqlType::Bigint(None)), // bogokey
+                        &Type::Sql(SqlType::Int(None)),    // sum(t1.a)
+                    ];
+                    let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
+                    assert_eq!(truth, types);
+                } else if matches!(g[idx].as_internal(), Some(NodeOperator::Extremum(_))) {
+                    let truth = vec![
+                        &Type::Sql(SqlType::Bigint(None)), // bogokey
+                        &Type::Sql(SqlType::Float),        // max(t1.b)
+                    ];
+                    let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
+                    assert_eq!(truth, types);
+                } else if matches!(g[idx].as_internal(), Some(NodeOperator::Concat(_))) {
+                    let truth = vec![
+                        &Type::Sql(SqlType::Bigint(None)), // bogokey
+                        &Type::Sql(SqlType::Text),         // group_concat()
+                    ];
+                    let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
+                    assert_eq!(truth, types);
+                }
+            });
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn infers_type_for_join() {
+        // set up graph
+        let mut g = integration_utils::start_simple("infers_type_for_join").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            inc.set_mir_config(super::mir::Config {
+                allow_topk: true,
+                ..Default::default()
+            });
+            // Must have a base node for type inference to work, so make one manually
+            assert!("CREATE TABLE t1 (a int, b float, c Text);"
+                .to_flow_parts(&mut inc, None, mig)
+                .is_ok());
+            assert!("CREATE TABLE t2 (a int, b float, c Text);"
+                .to_flow_parts(&mut inc, None, mig)
+                .is_ok());
+
+            let _ = inc
+                .add_query(
+                    "SELECT t1.a, t2.a FROM t1 JOIN t2 on t1.c = t2.c where t2.b = ?",
+                    None,
+                    mig,
+                )
+                .unwrap();
+
+            let g = &mig.dataflow_state.ingredients;
+            g.node_indices().for_each(|idx| {
+                if matches!(g[idx].as_internal(), Some(NodeOperator::Join(_))) {
+                    let truth = vec![
+                        &Type::Sql(SqlType::Int(None)), // t1.a
+                        &Type::Sql(SqlType::Float),     // t1.b
+                        &Type::Sql(SqlType::Text),      // t1.c
+                        &Type::Sql(SqlType::Int(None)), // t2.a
+                        &Type::Sql(SqlType::Float),     /* t2.b
+                                                         * The rhs of the ON clause is omitted! */
+                    ];
+                    let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
+                    assert_eq!(truth, types);
+                }
+            });
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn infers_type_for_union() {
+        // set up graph
+        let mut g = integration_utils::start_simple("infers_type_for_union").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            inc.set_mir_config(super::mir::Config {
+                allow_topk: true,
+                ..Default::default()
+            });
+            // Must have a base node for type inference to work, so make one manually
+            assert!("CREATE TABLE t1 (a int, b float, c Text);"
+                .to_flow_parts(&mut inc, None, mig)
+                .is_ok());
+            assert!("CREATE TABLE t2 (a int, b float, c Text);"
+                .to_flow_parts(&mut inc, None, mig)
+                .is_ok());
+
+            let _ = inc
+                .add_query("SELECT t1.a FROM t1 union select t2.a from t2", None, mig)
+                .unwrap();
+
+            let g = &mig.dataflow_state.ingredients;
+            g.node_indices().for_each(|idx| {
+                if matches!(g[idx].as_internal(), Some(NodeOperator::Union(_))) {
+                    let truth = vec![
+                        &Type::Sql(SqlType::Int(None)), // t1.a + t2.a
+                    ];
+                    let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
+                    assert_eq!(truth, types);
+                }
+            });
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn infers_type_for_project() {
+        // set up graph
+        let mut g = integration_utils::start_simple("infers_type_for_project").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            inc.set_mir_config(super::mir::Config {
+                allow_topk: true,
+                ..Default::default()
+            });
+            // Must have a base node for type inference to work, so make one manually
+            assert!("CREATE TABLE t1 (a int, b float, c Text);"
+                .to_flow_parts(&mut inc, None, mig)
+                .is_ok());
+
+            let _ = inc
+                .add_query(
+                    "SELECT cast(t1.b as char), t1.a, t1.a + 1 from t1",
+                    None,
+                    mig,
+                )
+                .unwrap();
+
+            let g = &mig.dataflow_state.ingredients;
+            g.node_indices().for_each(|idx| {
+                if matches!(g[idx].as_internal(), Some(NodeOperator::Project(_))) {
+                    let truth = vec![
+                        &Type::Sql(SqlType::Int(None)),    // t1.a
+                        &Type::Sql(SqlType::Char(None)),   // cast(t1.b as char)
+                        &Type::Sql(SqlType::Int(None)),    // t1.a + 1
+                        &Type::Sql(SqlType::Bigint(None)), // bogokey
+                    ];
+                    let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
+                    assert_eq!(truth, types);
+                }
+            });
         })
         .await;
     }

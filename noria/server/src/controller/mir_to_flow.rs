@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 
 use common::DataType;
+use dataflow::node::Column as DataflowColumn;
 use dataflow::ops::grouped::concat::GroupConcat;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
@@ -24,7 +25,7 @@ use mir::query::{MirQuery, QueryFlowParts};
 use mir::{Column, FlowNode, MirNodeRef};
 use nom_sql::{
     BinaryOperator, ColumnConstraint, ColumnSpecification, Expression, FunctionExpression, InValue,
-    OrderType, SqlIdentifier, UnaryOperator,
+    OrderType, SqlIdentifier, SqlType, UnaryOperator,
 };
 use noria::internal::{Index, IndexType};
 use noria::ViewPlaceholder;
@@ -35,6 +36,15 @@ use petgraph::graph::NodeIndex;
 
 use crate::controller::Migration;
 use crate::manual::ops::grouped::aggregate::Aggregation;
+
+/// Sets the names of dataflow columns using the names determined in MIR to ensure aliases are used
+fn set_names(names: &[&str], columns: &mut [DataflowColumn]) -> ReadySetResult<()> {
+    invariant_eq!(columns.len(), names.len());
+    for (c, n) in columns.iter_mut().zip(names.iter()) {
+        c.set_name((*n).into());
+    }
+    Ok(())
+}
 
 pub(super) fn mir_query_to_flow_parts(
     mir_query: &mut MirQuery,
@@ -403,7 +413,7 @@ fn adapt_base_node(
                 break;
             }
         }
-        let column_id = mig.add_column(na, a.column.name.clone(), default_value)?;
+        let column_id = mig.add_column(na, DataflowColumn::from(a.clone()), default_value)?;
 
         // store the new column ID in the column specs for this node
         for &mut (ref cs, ref mut cid) in column_specs.iter_mut() {
@@ -452,11 +462,10 @@ fn make_base_node(
         cs.1 = Some(i);
     }
 
-    let columns: Vec<_> = column_specs
+    let columns: Vec<DataflowColumn> = column_specs
         .iter()
-        .map(|&(ref cs, _)| Column::from(&cs.column))
+        .map(|&(ref cs, _)| cs.clone().into())
         .collect();
-    let column_names = column_names(columns.as_slice());
 
     // note that this defaults to a "None" (= NULL) default value for columns that do not have one
     // specified; we don't currently handle a "NOT NULL" SQL constraint for defaults
@@ -504,11 +513,7 @@ fn make_base_node(
         base
     };
 
-    Ok(FlowNode::New(mig.add_base(
-        name,
-        column_names.as_slice(),
-        base,
-    )))
+    Ok(FlowNode::New(mig.add_base(name, columns, base)))
 }
 
 fn make_union_node(
@@ -519,8 +524,13 @@ fn make_union_node(
     duplicate_mode: ops::union::DuplicateMode,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
-    let column_names = column_names(columns);
     let mut emit_column_id: HashMap<NodeIndex, Vec<usize>> = HashMap::new();
+
+    let mut cols = Vec::with_capacity(
+        emit.get(0)
+            .ok_or_else(|| internal_err("No emit columns"))?
+            .len(),
+    );
 
     // column_id_for_column doesn't take into consideration table aliases
     // which might cause improper ordering of columns in a union node
@@ -534,11 +544,29 @@ fn make_union_node(
             .collect::<ReadySetResult<Vec<_>>>()?;
 
         let ni = n.borrow().flow_node_addr()?;
+
+        // Union takes columns of first ancestor
+        if i == 0 {
+            #[allow(clippy::indexing_slicing)] // just got the address
+            let parent_cols = mig.dataflow_state.ingredients[ni].columns();
+            cols = emit_cols
+                .iter()
+                .map(|i| {
+                    parent_cols
+                        .get(*i)
+                        .cloned()
+                        .ok_or_else(|| internal_err("Invalid index"))
+                })
+                .collect::<ReadySetResult<Vec<_>>>()?;
+        }
+
         emit_column_id.insert(ni, emit_cols);
     }
+    set_names(&column_names(columns), &mut cols)?;
+
     let node = mig.add_ingredient(
         name,
-        column_names.as_slice(),
+        cols,
         ops::union::Union::new(emit_column_id, duplicate_mode)?,
     );
 
@@ -553,12 +581,15 @@ fn make_filter_node(
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
-    let column_names = column_names(columns);
     let filter_conditions = lower_expression(&parent, conditions)?;
+    #[allow(clippy::indexing_slicing)] // just got the address
+    let mut parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
+
+    set_names(&column_names(columns), &mut parent_cols)?;
 
     let node = mig.add_ingredient(
         name,
-        column_names.as_slice(),
+        parent_cols,
         ops::filter::Filter::new(parent_na, filter_conditions),
     );
     Ok(FlowNode::New(node))
@@ -576,13 +607,36 @@ fn make_grouped_node(
     invariant!(!group_by.is_empty());
     let parent_na = parent.borrow().flow_node_addr()?;
     let parent_node = parent.borrow();
-    let column_names = column_names(columns);
     let over_col_indx = parent_node.column_id_for_column(on)?;
     let group_col_indx = group_by
         .iter()
         .map(|c| parent_node.column_id_for_column(c))
         .collect::<ReadySetResult<Vec<_>>>()?;
     invariant!(!group_col_indx.is_empty());
+
+    // Grouped projects the group_by columns followed by computed column
+    #[allow(clippy::indexing_slicing)] // just got the address
+    let parent_cols = mig.dataflow_state.ingredients[parent_na].columns();
+
+    // group by columns
+    let mut cols = group_col_indx
+        .iter()
+        .map(|i| {
+            parent_cols
+                .get(*i)
+                .cloned()
+                .ok_or_else(|| internal_err("Invalid index"))
+        })
+        .collect::<ReadySetResult<Vec<_>>>()?;
+
+    let over_col_ty = parent_cols
+        .get(over_col_indx)
+        .ok_or_else(|| internal_err("Invalid index"))?
+        .ty();
+    let over_col_name = &columns
+        .last()
+        .ok_or_else(|| internal_err("Grouped has no projections"))?
+        .name;
 
     let na = match kind {
         // This is the product of an incomplete refactor. It simplifies MIR to consider Group_Concat
@@ -591,18 +645,47 @@ fn make_grouped_node(
         // aggregation before we pattern match for a generic aggregation.
         GroupedNodeType::Aggregation(Aggregation::GroupConcat { separator: sep }) => {
             let gc = GroupConcat::new(parent_na, over_col_indx, group_col_indx, sep)?;
-            mig.add_ingredient(name, column_names.as_slice(), gc)
+            let agg_col = DataflowColumn::new(
+                over_col_name.clone(),
+                SqlType::Text.into(),
+                Some(name.into()),
+            );
+            cols.push(agg_col);
+            set_names(&column_names(columns), &mut cols)?;
+            mig.add_ingredient(name, cols, gc)
         }
-        GroupedNodeType::Aggregation(agg) => mig.add_ingredient(
-            name,
-            column_names.as_slice(),
-            agg.over(parent_na, over_col_indx, group_col_indx.as_slice())?,
-        ),
-        GroupedNodeType::Extremum(extr) => mig.add_ingredient(
-            name,
-            column_names.as_slice(),
-            extr.over(parent_na, over_col_indx, group_col_indx.as_slice()),
-        ),
+        GroupedNodeType::Aggregation(agg) => {
+            let grouped = agg.over(parent_na, over_col_indx, group_col_indx.as_slice())?;
+            let agg_col = grouped
+                .output_col_type()
+                .map(|ty| DataflowColumn::new(over_col_name.clone(), ty.into(), Some(name.into())))
+                .unwrap_or_else(|| {
+                    DataflowColumn::new(
+                        over_col_name.clone(),
+                        over_col_ty.clone(),
+                        Some(name.into()),
+                    )
+                });
+            cols.push(agg_col);
+            set_names(&column_names(columns), &mut cols)?;
+            mig.add_ingredient(name, cols, grouped)
+        }
+        GroupedNodeType::Extremum(extr) => {
+            let grouped = extr.over(parent_na, over_col_indx, group_col_indx.as_slice());
+            let agg_col = grouped
+                .output_col_type()
+                .map(|ty| DataflowColumn::new(over_col_name.clone(), ty.into(), Some(name.into())))
+                .unwrap_or_else(|| {
+                    DataflowColumn::new(
+                        over_col_name.clone(),
+                        over_col_ty.clone(),
+                        Some(name.into()),
+                    )
+                });
+            cols.push(agg_col);
+            set_names(&column_names(columns), &mut cols)?;
+            mig.add_ingredient(name, cols, grouped)
+        }
     };
     Ok(FlowNode::New(na))
 }
@@ -614,11 +697,14 @@ fn make_identity_node(
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
-    let column_names = column_names(columns);
+    // Identity mirrors the parent nodes exactly
+    #[allow(clippy::indexing_slicing)] // just got the address
+    let mut parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
+    set_names(&column_names(columns), &mut parent_cols)?;
 
     let node = mig.add_ingredient(
         String::from(name),
-        column_names.as_slice(),
+        parent_cols,
         ops::identity::Identity::new(parent_na),
     );
     Ok(FlowNode::New(node))
@@ -639,7 +725,29 @@ fn make_join_node(
 
     invariant_eq!(on_left.len(), on_right.len());
 
-    let mut column_names = column_names(columns);
+    #[allow(clippy::indexing_slicing)] // just got the address
+    let left_cols = mig.dataflow_state.ingredients[left.borrow().flow_node_addr()?].columns();
+    #[allow(clippy::indexing_slicing)] // just got the address
+    let right_cols = mig.dataflow_state.ingredients[right.borrow().flow_node_addr()?].columns();
+
+    let mut cols = proj_cols
+        .iter()
+        .map(|c| match left.borrow().column_id_for_column(c) {
+            Ok(idx) => left_cols
+                .get(idx)
+                .cloned()
+                .ok_or_else(|| internal_err("Invalid index")),
+            Err(_) => match right.borrow().column_id_for_column(c) {
+                Ok(idx) => right_cols
+                    .get(idx)
+                    .cloned()
+                    .ok_or_else(|| internal_err("Invalid index")),
+                Err(_) => Err(internal_err("Column not found in either parent")),
+            },
+        })
+        .collect::<ReadySetResult<Vec<_>>>()?;
+
+    set_names(&column_names(columns), &mut cols)?;
 
     let (projected_cols_left, rest): (Vec<Column>, Vec<Column>) = proj_cols
         .iter()
@@ -768,11 +876,15 @@ fn make_join_node(
         right_na = make_cross_join_bogokey(right)?.address();
 
         join_config.push(JoinSource::B(left_col_idx, right_col_idx));
-        column_names.push("cross_join_bogokey");
+        cols.push(DataflowColumn::new(
+            "cross_join_bogokey".into(),
+            SqlType::Bigint(None).into(),
+            Some(name.into()),
+        ));
     }
 
     let j = Join::new(left_na, right_na, kind, join_config);
-    let n = mig.add_ingredient(String::from(name), column_names.as_slice(), j);
+    let n = mig.add_ingredient(String::from(name), cols, j);
 
     Ok(FlowNode::New(n))
 }
@@ -789,7 +901,12 @@ fn make_join_aggregates_node(
 ) -> ReadySetResult<FlowNode> {
     use dataflow::ops::join::JoinSource;
 
-    let column_names = column_names(columns);
+    let left_na = left.borrow().flow_node_addr()?;
+    let right_na = right.borrow().flow_node_addr()?;
+    #[allow(clippy::indexing_slicing)] // just got the address
+    let left_cols = mig.dataflow_state.ingredients[left_na].columns();
+    #[allow(clippy::indexing_slicing)] // just got the address
+    let right_cols = mig.dataflow_state.ingredients[right_na].columns();
 
     // We gather up all of the columns from each respective parent. If a column is in both parents,
     // then we know it was a group_by column and create a JoinSource::B type with the indices from
@@ -829,15 +946,28 @@ fn make_join_aggregates_node(
                     }
                 }),
         )
-        .collect();
+        .collect::<Vec<_>>();
 
-    let left_na = left.borrow().flow_node_addr()?;
-    let right_na = right.borrow().flow_node_addr()?;
+    let mut cols = join_config
+        .iter()
+        .map(|j| match j {
+            JoinSource::B(i, _) | JoinSource::L(i) => left_cols
+                .get(*i)
+                .cloned()
+                .ok_or_else(|| internal_err("Invalid index")),
+            JoinSource::R(i) => right_cols
+                .get(*i)
+                .cloned()
+                .ok_or_else(|| internal_err("Invalid index")),
+        })
+        .collect::<ReadySetResult<Vec<_>>>()?;
+
+    set_names(&column_names(columns), &mut cols)?;
 
     // Always treated as a JoinType::Inner based on joining on group_by cols, which always match
     // between parents.
     let j = Join::new(left_na, right_na, JoinType::Inner, join_config);
-    let n = mig.add_ingredient(String::from(name), column_names.as_slice(), j);
+    let n = mig.add_ingredient(String::from(name), cols, j);
 
     Ok(FlowNode::New(n))
 }
@@ -850,7 +980,10 @@ fn make_latest_node(
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
-    let column_names = column_names(columns);
+    #[allow(clippy::indexing_slicing)] // just got the address
+    let mut cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
+
+    set_names(&column_names(columns), &mut cols)?;
 
     let group_col_indx = group_by
         .iter()
@@ -864,7 +997,7 @@ fn make_latest_node(
     #[allow(clippy::indexing_slicing)] // group_col_indx length checked above
     let na = mig.add_ingredient(
         String::from(name),
-        column_names.as_slice(),
+        cols,
         Latest::new(parent_na, group_col_indx[0]),
     );
     Ok(FlowNode::New(na))
@@ -997,7 +1130,8 @@ fn make_project_node(
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
-    let column_names = column_names(source_columns);
+    #[allow(clippy::indexing_slicing)] // just got the address
+    let parent_cols = mig.dataflow_state.ingredients[parent_na].columns();
 
     let projected_column_ids = emit
         .iter()
@@ -1011,6 +1145,23 @@ fn make_project_node(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
+    let mut cols = projected_column_ids
+        .iter()
+        .map(|i| {
+            parent_cols
+                .get(*i)
+                .cloned()
+                .ok_or_else(|| internal_err("Invalid index"))
+        })
+        .collect::<ReadySetResult<Vec<_>>>()?;
+
+    // First set names for emitted columns. `set_names()` is not used because it assumes the two
+    // fields have equal lengths
+    let column_names = column_names(source_columns);
+    for (c, n) in cols.iter_mut().zip(column_names) {
+        c.set_name(n.into());
+    }
+
     let (_, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
 
     let projected_expressions: Vec<DataflowExpression> = expressions
@@ -1018,9 +1169,48 @@ fn make_project_node(
         .map(|(_, e)| lower_expression(&parent, e.clone()))
         .collect::<Result<Vec<_>, _>>()?;
 
+    let col_type = |idx: usize| -> ReadySetResult<Option<SqlType>> {
+        Ok(parent_cols
+            .get(idx)
+            .ok_or_else(|| {
+                internal_err(format!(
+                    "Expression referenced invalid index in parent, idx={}",
+                    idx
+                ))
+            })?
+            .ty()
+            .clone()
+            .into())
+    };
+
+    let col_names = source_columns
+        .iter()
+        .skip(cols.len())
+        .map(|c| c.name.clone());
+
+    let projected_expression_types = projected_expressions
+        .iter()
+        .map(|e| e.sql_type(col_type))
+        .collect::<ReadySetResult<Vec<_>>>()?;
+    let literal_types = literal_values
+        .iter()
+        .map(|l| l.sql_type())
+        .collect::<Vec<_>>();
+
+    cols.extend(
+        projected_expression_types
+            .iter()
+            .chain(literal_types.iter())
+            .zip(col_names)
+            .map(|(ty, n)| DataflowColumn::new(n, ty.clone().into(), Some(name.into()))),
+    );
+
+    // Check here since we did not check in `set_names()`
+    invariant_eq!(source_columns.len(), cols.len());
+
     let n = mig.add_ingredient(
         name,
-        column_names.as_slice(),
+        cols,
         Project::new(
             parent_na,
             projected_column_ids.as_slice(),
@@ -1039,7 +1229,43 @@ fn make_distinct_node(
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
-    let column_names = column_names(columns);
+    #[allow(clippy::indexing_slicing)] // just got the address
+    let parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
+
+    let grp_by_column_ids = group_by
+        .iter()
+        .map(|c| {
+            parent
+                .borrow()
+                .find_source_for_child_column(c)
+                .ok_or_else(|| {
+                    internal_err(format!("could not find source for child column: {:?}", c))
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut cols = grp_by_column_ids
+        .iter()
+        .map(|i| {
+            parent_cols
+                .get(*i)
+                .cloned()
+                .ok_or_else(|| internal_err("Invalid index"))
+        })
+        .collect::<ReadySetResult<Vec<_>>>()?;
+
+    // distinct count is projected last
+    let distinct_count_name = columns
+        .last()
+        .ok_or_else(|| internal_err("No projected columns for distinct"))?
+        .name
+        .clone();
+    cols.push(DataflowColumn::new(
+        distinct_count_name,
+        SqlType::Bigint(None).into(),
+        Some(name.into()),
+    ));
+    set_names(&column_names(columns), &mut cols)?;
 
     let group_by_indx = if group_by.is_empty() {
         // no query parameters, so we index on the first column
@@ -1057,7 +1283,7 @@ fn make_distinct_node(
     // make the new operator and record its metadata
     let na = mig.add_ingredient(
         String::from(name),
-        column_names.as_slice(),
+        cols,
         // We're using Count to implement distinct here, because count already keeps track of how
         // many times we have seen a set of values. This means that if we get a row
         // deletion, we won't be removing it from our records of distinct rows unless there are no
@@ -1082,7 +1308,21 @@ fn make_paginate_or_topk_node(
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
+    #[allow(clippy::indexing_slicing)] // just got the address
+    let mut parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
+
+    // set names using MIR columns to ensure aliases are used
     let column_names = column_names(columns);
+    // create page_number column if this is a paginate node
+    if !is_topk {
+        #[allow(clippy::unwrap_used)] // column_names must be populated
+        parent_cols.push(DataflowColumn::new(
+            column_names.last().unwrap().into(),
+            SqlType::Bigint(None).into(),
+            Some(name.into()),
+        ));
+    }
+    set_names(&column_names, &mut parent_cols)?;
 
     invariant!(
         !group_by.is_empty(),
@@ -1121,13 +1361,13 @@ fn make_paginate_or_topk_node(
     let na = if is_topk {
         mig.add_ingredient(
             String::from(name),
-            column_names.as_slice(),
+            parent_cols,
             ops::topk::TopK::new(parent_na, cmp_rows, group_by_indx, limit),
         )
     } else {
         mig.add_ingredient(
             String::from(name),
-            column_names.as_slice(),
+            parent_cols,
             ops::paginate::Paginate::new(parent_na, cmp_rows, group_by_indx, limit),
         )
     };

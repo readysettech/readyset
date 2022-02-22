@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{format_err, Context};
-use dataflow::node;
+use dataflow::node::{self, Column};
 use dataflow::prelude::ChannelCoordinator;
 use failpoint_macros::set_failpoint;
 use futures_util::StreamExt;
@@ -668,9 +668,9 @@ impl AuthorityLeaderElectionState {
                             None => {
                                 let mut g = petgraph::Graph::new();
                                 // Create the root node in the graph.
-                                let source = g.add_node(node::Node::new::<_, &[String], _, _>(
+                                let source = g.add_node(node::Node::new::<_, _, Vec<Column>, _>(
                                     "source",
-                                    &[],
+                                    Vec::new(),
                                     node::special::Source,
                                 ));
 

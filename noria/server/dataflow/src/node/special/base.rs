@@ -566,8 +566,10 @@ mod tests {
         use std::convert::TryInto;
 
         use dataflow_state::MaterializedNodeState;
+        use noria_data::noria_type::Type as NoriaType;
 
         use super::*;
+        use crate::node::Column as DataflowColumn;
 
         fn test_lots_of_changes_in_same_batch(mut state: MaterializedNodeState) {
             use crate::node;
@@ -577,12 +579,20 @@ mod tests {
             let mut graph = Graph::new();
             let source = graph.add_node(Node::new(
                 "source",
-                &["because-type-inference"],
+                vec![DataflowColumn::new("".into(), NoriaType::Unknown, None)],
                 node::NodeType::Source,
             ));
 
             let b = Base::new().with_primary_key([0, 2]);
-            let global = graph.add_node(Node::new("b", &["x", "y", "z"], b));
+            let global = graph.add_node(Node::new(
+                "b",
+                vec![
+                    DataflowColumn::new("x".into(), NoriaType::Unknown, None),
+                    DataflowColumn::new("y".into(), NoriaType::Unknown, None),
+                    DataflowColumn::new("z".into(), NoriaType::Unknown, None),
+                ],
+                b,
+            ));
             graph.add_edge(source, global, ());
             let local = unsafe { LocalNodeIndex::make(0_u32) };
             let mut ip: IndexPair = global.into();
