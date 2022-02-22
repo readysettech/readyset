@@ -14,6 +14,7 @@ noria-errors = { path = "../noria/errors/" }
 noria-data = { path = "../noria/data" }
 timestamp_service = {path= "../noria/timestamp_service/"}
 dataflow_expression = { path = "../noria/server/dataflow/expression" }
+readyset-tracing = { path = "../readyset-tracing" }
 futures-executor = "0.3.14"
 futures-util = "0.3.14"
 lazy_static = "1.0.0"
@@ -23,6 +24,7 @@ regex = "1.0.0"
 tokio = { version = "1.15", features = ["signal", "rt-multi-thread", "time"] }
 chrono = "0.4"
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
+tracing-futures = "0.2.5"
 vec1 = "1.6.0"
 itertools = "0.10"
 derive_more = "0.99.11"

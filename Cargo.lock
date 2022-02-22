@@ -3695,6 +3695,7 @@ dependencies = [
  "pin-project",
  "proptest",
  "rand 0.8.5",
+ "readyset-tracing",
  "reqwest",
  "rmp-serde",
  "rust_decimal",
@@ -3780,6 +3781,7 @@ dependencies = [
  "noria-client-metrics",
  "noria-data",
  "noria-errors",
+ "readyset-tracing",
  "regex",
  "rust_decimal",
  "serde",
@@ -3793,6 +3795,7 @@ dependencies = [
  "tokio-tower",
  "tower",
  "tracing",
+ "tracing-futures",
  "vec1",
 ]
 
@@ -4195,7 +4198,6 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-futures",
- "tracing-subscriber",
  "url",
  "vec1",
  "vec_map",

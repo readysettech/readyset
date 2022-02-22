@@ -21,7 +21,8 @@ use noria::{
 use noria_data::DataType;
 use noria_errors::ReadySetError::PreparedStatementMissing;
 use noria_errors::{internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err};
-use tracing::{error, info, trace};
+use readyset_tracing::presampled::instrument_if_enabled;
+use tracing::{error, info, instrument, trace};
 use vec1::vec1;
 
 use crate::backend::SelectSchema;
@@ -1221,6 +1222,22 @@ impl NoriaConnector {
     pub(crate) async fn handle_select(
         &mut self,
         // TODO(mc):  Take a reference here; requires getting rewrite::process_query() to Cow
+        query: nom_sql::SelectStatement,
+        ticket: Option<Timestamp>,
+        create_if_not_exist: bool,
+        event: &mut noria_client_metrics::QueryExecutionEvent,
+    ) -> ReadySetResult<QueryResult<'_>> {
+        let span =
+            readyset_tracing::child_span!(INFO, "handle_select", ?query, create_if_not_exist);
+        instrument_if_enabled(
+            self._handle_select(query, ticket, create_if_not_exist, event),
+            span,
+        )
+        .await
+    }
+
+    async fn _handle_select(
+        &mut self,
         mut query: nom_sql::SelectStatement,
         ticket: Option<Timestamp>,
         create_if_not_exist: bool,
@@ -1255,6 +1272,7 @@ impl NoriaConnector {
         res
     }
 
+    #[instrument(level = "info", skip(self))]
     pub(crate) async fn prepare_select(
         &mut self,
         mut statement: nom_sql::SelectStatement,
@@ -1331,6 +1349,7 @@ impl NoriaConnector {
         })
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub(crate) async fn execute_prepared_select(
         &mut self,
         q_id: u32,

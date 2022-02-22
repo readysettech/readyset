@@ -89,6 +89,7 @@ mysql-time = { path = "../../mysql-time" }
 noria-errors = { path = "../errors" }
 noria-data = { path = "../data" }
 dataflow_expression = { path = "../server/dataflow/expression" }
+readyset-tracing = { path = "../../readyset-tracing" }
 
 [dev-dependencies]
 assert_approx_eq = "1.1.0"
