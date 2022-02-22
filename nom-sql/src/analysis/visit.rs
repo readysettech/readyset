@@ -313,9 +313,9 @@ pub fn walk_limit_clause<'ast, V: Visitor<'ast>>(
     visitor: &mut V,
     limit_clause: &'ast mut LimitClause,
 ) -> Result<(), V::Error> {
-    visitor.visit_expression(&mut limit_clause.limit)?;
+    visitor.visit_literal(&mut limit_clause.limit)?;
     if let Some(offset) = &mut limit_clause.offset {
-        visitor.visit_expression(offset)?;
+        visitor.visit_literal(offset)?;
     }
     Ok(())
 }

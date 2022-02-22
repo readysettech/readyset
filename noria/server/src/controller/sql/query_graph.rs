@@ -729,23 +729,23 @@ pub(crate) fn extract_limit_offset(
         .offset
         .as_ref()
         .and_then(|offset| match offset {
-            Expression::Literal(Literal::Placeholder(ItemPlaceholder::DollarNumber(idx))) => {
+            Literal::Placeholder(ItemPlaceholder::DollarNumber(idx)) => {
                 Some(Ok(ViewPlaceholder::Offset(*idx as usize)))
             }
             // For now, remove offset if it is a literal 0
-            Expression::Literal(Literal::Integer(0)) => None,
+            Literal::Integer(0) => None,
             _ => Some(Err(internal_err("Numeric OFFSETs must be parametrized"))),
         })
         .transpose()?;
     let limit = match limit.limit {
-        Expression::Literal(Literal::Integer(val)) => {
+        Literal::Integer(val) => {
             if val < 0 {
                 unsupported!("LIMIT field cannot have a negative value")
             } else {
                 val as usize
             }
         }
-        Expression::Literal(Literal::Placeholder(_)) => {
+        Literal::Placeholder(_) => {
             unsupported!("ReadySet does not support parametrized LIMIT fields")
         }
         _ => unsupported!("Invalid LIMIT statement"),

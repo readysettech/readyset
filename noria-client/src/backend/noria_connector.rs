@@ -8,7 +8,7 @@ use std::sync::{atomic, Arc, RwLock};
 use dataflow_expression::Expression as DataflowExpression;
 use itertools::Itertools;
 use nom_sql::{
-    self, BinaryOperator, ColumnConstraint, DeleteStatement, Expression, InsertStatement, Literal,
+    self, BinaryOperator, ColumnConstraint, DeleteStatement, InsertStatement, Literal,
     SelectStatement, SqlIdentifier, SqlQuery, UpdateStatement,
 };
 use noria::consistency::Timestamp;
@@ -343,16 +343,13 @@ fn limit_offset_params<'param>(
         return (None, None);
     };
 
-    let offset = if matches!(
-        limit.offset,
-        Some(Expression::Literal(Literal::Placeholder(_)))
-    ) {
+    let offset = if matches!(limit.offset, Some(Literal::Placeholder(_))) {
         params.last()
     } else {
         None
     };
 
-    let limit = if matches!(limit.limit, Expression::Literal(Literal::Placeholder(_))) {
+    let limit = if matches!(limit.limit, Literal::Placeholder(_)) {
         if offset.is_some() {
             params.get(params.len() - 2)
         } else {
