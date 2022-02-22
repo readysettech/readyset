@@ -867,7 +867,7 @@ impl Hash for DataType {
             DataType::Max => 1i64.hash(state),
             DataType::Int(n) => n.hash(state),
             DataType::UnsignedInt(n) => n.hash(state),
-            DataType::Float(f) => f.to_bits().hash(state),
+            DataType::Float(f) => (f as f64).to_bits().hash(state),
             DataType::Double(f) => f.to_bits().hash(state),
             DataType::Text(..) | DataType::TinyText(..) => {
                 // this unwrap should be safe because no error path in try_from for &str on Text or
