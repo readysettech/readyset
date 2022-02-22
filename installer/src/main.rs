@@ -38,7 +38,7 @@ use crate::aws::{
     cfn_parameter, db_instance_parameter_group, filter, reboot_rds_db_instance, vpc_cidr,
     wait_for_rds_db_available,
 };
-use crate::console::{confirm, input, password, prompt_to_continue, select, spinner, GREEN_CHECK};
+use crate::console::{confirm, input, prompt_to_continue, select, spinner, GREEN_CHECK};
 pub use crate::deployment::Deployment;
 use crate::deployment::{CreateNew, Engine, Existing, MaybeExisting, RdsDb};
 
@@ -57,7 +57,7 @@ const VPC_CLOUDFORMATION_TEMPLATE_URL: &str =
 // Macro to define this so it can be included in constants
 macro_rules! readyset_cloudformation_s3_prefix {
     () => {
-        "installer-2022-02-17"
+        "installer-2022-02-22"
     };
 }
 
@@ -372,44 +372,11 @@ impl Installer {
         let retry_join_tag_value = consul_stack_outputs["ConsulEc2RetryJoinTagValue"].clone();
         let consul_join_managed_policy_arn =
             consul_stack_outputs["ConsulJoinManagedPolicyArn"].clone();
-        let DatabaseCredentials { username, password } =
-            self.deployment.database_credentials.clone().unwrap();
         let supplemental_stack_outputs = self
             .deployment
             .vpc_supplemental_stack_outputs
             .clone()
             .unwrap();
-        let mysql_database_address = self
-            .rds_client()
-            .await?
-            .describe_db_instances()
-            .db_instance_identifier(
-                self.deployment
-                    .rds_db
-                    .as_ref()
-                    .unwrap()
-                    .db_id
-                    .as_existing()
-                    .unwrap(),
-            )
-            .send()
-            .await?
-            .db_instances
-            .unwrap_or_default()
-            .into_iter()
-            .next()
-            .unwrap()
-            .endpoint
-            .unwrap()
-            .address
-            .unwrap();
-        let mysql_database_url = format!(
-            "mysql://{}:{}@{}/{}",
-            username,
-            password,
-            mysql_database_address,
-            self.deployment.rds_db.as_ref().unwrap().db_name
-        );
 
         let mut stack_config = StackConfig::from_url(template_url).await?;
         stack_config
@@ -424,9 +391,6 @@ impl Installer {
                 consul_join_managed_policy_arn,
             )
             .with_non_modifiable_parameter("KeyPairName", key_pair_name)
-            .with_non_modifiable_parameter("ReadySetMySQLAdapterUsername", username)
-            .with_non_modifiable_parameter("ReadySetMySQLAdapterPassword", password)
-            .with_non_modifiable_parameter("MySQLDatabaseURL", mysql_database_url)
             .with_non_modifiable_parameter("ReadySetDeploymentName", deployment_name)
             .with_non_modifiable_parameter(
                 "ReadySetServerSecurityGroupID",
@@ -522,7 +486,7 @@ impl Installer {
                 .parameters(cfn_parameter("PrivateSubnet2ID", subnets.next().unwrap()))
                 .parameters(cfn_parameter("PrivateSubnet3ID", subnets.next().unwrap()))
                 .parameters(cfn_parameter("DatabaseUsername", username))
-                .parameters(cfn_parameter("DatabasePassword", password))
+                .parameters(cfn_parameter("SSMPathRDSDatabasePassword", password))
                 .parameters(cfn_parameter("DatabaseName", db_name)),
         )
         .await?;
@@ -660,6 +624,7 @@ impl Installer {
                 .parameters(cfn_parameter("VPCPrivateSubnetIds", subnet_ids))
                 .parameters(cfn_parameter("VPCID", vpc_id))
                 .parameters(cfn_parameter("VPCCIDR", vpc_cidr))
+                .parameters(cfn_parameter("AdditionalAdapterCIDR", "0.0.0.0/16"))
                 .parameters(cfn_parameter(
                     "BastionSecurityGroupID",
                     default_security_group_id,
@@ -764,7 +729,9 @@ impl Installer {
             println!("Next, enter credentials for the root user account of the new RDS database.");
         }
         let username = input().with_prompt("Database username").interact_text()?;
-        let password = password().with_prompt("Database password").interact()?;
+        let password = input()
+            .with_prompt("Path to database password in Systems Manager Parameter Store")
+            .interact()?;
         self.deployment.database_credentials = Some(DatabaseCredentials { username, password });
 
         Ok(())
@@ -773,7 +740,10 @@ impl Installer {
     async fn configure_key_pair(&mut self) -> Result<()> {
         let key_pair_name = loop {
             let answer = select()
-                .with_prompt("Use an existing SSH key pair for the instances, or create a new one?")
+                .with_prompt(
+                    "Use an existing SSH key pair for the instances, or create a new one?
+                 If existing, it must be registered in your AWS account.",
+                )
                 .items(&["Existing key pair", "New key pair"])
                 .default(1)
                 .interact()?;
