@@ -1416,6 +1416,8 @@ impl Domain {
                             debug!(
                                 index = ?index,
                                 tags = ?tags,
+                                weak = ?weak,
+                                local = %node,
                                 "told to prepare partial state"
                             );
                             state.add_key(index, Some(tags));
