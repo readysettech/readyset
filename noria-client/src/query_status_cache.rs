@@ -1,6 +1,7 @@
 //! The query status cache provides a thread-safe window into an adapter's
 //! knowledge about queries, currently the migration status of a query in
 //! Noria.
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
@@ -9,9 +10,15 @@ use serde::ser::SerializeSeq;
 use serde::{Serialize, Serializer};
 
 use crate::rewrite::anonymize_literals;
+use crate::utils::hash_select_query;
 
 /// Each query is uniquely identifier by its select statement
 type Query = SelectStatement;
+
+/// Converts a u64 query hash to a query id
+pub fn hash_to_query_id(hash: u64) -> String {
+    format!("q_{:x}", hash)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryStatus {
@@ -199,12 +206,23 @@ impl Serialize for QueryList {
     }
 }
 
+pub struct DeniedQuery {
+    pub id: String,
+    pub query: Query,
+    pub status: QueryStatus,
+}
+
 /// A metadata cache for all queries that have been processed by this
 /// adapter. Thread-safe.
 pub struct QueryStatusCache {
     /// A thread-safe hash map that holds the query status of each query
     /// that is cached.
-    inner: DashMap<Query, QueryStatus>,
+    statuses: DashMap<Arc<Query>, QueryStatus>,
+
+    /// A thread-safe hash map that maps a query's id to the query. The id is a string formatted as
+    /// q_<16-digit-query-hash>. The id is stored as a string instead of a u64 to allow for
+    /// different id formats in the future.
+    ids: DashMap<String, Arc<Query>>,
 
     /// Holds the current style of migration, whether async or explicit, which may change the
     /// behavior of some internal methods.
@@ -221,14 +239,25 @@ impl QueryStatusCache {
     /// Constructs a new QueryStatusCache with the migration style set to Async.
     pub fn new() -> QueryStatusCache {
         QueryStatusCache {
-            inner: DashMap::new(),
+            statuses: DashMap::new(),
+            ids: DashMap::new(),
             style: MigrationStyle::InRequestPath,
         }
     }
 
+    /// Insert a query into the status cache. Inserts into the status and hash maps.
+    /// self.statuses.insert() should not be called directly
+    pub fn insert(&self, q: Query, status: QueryStatus) -> Option<QueryStatus> {
+        let q = Arc::new(q);
+        self.ids
+            .insert(hash_to_query_id(hash_select_query(&q)), q.clone());
+        self.statuses.insert(q, status)
+    }
+
     pub fn with_style(style: MigrationStyle) -> QueryStatusCache {
         QueryStatusCache {
-            inner: DashMap::new(),
+            statuses: DashMap::new(),
+            ids: DashMap::new(),
             style,
         }
     }
@@ -237,11 +266,11 @@ impl QueryStatusCache {
     /// within the query status cache, an entry is created and the query is set to
     /// PendingMigration.
     pub fn query_migration_state(&self, q: &Query) -> MigrationState {
-        let query_state = self.inner.get(q).map(|m| m.migration_state.clone());
+        let query_state = self.statuses.get(q).map(|m| m.migration_state.clone());
         match query_state {
             Some(s) => s,
             None => {
-                self.inner.insert(q.clone(), QueryStatus::new());
+                self.insert(q.clone(), QueryStatus::new());
                 MigrationState::Pending
             }
         }
@@ -251,10 +280,10 @@ impl QueryStatusCache {
     /// within the query status cache, an entry is created and the query is set to
     /// PendingMigration.
     pub fn query_status(&self, q: &Query) -> QueryStatus {
-        match self.inner.get(q).map(|s| s.clone()) {
+        match self.statuses.get(q).map(|s| s.clone()) {
             Some(s) => s,
             None => {
-                self.inner.insert(q.clone(), QueryStatus::new());
+                self.insert(q.clone(), QueryStatus::new());
                 QueryStatus::new()
             }
         }
@@ -262,14 +291,14 @@ impl QueryStatusCache {
 
     /// Updates the execution info for the given query.
     pub fn update_execution_info(&self, q: &Query, info: ExecutionInfo) {
-        if let Some(mut s) = self.inner.get_mut(q) {
+        if let Some(mut s) = self.statuses.get_mut(q) {
             s.execution_info = Some(info);
         }
     }
 
     /// Updates the transition time in the execution info for the given query.
     pub fn update_transition_time(&self, q: &Query, transition: &std::time::Instant) {
-        if let Some(mut s) = self.inner.get_mut(q) {
+        if let Some(mut s) = self.statuses.get_mut(q) {
             if let Some(ref mut info) = s.execution_info {
                 info.last_transition_time = *transition;
             }
@@ -278,7 +307,7 @@ impl QueryStatusCache {
 
     /// Resets the internal transition time to now. This should be used with extreme caution.
     pub fn reset_transition_time(&self, q: &Query) {
-        if let Some(mut s) = self.inner.get_mut(q) {
+        if let Some(mut s) = self.statuses.get_mut(q) {
             if let Some(ref mut info) = s.execution_info {
                 info.last_transition_time = Instant::now()
             }
@@ -293,7 +322,7 @@ impl QueryStatusCache {
         query_max_failure_duration: Duration,
         fallback_recovery_duration: Duration,
     ) -> bool {
-        if let Some(ref mut s) = self.inner.get_mut(stmt) {
+        if let Some(ref mut s) = self.statuses.get_mut(stmt) {
             if let Some(ref mut info) = s.execution_info {
                 return info.reset_if_exceeded_recovery(
                     query_max_failure_duration,
@@ -307,7 +336,7 @@ impl QueryStatusCache {
 
     /// Update ExecutionInfo to indicate that a recent execute failed due to a networking problem.
     pub fn execute_network_failure(&self, q: &Query) {
-        if let Some(mut s) = self.inner.get_mut(q) {
+        if let Some(mut s) = self.statuses.get_mut(q) {
             match s.execution_info {
                 Some(ref mut info) => info.execute_network_failure(),
                 None => {
@@ -322,7 +351,7 @@ impl QueryStatusCache {
 
     /// Update ExecutionInfo to indicate that a recent execute succeeded.
     pub fn execute_succeeded(&self, q: &Query) {
-        if let Some(mut s) = self.inner.get_mut(q) {
+        if let Some(mut s) = self.statuses.get_mut(q) {
             match s.execution_info {
                 Some(ref mut info) => info.execute_succeeded(),
                 None => {
@@ -337,7 +366,7 @@ impl QueryStatusCache {
 
     /// Update ExecutionInfo to indicate that a recent execute failed.
     pub fn execute_failed(&self, q: &Query) {
-        if let Some(mut s) = self.inner.get_mut(q) {
+        if let Some(mut s) = self.statuses.get_mut(q) {
             match s.execution_info {
                 Some(ref mut info) => info.execute_failed(),
                 None => {
@@ -354,7 +383,7 @@ impl QueryStatusCache {
     /// return true if that state has persisted for longer than the supplied duration, otherwise,
     /// it will return false.
     pub fn execute_network_failure_exceeded(&self, q: &Query, duration: Duration) -> bool {
-        if let Some(ref s) = self.inner.get(q) {
+        if let Some(ref s) = self.statuses.get(q) {
             if let Some(ref info) = s.execution_info {
                 return info.execute_network_failure_exceeded(duration);
             }
@@ -367,7 +396,7 @@ impl QueryStatusCache {
     /// `MigrationState::Unsupported`. An unsupported query cannot currently become supported once
     /// again.
     pub fn update_query_migration_state(&self, q: &Query, m: MigrationState) {
-        match self.inner.get_mut(q) {
+        match self.statuses.get_mut(q) {
             Some(mut s) if s.migration_state != MigrationState::Unsupported => {
                 // Once a query is determined to be unsupported, there is currently no going back.
                 // In the future when we can support this in the query path this check should
@@ -375,7 +404,7 @@ impl QueryStatusCache {
                 s.migration_state = m;
             }
             None => {
-                let _ = self.inner.insert(
+                let _ = self.insert(
                     q.clone(),
                     QueryStatus {
                         migration_state: m,
@@ -391,7 +420,7 @@ impl QueryStatusCache {
     /// `MigrationState::Unsupported`. An unsupported query cannot currently become supported once
     /// again.
     pub fn update_query_status(&self, q: &Query, status: QueryStatus) {
-        match self.inner.get_mut(q) {
+        match self.statuses.get_mut(q) {
             Some(mut s) if s.migration_state != MigrationState::Unsupported => {
                 s.migration_state = status.migration_state;
                 s.execution_info = status.execution_info;
@@ -400,56 +429,80 @@ impl QueryStatusCache {
                 s.execution_info = status.execution_info;
             }
             None => {
-                let _ = self.inner.insert(q.clone(), status);
+                let _ = self.insert(q.clone(), status);
             }
         }
     }
 
     /// Returns a list of queries that currently need the be processed to determine
     /// if they should be allowed (are supported by Noria).
-    pub fn pending_migration(&self) -> Vec<Query> {
-        self.inner
+    pub fn pending_migration(&self) -> QueryList {
+        self.statuses
             .iter()
             .filter(|r| matches!(r.value().migration_state, MigrationState::Pending))
-            .map(|r| r.key().clone())
-            .collect()
+            .map(|r| ((*(*r.key())).clone(), r.value().clone()))
+            .collect::<Vec<(Query, QueryStatus)>>()
+            .into()
     }
 
     /// Returns a list of queries that have a state of [`QueryState::Successful`].
     pub fn allow_list(&self) -> QueryList {
-        self.inner
+        self.statuses
             .iter()
             .filter(|r| matches!(r.value().migration_state, MigrationState::Successful))
-            .map(|r| (r.key().clone(), r.value().clone()))
+            .map(|r| ((*(*(r.key()))).clone(), r.value().clone()))
             .collect::<Vec<(Query, QueryStatus)>>()
             .into()
     }
 
     /// Returns a list of queries that are in the deny list.
-    pub fn deny_list(&self) -> QueryList {
+    pub fn deny_list(&self) -> Vec<DeniedQuery> {
         match self.style {
             MigrationStyle::Async | MigrationStyle::InRequestPath => self
-                .inner
+                .ids
                 .iter()
-                .filter(|r| matches!(r.value().migration_state, MigrationState::Unsupported))
-                .map(|r| (r.key().clone(), r.value().clone()))
-                .collect::<Vec<(Query, QueryStatus)>>()
-                .into(),
-            MigrationStyle::Explicit => self
-                .inner
-                .iter()
-                .filter(|r| {
-                    matches!(
-                        r.value().migration_state,
-                        MigrationState::Unsupported
-                            | MigrationState::Pending
-                            | MigrationState::DryRunSucceeded
-                    )
+                .filter_map(|r| {
+                    self.statuses.get(r.value()).and_then(|s| {
+                        if matches!(s.value().migration_state, MigrationState::Unsupported) {
+                            Some(DeniedQuery {
+                                id: r.key().clone(),
+                                query: (*(*(r.value()))).clone(),
+                                status: s.value().clone(),
+                            })
+                        } else {
+                            None
+                        }
+                    })
                 })
-                .map(|r| (r.key().clone(), r.value().clone()))
-                .collect::<Vec<(Query, QueryStatus)>>()
-                .into(),
+                .collect::<Vec<_>>(),
+            MigrationStyle::Explicit => self
+                .ids
+                .iter()
+                .filter_map(|r| {
+                    self.statuses.get(r.value()).and_then(|s| {
+                        if matches!(
+                            s.value().migration_state,
+                            MigrationState::Unsupported
+                                | MigrationState::Pending
+                                | MigrationState::DryRunSucceeded
+                        ) {
+                            Some(DeniedQuery {
+                                id: r.key().clone(),
+                                query: (*(*(r.value()))).clone(),
+                                status: s.value().clone(),
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect::<Vec<_>>(),
         }
+    }
+
+    /// Returns a query given a query hash
+    pub fn query(&self, id: &str) -> Option<Query> {
+        self.ids.get(id).map(|r| (*(*r.value())).clone())
     }
 }
 
@@ -475,6 +528,25 @@ mod tests {
             Ok(SqlQuery::Select(s)) => Ok(s),
             _ => Err(anyhow::anyhow!("Invalid SELECT statement")),
         }
+    }
+
+    #[test]
+    fn query_is_referenced_by_hash() {
+        let cache = QueryStatusCache::new();
+        let q1 = select_statement("SELECT * FROM t1").unwrap();
+        let q2 = select_statement("SELECT * FROM t2").unwrap();
+
+        cache.query_migration_state(&q1);
+        cache.update_query_migration_state(&q2, MigrationState::Successful);
+
+        let h1 = hash_to_query_id(hash_select_query(&q1));
+        let h2 = hash_to_query_id(hash_select_query(&q2));
+
+        let r1 = cache.query(&h1).unwrap();
+        let r2 = cache.query(&h2).unwrap();
+
+        assert_eq!(r1, q1);
+        assert_eq!(r2, q2);
     }
 
     #[test]

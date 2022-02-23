@@ -92,18 +92,19 @@ where
             select! {
                 _ = interval.tick() => {
                     let to_process = self.query_status_cache.pending_migration();
+                    let len = to_process.len();
                     if self.controller.is_some() {
                         // Dry run mode because we were given a controller handle.
-                        for q in &to_process {
-                            self.perform_dry_run_migration(q).await
+                        for q in to_process {
+                            self.perform_dry_run_migration(&q.0).await
                         }
                     } else {
-                        for q in &to_process {
-                            self.perform_migration(q).await
+                        for q in to_process {
+                            self.perform_migration(&q.0).await
                         }
                     }
 
-                    counter!(recorded::MIGRATION_HANDLER_PROCESSED, to_process.len() as u64);
+                    counter!(recorded::MIGRATION_HANDLER_PROCESSED, len as u64);
                 }
                 _ = self.shutdown_recv.recv() => {
                     info!("Migration handler shutting down after shut down signal received");

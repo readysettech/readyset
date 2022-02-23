@@ -57,6 +57,11 @@ pub enum NodeType {
 /// General error type to be used across all of the ReadySet codebase.
 #[derive(Eq, PartialEq, Serialize, Deserialize, Error, Debug, Clone)]
 pub enum ReadySetError {
+    /// The adapter received a query id in CREATE CACHED QUERY that does not correspond to a known
+    /// query
+    #[error("No query known by id {id}")]
+    NoQueryForId { id: String },
+
     /// The adapter will return this error on any set statement that is not
     /// explicitly allowed.
     #[error("Set statement disallowed: {statement}")]

@@ -1259,6 +1259,7 @@ dependencies = [
  "futures",
  "futures-util",
  "hyper",
+ "launchpad",
  "mysql_async",
  "nom-sql",
  "noria",
