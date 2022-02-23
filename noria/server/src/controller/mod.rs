@@ -28,7 +28,7 @@ use tracing::{error, info, warn};
 use tracing_futures::Instrument;
 use url::Url;
 
-use crate::controller::inner::Leader;
+use crate::controller::inner::{ControllerRequestType, Leader};
 use crate::controller::migrate::Migration;
 use crate::controller::recipe::Recipe;
 use crate::controller::state::DataflowState;
@@ -288,6 +288,8 @@ pub struct Controller {
     authority_task: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
     /// A handle to the write processing task.
     write_processing_task: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
+    /// A handle to the dry run processing task.
+    dry_run_task: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
     /// The config associated with this controller's server.
     config: Config,
     /// Whether we are the leader and ready to handle requests.
@@ -327,6 +329,7 @@ impl Controller {
             replication_error_channel: ReplicationErrorChannel::new(),
             authority_task: None,
             write_processing_task: None,
+            dry_run_task: None,
         }
     }
 
@@ -462,7 +465,7 @@ impl Controller {
 
         let (writer_tx, writer_rx) = tokio::sync::mpsc::channel(16);
         self.write_processing_task = Some(tokio::spawn(
-            crate::controller::write_processing_runner(
+            crate::controller::controller_req_processing_runner(
                 writer_rx,
                 self.authority.clone(),
                 self.inner.clone(),
@@ -470,6 +473,17 @@ impl Controller {
                 self.leader_ready.clone(),
             )
             .instrument(tracing::info_span!("write_processing")),
+        ));
+        let (dry_run_tx, dry_run_rx) = tokio::sync::mpsc::channel(16);
+        self.dry_run_task = Some(tokio::spawn(
+            crate::controller::controller_req_processing_runner(
+                dry_run_rx,
+                self.authority.clone(),
+                self.inner.clone(),
+                self.valve.clone(),
+                self.leader_ready.clone(),
+            )
+            .instrument(tracing::info_span!("dry_run_processing")),
         ));
 
         let leader_ready = self.leader_ready.clone();
@@ -489,22 +503,37 @@ impl Controller {
                 }
                 req = self.http_rx.recv() => {
                     if let Some(req) = req {
-                        // Check if the request is a write request.
-                        // If it's not, then we can handle the request on this thread, since
-                        // it will just read the current dataflow state.
-                        // If it is, we pass the request to the write processing task, which will
-                        // also handle the request in the same way, but on a different thread.
-                        // This is how we avoid blocking reads.
-                        if !crate::controller::inner::is_write(&req) {
-                            let leader_ready = leader_ready.load(Ordering::Acquire);
-                            crate::controller::handle_controller_request(
-                                req,
-                                self.authority.clone(),
-                                self.inner.clone(),
-                                leader_ready
-                            ).await?;
-                        } else if writer_tx.send(req).await.is_err() {
-                            internal!("write processing handle hung up!")
+                        // Check if the request is a write request, dry run request, or read
+                        // request.
+                        // If it's a read request, then we can handle the request on this thread,
+                        // since it will just read the current dataflow state.
+                        // If it is a write request, we pass the request to the write processing
+                        // task, which will also handle the request in the same way, but on a
+                        // different thread. This is how we avoid blocking reads.
+                        // Likewise if the request is a dry run request we handle the request on a
+                        // dedicated dry run thread. This is to avoid blocking migrations
+                        match crate::controller::inner::request_type(&req) {
+                            ControllerRequestType::Read => {
+                                let leader_ready = leader_ready.load(Ordering::Acquire);
+                                crate::controller::handle_controller_request(
+                                    req,
+                                    self.authority.clone(),
+                                    self.inner.clone(),
+                                    leader_ready
+                                ).await?;
+                            }
+                            ControllerRequestType::Write => {
+
+                                if writer_tx.send(req).await.is_err() {
+                                    internal!("write processing handle hung up!")
+                                }
+                            }
+                            ControllerRequestType::DryRun => {
+
+                                if dry_run_tx.send(req).await.is_err() {
+                                    internal!("dry run processing handle hung up!")
+                                }
+                            }
                         }
                     }
                     else {
@@ -919,8 +948,8 @@ pub(crate) async fn authority_runner(
     Ok(())
 }
 
-/// A task that handles write [`ControllerRequest`]s.
-async fn write_processing_runner(
+/// Designed to be spun up in a task that handles [`ControllerRequest`]s of various types.
+async fn controller_req_processing_runner(
     mut request_rx: Receiver<ControllerRequest>,
     authority: Arc<Authority>,
     leader_handle: Arc<LeaderHandle>,
