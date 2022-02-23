@@ -341,8 +341,9 @@ impl AuthorityControl for LocalAuthority {
 
         let r = f(store_inner
             .state
-            .as_ref()
-            .and_then(|data| data.downcast_ref::<P>().map(Clone::clone)));
+            .take()
+            .and_then(|data| data.downcast::<P>().ok())
+            .map(|b| *b));
 
         if let Ok(ref p) = r {
             let mut p = Box::new(p.clone());
