@@ -412,3 +412,16 @@ Outputs:
   BastionHostEIP1:
     Description: Elastic IP bound to Bastion host 1.
     Value: !GetAtt BastionStack.Outputs.EIP1
+
+  ReadySetRDSHost:
+    Description: Hostname of the RDS database.
+    Value: !GetAtt ReadySetRDSMySQLStack.Outputs.DatabaseHostname
+
+  ReadySetMonitorLANIP:
+    Description: VPC IP of monitor instance.
+    Value: !GetAtt ReadySetMySQLStack.Outputs.ReadySetMonitorInstanceLANIP
+
+  ReadySetAdapterNLBDNSName:
+    Description: Host for ReadySet connection string.
+    Value: !GetAtt ReadySetMySQLStack.Outputs.ReadySetAdapterNLBDNSName
+

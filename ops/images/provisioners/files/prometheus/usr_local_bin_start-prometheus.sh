@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-log_aggregator_address=`dig @127.0.0.1 -p 8600 logs-aggregator.service.consul +short`
+log_aggregator_address=$(dig @127.0.0.1 -p 8600 logs-aggregator.service.consul +short)
 
 if [ -z "${log_aggregator_address}" ]
 then
+  echo "Could not retrieve log aggregator IP from Consul :c"
   exit 1
 fi
 

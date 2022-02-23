@@ -131,7 +131,8 @@ RUN set -eux; \
         docker.io \
         python3.8 \
         python3-pip \
-        jq; \
+        jq \
+        openssh-client; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
@@ -162,6 +163,7 @@ RUN set -eux; \
     rain --version ; \
     ytt_apply.sh -v; \
     aws --version; \
+    ssh -V; \
     which docker
 
 CMD ["/bin/bash"]

@@ -640,3 +640,9 @@ Outputs:
     Value: !Ref ReadySetMySQLAdapterVPCEndpointService
     Export:
       Name: !Join ['-', [!Ref "AWS::StackName", ReadySetMySQLVPCEndpointService]]
+
+  ReadySetMonitorInstanceLANIP:
+    Description: VPC LAN address of monitor instance.
+    Value: !GetAtt ReadySetMonitorInstance.PrivateIp
+    Export:
+      Name: !Join ['-', [!Ref "AWS::StackName", ReadySetMonitorInstanceLANIP]]
