@@ -628,16 +628,23 @@ impl Leader {
 
 /// Helper method to distinguish if the given [`ControllerRequest`] actually
 /// requires modifying the dataflow graph state.
-pub(super) fn is_write(req: &ControllerRequest) -> bool {
-    matches!(
-        (&req.method, req.path.as_ref()),
+pub(super) fn request_type(req: &ControllerRequest) -> ControllerRequestType {
+    match (&req.method, req.path.as_ref()) {
         (&Method::GET, "/flush_partial")
-            | (&Method::GET | &Method::POST, "/controller_uri")
-            | (&Method::POST, "/extend_recipe")
-            | (&Method::POST, "/install_recipe")
-            | (&Method::POST, "/remove_query")
-            | (&Method::POST, "/set_replication_offset")
-            | (&Method::POST, "/replicate_readers")
-            | (&Method::POST, "/remove_node")
-    )
+        | (&Method::GET | &Method::POST, "/controller_uri")
+        | (&Method::POST, "/extend_recipe")
+        | (&Method::POST, "/install_recipe")
+        | (&Method::POST, "/remove_query")
+        | (&Method::POST, "/set_replication_offset")
+        | (&Method::POST, "/replicate_readers")
+        | (&Method::POST, "/remove_node") => ControllerRequestType::Write,
+        (&Method::POST, "/dry_run") => ControllerRequestType::DryRun,
+        _ => ControllerRequestType::Read,
+    }
+}
+
+pub(super) enum ControllerRequestType {
+    Write,
+    Read,
+    DryRun,
 }
