@@ -383,12 +383,14 @@ pub(crate) async fn listen(
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
 
         let retries = READERS.scope(Default::default(), async move {
+            let upquery_hist = metrics::register_histogram!(recorded::SERVER_VIEW_UPQUERY_DURATION);
             while let Some((mut pending, ack)) = rx.recv().await {
                 // A blocking read always comes immediately after a miss, so no reason to retry it
                 // right away better to wait a bit
                 tokio::time::sleep(RETRY_TIMEOUT / 4).await;
                 loop {
                     if let Poll::Ready(res) = pending.check() {
+                        upquery_hist.record(pending.first.elapsed().as_micros() as f64);
                         let _ = ack.send(res);
                         break;
                     }
