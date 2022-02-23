@@ -1,9 +1,11 @@
 use std::time::Duration;
 
+use launchpad::hash::hash;
 use mysql_async::prelude::Queryable;
 use noria::get_metric;
 use noria::metrics::{recorded, DumpedMetricValue};
 use noria_client::backend::QueryInfo;
+use noria_client::query_status_cache::hash_to_query_id;
 use noria_client_metrics::QueryDestination;
 use serial_test::serial;
 use test_utils::skip_slow_tests;
@@ -444,12 +446,24 @@ async fn dry_run_evaluates_support() {
     // in the background. Until the dry run is complete, the query has a
     // "pending" status in the proxied query table. Once the dry run
     // is complete, it will have a "yes" status.
+    let select_query = match nom_sql::parse_query(
+        nom_sql::Dialect::MySQL,
+        "SELECT * FROM `t1` WHERE (`uid` = $1)",
+    )
+    .unwrap()
+    {
+        nom_sql::SqlQuery::Select(s) => s,
+        _ => unreachable!(),
+    };
+    let query_id = hash_to_query_id(hash(&select_query));
     let mut results = EventuallyConsistentResults::new();
     results.write(&[(
+        query_id.clone(),
         "SELECT * FROM `t1` WHERE (`uid` = $1)".to_string(),
         "pending".to_string(),
     )]);
     results.write(&[(
+        query_id,
         "SELECT * FROM `t1` WHERE (`uid` = $1)".to_string(),
         "yes".to_string(),
     )]);

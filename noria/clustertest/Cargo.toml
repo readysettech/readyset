@@ -28,6 +28,7 @@ noria-client-metrics = { path = "../../noria-client/metrics" }
 noria-mysql = { path = "../../noria-mysql" }
 test_utils = { path = "../../test_utils" }
 clustertest-macros = { path = "./macros" }
+launchpad = { path = "../../launchpad" }
 
 [dev-dependencies]
 serial_test = "0.5.1"

@@ -91,13 +91,13 @@ use noria_client_metrics::{
 };
 use noria_data::DataType;
 use noria_errors::ReadySetError::{self, PreparedStatementMissing};
-use noria_errors::{internal, internal_err, unsupported, unsupported_err, ReadySetResult};
+use noria_errors::{internal, internal_err, unsupported, ReadySetResult};
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, instrument, trace, warn};
 
 use crate::query_status_cache::{
-    ExecutionInfo, ExecutionState, MigrationState, QueryStatus, QueryStatusCache,
+    DeniedQuery, ExecutionInfo, ExecutionState, MigrationState, QueryStatus, QueryStatusCache,
 };
 use crate::upstream_database::NoriaCompare;
 pub use crate::upstream_database::UpstreamPrepare;
@@ -1368,58 +1368,57 @@ where
     async fn show_proxied_queries(
         &mut self,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let queries = self
-            .query_status_cache
-            .deny_list()
-            .into_iter()
-            .map(|(q, status)| {
-                (
-                    q,
-                    if let MigrationState::DryRunSucceeded = status.migration_state {
-                        "yes".to_string()
-                    } else {
-                        "pending".to_string()
-                    },
-                )
-            });
+        let create_dummy_column = |n: &str| ColumnSchema {
+            spec: nom_sql::ColumnSpecification {
+                column: nom_sql::Column {
+                    name: n.into(),
+                    table: None,
+                },
+                sql_type: nom_sql::SqlType::Text,
+                constraints: vec![],
+                comment: None,
+            },
+            base: None,
+        };
+
+        let queries = self.query_status_cache.deny_list();
         let select_schema = SelectSchema {
             use_bogo: false,
             schema: Cow::Owned(vec![
-                ColumnSchema {
-                    spec: nom_sql::ColumnSpecification {
-                        column: nom_sql::Column {
-                            name: "proxied query".into(),
-                            table: None,
-                        },
-                        sql_type: nom_sql::SqlType::Text,
-                        constraints: vec![],
-                        comment: None,
-                    },
-                    base: None,
-                },
-                ColumnSchema {
-                    spec: nom_sql::ColumnSpecification {
-                        column: nom_sql::Column {
-                            name: "readyset supported".into(),
-                            table: None,
-                        },
-                        sql_type: nom_sql::SqlType::Text,
-                        constraints: vec![],
-                        comment: None,
-                    },
-                    base: None,
-                },
+                create_dummy_column("query id"),
+                create_dummy_column("proxied query"),
+                create_dummy_column("readyset supported"),
             ]),
 
-            columns: Cow::Owned(vec!["proxied query".into(), "readyset supported".into()]),
+            columns: Cow::Owned(vec![
+                "query id".into(),
+                "proxied query".into(),
+                "readyset supported".into(),
+            ]),
         };
 
         let data = queries
-            .map(|(q, status)| vec![DataType::from(q.to_string()), DataType::from(status)])
+            .into_iter()
+            .map(|DeniedQuery { id, query, status }| {
+                let s = if let MigrationState::DryRunSucceeded = status.migration_state {
+                    "yes".to_string()
+                } else {
+                    "pending".to_string()
+                };
+                vec![
+                    DataType::from(id),
+                    DataType::from(query.to_string()),
+                    DataType::from(s),
+                ]
+            })
             .collect::<Vec<_>>();
         let data = vec![Results::new(
             data,
-            Arc::new(["proxied query".into(), "readyset supported".into()]),
+            Arc::new([
+                "query id".into(),
+                "proxied query".into(),
+                "readyset supported".into(),
+            ]),
         )];
         Ok(noria_connector::QueryResult::Select {
             data,
@@ -1446,14 +1445,15 @@ where
             }
             SqlQuery::CreateCachedQuery(CreateCachedQueryStatement { name, inner }) => {
                 let st = match inner {
-                    CachedQueryInner::Statement(st) => st,
-                    _ => {
-                        return Some(Err(unsupported_err(
-                            "CREATE CACHED QUERY AS <query_id> is not yet implemented",
-                        )))
-                    }
+                    CachedQueryInner::Statement(st) => *st.clone(),
+                    CachedQueryInner::Id(id) => match self.query_status_cache.query(id.as_str()) {
+                        Some(st) => st,
+                        None => {
+                            return Some(Err(ReadySetError::NoQueryForId { id: id.to_string() }))
+                        }
+                    },
                 };
-                self.create_cached_query(name.as_deref(), *st.clone()).await
+                self.create_cached_query(name.as_deref(), st).await
             }
             SqlQuery::DropCachedQuery(DropCachedQueryStatement { name }) => {
                 self.drop_cached_query(name.as_str()).await
