@@ -355,6 +355,10 @@ pub mod recorded {
     /// Counter: The number of times a query required at least a partial replay.
     pub const SERVER_VIEW_QUERY_MISS: &str = "server.view_query_result_miss";
 
+    /// Histogram: The amount of time in microseconds spent waiting for an upquery during a read
+    /// request.
+    pub const SERVER_VIEW_UPQUERY_DURATION: &str = "server.view_query_upquery_duration_us";
+
     /// Counter: The number of times a dataflow node type is added to the
     /// dataflow graph. Recorded at the time the new graph is committed.
     ///
