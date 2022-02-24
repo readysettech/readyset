@@ -3850,6 +3850,89 @@ async fn topk_updates() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn simple_pagination() {
+    let mut g = start_simple_unsharded("simple_pagination").await;
+    g.install_recipe(
+        "CREATE TABLE t (x, y);
+         QUERY q: SELECT x, y FROM t WHERE y = $1 ORDER BY x ASC LIMIT 3 OFFSET $2;",
+    )
+    .await
+    .unwrap();
+
+    eprintln!("{}", g.graphviz().await.unwrap());
+
+    let mut t = g.table("t").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DataType::from(1), DataType::from("a")],
+        vec![DataType::from(2), DataType::from("a")],
+        vec![DataType::from(3), DataType::from("a")],
+        vec![DataType::from(4), DataType::from("a")],
+        vec![DataType::from(5), DataType::from("a")],
+        vec![DataType::from(6), DataType::from("a")],
+        vec![DataType::from(1), DataType::from("b")],
+        vec![DataType::from(2), DataType::from("b")],
+        vec![DataType::from(3), DataType::from("b")],
+    ])
+    .await
+    .unwrap();
+
+    let mut q = g.view("q").await.unwrap();
+    assert_eq!(
+        q.key_map(),
+        &[
+            (ViewPlaceholder::OneToOne(1), 1),
+            (ViewPlaceholder::Offset(2), 2)
+        ]
+    );
+
+    let mut a_page1: Vec<Vec<DataType>> = q
+        .lookup(&["a".into(), 0.into()], true)
+        .await
+        .unwrap()
+        .into();
+    a_page1.sort();
+    assert_eq!(
+        a_page1,
+        vec![
+            vec![DataType::from(1), DataType::from("a")],
+            vec![DataType::from(2), DataType::from("a")],
+            vec![DataType::from(3), DataType::from("a")],
+        ]
+    );
+
+    let mut a_page2: Vec<Vec<DataType>> = q
+        .lookup(&["a".into(), 1.into()], true)
+        .await
+        .unwrap()
+        .into();
+    a_page2.sort();
+    assert_eq!(
+        a_page2,
+        vec![
+            vec![DataType::from(4), DataType::from("a")],
+            vec![DataType::from(5), DataType::from("a")],
+            vec![DataType::from(6), DataType::from("a")],
+        ]
+    );
+
+    let mut b_page1: Vec<Vec<DataType>> = q
+        .lookup(&["b".into(), 0.into()], true)
+        .await
+        .unwrap()
+        .into();
+    b_page1.sort();
+    assert_eq!(
+        b_page1,
+        vec![
+            vec![DataType::from(1), DataType::from("b")],
+            vec![DataType::from(2), DataType::from("b")],
+            vec![DataType::from(3), DataType::from("b")],
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn correct_nested_view_schema() {
     use nom_sql::{ColumnSpecification, SqlType};
 
