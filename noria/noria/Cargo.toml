@@ -53,7 +53,7 @@ url = { version = "2.2", features = ["serde"] }
 mysql_async = "0.29"
 rand = "0.8.4"
 parking_lot = "0.11.2"
-cloudflare-zlib = "0.2.9"
+cloudflare-zlib = { version = "0.2.9", features = ["arm-always"] }
 
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
 metrics = "0.18"
