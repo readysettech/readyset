@@ -472,6 +472,10 @@ pub mod test {
             self.narrow_one::<Record>(d.into(), remember)
         }
 
+        pub fn node_index(&self) -> IndexPair {
+            self.nut.expect("set_op not called")
+        }
+
         pub fn node(&self) -> cell::Ref<Node> {
             self.nodes[*self.nut.unwrap()].borrow()
         }
