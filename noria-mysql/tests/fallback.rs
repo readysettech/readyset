@@ -1,4 +1,5 @@
 use mysql_async::prelude::*;
+use noria_client::backend::noria_connector::ReadBehavior;
 use noria_client::BackendBuilder;
 use noria_client_test_helpers::mysql_helpers::MySQLAdapter;
 use noria_client_test_helpers::{self, sleep};
@@ -11,6 +12,7 @@ async fn setup() -> (mysql_async::Opts, Handle) {
         true,
         true,
         true,
+        ReadBehavior::Blocking,
     )
     .await
 }

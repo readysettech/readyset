@@ -2,21 +2,12 @@ use std::sync::Arc;
 
 use mysql_async::prelude::*;
 use mysql_async::{Conn, Result, Row, Statement};
-use noria_client::backend::{MigrationMode, QueryInfo};
+use noria_client::backend::MigrationMode;
 use noria_client::query_status_cache::QueryStatusCache;
 use noria_client_metrics::QueryDestination;
-use noria_client_test_helpers::mysql_helpers::query_cache_setup;
+use noria_client_test_helpers::mysql_helpers::{last_query_info, query_cache_setup};
 use noria_client_test_helpers::sleep;
 use serial_test::serial;
-
-/// Retrieves where the query executed by parsing the row returned by
-/// EXPLAIN LAST STATEMENT.
-async fn last_query_info(conn: &mut Conn) -> QueryInfo {
-    conn.query_first::<'_, QueryInfo, _>("EXPLAIN LAST STATEMENT")
-        .await
-        .unwrap()
-        .unwrap()
-}
 
 // With in_request_path migration and fallback, an supported query should execute on Noria
 // and be marked allowed on completion, an unsupported query should execute on Noria

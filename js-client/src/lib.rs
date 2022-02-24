@@ -13,6 +13,7 @@ use neon::prelude::*;
 use nom_sql::{Dialect, SelectStatement};
 use noria::consensus::Authority;
 use noria::{ControllerHandle, ZookeeperAuthority};
+use noria_client::backend::noria_connector::ReadBehavior;
 use noria_client::backend::{Backend, BackendBuilder, NoriaConnector};
 use noria_client::query_status_cache::QueryStatusCache;
 use noria_client::UpstreamDatabase;
@@ -93,6 +94,7 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
         auto_increments,
         query_cache,
         Some(region),
+        ReadBehavior::Blocking,
     ));
     let upstream = if !mysql_address.is_empty() {
         Some(rt.block_on(MySqlUpstream::connect(mysql_address)).unwrap())

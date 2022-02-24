@@ -21,7 +21,7 @@ use nom_sql::{Dialect, SelectStatement, SqlQuery};
 use noria::consensus::{AuthorityControl, AuthorityType, ConsulAuthority};
 use noria::metrics::recorded;
 use noria::{ControllerHandle, ReadySetError};
-use noria_client::backend::noria_connector::NoriaConnector;
+use noria_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use noria_client::backend::MigrationMode;
 use noria_client::http_router::NoriaAdapterHttpRouter;
 use noria_client::migration_handler::MigrationHandler;
@@ -227,6 +227,10 @@ pub struct Options {
         default_value = "0"
     )]
     fallback_recovery_seconds: u64,
+
+    /// Whether to use non-blocking or blocking reads against the cache.
+    #[clap(long, env = "NON_BLOCKING_READS")]
+    non_blocking_reads: bool,
 }
 
 impl<H> NoriaAdapter<H>
@@ -350,6 +354,12 @@ where
             None
         };
 
+        let noria_read_behavior = if options.non_blocking_reads {
+            ReadBehavior::NonBlocking
+        } else {
+            ReadBehavior::Blocking
+        };
+
         let migration_style = if options.async_migrations {
             MigrationStyle::Async
         } else if options.explicit_migrations {
@@ -388,6 +398,7 @@ where
                         auto_increments.clone(),
                         query_cache.clone(),
                         None,
+                        noria_read_behavior,
                     )
                     .instrument(connection.in_scope(|| {
                         span!(Level::DEBUG, "Building migration task noria connector")
@@ -502,6 +513,7 @@ where
                     auto_increments.clone(),
                     query_cache.clone(),
                     region.clone(),
+                    noria_read_behavior,
                 )
                 .instrument(connection.in_scope(|| span!(Level::DEBUG, "Building noria connector")))
                 .await;

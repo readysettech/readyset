@@ -1,6 +1,7 @@
 use std::env;
 
 use async_trait::async_trait;
+use noria_client::backend::noria_connector::ReadBehavior;
 use noria_client::backend::BackendBuilder;
 use noria_client::Backend;
 use noria_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
@@ -16,6 +17,7 @@ pub async fn setup_w_fallback() -> (tokio_postgres::Config, Handle) {
         true,
         true,
         true,
+        ReadBehavior::Blocking,
     )
     .await
 }
@@ -26,6 +28,7 @@ pub async fn setup(partial: bool) -> (tokio_postgres::Config, Handle) {
         false,
         partial,
         true,
+        ReadBehavior::Blocking,
     )
     .await
 }

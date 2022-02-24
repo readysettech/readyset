@@ -6,7 +6,7 @@ use std::time::Duration;
 use nom_sql::SelectStatement;
 use noria::consensus::Authority;
 use noria::{ControllerHandle, ZookeeperAuthority};
-use noria_client::backend::noria_connector::{self, NoriaConnector};
+use noria_client::backend::noria_connector::{self, NoriaConnector, ReadBehavior};
 use noria_client::backend::{BackendBuilder, QueryResult};
 use noria_client::query_status_cache::QueryStatusCache;
 use noria_client::{Backend, UpstreamDatabase};
@@ -38,7 +38,14 @@ async fn main() {
     let mysql_url = String::from(mysql_url);
     let upstream = Some(MySqlUpstream::connect(mysql_url.clone()).await.unwrap());
 
-    let noria = NoriaConnector::new(ch.clone(), auto_increments, query_cache, None).await;
+    let noria = NoriaConnector::new(
+        ch.clone(),
+        auto_increments,
+        query_cache,
+        None,
+        ReadBehavior::Blocking,
+    )
+    .await;
     let query_status_cache = Arc::new(QueryStatusCache::new());
 
     let mut b: Backend<_, MySqlQueryHandler> = BackendBuilder::new()

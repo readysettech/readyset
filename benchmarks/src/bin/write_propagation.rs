@@ -27,7 +27,7 @@ use clap::{Parser, ValueHint};
 use nom_sql::SelectStatement;
 use noria::consensus::AuthorityType;
 use noria::{ControllerHandle, KeyComparison, View, ViewQuery};
-use noria_client::backend::noria_connector::NoriaConnector;
+use noria_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use noria_client::backend::{Backend, BackendBuilder};
 use noria_client::query_status_cache::QueryStatusCache;
 use noria_client::UpstreamDatabase;
@@ -111,7 +111,14 @@ impl Writer {
         let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
         let query_status_cache = Arc::new(QueryStatusCache::new());
         let upstream = Some(MySqlUpstream::connect(self.database_url.clone()).await?);
-        let noria = NoriaConnector::new(ch.clone(), auto_increments, query_cache, None).await;
+        let noria = NoriaConnector::new(
+            ch.clone(),
+            auto_increments,
+            query_cache,
+            None,
+            ReadBehavior::Blocking,
+        )
+        .await;
 
         let mut b = BackendBuilder::new()
             .require_authentication(false)
@@ -210,7 +217,7 @@ impl Writer {
             timestamp: None,
         };
 
-        let res = view.raw_lookup(vq).await?;
+        let res = view.raw_lookup(vq).await?.into_results().unwrap();
         assert_eq!(res.len(), 1);
         Ok(())
     }

@@ -319,7 +319,7 @@ impl NoriaExecutor {
                 timestamp: None,
             };
 
-            let r = self.view.raw_lookup(vq).await?;
+            let r = self.view.raw_lookup(vq).await?.into_results().unwrap();
             assert_eq!(r.len(), batch.len());
             assert!(r.iter().all(|rset| !rset.is_empty()));
 

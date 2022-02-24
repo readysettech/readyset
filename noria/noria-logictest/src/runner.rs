@@ -16,6 +16,7 @@ use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
 use noria::consensus::{Authority, LocalAuthorityStore};
 use noria::ControllerHandle;
+use noria_client::backend::noria_connector::ReadBehavior;
 use noria_client::backend::{BackendBuilder, NoriaConnector};
 use noria_client::query_status_cache::QueryStatusCache;
 use noria_client::UpstreamDatabase;
@@ -525,7 +526,14 @@ impl TestScript {
         let task = tokio::spawn(async move {
             let (s, _) = listener.accept().await.unwrap();
 
-            let noria = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
+            let noria = NoriaConnector::new(
+                ch,
+                auto_increments,
+                query_cache,
+                None,
+                ReadBehavior::Blocking,
+            )
+            .await;
             let query_status_cache = Arc::new(QueryStatusCache::new());
 
             macro_rules! make_backend {

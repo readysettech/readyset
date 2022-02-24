@@ -1011,7 +1011,7 @@ where
         event.destination = Some(QueryDestination::Noria);
         let _t = event.start_noria_timer();
 
-        match prep {
+        let res = match prep {
             Select {
                 statement_id: id, ..
             } => noria.execute_prepared_select(*id, params, ticket).await,
@@ -1025,7 +1025,14 @@ where
                 statement_id: id, ..
             } => noria.execute_prepared_delete(*id, params).await,
         }
-        .map(Into::into)
+        .map(Into::into);
+
+        drop(_t);
+        if let Err(e) = &res {
+            event.set_noria_error(e);
+        }
+
+        res
     }
 
     /// Execute a prepared statement on Noria
@@ -1087,7 +1094,6 @@ where
                 }
                 warn!(error = %noria_err, "Error received from noria, sending query to fallback");
 
-                event.set_noria_error(&noria_err);
                 Self::execute_upstream(upstream, upstream_prep, params, event, true).await
             }
         }

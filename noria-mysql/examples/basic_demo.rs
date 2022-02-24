@@ -7,7 +7,7 @@ use maplit::hashmap;
 use nom_sql::SelectStatement;
 use noria::consensus::Authority;
 use noria::{ControllerHandle, ZookeeperAuthority};
-use noria_client::backend::noria_connector::{self, NoriaConnector};
+use noria_client::backend::noria_connector::{self, NoriaConnector, ReadBehavior};
 use noria_client::backend::{BackendBuilder, QueryResult};
 use noria_client::query_status_cache::QueryStatusCache;
 use noria_client::Backend;
@@ -27,7 +27,14 @@ async fn main() -> Result<()> {
     let query_status_cache = Arc::new(QueryStatusCache::new());
 
     let upstream: Option<MySqlUpstream> = None;
-    let noria = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
+    let noria = NoriaConnector::new(
+        ch,
+        auto_increments,
+        query_cache,
+        None,
+        ReadBehavior::Blocking,
+    )
+    .await;
     let slowlog = false;
     let users: &'static HashMap<String, String> = Box::leak(Box::new(hashmap! {
         "user".to_owned() => "pw".to_owned()

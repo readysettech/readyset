@@ -19,7 +19,7 @@ use launchpad::intervals;
 use nom_sql::SqlIdentifier;
 use noria::consistency::Timestamp;
 use noria::metrics::recorded;
-use noria::{KeyComparison, ReadQuery, ReadReply, Tagged, ViewQuery};
+use noria::{KeyComparison, LookupResult, ReadQuery, ReadReply, Tagged, ViewQuery};
 use noria_errors::internal_err;
 use pin_project::pin_project;
 use serde::ser::Serializer;
@@ -247,7 +247,7 @@ impl ReadRequestHandler {
                 self.hit_ctr.increment(1);
                 return Ok(Ok(Tagged {
                     tag,
-                    v: ReadReply::Normal(Ok(ret)),
+                    v: ReadReply::Normal(Ok(LookupResult::Results(ret))),
                 }));
             }
             self.miss_ctr.increment(1);
@@ -271,7 +271,7 @@ impl ReadRequestHandler {
                 if !block {
                     Either::Left(future::ready(Ok(Tagged {
                         tag,
-                        v: ReadReply::Normal(Ok(ret)),
+                        v: ReadReply::Normal(Ok(LookupResult::NonBlockingMiss)),
                     })))
                 } else {
                     let (tx, rx) = tokio::sync::oneshot::channel();
@@ -646,7 +646,7 @@ impl BlockingRead {
         if self.pending_keys.is_empty() {
             Poll::Ready(Ok(Tagged {
                 tag: self.tag,
-                v: ReadReply::Normal(Ok(mem::take(&mut self.read))),
+                v: ReadReply::Normal(Ok(LookupResult::Results(mem::take(&mut self.read)))),
             }))
         } else {
             Poll::Pending
@@ -658,7 +658,7 @@ impl BlockingRead {
 mod readreply {
     use std::borrow::Cow;
 
-    use noria::{ReadReply, ReadySetError, Tagged};
+    use noria::{LookupResult, ReadReply, ReadySetError, Tagged};
     use noria_data::DataType;
 
     use super::SerializedReadReplyBatch;
@@ -667,15 +667,16 @@ mod readreply {
         let got: Tagged<ReadReply> = bincode::deserialize(
             &bincode::serialize(&Tagged {
                 tag: 32,
-                v: ReadReply::Normal::<SerializedReadReplyBatch>(Ok(data
-                    .iter()
-                    .map(|d| {
-                        super::serialize(
-                            d.iter()
-                                .map(|v| v.iter().map(Cow::Borrowed).collect::<Vec<_>>()),
-                        )
-                    })
-                    .collect())),
+                v: ReadReply::Normal::<SerializedReadReplyBatch>(Ok(LookupResult::Results(
+                    data.iter()
+                        .map(|d| {
+                            super::serialize(
+                                d.iter()
+                                    .map(|v| v.iter().map(Cow::Borrowed).collect::<Vec<_>>()),
+                            )
+                        })
+                        .collect(),
+                ))),
             })
             .unwrap(),
         )
@@ -683,7 +684,7 @@ mod readreply {
 
         match got {
             Tagged {
-                v: ReadReply::Normal(Ok(got)),
+                v: ReadReply::Normal(Ok(LookupResult::Results(got))),
                 tag: 32,
             } => {
                 assert_eq!(got.len(), data.len());
@@ -700,7 +701,9 @@ mod readreply {
         let got: Tagged<ReadReply> = bincode::deserialize(
             &bincode::serialize(&Tagged {
                 tag: 32,
-                v: ReadReply::Normal::<SerializedReadReplyBatch>(Ok(Vec::new())),
+                v: ReadReply::Normal::<SerializedReadReplyBatch>(Ok(LookupResult::Results(
+                    Vec::new(),
+                ))),
             })
             .unwrap(),
         )
@@ -708,7 +711,7 @@ mod readreply {
 
         match got {
             Tagged {
-                v: ReadReply::Normal(Ok(data)),
+                v: ReadReply::Normal(Ok(LookupResult::Results(data))),
                 tag: 32,
             } => {
                 assert!(data.is_empty());
@@ -807,15 +810,16 @@ mod readreply {
         for tag in 0..10 {
             w.send(Tagged {
                 tag,
-                v: ReadReply::Normal::<SerializedReadReplyBatch>(Ok(data
-                    .iter()
-                    .map(|d| {
-                        super::serialize(
-                            d.iter()
-                                .map(|v| v.iter().map(Cow::Borrowed).collect::<Vec<_>>()),
-                        )
-                    })
-                    .collect())),
+                v: ReadReply::Normal::<SerializedReadReplyBatch>(Ok(LookupResult::Results(
+                    data.iter()
+                        .map(|d| {
+                            super::serialize(
+                                d.iter()
+                                    .map(|v| v.iter().map(Cow::Borrowed).collect::<Vec<_>>()),
+                            )
+                        })
+                        .collect(),
+                ))),
             })
             .await
             .unwrap();
@@ -830,7 +834,7 @@ mod readreply {
 
             match got {
                 Tagged {
-                    v: ReadReply::Normal(Ok(got)),
+                    v: ReadReply::Normal(Ok(LookupResult::Results(got))),
                     tag: t,
                 } => {
                     assert_eq!(tag, t);

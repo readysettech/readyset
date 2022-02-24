@@ -30,7 +30,9 @@ use nom_sql::{BinaryOperator, OrderType};
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::consistency::Timestamp;
 use noria::internal::LocalNodeIndex;
-use noria::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery, ViewRequest};
+use noria::{
+    KeyComparison, LookupResult, Modification, SchemaType, ViewPlaceholder, ViewQuery, ViewRequest,
+};
 use noria_data::DataType;
 use noria_errors::ReadySetError::{MigrationPlanFailed, RpcFailed};
 use rusty_fork::rusty_fork_test;
@@ -160,13 +162,15 @@ async fn test_timestamp_propagation_simple() {
             timestamp: Some(t.clone()),
         })
         .await
+        .unwrap()
+        .into_results()
         .unwrap();
 
     assert_eq!(res[0], vec![vec![id.clone(), value.clone()]]);
 
     // Perform a read with a timestamp the reader cannot satisfy.
-    let res = cq
-        .raw_lookup(ViewQuery {
+    assert_eq!(
+        cq.raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::Equal(vec1![id.clone()])],
             block: false,
             filter: None,
@@ -175,9 +179,9 @@ async fn test_timestamp_propagation_simple() {
             timestamp: Some(timestamp(vec![(1, 4)])),
         })
         .await
-        .unwrap();
-
-    assert_eq!(res[0], Vec::new());
+        .unwrap(),
+        LookupResult::NonBlockingMiss
+    );
 }
 
 // Simulate writes from two clients.
@@ -243,6 +247,8 @@ async fn test_timestamp_propagation_multitable() {
             timestamp: Some(timestamp(vec![(0, 6), (1, 6)])),
         })
         .await
+        .unwrap()
+        .into_results()
         .unwrap();
 
     assert_eq!(res[0], vec![vec![DataType::Int(1), DataType::Int(2)]]);
@@ -250,17 +256,17 @@ async fn test_timestamp_propagation_multitable() {
     // Perform a non-blocking read with a timestamp that the reader should not
     // be able to satisfy. A non-blocking read of a satisfiable timestamp would
     // suceed here due to the previous read materializing the data.
-    let res = cq
-        .raw_lookup(ViewQuery {
+    assert_eq!(
+        cq.raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::Equal(vec1![DataType::Int(1)])],
             block: false,
             filter: None,
             timestamp: Some(timestamp(vec![(0, 6), (1, 7)])),
         })
         .await
-        .unwrap();
-
-    assert_eq!(res[0], Vec::new());
+        .unwrap(),
+        LookupResult::NonBlockingMiss
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -3749,6 +3755,8 @@ async fn between_parametrized() {
             true,
         )
         .await
+        .unwrap()
+        .into_results()
         .unwrap();
     let rows: Vec<Vec<Vec<DataType>>> = res.into_iter().map(|v| v.into()).collect();
     assert_eq!(rows, expected);
@@ -4287,6 +4295,8 @@ async fn non_sql_materialized_range_query() {
             false,
         )
         .await
+        .unwrap()
+        .into_results()
         .unwrap();
 
     assert_eq!(
@@ -4326,6 +4336,8 @@ async fn non_sql_range_upquery() {
             true,
         )
         .await
+        .unwrap()
+        .into_results()
         .unwrap();
 
     assert_eq!(
@@ -4414,6 +4426,8 @@ async fn range_upquery_after_point_queries() {
             true,
         )
         .await
+        .unwrap()
+        .into_results()
         .unwrap();
 
     assert_eq!(
@@ -4568,6 +4582,8 @@ async fn post_read_ilike() {
             timestamp: None,
         })
         .await
+        .unwrap()
+        .into_results()
         .unwrap();
 
     assert_eq!(
@@ -6690,6 +6706,8 @@ async fn straddled_join_range_query() {
             true,
         )
         .await
+        .unwrap()
+        .into_results()
         .unwrap();
 
     let res = rows
@@ -6739,6 +6757,8 @@ async fn overlapping_range_queries() {
                     true,
                 )
                 .await
+                .unwrap()
+                .into_results()
                 .unwrap();
             let ns = results
                 .into_iter()
@@ -6810,6 +6830,8 @@ async fn overlapping_remapped_range_queries() {
                     true,
                 )
                 .await
+                .unwrap()
+                .into_results()
                 .unwrap();
             let ns = results
                 .into_iter()
@@ -6878,6 +6900,8 @@ async fn range_query_through_union() {
             true,
         )
         .await
+        .unwrap()
+        .into_results()
         .unwrap();
 
     let res = rows
@@ -6973,6 +6997,8 @@ async fn mixed_inclusive_range_and_equality() {
             true,
         )
         .await
+        .unwrap()
+        .into_results()
         .unwrap()
         .into_iter()
         .next()
@@ -7544,7 +7570,7 @@ async fn aggressive_eviction_impl() {
             timestamp: None,
         };
 
-        let r = view.raw_lookup(vq).await.unwrap();
+        let r = view.raw_lookup(vq).await.unwrap().into_results().unwrap();
         assert_eq!(r.len(), keys.len());
     }
 }
