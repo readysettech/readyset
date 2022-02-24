@@ -706,11 +706,42 @@ pub enum ReadQuery {
     },
 }
 
+/// The result of a lookup to a view.
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub enum LookupResult<D> {
+    /// The view query was executed in non-blocking mode and resulted in a cache miss.
+    NonBlockingMiss,
+    /// The results of the view query lookup.
+    Results(Vec<D>),
+}
+
+impl<D> LookupResult<D> {
+    /// Maps a set of lookup results from Vec<D> to Vec<U>.
+    pub fn map_results<U, F>(self, f: F) -> LookupResult<U>
+    where
+        F: FnMut(D) -> U,
+    {
+        match self {
+            Self::NonBlockingMiss => LookupResult::NonBlockingMiss,
+            Self::Results(d) => LookupResult::Results(d.into_iter().map(f).collect()),
+        }
+    }
+
+    /// Converts a lookup result into the inner `Results` type.
+    pub fn into_results(self) -> Option<Vec<D>> {
+        if let Self::Results(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+}
+
 #[doc(hidden)]
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ReadReply<D = ReadReplyBatch> {
     /// A reply to a normal lookup request
-    Normal(ReadySetResult<Vec<D>>),
+    Normal(ReadySetResult<LookupResult<D>>),
     /// Read size of view
     Size(usize),
     // Read keys of view
@@ -719,7 +750,7 @@ pub enum ReadReply<D = ReadReplyBatch> {
 
 impl<D> ReadReply<D> {
     /// Convert this [`ReadReply`] into a [`ReadReply::Normal`], consuming self
-    pub fn into_normal(self) -> Option<ReadySetResult<Vec<D>>> {
+    pub fn into_normal(self) -> Option<ReadySetResult<LookupResult<D>>> {
         if let Self::Normal(v) = self {
             Some(v)
         } else {
@@ -935,7 +966,7 @@ impl From<(Vec<KeyComparison>, bool)> for ViewQuery {
 }
 
 impl Service<ViewQuery> for View {
-    type Response = Vec<Results>;
+    type Response = LookupResult<Results>;
     type Error = ReadySetError;
 
     type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
@@ -984,10 +1015,10 @@ impl Service<ViewQuery> for View {
                             .ok_or_else(|| {
                                 internal_err("Unexpected response type from reader service")
                             })?
-                            .map(|rows| {
-                                rows.into_iter()
-                                    .map(|rows| Results::new(rows.into(), Arc::clone(&columns)))
-                                    .collect()
+                            .map(|l| {
+                                l.map_results(|rows| {
+                                    Results::new(rows.into(), Arc::clone(&columns))
+                                })
                             })
                     })
                     .map_err(move |e| view_err(ni, e)),
@@ -1057,11 +1088,25 @@ impl Service<ViewQuery> for View {
                         .map_err(move |e| view_err(ni, e))
                 })
                 .collect::<FuturesUnordered<_>>()
-                .try_concat()
-                .map_ok(move |rows| {
-                    rows.into_iter()
-                        .map(|rows| Results::new(rows.into(), Arc::clone(&columns)))
-                        .collect()
+                .try_collect::<Vec<LookupResult<ReadReplyBatch>>>()
+                .map_ok(move |e| {
+                    // Flatten this to a single LookupResult<Results>.
+                    e.into_iter()
+                        .fold(LookupResult::Results(Vec::new()), |mut acc, x| {
+                            if let LookupResult::Results(d) = &mut acc {
+                                match x {
+                                    LookupResult::NonBlockingMiss => {
+                                        return LookupResult::NonBlockingMiss;
+                                    }
+                                    LookupResult::Results(u) => {
+                                        d.extend(u.into_iter().map(|rows| {
+                                            Results::new(rows.into(), Arc::clone(&columns))
+                                        }));
+                                    }
+                                }
+                            }
+                            acc
+                        })
                 }),
         )
     }
@@ -1170,7 +1215,7 @@ impl View {
     /// The method will block if the results are not yet available only when `block` is `true`.
     /// If `block` is false, misses will be returned as empty results. Any requested keys that have
     /// missing state will be backfilled (asynchronously if `block` is `false`).
-    pub async fn raw_lookup(&mut self, query: ViewQuery) -> ReadySetResult<Vec<Results>> {
+    pub async fn raw_lookup(&mut self, query: ViewQuery) -> ReadySetResult<LookupResult<Results>> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
         self.call(query).await
     }
@@ -1191,7 +1236,7 @@ impl View {
         &mut self,
         key_comparisons: Vec<KeyComparison>,
         block: bool,
-    ) -> ReadySetResult<Vec<Results>> {
+    ) -> ReadySetResult<LookupResult<Results>> {
         self.raw_lookup((key_comparisons, block, None).into()).await
     }
 
@@ -1225,7 +1270,9 @@ impl View {
         let rs = self
             .multi_lookup_ryw(vec![KeyComparison::Equal(key)], block, ticket)
             .await?;
-        rs.into_iter()
+        rs.into_results()
+            .ok_or_else(|| internal_err("incorrect type returned for lookup"))?
+            .into_iter()
             .next()
             .ok_or_else(|| internal_err("no result found for key"))
     }
@@ -1241,7 +1288,7 @@ impl View {
         key_comparisons: Vec<KeyComparison>,
         block: bool,
         ticket: Option<Timestamp>,
-    ) -> ReadySetResult<Vec<Results>> {
+    ) -> ReadySetResult<LookupResult<Results>> {
         self.raw_lookup((key_comparisons, block, ticket).into())
             .await
     }
@@ -1265,6 +1312,8 @@ impl View {
             .multi_lookup_ryw(vec![KeyComparison::Equal(key)], block, ticket)
             .await?;
         Ok(rs
+            .into_results()
+            .ok_or_else(|| internal_err("incorrect type returned for lookup"))?
             .into_iter()
             .next()
             .ok_or_else(|| internal_err("no result found for key"))?

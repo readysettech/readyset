@@ -235,6 +235,10 @@ pub enum ReadySetError {
     #[error("the query specified an empty lookup key")]
     EmptyKey,
 
+    /// The queries lookup key is not found at the reader - a cache miss.
+    #[error("the queries lookup key is not found at the reader")]
+    ReaderMissingKey,
+
     /// A prepared statement is missing.
     #[error("Prepared statement with ID {statement_id} not found")]
     PreparedStatementMissing {

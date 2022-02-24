@@ -9,7 +9,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use nom_sql::SelectStatement;
 use noria::consensus::{Authority, LocalAuthorityStore};
-use noria_client::backend::noria_connector::NoriaConnector;
+use noria_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use noria_client::backend::{BackendBuilder, MigrationMode};
 use noria_client::query_status_cache::QueryStatusCache;
 use noria_client::{Backend, QueryHandler, UpstreamDatabase};
@@ -54,6 +54,7 @@ pub async fn setup<A>(
     fallback: bool,
     partial: bool,
     wait_for_backend: bool,
+    read_behavior: ReadBehavior,
 ) -> (A::ConnectionOpts, Handle)
 where
     A: Adapter + 'static,
@@ -68,6 +69,7 @@ where
         MigrationMode::InRequestPath,
         true,
         false,
+        read_behavior,
     )
     .await
 }
@@ -110,6 +112,7 @@ where
         MigrationMode::OutOfBand, // Must use CREATE CACHED QUERY to migrate queries.
         recreate_database,
         true, // Allow unsupported set for testing.
+        ReadBehavior::Blocking,
     )
     .await
 }
@@ -126,6 +129,7 @@ pub async fn setup_inner<A>(
     mode: MigrationMode,
     recreate_database: bool,
     allow_unsupported_set: bool,
+    read_behavior: ReadBehavior,
 ) -> (A::ConnectionOpts, Handle)
 where
     A: Adapter + 'static,
@@ -173,7 +177,8 @@ where
             let authority = authority.clone();
 
             let ch = ControllerHandle::new(authority).await;
-            let noria = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
+            let noria =
+                NoriaConnector::new(ch, auto_increments, query_cache, None, read_behavior).await;
             // backend either has upstream or noria writer
             let upstream = if let Some(f) = fallback.as_ref() {
                 Some(A::make_upstream(f.clone()).await)

@@ -4,12 +4,23 @@ use std::fmt::Display;
 use async_trait::async_trait;
 use msql_srv::MysqlIntermediary;
 use mysql_async::prelude::Queryable;
-use noria_client::backend::{BackendBuilder, MigrationMode};
+use mysql_async::Conn;
+use noria_client::backend::noria_connector::ReadBehavior;
+use noria_client::backend::{BackendBuilder, MigrationMode, QueryInfo};
 use noria_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
 use noria_server::Handle;
 use tokio::net::TcpStream;
 
 use crate::Adapter;
+
+/// Retrieves where the query executed by parsing the row returned by
+/// EXPLAIN LAST STATEMENT.
+pub async fn last_query_info(conn: &mut Conn) -> QueryInfo {
+    conn.query_first::<'_, QueryInfo, _>("EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .unwrap()
+}
 
 pub async fn recreate_database<N>(dbname: N)
 where
@@ -92,6 +103,20 @@ pub async fn setup(partial: bool) -> (mysql_async::Opts, Handle) {
         false,
         partial,
         true,
+        ReadBehavior::Blocking,
+    )
+    .await
+}
+
+pub async fn setup_with_read_behavior(read_behavior: ReadBehavior) -> (mysql_async::Opts, Handle) {
+    crate::setup::<MySQLAdapter>(
+        BackendBuilder::new()
+            .require_authentication(false)
+            .explain_last_statement(true),
+        false,
+        true,
+        true,
+        read_behavior,
     )
     .await
 }
@@ -116,6 +141,7 @@ pub async fn query_cache_setup(
         migration_mode,
         true,  // recreate database.
         false, //allow unsupported set
+        ReadBehavior::Blocking,
     )
     .await
 }

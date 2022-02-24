@@ -3,10 +3,13 @@ use std::convert::TryFrom;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use mysql_async::prelude::*;
 use noria::status::ReadySetStatus;
+use noria_client::backend::noria_connector::ReadBehavior;
 use noria_client::backend::QueryInfo;
 use noria_client_metrics::QueryDestination;
-use noria_client_test_helpers::mysql_helpers::setup;
+use noria_client_test_helpers::mysql_helpers::{last_query_info, setup, setup_with_read_behavior};
 use noria_client_test_helpers::sleep;
+use noria_errors::ReadySetError;
+
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_basic() {
     let (opts, _handle) = setup(true).await;
@@ -1583,4 +1586,34 @@ async fn show_readyset_status() {
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     let ret: Vec<mysql::Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
     assert!(ReadySetStatus::try_from(ret).is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn simple_nonblocking_select() {
+    let (opts, _handle) = setup_with_read_behavior(ReadBehavior::NonBlocking).await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TABLE test (x int, y int)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.query_drop("INSERT INTO test (x, y) VALUES (4, 2)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    let res: Result<Vec<mysql_async::Row>, _> =
+        conn.exec("SELECT * FROM test WHERE x = 4", ()).await;
+    assert_eq!(
+        last_query_info(&mut conn).await.noria_error,
+        ReadySetError::ReaderMissingKey.to_string()
+    );
+    assert!(res.is_err());
+
+    // Long enough to wait for upquery.
+    sleep().await;
+
+    let mut rows: Vec<(i32, i32)> = conn.exec("SELECT * FROM test", ()).await.unwrap();
+    rows.sort_by_key(|(a, _)| *a);
+    assert_eq!(rows, vec![(4, 2)]);
 }

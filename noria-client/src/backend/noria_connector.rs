@@ -379,6 +379,25 @@ pub struct NoriaConnector {
     /// to allow returning references to schemas from views all the way to msql-srv,
     /// but on subsequent requests, do not use a failed view.
     failed_views: HashSet<String>,
+
+    /// How to handle issuing reads against Noria. See [`ReadBehavior`].
+    read_behavior: ReadBehavior,
+}
+
+/// The read behavior used when executing a read against Noria.
+#[derive(Clone, Copy)]
+pub enum ReadBehavior {
+    /// If Noria is unable to immediately service the read due to a cache miss, block on the
+    /// response.
+    Blocking,
+    /// If Noria is unable to immediately service the read, return an error.
+    NonBlocking,
+}
+
+impl ReadBehavior {
+    fn is_blocking(&self) -> bool {
+        matches!(self, Self::Blocking)
+    }
 }
 
 /// Used when we can determine that the params for 'OFFSET ?' or 'LIMIT ?' passed in
@@ -406,6 +425,7 @@ impl Clone for NoriaConnector {
             prepared_statement_cache: self.prepared_statement_cache.clone(),
             region: self.region.clone(),
             failed_views: self.failed_views.clone(),
+            read_behavior: self.read_behavior,
         }
     }
 }
@@ -416,6 +436,7 @@ impl NoriaConnector {
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         region: Option<String>,
+        read_behavior: ReadBehavior,
     ) -> Self {
         let backend = NoriaBackendInner::new(ch).await;
         if let Err(e) = &backend {
@@ -431,6 +452,7 @@ impl NoriaConnector {
             prepared_statement_cache: HashMap::new(),
             region,
             failed_views: HashSet::new(),
+            read_behavior,
         }
     }
 
@@ -1225,7 +1247,7 @@ impl NoriaConnector {
         let keys = processed.make_keys(&[])?;
 
         trace!(%qname, "query::select::do");
-        let res = do_read(getter, &query, keys, ticket).await;
+        let res = do_read(getter, &query, keys, ticket, self.read_behavior).await;
         if let Err(e) = res.as_ref() {
             if e.is_networking_related() {
                 self.failed_views.insert(qname.to_owned());
@@ -1357,6 +1379,7 @@ impl NoriaConnector {
                     statement,
                     processed_query_params.make_keys(params)?,
                     ticket,
+                    self.read_behavior,
                 )
                 .await
             }
@@ -1398,6 +1421,7 @@ fn build_view_query(
     q: &nom_sql::SelectStatement,
     mut raw_keys: Vec<Cow<'_, [DataType]>>,
     ticket: Option<Timestamp>,
+    read_behavior: ReadBehavior,
 ) -> ReadySetResult<ViewQuery> {
     let projected_schema = getter_schema.schema(SchemaType::ProjectedSchema);
 
@@ -1566,7 +1590,7 @@ fn build_view_query(
 
     Ok(ViewQuery {
         key_comparisons: keys,
-        block: true,
+        block: read_behavior.is_blocking(),
         filter: filters
             .into_iter()
             .reduce(|expr1, expr2| DataflowExpression::Op {
@@ -1586,6 +1610,7 @@ async fn do_read<'a>(
     q: &nom_sql::SelectStatement,
     raw_keys: Vec<Cow<'_, [DataType]>>,
     ticket: Option<Timestamp>,
+    read_behavior: ReadBehavior,
 ) -> ReadySetResult<QueryResult<'a>> {
     let use_bogo = raw_keys.is_empty();
     let vq = build_view_query(
@@ -1596,8 +1621,13 @@ async fn do_read<'a>(
         q,
         raw_keys,
         ticket,
+        read_behavior,
     )?;
-    let data = getter.raw_lookup(vq).await?;
+    let data = getter
+        .raw_lookup(vq)
+        .await?
+        .into_results()
+        .ok_or(ReadySetError::ReaderMissingKey)?;
     trace!("select::complete");
 
     Ok(QueryResult::Select {
@@ -1729,6 +1759,7 @@ mod tests {
                 &parse_select_statement("SELECT t.x FROM t WHERE t.x = $1"),
                 vec![vec![DataType::from(1)].into()],
                 None,
+                ReadBehavior::Blocking,
             )
             .unwrap();
 
@@ -1747,6 +1778,7 @@ mod tests {
                 &parse_select_statement("SELECT t.x FROM t WHERE t.x BETWEEN $1 AND $2"),
                 vec![vec![DataType::from(1), DataType::from(2)].into()],
                 None,
+                ReadBehavior::Blocking,
             )
             .unwrap();
 
@@ -1770,6 +1802,7 @@ mod tests {
                 &parse_select_statement("SELECT t.x FROM t WHERE t.x = $1 AND t.y ILIKE $2"),
                 vec![vec![DataType::from(1), DataType::from("%a%")].into()],
                 None,
+                ReadBehavior::Blocking,
             )
             .unwrap();
 
@@ -1794,6 +1827,7 @@ mod tests {
                 &parse_select_statement("SELECT t.x FROM t WHERE t.x >= $1 AND t.y = $2"),
                 vec![vec![DataType::from(1), DataType::from("a")].into()],
                 None,
+                ReadBehavior::Blocking,
             )
             .unwrap();
 
@@ -1819,6 +1853,7 @@ mod tests {
                 ),
                 vec![vec![DataType::from(1), DataType::from(2), DataType::from("a")].into()],
                 None,
+                ReadBehavior::Blocking,
             )
             .unwrap();
 
@@ -1843,6 +1878,7 @@ mod tests {
                 &parse_select_statement("SELECT t.x FROM t WHERE t.x > $1 AND t.y = $2"),
                 vec![vec![DataType::from(1), DataType::from("a")].into()],
                 None,
+                ReadBehavior::Blocking,
             )
             .unwrap();
 
@@ -1874,6 +1910,7 @@ mod tests {
                 &parse_select_statement("SELECT t.x FROM t WHERE t.x > $1 AND t.y > $2"),
                 vec![vec![DataType::from(1), DataType::from("a")].into()],
                 None,
+                ReadBehavior::Blocking,
             )
             .unwrap();
 

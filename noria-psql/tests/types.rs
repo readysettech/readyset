@@ -1,5 +1,5 @@
+use noria_client::backend::noria_connector::ReadBehavior;
 use noria_client::backend::BackendBuilder;
-use noria_client_test_helpers;
 use noria_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use noria_server::Handle;
 
@@ -12,6 +12,7 @@ async fn setup() -> (tokio_postgres::Config, Handle) {
         true,
         true,
         true,
+        ReadBehavior::Blocking,
     )
     .await
 }
