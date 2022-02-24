@@ -219,6 +219,18 @@ pub enum ReadySetError {
         workers: Vec<Url>,
     },
 
+    /// A reader could not be found at the given worker.
+    #[error("Reader not found")]
+    ReaderNotFound,
+
+    /// The request cannot be serviced because the server is shutting down.
+    #[error("Server is shutting down")]
+    ServerShuttingDown,
+
+    /// Upquery timeout reached.
+    #[error("Upquery timeout")]
+    UpqueryTimeout,
+
     /// The query specified an empty lookup key.
     #[error("the query specified an empty lookup key")]
     EmptyKey,

@@ -1,6 +1,7 @@
 use core::task::Context;
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::future::Future;
 use std::task::Poll;
@@ -19,6 +20,7 @@ use nom_sql::SqlIdentifier;
 use noria::consistency::Timestamp;
 use noria::metrics::recorded;
 use noria::{KeyComparison, ReadQuery, ReadReply, Tagged, ViewQuery};
+use noria_errors::internal_err;
 use pin_project::pin_project;
 use serde::ser::Serializer;
 use stream_cancel::Valve;
@@ -68,7 +70,9 @@ impl From<Vec<u8>> for SerializedReadReplyBatch {
     }
 }
 
-type Ack = tokio::sync::oneshot::Sender<Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>>;
+type Ack = tokio::sync::oneshot::Sender<
+    Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>,
+>;
 
 struct ReadRequestHandler {
     readers: Readers,
@@ -98,7 +102,8 @@ impl ReadRequestHandler {
         tag: u32,
         target: (NodeIndex, SqlIdentifier, usize),
         query: ViewQuery,
-    ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
+    ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send
+    {
         let ViewQuery {
             mut key_comparisons,
             block,
@@ -107,13 +112,19 @@ impl ReadRequestHandler {
         } = query;
         let immediate = READERS.with(|readers_cache| {
             let mut readers_cache = readers_cache.borrow_mut();
-            // TODO(ENG-845): We currently assume that a reader *must* exist if we have gotten a
-            // view to it. This may not always be true if queries can be removed. A
-            // client should not be able to continue to query with a view.
-            let reader = readers_cache.entry(target.clone()).or_insert_with(|| {
-                let readers = self.readers.lock().unwrap();
-                readers.get(&target).unwrap().clone()
-            });
+            let reader = match readers_cache.entry(target.clone()) {
+                Occupied(v) => v.into_mut(),
+                Vacant(v) => {
+                    let readers = self.readers.lock().unwrap();
+
+                    v.insert(
+                        readers
+                            .get(&target)
+                            .ok_or(ReadySetError::ReaderNotFound)?
+                            .clone(),
+                    )
+                }
+            };
 
             let mut ret = Vec::with_capacity(key_comparisons.len());
             let consistency_miss = !has_sufficient_timestamp(reader, &timestamp);
@@ -251,7 +262,7 @@ impl ReadRequestHandler {
 
         let immediate = match immediate {
             Ok(v) => v,
-            Err(()) => return Either::Right(Either::Left(async move { Err(()) })),
+            Err(e) => return Either::Right(Either::Left(async move { Err(e) })),
         };
 
         match immediate {
@@ -287,10 +298,10 @@ impl ReadRequestHandler {
                     ));
                     if r.is_err() {
                         // we're shutting down
-                        return Either::Left(future::ready(Err(())));
+                        return Either::Left(future::ready(Err(ReadySetError::ServerShuttingDown)));
                     }
                     Either::Right(Either::Right(rx.map(|r| match r {
-                        Err(_) => Err(()),
+                        Err(e) => Err(internal_err(e.to_string())),
                         Ok(r) => r,
                     })))
                 }
@@ -302,7 +313,8 @@ impl ReadRequestHandler {
         &mut self,
         tag: u32,
         target: (NodeIndex, SqlIdentifier, usize),
-    ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
+    ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send
+    {
         let size = READERS.with(|readers_cache| {
             let mut readers_cache = readers_cache.borrow_mut();
             let reader = readers_cache.entry(target.clone()).or_insert_with(|| {
@@ -323,7 +335,8 @@ impl ReadRequestHandler {
         &mut self,
         tag: u32,
         target: (NodeIndex, SqlIdentifier, usize),
-    ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
+    ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send
+    {
         let keys = READERS.with(|readers_cache| {
             let mut readers_cache = readers_cache.borrow_mut();
             let read_handle = self.readers.lock().unwrap().get(&target).unwrap().clone();
@@ -338,7 +351,7 @@ impl ReadRequestHandler {
 
 impl Service<Tagged<ReadQuery>> for ReadRequestHandler {
     type Response = Tagged<ReadReply<SerializedReadReplyBatch>>;
-    type Error = ();
+    type Error = ReadySetError;
     type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -409,10 +422,8 @@ pub(crate) async fn listen(
         );
         tokio::spawn(server.map_err(|e| {
             match e {
-                server::Error::Service(()) => {
-                    // server is shutting down -- no need to report this error
-                    return;
-                }
+                // server is shutting down -- no need to report this error
+                server::Error::Service(ReadySetError::ServerShuttingDown) => {}
                 server::Error::BrokenTransportRecv(ref e)
                 | server::Error::BrokenTransportSend(ref e) => {
                     if let bincode::ErrorKind::Io(ref e) = **e {
@@ -420,12 +431,13 @@ pub(crate) async fn listen(
                             || e.kind() == std::io::ErrorKind::ConnectionReset
                         {
                             // client went away
-                            return;
                         }
+                    } else {
+                        error!(error = ?e, "client transport error");
                     }
                 }
+                e => error!(error = ?e, "reader service error"),
             }
-            error!(error = ?e, "reader client protocol error");
         }));
     }
 }
@@ -536,7 +548,9 @@ impl std::fmt::Debug for BlockingRead {
 }
 
 impl BlockingRead {
-    fn check(&mut self) -> Poll<Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> {
+    fn check(
+        &mut self,
+    ) -> Poll<Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> {
         READERS.with(|readers_cache| {
             let mut readers_cache = readers_cache.borrow_mut();
             let s = &self.truth;
@@ -581,7 +595,7 @@ impl BlockingRead {
                                 // map has been deleted, so server is shutting down
                                 self.pending_indices.clear();
                                 self.pending_keys.clear();
-                                return Err(());
+                                return Err(ReadySetError::ServerShuttingDown);
                             }
                         }
                     }
@@ -592,7 +606,7 @@ impl BlockingRead {
                     // evicted again without us reading it.
                     if !reader.trigger(self.pending_keys.iter()) {
                         // server is shutting down and won't do the backfill
-                        return Err(());
+                        return Err(ReadySetError::ServerShuttingDown);
                     }
 
                     self.trigger_timeout =
@@ -622,7 +636,7 @@ impl BlockingRead {
                 }
 
                 if waited > self.upquery_timeout {
-                    return Err(());
+                    return Err(ReadySetError::UpqueryTimeout);
                 }
             }
 
