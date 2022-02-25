@@ -99,6 +99,7 @@ pub struct WorkerElectionState {
     controller_uri: Url,
 }
 
+/// A handle for sending messages to a domain in-process.
 pub struct DomainHandle {
     req_tx: Sender<WrappedDomainRequest>,
     /// Can be used to send an abort signal to the domain
