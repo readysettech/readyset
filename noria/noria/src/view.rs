@@ -1173,6 +1173,11 @@ impl View {
         &*self.columns
     }
 
+    /// Get a slice of the columns.
+    pub fn column_slice(&self) -> Arc<[SqlIdentifier]> {
+        Arc::clone(&self.columns)
+    }
+
     /// Get the schema definition of this view.
     pub fn schema(&self) -> Option<&ViewSchema> {
         self.schema.as_ref()
@@ -1182,6 +1187,11 @@ impl View {
     /// view refers to.
     pub fn node(&self) -> &NodeIndex {
         &self.node
+    }
+
+    /// Name associated with the reader associated with the view.
+    pub fn name(&self) -> SqlIdentifier {
+        self.name.clone()
     }
 
     /// Get the current size of this view.
@@ -1381,7 +1391,13 @@ impl View {
 #[derive(Debug, Default)]
 #[doc(hidden)]
 #[repr(transparent)]
-pub struct ReadReplyBatch(Vec<Vec<DataType>>);
+pub struct ReadReplyBatch(pub Vec<Vec<DataType>>);
+
+impl ReadReplyBatch {
+    pub fn empty() -> Self {
+        Self(Vec::new())
+    }
+}
 
 use serde::de::{self, DeserializeSeed, Deserializer, Visitor};
 impl<'de> Deserialize<'de> for ReadReplyBatch {
