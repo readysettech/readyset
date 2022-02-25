@@ -28,3 +28,6 @@ noria-client = { path = ".." }
 noria-client-metrics = { path = "../metrics" }
 readyset-tracing = { path = "../../readyset-tracing" }
 chrono = "0.4"
+
+noria-dataflow = { path = "../../noria/server/dataflow" }
+noria-server = { path = "../../noria/server/" }

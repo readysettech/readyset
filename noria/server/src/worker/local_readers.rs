@@ -1,87 +1,39 @@
-#![allow(missing_docs)]
+//! A duplicate of the `readers` file that instead returns a ReadReplyBatch rather than a
+//! SerializedReadReplyBatch.
 
-use core::task::Context;
+#![allow(missing_docs)]
 use std::borrow::Cow;
-use std::cell::RefCell;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::HashMap;
 use std::future::Future;
-use std::pin::Pin;
 use std::task::Poll;
 use std::time::Duration;
 use std::{mem, time};
 
-use async_bincode::AsyncBincodeStream;
-use dataflow::prelude::{DataType, *};
+use dataflow::prelude::*;
 use dataflow::{Expression as DataflowExpression, Readers, SingleReadHandle};
-use failpoint_macros::set_failpoint;
 use futures_util::future;
-use futures_util::future::{Either, FutureExt, TryFutureExt};
-use futures_util::stream::{StreamExt, TryStreamExt};
+use futures_util::future::{Either, FutureExt};
 use launchpad::intervals;
 use nom_sql::SqlIdentifier;
 use noria::consistency::Timestamp;
 use noria::metrics::recorded;
-use noria::{KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyStats, Tagged, ViewQuery};
+use noria::{
+    KeyComparison, LookupResult, ReadReply, ReadReplyBatch, ReadReplyStats, Tagged, ViewQuery,
+};
 use noria_errors::internal_err;
 use pin_project::pin_project;
-use readyset_tracing::instrument_remote;
-use readyset_tracing::presampled::instrument_if_enabled;
-use readyset_tracing::propagation::Instrumented;
-use serde::ser::Serializer;
-use stream_cancel::Valve;
-use tokio::task_local;
-use tokio_stream::wrappers::TcpListenerStream;
-use tokio_tower::multiplex::server;
-use tower::Service;
-use tracing::{error, warn};
+use tracing::warn;
 
-/// Retry reads every this often.
-const RETRY_TIMEOUT: Duration = Duration::from_micros(100);
+use crate::worker::readers::READERS;
 
 /// If a blocking reader finds itself waiting this long for a backfill to complete, it will
 /// re-issue the replay request. To avoid the system falling over if replays are slow for a little
 /// while, waiting readers will use exponential backoff on this delay if they continue to miss.
 const TRIGGER_TIMEOUT_MS: u64 = 20;
 
-task_local! {
-    pub static READERS: RefCell<HashMap<
-        (NodeIndex, SqlIdentifier, usize),
-        SingleReadHandle,
-    >>;
-}
-
-/// A read reply batch serialized to a Vec<u8>. Can be deserialized to a
-/// ReplyBatch.
-#[derive(Debug)]
-#[repr(transparent)]
-pub struct SerializedReadReplyBatch(Vec<u8>);
-
-impl serde::Serialize for SerializedReadReplyBatch {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_bytes(&self.0)
-    }
-}
-
-impl SerializedReadReplyBatch {
-    fn empty() -> Self {
-        serialize(vec![])
-    }
-}
-
-impl From<Vec<u8>> for SerializedReadReplyBatch {
-    fn from(v: Vec<u8>) -> Self {
-        Self(v)
-    }
-}
-
 /// An Ack to resolve a blocking read.
-type Ack = tokio::sync::oneshot::Sender<
-    Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>,
->;
+pub type Ack =
+    tokio::sync::oneshot::Sender<Result<Tagged<ReadReply<ReadReplyBatch>>, ReadySetError>>;
 
 /// Creates a handler that can be used to perform read queries against a set of
 /// Readers.
@@ -96,7 +48,7 @@ pub struct ReadRequestHandler {
 
 impl ReadRequestHandler {
     /// Creates a new request handler that can be used to query Readers.
-    fn new(
+    pub fn new(
         readers: Readers,
         wait: tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
         upquery_timeout: Duration,
@@ -110,13 +62,12 @@ impl ReadRequestHandler {
         }
     }
 
-    fn handle_normal_read_query(
+    pub fn handle_normal_read_query(
         &mut self,
         tag: u32,
         target: (NodeIndex, SqlIdentifier, usize),
         query: ViewQuery,
-    ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send
-    {
+    ) -> impl Future<Output = Result<Tagged<ReadReply<ReadReplyBatch>>, ReadySetError>> + Send {
         let ViewQuery {
             mut key_comparisons,
             block,
@@ -165,7 +116,7 @@ impl ReadRequestHandler {
             // sufficiently up to date.
             for (i, key) in key_comparisons.drain(..).enumerate() {
                 if !ready {
-                    ret.push(SerializedReadReplyBatch::empty());
+                    ret.push(ReadReplyBatch::empty());
                     continue;
                 }
 
@@ -173,7 +124,7 @@ impl ReadRequestHandler {
                 match do_lookup(reader, &key, &filter) {
                     Ok(rs) => {
                         if consistency_miss {
-                            ret.push(SerializedReadReplyBatch::empty());
+                            ret.push(ReadReplyBatch::empty());
                         } else {
                             // immediate hit!
                             ret.push(rs);
@@ -182,7 +133,7 @@ impl ReadRequestHandler {
                     Err(NotReady) => {
                         // map not yet ready
                         ready = false;
-                        ret.push(SerializedReadReplyBatch::empty());
+                        ret.push(ReadReplyBatch::empty());
                     }
                     Err(Error(e)) => {
                         return Ok(Ok(Tagged {
@@ -192,7 +143,7 @@ impl ReadRequestHandler {
                     }
                     Err(miss) => {
                         // need to trigger partial replay for this key
-                        ret.push(SerializedReadReplyBatch::empty());
+                        ret.push(ReadReplyBatch::empty());
 
                         let misses = miss.into_misses();
 
@@ -321,225 +272,39 @@ impl ReadRequestHandler {
             }
         }
     }
-
-    fn handle_size_query(
-        &mut self,
-        tag: u32,
-        target: (NodeIndex, SqlIdentifier, usize),
-    ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send
-    {
-        let size = READERS.with(|readers_cache| {
-            let mut readers_cache = readers_cache.borrow_mut();
-            let reader = readers_cache.entry(target.clone()).or_insert_with(|| {
-                let readers = self.readers.lock().unwrap();
-                readers.get(&target).unwrap().clone()
-            });
-
-            reader.len()
-        });
-
-        future::ready(Ok(Tagged {
-            tag,
-            v: ReadReply::Size(size),
-        }))
-    }
-
-    fn handle_keys_query(
-        &mut self,
-        tag: u32,
-        target: (NodeIndex, SqlIdentifier, usize),
-    ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send
-    {
-        let keys = READERS.with(|readers_cache| {
-            let mut readers_cache = readers_cache.borrow_mut();
-            let read_handle = self.readers.lock().unwrap().get(&target).unwrap().clone();
-            readers_cache.entry(target).or_insert(read_handle).keys()
-        });
-        future::ready(Ok(Tagged {
-            tag,
-            v: ReadReply::Keys(keys),
-        }))
-    }
 }
 
-#[pin_project(project = ReadResponseFutureProj)]
-enum ReadResponseFuture<N, S, K>
-where
-    N: Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send,
-    S: Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send,
-    K: Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send,
-{
-    Normal(#[pin] N),
-    Size(#[pin] S),
-    Keys(#[pin] K),
-}
-
-impl<N, S, K> Future for ReadResponseFuture<N, S, K>
-where
-    N: Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send,
-    S: Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send,
-    K: Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send,
-{
-    type Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>;
-    #[inline]
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.project() {
-            ReadResponseFutureProj::Normal(f) => f.poll(cx),
-            ReadResponseFutureProj::Size(f) => f.poll(cx),
-            ReadResponseFutureProj::Keys(f) => f.poll(cx),
-        }
-    }
-}
-
-impl Service<Instrumented<Tagged<ReadQuery>>> for ReadRequestHandler {
-    type Response = Tagged<ReadReply<SerializedReadReplyBatch>>;
-    type Error = ReadySetError;
-    type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
-
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    #[instrument_remote(level = "info")]
-    #[inline]
-    fn call(&mut self, #[instrumented] m: Tagged<ReadQuery>) -> Self::Future {
-        let tag = m.tag;
-        match m.v {
-            ReadQuery::Normal { target, query } => {
-                let future = self.handle_normal_read_query(tag, target, query);
-                let span = readyset_tracing::child_span!(INFO, "normal_read_query");
-                ReadResponseFuture::Normal(instrument_if_enabled(future, span))
-            }
-            ReadQuery::Size { target } => {
-                let future = self.handle_size_query(tag, target);
-                let span = readyset_tracing::child_span!(INFO, "size_query");
-                ReadResponseFuture::Size(instrument_if_enabled(future, span))
-            }
-            ReadQuery::Keys { target } => {
-                let future = self.handle_keys_query(tag, target);
-                let span = readyset_tracing::child_span!(INFO, "keys_query");
-                ReadResponseFuture::Keys(instrument_if_enabled(future, span))
-            }
-        }
-    }
-}
-
-pub(crate) async fn listen(
-    valve: Valve,
-    on: tokio::net::TcpListener,
-    readers: Readers,
-    upquery_timeout: Duration,
-) {
-    let mut stream = valve.wrap(TcpListenerStream::new(on)).into_stream();
-    while let Some(stream) = stream.next().await {
-        set_failpoint!("read-query");
-        if stream.is_err() {
-            // io error from client: just ignore it
-            continue;
-        }
-
-        let stream = stream.unwrap();
-        let readers = readers.clone();
-        stream.set_nodelay(true).expect("could not set TCP_NODELAY");
-
-        // future that ensures all blocking reads are handled in FIFO order
-        // and avoid hogging the executors with read retries
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
-
-        let retries = READERS.scope(Default::default(), async move {
-            let upquery_hist = metrics::register_histogram!(recorded::SERVER_VIEW_UPQUERY_DURATION);
-            while let Some((mut pending, ack)) = rx.recv().await {
-                // A blocking read always comes immediately after a miss, so no reason to retry it
-                // right away better to wait a bit
-                tokio::time::sleep(RETRY_TIMEOUT / 4).await;
-                loop {
-                    if let Poll::Ready(res) = pending.check() {
-                        upquery_hist.record(pending.first.elapsed().as_micros() as f64);
-                        let _ = ack.send(res);
-                        break;
-                    }
-                    tokio::time::sleep(RETRY_TIMEOUT).await;
-                }
-            }
-        });
-        tokio::spawn(retries);
-
-        let r = ReadRequestHandler::new(readers, tx, upquery_timeout);
-
-        let server = READERS.scope(
-            Default::default(),
-            server::Server::new(AsyncBincodeStream::from(stream).for_async(), r),
-        );
-        tokio::spawn(server.map_err(|e| {
-            match e {
-                // server is shutting down -- no need to report this error
-                server::Error::Service(ReadySetError::ServerShuttingDown) => {}
-                server::Error::BrokenTransportRecv(ref e)
-                | server::Error::BrokenTransportSend(ref e) => {
-                    if let bincode::ErrorKind::Io(ref e) = **e {
-                        if e.kind() == std::io::ErrorKind::BrokenPipe
-                            || e.kind() == std::io::ErrorKind::ConnectionReset
-                        {
-                            // client went away
-                        }
-                    } else {
-                        error!(error = ?e, "client transport error");
-                    }
-                }
-                e => error!(error = ?e, "reader service error"),
-            }
-        }));
-    }
-}
-
-fn serialize<'a, I>(rs: I) -> SerializedReadReplyBatch
-where
-    I: IntoIterator<Item = Vec<Cow<'a, DataType>>>,
-    I::IntoIter: ExactSizeIterator,
-{
-    let mut it = rs.into_iter().peekable();
-    let ln = it.len();
-    let fst = it.peek();
-    let mut v = Vec::with_capacity(
-        fst.as_ref()
-            .map(|fst| {
-                // assume all rows are the same length
-                ln * fst.len() * std::mem::size_of::<DataType>()
-            })
-            .unwrap_or(0)
-            + std::mem::size_of::<u64>(/* seq.len */),
-    );
-
-    let mut ser = bincode::Serializer::new(&mut v, bincode::DefaultOptions::default());
-    ser.collect_seq(it).unwrap();
-    SerializedReadReplyBatch(v)
+fn sorry_cows(cows: Vec<Vec<Cow<'_, DataType>>>) -> Vec<Vec<DataType>> {
+    cows.into_iter()
+        .map(|v| v.into_iter().map(|cow| (*cow).clone()).collect::<Vec<_>>())
+        .collect()
 }
 
 fn do_lookup(
     reader: &SingleReadHandle,
     key: &KeyComparison,
     filter: &Option<DataflowExpression>,
-) -> Result<SerializedReadReplyBatch, dataflow::LookupError> {
+) -> Result<ReadReplyBatch, dataflow::LookupError> {
     if let Some(equal) = &key.equal() {
         reader
             .try_find_and(*equal, |rs| {
                 let filtered = reader.post_lookup.process(rs, filter)?;
-                Ok(serialize(filtered))
+                Ok(ReadReplyBatch(sorry_cows(filtered)))
             })
             .map(|r| r.0)
     } else {
         if key.is_reversed_range() {
             warn!("Reader received lookup for range with start bound above end bound; returning empty result set");
-            return Ok(SerializedReadReplyBatch::empty());
+            return Ok(ReadReplyBatch::empty());
         }
 
         reader
             .try_find_range_and(&key, |r| Ok(r.into_iter().cloned().collect::<Vec<_>>()))
             .and_then(|(rs, _)| {
-                Ok(serialize(reader.post_lookup.process(
+                Ok(ReadReplyBatch(sorry_cows(reader.post_lookup.process(
                     rs.into_iter().flatten().collect::<Vec<_>>().iter(),
                     filter,
-                )?))
+                )?)))
             })
     }
 }
@@ -565,11 +330,11 @@ fn has_sufficient_timestamp(reader: &SingleReadHandle, timestamp: &Option<Timest
 /// Issues a blocking read against a reader. This can be repeatedly polled via `check` for
 /// completion.
 #[pin_project]
-struct BlockingRead {
+pub struct BlockingRead {
     tag: u32,
     target: (NodeIndex, SqlIdentifier, usize),
     // serialized records for keys we have already read
-    read: Vec<SerializedReadReplyBatch>,
+    read: Vec<ReadReplyBatch>,
     // keys we have yet to read and their corresponding indices in the reader
     pending_keys: Vec<KeyComparison>,
     pending_indices: Vec<usize>,
@@ -601,9 +366,7 @@ impl std::fmt::Debug for BlockingRead {
 
 impl BlockingRead {
     /// Check if we have the results for this blocking read.
-    pub fn check(
-        &mut self,
-    ) -> Poll<Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> {
+    pub fn check(&mut self) -> Poll<Result<Tagged<ReadReply<ReadReplyBatch>>, ReadySetError>> {
         READERS.with(|readers_cache| {
             let mut readers_cache = readers_cache.borrow_mut();
             let s = &self.truth;
@@ -701,241 +464,11 @@ impl BlockingRead {
                 tag: self.tag,
                 v: ReadReply::Normal(Ok(LookupResult::Results(
                     mem::take(&mut self.read),
-                    ReadReplyStats { cache_misses: 1 },
+                    ReadReplyStats::default(),
                 ))),
             }))
         } else {
             Poll::Pending
         }
-    }
-}
-
-#[cfg(test)]
-mod readreply {
-    use std::borrow::Cow;
-
-    use noria::{LookupResult, ReadReply, ReadReplyStats, ReadySetError, Tagged};
-    use noria_data::DataType;
-
-    use super::SerializedReadReplyBatch;
-
-    fn rtt_ok(data: Vec<Vec<Vec<DataType>>>) {
-        let got: Tagged<ReadReply> = bincode::deserialize(
-            &bincode::serialize(&Tagged {
-                tag: 32,
-                v: ReadReply::Normal::<SerializedReadReplyBatch>(Ok(LookupResult::Results(
-                    data.iter()
-                        .map(|d| {
-                            super::serialize(
-                                d.iter()
-                                    .map(|v| v.iter().map(Cow::Borrowed).collect::<Vec<_>>()),
-                            )
-                        })
-                        .collect(),
-                    ReadReplyStats::default(),
-                ))),
-            })
-            .unwrap(),
-        )
-        .unwrap();
-
-        match got {
-            Tagged {
-                v: ReadReply::Normal(Ok(LookupResult::Results(got, _))),
-                tag: 32,
-            } => {
-                assert_eq!(got.len(), data.len());
-                for (got, expected) in got.into_iter().zip(data.into_iter()) {
-                    assert_eq!(&*got, &expected);
-                }
-            }
-            r => panic!("{:?}", r),
-        }
-    }
-
-    #[test]
-    fn rtt_normal_empty() {
-        let got: Tagged<ReadReply> = bincode::deserialize(
-            &bincode::serialize(&Tagged {
-                tag: 32,
-                v: ReadReply::Normal::<SerializedReadReplyBatch>(Ok(LookupResult::Results(
-                    Vec::new(),
-                    ReadReplyStats::default(),
-                ))),
-            })
-            .unwrap(),
-        )
-        .unwrap();
-
-        match got {
-            Tagged {
-                v: ReadReply::Normal(Ok(LookupResult::Results(data, _))),
-                tag: 32,
-            } => {
-                assert!(data.is_empty());
-            }
-            r => panic!("{:?}", r),
-        }
-    }
-
-    #[test]
-    fn rtt_normal_one() {
-        rtt_ok(vec![vec![vec![DataType::from(1)]]]);
-    }
-
-    #[test]
-    fn rtt_normal_multifield() {
-        rtt_ok(vec![vec![vec![DataType::from(1), DataType::from(42)]]]);
-    }
-
-    #[test]
-    fn rtt_normal_multirow() {
-        rtt_ok(vec![vec![
-            vec![DataType::from(1)],
-            vec![DataType::from(42)],
-        ]]);
-    }
-
-    #[test]
-    fn rtt_normal_multibatch() {
-        rtt_ok(vec![
-            vec![vec![DataType::from(1)]],
-            vec![vec![DataType::from(42)]],
-        ]);
-    }
-
-    #[test]
-    fn rtt_normal_multi() {
-        rtt_ok(vec![
-            vec![
-                vec![DataType::from(1), DataType::from(42)],
-                vec![DataType::from(43), DataType::from(2)],
-            ],
-            vec![
-                vec![DataType::from(2), DataType::from(43)],
-                vec![DataType::from(44), DataType::from(3)],
-            ],
-        ]);
-    }
-
-    #[test]
-    fn rtt_normal_err() {
-        let got: Tagged<ReadReply> = bincode::deserialize(
-            &bincode::serialize(&Tagged {
-                tag: 32,
-                v: ReadReply::Normal::<SerializedReadReplyBatch>(Err(
-                    ReadySetError::ViewNotYetAvailable,
-                )),
-            })
-            .unwrap(),
-        )
-        .unwrap();
-
-        assert!(matches!(
-            got,
-            Tagged {
-                tag: 32,
-                v: ReadReply::Normal(Err(ReadySetError::ViewNotYetAvailable))
-            }
-        ));
-    }
-
-    #[test]
-    fn rtt_size() {
-        let got: Tagged<ReadReply> = bincode::deserialize(
-            &bincode::serialize(&Tagged {
-                tag: 32,
-                v: ReadReply::Size::<SerializedReadReplyBatch>(42),
-            })
-            .unwrap(),
-        )
-        .unwrap();
-        assert!(matches!(
-            got,
-            Tagged {
-                tag: 32,
-                v: ReadReply::Size(42)
-            }
-        ));
-    }
-
-    async fn async_bincode_rtt_ok(data: Vec<Vec<Vec<DataType>>>) {
-        use futures_util::{SinkExt, StreamExt};
-
-        let mut z = Vec::new();
-        let mut w = async_bincode::AsyncBincodeWriter::from(&mut z).for_async();
-
-        for tag in 0..10 {
-            w.send(Tagged {
-                tag,
-                v: ReadReply::Normal::<SerializedReadReplyBatch>(Ok(LookupResult::Results(
-                    data.iter()
-                        .map(|d| {
-                            super::serialize(
-                                d.iter()
-                                    .map(|v| v.iter().map(Cow::Borrowed).collect::<Vec<_>>()),
-                            )
-                        })
-                        .collect(),
-                    ReadReplyStats::default(),
-                ))),
-            })
-            .await
-            .unwrap();
-        }
-
-        let mut r = async_bincode::AsyncBincodeReader::<_, Tagged<ReadReply>>::from(
-            std::io::Cursor::new(&z[..]),
-        );
-
-        for tag in 0..10 {
-            let got: Tagged<ReadReply> = r.next().await.unwrap().unwrap();
-
-            match got {
-                Tagged {
-                    v: ReadReply::Normal(Ok(LookupResult::Results(got, _))),
-                    tag: t,
-                } => {
-                    assert_eq!(tag, t);
-                    assert_eq!(got.len(), data.len());
-                    for (got, expected) in got.into_iter().zip(data.iter()) {
-                        assert_eq!(&*got, expected);
-                    }
-                }
-                r => panic!("{:?}", r),
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn async_bincode_rtt_empty() {
-        async_bincode_rtt_ok(vec![]).await;
-    }
-
-    #[tokio::test]
-    async fn async_bincode_rtt_one_empty() {
-        async_bincode_rtt_ok(vec![vec![]]).await;
-    }
-
-    #[tokio::test]
-    async fn async_bincode_rtt_one_one_empty() {
-        async_bincode_rtt_ok(vec![vec![vec![]]]).await;
-    }
-
-    #[tokio::test]
-    async fn async_bincode_rtt_multi() {
-        async_bincode_rtt_ok(vec![
-            vec![
-                vec![DataType::from(1), DataType::from(42)],
-                vec![DataType::from(43), DataType::from(2)],
-            ],
-            vec![
-                vec![DataType::from(2), DataType::from(43)],
-                vec![DataType::from(44), DataType::from(3)],
-            ],
-            vec![vec![]],
-            vec![],
-        ])
-        .await;
     }
 }

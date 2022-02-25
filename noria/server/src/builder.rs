@@ -243,6 +243,45 @@ impl Builder {
         )
     }
 
+    /// Start a server instance with readers already created and return a handle to it.
+    pub fn start_with_readers(
+        self,
+        authority: Arc<Authority>,
+        readers: dataflow::Readers,
+        reader_addr: SocketAddr,
+        valve: stream_cancel::Valve,
+        trigger: stream_cancel::Trigger,
+    ) -> impl Future<Output = Result<Handle, anyhow::Error>> {
+        let Builder {
+            listen_addr,
+            external_addr,
+            ref config,
+            memory_limit,
+            memory_check_frequency,
+            region,
+            reader_only,
+            volume_id,
+        } = self;
+
+        let config = config.clone();
+
+        crate::startup::start_instance_inner(
+            authority,
+            listen_addr,
+            external_addr,
+            config,
+            memory_limit,
+            memory_check_frequency,
+            region,
+            reader_only,
+            volume_id,
+            readers,
+            reader_addr,
+            valve,
+            trigger,
+        )
+    }
+
     /// Start a local-only worker, and return a handle to it.
     pub fn start_local(self) -> impl Future<Output = Result<Handle, anyhow::Error>> {
         let store = Arc::new(LocalAuthorityStore::new());

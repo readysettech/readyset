@@ -16,12 +16,14 @@ use noria::consistency::Timestamp;
 use noria::internal::LocalNodeIndex;
 use noria::results::Results;
 use noria::{
-    ColumnSchema, ControllerHandle, KeyColumnIdx, KeyComparison, ReadySetError, ReadySetResult,
-    SchemaType, Table, TableOperation, View, ViewPlaceholder, ViewQuery, ViewSchema,
+    ColumnSchema, ControllerHandle, KeyColumnIdx, KeyComparison, ReadQuery, ReadySetError,
+    ReadySetResult, SchemaType, Table, TableOperation, View, ViewPlaceholder, ViewQuery,
+    ViewSchema,
 };
 use noria_data::DataType;
 use noria_errors::ReadySetError::PreparedStatementMissing;
 use noria_errors::{internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err};
+use noria_server::worker::local_readers::ReadRequestHandler;
 use readyset_tracing::instrument_child;
 use tracing::{error, info, instrument, trace};
 use vec1::vec1;
@@ -381,6 +383,10 @@ pub struct NoriaConnector {
 
     /// How to handle issuing reads against Noria. See [`ReadBehavior`].
     read_behavior: ReadBehavior,
+
+    /// A read request handler that may be used to service reads from readers
+    /// on the same server.
+    read_request_handler: Option<ReadRequestHandler>,
 }
 
 /// The read behavior used when executing a read against Noria.
@@ -425,6 +431,7 @@ impl Clone for NoriaConnector {
             region: self.region.clone(),
             failed_views: self.failed_views.clone(),
             read_behavior: self.read_behavior,
+            read_request_handler: self.read_request_handler.clone(),
         }
     }
 }
@@ -436,6 +443,25 @@ impl NoriaConnector {
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         region: Option<String>,
         read_behavior: ReadBehavior,
+    ) -> Self {
+        NoriaConnector::new_with_local_reads(
+            ch,
+            auto_increments,
+            query_cache,
+            region,
+            read_behavior,
+            None,
+        )
+        .await
+    }
+
+    pub async fn new_with_local_reads(
+        ch: ControllerHandle,
+        auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
+        query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
+        region: Option<String>,
+        read_behavior: ReadBehavior,
+        read_request_handler: Option<ReadRequestHandler>,
     ) -> Self {
         let backend = NoriaBackendInner::new(ch).await;
         if let Err(e) = &backend {
@@ -452,6 +478,7 @@ impl NoriaConnector {
             region,
             failed_views: HashSet::new(),
             read_behavior,
+            read_request_handler,
         }
     }
 
@@ -1257,7 +1284,16 @@ impl NoriaConnector {
         let keys = processed.make_keys(&[])?;
 
         trace!(%qname, "query::select::do");
-        let res = do_read(getter, &query, keys, ticket, self.read_behavior, event).await;
+        let res = do_read(
+            getter,
+            &query,
+            keys,
+            ticket,
+            self.read_behavior,
+            self.read_request_handler.as_mut(),
+            event,
+        )
+        .await;
         if let Err(e) = res.as_ref() {
             if e.is_networking_related() {
                 self.failed_views.insert(qname.to_owned());
@@ -1395,6 +1431,7 @@ impl NoriaConnector {
                     processed_query_params.make_keys(params)?,
                     ticket,
                     self.read_behavior,
+                    self.read_request_handler.as_mut(),
                     event,
                 )
                 .await
@@ -1646,7 +1683,8 @@ async fn do_read<'a>(
     raw_keys: Vec<Cow<'_, [DataType]>>,
     ticket: Option<Timestamp>,
     read_behavior: ReadBehavior,
-    event: &mut noria_client_metrics::QueryExecutionEvent,
+    read_request_handler: Option<&'a mut ReadRequestHandler>,
+    _event: &mut noria_client_metrics::QueryExecutionEvent,
 ) -> ReadySetResult<QueryResult<'a>> {
     let use_bogo = raw_keys.is_empty();
     let vq = build_view_query(
@@ -1659,23 +1697,39 @@ async fn do_read<'a>(
         ticket,
         read_behavior,
     )?;
-    let data = getter
-        .raw_lookup(vq)
-        .await?
-        .into_results()
-        .ok_or(ReadySetError::ReaderMissingKey)?;
-    event.cache_misses = Some(
-        data.iter()
-            .map(|result| {
-                result
-                    .stats
-                    .as_ref()
-                    .map(|stats| stats.cache_misses)
-                    .unwrap_or(0)
-            })
-            .sum(),
-    );
 
+    let data = if let Some(rh) = read_request_handler {
+        let request = noria::Tagged::from(ReadQuery::Normal {
+            target: (*getter.node(), getter.name(), 0),
+            query: vq.clone(),
+        });
+
+        // Query the local reader if it is a read query, otherwise default to the traditional
+        // View API.
+        let tag = request.tag;
+        if let ReadQuery::Normal { target, query } = request.v {
+            let result = rh.handle_normal_read_query(tag, target, query).await;
+            result?
+                .v
+                .into_normal()
+                .ok_or_else(|| internal_err("Unexpected response type from reader service"))?
+                .map(|z| z.map_results(|rows, _| Results::new(rows.into(), getter.column_slice())))?
+                .into_results()
+                .ok_or(ReadySetError::ReaderMissingKey)?
+        } else {
+            getter
+                .raw_lookup(vq)
+                .await?
+                .into_results()
+                .ok_or(ReadySetError::ReaderMissingKey)?
+        }
+    } else {
+        getter
+            .raw_lookup(vq)
+            .await?
+            .into_results()
+            .ok_or(ReadySetError::ReaderMissingKey)?
+    };
     trace!("select::complete");
 
     Ok(QueryResult::Select {
