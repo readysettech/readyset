@@ -410,8 +410,11 @@ mod controller;
 mod coordination;
 mod handle;
 mod http_router;
-mod startup;
-mod worker;
+
+/// Utilities to create all server components.
+pub mod startup;
+/// The worker logic handling reads from the dataflow graph.
+pub mod worker;
 
 #[cfg(test)]
 mod integration;
