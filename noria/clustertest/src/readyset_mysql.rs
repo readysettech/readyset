@@ -46,8 +46,7 @@ async fn create_table_insert_test() {
     assert!(
         query_until_expected(
             &mut adapter,
-            r"SELECT * FROM t1;",
-            (),
+            QueryExecution::PrepareExecute("SELECT * FROM t1", ()),
             &EventuallyConsistentResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
@@ -91,8 +90,7 @@ async fn mirror_prepare_exec_test() {
     assert!(
         query_until_expected(
             &mut adapter,
-            r"SELECT * FROM t1 WHERE uid = ?;",
-            (2,),
+            QueryExecution::PrepareExecute("SELECT * FROM t1 where uid = ?", (2,)),
             &EventuallyConsistentResults::empty_or(&[(2, 5)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
@@ -143,8 +141,7 @@ async fn async_migrations_confidence_check() {
     assert!(
         query_until_expected(
             &mut adapter,
-            r"SELECT * FROM t1 WHERE uid = ?;",
-            (2,),
+            QueryExecution::PrepareExecute("SELECT * FROM t1 where uid = ?", (2,)),
             &EventuallyConsistentResults::empty_or(&[(2, 5)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
@@ -158,8 +155,7 @@ async fn async_migrations_confidence_check() {
         query_until_expected_from_noria(
             &mut adapter,
             deployment.metrics(),
-            r"SELECT * FROM t1 WHERE uid = ?;",
-            (2,),
+            QueryExecution::PrepareExecute(r"SELECT * FROM t1 where uid = ?", (2,)),
             &EventuallyConsistentResults::empty_or(&[(2, 5)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
@@ -243,8 +239,7 @@ async fn query_cached_view_after_failure() {
         query_until_expected_from_noria(
             &mut adapter,
             deployment.metrics(),
-            query.clone(),
-            (1,),
+            QueryExecution::PrepareExecute(query.clone(), (1,)),
             &EventuallyConsistentResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
@@ -276,8 +271,7 @@ async fn query_cached_view_after_failure() {
         query_until_expected_from_noria(
             &mut adapter,
             deployment.metrics(),
-            query.clone(),
-            (1,),
+            QueryExecution::PrepareExecute(query.clone(), (1,)),
             &EventuallyConsistentResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
@@ -327,8 +321,7 @@ async fn test_fallback_recovery_period() {
         query_until_expected_from_noria(
             &mut adapter,
             deployment.metrics(),
-            query.clone(),
-            (1,),
+            QueryExecution::PrepareExecute(query.clone(), (1,)),
             &EventuallyConsistentResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
@@ -440,23 +433,34 @@ async fn dry_run_evaluates_support() {
     assert!(
         query_until_expected(
             &mut adapter,
-            r"SELECT * FROM t1 WHERE uid = ?;",
-            (2,),
+            QueryExecution::PrepareExecute(r"SELECT * FROM t1 where uid = ?", (2,)),
             &EventuallyConsistentResults::empty_or(&[(2, 5)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
         .await
     );
 
-    // Now check that we confirm we can support this query.
+    // After executing the query, the query will be dry run against Noria
+    // in the background. Until the dry run is complete, the query has a
+    // "pending" status in the proxied query table. Once the dry run
+    // is complete, it will have a "yes" status.
+    let mut results = EventuallyConsistentResults::new();
+    results.write(&[(
+        "SELECT * FROM `t1` WHERE (`uid` = $1)".to_string(),
+        "pending".to_string(),
+    )]);
+    results.write(&[(
+        "SELECT * FROM `t1` WHERE (`uid` = $1)".to_string(),
+        "yes".to_string(),
+    )]);
+
+    // Verify that the query eventually reaches the "yes" state in the
+    // proxied query table.
     assert!(
-        query_until_expected_str(
+        query_until_expected(
             &mut adapter,
-            r"SHOW PROXIED QUERIES;",
-            &EventuallyConsistentResults::empty_or(&[(
-                "SELECT * FROM `t1` WHERE (`uid` = $1)".to_string(),
-                "yes".to_string()
-            )]),
+            QueryExecution::<String, ()>::Query("SHOW PROXIED QUERIES"),
+            &results,
             PROPAGATION_DELAY_TIMEOUT,
         )
         .await
@@ -496,8 +500,7 @@ async fn correct_data_after_restart() {
     assert!(
         query_until_expected(
             &mut adapter,
-            r"SELECT * FROM t1;",
-            (),
+            QueryExecution::PrepareExecute("SELECT * FROM t1", ()),
             &EventuallyConsistentResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
@@ -526,8 +529,7 @@ async fn correct_data_after_restart() {
         query_until_expected_from_noria(
             &mut adapter,
             deployment.metrics(),
-            r"SELECT * FROM t1;",
-            (),
+            QueryExecution::PrepareExecute("SELECT * FROM t1", ()),
             &EventuallyConsistentResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
@@ -688,8 +690,7 @@ async fn update_during_failure() {
         query_until_expected_from_noria(
             &mut adapter,
             deployment.metrics(),
-            r"SELECT * FROM t1 WHERE uid = 1;",
-            (),
+            QueryExecution::PrepareExecute("SELECT * FROM t1 where uid = 1", ()),
             &results,
             PROPAGATION_DELAY_TIMEOUT,
         )
@@ -699,8 +700,7 @@ async fn update_during_failure() {
         query_until_expected_from_noria(
             &mut adapter,
             deployment.metrics(),
-            r"SELECT * FROM t2 WHERE uid = 1;",
-            (),
+            QueryExecution::PrepareExecute("SELECT * FROM t2 where uid = 1", ()),
             &results,
             PROPAGATION_DELAY_TIMEOUT,
         )
@@ -832,8 +832,7 @@ async fn update_propagation_through_failed_domain() {
         query_until_expected_from_noria(
             &mut adapter,
             deployment.metrics(),
-            r"SELECT * FROM t1 where uid = ?;",
-            (2,),
+            QueryExecution::PrepareExecute("SELECT * FROM t1 where uid = ?", (2,)),
             &results,
             PROPAGATION_DELAY_TIMEOUT,
         )
@@ -875,8 +874,7 @@ async fn update_propagation_through_failed_domain() {
         query_until_expected_from_noria(
             &mut adapter,
             deployment.metrics(),
-            r"SELECT * FROM t1 where uid = ?;",
-            (2,),
+            QueryExecution::PrepareExecute("SELECT * FROM t1 where uid = ?", (2,)),
             &results,
             PROPAGATION_DELAY_TIMEOUT,
         )
@@ -920,8 +918,7 @@ async fn end_to_end_with_restarts() {
     assert!(
         query_until_expected(
             &mut adapter,
-            r"SELECT * FROM t1;",
-            (),
+            QueryExecution::PrepareExecute("SELECT * FROM t1", ()),
             &EventuallyConsistentResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
@@ -952,8 +949,7 @@ async fn end_to_end_with_restarts() {
             query_until_expected_from_noria(
                 &mut adapter,
                 deployment.metrics(),
-                r"SELECT * FROM t1;",
-                (),
+                QueryExecution::PrepareExecute("SELECT * FROM t1", ()),
                 &EventuallyConsistentResults::empty_or(&[(1, 4)]),
                 PROPAGATION_DELAY_TIMEOUT,
             )
@@ -1112,8 +1108,7 @@ async fn writes_survive_restarts() {
             query_until_expected_from_noria(
                 &mut adapter,
                 deployment.metrics(),
-                r"SELECT * FROM t1 WHERE uid = 1;",
-                (),
+                QueryExecution::PrepareExecute("SELECT * FROM t1 where uid = 1", ()),
                 &results,
                 PROPAGATION_DELAY_TIMEOUT,
             )
@@ -1123,8 +1118,7 @@ async fn writes_survive_restarts() {
             query_until_expected_from_noria(
                 &mut adapter,
                 deployment.metrics(),
-                r"SELECT * FROM t2 WHERE uid = 1;",
-                (),
+                QueryExecution::PrepareExecute("SELECT * FROM t2 where uid = 1", ()),
                 &results,
                 PROPAGATION_DELAY_TIMEOUT,
             )
