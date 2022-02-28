@@ -1224,6 +1224,7 @@ impl NoriaConnector {
         mut query: nom_sql::SelectStatement,
         ticket: Option<Timestamp>,
         create_if_not_exist: bool,
+        event: &mut noria_client_metrics::QueryExecutionEvent,
     ) -> ReadySetResult<QueryResult<'_>> {
         let processed = rewrite::process_query(&mut query)?;
 
@@ -1244,7 +1245,7 @@ impl NoriaConnector {
         let keys = processed.make_keys(&[])?;
 
         trace!(%qname, "query::select::do");
-        let res = do_read(getter, &query, keys, ticket, self.read_behavior).await;
+        let res = do_read(getter, &query, keys, ticket, self.read_behavior, event).await;
         if let Err(e) = res.as_ref() {
             if e.is_networking_related() {
                 self.failed_views.insert(qname.to_owned());
@@ -1335,6 +1336,7 @@ impl NoriaConnector {
         q_id: u32,
         params: &[DataType],
         ticket: Option<Timestamp>,
+        event: &mut noria_client_metrics::QueryExecutionEvent,
     ) -> ReadySetResult<QueryResult<'_>> {
         let NoriaConnector {
             prepared_statement_cache,
@@ -1379,6 +1381,7 @@ impl NoriaConnector {
                     processed_query_params.make_keys(params)?,
                     ticket,
                     self.read_behavior,
+                    event,
                 )
                 .await
             }
@@ -1629,6 +1632,7 @@ async fn do_read<'a>(
     raw_keys: Vec<Cow<'_, [DataType]>>,
     ticket: Option<Timestamp>,
     read_behavior: ReadBehavior,
+    event: &mut noria_client_metrics::QueryExecutionEvent,
 ) -> ReadySetResult<QueryResult<'a>> {
     let use_bogo = raw_keys.is_empty();
     let vq = build_view_query(
@@ -1646,6 +1650,18 @@ async fn do_read<'a>(
         .await?
         .into_results()
         .ok_or(ReadySetError::ReaderMissingKey)?;
+    event.cache_misses = Some(
+        data.iter()
+            .map(|result| {
+                result
+                    .stats
+                    .as_ref()
+                    .map(|stats| stats.cache_misses)
+                    .unwrap_or(0)
+            })
+            .sum(),
+    );
+
     trace!("select::complete");
 
     Ok(QueryResult::Select {

@@ -336,7 +336,8 @@ pub use crate::table::{PacketData, PacketPayload, PacketTrace};
 pub use crate::view::View;
 #[doc(hidden)]
 pub use crate::view::{
-    KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyBatch, SchemaType, ViewQuery,
+    KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyBatch, ReadReplyStats, SchemaType,
+    ViewQuery,
 };
 
 #[doc(hidden)]

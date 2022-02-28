@@ -19,7 +19,7 @@ use launchpad::intervals;
 use nom_sql::SqlIdentifier;
 use noria::consistency::Timestamp;
 use noria::metrics::recorded;
-use noria::{KeyComparison, LookupResult, ReadQuery, ReadReply, Tagged, ViewQuery};
+use noria::{KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyStats, Tagged, ViewQuery};
 use noria_errors::internal_err;
 use pin_project::pin_project;
 use serde::ser::Serializer;
@@ -247,7 +247,7 @@ impl ReadRequestHandler {
                 self.hit_ctr.increment(1);
                 return Ok(Ok(Tagged {
                     tag,
-                    v: ReadReply::Normal(Ok(LookupResult::Results(ret))),
+                    v: ReadReply::Normal(Ok(LookupResult::Results(ret, ReadReplyStats::default()))),
                 }));
             }
             self.miss_ctr.increment(1);
@@ -646,7 +646,10 @@ impl BlockingRead {
         if self.pending_keys.is_empty() {
             Poll::Ready(Ok(Tagged {
                 tag: self.tag,
-                v: ReadReply::Normal(Ok(LookupResult::Results(mem::take(&mut self.read)))),
+                v: ReadReply::Normal(Ok(LookupResult::Results(
+                    mem::take(&mut self.read),
+                    ReadReplyStats { cache_misses: 1 },
+                ))),
             }))
         } else {
             Poll::Pending
@@ -658,7 +661,7 @@ impl BlockingRead {
 mod readreply {
     use std::borrow::Cow;
 
-    use noria::{LookupResult, ReadReply, ReadySetError, Tagged};
+    use noria::{LookupResult, ReadReply, ReadReplyStats, ReadySetError, Tagged};
     use noria_data::DataType;
 
     use super::SerializedReadReplyBatch;
@@ -676,6 +679,7 @@ mod readreply {
                             )
                         })
                         .collect(),
+                    ReadReplyStats::default(),
                 ))),
             })
             .unwrap(),
@@ -684,7 +688,7 @@ mod readreply {
 
         match got {
             Tagged {
-                v: ReadReply::Normal(Ok(LookupResult::Results(got))),
+                v: ReadReply::Normal(Ok(LookupResult::Results(got, _))),
                 tag: 32,
             } => {
                 assert_eq!(got.len(), data.len());
@@ -703,6 +707,7 @@ mod readreply {
                 tag: 32,
                 v: ReadReply::Normal::<SerializedReadReplyBatch>(Ok(LookupResult::Results(
                     Vec::new(),
+                    ReadReplyStats::default(),
                 ))),
             })
             .unwrap(),
@@ -711,7 +716,7 @@ mod readreply {
 
         match got {
             Tagged {
-                v: ReadReply::Normal(Ok(LookupResult::Results(data))),
+                v: ReadReply::Normal(Ok(LookupResult::Results(data, _))),
                 tag: 32,
             } => {
                 assert!(data.is_empty());
@@ -819,6 +824,7 @@ mod readreply {
                             )
                         })
                         .collect(),
+                    ReadReplyStats::default(),
                 ))),
             })
             .await
@@ -834,7 +840,7 @@ mod readreply {
 
             match got {
                 Tagged {
-                    v: ReadReply::Normal(Ok(LookupResult::Results(got))),
+                    v: ReadReply::Normal(Ok(LookupResult::Results(got, _))),
                     tag: t,
                 } => {
                     assert_eq!(tag, t);

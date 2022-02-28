@@ -709,6 +709,19 @@ async fn query_logger(
                             "query_type" => SharedString::from(event.sql_type)
                         );
                     }
+
+                    if let Some(cache_misses) = event.cache_misses {
+                        metrics::counter!(
+                            noria_client_metrics::recorded::QUERY_LOG_TOTAL_CACHE_MISSES,
+                            cache_misses,
+                            "query" => query.clone(),
+                        );
+                        metrics::counter!(
+                            noria_client_metrics::recorded::QUERY_LOG_QUERY_CACHE_MISSED,
+                            1,
+                            "query" => query.clone(),
+                        );
+                    }
                 } else {
                     info!("Metrics thread shutting down after request handle dropped.");
                 }

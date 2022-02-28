@@ -36,6 +36,9 @@ pub struct QueryExecutionEvent {
 
     /// Where the query ended up executing
     pub destination: Option<QueryDestination>,
+
+    /// Number of cache misses which occurred as part of a query
+    pub cache_misses: Option<u64>,
 }
 
 #[derive(Debug, PartialEq, Serialize, Clone, Copy, Default)]
@@ -139,6 +142,7 @@ impl QueryExecutionEvent {
             noria_duration: None,
             noria_error: None,
             destination: None,
+            cache_misses: None,
         }
     }
 
