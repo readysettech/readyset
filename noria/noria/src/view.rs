@@ -721,27 +721,46 @@ pub enum LookupResult<D> {
     /// The view query was executed in non-blocking mode and resulted in a cache miss.
     NonBlockingMiss,
     /// The results of the view query lookup.
-    Results(Vec<D>),
+    Results(Vec<D>, ReadReplyStats),
 }
 
 impl<D> LookupResult<D> {
     /// Maps a set of lookup results from Vec<D> to Vec<U>.
-    pub fn map_results<U, F>(self, f: F) -> LookupResult<U>
+    pub fn map_results<U, F>(self, mut f: F) -> LookupResult<U>
     where
-        F: FnMut(D) -> U,
+        F: FnMut(D, &ReadReplyStats) -> U,
     {
         match self {
             Self::NonBlockingMiss => LookupResult::NonBlockingMiss,
-            Self::Results(d) => LookupResult::Results(d.into_iter().map(f).collect()),
+            Self::Results(d, stats) => {
+                LookupResult::Results(d.into_iter().map(|d| f(d, &stats)).collect(), stats)
+            }
         }
     }
 
     /// Converts a lookup result into the inner `Results` type.
     pub fn into_results(self) -> Option<Vec<D>> {
-        if let Self::Results(v) = self {
+        if let Self::Results(v, _) = self {
             Some(v)
         } else {
             None
+        }
+    }
+}
+
+#[doc(hidden)]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
+pub struct ReadReplyStats {
+    /// The count of cache misses which have occurred
+    pub cache_misses: u64,
+}
+
+impl ReadReplyStats {
+    /// Creates a new [`ReadReplyStats`]
+    #[must_use]
+    pub fn merge(&self, other: &Self) -> Self {
+        Self {
+            cache_misses: self.cache_misses + other.cache_misses,
         }
     }
 }
@@ -1025,8 +1044,12 @@ impl Service<ViewQuery> for View {
                                 internal_err("Unexpected response type from reader service")
                             })?
                             .map(|l| {
-                                l.map_results(|rows| {
-                                    Results::new(rows.into(), Arc::clone(&columns))
+                                l.map_results(|rows, stats| {
+                                    Results::with_stats(
+                                        rows.into(),
+                                        Arc::clone(&columns),
+                                        stats.clone(),
+                                    )
                                 })
                             })
                     })
@@ -1100,22 +1123,28 @@ impl Service<ViewQuery> for View {
                 .try_collect::<Vec<LookupResult<ReadReplyBatch>>>()
                 .map_ok(move |e| {
                     // Flatten this to a single LookupResult<Results>.
-                    e.into_iter()
-                        .fold(LookupResult::Results(Vec::new()), |mut acc, x| {
-                            if let LookupResult::Results(d) = &mut acc {
+                    e.into_iter().fold(
+                        LookupResult::Results(Vec::new(), ReadReplyStats::default()),
+                        |mut acc, x| {
+                            if let LookupResult::Results(d, _) = &mut acc {
                                 match x {
                                     LookupResult::NonBlockingMiss => {
                                         return LookupResult::NonBlockingMiss;
                                     }
-                                    LookupResult::Results(u) => {
+                                    LookupResult::Results(u, stats) => {
                                         d.extend(u.into_iter().map(|rows| {
-                                            Results::new(rows.into(), Arc::clone(&columns))
+                                            Results::with_stats(
+                                                rows.into(),
+                                                Arc::clone(&columns),
+                                                stats.clone(),
+                                            )
                                         }));
                                     }
                                 }
                             }
                             acc
-                        })
+                        },
+                    )
                 }),
         )
     }

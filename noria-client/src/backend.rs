@@ -1009,12 +1009,16 @@ where
         use noria_connector::PrepareResult::*;
 
         event.destination = Some(QueryDestination::Noria);
-        let _t = event.start_noria_timer();
+        let start = Instant::now();
 
         let res = match prep {
             Select {
                 statement_id: id, ..
-            } => noria.execute_prepared_select(*id, params, ticket).await,
+            } => {
+                noria
+                    .execute_prepared_select(*id, params, ticket, event)
+                    .await
+            }
             Insert {
                 statement_id: id, ..
             } => noria.execute_prepared_insert(*id, params).await,
@@ -1027,10 +1031,11 @@ where
         }
         .map(Into::into);
 
-        drop(_t);
         if let Err(e) = &res {
             event.set_noria_error(e);
         }
+
+        event.noria_duration = Some(start.elapsed());
 
         res
     }
@@ -1519,14 +1524,18 @@ where
 
         let noria_res = {
             event.destination = Some(QueryDestination::Noria);
-            let _t = event.start_noria_timer();
-            self.noria
+            let start = Instant::now();
+            let res = self
+                .noria
                 .handle_select(
                     stmt.clone(),
                     self.ticket.clone(),
                     self.migration_mode == MigrationMode::InRequestPath,
+                    event,
                 )
-                .await
+                .await;
+            event.noria_duration = Some(start.elapsed());
+            res
         };
 
         if status.execution_info.is_none() {
@@ -1830,7 +1839,7 @@ where
                 // no. TODO: Implement event execution metrics for Noria without
                 // upstream.
                 event.destination = Some(QueryDestination::Noria);
-                let _t = event.start_noria_timer();
+                let start = Instant::now();
 
                 let res = match parsed_query {
                     // CREATE VIEW will still trigger migrations with epxlicit-migrations enabled
@@ -1839,7 +1848,7 @@ where
                     SqlQuery::Select(q) => {
                         let res = self
                             .noria
-                            .handle_select(q.clone(), self.ticket.clone(), true)
+                            .handle_select(q.clone(), self.ticket.clone(), true, event)
                             .await;
                         res
                     }
@@ -1858,6 +1867,7 @@ where
                         unsupported!("query type unsupported");
                     }
                 }?;
+                event.noria_duration = Some(start.elapsed());
 
                 Ok(QueryResult::Noria(res))
             }

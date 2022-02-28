@@ -5,11 +5,15 @@ use std::sync::Arc;
 use nom_sql::SqlIdentifier;
 use noria_data::DataType;
 
+use crate::ReadReplyStats;
+
 /// A result set from a Noria query.
 #[derive(PartialEq, Eq)]
 pub struct Results {
     results: Vec<Vec<DataType>>,
     columns: Arc<[SqlIdentifier]>,
+    /// When present, contains stats related to the operation
+    pub stats: Option<ReadReplyStats>,
 }
 
 impl Results {
@@ -17,7 +21,24 @@ impl Results {
     // https://github.com/rust-lang/rust/issues/69785
     #[doc(hidden)]
     pub fn new(results: Vec<Vec<DataType>>, columns: Arc<[SqlIdentifier]>) -> Self {
-        Self { results, columns }
+        Self {
+            results,
+            columns,
+            stats: None,
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn with_stats(
+        results: Vec<Vec<DataType>>,
+        columns: Arc<[SqlIdentifier]>,
+        stats: ReadReplyStats,
+    ) -> Self {
+        Self {
+            results,
+            columns,
+            stats: Some(stats),
+        }
     }
 
     /// Iterate over references to the returned rows.
