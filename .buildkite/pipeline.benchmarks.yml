@@ -13,7 +13,7 @@ steps:
       .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-server readyset-server .
     env:
       # Always generate a release binary for benchmarking
-      FORCE_RELEASE: "true"
+      RELEASE: "true"
       # Tag to be created for readyset-server
       VERSION: "benchmark-release-${BUILDKITE_COMMIT}"
       # Tag to pull for builder (previously built)
@@ -31,7 +31,7 @@ steps:
       .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-mysql readyset-mysql .
     env:
       # Always generate a release binary for benchmarking
-      FORCE_RELEASE: "true"
+      RELEASE: "true"
       # Tag to be created for readyset-mysql
       VERSION: "benchmark-release-${BUILDKITE_COMMIT}"
       # Tag to pull for builder (previously built)

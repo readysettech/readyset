@@ -15,7 +15,7 @@ steps:
         login: true
         retries: 3
 
-  - label: ":docker: Build readyset-server image"
+  - label: ":docker: Build readyset-server debug image"
     key: readyset-server-image
     depends_on:
       - build-builder-base-image
@@ -26,7 +26,7 @@ steps:
         login: true
         retries: 3
 
-  - label: ":docker: Build readyset-mysql image"
+  - label: ":docker: Build readyset-mysql debug image"
     key: readyset-mysql-image
     depends_on:
       - build-builder-base-image
@@ -37,7 +37,7 @@ steps:
         login: true
         retries: 3
 
-  - label: ":docker: Build readyset-psql image"
+  - label: ":docker: Build readyset-psql debug image"
     key: readyset-psql-image
     depends_on:
       - build-builder-base-image
@@ -48,7 +48,7 @@ steps:
         login: true
         retries: 3
 
-  - label: ":docker: Build metrics-aggregator image"
+  - label: ":docker: Build metrics-aggregator debug image"
     key: metrics-aggregator-image
     depends_on:
       - build-builder-base-image

@@ -63,30 +63,33 @@ steps:
                 - rust-toolchain
                 - ops/readyset-substrate
 
-            - label: ":docker: Build readyset-server image"
+            - label: ":docker: Build readyset-server debug image"
               include:
                 - "[!ops]*"
                 - Cargo.lock
                 - Cargo.toml
                 - rust-toolchain
 
-            - label: ':docker: Build readyset-mysql image'
+            - label: ':docker: Build readyset-mysql debug image'
               include:
                 - "[!ops]*"
                 - Cargo.lock
                 - Cargo.toml
                 - rust-toolchain
 
-            - label: ':docker: Build readyset-psql image'
+            - label: ':docker: Build readyset-psql debug image'
               include:
                 - "[!ops]*"
                 - Cargo.lock
                 - Cargo.toml
                 - rust-toolchain
 
-            - label: ':docker: Build metrics-aggregator image'
+            - label: ':docker: Build metrics-aggregator debug image'
               include:
-                - "metrics-aggregator/**"
+                - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
 
             - label: ':rust: Run tests'
               include:
@@ -224,15 +227,6 @@ steps:
       message: ":algolia: Performance Benchmarks for ${BUILDKITE_COMMIT}"
     async: true
 
-  - trigger: "docker-release"
-    branches: refs/heads/main
-    label: ":rocket: Docker Release"
-    build:
-      branch: refs/heads/main
-      commit: HEAD
-      message: ":rocket: Docker Release for ${BUILDKITE_COMMIT}"
-    async: true
-
   - trigger: "internal-amis"
     branches: refs/heads/main
     label: ":rocket: Internal AMIs"
@@ -243,8 +237,70 @@ steps:
     async: true
 
   # If you update any steps below this line, please update docs/src/release-process.md
+  - block: "Build release :docker: containers"
+    key: block-docker-release
 
-  - block: "Build :amazon-ec2: AMIs and :aws-cloudformation: CloudFormation templates"
+  - label: ":docker: Build readyset-server release image"
+    key: readyset-server-release-image
+    depends_on:
+      - block-docker-release
+      - build-builder-base-image
+    command:
+      - RELEASE=true .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-server readyset-server .
+      - docker tag 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:release-${BUILDKITE_COMMIT} readyset-server:release-${BUILDKITE_COMMIT}
+      - docker save readyset-server:release-${BUILDKITE_COMMIT} | gzip > readyset-server-release-${BUILDKITE_COMMIT}.tar.gz
+      - buildkite-agent artifact upload readyset-server-release-${BUILDKITE_COMMIT}.tar.gz
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ":docker: Build readyset-mysql release image"
+    key: readyset-mysql-release-image
+    depends_on:
+      - block-docker-release
+      - build-builder-base-image
+    command:
+      - RELEASE=true .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-mysql readyset-mysql .
+      - docker tag 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:release-${BUILDKITE_COMMIT} readyset-mysql:release-${BUILDKITE_COMMIT}
+      - docker save readyset-mysql:release-${BUILDKITE_COMMIT} | gzip > readyset-mysql-release-${BUILDKITE_COMMIT}.tar.gz
+      - buildkite-agent artifact upload readyset-mysql-release-${BUILDKITE_COMMIT}.tar.gz
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ":docker: Build readyset-psql release image"
+    key: readyset-psql-release-image
+    depends_on:
+      - block-docker-release
+      - build-builder-base-image
+    command:
+      - RELEASE=true .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-psql readyset-psql .
+      - docker tag 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-psql:release-${BUILDKITE_COMMIT} readyset-psql:release-${BUILDKITE_COMMIT}
+      - docker save readyset-psql:release-${BUILDKITE_COMMIT} | gzip > readyset-psql-release-${BUILDKITE_COMMIT}.tar.gz
+      - buildkite-agent artifact upload readyset-psql-release-${BUILDKITE_COMMIT}.tar.gz
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ":docker: Build metrics-aggregator release image"
+    key: metrics-aggregator-release-image
+    depends_on:
+      - block-docker-release
+      - build-builder-base-image
+    command:
+      - RELEASE=true .buildkite/build-image-with-builder.sh build/Dockerfile.metrics-aggregator metrics-aggregator .
+      - docker tag 305232526136.dkr.ecr.us-east-2.amazonaws.com/metrics-aggregator:release-${BUILDKITE_COMMIT} readyset-metrics-aggregator:release-${BUILDKITE_COMMIT}
+      - docker save readyset-metrics-aggregator:release-${BUILDKITE_COMMIT} | gzip > readyset-metrics-aggregator-release-${BUILDKITE_COMMIT}.tar.gz
+      - buildkite-agent artifact upload readyset-metrics-aggregator-release-${BUILDKITE_COMMIT}.tar.gz
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - block: "Build, test, and upload internal :amazon-ec2: AMIs and :aws-cloudformation: CloudFormation templates"
     key: block-ami-cfn
     prompt: "Build AMIs and CloudFormation templates?"
 

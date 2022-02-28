@@ -27,13 +27,20 @@ AWS_REGION=${AWS_REGION:-us-east-2}
 CACHEPOT_BUCKET=${CACHEPOT_BUCKET:-readysettech-build-sccache-us-east-2}
 CACHEPOT_REGION=${CACHEPOT_REGION:-${AWS_REGION}}
 
+RELEASE=${RELEASE:-"false"}
 VERSION=${VERSION:-$BUILDKITE_COMMIT}
-# Allows one to force passing in release=1 as build argument
-FORCE_RELEASE=${FORCE_RELEASE:-"false"}
 BUILDER_VERSION=${BUILDER_VERSION:-$VERSION}
 
 docker_repo="$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com"
 image="$docker_repo/$image_name"
+
+if [[ "${RELEASE}" == "true" ]]; then
+    release_buildargs=("--build-arg" "release=1")
+    tag="release-${VERSION}"
+else
+    release_buildargs=()
+    tag="${VERSION}"
+fi
 
 echo "--- :docker: Pulling $image:latest"
 if docker pull "$image:latest"; then
@@ -43,16 +50,10 @@ else
     cache_from=""
 fi
 
-if [[ "$BUILDKITE_BRANCH" = "refs/heads/main" || "${FORCE_RELEASE}" == "true" ]]; then
-    release_buildargs=("--build-arg" "release=1")
-else
-    release_buildargs=()
-fi
-
 build_cmd_prefix=(
     "docker" "build" \
     "-f" "$dockerfile" \
-    "-t" "$image:$VERSION" \
+    "-t" "$image:$tag" \
     "--build-arg" "BUILDKIT_INLINE_CACHE=1" \
     "--build-arg" "CACHEPOT_BUCKET"
     "--build-arg" "CACHEPOT_REGION"
@@ -75,13 +76,16 @@ fi
 
 echo "+++ :docker: Building $image:$VERSION"
 DOCKER_BUILDKIT=1 "${build_cmd[@]}"
-tags_to_push=("$image:$VERSION")
+tags_to_push=("$image:$tag")
 
-if [ "$BUILDKITE_BRANCH" = "refs/heads/main" ]; then
-    docker tag "$image:$VERSION" "$image:latest"
-    tags_to_push+=("$image:latest")
-    docker tag "$image:$VERSION" "$image:release-${BUILDKITE_COMMIT}"
-    tags_to_push+=("$image:release-${BUILDKITE_COMMIT}")
+if [[ "$BUILDKITE_BRANCH" == "refs/heads/main" ]]; then
+    if [[ "${RELEASE}" == "true" ]]; then
+        latest_tag="release-latest"
+    else
+        latest_tag="latest"
+    fi
+    docker tag "$image:$tag" "$image:$latest_tag"
+    tags_to_push+=("$image:$latest_tag")
 fi
 
 for tag in "${tags_to_push[@]}"; do
