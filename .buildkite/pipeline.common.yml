@@ -15,6 +15,16 @@ steps:
         login: true
         retries: 3
 
+  - label: ':docker: Build readyset-installer build image'
+    key: installer-image
+    depends_on:
+      - build-builder-base-image
+    command: .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-installer readyset-installer .
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
   - label: ":docker: Build readyset-server debug image"
     key: readyset-server-image
     depends_on:
@@ -138,6 +148,7 @@ steps:
           volumes:
           - 'target:/workdir/target'
           environment:
+          - READYSET_CFN_PREFIX=$(buildkite-agent meta-data get release-name)
           - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
           - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0

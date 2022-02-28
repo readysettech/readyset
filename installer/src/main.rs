@@ -13,7 +13,7 @@ use aws_types::credentials::{CredentialsError, ProvideCredentials};
 use aws_types::region::Region;
 use aws_types::Credentials;
 use clap::Parser;
-use deployment::DatabaseCredentials;
+use deployment::{DatabaseCredentials, TemplateType};
 use directories::ProjectDirs;
 use ec2::model::{AttributeBooleanValue, KeyType, Subnet, VpcAttributeName};
 use futures::stream::{FuturesUnordered, TryStreamExt};
@@ -60,59 +60,6 @@ const MIN_AVAILABILITY_ZONES: usize = 3;
 /// Public cloudformation template for the VPC
 const VPC_CLOUDFORMATION_TEMPLATE_URL: &str =
     "https://aws-quickstart.s3.amazonaws.com/quickstart-aws-vpc/templates/aws-vpc.template.yaml";
-
-// Macro to define this so it can be included in constants
-macro_rules! readyset_cloudformation_s3_prefix {
-    () => {
-        "installer-2022-03-08"
-    };
-}
-
-// Public cloudformation template prefix for the ReadySet stacks
-// TODO: Not needed right now but would be good to have in the future.
-// const READYSET_CLOUDFORMATION_S3_PREFIX: &str = readyset_cloudformation_s3_prefix!();
-
-/// Public cloudformation template for the VPC supplemental stack
-const VPC_SUPPLEMENTAL_CLOUDFORMATION_TEMPLATE_URL: &str = concat!(
-    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/",
-    readyset_cloudformation_s3_prefix!(),
-    "/readyset/templates/readyset-vpc-supplemental-template.yaml"
-);
-
-/// Public cloudformation template for the Consul stack
-const CONSUL_CLOUDFORMATION_TEMPLATE_URL: &str = concat!(
-    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/",
-    readyset_cloudformation_s3_prefix!(),
-    "/readyset/templates/readyset-authority-consul-template.yaml"
-);
-
-/// Public cloudformation template for the MySQL RDS stack
-const RDS_MYSQL_CLOUDFORMATION_TEMPLATE_URL: &str = concat!(
-    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/",
-    readyset_cloudformation_s3_prefix!(),
-    "/readyset/templates/readyset-rds-mysql-template.yaml"
-);
-
-/// Public cloudformation template for the PostgreSQL RDS stack
-const RDS_POSTGRESQL_CLOUDFORMATION_TEMPLATE_URL: &str = concat!(
-    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/",
-    readyset_cloudformation_s3_prefix!(),
-    "/readyset/templates/readyset-rds-mysql-template.yaml"
-);
-
-/// Public cloudformation template for the MySQL Readyset stack
-const READYSET_MYSQL_CLOUDFORMATION_TEMPLATE_URL: &str = concat!(
-    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/",
-    readyset_cloudformation_s3_prefix!(),
-    "/readyset/templates/readyset-mysql-template.yaml"
-);
-
-/// Public cloudformation template for the MySQL Readyset stack
-const READYSET_POSTGRESQL_CLOUDFORMATION_TEMPLATE_URL: &str = concat!(
-    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/",
-    readyset_cloudformation_s3_prefix!(),
-    "/readyset/templates/readyset-postgresql-template.yaml"
-);
 
 /// Install and configure a ReadySet cluster in AWS
 #[derive(Parser)]
@@ -367,8 +314,12 @@ impl Installer {
         let stack_name = format!("{}-readyset", self.deployment.name);
 
         let template_url = match self.deployment.rds_db.as_ref().unwrap().engine {
-            Engine::MySQL => READYSET_MYSQL_CLOUDFORMATION_TEMPLATE_URL,
-            Engine::PostgreSQL => READYSET_POSTGRESQL_CLOUDFORMATION_TEMPLATE_URL,
+            Engine::MySQL => self
+                .deployment
+                .cloudformation_template_url(TemplateType::Mysql),
+            Engine::PostgreSQL => self
+                .deployment
+                .cloudformation_template_url(TemplateType::Postgres),
         };
 
         let deployment_name = self.deployment.name.clone();
@@ -422,7 +373,7 @@ impl Installer {
             .unwrap()
             .clone();
 
-        let mut stack_config = StackConfig::from_url(template_url).await?;
+        let mut stack_config = StackConfig::from_url(&template_url).await?;
         stack_config
             .with_non_modifiable_parameter("VPCID", vpc_id)
             .with_non_modifiable_parameter("PrivateSubnet1ID", subnets.next().unwrap())
@@ -506,8 +457,12 @@ impl Installer {
         let stack_name = format!("{}-rds", self.deployment.name);
 
         let template_url = match self.deployment.rds_db.as_ref().unwrap().engine {
-            Engine::MySQL => RDS_MYSQL_CLOUDFORMATION_TEMPLATE_URL,
-            Engine::PostgreSQL => RDS_POSTGRESQL_CLOUDFORMATION_TEMPLATE_URL,
+            Engine::MySQL => self
+                .deployment
+                .cloudformation_template_url(TemplateType::RdsMysql),
+            Engine::PostgreSQL => self
+                .deployment
+                .cloudformation_template_url(TemplateType::RdsPostgres),
         };
 
         let vpc_id = self
@@ -577,6 +532,9 @@ impl Installer {
         println!("About to deploy Consul stack");
         prompt_to_continue()?;
         let stack_name = format!("{}-consul", self.deployment.name);
+        let template_url: String = self
+            .deployment
+            .cloudformation_template_url(TemplateType::Consul);
 
         let key_pair_name = self.deployment.key_pair_name.clone().unwrap();
         let consul_server_security_group_id = self
@@ -594,7 +552,7 @@ impl Installer {
             cfn_client
                 .create_stack()
                 .stack_name(&stack_name)
-                .template_url(CONSUL_CLOUDFORMATION_TEMPLATE_URL)
+                .template_url(template_url)
                 .parameters(cfn_parameter("KeyPairName", &key_pair_name))
                 .parameters(cfn_parameter("PrivateSubnet1ID", subnets.next().unwrap()))
                 .parameters(cfn_parameter("PrivateSubnet2ID", subnets.next().unwrap()))
@@ -639,6 +597,9 @@ impl Installer {
         );
         prompt_to_continue()?;
         let stack_name = format!("{}-vpc-supplemental", self.deployment.name);
+        let template_url = self
+            .deployment
+            .cloudformation_template_url(TemplateType::VpcSupplemental);
 
         let vpc_id = self
             .deployment
@@ -675,7 +636,7 @@ impl Installer {
             cfn_client
                 .create_stack()
                 .stack_name(&stack_name)
-                .template_url(VPC_SUPPLEMENTAL_CLOUDFORMATION_TEMPLATE_URL)
+                .template_url(template_url)
                 .parameters(cfn_parameter("VPCPrivateSubnetIds", subnet_ids))
                 .parameters(cfn_parameter("VPCID", vpc_id))
                 .parameters(cfn_parameter("VPCCIDR", vpc_cidr))
@@ -960,8 +921,10 @@ impl Installer {
     async fn validate_rs_ami_access(&mut self) -> Result<()> {
         let futures = FuturesUnordered::new();
         for template_url in [
-            READYSET_MYSQL_CLOUDFORMATION_TEMPLATE_URL,
-            READYSET_POSTGRESQL_CLOUDFORMATION_TEMPLATE_URL,
+            self.deployment
+                .cloudformation_template_url(TemplateType::Mysql),
+            self.deployment
+                .cloudformation_template_url(TemplateType::Postgres),
         ] {
             let template = Template::download(template_url).await?;
             let region = self.deployment.aws_region.as_ref().unwrap();

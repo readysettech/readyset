@@ -33,6 +33,10 @@ steps:
             # Since we always want to be able to build docker images, always build the base image.
             - label: ':docker: Build builder base image'
 
+            - label: ':docker: Build readyset-installer builder image'
+              include:
+                - installer/
+
             - label: ':rust: Check rustfmt'
               include:
                 - "[!ops]*"
@@ -542,3 +546,34 @@ steps:
       AWS_ASSUME_ROLE_ARN: arn:aws:iam::305232526136:role/DeployCustomerArtifactsWrite
     agents:
       queue: ops
+
+
+  - label: ':computer: Build ReadySet Installer'
+    key: build-installer
+    depends_on:
+      - packer-deploy-external
+    commands:
+      - 'echo +++ :computer: running build for ReadySet Installer'
+      - rustup target add x86_64-unknown-linux-musl
+      - if buildkite-agent meta-data exists release-name; then
+      -    export READYSET_CFN_PREFIX=$(buildkite-agent meta-data get release-name)
+      - else
+      -    export READYSET_CFN_PREFIX="alpha/${BUILDKITE_COMMIT}"
+      - fi
+      - RUSTFLAGS='-D warnings' cargo build --release --bin readyset-installer --target x86_64-unknown-linux-musl
+      - strip target/x86_64-unknown-linux-musl/release/readyset-installer
+    artifact_paths:
+      - target/x86_64-unknown-linux-musl/release/readyset-installer
+    plugins:
+      - docker#v3.9.0:
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-installer:${BUILDKITE_COMMIT}
+          volumes:
+            - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+            - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+            - CACHEPOT_REGION=us-east-2
+            - CARGO_INCREMENTAL=0
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+

@@ -13,6 +13,15 @@ pub(crate) use MaybeExisting::{CreateNew, Existing};
 
 use crate::console::{confirm, input, select};
 
+/// Used in build to match this installer a set of CFN templates.
+const PAIRED_VERSION: Option<&str> = option_env!("READYSET_CFN_PREFIX");
+
+/// Used if there is no paired version specified.
+/// Hardcoded to the last public release template set.
+const FALLBACK_VERSION: &str = "installer-2022-03-08";
+const S3_PREFIX: &str = "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/";
+const TEMPLATE_DIR: &str = "/readyset/templates/";
+
 /// An enum encapsulating the user selection to either use an existing entity (represented by the
 /// `T` type argument) or create a new one
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
@@ -191,6 +200,16 @@ pub struct Deployment {
     pub(crate) readyset_stack_outputs: Option<HashMap<String, String>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TemplateType {
+    Consul,
+    VpcSupplemental,
+    RdsMysql,
+    RdsPostgres,
+    Mysql,
+    Postgres,
+}
+
 impl Deployment {
     /// Create a new Deployment with the given name
     pub fn new<S>(name: S) -> Self
@@ -201,6 +220,22 @@ impl Deployment {
             name: name.into(),
             ..Default::default()
         }
+    }
+
+    pub fn cloudformation_template_url(&self, t: TemplateType) -> String {
+        let version_to_use = PAIRED_VERSION.unwrap_or(FALLBACK_VERSION);
+        let template_file = match t {
+            TemplateType::VpcSupplemental => "readyset-vpc-supplemental-template.yaml",
+            TemplateType::Consul => "readyset-authority-consul-template.yaml",
+            TemplateType::RdsMysql => "readyset-rds-mysql-template.yaml",
+            TemplateType::RdsPostgres => "readyset-rds-postgresql-template.yaml",
+            TemplateType::Mysql => "readyset-mysql-template.yaml",
+            TemplateType::Postgres => "readyset-postgresql-template.yaml",
+        };
+        format!(
+            "{}{}{}{}",
+            S3_PREFIX, version_to_use, TEMPLATE_DIR, template_file
+        )
     }
 
     /// Returns a reference to the name of the given deployment
@@ -331,7 +366,10 @@ where
 }
 
 #[cfg(test)]
+
 mod tests {
+    use std::env;
+
     use tempfile::TempDir;
     use test_strategy::proptest;
 
@@ -380,5 +418,26 @@ mod tests {
         eprintln!("JSON: {}", serialized);
         let rt = serde_json::from_str::<Deployment>(&serialized).unwrap();
         assert_eq!(rt, deployment);
+    }
+
+    #[test]
+    fn cloudformation_template_url_fallback() {
+        env::set_var("READYSET_CFN_PREFIX", "");
+        let expected = format!("https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/{}/readyset/templates/readyset-authority-consul-template.yaml", FALLBACK_VERSION);
+        let deployment = Deployment::new("cloudformation_template_url");
+        let actual = deployment.cloudformation_template_url(TemplateType::Consul);
+        assert_eq!(expected, actual)
+    }
+
+    #[test]
+    fn cloudformation_template_url_release() {
+        env::set_var(
+            "READYSET_CFN_PREFIX",
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890",
+        ); // valid hash characters
+        let expected = format!("https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/{}/readyset/templates/readyset-authority-consul-template.yaml", FALLBACK_VERSION);
+        let deployment = Deployment::new("cloudformation_template_url");
+        let actual = deployment.cloudformation_template_url(TemplateType::Consul);
+        assert_eq!(expected, actual)
     }
 }
