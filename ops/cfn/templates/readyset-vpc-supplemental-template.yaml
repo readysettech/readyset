@@ -21,6 +21,14 @@ Parameters:
     Description: Comma-delimited list of private subnet IDs within the target VPC (e.g. subnet-1234,subnet-4567,subnet-8910).
     Type: CommaDelimitedList
 
+  VPCEndpointsEnabled:
+    Description: Toggles the creation of VPC endpoints. Set to true if the target VPC does not use NAT gateways.
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+
   # Bastion SG
 
   BastionSecurityGroupID:
@@ -29,6 +37,8 @@ Parameters:
 
 Conditions:
   CreateAdditionalAdapterCIDRRule: !Not [!Equals [!Ref AdditionalAdapterCIDR, ""]]
+
+  CreateVPCEndpoints: !Equals [!Ref VPCEndpointsEnabled, "true"]
 
 Resources:
   ConsulServerSecurityGroup:
@@ -288,6 +298,7 @@ Resources:
           FromPort: 443
           ToPort: 443
           SourceSecurityGroupId: !Ref ConsulServerSecurityGroup
+    Condition: CreateVPCEndpoints
 
   # EC2 VPC endpoint
 
@@ -350,6 +361,7 @@ Resources:
       VpcEndpointType: Interface
       PrivateDnsEnabled: "true"
       VpcId: !Ref VPCID
+    Condition: CreateVPCEndpoints
 
   # Autoscaling VPC endpoint
 
@@ -374,6 +386,7 @@ Resources:
       VpcEndpointType: Interface
       PrivateDnsEnabled: "true"
       VpcId: !Ref VPCID
+    Condition: CreateVPCEndpoints
 
   # SQS VPC endpoint
 
@@ -397,6 +410,7 @@ Resources:
       VpcEndpointType: Interface
       PrivateDnsEnabled: "true"
       VpcId: !Ref VPCID
+    Condition: CreateVPCEndpoints
 
   # SSM VPC endpoint
 
@@ -420,6 +434,7 @@ Resources:
       VpcEndpointType: Interface
       PrivateDnsEnabled: "true"
       VpcId: !Ref VPCID
+    Condition: CreateVPCEndpoints
 
   # KMS VPC endpoint
 
@@ -443,6 +458,7 @@ Resources:
       VpcEndpointType: Interface
       PrivateDnsEnabled: "true"
       VpcId: !Ref VPCID
+    Condition: CreateVPCEndpoints
 
   # CloudFormation VPC endpoint
 
@@ -456,6 +472,7 @@ Resources:
       VpcEndpointType: Interface
       PrivateDnsEnabled: "true"
       VpcId: !Ref VPCID
+    Condition: CreateVPCEndpoints
 
   # CloudWatch VPC endpoint
 
@@ -482,6 +499,7 @@ Resources:
       VpcEndpointType: Interface
       PrivateDnsEnabled: "true"
       VpcId: !Ref VPCID
+    Condition: CreateVPCEndpoints
 
   CloudWatchMonitoringVPCEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -502,6 +520,7 @@ Resources:
       VpcEndpointType: Interface
       PrivateDnsEnabled: "true"
       VpcId: !Ref VPCID
+    Condition: CreateVPCEndpoints
 
 Outputs:
   ReadySetServerSecurityGroupID:
