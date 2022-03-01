@@ -168,7 +168,7 @@ impl FromQueryLog {
             .into_iter()
             .map(Value::try_from)
             .collect::<Result<Vec<_>, _>>()?;
-        let rows = conn.execute(stmt.to_string(), &params).await?;
+        let rows = conn.execute(&stmt.to_string(), &params).await?;
         if self.skip_ddl && is_ddl(&parsed) {
             return Ok(None);
         }
