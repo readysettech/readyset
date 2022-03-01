@@ -1097,7 +1097,9 @@ where
                         info.execute_unsupported();
                     }
                 }
-                warn!(error = %noria_err, "Error received from noria, sending query to fallback");
+                if !matches!(noria_err, ReadySetError::ReaderMissingKey) {
+                    warn!(error = %noria_err, "Error received from noria, sending query to fallback");
+                }
 
                 Self::execute_upstream(upstream, upstream_prep, params, event, true).await
             }
@@ -1611,7 +1613,9 @@ where
             }
             // Parse error, send to fallback
             Err(e) => {
-                warn!(error = %e, "Error received from noria, sending query to fallback");
+                if !matches!(e, ReadySetError::ReaderMissingKey) {
+                    warn!(error = %e, "Error received from noria, sending query to fallback");
+                }
                 self.query_fallback(query, &mut event).await
             }
             // Parsed but is in transaction so send to fallback
