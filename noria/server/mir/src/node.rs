@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::{Debug, Display, Error, Formatter};
+use std::marker::PhantomData;
 use std::mem;
 use std::rc::Rc;
 
@@ -488,15 +489,17 @@ impl MirNode {
     ///
     /// This iterator will yield nodes children first, starting at the ancestors of this node (but
     /// not including this node itself).
-    pub fn topo_ancestors(&self) -> TopoAncestors {
-        TopoAncestors {
-            queue: self
-                .ancestors()
-                .iter()
-                .map(|n| n.upgrade().unwrap())
-                .collect(),
-            in_edge_counts: Default::default(),
-        }
+    pub fn topo_ancestors(&self) -> Topo<Ancestors> {
+        Topo::new(self)
+    }
+
+    /// Return an iterator over all the transitive children of this node in reverse topographical
+    /// order
+    ///
+    /// This iterator will yield nodes ancestors first, starting at the children of this node (but
+    /// not including this node itself).
+    pub fn topo_descendants(&self) -> Topo<Children> {
+        Topo::new(self)
     }
 
     /// Return an iterator over all transitive root ancestors of this node (ancestor nodes which
@@ -507,32 +510,89 @@ impl MirNode {
     }
 }
 
-/// An iterator over the transitive ancestors of a node in a MIR graph. Constructed via the
-/// [`Node::topo_ancestors`] function
-pub struct TopoAncestors {
-    queue: VecDeque<MirNodeRef>,
-    in_edge_counts: HashMap<String, usize>,
+/// A [`Relationship`] that goes towards the [`children`][] of a node
+///
+/// [`children`]: MirNode::children
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Children;
+
+/// A [`Relationship`] that goes towards the [`ancestors`][] of a node
+///
+/// [`ancestors`]: MirNode::ancestors
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ancestors;
+
+mod sealed {
+    pub trait Sealed {}
+    impl Sealed for super::Children {}
+    impl Sealed for super::Ancestors {}
 }
 
-impl Iterator for TopoAncestors {
+/// A trait providing an abstract definition of the direction of an edge in a MIR.
+///
+/// This trait is [sealed][], so cannot be implemented outside of this module
+///
+/// [sealed]: https://rust-lang.github.io/api-guidelines/future-proofing.html#sealed-traits-protect-against-downstream-implementations-c-sealed
+pub trait Relationship: sealed::Sealed {
+    /// The relationship going in the other direction
+    type Other: Relationship;
+    /// A vector of node references in the direction of this relationship
+    fn neighbors(node: &MirNode) -> Vec<MirNodeRef>;
+}
+
+impl Relationship for Children {
+    type Other = Ancestors;
+    fn neighbors(node: &MirNode) -> Vec<MirNodeRef> {
+        node.children().to_vec()
+    }
+}
+
+impl Relationship for Ancestors {
+    type Other = Children;
+    fn neighbors(node: &MirNode) -> Vec<MirNodeRef> {
+        node.ancestors()
+            .iter()
+            .map(|mnr| mnr.upgrade().unwrap())
+            .collect()
+    }
+}
+
+/// An iterator over the transitive relationships of a node in a MIR graph (either children or
+/// ancestors). Constructed via the [`Node::topo_ancestors`] and [`Node::topo_children`] function
+pub struct Topo<R: Relationship> {
+    queue: VecDeque<MirNodeRef>,
+    edge_counts: HashMap<String, usize>,
+    _phantom: PhantomData<R>,
+}
+
+impl<R: Relationship> Topo<R> {
+    fn new(node: &MirNode) -> Self {
+        Topo {
+            queue: R::neighbors(node).into(),
+            edge_counts: Default::default(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<R: Relationship> Iterator for Topo<R> {
     type Item = MirNodeRef;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.queue.pop_front().map(|n| {
-            for parent in n.borrow().ancestors() {
-                let parent = parent.upgrade().unwrap();
-                let nd = parent.borrow().versioned_name();
-                let in_edges = if let Some(in_edges) = self.in_edge_counts.get(&nd) {
-                    *in_edges
+            for sib in R::neighbors(&n.borrow()) {
+                let nd = sib.borrow().versioned_name();
+                let num_edges = if let Some(num_edges) = self.edge_counts.get(&nd) {
+                    *num_edges
                 } else {
-                    parent.borrow().children().len()
+                    R::Other::neighbors(&sib.borrow()).len()
                 };
 
-                assert!(in_edges >= 1, "{} has no incoming edges!", nd);
-                if in_edges == 1 {
-                    self.queue.push_back(parent.clone());
+                assert!(num_edges >= 1, "{} has no incoming edges!", nd);
+                if num_edges == 1 {
+                    self.queue.push_back(sib.clone());
                 }
-                self.in_edge_counts.insert(nd, in_edges - 1);
+                self.edge_counts.insert(nd, num_edges - 1);
             }
             n
         })

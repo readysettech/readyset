@@ -83,20 +83,19 @@ fn push_dependent_filter(
             for col in dependency.non_dependent_columns() {
                 child_ref.add_column(col.clone())?;
             }
-            for grandchild in child_ref.children() {
-                if matches!(
-                    grandchild.borrow().inner,
+            for child_descendant in child_ref.topo_descendants() {
+                if !matches!(
+                    child_descendant.borrow().inner,
+                    // We'll update these below, outside this match block, since we need to drop
+                    // the child ref before we do it to avoid runtime borrow
+                    // errors (ugh RefCell!)
                     MirNodeInner::Filter { .. }
                         | MirNodeInner::TopK { .. }
                         | MirNodeInner::Latest { .. }
                         | MirNodeInner::Identity
                 ) {
-                    // Filter, TopK, Latest, and Identity all copy their parent's columns, so we
-                    // have to update that here (ugh)
-                    grandchild.borrow_mut().columns = child_ref.columns().to_vec();
-                } else {
                     for col in dependency.non_dependent_columns() {
-                        grandchild.borrow_mut().add_column(col.clone())?;
+                        child_descendant.borrow_mut().add_column(col.clone())?;
                     }
                 }
             }
@@ -108,6 +107,30 @@ fn push_dependent_filter(
         ),
     };
     drop(child_ref);
+
+    for descendant in child.borrow().topo_descendants() {
+        if matches!(
+            descendant.borrow().inner,
+            MirNodeInner::Filter { .. }
+                | MirNodeInner::TopK { .. }
+                | MirNodeInner::Latest { .. }
+                | MirNodeInner::Identity
+        ) {
+            // These nodes all copy their parent's columns verbatim, so we have to update that here
+            // (ugh!)
+            let columns = descendant
+                .borrow()
+                .ancestors()
+                .first()
+                .unwrap()
+                .upgrade()
+                .unwrap()
+                .borrow()
+                .columns()
+                .to_vec();
+            descendant.borrow_mut().columns = columns;
+        }
+    }
 
     if should_insert {
         MirNode::splice_child_below(child, node);
@@ -554,6 +577,292 @@ mod tests {
             "t2",
             "t2_filter should be removed"
         );
+
+        assert!(pull_all_required_columns(&mut query).is_ok());
+    }
+
+    #[test]
+    fn multiple_filters_after_agg() {
+        readyset_logging::init_test_logging();
+        // query looks something like:
+        //     SELECT t1.a FROM t1
+        //     WHERE EXISTS (
+        //         SELECT 1 FROM t2 WHERE t2.a = t1.a GROUP BY t2.b
+        //         HAVING COUNT(t2.b) BETWEEN 4 AND 7
+        //     )
+
+        let t2 = MirNode::new(
+            "t2".into(),
+            0,
+            vec![Column::new(Some("t2"), "a")],
+            MirNodeInner::Base {
+                column_specs: vec![
+                    (
+                        ColumnSpecification {
+                            column: nom_sql::Column::from("t2.a"),
+                            sql_type: SqlType::Int(None),
+                            constraints: vec![],
+                            comment: None,
+                        },
+                        None,
+                    ),
+                    (
+                        ColumnSpecification {
+                            column: nom_sql::Column::from("t2.b"),
+                            sql_type: SqlType::Int(None),
+                            constraints: vec![],
+                            comment: None,
+                        },
+                        None,
+                    ),
+                ],
+                primary_key: Some([Column::new(Some("t2"), "a")].into()),
+                unique_keys: Default::default(),
+                adapted_over: None,
+            },
+            vec![],
+            vec![],
+        );
+        // t2 -> ...
+
+        // -> σ[t2.a = t1.a]
+        let t2_filter = MirNode::new(
+            "t2_filter".into(),
+            0,
+            vec![Column::new(Some("t2"), "a")],
+            MirNodeInner::Filter {
+                conditions: Expression::BinaryOp {
+                    lhs: Box::new(Expression::Column("t2.a".into())),
+                    op: BinaryOperator::Equal,
+                    rhs: Box::new(Expression::Column("t1.a".into())),
+                },
+            },
+            vec![Rc::downgrade(&t2)],
+            vec![],
+        );
+
+        // -> |*|(t2.b) γ[t2.b]
+        let t2_count = MirNode::new(
+            "q_t2_count".into(),
+            0,
+            vec![Column::new(Some("t2"), "b"), Column::named("COUNT(t2.b)")],
+            MirNodeInner::Aggregation {
+                on: Column::new(Some("t2"), "b"),
+                group_by: vec![Column::new(Some("t2"), "b")],
+                kind: Aggregation::Count { count_nulls: false },
+            },
+            vec![Rc::downgrade(&t2_filter)],
+            vec![],
+        );
+
+        // -> σ[count(t2.b) >= 4]
+        let t2_count_f1 = MirNode::new(
+            "q_t2_count_f1".into(),
+            0,
+            vec![Column::new(Some("t2"), "b"), Column::named("COUNT(t2.b)")],
+            MirNodeInner::Filter {
+                conditions: Expression::BinaryOp {
+                    lhs: Box::new(Expression::Column(nom_sql::Column {
+                        table: None,
+                        name: "COUNT(t2.b)".into(),
+                    })),
+                    op: BinaryOperator::GreaterOrEqual,
+                    rhs: Box::new(Expression::Literal(4.into())),
+                },
+            },
+            vec![Rc::downgrade(&t2_count)],
+            vec![],
+        );
+
+        // -> σ[count(t2.b) <= 7]
+        let t2_count_f2 = MirNode::new(
+            "q_t2_count_f2".into(),
+            0,
+            vec![Column::new(Some("t2"), "b"), Column::named("COUNT(t2.b)")],
+            MirNodeInner::Filter {
+                conditions: Expression::BinaryOp {
+                    lhs: Box::new(Expression::Column(nom_sql::Column {
+                        table: None,
+                        name: "COUNT(t2.b)".into(),
+                    })),
+                    op: BinaryOperator::LessOrEqual,
+                    rhs: Box::new(Expression::Literal(7.into())),
+                },
+            },
+            vec![Rc::downgrade(&t2_count_f1)],
+            vec![],
+        );
+
+        // -> π[lit: 0, lit: 0]
+        let group_proj = MirNode::new(
+            "q_prj_hlpr".into(),
+            0,
+            vec![Column::named("__count_val"), Column::named("__count_grp")],
+            MirNodeInner::Project {
+                emit: vec![],
+                expressions: vec![],
+                literals: vec![
+                    ("__count_val".into(), DataType::from(0u32)),
+                    ("__count_grp".into(), DataType::from(0u32)),
+                ],
+            },
+            vec![Rc::downgrade(&t2_count_f2)],
+            vec![],
+        );
+        // -> [0, 0] for each row
+
+        // -> |0| γ[1]
+        let exists_count = MirNode::new(
+            "__exists_count".into(),
+            0,
+            vec![
+                Column::named("__count_val"),
+                Column::named("__count_grp"),
+                Column::named("__exists_count"),
+            ],
+            MirNodeInner::Aggregation {
+                on: Column::named("__count_val"),
+                group_by: vec![Column::named("__count_grp")],
+                kind: Aggregation::Count { count_nulls: true },
+            },
+            vec![Rc::downgrade(&group_proj)],
+            vec![],
+        );
+        // -> [0, <count>] for each row
+
+        // -> σ[c1 > 0]
+        let gt_0_filter = MirNode::new(
+            "count_gt_0".into(),
+            0,
+            vec![
+                Column::named("__count_val"),
+                Column::named("__count_grp"),
+                Column::named("__exists_count"),
+            ],
+            MirNodeInner::Filter {
+                conditions: Expression::BinaryOp {
+                    lhs: Box::new(Expression::Column("__exists_count".into())),
+                    op: BinaryOperator::Greater,
+                    rhs: Box::new(Expression::Literal(Literal::Integer(0))),
+                },
+            },
+            vec![Rc::downgrade(&exists_count)],
+            vec![],
+        );
+
+        let t1 = MirNode::new(
+            "t1".into(),
+            0,
+            vec![Column::new(Some("t1"), "a")],
+            MirNodeInner::Base {
+                column_specs: vec![(
+                    ColumnSpecification {
+                        column: nom_sql::Column::from("a"),
+                        sql_type: SqlType::Int(None),
+                        constraints: vec![],
+                        comment: None,
+                    },
+                    None,
+                )],
+                primary_key: Some([Column::from("a")].into()),
+                unique_keys: Default::default(),
+                adapted_over: None,
+            },
+            vec![],
+            vec![],
+        );
+        // t1 -> ...
+
+        // -> π[..., lit: 0]
+        let left_literal_join_key_proj = MirNode::new(
+            "t1_join_key".into(),
+            0,
+            vec![Column::new(Some("t1"), "a")],
+            MirNodeInner::Project {
+                emit: vec![Column::new(Some("t1"), "a")],
+                expressions: vec![],
+                literals: vec![("__exists_join_key".into(), DataType::from(0u32))],
+            },
+            vec![Rc::downgrade(&t1)],
+            vec![],
+        );
+
+        // -> ⧑ on: l.__exists_join_key ≡ r.__count_grp
+        let join_columns = vec![
+            Column::new(Some("t1"), "a"),
+            Column::named("__exists_join_key"),
+            Column::named("__count_grp"),
+            Column::named("__exists_count"),
+        ];
+        let exists_join = MirNode::new(
+            "exists_join".into(),
+            0,
+            join_columns.clone(),
+            MirNodeInner::DependentJoin {
+                on_left: vec![Column::named("__exists_join_key")],
+                on_right: vec![Column::named("__count_grp")],
+                project: join_columns.clone(),
+            },
+            vec![
+                Rc::downgrade(&left_literal_join_key_proj),
+                Rc::downgrade(&gt_0_filter),
+            ],
+            vec![],
+        );
+
+        let leaf = MirNode::new(
+            "q".into(),
+            0,
+            join_columns,
+            MirNodeInner::leaf(exists_join.clone(), vec![], IndexType::HashMap),
+            vec![Rc::downgrade(&exists_join)],
+            vec![],
+        );
+
+        let mut query = MirQuery {
+            name: "q".into(),
+            roots: vec![t1, t2],
+            leaf,
+        };
+
+        eliminate_dependent_joins(&mut query).unwrap();
+
+        eprintln!("{}", query.to_graphviz());
+
+        assert_eq!(
+            t2_count_f2.borrow().columns(),
+            &[
+                Column::new(Some("t2"), "b"),
+                Column::new(Some("t2"), "a"),
+                Column::named("COUNT(t2.b)"),
+            ],
+            "should update columns of filters recursively"
+        );
+
+        match &exists_join.borrow().inner {
+            MirNodeInner::Join {
+                on_left, on_right, ..
+            } => {
+                assert_eq!(on_left.len(), 2);
+                assert_eq!(on_right.len(), 2);
+
+                let left_pos = on_left
+                    .iter()
+                    .position(|col| col.name == "a" && col.table == Some("t1".into()));
+                let right_pos = on_right
+                    .iter()
+                    .position(|col| col.name == "a" && col.table == Some("t2".into()));
+
+                assert!(left_pos.is_some());
+                assert!(right_pos.is_some());
+
+                assert_eq!(left_pos.unwrap(), right_pos.unwrap());
+            }
+            _ => panic!(
+                "should have rewritten dependent to non-dependent join (got: {})",
+                exists_join.borrow().description()
+            ),
+        };
 
         assert!(pull_all_required_columns(&mut query).is_ok());
     }
