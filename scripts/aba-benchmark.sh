@@ -1,7 +1,8 @@
 #!/bin/bash
 set -eo pipefail
 
-DIR="$(dirname "${0}")/.."
+DIR="$(cd "$(dirname "${0}")/.."; pwd)"
+cd "${DIR}"
 
 function ensure_monitoring_stack() {
     docker-compose -f "${DIR}/docker/monitoring/docker-compose.yml" up -d
@@ -22,7 +23,7 @@ function run_adapter() {
 
 function setup() {
     docker-compose -f "${DIR}/docker-compose.yml" -f "${DIR}/benchmarks/docker-compose.override.yml" up -d
-    cargo build --release --bin noria-server --bin noria-mysql & sleep 10; wait
+    cargo build --release --bin noria-server --bin noria-mysql --bin benchmarks & sleep 10; wait
     exec 3< <(run_noria)
     exec 4< <(run_adapter)
     read <&3 noria_pid

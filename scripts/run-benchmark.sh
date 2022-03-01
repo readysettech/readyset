@@ -20,12 +20,12 @@ if [ "$#" -eq 1 ]; then
 fi
 
 # Go to the directory that has all test scripts.
-cd "${ROOT}/benchmarks"
+cd "${ROOT}"
 
 # MySQL connection string for the RDS.
 READYSET_RDS=mysql://$RDS_USER:$RDS_PASS@$RDS_HOST:$RDS_PORT/$RDS_DATABASE
 # File to write deployment yaml files to.
-DEPLOYMENT_FILE=deployment.yaml
+DEPLOYMENT_FILE=benchmarks/deployment.yaml
 
 # Write the deployment YAML for use by benchmarks later.
 cat > $DEPLOYMENT_FILE <<EOF
@@ -41,7 +41,7 @@ echo "Beginning benchmarks"
 cargo run --release --bin benchmarks -- --benchmark "${DATA_DIR}/read_benchmark_irl_small.yaml" --deployment $DEPLOYMENT_FILE
 
 # Binlog replication from this shouldn't bleed over into the next test.
-sleep 120
+sleep 30
 
 cargo run --release --bin benchmarks -- --benchmark "${DATA_DIR}/cache_hit_fastly_small.yaml" --deployment $DEPLOYMENT_FILE
 
