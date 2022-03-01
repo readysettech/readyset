@@ -178,19 +178,51 @@ impl DatabaseConnection {
         }
     }
 
-    pub async fn execute<Q, P>(&mut self, stmt: Q, params: P) -> anyhow::Result<Vec<Vec<Value>>>
+    pub async fn prepare<Q>(&mut self, query: Q) -> anyhow::Result<DatabaseStatement>
     where
-        Q: AsRef<str>,
-        P: Into<mysql_async::Params> + IntoIterator,
+        Q: AsRef<str> + Send + Sync,
+    {
+        match self {
+            DatabaseConnection::MySQL(conn) => Ok(conn.prep(query).await?.into()),
+            DatabaseConnection::PostgreSQL(client) => {
+                Ok(client.prepare(query.as_ref()).await?.into())
+            }
+        }
+    }
+
+    pub async fn execute<P>(
+        &mut self,
+        stmt: impl Into<DatabaseStatement>,
+        params: P,
+    ) -> anyhow::Result<Vec<Vec<Value>>>
+    where
+        P: Into<mysql_async::Params> + IntoIterator + Send,
+        P::IntoIter: ExactSizeIterator,
+        P::Item: pgsql::types::BorrowToSql,
+    {
+        match stmt.into() {
+            DatabaseStatement::Mysql(s) => {
+                convert_mysql_results(self.as_mysql_conn()?.exec_iter(s, params).await?).await
+            }
+            DatabaseStatement::Postgres(s) => {
+                convert_pgsql_results(self.as_postgres_conn()?.query_raw(&s, params).await?).await
+            }
+            DatabaseStatement::Str(s) => self.execute_str(s.as_ref(), params).await,
+        }
+    }
+
+    async fn execute_str<P>(&mut self, stmt: &str, params: P) -> anyhow::Result<Vec<Vec<Value>>>
+    where
+        P: Into<mysql_async::Params> + IntoIterator + Send,
         P::IntoIter: ExactSizeIterator,
         P::Item: pgsql::types::BorrowToSql,
     {
         match self {
             DatabaseConnection::MySQL(conn) => {
-                convert_mysql_results(conn.exec_iter(stmt.as_ref(), params).await?).await
+                convert_mysql_results(conn.exec_iter(stmt, params).await?).await
             }
             DatabaseConnection::PostgreSQL(client) => {
-                convert_pgsql_results(client.query_raw(stmt.as_ref(), params).await?).await
+                convert_pgsql_results(client.query_raw(stmt, params).await?).await
             }
         }
     }
@@ -199,5 +231,67 @@ impl DatabaseConnection {
         script
             .run_on_database(&Default::default(), self, None)
             .await
+    }
+
+    pub fn as_mysql_conn(&mut self) -> anyhow::Result<&mut mysql_async::Conn> {
+        if let DatabaseConnection::MySQL(c) = self {
+            Ok(c)
+        } else {
+            Err(anyhow!(
+                "DatabaseConnection is not a MySQL connection variant"
+            ))
+        }
+    }
+
+    pub fn as_postgres_conn(&mut self) -> anyhow::Result<&mut tokio_postgres::Client> {
+        if let DatabaseConnection::PostgreSQL(c) = self {
+            Ok(c)
+        } else {
+            Err(anyhow!(
+                "DatabaseConnection is not a Postgres connection variant"
+            ))
+        }
+    }
+}
+
+/// An enum wrapper around various prepared statement types. Either a mysql_async prepared
+/// statement, a tokio_postgres prepared statement, or a plain query string that we would like to
+/// both prepare and execute.
+pub enum DatabaseStatement {
+    /// A MySQL prepared statement returned from a prepare call in `mysql_async`.
+    Mysql(mysql_async::Statement),
+    /// A PostgreSQL prepared statement returned from a prepare call in `tokio_postgres`.
+    Postgres(tokio_postgres::Statement),
+    /// A simple query string that a user would like to be both prepared and executed.
+    Str(String),
+}
+
+impl From<mysql_async::Statement> for DatabaseStatement {
+    fn from(s: mysql_async::Statement) -> DatabaseStatement {
+        DatabaseStatement::Mysql(s)
+    }
+}
+
+impl From<tokio_postgres::Statement> for DatabaseStatement {
+    fn from(s: tokio_postgres::Statement) -> DatabaseStatement {
+        DatabaseStatement::Postgres(s)
+    }
+}
+
+impl From<&str> for DatabaseStatement {
+    fn from(s: &str) -> DatabaseStatement {
+        DatabaseStatement::Str(s.to_string())
+    }
+}
+
+impl From<String> for DatabaseStatement {
+    fn from(s: String) -> DatabaseStatement {
+        DatabaseStatement::Str(s)
+    }
+}
+
+impl From<&String> for DatabaseStatement {
+    fn from(s: &String) -> DatabaseStatement {
+        DatabaseStatement::Str(s.to_owned())
     }
 }
