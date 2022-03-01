@@ -22,8 +22,11 @@ function run_adapter() {
 }
 
 function setup() {
+    cargo build --release --bin noria-server --bin noria-mysql --bin benchmarks &
+    killall -9 noria-server noria-mysql || true
     docker-compose -f "${DIR}/docker-compose.yml" -f "${DIR}/benchmarks/docker-compose.override.yml" up -d
-    cargo build --release --bin noria-server --bin noria-mysql --bin benchmarks & sleep 10; wait
+    ensure_monitoring_stack
+    wait
     exec 3< <(run_noria)
     exec 4< <(run_adapter)
     read <&3 noria_pid
@@ -50,6 +53,8 @@ function teardown() {
     kill "$1" "$2"
     docker-compose -f "${DIR}/docker-compose.yml" -f "${DIR}/benchmarks/docker-compose.override.yml" down -v
     rm -Rf localbench-*
+    docker-compose -f "${DIR}/docker/monitoring/docker-compose.yml" stop pushgateway
+    docker-compose -f "${DIR}/docker/monitoring/docker-compose.yml" rm -f pushgateway
 }
 
 if [ "$#" -ne 2 ]; then
@@ -69,8 +74,6 @@ if [ "$#" -ne 2 ]; then
     echo ' 11. Direct you to use your human eyes and brain to view and interpret metrics'
     exit 1
 fi
-
-ensure_monitoring_stack
 
 echo '--- A1'
 git checkout "${1}"
