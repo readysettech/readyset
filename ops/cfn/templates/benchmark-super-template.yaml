@@ -1,0 +1,442 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: ReadySet benchmarking environment that uses an existing VPC to home all required resources contained.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: VPC Network Configuration
+        Parameters:
+          - VPCCIDR
+          - AdditionalAdapterCIDR
+          - VPCID
+          - VPCPrivateSubnetIds
+          - SSHSecurityGroupID
+      - Label:
+          default: SSH Access Configuration
+        Parameters:
+          - KeyPairName
+      - Label:
+          default: Consul Configuration
+        Parameters:
+          - ConsulEc2RetryJoinTagKey
+          - ConsulEc2RetryJoinTagValue
+      - Label:
+          default: Database Configuration
+        Parameters:
+          - DatabaseStorageType
+          - DatabaseInstanceClass
+          - DatabaseAllocatedStorage
+      - Label:
+          default: MySQL DB Configurations
+        Parameters:
+          - MySQLDatabaseUsername
+          - MySQLDatabaseName
+          - MySQLRDSSnapshotId
+      - Label:
+          default: PostgreSQL DB Configurations
+        Parameters:
+          - PostgreSQLDatabaseUsername
+          - PostgreSQLDatabaseName
+          - PostgreSQLRDSSnapshotId
+      - Label:
+          default: Secret Configuration
+        Parameters:
+          - SSMParameterKmsKeyArn
+          - PostgreSQLSSMPathRDSDatabasePassword
+          - MySQLSSMPathRDSDatabasePassword
+      - Label:
+          default: ReadySet Configuration
+        Parameters:
+          - ReadySetS3BucketName
+          - ReadySetS3KeyPrefix
+          - ReadySetAdapterInstanceType
+          - ReadySetAdapterNodes
+          - ReadySetServerInstanceType
+          - ReadySetServerNodes
+          - ReadySetServerInitialVolumeSizeGB
+          - ReadySetServerAutoGrowVolume
+          - ReadySetServerMaxVolumeSizeGB
+          - ReadySetMonitorInstanceType
+          - ReadySetMemoryLimitGB
+          - ReadySetDeploymentName
+      - Label:
+          Default: Feature Toggles
+        Parameters:
+          - EnableMySQLReadySet
+          - EnablePostgreSQLReadySet
+
+Parameters:
+  ReadySetS3BucketName:
+    Description: S3 bucket name for the ReadySet assets. ReadySet bucket name can include numbers, lowercase letters, uppercase letters, and hyphens (-). It cannot start or end with a hyphen (-).
+    Type: String
+    AllowedPattern: ^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$
+    ConstraintDescription: ReadySet bucket name can include numbers, lowercase letters, uppercase letters, and hyphens (-). It cannot start or end with a hyphen (-).
+
+  ReadySetS3KeyPrefix:
+    Description: S3 key prefix for the ReadySet assets. S3 key prefix can include numbers, lowercase letters, uppercase letters, and hyphens (-) and forward slashes (/).
+    Type: String
+    Default: /readyset/
+    AllowedPattern: ^[0-9a-zA-Z-/]*$
+    ConstraintDescription: ReadySet S3 key prefix can include numbers, lowercase letters, uppercase letters, and hyphens (-) and forward slashes (/).
+
+  # Private VPC Subnets
+
+  VPCPrivateSubnetIds:
+    Description: Comma-delimited list of private VPC subnet IDs within the target VPC (e.g. subnet-1234,subnet-4567,subnet-8910).
+    Type: String
+
+  SSHSecurityGroupID:
+    Description: ID of the VPC security group which this stack will allow SSH traffic from.
+    Type: String
+    AllowedPattern: ^(sg-.*)
+
+  VPCID:
+    Description: ID of the VPC to deploy resources in.
+    Type: AWS::EC2::VPC::Id
+    AllowedPattern: (^vpc-\w+)
+
+  VPCCIDR:
+    Description: CIDR block for the VPC
+    Type: String
+    Default: 10.0.0.0/16
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+
+  AdditionalAdapterCIDR:
+    Description: Additional CIDR to allow access to the Adapters from.
+    Type: String
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+
+  KeyPairName:
+    Description: Public/private key pairs allow you to securely connect to your instance after it launches
+    Type: AWS::EC2::KeyPair::KeyName
+
+  ConsulEc2RetryJoinTagKey:
+    Description: The EC2 instance tag key to filter on when joining to other Consul nodes.
+    Type: String
+    Default: ReadySetConsulNodeType
+    ConstraintDescription: Must match EC2 Tag Name requirements.
+
+  ConsulEc2RetryJoinTagValue:
+    Description: The EC2 instance tag value to filter on when joining to other Consul nodes.
+    Type: String
+    Default: Server
+    ConstraintDescription: Must match EC2 Tag Value requirements.
+
+  ReadySetAdapterInstanceType:
+    Description: The EC2 instance type to use for adapter instances.
+    Type: String
+    Default: c5.large
+
+  ReadySetAdapterNodes:
+    Description: Number of adapter nodes to create
+    Type: String
+    Default: 3
+
+  ReadySetServerInstanceType:
+    Description: The EC2 instance type to use for server instances.
+    Type: String
+    Default: c5.large
+    AllowedPattern: ^(\w)5.*
+    ConstraintDescription: Instance type must be 5th generation.
+
+  ReadySetServerNodes:
+    Description: Number of server nodes to create
+    Type: String
+    Default: 3
+
+  ReadySetMonitorInstanceType:
+    Description: The EC2 instance type to use for the logs aggregation instance.
+    Type: String
+    Default: c5.large
+
+  DatabaseStorageType:
+    Description: Database storage type
+    Type: String
+    Default: gp2
+
+  DatabaseInstanceClass:
+    Description: Database instance class
+    Type: String
+    Default: db.m5.large
+
+  DatabaseAllocatedStorage:
+    Description: The size of the database (GiB)
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 65536
+
+  ReadySetMemoryLimitGB:
+    Description: Memory limit for readyset server instances, in gigabytes. This should generally be set to around 80% of the memory available on the instance. A memory limit of 0 (the default) disables eviction entirely.
+    Type: Number
+    Default: 0
+    MinValue: 0
+
+  ReadySetDeploymentName:
+    Type: String
+    MinLength: 1
+    AllowedPattern: ^[^/ ]+$
+    ConstraintDescription: Must be non-empty and cannot contain slashes ("/") or spaces
+
+  ReadySetServerInitialVolumeSizeGB:
+    Description: Initial volume size, in gigabytes, to provision for Server instances. This should match the EBS volume size of the RDS instance.
+    Type: Number
+    Default: 32
+    MinValue: 32
+
+  ReadySetServerAutoGrowVolume:
+    Description: Automatically grow the volume for the ReadySet server.
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+
+  ReadySetServerMaxVolumeSizeGB:
+    Description: Maximum volume size, in gigabytes, to grow the volume to. If set to zero the volume will have no maximum size. Ignored if ReadySetServerAutoGrowVolume is false.
+    Type: Number
+    Default: 0
+
+  SSMParameterKmsKeyArn:
+    Description: ARN of KMS key that was used to encrypt SSM parameters referenced within this template.
+    Type: String
+
+  EnableMySQLReadySet:
+    Description: Whether or not to deploy ReadySet MySQL related resources.
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+
+  EnablePostgreSQLReadySet:
+    Description: Whether or not to deploy ReadySet PostgreSQL related resources.
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+
+  MySQLRDSSnapshotId:
+    Description: RDS snapshot ID to use for the MySQL RDS instance.
+    Type: String
+    Default: ""
+    MinLength: 0
+    MaxLength: 128
+
+  MySQLDatabaseName:
+    Description: MySQL username to connect to MySQL RDS instance, if enabled. This should be the DB name baked into MySQLRDSSnapshotId.
+    Type: String
+    Default: ""
+    MinLength: 0
+    MaxLength: 64
+
+  MySQLDatabaseUsername:
+    Description: Username to log into the ReadySet adapter and backing RDS MySQL instance.
+    Type: String
+    MinLength: 1
+    MaxLength: 16
+
+  MySQLSSMPathRDSDatabasePassword:
+    Description: Path to SSM secure string parameter that contains the backend MySQL database password.
+    Type: String
+    Default: ""
+
+  PostgreSQLDatabaseUsername:
+    Description: Username to log into the ReadySet adapter and backing RDS Postgres instance.
+    Type: String
+    MinLength: 1
+    MaxLength: 16
+
+  PostgreSQLDatabaseName:
+    Description: Postgres username to connect to PostgreSQL RDS instance, if enabled. This should be the DB name baked into PostgreSQLRDSSnapshotId.
+    Type: String
+    Default: ""
+    MinLength: 0
+    MaxLength: 64
+
+  PostgreSQLRDSSnapshotId:
+    Description: RDS snapshot ID to use for the MySQL RDS instance.
+    Type: String
+    Default: ""
+    MinLength: 0
+    MaxLength: 128
+
+  PostgreSQLSSMPathRDSDatabasePassword:
+    Description: Path to SSM secure string parameter that contains the backend PostgreSQL database password.
+    Type: String
+    Default: ""
+
+Conditions:
+  MySQLStackEnabled: !Equals [!Ref EnableMySQLReadySet, "true"]
+
+  PostgreSQLStackEnabled: !Equals [!Ref EnablePostgreSQLReadySet, "true"]
+
+Resources:
+  # Supplemental VPC resources
+
+  VPCSupplementalStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub >-
+        https://${ReadySetS3BucketName}.s3.amazonaws.com${ReadySetS3KeyPrefix}templates/readyset-vpc-supplemental-template.yaml
+      Parameters:
+        VPCPrivateSubnetIds: !Ref VPCPrivateSubnetIds
+        VPCID: !Ref VPCID
+        VPCCIDR: !Ref VPCCIDR
+        AdditionalAdapterCIDR: !Ref AdditionalAdapterCIDR
+        BastionSecurityGroupID: !Ref SSHSecurityGroupID
+        VPCEndpointsEnabled: "false"
+
+  # Consul Cluster
+
+  ReadySetConsulStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub >-
+        https://${ReadySetS3BucketName}.s3.amazonaws.com${ReadySetS3KeyPrefix}templates/readyset-authority-consul-template.yaml
+      Parameters:
+        KeyPairName: !Ref KeyPairName
+        PrivateSubnet1ID: !Select [0, !Split [',', !Ref VPCPrivateSubnetIds]]
+        PrivateSubnet2ID: !Select [1, !Split [',', !Ref VPCPrivateSubnetIds]]
+        PrivateSubnet3ID: !Select [2, !Split [',', !Ref VPCPrivateSubnetIds]]
+        ConsulEc2RetryJoinTagKey: !Ref ConsulEc2RetryJoinTagKey
+        ConsulEc2RetryJoinTagValue: !Ref ConsulEc2RetryJoinTagValue
+        # Security Groups
+        ConsulServerSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ConsulServerSecurityGroupID
+
+  # RDS Cluster Module
+
+  RDSStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub >-
+        https://${ReadySetS3BucketName}.s3.amazonaws.com${ReadySetS3KeyPrefix}templates/benchmark-rds-template.yaml
+      Parameters:
+        VPCPrivateSubnetIds: !Ref VPCPrivateSubnetIds
+        VPCID: !Ref VPCID
+        VPCCIDR: !Ref VPCCIDR
+        DatabaseStorageType: !Ref DatabaseStorageType
+        DatabaseInstanceClass: !Ref DatabaseInstanceClass
+        DatabaseAllocatedStorage: !Ref DatabaseAllocatedStorage
+        EnableMySQLRDS: !Ref EnableMySQLReadySet
+        EnablePostgreSQLRDS: !Ref EnablePostgreSQLReadySet
+        MySQLDBSnapshotId: !Ref MySQLRDSSnapshotId
+        PostgreSQLDBSnapshotId: !Ref PostgreSQLRDSSnapshotId
+
+  # ReadySet for MySQL
+
+  ReadySetMySQLStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub >-
+        https://${ReadySetS3BucketName}.s3.amazonaws.com${ReadySetS3KeyPrefix}templates/readyset-mysql-template.yaml
+      Parameters:
+        ConsulJoinManagedPolicyArn: !GetAtt ReadySetConsulStack.Outputs.ConsulJoinManagedPolicyArn
+        PrivateSubnet1ID: !Select [0, !Split [',', !Ref VPCPrivateSubnetIds]]
+        PrivateSubnet2ID: !Select [1, !Split [',', !Ref VPCPrivateSubnetIds]]
+        PrivateSubnet3ID: !Select [2, !Split [',', !Ref VPCPrivateSubnetIds]]
+        VPCID: !Ref VPCID
+        ConsulEc2RetryJoinTagKey: !Ref ConsulEc2RetryJoinTagKey
+        ConsulEc2RetryJoinTagValue: !Ref ConsulEc2RetryJoinTagValue
+        KeyPairName: !Ref KeyPairName
+        ReadySetAdapterInstanceType: !Ref ReadySetAdapterInstanceType
+        ReadySetAdapterNodes: !Ref ReadySetAdapterNodes
+        ReadySetServerInstanceType: !Ref ReadySetServerInstanceType
+        ReadySetServerNodes: !Ref ReadySetServerNodes
+        ReadySetServerInitialVolumeSizeGB: !Ref ReadySetServerInitialVolumeSizeGB
+        ReadySetServerAutoGrowVolume: !Ref ReadySetServerAutoGrowVolume
+        ReadySetServerMaxVolumeSizeGB: !Ref ReadySetServerMaxVolumeSizeGB
+        ReadySetMonitorInstanceType: !Ref ReadySetMonitorInstanceType
+        ReadySetMemoryLimitGB: !Ref ReadySetMemoryLimitGB
+        ReadySetDeploymentName: !Ref ReadySetDeploymentName
+        # Networking Inputs
+        ReadySetServerSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetServerSecurityGroupID
+        ReadySetAdapterSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetAdapterSecurityGroupID
+        ReadySetMonitoringSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetMonitoringSecurityGroupID
+        # Backend DB Inputs
+        SSMParameterKmsKeyArn: !Ref SSMParameterKmsKeyArn
+        SSMPathRDSDatabasePassword: !Ref MySQLSSMPathRDSDatabasePassword
+        DatabaseName: !Ref MySQLDatabaseName
+        DatabaseHostname: !GetAtt RDSStack.Outputs.MySQLRDSHostname
+        DatabaseAdapterUsername: !Ref MySQLDatabaseUsername
+        DatabasePort: !GetAtt RDSStack.Outputs.MySQLRDSPort
+    Condition: MySQLStackEnabled
+
+  # ReadySet for PostgreSQL
+
+  ReadySetPostgreSQLStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub >-
+        https://${ReadySetS3BucketName}.s3.amazonaws.com${ReadySetS3KeyPrefix}templates/readyset-postgresql-template.yaml
+      Parameters:
+        ConsulJoinManagedPolicyArn: !GetAtt ReadySetConsulStack.Outputs.ConsulJoinManagedPolicyArn
+        VPCPrivateSubnetIds: !Split [',', !Ref VPCPrivateSubnetIds]
+        VPCID: !Ref VPCID
+        ConsulEc2RetryJoinTagKey: !GetAtt ReadySetConsulStack.Outputs.ConsulEc2RetryJoinTagKey
+        ConsulEc2RetryJoinTagValue: !GetAtt ReadySetConsulStack.Outputs.ConsulEc2RetryJoinTagValue
+        KeyPairName: !Ref KeyPairName
+        ReadySetAdapterInstanceType: !Ref ReadySetAdapterInstanceType
+        ReadySetAdapterNodes: !Ref ReadySetAdapterNodes
+        ReadySetServerInstanceType: !Ref ReadySetServerInstanceType
+        ReadySetServerNodes: !Ref ReadySetServerNodes
+        ReadySetServerInitialVolumeSizeGB: !Ref ReadySetServerInitialVolumeSizeGB
+        ReadySetServerAutoGrowVolume: !Ref ReadySetServerAutoGrowVolume
+        ReadySetServerMaxVolumeSizeGB: !Ref ReadySetServerMaxVolumeSizeGB
+        ReadySetMonitorInstanceType: !Ref ReadySetMonitorInstanceType
+        ReadySetMemoryLimitGB: !Ref ReadySetMemoryLimitGB
+        ReadySetDeploymentName: !Ref ReadySetDeploymentName
+        # Networking Inputs
+        ReadySetServerSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetServerSecurityGroupID
+        ReadySetAdapterSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetAdapterSecurityGroupID
+        ReadySetMonitoringSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetMonitoringSecurityGroupID
+        # Backend DB Inputs
+        SSMParameterKmsKeyArn: !Ref SSMParameterKmsKeyArn
+        SSMPathRDSDatabasePassword: !Ref PostgreSQLSSMPathRDSDatabasePassword
+        DatabaseName: !Ref PostgreSQLDatabaseName
+        DatabaseHostname: !GetAtt RDSStack.Outputs.PostgreSQLRDSHostname
+        DatabaseAdapterUsername: !Ref PostgreSQLDatabaseUsername
+        DatabasePort: !GetAtt RDSStack.Outputs.PostgreSQLRDSPort
+    Condition: PostgreSQLStackEnabled
+
+Outputs:
+  # MySQL Stack Outputs
+
+  ReadySetMySQLVPCEndpointService:
+    Description: S3 VPC Endpoint for accessing ReadySet for MySQL.
+    Value: !If [MySQLStackEnabled, !GetAtt ReadySetMySQLStack.Outputs.ReadySetMySQLVPCEndpointService, ""]
+
+  ReadySetMySQLAdapterNLBDNSName:
+    Description: Hostname of the NLB which reverse proxies MySQL traffic to the MySQL adapter nodes of the cluster.
+    Value: !If [MySQLStackEnabled, !GetAtt ReadySetMySQLStack.Outputs.ReadySetAdapterNLBDNSName, ""]
+
+  # PostgreSQL Stack Outputs
+
+  ReadySetPostgreSQLAdapterNLBDNSName:
+    Description: Hostname of the NLB which reverse proxies PostgreSQL traffic to the PostgreSQL adapter nodes of the cluster.
+    Value: !If [PostgreSQLStackEnabled, !GetAtt ReadySetPostgreSQLStack.Outputs.ReadySetAdapterNLBDNSName, ""]
+
+  ReadySetPostgreSQLVPCEndpointService:
+    Description: S3 VPC Endpoint for accessing ReadySet for PostgreSQL.
+    Value: !If [PostgreSQLStackEnabled, !GetAtt ReadySetPostgreSQLStack.Outputs.ReadySetPostgreSQLVPCEndpointService, ""]
+
+  # Networking Outputs
+
+  ReadySetServerSecurityGroupID:
+    Description: ID of VPC security group designated for ReadySet Server instances.
+    Value: !GetAtt VPCSupplementalStack.Outputs.ReadySetServerSecurityGroupID
+
+  ReadySetAdapterSecurityGroupID:
+    Description: ID of VPC security group designated for ReadySet Adapter instances.
+    Value: !GetAtt VPCSupplementalStack.Outputs.ReadySetAdapterSecurityGroupID
+
+  ReadySetMonitoringSecurityGroupID:
+    Description: ID of VPC security group designated for ReadySet Monitoring instance(s).
+    Value: !GetAtt VPCSupplementalStack.Outputs.ReadySetMonitoringSecurityGroupID
+
+  ReadySetDBSecurityGroup:
+    Description: Attach this Security Group to your RDS instance.
+    Value: !GetAtt VPCSupplementalStack.Outputs.ReadySetDBSecurityGroupID

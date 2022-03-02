@@ -1,0 +1,198 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: New RDS DB Instance(s) configured for Readyset
+
+Parameters:
+  VPCPrivateSubnetIds:
+    Description: Comma-delimited list of private VPC subnet IDs within the target VPC (e.g. subnet-1234,subnet-4567,subnet-8910).
+    Type: CommaDelimitedList
+
+  VPCID:
+    Description: VPC ID
+    Type: AWS::EC2::VPC::Id
+
+  VPCCIDR:
+    Description: CIDR block for the VPC
+    Type: String
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+
+  DatabaseStorageType:
+    Description: Database storage type
+    Type: String
+    Default: gp2
+
+  DatabaseInstanceClass:
+    Description: Database instance class
+    Type: String
+    Default: db.m5.large
+
+  DatabaseAllocatedStorage:
+    Description: The size of the database (GiB)
+    Type: Number
+    Default: 50
+    MinValue: 50
+    MaxValue: 65536
+    ConstraintDescription: must be between 20 and 65536 GiB.
+
+  DatabaseBackupWindow:
+    Description: AWS backup window for RDS instance (UTC).
+    Type: String
+    Default: 05:30-06:30
+
+  DatabaseMaintenanceWindow:
+    Description: AWS maintenance window for RDS instance (UTC).
+    Type: String
+    Default: sun:06:45-sun:08:00
+
+  EnableMySQLRDS:
+    Description: Whether or not to deploy ReadySet MySQL related RDS resources.
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+
+  EnablePostgreSQLRDS:
+    Description: Whether or not to deploy ReadySet PostgreSQL related RDS resources.
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+
+  MySQLDBSnapshotId:
+    Description: RDS snapshot ID to use for the MySQL RDS instance.
+    Type: String
+    Default: ""
+    MinLength: 0
+    MaxLength: 128
+
+  PostgreSQLDBSnapshotId:
+    Description: RDS snapshot ID to use for the MySQL RDS instance.
+    Type: String
+    Default: ""
+    MinLength: 0
+    MaxLength: 128
+
+Conditions:
+  MySQLRDSEnabled: !Equals [!Ref EnableMySQLRDS, "true"]
+
+  PostgreSQLRDSEnabled: !Equals [!Ref EnablePostgreSQLRDS, "true"]
+
+Resources:
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow connections to the RDS from inside the VPC
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: !Ref VPCCIDR
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+
+  # Database Subnet Group (Engine Agnostic)
+
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Collection of subnets used by the ReadySet backend database.
+      SubnetIds: !Ref VPCPrivateSubnetIds
+
+  # MySQL Specific Parameter Group
+
+  MySQLDatabaseParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: ReadySet RDS MySQL Parameter Group
+      Family: mysql8.0
+      Parameters:
+        binlog_format: ROW
+    Condition: MySQLRDSEnabled
+
+  # MySQL Specific DB Instance
+
+  MySQLDatabaseInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: mysql
+      DBInstanceClass: !Ref DatabaseInstanceClass
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      AllocatedStorage: !Ref DatabaseAllocatedStorage
+      StorageType: !Ref DatabaseStorageType
+      DBSnapshotIdentifier: !Ref MySQLDBSnapshotId
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      DBParameterGroupName: !Ref MySQLDatabaseParameterGroup
+      PreferredBackupWindow: !Ref DatabaseBackupWindow
+      PreferredMaintenanceWindow: !Ref DatabaseMaintenanceWindow
+      BackupRetentionPeriod: 1
+    Condition: MySQLRDSEnabled
+
+  # PostgreSQL Specific Parameter Group
+
+  PostgreSQLDatabaseParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: ReadySet RDS Postgres Parameter Group
+      Family: postgres13
+      Parameters:
+        rds.logical_replication: 1
+    Condition: PostgreSQLRDSEnabled
+
+  # PostgreSQL specific DB Instance
+
+  PostgreSQLDatabaseInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: postgres
+      DBInstanceClass: !Ref DatabaseInstanceClass
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      AllocatedStorage: !Ref DatabaseAllocatedStorage
+      StorageType: !Ref DatabaseStorageType
+      DBSnapshotIdentifier: !Ref PostgreSQLDBSnapshotId
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      DBParameterGroupName: !Ref PostgreSQLDatabaseParameterGroup
+      PreferredBackupWindow: !Ref DatabaseBackupWindow
+      PreferredMaintenanceWindow: !Ref DatabaseMaintenanceWindow
+      BackupRetentionPeriod: 1
+    Condition: PostgreSQLRDSEnabled
+
+Outputs:
+  # MySQL Related Outputs
+
+  MySQLDatabaseIdentifier:
+    Description: Identifier of the created RDS instance
+    Value: !If [MySQLRDSEnabled, !Ref MySQLDatabaseInstance, ""]
+
+  MySQLRDSHostname:
+    Description: Hostname of the created RDS MySQL instance
+    Value: !If [MySQLRDSEnabled, !GetAtt MySQLDatabaseInstance.Endpoint.Address, ""]
+
+  MySQLRDSPort:
+    Description: TCP port of the RDS MySQL instance listener
+    Value: !If [MySQLRDSEnabled, !GetAtt MySQLDatabaseInstance.Endpoint.Port, ""]
+
+  # PostgreSQL Related Outputs
+
+  PostgreSQLDatabaseIdentifier:
+    Description: Identifier of the created RDS PostgreSQL instance
+    Value: !If [PostgreSQLRDSEnabled, !Ref PostgreSQLDatabaseInstance, ""]
+
+  PostgreSQLRDSHostname:
+    Description: Hostname of the created RDS PostgreSQL instance
+    Value: !If [PostgreSQLRDSEnabled, !GetAtt PostgreSQLDatabaseInstance.Endpoint.Address, ""]
+
+  PostgreSQLRDSPort:
+    Description: TCP port of the RDS PostgreSQL instance listener
+    Value: !If [PostgreSQLRDSEnabled, !GetAtt PostgreSQLDatabaseInstance.Endpoint.Port, ""]
