@@ -154,7 +154,7 @@ mod tests {
                 assert_eq!(
                     stmt.limit,
                     Some(LimitClause {
-                        limit: Expression::Literal(4.into()),
+                        limit: 4.into(),
                         offset: None,
                     })
                 );

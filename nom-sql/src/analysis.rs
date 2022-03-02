@@ -220,11 +220,6 @@ impl SelectStatement {
             .chain(&self.where_clause)
             .chain(self.group_by.iter().flat_map(|gbc| &gbc.having))
             .chain(
-                self.limit
-                    .iter()
-                    .flat_map(|limit| limit.offset.iter().chain(iter::once(&limit.limit))),
-            )
-            .chain(
                 self.order
                     .iter()
                     .flat_map(|oc| oc.order_by.iter().map(|(expr, _)| expr)),

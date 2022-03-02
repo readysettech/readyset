@@ -2400,7 +2400,7 @@ impl QueryOperation {
                 });
 
                 query.limit = Some(LimitClause {
-                    limit: Expression::Literal(Literal::Integer(*limit as _)),
+                    limit: Literal::Integer(*limit as _),
                     offset: None,
                 });
 
