@@ -1,0 +1,20 @@
+statement ok
+create table t1 (grp int, val int);
+
+statement ok
+insert into t1 (grp, val) values (1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6);
+
+statement ok
+create cached query as
+select val from t1 where grp = ? order by val asc limit 3 offset ?;
+
+graphviz
+
+query I nosort
+select val from t1 where grp = ? order by val asc limit 3 offset ?;
+? = 1
+? = 3
+----
+4
+5
+6

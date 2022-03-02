@@ -1366,7 +1366,9 @@ impl NoriaConnector {
                 .get_noria_view(name, region.as_deref(), view_failed)
                 .await?;
 
-            if (offset.is_some() && !matches!(offset, Some(DataType::Int(0))))
+            if (matches!(limit, Some(DataType::Int(1)))
+                && offset.is_some()
+                && !matches!(offset, Some(DataType::Int(0))))
                 || matches!(limit, Some(DataType::Int(0)))
             {
                 short_circuit_empty_resultset(getter).await
@@ -1567,11 +1569,22 @@ fn build_view_query(
                             lower_key.push(lower_value);
                             upper_key.push(upper_value);
                         }
-                        ViewPlaceholder::Offset(idx) => {
+                        ViewPlaceholder::PageNumber {
+                            offset_placeholder,
+                            limit,
+                        } => {
                             // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
                             // offset parameters should always be a Bigint
-                            // TODO(DAN): convert from offset to page number here or in view
-                            k.push(key[*idx - 1].coerce_to(&nom_sql::SqlType::Bigint(None))?);
+                            let offset: u64 = key[*offset_placeholder - 1]
+                                .coerce_to(&nom_sql::SqlType::Bigint(None))?
+                                .try_into()?;
+                            if offset % *limit != 0 {
+                                unsupported!(
+                                    "OFFSET must currently be an integer multiple of LIMIT"
+                                );
+                            }
+                            let page_number = offset / *limit;
+                            k.push(page_number.into());
                         }
                     };
                 }
@@ -1590,6 +1603,8 @@ fn build_view_query(
             })
             .collect::<ReadySetResult<Vec<_>>>()?
     };
+
+    trace!(?keys, ?filters, "Built view query");
 
     Ok(ViewQuery {
         key_comparisons: keys,
@@ -1932,6 +1947,41 @@ mod tests {
                     Bound::Excluded(vec1![DataType::from(1), DataType::from("a")]),
                     Bound::Unbounded
                 ))]
+            );
+        }
+
+        #[test]
+        fn paginated_with_key() {
+            let query = build_view_query(
+                &*SCHEMA,
+                &[
+                    (ViewPlaceholder::OneToOne(1), 0),
+                    (
+                        ViewPlaceholder::PageNumber {
+                            offset_placeholder: 2,
+                            limit: 3,
+                        },
+                        1,
+                    ),
+                ],
+                &parse_select_statement(
+                    "SELECT t.x FROM t WHERE t.x = $1 ORDER BY t.y ASC LIMIT 3 OFFSET $2",
+                ),
+                vec![vec![DataType::from(1), DataType::from(3)].into()],
+                None,
+                ReadBehavior::Blocking,
+            )
+            .unwrap();
+
+            assert_eq!(query.filter, None);
+
+            assert_eq!(
+                query.key_comparisons,
+                vec![vec1![
+                    DataType::from(1),
+                    DataType::from(1) // page 2
+                ]
+                .into()]
             );
         }
     }
