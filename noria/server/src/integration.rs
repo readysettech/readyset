@@ -3882,7 +3882,13 @@ async fn simple_pagination() {
         q.key_map(),
         &[
             (ViewPlaceholder::OneToOne(1), 1),
-            (ViewPlaceholder::Offset(2), 2)
+            (
+                ViewPlaceholder::PageNumber {
+                    offset_placeholder: 2,
+                    limit: 3
+                },
+                2
+            )
         ]
     );
 

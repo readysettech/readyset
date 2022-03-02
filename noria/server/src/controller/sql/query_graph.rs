@@ -723,26 +723,14 @@ fn collect_join_predicates(cond: Expression, out: &mut Vec<JoinPredicate>) -> Re
 
 /// Convert limit and offset fields to usize and Option<ViewPlaceholder>
 pub(crate) fn extract_limit_offset(
-    limit: &LimitClause,
+    limit_clause: &LimitClause,
 ) -> ReadySetResult<(usize, Option<ViewPlaceholder>)> {
-    let offset = limit
-        .offset
-        .as_ref()
-        .and_then(|offset| match offset {
-            Literal::Placeholder(ItemPlaceholder::DollarNumber(idx)) => {
-                Some(Ok(ViewPlaceholder::Offset(*idx as usize)))
-            }
-            // For now, remove offset if it is a literal 0
-            Literal::Integer(0) => None,
-            _ => Some(Err(internal_err("Numeric OFFSETs must be parametrized"))),
-        })
-        .transpose()?;
-    let limit = match limit.limit {
+    let limit = match limit_clause.limit {
         Literal::Integer(val) => {
             if val < 0 {
                 unsupported!("LIMIT field cannot have a negative value")
             } else {
-                val as usize
+                val as u64
             }
         }
         Literal::Placeholder(_) => {
@@ -750,7 +738,23 @@ pub(crate) fn extract_limit_offset(
         }
         _ => unsupported!("Invalid LIMIT statement"),
     };
-    Ok((limit, offset))
+    let offset = limit_clause
+        .offset
+        .as_ref()
+        .and_then(|offset| match offset {
+            Literal::Placeholder(ItemPlaceholder::DollarNumber(idx)) => {
+                Some(Ok(ViewPlaceholder::PageNumber {
+                    offset_placeholder: *idx as _,
+                    limit,
+                }))
+            }
+            // For now, remove offset if it is a literal 0
+            Literal::Integer(0) => None,
+            _ => Some(Err(internal_err("Numeric OFFSETs must be parametrized"))),
+        })
+        .transpose()?;
+
+    Ok((limit as _, offset))
 }
 
 #[allow(clippy::cognitive_complexity)]
@@ -1490,6 +1494,37 @@ mod tests {
                     (
                         mir::Column::new(Some("t"), "y"),
                         ViewPlaceholder::OneToOne(3)
+                    )
+                ]
+            );
+        }
+
+        #[test]
+        fn paginated() {
+            let qg = make_query_graph(
+                "SELECT t.x FROM t WHERE t.x = $1 ORDER BY t.y ASC LIMIT 3 OFFSET $2",
+            );
+            let key = qg
+                .view_key(&mir::Config {
+                    allow_paginate: true,
+                    ..Default::default()
+                })
+                .unwrap();
+
+            assert_eq!(key.index_type, IndexType::HashMap);
+            assert_eq!(
+                key.columns,
+                vec![
+                    (
+                        mir::Column::new(Some("t"), "x"),
+                        ViewPlaceholder::OneToOne(1)
+                    ),
+                    (
+                        mir::Column::named("__page_number"),
+                        ViewPlaceholder::PageNumber {
+                            offset_placeholder: 2,
+                            limit: 3,
+                        }
                     )
                 ]
             );

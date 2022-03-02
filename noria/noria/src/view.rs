@@ -66,9 +66,14 @@ pub enum ViewPlaceholder {
     /// respectively
     Between(PlaceholderIdx, PlaceholderIdx),
 
-    /// This key column corresponds to the OFFSET parameter in the SQL query. There may be
-    /// at most one instance of this variant per query.
-    Offset(PlaceholderIdx),
+    /// This key column is the page number of a paginated query, which must be calculated by
+    /// dividing the value for the `OFFSET` clause by the value for the `LIMIT` in the query
+    PageNumber {
+        /// The index of the placeholder for the `OFFSET` clause of the original query
+        offset_placeholder: PlaceholderIdx,
+        /// The `LIMIT` (page size) in the query
+        limit: u64,
+    },
 }
 
 impl From<Option<PlaceholderIdx>> for ViewPlaceholder {
