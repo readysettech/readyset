@@ -22,6 +22,8 @@ function run_adapter() {
 }
 
 function setup() {
+    export TRACING_HOST=127.0.0.1:6831
+    export TRACING_SAMPLE_PERCENT=0.001
     cargo build --release --bin noria-server --bin noria-mysql --bin benchmarks &
     killall -9 noria-server noria-mysql || true
     docker-compose -f "${DIR}/docker-compose.yml" -f "${DIR}/benchmarks/docker-compose.override.yml" up -d
