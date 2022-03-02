@@ -18,3 +18,11 @@ select val from t1 where grp = ? order by val asc limit 3 offset ?;
 4
 5
 6
+
+query I nosort
+select val from t1 where grp = ? order by val asc limit 3 offset 3;
+? = 1
+----
+4
+5
+6
