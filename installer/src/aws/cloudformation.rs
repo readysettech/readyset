@@ -113,6 +113,12 @@ pub(crate) struct ParameterGroup {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct AwsAmiRegionMap {
+    #[serde(rename = "AWSAMIRegionMap")]
+    pub aws_ami_region_map: HashMap<String, HashMap<String, String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub(crate) struct CloudFormationInterface {
     pub(crate) parameter_groups: Vec<ParameterGroup>,
@@ -130,6 +136,7 @@ pub(crate) struct TemplateMetadata {
 #[serde(rename_all = "PascalCase")]
 pub(crate) struct Template {
     metadata: TemplateMetadata,
+    pub mappings: Option<AwsAmiRegionMap>,
     parameters: HashMap<String, TemplateParameter>,
 }
 
@@ -482,6 +489,24 @@ ConstraintDescription: Must begin with a letter and contain only alphanumeric ch
     fn deserialize_readyset_mysql_super_template() {
         let mut path = PathBuf::from("..").canonicalize().unwrap();
         path.push("ops/cfn/templates/readyset-mysql-super-template.yaml");
+        let file = File::open(path).unwrap();
+        let template_res = serde_yaml::from_reader::<_, Template>(file);
+        assert!(template_res.is_ok(), "{}", template_res.err().unwrap());
+    }
+
+    #[test]
+    fn deserialize_readyset_mysql_ytt_template() {
+        let mut path = PathBuf::from("..").canonicalize().unwrap();
+        path.push("ops/cfn/ytt_templates/readyset-mysql-template.ytt.yaml");
+        let file = File::open(path).unwrap();
+        let template_res = serde_yaml::from_reader::<_, Template>(file);
+        assert!(template_res.is_ok(), "{}", template_res.err().unwrap());
+    }
+
+    #[test]
+    fn deserialize_readyset_postgres_ytt_template() {
+        let mut path = PathBuf::from("..").canonicalize().unwrap();
+        path.push("ops/cfn/ytt_templates/readyset-postgresql-template.ytt.yaml");
         let file = File::open(path).unwrap();
         let template_res = serde_yaml::from_reader::<_, Template>(file);
         assert!(template_res.is_ok(), "{}", template_res.err().unwrap());

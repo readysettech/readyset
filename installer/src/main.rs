@@ -6,6 +6,7 @@ use std::{env, iter};
 
 use ::console::{style, Emoji};
 use anyhow::{anyhow, bail, Result};
+use aws::cloudformation::Template;
 use aws::vpc_attribute;
 use aws_types::credentials::future::ProvideCredentials as ProvideCredentialsFut;
 use aws_types::credentials::{CredentialsError, ProvideCredentials};
@@ -198,6 +199,10 @@ impl Installer {
         self.save().await?;
 
         self.load_aws_config().await?;
+
+        // Validate given AWS profile has access to Readyset images to avoid future errors
+        self.validate_rs_ami_access().await?;
+
         self.save().await?;
 
         if let Some(vpc_id) = &self.deployment.vpc_id {
@@ -948,6 +953,47 @@ impl Installer {
         self.deployment.key_pair_name = Some(key_pair_name);
 
         success!("Configured SSH key");
+
+        Ok(())
+    }
+
+    async fn validate_rs_ami_access(&mut self) -> Result<()> {
+        let futures = FuturesUnordered::new();
+        for template_url in [
+            READYSET_MYSQL_CLOUDFORMATION_TEMPLATE_URL,
+            READYSET_POSTGRESQL_CLOUDFORMATION_TEMPLATE_URL,
+        ] {
+            let template = Template::download(template_url).await?;
+            let region = self.deployment.aws_region.as_ref().unwrap();
+
+            if let Some(mappings) = template.mappings {
+                if let Some(region_map) = mappings.aws_ami_region_map.get(region) {
+                    for ami_id in region_map.values() {
+                        let ec2 = self.ec2_client().await?.clone();
+                        let ami_id = ami_id.to_owned();
+                        futures.push(async move {
+                            let result = ec2
+                                .describe_images()
+                                .filters(filter("image-id", ami_id))
+                                .send()
+                                .await;
+
+                            result.map(|image_output| {
+                                !image_output.images.unwrap_or_default().is_empty()
+                            })
+                        });
+                    }
+                }
+            }
+        }
+
+        let res: Vec<bool> = futures.try_collect().await?;
+        let has_ami_access = res.iter().all(|b| *b);
+        if !has_ami_access {
+            bail!(
+                "This AWS account doesn't have access to the AMIs needed for installation. Please use a different AWS account for this deployment."
+            )
+        }
 
         Ok(())
     }
