@@ -799,6 +799,14 @@ impl DataflowState {
                             #[allow(clippy::unwrap_used)] // it must be a reader if it has a key
                             reader_node.as_mut_reader().unwrap().set_index(index);
                         }
+                        if let Some(mapping) = child.as_reader().map(|r| r.mapping()) {
+                            // And set the mapping on the replicated reader.
+                            #[allow(clippy::unwrap_used)] // it must be a reader if it has a key
+                            reader_node
+                                .as_mut_reader()
+                                .unwrap()
+                                .set_mapping(mapping.to_vec());
+                        }
                         // We add the replicated reader to the graph.
                         let reader_index = self.ingredients.add_node(reader_node);
                         self.ingredients.add_edge(node_index, reader_index, ());
