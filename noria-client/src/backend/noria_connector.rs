@@ -1269,9 +1269,6 @@ impl NoriaConnector {
             .cloned()
             .collect();
 
-        trace!("select::collapse where-in clauses");
-        let processed_query_params = rewrite::process_query(&mut statement)?;
-
         let limit_columns: Vec<_> = utils::get_limit_parameters(&statement)
             .into_iter()
             .map(|c| ColumnSchema {
@@ -1284,6 +1281,9 @@ impl NoriaConnector {
                 base: None,
             })
             .collect();
+
+        trace!("select::collapse where-in clauses");
+        let processed_query_params = rewrite::process_query(&mut statement)?;
 
         // check if we already have this query prepared
         trace!("select::access view");

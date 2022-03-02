@@ -5,7 +5,9 @@ use std::{iter, mem};
 
 use itertools::{Either, Itertools};
 use nom_sql::analysis::visit::{self, Visitor};
-use nom_sql::{BinaryOperator, Expression, InValue, ItemPlaceholder, Literal, SelectStatement};
+use nom_sql::{
+    BinaryOperator, Expression, InValue, ItemPlaceholder, LimitClause, Literal, SelectStatement,
+};
 use noria_errors::{unsupported, ReadySetError, ReadySetResult};
 
 /// Struct storing information about parameters processed from a raw user supplied query, which
@@ -399,6 +401,14 @@ struct AutoParametrizeVisitor {
     query_depth: u8,
 }
 
+impl AutoParametrizeVisitor {
+    fn replace_literal(&mut self, literal: &mut Literal) {
+        let literal = mem::replace(literal, Literal::Placeholder(ItemPlaceholder::QuestionMark));
+        self.out.push((self.param_index, literal));
+        self.param_index += 1;
+    }
+}
+
 impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
     type Error = !;
 
@@ -442,10 +452,7 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
                     op: BinaryOperator::Equal,
                     rhs: box Expression::Literal(lit),
                 } => {
-                    let literal =
-                        mem::replace(lit, Literal::Placeholder(ItemPlaceholder::QuestionMark));
-                    self.out.push((self.param_index, literal));
-                    self.param_index += 1;
+                    self.replace_literal(lit);
                     return Ok(());
                 }
                 Expression::BinaryOp {
@@ -508,6 +515,17 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
         visit::walk_expression(self, expression)?;
         self.in_supported_position = was_supported;
         Ok(())
+    }
+
+    fn visit_limit_clause(&mut self, limit: &'ast mut LimitClause) -> Result<(), Self::Error> {
+        match &mut limit.offset {
+            None | Some(Literal::Placeholder(_)) => {}
+            Some(lit) => {
+                self.replace_literal(lit);
+            }
+        }
+
+        visit::walk_limit_clause(self, limit)
     }
 }
 
@@ -1046,6 +1064,15 @@ mod tests {
                 "SELECT * FROM posts WHERE id = 1 AND score > ?",
                 vec![],
             )
+        }
+
+        #[test]
+        fn offset() {
+            test_auto_parametrize(
+                "SELECT * FROM posts WHERE id = 1 ORDER BY SCORE ASC LIMIT 3 OFFSET 6",
+                "SELECT * FROM posts WHERE id = ? ORDER BY SCORE ASC LIMIT 3 OFFSET ?",
+                vec![(0, 1.into()), (1, 6.into())],
+            );
         }
     }
 
