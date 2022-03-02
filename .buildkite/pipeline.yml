@@ -523,9 +523,8 @@ steps:
     commands:
       - export TEMPLATE_ARTIFACT_STEP_NAME=packer-cfn-template-ytt-external
       - export S3_BUCKET=readysettech-cfn-public-us-east-2
-      - release_name=$(buildkite-agent meta-data get release-name)
-      - if [ -n "$$release_name" ]; then
-      -   export S3_PREFIX="$$release_name"
+      - if buildkite-agent meta-data exists release-name; then
+      -   export S3_PREFIX=$(buildkite-agent meta-data get release-name)
       - else
       -   export S3_PREFIX="alpha/${BUILDKITE_COMMIT}"
       - fi
