@@ -11,7 +11,7 @@
 //!     - Add the type's name as a variant `Benchmark`.
 
 use std::collections::HashMap;
-use std::fmt;
+use std::fmt::{self, Display};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -32,6 +32,7 @@ use crate::scale_views::ScaleViews;
 use crate::single_query_benchmark::SingleQueryBenchmark;
 use crate::template::Template;
 use crate::utils::prometheus::{ForwardPrometheusMetrics, PrometheusEndpoint};
+use crate::workload_emulator::WorkloadEmulator;
 use crate::write_benchmark::WriteBenchmark;
 use crate::write_latency_benchmark::WriteLatencyBenchmark;
 
@@ -53,6 +54,7 @@ pub enum Benchmark {
     ReadWriteBenchmark,
     FallbackBenchmark,
     SingleQueryBenchmark,
+    WorkloadEmulator,
 }
 
 impl Benchmark {
@@ -70,6 +72,7 @@ impl Benchmark {
             Self::ReadWriteBenchmark(_) => "read_write_benchmark",
             Self::FallbackBenchmark(_) => "fallback_benchmark",
             Self::SingleQueryBenchmark(_) => "single_query_benchmark",
+            Self::WorkloadEmulator(_) => "workload_emulator",
         }
     }
 }
@@ -136,8 +139,9 @@ impl BenchmarkResults {
         }
     }
 
-    pub fn from<T>(results: &[(&str, (T, metrics::Unit))]) -> Self
+    pub fn from<S, T>(results: &[(S, (T, metrics::Unit))]) -> Self
     where
+        S: Display,
         T: fmt::Display + Clone,
         f64: From<T>,
     {

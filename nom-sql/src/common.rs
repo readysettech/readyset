@@ -184,6 +184,16 @@ impl fmt::Display for SqlType {
     }
 }
 
+impl FromStr for SqlType {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        type_identifier(Dialect::MySQL)(s.as_bytes())
+            .map(|(_, s)| s)
+            .map_err(|_| "failed to parse")
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
 pub struct Float {
     pub value: f32,

@@ -94,5 +94,7 @@ mod read_write_benchmark;
 mod scale_connections;
 mod scale_views;
 mod single_query_benchmark;
+mod spec;
+mod workload_emulator;
 mod write_benchmark;
 mod write_latency_benchmark;

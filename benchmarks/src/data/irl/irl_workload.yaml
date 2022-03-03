@@ -1,0 +1,45 @@
+distributions:
+    - name: ids
+      range:
+        start: 0
+        end: 1000000
+      uniform:
+    - name: auth_token
+      zipf: 1.15
+      query: select auth_token from user_auth_tokens
+    - name: invites
+      zipf: 1.15
+      query: select invite_id, user_id from invites_users limit 1000000
+queries:
+    - spec: select * from users where users.id in ( ?, ?, ? )
+      params:
+        - sql_type: bigint
+          distribution: ids
+        - sql_type: bigint
+          distribution: ids
+        - sql_type: bigint
+          distribution: ids
+      weight: 2000000
+      migrate: true
+    - spec: select * from user_auth_tokens where auth_token = ?
+      params:
+        - sql_type: char
+          distribution: auth_token
+      weight: 100000
+      migrate: true
+    - spec: select * from invites_users where invites_users.invite_id in ( ? ) and invites_users.user_id = ?
+      params:
+        - sql_type: bigint
+          distribution: invites
+          col: 0
+        - sql_type: bigint
+          distribution: invites
+          col: 1
+      weight: 500000
+      migrate: true
+    - spec: update users set updated_at = now() where id = ?
+      params:
+        - sql_type: bigint
+          distribution: ids
+      weight: 10000
+      migrate: false
