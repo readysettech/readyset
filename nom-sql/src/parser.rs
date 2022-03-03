@@ -77,6 +77,14 @@ impl fmt::Display for SqlQuery {
     }
 }
 
+impl str::FromStr for SqlQuery {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        parse_query(Dialect::MySQL, s)
+    }
+}
+
 impl SqlQuery {
     /// Returns the type of the query, e.g. "CREATE TABLE" or "SELECT"
     pub fn query_type(&self) -> &'static str {
