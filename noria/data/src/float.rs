@@ -279,7 +279,7 @@ mod tests {
 
     #[proptest]
     fn float_to_tinyint(val: f32) {
-        if val < i8::MIN as f32 || val > i8::MAX as f32 {
+        if val < i8::MIN as f32 - 0.5 || val >= i8::MAX as f32 + 0.5 {
             DataType::Double(val as _)
                 .coerce_to(&SqlType::Tinyint(None))
                 .expect_err("OOB");
@@ -304,7 +304,7 @@ mod tests {
 
     #[proptest]
     fn float_to_smallint(val: f32) {
-        if val < i16::MIN as f32 || val > i16::MAX as f32 {
+        if val < i16::MIN as f32 - 0.5 || val >= i16::MAX as f32 + 0.5 {
             DataType::Double(val as _)
                 .coerce_to(&SqlType::Smallint(None))
                 .expect_err("OOB");
@@ -328,7 +328,7 @@ mod tests {
 
     #[proptest]
     fn float_to_int(val: f64) {
-        if val < i32::MIN as f64 || val > i32::MAX as f64 {
+        if val < i32::MIN as f64 - 0.5 || val >= i32::MAX as f64 + 0.5 {
             DataType::Double(val as _)
                 .coerce_to(&SqlType::Int(None))
                 .expect_err("OOB");
@@ -352,7 +352,7 @@ mod tests {
 
     #[proptest]
     fn float_to_bigint(val: f64) {
-        if val < i64::MIN as f64 || val > i64::MAX as f64 {
+        if val < i64::MIN as f64 - 0.5 || val >= i64::MAX as f64 + 0.5 {
             DataType::Double(val as _)
                 .coerce_to(&SqlType::Bigint(None))
                 .expect_err("OOB");
