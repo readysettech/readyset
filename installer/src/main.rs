@@ -24,9 +24,13 @@ use lazy_static::lazy_static;
 use rds::model::{ApplyMethod, DbInstance, DbParameterGroup, Parameter};
 use regex::Regex;
 use rusoto_credential::ProfileProvider;
+use ssm::model::{ParameterStringFilter, ParameterType};
 use tokio::fs::{DirBuilder, OpenOptions};
 use tokio::io::AsyncWriteExt;
-use {aws_sdk_cloudformation as cfn, aws_sdk_ec2 as ec2, aws_sdk_rds as rds};
+use {
+    aws_sdk_cloudformation as cfn, aws_sdk_ec2 as ec2, aws_sdk_kms as kms, aws_sdk_rds as rds,
+    aws_sdk_ssm as ssm,
+};
 
 mod aws;
 mod deployment;
@@ -35,12 +39,14 @@ mod console;
 
 use crate::aws::cloudformation::{deploy_stack, StackConfig};
 use crate::aws::{
-    cfn_parameter, db_instance_parameter_group, filter, reboot_rds_db_instance, vpc_cidr,
-    wait_for_rds_db_available,
+    cfn_parameter, db_instance_parameter_group, filter, kms_arn, reboot_rds_db_instance,
+    validate_ssm_parameter_name, vpc_cidr, wait_for_rds_db_available,
 };
-use crate::console::{confirm, input, prompt_to_continue, select, spinner, GREEN_CHECK};
+use crate::console::{confirm, input, password, prompt_to_continue, select, spinner, GREEN_CHECK};
 pub use crate::deployment::Deployment;
-use crate::deployment::{CreateNew, Engine, Existing, MaybeExisting, RdsDb};
+use crate::deployment::{
+    CreateNew, DatabasePasswordParameter, Engine, Existing, MaybeExisting, RdsDb,
+};
 
 /// List of regions where we deploy AMIs.
 ///
@@ -162,6 +168,8 @@ struct Installer {
     ec2_client: Option<ec2::Client>,
     rds_client: Option<rds::Client>,
     cfn_client: Option<cfn::Client>,
+    ssm_client: Option<ssm::Client>,
+    kms_client: Option<kms::Client>,
 }
 
 impl Installer {
@@ -173,6 +181,8 @@ impl Installer {
             ec2_client: None,
             rds_client: None,
             cfn_client: None,
+            ssm_client: None,
+            kms_client: None,
         }
     }
 
@@ -377,6 +387,35 @@ impl Installer {
             .vpc_supplemental_stack_outputs
             .clone()
             .unwrap();
+        let DatabaseCredentials { username, password } =
+            self.deployment.database_credentials.clone().unwrap();
+        let database_hostname = self
+            .rds_client()
+            .await?
+            .describe_db_instances()
+            .db_instance_identifier(
+                self.deployment
+                    .rds_db
+                    .as_ref()
+                    .unwrap()
+                    .db_id
+                    .as_existing()
+                    .unwrap(),
+            )
+            .send()
+            .await
+            .unwrap()
+            .db_instances
+            .unwrap_or_default()
+            .first()
+            .ok_or_else(|| anyhow!("RDS database instance not found"))?
+            .endpoint
+            .as_ref()
+            .unwrap()
+            .address
+            .as_ref()
+            .unwrap()
+            .clone();
 
         let mut stack_config = StackConfig::from_url(template_url).await?;
         stack_config
@@ -403,7 +442,15 @@ impl Installer {
             .with_non_modifiable_parameter(
                 "ReadySetMonitoringSecurityGroupID",
                 &supplemental_stack_outputs["ReadySetMonitoringSecurityGroupID"],
-            );
+            )
+            .with_non_modifiable_parameter(
+                "DatabaseName",
+                self.deployment.rds_db.as_ref().unwrap().db_name.clone(),
+            )
+            .with_non_modifiable_parameter("DatabaseHostname", database_hostname)
+            .with_non_modifiable_parameter("DatabaseAdapterUsername", username)
+            .with_non_modifiable_parameter("SSMParameterKmsKeyArn", password.kms_arn)
+            .with_non_modifiable_parameter("SSMPathRDSDatabasePassword", password.ssm_path);
 
         stack_config.prompt_for_required_parameters()?;
 
@@ -486,7 +533,10 @@ impl Installer {
                 .parameters(cfn_parameter("PrivateSubnet2ID", subnets.next().unwrap()))
                 .parameters(cfn_parameter("PrivateSubnet3ID", subnets.next().unwrap()))
                 .parameters(cfn_parameter("DatabaseUsername", username))
-                .parameters(cfn_parameter("SSMPathRDSDatabasePassword", password))
+                .parameters(cfn_parameter(
+                    "SSMPathRDSDatabasePassword",
+                    password.ssm_path,
+                ))
                 .parameters(cfn_parameter("DatabaseName", db_name)),
         )
         .await?;
@@ -729,9 +779,88 @@ impl Installer {
             println!("Next, enter credentials for the root user account of the new RDS database.");
         }
         let username = input().with_prompt("Database username").interact_text()?;
-        let password = input()
-            .with_prompt("Path to database password in Systems Manager Parameter Store")
+
+        println!("ReadySet supports loading your database instance password from AWS Systems Manager Parameter Store");
+        println!("You can provide either an existing SecureString parameter, or enter the password directly and we can create one for you");
+        let password_kind = select()
+            .with_prompt("Use an existing SSM parameter, or enter one directly?")
+            .items(&["Existing SSM Parameter", "Enter password directly"])
             .interact()?;
+
+        let password = if password_kind == 0 {
+            // existing ssm parameter
+            let ssm_parameters = self
+                .ssm_client()
+                .await?
+                .describe_parameters()
+                .parameter_filters(
+                    ParameterStringFilter::builder()
+                        .key("Type")
+                        .option("Equals")
+                        .values("SecureString")
+                        .build(),
+                )
+                .send()
+                .await?
+                .parameters
+                .unwrap_or_default()
+                .into_iter()
+                .collect::<Vec<_>>();
+            let selection = select()
+                .with_prompt("SSM Parameter to use")
+                .items(
+                    &ssm_parameters
+                        .iter()
+                        .map(|param| param.name.clone().unwrap())
+                        .collect::<Vec<_>>(),
+                )
+                .interact()?;
+            let parameter = &ssm_parameters[selection];
+
+            let kms_arn = kms_arn(
+                self.kms_client().await?,
+                parameter
+                    .key_id
+                    .clone()
+                    .unwrap_or_else(|| "alias/aws/ssm".into()),
+            )
+            .await?;
+
+            DatabasePasswordParameter {
+                ssm_path: parameter.name.clone().unwrap(),
+                kms_arn,
+            }
+        } else {
+            // enter password directly
+            let password = password().with_prompt("Database Password").interact()?;
+            let parameter_name = input()
+                .with_prompt("SSM Parameter path to create")
+                .validate_with(|input: &String| validate_ssm_parameter_name(input))
+                .interact()?;
+            let create_pb = spinner().with_message(format!(
+                "Creating SSM Parameter {}",
+                style(&parameter_name).bold()
+            ));
+            self.ssm_client()
+                .await?
+                .put_parameter()
+                .name(&parameter_name)
+                .value(password)
+                .r#type(ParameterType::SecureString)
+                .send()
+                .await?;
+            create_pb.finish_with_message(format!(
+                "{}Created SSM Parameter {}",
+                *GREEN_CHECK,
+                style(&parameter_name).bold()
+            ));
+
+            DatabasePasswordParameter {
+                ssm_path: parameter_name,
+                kms_arn: kms_arn(self.kms_client().await?, "alias/aws/ssm").await?,
+            }
+        };
+
         self.deployment.database_credentials = Some(DatabaseCredentials { username, password });
 
         Ok(())
@@ -1612,6 +1741,30 @@ impl Installer {
     async fn init_cfn_client(&mut self) -> Result<&cfn::Client> {
         let cfn_client = cfn::Client::new(self.aws_config().await?);
         Ok(self.cfn_client.insert(cfn_client))
+    }
+
+    async fn ssm_client(&mut self) -> Result<&ssm::Client> {
+        if self.ssm_client.is_none() {
+            self.init_ssm_client().await?;
+        }
+        Ok(self.ssm_client.as_ref().unwrap())
+    }
+
+    async fn init_ssm_client(&mut self) -> Result<&ssm::Client> {
+        let ssm_client = ssm::Client::new(self.aws_config().await?);
+        Ok(self.ssm_client.insert(ssm_client))
+    }
+
+    async fn kms_client(&mut self) -> Result<&kms::Client> {
+        if self.kms_client.is_none() {
+            self.init_kms_client().await?;
+        }
+        Ok(self.kms_client.as_ref().unwrap())
+    }
+
+    async fn init_kms_client(&mut self) -> Result<&kms::Client> {
+        let kms_client = kms::Client::new(self.aws_config().await?);
+        Ok(self.kms_client.insert(kms_client))
     }
 
     async fn aws_config(&mut self) -> Result<&aws_config::Config> {

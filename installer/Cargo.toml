@@ -10,6 +10,8 @@ aws-config = "0.3.0"
 aws-sdk-cloudformation = "0.3.0"
 aws-sdk-ec2 = "0.3.0"
 aws-sdk-rds = "0.3.0"
+aws-sdk-ssm = "0.3.0"
+aws-sdk-kms = "0.3.0"
 aws-types = "0.3.0"
 clap = { version = "3.0", features = ["derive", "env"] }
 console = "0.15.0"

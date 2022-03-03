@@ -4,8 +4,10 @@ use console::style;
 use ec2::model::{Filter, VpcAttributeName};
 use futures::stream::{self, FuturesUnordered};
 use futures::TryStreamExt;
+use lazy_static::lazy_static;
 use rds::model::{DbInstance, DbParameterGroup, Parameter};
-use {aws_sdk_cloudformation as cfn, aws_sdk_ec2 as ec2, aws_sdk_rds as rds};
+use regex::Regex;
+use {aws_sdk_cloudformation as cfn, aws_sdk_ec2 as ec2, aws_sdk_kms as kms, aws_sdk_rds as rds};
 
 use crate::console::{spinner, GREEN_CHECK};
 
@@ -177,4 +179,96 @@ pub(crate) async fn vpc_attribute(
         _ => bail!("Unknown VPC attribute name"),
     };
     Ok(val.and_then(|val| val.value()).unwrap_or_default())
+}
+
+pub(crate) async fn kms_arn(kms_client: &kms::Client, key_id: impl Into<String>) -> Result<String> {
+    let key_id = key_id.into();
+    Ok(kms_client
+        .describe_key()
+        .key_id(&key_id)
+        .send()
+        .await?
+        .key_metadata()
+        .ok_or_else(|| anyhow!("Could not find KMS key {}", key_id))?
+        .arn
+        .clone()
+        .unwrap())
+}
+
+/// Validate the given input string as an SSM parameter name according to the [rules for SSM
+/// parameter names][docs]. This function is intended to be used as a [`dialoguer::Validator`]
+///
+/// [docs]: https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_PutParameter.html#API_PutParameter_RequestSyntax
+pub(crate) fn validate_ssm_parameter_name(input: &str) -> Result<(), &'static str> {
+    lazy_static! {
+        static ref INVALID_PREFIX_RE: Regex = Regex::new("(?i)^(?:aws|ssm)").unwrap();
+        static ref VALID_CHARSET_RE: Regex = Regex::new("^[a-zA-Z0-9_./-]+$").unwrap();
+    }
+
+    if INVALID_PREFIX_RE.is_match(input) {
+        return Err("Parameter names can't be prefixed with `aws` or `ssm`");
+    }
+
+    if !VALID_CHARSET_RE.is_match(input) {
+        return Err("Invalid format for parameter name");
+    }
+
+    if input.split('/').count() > 15 {
+        return Err("Parameter hierarchies are limited to a maximum depth of fifteen levels");
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod validate_ssm_parameter_name {
+        use super::*;
+
+        fn is_valid(s: &str) {
+            let res = validate_ssm_parameter_name(s);
+            assert!(res.is_ok(), "Error: {}", res.err().unwrap());
+        }
+
+        fn is_invalid(s: &str) {
+            assert!(validate_ssm_parameter_name(s).is_err())
+        }
+
+        #[test]
+        fn valid_simple() {
+            is_valid("MySecret")
+        }
+
+        #[test]
+        fn valid_with_components() {
+            is_valid("/Dev/Production/East/Project-ABC/MyParameter")
+        }
+
+        #[test]
+        fn invalid_spaces() {
+            is_invalid("My Secret")
+        }
+
+        #[test]
+        fn invalid_charset() {
+            is_invalid("Σecretσauce")
+        }
+
+        #[test]
+        fn invalid_prefix() {
+            is_invalid("aws/secrets")
+        }
+
+        #[test]
+        fn invalid_prefix_with_case() {
+            is_invalid("aWs/secrets")
+        }
+
+        #[test]
+        fn invalid_too_many_segments() {
+            is_invalid("a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p")
+        }
+    }
 }

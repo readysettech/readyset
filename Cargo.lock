@@ -462,6 +462,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-kms"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62bbbdedf99753be40c10ae7302d3146ddcf51284f0221453a4af737266b16c2"
+dependencies = [
+ "aws-endpoint",
+ "aws-http",
+ "aws-sig-auth",
+ "aws-smithy-async",
+ "aws-smithy-client",
+ "aws-smithy-http",
+ "aws-smithy-http-tower",
+ "aws-smithy-json",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes 1.1.0",
+ "http",
+ "tower",
+]
+
+[[package]]
 name = "aws-sdk-rds"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -525,6 +546,28 @@ dependencies = [
  "aws-smithy-xml",
  "aws-types",
  "bytes 1.1.0",
+ "http",
+ "tower",
+]
+
+[[package]]
+name = "aws-sdk-ssm"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff3dc1eaed59452c9a485e9d1cad4c1101ca59750c817848be9ca17ba4c2e2a2"
+dependencies = [
+ "aws-endpoint",
+ "aws-http",
+ "aws-sig-auth",
+ "aws-smithy-async",
+ "aws-smithy-client",
+ "aws-smithy-http",
+ "aws-smithy-http-tower",
+ "aws-smithy-json",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes 1.1.0",
+ "fastrand",
  "http",
  "tower",
 ]
@@ -5059,7 +5102,9 @@ dependencies = [
  "aws-config",
  "aws-sdk-cloudformation",
  "aws-sdk-ec2",
+ "aws-sdk-kms",
  "aws-sdk-rds",
+ "aws-sdk-ssm",
  "aws-types",
  "clap 3.0.4",
  "console",

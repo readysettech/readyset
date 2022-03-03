@@ -134,11 +134,17 @@ pub(crate) struct RdsDb {
     pub(crate) engine: Engine,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub(crate) struct DatabasePasswordParameter {
+    pub(crate) kms_arn: String,
+    pub(crate) ssm_path: String,
+}
+
 /// Credentials to use for ReadySet to connect to the RDS database
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub(crate) struct DatabaseCredentials {
     pub(crate) username: String,
-    pub(crate) password: String,
+    pub(crate) password: DatabasePasswordParameter,
 }
 
 /// A (potentially partially-completed) deployment of a readyset cluster
