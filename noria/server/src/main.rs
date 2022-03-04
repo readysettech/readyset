@@ -286,6 +286,10 @@ fn main() -> anyhow::Result<()> {
         builder.set_max_concurrent_replay(r)
     }
 
+    if let Some(id) = opts.replication_server_id {
+        builder.set_replication_server_id(id);
+    }
+
     if opts.reader_only {
         builder.as_reader_only()
     }
