@@ -1,3 +1,6 @@
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
 #-------------- [ Networking ] -------------------------------------- #
 
 data "aws_vpc" "network" {
@@ -21,4 +24,14 @@ data "aws_subnet_ids" "private" {
     name   = "tag:Connectivity"
     values = ["private"]
   }
+}
+
+#-------------- [ KMS Keys ] --------------------------------------- #
+
+data "aws_kms_key" "default-ssm" {
+  key_id = "alias/aws/ssm"
+}
+
+data "aws_kms_key" "default-secrets-mgr" {
+  key_id = "alias/aws/secretsmanager"
 }

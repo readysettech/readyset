@@ -66,6 +66,11 @@ module "eks-main" {
   # Prometheus / Grafana
   benchmark_prom_grafana_enabled = var.benchmark_prom_grafana_enabled
 
+  # External Secrets
+  external_secrets_enabled                    = true
+  external_secrets_kms_key_authorization_list = local.ext_secrets_kms_key_arns
+  external_secrets_ssm_auth_limits            = local.ext_secrets_ssm_auth_limits
+  external_secrets_secretsmanager_auth_limits = local.ext_secrets_secmgr_auth_limits
 
 }
 

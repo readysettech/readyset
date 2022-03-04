@@ -33,3 +33,15 @@ variable "benchmarking_iam_role_trusted_account_ids" {
   type        = list(string)
   default     = []
 }
+
+variable "buildkite_k8s_queue_iam_role_enabled" {
+  description = "Toggles creation of AWS IAM resources required for Benchmarking agents in the buildk8s queue."
+  type        = bool
+  default     = true
+}
+
+variable "buildkite_k8s_queue_iam_role_arns" {
+  description = "ARN of additional IAM roles to grant Buildkite agents in the buildk8s queue permission to assume."
+  default = ["arn:aws:iam::305232526136:role/readyset-ci-k8s-build-us-east-2"]
+  type = list(string)
+}

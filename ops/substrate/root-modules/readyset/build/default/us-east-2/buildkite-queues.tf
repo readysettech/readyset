@@ -157,3 +157,26 @@ module "buildkite_benchmark_queue" {
   # Needed to change file permissions during builds
   agent_additional_sudo_permissions = ["NOPASSWD:ALL"]
 }
+
+# Buildkite queue that will provide access to build k8s cluster
+# This will live in private subnets and can therefore hit k8s
+module "buildkite_k8s_queue" {
+  source          = "../../../../../modules/buildkite-queue/regional"
+  environment     = "build"
+  buildkite_queue = "buildk8s"
+  instance_type   = "c5.xlarge"
+
+  min_size = 0
+  max_size = 10
+  ssh_key_pair_name                          = "readyset-devops"
+  buildkite_agent_token_parameter_store_path = module.buildkite_queue_shared.buildkite_agent_token_parameter_store_path
+  extra_iam_policy_arns = concat(
+    local.extra_iam_policy_arns, [
+      aws_iam_policy.bk-k8s-assume-role[0].arn
+    ]
+  )
+  secrets_bucket   = aws_s3_bucket.ops-secrets.bucket
+  artifacts_bucket = aws_s3_bucket.ops-artifacts.bucket
+  # Needed to change file permissions during builds
+  agent_additional_sudo_permissions = ["NOPASSWD:ALL"]
+}

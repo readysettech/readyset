@@ -221,3 +221,21 @@ variable "vpc_dns_resolver_ip" {
   description = "Private IP of the VPC DNS resolver which is hosting the k8s cluster."
   default     = ""
 }
+
+#-------------- [ External Secrets ] ---------------------------------- #
+
+variable "external_secrets_ssm_auth_limits" {
+  description = "List of SSM resources to grant External Secrets read access to. Supports wildcards."
+  default = [
+    "rs-build-us-east-2/*"
+  ]
+  type = list(string)
+}
+
+variable "external_secrets_secretsmanager_auth_limits" {
+  description = "List of Secrets Manager resources to grant External Secrets read access to. Supports wildcards."
+  default = [
+    "rs-build-us-east-2/*"
+  ]
+  type = list(string)
+}

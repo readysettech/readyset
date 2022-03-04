@@ -35,3 +35,12 @@ resource "aws_iam_policy" "bk-benchmarking-assume-role" {
   path   = "/"
   policy = data.aws_iam_policy_document.bk-benchmarking-assume-role[0].json
 }
+
+# Policy to allow Buildkite agents to assume role that provides a level
+# of k8s access
+resource "aws_iam_policy" "bk-k8s-assume-role" {
+  count  = var.buildkite_k8s_queue_iam_role_enabled ? 1 : 0
+  name   = local.bk_benchmarking_iam_pol_name
+  path   = "/"
+  policy = data.aws_iam_policy_document.bk-k8s-assume-role[0].json
+}
