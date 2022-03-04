@@ -22,7 +22,27 @@ use crate::controller::keys::{self, IndexRef};
 use crate::controller::migrate::DomainMigrationPlan;
 use crate::controller::state::graphviz;
 
+/// A struct representing all the information required to construct and maintain the
+/// materializations for a single node within a dataflow graph.
+///
+/// A [`Plan`] is [constructed] for a single node with references to a dataflow [`Graph`] and the
+/// [`Materializations`] in that graph, and over the course of its existence mutates that set of
+/// materializations and also adds new messages to a [`DomainMigrationPlan`] to inform domains
+/// throughout the graph of information they need to know about maintaining the materializations of
+/// that node, including but not limited to:
+///
+/// - Information about replay paths that originate at the node (both for the domain containing the
+///   node, and the domain containing nodes along those replay paths)
+/// - Information about [columns that are generated][generated-cols] by the node
+/// - Informing [egress nodes][] about tags of their targets
+/// - Informing domains about indices they need to create for materializations
+///
+/// [constructed]: Plan::new
+/// [generated-cols]: ColumnSource::GeneratedFromColumns
+/// [egress nodes]: dataflow::node::special::Egress
 pub(super) struct Plan<'a> {
+    /// A reference to the materializations in the graph. Only mutated to generate new [`Tag`]s for
+    /// replay paths
     m: &'a mut super::Materializations,
     graph: &'a Graph,
     node: NodeIndex,
@@ -72,7 +92,9 @@ impl<'a> Plan<'a> {
         }
     }
 
-    fn paths(&mut self, index: &Index) -> Result<Vec<Vec<IndexRef>>, ReadySetError> {
+    /// Compute the set of replay paths required to construct and maintain the given `index` in our
+    /// node.
+    fn paths(&self, index: &Index) -> Result<Vec<Vec<IndexRef>>, ReadySetError> {
         let graph = self.graph;
         let ni = self.node;
         let mut paths = keys::replay_paths_for_opt(
