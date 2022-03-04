@@ -10,6 +10,7 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, ValueHint};
+use database_utils::DatabaseURL;
 use futures::StreamExt;
 use itertools::Itertools;
 use nom::character::complete::multispace0;
@@ -19,7 +20,6 @@ use nom::IResult;
 use nom_sql::parser::{sql_query, SqlQuery};
 use nom_sql::Dialect;
 use noria_client::backend::Backend;
-use noria_logictest::upstream::DatabaseURL;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use query_generator::{ColumnName, TableName, TableSpec};
 use serde::{Deserialize, Serialize};

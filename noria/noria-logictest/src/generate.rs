@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use anyhow::{anyhow, bail, Context};
 use clap::Parser;
 use colored::Colorize;
+use database_utils::{DatabaseConnection, DatabaseURL};
 use itertools::Itertools;
 use nom_sql::{
     parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Dialect, Expression,
@@ -16,7 +17,6 @@ use query_generator::{GeneratorState, QuerySeed};
 
 use crate::ast::{Query, QueryParams, QueryResults, Record, SortMode, Statement, StatementResult};
 use crate::runner::TestScript;
-use crate::upstream::{DatabaseConnection, DatabaseURL};
 
 /// Default value for [`Seed::hash_threshold`]
 const DEFAULT_HASH_THRESHOLD: usize = 20;
@@ -293,7 +293,9 @@ impl Seed {
             .collect::<Vec<_>>();
 
         eprintln!("{}", "==> Running original test script".bold());
-        conn.run_script(&self.script).await?;
+        self.script
+            .run_on_database(&Default::default(), &mut conn, None)
+            .await?;
 
         eprintln!(
             "{}",

@@ -844,6 +844,7 @@ dependencies = [
  "atomic-counter",
  "chrono",
  "clap 3.0.4",
+ "database-utils",
  "enum_dispatch",
  "futures",
  "hdrhistogram",
@@ -1676,6 +1677,20 @@ checksum = "e77a43b28d0668df09411cb0bc9a8c2adc40f9a048afe863e05fd43251e8e39c"
 dependencies = [
  "cfg-if 1.0.0",
  "num_cpus",
+]
+
+[[package]]
+name = "database-utils"
+version = "0.1.0"
+dependencies = [
+ "derive_more",
+ "futures",
+ "mysql_async",
+ "native-tls",
+ "postgres-native-tls",
+ "thiserror",
+ "tokio",
+ "tokio-postgres",
 ]
 
 [[package]]
@@ -3993,6 +4008,7 @@ dependencies = [
  "chrono",
  "clap 3.0.4",
  "colored",
+ "database-utils",
  "derive_more",
  "enum-display-derive",
  "futures",
@@ -4026,6 +4042,7 @@ dependencies = [
  "readyset-tracing",
  "rust_decimal",
  "tempfile",
+ "thiserror",
  "tikv-jemallocator",
  "tokio",
  "tokio-postgres",

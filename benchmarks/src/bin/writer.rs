@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 use benchmarks::utils::generate::parallel_load;
 use benchmarks::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use clap::{Parser, ValueHint};
+use database_utils::DatabaseURL;
 use noria_data::DataType;
-use noria_logictest::upstream::DatabaseURL;
 use query_generator::ColumnGenerationSpec;
 
 static REPORTING_INTERVAL: Duration = Duration::from_secs(10);

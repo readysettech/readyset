@@ -9,6 +9,7 @@ use std::{env, io, process};
 use anyhow::{anyhow, bail, Context};
 use clap::Parser;
 use colored::Colorize;
+use database_utils::{DatabaseType, DatabaseURL};
 use futures::stream::futures_unordered::FuturesUnordered;
 use futures::StreamExt;
 use lazy_static::lazy_static;
@@ -27,13 +28,11 @@ pub mod generate;
 pub mod parser;
 pub mod permute;
 pub mod runner;
-pub mod upstream;
 
 use crate::from_query_log::FromQueryLog;
 use crate::generate::Generate;
 use crate::permute::Permute;
 use crate::runner::{NoriaOptions, RunOptions, TestScript};
-use crate::upstream::{DatabaseType, DatabaseURL};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]

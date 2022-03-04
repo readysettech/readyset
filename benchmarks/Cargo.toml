@@ -43,6 +43,7 @@ mysql = "22.0"
 walkdir = "2.3"
 
 # local dependencies
+database-utils = { path = "../database-utils" }
 noria = { path = "../noria/noria" }
 noria-data = { path = "../noria/data" }
 nom-sql = { path = "../nom-sql" }

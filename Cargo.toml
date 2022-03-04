@@ -7,6 +7,7 @@ eui48 = { git = "https://github.com/readysettech/eui48.git", branch = "master" }
 
 [workspace]
 members = [
+    "database-utils",
     "buildkite-pipeline-rs",
     "js-client",
     "mysql-srv",

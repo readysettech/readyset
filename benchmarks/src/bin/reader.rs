@@ -5,10 +5,10 @@ use std::{env, fs, mem};
 
 use anyhow::Result;
 use clap::{ArgEnum, Parser};
+use database_utils::{DatabaseConnection, DatabaseURL};
 use noria::consensus::AuthorityType;
 use noria::{ControllerHandle, KeyComparison, View, ViewQuery};
 use noria_data::DataType;
-use noria_logictest::upstream::{DatabaseConnection, DatabaseURL};
 use rand::distributions::{Distribution, Uniform};
 use rand::prelude::*;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -354,7 +354,7 @@ impl MySqlExecutor {
     }
 
     async fn on_query(&mut self, q: BatchedQuery) -> Result<Vec<BatchedQuery>> {
-        let _ = self.conn.execute(self.query, &q.key).await.unwrap();
+        let _: Vec<Vec<DataType>> = self.conn.execute(self.query, &q.key).await.unwrap();
         Ok(vec![q])
     }
 }

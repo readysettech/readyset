@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::anyhow;
 use clap::Parser;
+use database_utils::{DatabaseConnection, DatabaseURL};
 use itertools::Itertools;
 use nom_sql::{
     parse_query, Dialect, Expression, FieldDefinitionExpression, FunctionExpression, SqlQuery,
@@ -11,7 +12,6 @@ use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncWriteExt, BufReader};
 
 use crate::ast::{Record, Statement, StatementResult, Value};
-use crate::upstream::{DatabaseConnection, DatabaseURL};
 
 mod querylog;
 use querylog::{Command, Entry, Session, Stream};
