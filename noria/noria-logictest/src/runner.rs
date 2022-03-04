@@ -11,6 +11,7 @@ use std::{io, mem};
 
 use anyhow::{anyhow, bail, Context};
 use colored::*;
+use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL};
 use itertools::Itertools;
 use mysql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
@@ -30,7 +31,6 @@ use crate::ast::{
     Conditional, Query, QueryResults, Record, SortMode, Statement, StatementResult, Value,
 };
 use crate::parser;
-use crate::upstream::{DatabaseConnection, DatabaseType, DatabaseURL};
 
 #[derive(Debug, Clone)]
 pub struct TestScript {
@@ -151,7 +151,7 @@ impl TestScript {
         );
 
         let db_name = match &opts.upstream_database_url {
-            Some(db_url) => db_url.upstream_type().to_string(),
+            Some(db_url) => db_url.database_type().to_string(),
             None => "Noria".to_owned(),
         };
 
@@ -191,7 +191,7 @@ impl TestScript {
             .db_name()
             .ok_or_else(|| anyhow!("Must specify database name as part of database URL"))?;
         let mut admin_url = url.clone();
-        admin_url.set_db_name(match url.upstream_type() {
+        admin_url.set_db_name(match url.database_type() {
             DatabaseType::PostgreSQL => "postgres".to_owned(),
             DatabaseType::MySQL => "mysql".to_owned(),
         });

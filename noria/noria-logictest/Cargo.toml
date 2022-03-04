@@ -14,7 +14,7 @@ colored = "2.0.0"
 derive_more = "0.99.11"
 hex = "0.4.3"
 md5 = "0.7.0"
-mysql_async = "0.29"
+mysql_async = "0.29.0"
 mysql = "22.0.0"
 mysql_common = { version = "0.28.0", features = ["chrono"] }
 tikv-jemallocator = "0.4"
@@ -26,6 +26,7 @@ nom = "7.1"
 noria-server = { path = "../server/" }
 noria-client = { path = "../../noria-client/" }
 noria = { path = "../noria/" }
+database-utils = { path = "../../database-utils" }
 nom-sql = { path = "../../nom-sql" }
 mysql-srv = { path = "../../mysql-srv" }
 psql-srv = { path = "../../psql-srv" }
@@ -53,3 +54,4 @@ humantime = "2.1"
 rust_decimal = { version = "1.16", features = ["db-tokio-postgres"] }
 indicatif = "0.16"
 bit-vec = { version = "0.6", features = ["serde"] }
+thiserror = "1.0.30"

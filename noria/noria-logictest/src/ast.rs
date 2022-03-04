@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt::{self, Display};
+use std::num::TryFromIntError;
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 use std::{cmp, vec};
@@ -24,6 +25,7 @@ use noria_data::{DataType, TIMESTAMP_FORMAT};
 use pgsql::types::{accepts, to_sql_checked};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
+use thiserror::Error;
 use tokio_postgres as pgsql;
 
 /// The expected result of a statement
@@ -195,20 +197,31 @@ pub enum Value {
     BitVector(BitVec),
 }
 
+#[derive(Error, Debug)]
+#[error("Failed to convert mysql_async::Value: {0}")]
+pub struct ValueConversionError(String);
+
 impl TryFrom<mysql_async::Value> for Value {
-    type Error = anyhow::Error;
+    type Error = ValueConversionError;
 
     fn try_from(value: mysql_async::Value) -> Result<Self, Self::Error> {
         use mysql_async::Value::*;
         match value {
             NULL => Ok(Self::Null),
-            Bytes(bs) => Ok(Self::Text(String::from_utf8(bs)?)),
+            Bytes(bs) => Ok(Self::Text(
+                String::from_utf8(bs).map_err(|e| ValueConversionError(e.to_string()))?,
+            )),
             Int(i) => Ok(Self::Integer(i)),
-            UInt(i) => Ok(Self::Integer(i.try_into()?)),
+            UInt(i) => Ok(Self::Integer(
+                i.try_into()
+                    .map_err(|e: TryFromIntError| ValueConversionError(e.to_string()))?,
+            )),
             Float(f) => Self::try_from(Double(f as f64)),
             Double(f) => {
                 if !f.is_finite() {
-                    bail!("Invalid infinite float value");
+                    return Err(ValueConversionError(
+                        "Invalid infinite float value".to_string(),
+                    ));
                 }
                 Ok(Self::Real(
                     f.trunc() as i64,
@@ -225,7 +238,9 @@ impl TryFrom<mysql_async::Value> for Value {
             )),
             Time(neg, d, h, m, s, us) => Ok(Self::Time(MysqlTime::from_hmsus(
                 !neg,
-                (d * 24 + (h as u32)).try_into()?,
+                (d * 24 + (h as u32))
+                    .try_into()
+                    .map_err(|e: TryFromIntError| ValueConversionError(e.to_string()))?,
                 m,
                 s,
                 us.into(),
@@ -235,7 +250,7 @@ impl TryFrom<mysql_async::Value> for Value {
 }
 
 impl TryFrom<Literal> for Value {
-    type Error = anyhow::Error;
+    type Error = ValueConversionError;
     fn try_from(value: Literal) -> Result<Self, Self::Error> {
         macro_rules! real_value {
             ($real:expr, $prec:expr) => {{
@@ -255,20 +270,26 @@ impl TryFrom<Literal> for Value {
             Literal::Double(double) => real_value!(double.value, double.precision),
             Literal::Numeric(mantissa, scale) => Decimal::try_from_i128_with_scale(mantissa, scale)
                 .map_err(|e| {
-                    anyhow::Error::msg(format!(
+                    ValueConversionError(format!(
                         "Could not convert literal value to NUMERIC type: {}",
                         e
                     ))
                 })
                 .map(Value::Numeric)?,
             Literal::String(v) => Value::Text(v),
-            Literal::Blob(v) => Value::Text(String::from_utf8(v)?),
+            Literal::Blob(v) => {
+                Value::Text(String::from_utf8(v).map_err(|e| ValueConversionError(e.to_string()))?)
+            }
             Literal::CurrentTime => Value::Time(Utc::now().naive_utc().time().into()),
             Literal::CurrentDate => Value::Date(Utc::now().naive_utc()),
             Literal::CurrentTimestamp => Value::Date(Utc::now().naive_utc()),
             Literal::ByteArray(b) => Value::ByteArray(b),
             Literal::BitVector(b) => Value::BitVector(BitVec::from_bytes(b.as_slice())),
-            Literal::Placeholder(_) => bail!("Placeholders are not valid values"),
+            Literal::Placeholder(_) => {
+                return Err(ValueConversionError(
+                    "Placeholders are not valid values".to_string(),
+                ))
+            }
         })
     }
 }
@@ -685,9 +706,9 @@ impl From<QueryParams> for mysql_async::Params {
     fn from(qp: QueryParams) -> Self {
         match qp {
             qp if qp.is_empty() => mysql_async::Params::Empty,
-            QueryParams::PositionalParams(vs) => {
-                mysql_async::Params::Positional(vs.into_iter().map(mysql::Value::from).collect())
-            }
+            QueryParams::PositionalParams(vs) => mysql_async::Params::Positional(
+                vs.into_iter().map(mysql_async::Value::from).collect(),
+            ),
             QueryParams::NumberedParams(nps) => mysql_async::Params::Named(
                 nps.into_iter()
                     .map(|(n, v)| (n.to_string(), mysql_async::Value::from(v)))
