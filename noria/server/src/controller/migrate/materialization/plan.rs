@@ -118,10 +118,6 @@ impl<'a> Plan<'a> {
             },
         )?
         .into_iter()
-        .map(|mut path| {
-            path.reverse();
-            path
-        })
         .collect::<Vec<_>>();
 
         // it doesn't make sense for a replay path to have <=1 nodes in it; this can, however,
