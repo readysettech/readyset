@@ -538,9 +538,13 @@ impl Materializations {
                     // Some of these replay paths might start at nodes other than the one we're
                     // passing to replay_paths_for, if generated columns are involved. We need to
                     // materialize those nodes, too.
-                    let n_to_skip = if path[0].node == ni { 1 } else { 0 };
+                    let n_to_skip = if path.last().unwrap().node == ni {
+                        1
+                    } else {
+                        0
+                    };
                     for (i, IndexRef { node, index }) in
-                        path.into_iter().skip(n_to_skip).enumerate()
+                        path.into_iter().rev().skip(n_to_skip).enumerate()
                     {
                         match index {
                             None => {
@@ -774,7 +778,7 @@ impl Materializations {
                     )?;
 
                     for path in paths {
-                        for IndexRef { node, index } in path {
+                        for IndexRef { node, index } in path.into_iter().rev() {
                             match index {
                                 None => break,
                                 Some(child_index) => {

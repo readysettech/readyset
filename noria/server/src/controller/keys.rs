@@ -7,6 +7,10 @@ use noria::ReadySetError;
 use vec1::Vec1;
 
 // TODO: rewrite as iterator
+/// *DEPRECATED*: trace the provenance of the given set ofa columns from the given node up the
+/// graph.
+///
+/// Returns segments in *trace order*, with the target node first and the source node last
 pub fn provenance_of(
     graph: &Graph,
     node: NodeIndex,
@@ -204,6 +208,9 @@ where
 /// If `stop_at` is provided, replay paths will not continue past (but will include) nodes for which
 /// `stop_at(node_index)` returns `true`. (The intended usage here is for `stop_at` to return
 /// `true` for nodes that already have a materialization.)
+///
+/// Note that this function returns replay paths in *replay order*, with the source node first and
+/// the target node last
 pub fn replay_paths_for<F>(
     graph: &Graph,
     ColumnRef { node, columns }: ColumnRef,
@@ -225,6 +232,9 @@ where
 /// This is useful for full materialization cases where specifying a `ColumnRef` will try and
 /// generate split replay paths for generated columns, which is highly undesirable unless we're
 /// doing partial.
+///
+/// Note that this function returns replay paths in *replay order*, with the source node first and
+/// the target node last
 pub fn replay_paths_for_opt<F>(
     graph: &Graph,
     colref: IndexRef,
@@ -233,11 +243,15 @@ pub fn replay_paths_for_opt<F>(
 where
     F: Fn(NodeIndex) -> bool,
 {
-    let start = vec![colref];
-    continue_replay_path(graph, start, &stop_at)
+    let mut paths = continue_replay_path(graph, vec![colref], &stop_at)?;
+    paths.iter_mut().for_each(|p| p.reverse());
+    Ok(paths)
 }
 
 /// Like `replay_paths_for`, but `stop_at` always returns `false`.
+///
+/// Note that this function returns replay paths in *replay order*, with the source node first and
+/// the target node last
 pub fn replay_paths_for_nonstop(
     graph: &Graph,
     colref: ColumnRef,
@@ -475,8 +489,8 @@ mod tests {
             )
             .unwrap(),
             vec![vec![
+                IndexRef::partial(a, Index::hash_map(vec![0])),
                 IndexRef::partial(x, Index::hash_map(vec![0])),
-                IndexRef::partial(a, Index::hash_map(vec![0]))
             ]]
         );
 
@@ -491,8 +505,8 @@ mod tests {
             )
             .unwrap(),
             vec![vec![
+                IndexRef::partial(a, Index::hash_map(vec![0, 1])),
                 IndexRef::partial(x, Index::hash_map(vec![0, 1])),
-                IndexRef::partial(a, Index::hash_map(vec![0, 1]))
             ]]
         );
     }
@@ -519,8 +533,8 @@ mod tests {
             )
             .unwrap(),
             vec![vec![
+                IndexRef::partial(a, Index::hash_map(vec![1])),
                 IndexRef::partial(x, Index::hash_map(vec![0])),
-                IndexRef::partial(a, Index::hash_map(vec![1]))
             ]]
         );
         assert_eq!(
@@ -534,8 +548,8 @@ mod tests {
             )
             .unwrap(),
             vec![vec![
+                IndexRef::partial(a, Index::hash_map(vec![1, 0])),
                 IndexRef::partial(x, Index::hash_map(vec![0, 1])),
-                IndexRef::partial(a, Index::hash_map(vec![1, 0]))
             ]]
         );
     }
@@ -569,8 +583,8 @@ mod tests {
             )
             .unwrap(),
             vec![vec![
+                IndexRef::partial(a, Index::hash_map(vec![0])),
                 IndexRef::partial(x, Index::hash_map(vec![0])),
-                IndexRef::partial(a, Index::hash_map(vec![0]))
             ]]
         );
         assert_eq!(
@@ -584,8 +598,8 @@ mod tests {
             )
             .unwrap(),
             vec![vec![
+                IndexRef::full(a),
                 IndexRef::partial(x, Index::hash_map(vec![1])),
-                IndexRef::full(a)
             ]]
         );
         assert_eq!(
@@ -599,8 +613,8 @@ mod tests {
             )
             .unwrap(),
             vec![vec![
+                IndexRef::full(a),
                 IndexRef::partial(x, Index::hash_map(vec![0, 1])),
-                IndexRef::full(a)
             ]]
         );
     }
@@ -637,12 +651,12 @@ mod tests {
             paths,
             vec![
                 vec![
+                    IndexRef::partial(a, Index::hash_map(vec![0])),
                     IndexRef::partial(x, Index::hash_map(vec![0])),
-                    IndexRef::partial(a, Index::hash_map(vec![0]))
                 ],
                 vec![
+                    IndexRef::partial(b, Index::hash_map(vec![0])),
                     IndexRef::partial(x, Index::hash_map(vec![0])),
-                    IndexRef::partial(b, Index::hash_map(vec![0]))
                 ],
             ]
         );
@@ -661,12 +675,12 @@ mod tests {
             paths,
             vec![
                 vec![
+                    IndexRef::partial(a, Index::hash_map(vec![0, 1])),
                     IndexRef::partial(x, Index::hash_map(vec![0, 1])),
-                    IndexRef::partial(a, Index::hash_map(vec![0, 1]))
                 ],
                 vec![
+                    IndexRef::partial(b, Index::hash_map(vec![0, 1])),
                     IndexRef::partial(x, Index::hash_map(vec![0, 1])),
-                    IndexRef::partial(b, Index::hash_map(vec![0, 1]))
                 ],
             ]
         );
@@ -705,8 +719,8 @@ mod tests {
             )
             .unwrap(),
             vec![vec![
+                IndexRef::partial(a, Index::hash_map(vec![0])),
                 IndexRef::partial(x, Index::hash_map(vec![0])),
-                IndexRef::partial(a, Index::hash_map(vec![0]))
             ]]
         );
 
@@ -722,8 +736,8 @@ mod tests {
             )
             .unwrap(),
             vec![vec![
+                IndexRef::partial(b, Index::hash_map(vec![1])),
                 IndexRef::partial(x, Index::hash_map(vec![2])),
-                IndexRef::partial(b, Index::hash_map(vec![1]))
             ]]
         );
 
@@ -741,8 +755,8 @@ mod tests {
         assert_eq!(
             paths,
             vec![vec![
+                IndexRef::partial(a, Index::hash_map(vec![1])),
                 IndexRef::partial(x, Index::hash_map(vec![1])),
-                IndexRef::partial(a, Index::hash_map(vec![1]))
             ],]
         );
 
@@ -760,8 +774,8 @@ mod tests {
         assert_eq!(
             paths,
             vec![vec![
+                IndexRef::partial(a, Index::hash_map(vec![0, 1])),
                 IndexRef::partial(x, Index::hash_map(vec![0, 1])),
-                IndexRef::partial(a, Index::hash_map(vec![0, 1]))
             ],]
         );
 
@@ -779,8 +793,8 @@ mod tests {
         assert_eq!(
             paths,
             vec![vec![
+                IndexRef::partial(b, Index::hash_map(vec![0, 1])),
                 IndexRef::partial(x, Index::hash_map(vec![1, 2])),
-                IndexRef::partial(b, Index::hash_map(vec![0, 1]))
             ],]
         );
 
@@ -800,12 +814,12 @@ mod tests {
             paths,
             vec![
                 vec![
+                    IndexRef::partial(a, Index::hash_map(vec![0, 1])),
                     IndexRef::partial(x, Index::hash_map(vec![0, 1, 2])),
-                    IndexRef::partial(a, Index::hash_map(vec![0, 1]))
                 ],
                 vec![
+                    IndexRef::partial(b, Index::hash_map(vec![1])),
                     IndexRef::partial(x, Index::hash_map(vec![0, 1, 2])),
-                    IndexRef::partial(b, Index::hash_map(vec![1]))
                 ],
             ]
         );
@@ -825,12 +839,12 @@ mod tests {
             paths,
             vec![
                 vec![
+                    IndexRef::partial(a, Index::hash_map(vec![0])),
                     IndexRef::partial(x, Index::hash_map(vec![0, 2])),
-                    IndexRef::partial(a, Index::hash_map(vec![0]))
                 ],
                 vec![
+                    IndexRef::partial(b, Index::hash_map(vec![1])),
                     IndexRef::partial(x, Index::hash_map(vec![0, 2])),
-                    IndexRef::partial(b, Index::hash_map(vec![1]))
                 ],
             ]
         );
