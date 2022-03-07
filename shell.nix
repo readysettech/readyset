@@ -1,6 +1,6 @@
 with import (builtins.fetchTarball {
-  url = "https://github.com/nixos/nixpkgs/archive/adf7f03d3bfceaba64788e1e846191025283b60d.tar.gz";
-  sha256 = "13586j87n8jxin940rcr0q74bfv4zbmwz02l2p923dcgksvfjxds";
+  url = "https://github.com/nixos/nixpkgs/archive/062a0c5437b68f950b081bbfc8a699d57a4ee026.tar.gz";
+  sha256 = "0vfd7g1gwy9lcnnv8kclqr68pndd9sg0xq69h465zbbzb2vnijh9";
 }) {};
 mkShell {
   name = "readyset";
