@@ -15,7 +15,7 @@ steps:
       # Always generate a release binary for benchmarking
       RELEASE: "true"
       # Tag to be created for readyset-server
-      VERSION: "benchmark-release-${BUILDKITE_COMMIT}"
+      VERSION: "benchmark-${BUILDKITE_COMMIT}"
       # Tag to pull for builder (previously built)
       BUILDER_VERSION: "${BUILDKITE_COMMIT}"
     depends_on:
@@ -33,7 +33,7 @@ steps:
       # Always generate a release binary for benchmarking
       RELEASE: "true"
       # Tag to be created for readyset-mysql
-      VERSION: "benchmark-release-${BUILDKITE_COMMIT}"
+      VERSION: "benchmark-${BUILDKITE_COMMIT}"
       # Tag to pull for builder (previously built)
       BUILDER_VERSION: "${BUILDKITE_COMMIT}"
     depends_on:
@@ -50,7 +50,7 @@ steps:
       - echo "ENVIRONMENT=ci" >> ./.buildkite/benchmark.env
       - echo "BUILDKITE_COMMIT=${BUILDKITE_COMMIT}" >> ./.buildkite/benchmark.env
       - echo "PROM_INSTANCE_LABEL=ci-benchmark-${BUILDKITE_BUILD_NUMBER}-${BUILDKITE_COMMIT:0:7}" >> ./.buildkite/benchmark.env
-      - echo "DOCKER_TAG=benchmark-release-${BUILDKITE_COMMIT}" >> ./.buildkite/benchmark.env
+      - echo "DOCKER_TAG=release-benchmark-${BUILDKITE_COMMIT}" >> ./.buildkite/benchmark.env
       - echo "BENCHMARK_DC_PROJECT_NAME=benchmark-${BUILDKITE_COMMIT:0:7}" >> ./.buildkite/benchmark.env
       - echo "BENCHMARK_DATADIR_S3_KEY=readyset-devops-assets-build-us-east-2/benchmark-datadir-1.4.tgz" >> ./.buildkite/benchmark.env
       - echo "BENCHMARK_DATADIR_ARCHIVE_EXTRACT_TO=${BUILDKITE_BUILD_CHECKOUT_PATH}/benchmark-mysql-datadir-${BUILDKITE_COMMIT:0:7}" >> ./.buildkite/benchmark.env
