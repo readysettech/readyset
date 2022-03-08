@@ -27,7 +27,7 @@ use unbounded_interval_tree::IntervalTree;
 use vec1::Vec1;
 
 use crate::node::NodeProcessingResult;
-use crate::payload::{ReplayPieceContext, SourceSelection};
+use crate::payload::{PrettyReplayPath, ReplayPieceContext, SourceSelection};
 use crate::prelude::*;
 use crate::processing::ColumnMiss;
 use crate::state::{MaterializedNodeState, RangeLookupResult};
@@ -1617,11 +1617,19 @@ impl Domain {
                 raw_path,
             } => {
                 if notify_done {
-                    debug!(?path, ?tag, "told about terminating replay path",);
+                    debug!(
+                        path = %PrettyReplayPath(&path),
+                        ?tag,
+                        "told about terminating replay path",
+                    );
                     // NOTE: we set self.replaying_to when we first receive a replay with
                     // this tag
                 } else {
-                    debug!(?path, ?tag, "told about replay path");
+                    debug!(
+                        path = %PrettyReplayPath(&path),
+                        ?tag,
+                        "told about replay path"
+                    );
                 }
 
                 use crate::payload;

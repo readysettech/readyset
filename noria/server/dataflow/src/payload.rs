@@ -1,6 +1,7 @@
 use std::collections::HashSet;
-use std::fmt;
+use std::fmt::{self, Display};
 
+use itertools::Itertools;
 use nom_sql::SqlIdentifier;
 use noria::internal::LocalOrNot;
 use noria::{self, KeyComparison, PacketData, PacketTrace};
@@ -15,6 +16,44 @@ pub struct ReplayPathSegment {
     pub node: LocalNodeIndex,
     pub force_tag_to: Option<Tag>,
     pub partial_index: Option<Index>,
+}
+
+/// [`Display`] wrapper struct for a list of [`ReplayPathSegment`]s, to write them using a more
+/// human-readable representation
+pub struct PrettyReplayPath<'a>(pub &'a [ReplayPathSegment]);
+
+impl<'a> Display for PrettyReplayPath<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (
+            i,
+            ReplayPathSegment {
+                node,
+                force_tag_to,
+                partial_index,
+            },
+        ) in self.0.iter().enumerate()
+        {
+            if i != 0 {
+                write!(f, " → ")?;
+            }
+
+            write!(f, "{}", node)?;
+            if let Some(idx) = partial_index {
+                write!(
+                    f,
+                    " ({:?}[{}])",
+                    idx.index_type,
+                    idx.columns.iter().join(", ")
+                )?;
+            }
+
+            if let Some(tag) = force_tag_to {
+                write!(f, " force: {:?}", tag)?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
