@@ -1,0 +1,8 @@
+apiVersion: v2
+appVersion: 0.0.1
+description: ReadySet benchmarking Helm chart
+home: https://readyset.io/
+icon: https://readyset.io/images/favicon.png
+kubeVersion: '>=1.18.0-0'
+name: readyset-benchmarks
+version: 0.0.1

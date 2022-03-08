@@ -27,6 +27,7 @@ BENCHMARK_START_TIME=$(date +%s)
 
 # Location to pass to benchmark binary as --results-file
 REPORT_SAVE_DIR=${REPORT_SAVE_DIR:-/tmp/artifacts}
+REPORT_JSON_ENABLED="${REPORT_JSON_ENABLED:-'disabled'}"
 
 # ----------- [Functions] ----------------------------------- #
 
@@ -34,7 +35,7 @@ log_benchmark () {
     project=$1
     bench_f=$2
     msg=$3
-    printf "[%s - %s] %s" "${project}" "${bench_f}" "${msg}"
+    printf "[%s - %s] %s\n" "${project}" "${bench_f}" "${msg}"
 }
 
 check_benchmark_exit_code () {
@@ -62,14 +63,33 @@ check_benchmark_exit_code () {
     log_benchmark "${project}" "${bench_f}" "${m}"
 }
 
+append_json_output_file_b64() {
+    local file_name=$1
+    local file_path=$2
+    local b64
+    local json
+    if [[ "${REPORT_JSON_ENABLED}" != "enabled" ]]; then
+        return
+    fi
+    b64=$(base64 -i $file_path | tr -d '\n')
+    json='{"'"$file_name"'":"'"${b64}"'"}'
+    if  [[ -n "${b64}" ]]; then
+        results_json_output=$(echo $results_json_output | jq '. + '"$json"'')
+    fi
+}
+
+print_results_json() {
+    if [[ "${REPORT_JSON_ENABLED}" != "enabled" ]]; then
+        return
+    fi
+    set +x
+    echo "BENCH_RUNNER_OUTPUT${results_json_output}END"
+    set -x
+}
+
 # ----------- [Main] ---------------------------------------- #
 
-echo 'Beginning execution of ReadySet MySQL benchmarks'
-
-# TODO: @Marcus - swap this out for a more robust "snapshots completed" approach.
-echo "[SHIM]: Sleeping for 600s to let snapshot complete."
-sleep 600
-
+results_json_output="{}"
 echo 'Beginning execution of ReadySet MySQL benchmarks'
 
 # --------------------------------------------
@@ -84,8 +104,10 @@ benchmarks \
     --skip-setup \
     --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
     --results-file "${REPORT_SAVE_DIR}/$project.log"
+ec=$?
 
-check_benchmark_exit_code $? "${project}" "${bench_file}"
+append_json_output_file_b64 "${project}.log" "${REPORT_SAVE_DIR}/$project.log"
+check_benchmark_exit_code $ec "${project}" "${bench_file}"
 
 # Binlog replication from this shouldn't bleed over into the next test.
 printf "[SLEEP] Waiting %s for binlog replication to settle in." "${REPL_AWAIT_SLEEP_DURATION}"
@@ -94,23 +116,29 @@ sleep "${REPL_AWAIT_SLEEP_DURATION}"
 # --------------------------------------------
 # Minimal Benchmarks
 # --------------------------------------------
+echo "Dynamically identifying minimal benchmarks to be executed."
 bench_subdir='minimal'
 project='minimal'
 benchmark_files=`find $BENCHMARK_TEST_DIR/minimal -mindepth 1`
 setup_str=''
 
+echo "Preparing to execute Minimal benchmarks."
+
 for bench_path in $benchmark_files; do
     bench_name=${bench_subdir}/$(basename $bench_path)
+    echo "Bench Name: $bench_name"
+    echo "Bench Path: $bench_path"
     log_benchmark "${project}" "${bench_name}" "${BENCH_LOG_START_MSG}" "1"
 
     benchmarks \
         --benchmark $bench_path \
         ${setup_str} \
         --results-file "${REPORT_SAVE_DIR}/$project.log"
-
+    ec=$?
     # Skip on every minimal benchmark after the first.
     setup_str='--skip-setup'
-    check_benchmark_exit_code $? "${project}" "${bench_name}"
+    append_json_output_file_b64 "${project}.log" "${REPORT_SAVE_DIR}/$project.log"
+    check_benchmark_exit_code $ec "${project}" "${bench_name}"
 done
 
 # --------------------------------------------
@@ -124,8 +152,10 @@ log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
 benchmarks \
     --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
     --results-file "${REPORT_SAVE_DIR}/$project.log"
+ec=$?
 
-check_benchmark_exit_code $? "${project}" "${bench_file}"
+append_json_output_file_b64 "${project}.log" "${REPORT_SAVE_DIR}/$project.log"
+check_benchmark_exit_code $ec "${project}" "${bench_file}"
 
 # --------------------------------------------
 # Fastly Small Read Benchmark
@@ -139,8 +169,10 @@ benchmarks \
     --skip-setup \
     --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
     --results-file "${REPORT_SAVE_DIR}/$project.log"
+ec=$?
 
-check_benchmark_exit_code $? "${project}" "${bench_file}"
+append_json_output_file_b64 "${project}.log" "${REPORT_SAVE_DIR}/$project.log"
+check_benchmark_exit_code $ec "${project}" "${bench_file}"
 
 # --------------------------------------------
 # Small Connection Scaling Benchmark
@@ -166,11 +198,15 @@ log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
 benchmarks \
     --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
     --results-file "${REPORT_SAVE_DIR}/$project.log"
+ec=$?
 
-check_benchmark_exit_code $? "${project}" "${bench_file}"
+append_json_output_file_b64 "${project}.log" "${REPORT_SAVE_DIR}/$project.log"
+check_benchmark_exit_code $ec "${project}" "${bench_file}"
 
 # ----------- [Complete] ---------------------------------------- #
 
 end_time=$(date +%s)
 runtime=$((end_time-BENCHMARK_START_TIME))
-printf "All benchmhe_hitarks completed successfully in a total of %s seconds." $runtime
+printf "All benchmarks completed successfully in a total of %s seconds." $runtime
+
+print_results_json

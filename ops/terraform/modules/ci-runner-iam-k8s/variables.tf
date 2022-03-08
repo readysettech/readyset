@@ -27,12 +27,19 @@ variable "k8s_role_name" {
   default     = "ci-runner"
 }
 
+variable "authorized_eks_clusters" {
+  description = "List of EKS clusters module is granted describe access to."
+  type        = list(string)
+  default     = []
+}
+
 variable "k8s_role_grants" {
   description = "Object representing k8s RBAC rules to be applied to the k8s role."
   type        = map(any)
   default = {
     build = [{
       api_groups = [
+        "",
         "apps",
         "batch",
         "extensions"
@@ -42,6 +49,7 @@ variable "k8s_role_grants" {
         "cronjobs",
         "jobs",
         "pods",
+        "pods/log",
         "services"
       ],
       verbs = [

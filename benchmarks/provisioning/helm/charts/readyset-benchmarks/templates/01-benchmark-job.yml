@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ template "benchmark.runner.name" .Values.benchmark.runner }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- range $k, $v := .Values.benchmark.runner.labels }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+spec:
+  backoffLimit: {{ .Values.benchmark.runner.backoffLimit }}
+  template:
+    spec:
+      {{- include "benchmark.runner.affinity" .Values.benchmark.runner | nindent 6 }}
+      {{- include "benchmark.runner.tolerations" .Values.benchmark.runner | nindent 6 }}
+      restartPolicy: {{ .Values.benchmark.runner.restartPolicy | quote }}
+      containers:
+      - name: benchmark
+        image: {{ template "benchmark.runner.image" .Values.benchmark.runner }}
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        command: [
+          {{ .Values.benchmark.runner.entrypoint | quote }}
+        ]
+        args:
+        {{- range .Values.benchmark.runner.command }}
+          - {{ . | quote }}
+        {{- end -}}
+        {{- include "benchmark.runner.environmentVars" .Values.benchmark.runner | nindent 8 }}
+        {{- include "benchmark.runner.resources" .Values.benchmark.runner | nindent 8 }}
+        volumeMounts:
+          - mountPath: {{ .Values.benchmark.runner.env.REPORT_SAVE_DIR }}
+            name: results-volume
+      volumes:
+      # Empty volume where test results are stored
+      - name: results-volume
+        emptyDir: {}

@@ -103,7 +103,7 @@ self_managed_node_group_configs = {
     ami_id               = "ami-091dbe769bf1d5d72"
     single_az            = "true"
     min_size             = 1
-    max_size             = 8,
+    max_size             = 20,
     desired_size         = 1,
     instance_type        = "m5.large",
     bootstrap_extra_args = "--kubelet-extra-args '--node-labels=readyset.io/worker=benchmarks --register-with-taints benchmarks=true:NoSchedule --cluster-dns=169.254.20.10'"

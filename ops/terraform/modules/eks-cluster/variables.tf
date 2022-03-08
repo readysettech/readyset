@@ -282,5 +282,5 @@ variable "ips_refresher_ecr_aws_account_id" {
 
 variable "vpc_dns_resolver_ip" {
   description = "Private IP of the VPC DNS resolver which is hosting the k8s cluster."
-  default = ""
+  default     = ""
 }

@@ -92,17 +92,7 @@ services:
       readyset-server:
         condition: service_healthy
   benchmarks:
-    # Eventually, when benchmarks are more static, we can abstract
-    # the build process external to docker-compose and leverage an image
-    # in ECR. Building inline for now seems viable.
-    image: readyset-benchmarks
-    build:
-      dockerfile: build/Dockerfile.readyset-benchmarks
-      context: ../
-      args:
-        release: 1
-        READYSET_RUST_UBUNTU2004_BUILDER_BASE_TAG: latest
-        BUILDKIT_INLINE_CACHE: 1
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-benchmarks:${BENCHMARK_DOCKER_TAG}
     environment:
       INSTANCE_LABEL: "${PROM_INSTANCE_LABEL}"
       TARGET_CONN_STR: "mysql://root:root@readyset-adapter:3333"

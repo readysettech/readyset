@@ -83,7 +83,8 @@ else
   if [ "${ENVIRONMENT}" == "localdevelopment" ]; then
     aws s3 cp s3://${BENCHMARK_DATADIR_S3_KEY} ${BENCHMARK_DATADIR_ARCHIVE_SAVE_AS} --profile ${LOAD_AWS_PROFILE} --quiet
   else
-    aws s3 cp s3://${BENCHMARK_DATADIR_S3_KEY} ${BENCHMARK_DATADIR_ARCHIVE_SAVE_AS} --quiet
+    # Try to download quietly, but if unable, show errors.
+    aws s3 cp s3://${BENCHMARK_DATADIR_S3_KEY} ${BENCHMARK_DATADIR_ARCHIVE_SAVE_AS} --quiet || aws s3 cp s3://${BENCHMARK_DATADIR_S3_KEY} ${BENCHMARK_DATADIR_ARCHIVE_SAVE_AS}
   fi
 
   mkdir -p ${BENCHMARK_DATADIR_ARCHIVE_EXTRACT_TO}

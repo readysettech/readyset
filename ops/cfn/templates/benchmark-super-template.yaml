@@ -413,6 +413,10 @@ Outputs:
     Description: Hostname of the NLB which reverse proxies MySQL traffic to the MySQL adapter nodes of the cluster.
     Value: !If [MySQLStackEnabled, !GetAtt ReadySetMySQLStack.Outputs.ReadySetAdapterNLBDNSName, ""]
 
+  MySQLRDSHostname:
+    Description: Hostname of the provisioned MySQL RDS instance.
+    Value: !If [MySQLStackEnabled, !GetAtt RDSStack.Outputs.MySQLRDSHostname, ""]
+
   # PostgreSQL Stack Outputs
 
   ReadySetPostgreSQLAdapterNLBDNSName:
@@ -422,6 +426,10 @@ Outputs:
   ReadySetPostgreSQLVPCEndpointService:
     Description: S3 VPC Endpoint for accessing ReadySet for PostgreSQL.
     Value: !If [PostgreSQLStackEnabled, !GetAtt ReadySetPostgreSQLStack.Outputs.ReadySetPostgreSQLVPCEndpointService, ""]
+
+  PostgreSQLRDSHostname:
+    Description: Hostname of the provisioned MySQL RDS instance.
+    Value: !If [PostgreSQLStackEnabled, !GetAtt RDSStack.Outputs.PostgreSQLRDSHostname, ""]
 
   # Networking Outputs
 

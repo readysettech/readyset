@@ -223,14 +223,6 @@ steps:
 
   - wait
 
-  - trigger: "readyset-benchmarks"
-    label: ":algolia: Performance Benchmarks"
-    build:
-      branch: ${BUILDKITE_BRANCH}
-      commit: ${BUILDKITE_COMMIT}
-      message: ":algolia: Performance Benchmarks for ${BUILDKITE_COMMIT}"
-    async: true
-
   - trigger: "internal-amis"
     branches: refs/heads/main
     label: ":rocket: Internal AMIs"
@@ -442,6 +434,17 @@ steps:
     agents:
       queue: ops
 
+  # Benchmarking
+  - trigger: "readyset-benchmarks"
+    label: ":algolia: Performance Benchmarks"
+    depends_on:
+      - test-cfn-stack
+    build:
+      branch: ${BUILDKITE_BRANCH}
+      commit: ${BUILDKITE_COMMIT}
+      message: ":algolia: Performance Benchmarks for ${BUILDKITE_COMMIT}"
+    async: true
+
   - block: "Deploy :amazon-ec2: AMIs and :aws-cloudformation: CloudFormation alpha release"
     key: block-public-alpha
     prompt: "Copy AMIs and CloudFormation templates to public visibility?"
@@ -576,4 +579,3 @@ steps:
       - ecr#v2.5.0:
           login: true
           retries: 3
-

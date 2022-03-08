@@ -7,15 +7,17 @@ steps:
     key: block-benchmarks
     prompt: "Run ReadySet Benchmarks?"
 
-  - label: ":docker: Build benchmark readyset-server image"
-    key: build-readyset-server-image
+  # Build the readyset-benchmark container image that'll be
+  # used elsewhere in the pipeline
+  - label: ":docker: Build readyset-benchmarks image"
+    key: build-readyset-benchmarks-image
     command: >-
-      .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-server readyset-server .
+      .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-benchmarks readyset-benchmarks .
     env:
       # Always generate a release binary for benchmarking
       RELEASE: "true"
       # Tag to be created for readyset-server
-      VERSION: "benchmark-${BUILDKITE_COMMIT}"
+      VERSION: "${BUILDKITE_COMMIT}"
       # Tag to pull for builder (previously built)
       BUILDER_VERSION: "${BUILDKITE_COMMIT}"
     depends_on:
@@ -25,45 +27,61 @@ steps:
         login: true
         retries: 3
 
-  - label: ":docker: Build benchmark readyset-mysql image"
-    key: build-readyset-mysql-image
-    command: >-
-      .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-mysql readyset-mysql .
+  # Launch CFN stack with Assumed Role
+  - label: ":cloud: Launch ReadySet Benchmarking CloudFormation Stack"
+    key: readyset-benchmark-cfn-launch
+    commands: >-
+      .buildkite/cfn-benchmark-stack-launch.sh
     env:
-      # Always generate a release binary for benchmarking
-      RELEASE: "true"
-      # Tag to be created for readyset-mysql
-      VERSION: "benchmark-${BUILDKITE_COMMIT}"
-      # Tag to pull for builder (previously built)
-      BUILDER_VERSION: "${BUILDKITE_COMMIT}"
+      BUILDKITE_BUILD_NUMBER: "${BUILDKITE_BUILD_NUMBER}"
+      BUILDKITE_COMMIT: "${BUILDKITE_COMMIT}"
+    plugins:
+      - cultureamp/aws-assume-role#v0.2.0:
+          role: "arn:aws:iam::305232526136:role/readyset-ci-k8s-build-us-east-2"
     depends_on:
       - block-benchmarks
-    plugins:
-      ecr#v2.5.0:
-        login: true
-        retries: 3
+    agents:
+      queue: buildk8s
 
-  - label: ":pipeline: Run Noria Benchmark in Docker-Compose"
+  # Launch benchmark runner in k8s to benchmark CFN stack and gather output
+  - label: ":algolia: Launching benchmark job in :k8s:"
+    key: readyset-benchmark-runner-launch
+    commands: >-
+      .buildkite/cfn-benchmark-k8s-runner.sh
+    env:
+      RUNNER_IMAGE_TAG: release-${BUILDKITE_COMMIT}
+      BUILDKITE_BUILD_NUMBER: "${BUILDKITE_BUILD_NUMBER}"
+      BUILDKITE_COMMIT: "${BUILDKITE_COMMIT}"
+    plugins:
+      - cultureamp/aws-assume-role#v0.2.0:
+          role: "arn:aws:iam::305232526136:role/readyset-ci-k8s-build-us-east-2"
+    depends_on:
+      - readyset-benchmark-cfn-launch
+    agents:
+      queue: buildk8s
+
+  # Launch docker-compose based benchmarks using zipped MySQL datadir
+  - label: ":pipeline: Run ReadySet Benchmark in Docker-Compose"
     key: readyset-benchmark
     commands:
       - 'echo +++ :wrench: Benchmark Env File Setup'
       - echo "ENVIRONMENT=ci" >> ./.buildkite/benchmark.env
       - echo "BUILDKITE_COMMIT=${BUILDKITE_COMMIT}" >> ./.buildkite/benchmark.env
       - echo "PROM_INSTANCE_LABEL=ci-benchmark-${BUILDKITE_BUILD_NUMBER}-${BUILDKITE_COMMIT:0:7}" >> ./.buildkite/benchmark.env
-      - echo "DOCKER_TAG=release-benchmark-${BUILDKITE_COMMIT}" >> ./.buildkite/benchmark.env
+      - echo "DOCKER_TAG=${BUILDKITE_COMMIT}" >> ./.buildkite/benchmark.env
+      - echo "BENCHMARK_DOCKER_TAG=release-${BUILDKITE_COMMIT}" >> ./.buildkite/benchmark.env
       - echo "BENCHMARK_DC_PROJECT_NAME=benchmark-${BUILDKITE_COMMIT:0:7}" >> ./.buildkite/benchmark.env
       - echo "BENCHMARK_DATADIR_S3_KEY=readyset-devops-assets-build-us-east-2/benchmark-datadir-1.4.tgz" >> ./.buildkite/benchmark.env
-      - echo "BENCHMARK_DATADIR_ARCHIVE_EXTRACT_TO=${BUILDKITE_BUILD_CHECKOUT_PATH}/benchmark-mysql-datadir-${BUILDKITE_COMMIT:0:7}" >> ./.buildkite/benchmark.env
-      - echo "BENCHMARK_DATADIR_ARCHIVE_SAVE_AS=${BUILDKITE_BUILD_CHECKOUT_PATH}/tmp-benchmark-mysql-datadir-${BUILDKITE_COMMIT:0:7}.tgz" >> ./.buildkite/benchmark.env
-      - echo "BENCHMARK_ARTIFACT_DIR=${BUILDKITE_BUILD_CHECKOUT_PATH}/artifacts-${BUILDKITE_COMMIT:0:7}" >> ./.buildkite/benchmark.env
+      - echo "BENCHMARK_DATADIR_ARCHIVE_EXTRACT_TO=$(pwd)/benchmark-mysql-datadir-${BUILDKITE_COMMIT:0:7}" >> ./.buildkite/benchmark.env
+      - echo "BENCHMARK_DATADIR_ARCHIVE_SAVE_AS=$(pwd)/tmp-benchmark-mysql-datadir-${BUILDKITE_COMMIT:0:7}.tgz" >> ./.buildkite/benchmark.env
+      - echo "BENCHMARK_ARTIFACT_DIR=$(pwd)/artifacts-${BUILDKITE_COMMIT:0:7}" >> ./.buildkite/benchmark.env
       - 'echo +++ :stopwatch: Benchmark Execution'
       - ./.buildkite/orchestrate-benchmarks.sh
-      - cd "${BUILDKITE_BUILD_CHECKOUT_PATH}/artifacts-${BUILDKITE_COMMIT:0:7}" && buildkite-agent artifact upload "*.log"
-    agents:
-      queue: benchmarks
-    depends_on:
-      - build-readyset-server-image
-      - build-readyset-mysql-image
+      - cd "./artifacts-${BUILDKITE_COMMIT:0:7}" && buildkite-agent artifact upload "*.log"
     plugins:
       - cultureamp/aws-assume-role#v0.2.0:
           role: "arn:aws:iam::305232526136:role/readyset-ci-benchmarking-build-us-east-2"
+    depends_on:
+      - build-readyset-benchmarks-image
+    agents:
+      queue: benchmarks

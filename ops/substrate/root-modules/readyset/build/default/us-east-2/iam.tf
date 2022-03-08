@@ -40,7 +40,7 @@ resource "aws_iam_policy" "bk-benchmarking-assume-role" {
 # of k8s access
 resource "aws_iam_policy" "bk-k8s-assume-role" {
   count  = var.buildkite_k8s_queue_iam_role_enabled ? 1 : 0
-  name   = local.bk_benchmarking_iam_pol_name
+  name   = local.bk_k8s_role_iam_pol_name
   path   = "/"
   policy = data.aws_iam_policy_document.bk-k8s-assume-role[0].json
 }

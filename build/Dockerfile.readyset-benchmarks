@@ -29,7 +29,8 @@ RUN set -eux && \
         libssl-dev \
         mariadb-client-10.3 \
         ca-certificates \
-        curl && \
+        curl \
+        jq && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /tmp/readyset/target/*/benchmarks /usr/local/bin

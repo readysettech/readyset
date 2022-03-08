@@ -40,6 +40,7 @@ module "buildkite_queue_shared" {
     tolist(module.buildkite_ops_queue.iam_roles),
     tolist(module.buildkite_default_queue.iam_roles),
     tolist(module.buildkite_benchmark_queue.iam_roles),
+    tolist(module.buildkite_k8s_queue.iam_roles),
     flatten(values(module.buildkite_queue)[*].iam_roles),
   )
 }

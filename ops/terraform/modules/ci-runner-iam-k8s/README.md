@@ -36,10 +36,11 @@ No requirements.
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
+| <a name="input_authorized_eks_clusters"></a> [authorized\_eks\_clusters](#input\_authorized\_eks\_clusters) | List of EKS clusters module is granted describe access to. | `list(string)` | `[]` | no |
 | <a name="input_aws_region"></a> [aws\_region](#input\_aws\_region) | The AWS region to create resources in. | `string` | n/a | yes |
 | <a name="input_environment"></a> [environment](#input\_environment) | The name of the environment. | `string` | n/a | yes |
 | <a name="input_iam_role_trusted_account_ids"></a> [iam\_role\_trusted\_account\_ids](#input\_iam\_role\_trusted\_account\_ids) | AWS accounts to permit assumption of the created IAM role. Should be empty if not using this role to traverse account boundaries. | `list(string)` | `[]` | no |
-| <a name="input_k8s_role_grants"></a> [k8s\_role\_grants](#input\_k8s\_role\_grants) | Object representing k8s RBAC rules to be applied to the k8s role. | `map(any)` | <pre>{<br>  "build": [<br>    {<br>      "api_groups": [<br>        "apps",<br>        "batch",<br>        "extensions"<br>      ],<br>      "resources": [<br>        "configmaps",<br>        "cronjobs",<br>        "jobs",<br>        "pods",<br>        "services"<br>      ],<br>      "verbs": [<br>        "create",<br>        "describe",<br>        "get",<br>        "watch",<br>        "list",<br>        "delete"<br>      ]<br>    }<br>  ]<br>}</pre> | no |
+| <a name="input_k8s_role_grants"></a> [k8s\_role\_grants](#input\_k8s\_role\_grants) | Object representing k8s RBAC rules to be applied to the k8s role. | `map(any)` | <pre>{<br>  "build": [<br>    {<br>      "api_groups": [<br>        "",<br>        "apps",<br>        "batch",<br>        "extensions"<br>      ],<br>      "resources": [<br>        "configmaps",<br>        "cronjobs",<br>        "jobs",<br>        "pods",<br>        "pods/log",<br>        "services"<br>      ],<br>      "verbs": [<br>        "create",<br>        "describe",<br>        "get",<br>        "watch",<br>        "list",<br>        "delete"<br>      ]<br>    }<br>  ]<br>}</pre> | no |
 | <a name="input_k8s_role_name"></a> [k8s\_role\_name](#input\_k8s\_role\_name) | Name of Kubernetes RBAC role to be created for mapping to the IAM role. | `string` | `"ci-runner"` | no |
 | <a name="input_resource_tags"></a> [resource\_tags](#input\_resource\_tags) | Base AWS resource tags to apply to any resources. | `map(any)` | `{}` | no |
 

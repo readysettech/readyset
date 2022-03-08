@@ -105,24 +105,36 @@ data "aws_iam_policy_document" "cfn-actions" {
       "rds:CreateDBInstance",
       "rds:CreateDBParameterGroup",
       "rds:CreateDBSubnetGroup",
-      "rds:DescribeDBInstance",
-      "rds:DescribeDBInstances",
-      "rds:DescribeDBSubnetGroups",
-      "rds:DescribeEngineDefaultParameters",
       "rds:DeleteDBInstance",
       "rds:DeleteDBParameterGroup",
       "rds:DeleteDBSubnetGroup",
       "rds:ModifyDBParameterGroup",
       "rds:ModifyDBSubnetGroup",
-      "rds:DescribeEngineDefaultParameters",
+      "ec2:Describe*",
+      "rds:CreateDBSnapshot",
+      "rds:DeleteDBSnapshot",
+      "rds:Describe*",
+      "rds:DownloadDBLogFilePortion",
+      "rds:List*",
+      "rds:ModifyDBInstance",
+      "rds:ModifyOptionGroup",
+      "rds:RebootDBInstance",
+      "rds:RestoreDBInstanceFromDBSnapshot",
       "s3:GetObject",
       "s3:ListBucket",
       "sqs:CreateQueue",
       "sqs:DeleteQueue",
       "sqs:GetQueueAttributes",
       "ssm:GetParameter",
-      "ssm:GetParameters"
+      "ssm:GetParameters",
     ]
+    resources = ["*"]
+  }
+
+  statement {
+    effect    = "Allow"
+    sid       = "UpdateKubeConfigPerms"
+    actions   = ["eks:DescribeCluster"]
     resources = ["*"]
   }
 }
