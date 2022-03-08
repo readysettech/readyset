@@ -39,3 +39,9 @@ services:
     restart: unless-stopped
     volumes:
       - '/:/host:ro,rslave'
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    network_mode: "host"
+    environment:
+      SPAN_STORAGE_TYPE: "badger"
+      BADGER_EPHEMERAL: "false"
