@@ -64,7 +64,7 @@ const VPC_CLOUDFORMATION_TEMPLATE_URL: &str =
 // Macro to define this so it can be included in constants
 macro_rules! readyset_cloudformation_s3_prefix {
     () => {
-        "installer-2022-02-22"
+        "installer-2022-03-08"
     };
 }
 
