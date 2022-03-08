@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use msql_srv::{
@@ -194,7 +195,7 @@ impl DerefMut for Backend {
 struct CachedSchema {
     mysql_schema: Vec<msql_srv::Column>,
     column_map: Vec<Option<usize>>,
-    preencoded_schema: Vec<u8>,
+    preencoded_schema: Arc<[u8]>,
 }
 
 macro_rules! convert_columns {
@@ -356,12 +357,12 @@ where
                     self.schema_cache.entry(id).or_insert(CachedSchema {
                         mysql_schema,
                         column_map,
-                        preencoded_schema,
+                        preencoded_schema: preencoded_schema.into(),
                     })
                 };
 
                 let mut rw = results
-                    .start_with_cache(mysql_schema, preencoded_schema)
+                    .start_with_cache(mysql_schema, preencoded_schema.clone())
                     .await?;
                 for r in data.into_iter().flatten() {
                     for (c, pos) in mysql_schema.iter().zip(column_map.iter()) {
