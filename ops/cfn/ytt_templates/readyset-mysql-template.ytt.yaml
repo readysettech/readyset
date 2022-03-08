@@ -168,7 +168,7 @@ Parameters:
   DatabasePort:
     Description: TCP port of the MySQL server to front with ReadySet.
     Type: Number
-    Default: 5432
+    Default: 3306
 
   DatabaseProtocol:
     Description: Database connection protocol prefix for connection strings. Typically mysql.
