@@ -138,6 +138,8 @@ data "aws_iam_policy_document" "internal-cfn-access-policy-role-document" {
       "sqs:CreateQueue",
       "sqs:DeleteQueue",
       "sqs:GetQueueAttributes",
+      "ssm:PutParameter",
+      "ssm:DeleteParameter",
       "ssm:GetParameter",
       "ssm:GetParameters"
     ]

@@ -10,8 +10,7 @@ buildkite-agent artifact download "*.yaml" --step packer-cfn-template-ytt ./rend
 cd ./rendered_templates
 
 # Generate an SSH key to connect to the bastion box
-key_fragment=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c10)
-key_name=cfn-ci-key-"$key_fragment"
+key_name="cfn-ci-key-${BUILDKITE_COMMIT}"
 
 mkdir ~/keys
 aws --region us-east-2 ec2 \
@@ -22,7 +21,14 @@ aws --region us-east-2 ec2 \
 
 chmod 400 ~/keys/"$key_name".pem
 
-# cfncitestkey is provisioned and maintained by hand at the moment
+ssh_key_path="$(realpath ~/keys/${key_name}.pem)"
+
+aws ssm put-parameter \
+    --region us-east-2 \
+    --name "/readyset/build/$key_name" \
+    --type "SecureString" \
+    --value file://"$ssh_key_path"
+
 # We only capture the last line of script output since that's the only line that will contain the stack name.
 mysql_super_stack=$(../../cfn-test/create-mysql-super-stack.sh -h "${BUILDKITE_COMMIT}" -k "$key_name" | tail -1)
 
@@ -60,11 +66,11 @@ ssh -o StrictHostKeyChecking=no \
   ubuntu@"$bastion_eip" \
   basic_validation_test --help #check if we can reach the bastion box
 
-#ssh -o StrictHostKeyChecking=no \
-#  -o LogLevel=ERROR \
-#  -o UserKnownHostsFile=/dev/null \
-#  -i ~/keys/"$key_name".pem \
-#  ubuntu@"$bastion_eip" "basic_validation_test --adapter $readyset_adapter --rds $readyset_rds --prometheus-address $prometheus_addr --migration-mode explicit-migration"
+ssh -o StrictHostKeyChecking=no \
+  -o LogLevel=ERROR \
+  -o UserKnownHostsFile=/dev/null \
+  -i ~/keys/"$key_name".pem \
+  ubuntu@"$bastion_eip" "basic_validation_test --adapter $readyset_adapter --rds $readyset_rds --prometheus-address $prometheus_addr --migration-mode explicit-migration"
 
 #Clean up resources
 aws --region us-east-2 cloudformation delete-stack --stack-name "$mysql_super_stack"
@@ -72,3 +78,6 @@ aws --region us-east-2 ec2 \
  delete-key-pair \
  --key-name "$key_name"
 rm ~/keys/"$key_name".pem
+aws ssm delete-parameter \
+    --region us-east-2 \
+    --name "/readyset/build/$key_name"
