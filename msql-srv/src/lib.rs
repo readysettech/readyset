@@ -342,6 +342,7 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
         init_packet.extend_from_slice(&b"\0"[..]);
 
         self.writer.write_packet(&init_packet).await?;
+        self.writer.flush().await?;
 
         let (seq, handshake_bytes) = self.reader.next().await?.ok_or_else(|| {
             io::Error::new(
@@ -395,6 +396,7 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
             )
             .await?;
         }
+        self.writer.flush().await?;
 
         Ok(auth_success)
     }
@@ -505,12 +507,16 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                 }
                 Command::Ping => {
                     writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty()).await?;
+                    self.writer.flush().await?;
                 }
                 Command::Quit => {
                     break;
                 }
             }
+
+            self.writer.flush().await?;
         }
+
         Ok(())
     }
 }

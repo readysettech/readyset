@@ -1,6 +1,7 @@
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::io;
+use std::sync::Arc;
 
 use tokio::io::AsyncWrite;
 
@@ -176,7 +177,7 @@ impl<'a, W: AsyncWrite + Unpin> QueryResultWriter<'a, W> {
     pub async fn start_with_cache(
         mut self,
         columns: &'a [Column],
-        cached: &'a [u8],
+        cached: Arc<[u8]>,
     ) -> io::Result<RowWriter<'a, W>> {
         self.finalize(true).await?;
         RowWriter::new(self, columns, Some(cached)).await
@@ -266,7 +267,7 @@ pub struct RowWriter<'a, W: AsyncWrite + Unpin> {
     bitmap_idx: usize,
     columns: &'a [Column],
     /// A cached pre-encoded representation of the column definitions
-    cached: Option<&'a [u8]>,
+    cached: Option<Arc<[u8]>>,
 
     // next column to write for the current row
     // NOTE: (ab)used to track number of *rows* for a zero-column resultset
@@ -287,7 +288,7 @@ where
     async fn new(
         result: QueryResultWriter<'a, W>,
         columns: &'a [Column],
-        cached_column_def: Option<&'a [u8]>,
+        cached_column_def: Option<Arc<[u8]>>,
     ) -> io::Result<RowWriter<'a, W>> {
         let bitmap_len = (columns.len() + 7 + 2) / 8;
         let mut rw = RowWriter {
@@ -313,9 +314,10 @@ where
             return Ok(());
         }
 
-        match self.cached {
+        match &self.cached {
             Some(cached) => {
-                writers::column_definitions_cached(self.columns, cached, self.result.writer).await
+                writers::column_definitions_cached(self.columns, cached.clone(), self.result.writer)
+                    .await
             }
             None => writers::column_definitions(self.columns, self.result.writer).await,
         }

@@ -1,4 +1,5 @@
-use std::io::{self, Cursor, Write};
+use std::io::{self, Write};
+use std::sync::Arc;
 
 use byteorder::{LittleEndian, WriteBytesExt};
 use tokio::io::AsyncWrite;
@@ -12,8 +13,9 @@ pub(crate) async fn write_eof_packet<W: AsyncWrite + Unpin>(
     w: &mut PacketWriter<W>,
     s: StatusFlags,
 ) -> io::Result<()> {
-    let buf: [u8; 5] = [0xFE, 0x00, 0x00, s.bits() as u8, (s.bits() >> 8) as u8];
-    w.write_packet(&buf).await
+    let buf = vec![0xFE, 0x00, 0x00, s.bits() as u8, (s.bits() >> 8) as u8];
+    w.enqueue_packet(buf);
+    Ok(())
 }
 
 pub(crate) async fn write_ok_packet<W: AsyncWrite + Unpin>(
@@ -23,15 +25,14 @@ pub(crate) async fn write_ok_packet<W: AsyncWrite + Unpin>(
     s: StatusFlags,
 ) -> io::Result<()> {
     const MAX_OK_PACKET_LEN: usize = 1 + 9 + 9 + 2 + 2;
-    let mut inner_buf = [0u8; MAX_OK_PACKET_LEN];
-    let mut buf = Cursor::new(&mut inner_buf[..]);
+    let mut buf = Vec::with_capacity(MAX_OK_PACKET_LEN);
     buf.write_u8(0x00)?; // OK packet type
     buf.write_lenenc_int(rows)?;
     buf.write_lenenc_int(last_insert_id)?;
     buf.write_u16::<LittleEndian>(s.bits())?;
     buf.write_all(&[0x00, 0x00])?; // no warnings
-    w.write_packet(&buf.get_ref()[..buf.position() as usize])
-        .await
+    w.enqueue_packet(buf);
+    Ok(())
 }
 
 pub async fn write_err<W: AsyncWrite + Unpin>(
@@ -62,21 +63,19 @@ where
     W: AsyncWrite + Unpin,
 {
     const MAX_PREPARE_OK_PACKET_LEN: usize = 1 + 4 + 2 + 2 + 1 + 2;
-    let mut inner_buf = [0u8; MAX_PREPARE_OK_PACKET_LEN];
-    let mut buf = Cursor::new(&mut inner_buf[..]);
 
     let pi = params.into_iter();
     let ci = columns.into_iter();
 
     // first, write out COM_STMT_PREPARE_OK
+    let mut buf = Vec::with_capacity(MAX_PREPARE_OK_PACKET_LEN);
     buf.write_u8(0x00)?;
     buf.write_u32::<LittleEndian>(id)?;
     buf.write_u16::<LittleEndian>(ci.len() as u16)?;
     buf.write_u16::<LittleEndian>(pi.len() as u16)?;
     buf.write_u8(0x00)?;
     buf.write_u16::<LittleEndian>(0)?; // number of warnings
-    w.write_packet(&buf.get_ref()[..buf.position() as usize])
-        .await?;
+    w.enqueue_packet(buf);
 
     write_column_definitions(pi, w, true).await?;
     write_column_definitions(ci, w, true).await
@@ -171,16 +170,16 @@ where
     <I as IntoIterator>::IntoIter: ExactSizeIterator,
     W: AsyncWrite + Unpin,
 {
-    let mut buf = Vec::new();
     let i = i.into_iter();
+    let mut buf = Vec::new();
     buf.write_lenenc_int(i.len() as u64)?;
-    w.write_packet(&buf).await?;
+    w.enqueue_packet(buf);
     write_column_definitions(i, w, false).await
 }
 
 pub(crate) async fn column_definitions_cached<'a, I, W>(
     i: I,
-    cached: &[u8],
+    cached: Arc<[u8]>,
     w: &mut PacketWriter<W>,
 ) -> io::Result<()>
 where
@@ -189,7 +188,7 @@ where
     W: AsyncWrite + Unpin,
 {
     let i = i.into_iter();
-    w.write_raw(cached).await?;
+    w.enqueue_raw(cached).await?;
     w.seq = w.seq.wrapping_add((1 + i.len()) as u8);
     write_eof_packet(w, StatusFlags::empty()).await
 }
