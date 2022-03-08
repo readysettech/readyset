@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::future::Future;
+use std::pin::Pin;
 use std::task::Poll;
 use std::time::Duration;
 use std::{mem, time};
@@ -360,18 +361,47 @@ impl ReadRequestHandler {
             ReadQuery::Normal { target, query } => {
                 let future = self.handle_normal_read_query(tag, target, query);
                 let span = readyset_tracing::child_span!(INFO, "normal_read_query");
-                Either::Left(instrument_if_enabled(future, span))
+                ReadResponseFuture::Normal(instrument_if_enabled(future, span))
             }
             ReadQuery::Size { target } => {
                 let future = self.handle_size_query(tag, target);
                 let span = readyset_tracing::child_span!(INFO, "size_query");
-                Either::Right(Either::Left(instrument_if_enabled(future, span)))
+                ReadResponseFuture::Size(instrument_if_enabled(future, span))
             }
             ReadQuery::Keys { target } => {
                 let future = self.handle_keys_query(tag, target);
                 let span = readyset_tracing::child_span!(INFO, "keys_query");
-                Either::Right(Either::Right(instrument_if_enabled(future, span)))
+                ReadResponseFuture::Keys(instrument_if_enabled(future, span))
             }
+        }
+    }
+}
+
+#[pin_project(project = ReadResponseFutureProj)]
+enum ReadResponseFuture<N, S, K>
+where
+    N: Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send,
+    S: Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send,
+    K: Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send,
+{
+    Normal(#[pin] N),
+    Size(#[pin] S),
+    Keys(#[pin] K),
+}
+
+impl<N, S, K> Future for ReadResponseFuture<N, S, K>
+where
+    N: Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send,
+    S: Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send,
+    K: Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send,
+{
+    type Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>;
+    #[inline]
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.project() {
+            ReadResponseFutureProj::Normal(f) => f.poll(cx),
+            ReadResponseFutureProj::Size(f) => f.poll(cx),
+            ReadResponseFutureProj::Keys(f) => f.poll(cx),
         }
     }
 }
