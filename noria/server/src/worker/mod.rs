@@ -164,14 +164,14 @@ fn handle_domain_future_completion(
         }
         Ok(Err(e)) => {
             error!(index = idx.index(), shard, err = %e, "domain failed with an error");
-            panic!("domain failed");
+            panic!("domain failed: {}", e);
         }
         Err(e) if e.is_cancelled() => {
             warn!(index = idx.index(), shard, err = %e, "domain future cancelled")
         }
         Err(e) => {
             error!(index = idx.index(), shard, err = %e, "domain future failed");
-            panic!("domain future failure");
+            panic!("domain future failure: {}", e);
         }
     }
 }
