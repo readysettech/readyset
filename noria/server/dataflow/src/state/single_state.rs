@@ -82,100 +82,130 @@ impl SingleState {
         let mut key = key.into_iter();
         let replaced = match self.state {
             KeyedState::SingleBTree(ref mut map) => {
+                assert_eq!(key.len(), 1);
                 map.insert(key.next().unwrap(), Rows::default())
             }
             KeyedState::DoubleBTree(ref mut map) => {
+                assert_eq!(key.len(), 2);
                 map.insert((key.next().unwrap(), key.next().unwrap()), Rows::default())
             }
-            KeyedState::TriBTree(ref mut map) => map.insert(
-                (
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                ),
-                Rows::default(),
-            ),
-            KeyedState::QuadBTree(ref mut map) => map.insert(
-                (
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                ),
-                Rows::default(),
-            ),
-            KeyedState::QuinBTree(ref mut map) => map.insert(
-                (
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                ),
-                Rows::default(),
-            ),
-            KeyedState::SexBTree(ref mut map) => map.insert(
-                (
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                ),
-                Rows::default(),
-            ),
+            KeyedState::TriBTree(ref mut map) => {
+                assert_eq!(key.len(), 3);
+                map.insert(
+                    (
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                    ),
+                    Rows::default(),
+                )
+            }
+            KeyedState::QuadBTree(ref mut map) => {
+                assert_eq!(key.len(), 4);
+                map.insert(
+                    (
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                    ),
+                    Rows::default(),
+                )
+            }
+            KeyedState::QuinBTree(ref mut map) => {
+                assert_eq!(key.len(), 5);
+                map.insert(
+                    (
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                    ),
+                    Rows::default(),
+                )
+            }
+            KeyedState::SexBTree(ref mut map) => {
+                assert_eq!(key.len(), 6);
+                map.insert(
+                    (
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                    ),
+                    Rows::default(),
+                )
+            }
             KeyedState::MultiBTree(ref mut map, len) => {
                 // I hope LLVM optimizes away the unnecessary into_iter() -> collect()
-                debug_assert_eq!(key.len(), len);
+                assert_eq!(key.len(), len);
                 map.insert(key.collect(), Rows::default())
             }
             KeyedState::MultiHash(ref mut map, len) => {
-                debug_assert_eq!(key.len(), len);
+                assert_eq!(key.len(), len);
                 map.insert(key.collect(), Rows::default())
             }
-            KeyedState::SingleHash(ref mut map) => map.insert(key.next().unwrap(), Rows::default()),
+            KeyedState::SingleHash(ref mut map) => {
+                assert_eq!(key.len(), 1);
+                map.insert(key.next().unwrap(), Rows::default())
+            }
             KeyedState::DoubleHash(ref mut map) => {
+                assert_eq!(key.len(), 2);
                 map.insert((key.next().unwrap(), key.next().unwrap()), Rows::default())
             }
-            KeyedState::TriHash(ref mut map) => map.insert(
-                (
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                ),
-                Rows::default(),
-            ),
-            KeyedState::QuadHash(ref mut map) => map.insert(
-                (
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                ),
-                Rows::default(),
-            ),
-            KeyedState::QuinHash(ref mut map) => map.insert(
-                (
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                ),
-                Rows::default(),
-            ),
-            KeyedState::SexHash(ref mut map) => map.insert(
-                (
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                    key.next().unwrap(),
-                ),
-                Rows::default(),
-            ),
+            KeyedState::TriHash(ref mut map) => {
+                assert_eq!(key.len(), 3);
+                map.insert(
+                    (
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                    ),
+                    Rows::default(),
+                )
+            }
+            KeyedState::QuadHash(ref mut map) => {
+                assert_eq!(key.len(), 4);
+                map.insert(
+                    (
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                    ),
+                    Rows::default(),
+                )
+            }
+            KeyedState::QuinHash(ref mut map) => {
+                assert_eq!(key.len(), 5);
+                map.insert(
+                    (
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                    ),
+                    Rows::default(),
+                )
+            }
+            KeyedState::SexHash(ref mut map) => {
+                assert_eq!(key.len(), 6);
+                map.insert(
+                    (
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                        key.next().unwrap(),
+                    ),
+                    Rows::default(),
+                )
+            }
         };
         assert!(replaced.is_none());
     }
