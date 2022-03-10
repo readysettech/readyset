@@ -1282,8 +1282,9 @@ impl DataflowState {
                         );
                     }
                 }
-                self.remove_nodes(nodes_to_remove.as_slice()).await?;
 
+                new.remove_leaf_aliases(&nodes_to_remove);
+                self.remove_nodes(&nodes_to_remove).await?;
                 self.recipe = new;
             }
             Err(ref e) => {
