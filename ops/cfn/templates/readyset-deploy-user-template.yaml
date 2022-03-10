@@ -200,7 +200,7 @@ Resources:
                   - iam:ListAccessKeys
                   - iam:UpdateAccessKey
                 Resource: arn:aws:iam::*:user/${aws:username}
-            PolicyName: AllowAccessKeyCreation
+          PolicyName: AllowAccessKeyCreation
         - PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -208,7 +208,7 @@ Resources:
                 Action:
                   - ec2:Get*
                 Resource: '*'
-            PolicyName: AllowAdditionalEC2Access
+          PolicyName: AllowAdditionalEC2Access
         - PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -226,4 +226,4 @@ Resources:
                   - sns:Unsubscribe
                   - sns:ConfirmSubscription
                 Resource: '*'
-            PolicyName: AllowAlarmAndDashboardModification
+          PolicyName: AllowAlarmAndDashboardModification

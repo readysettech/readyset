@@ -28,3 +28,5 @@ tests:
       SSMParameterKmsKeyArn: arn:aws:kms:us-east-2:069491470376:key/5cb3afeb-e9dd-40df-98cf-a82bb53ee78b
       SSMPathRDSDatabasePassword: /readyset/sandbox/dbPassword
     template: templates/readyset-postgresql-super-template.yaml
+  readyset-deploy-user:
+    template: templates/readyset-deploy-user-template.yaml
