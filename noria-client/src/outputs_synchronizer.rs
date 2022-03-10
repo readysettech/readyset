@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use noria::{ControllerHandle, ReadySetResult};
 use tokio::select;
 use tracing::{info, instrument, warn};
@@ -10,7 +8,7 @@ pub struct OutputsSynchronizer {
     /// The noria connector used to query
     controller: ControllerHandle,
     /// The query status cache is updated according to which queries exist in noria
-    query_status_cache: Arc<QueryStatusCache>,
+    query_status_cache: &'static QueryStatusCache,
     /// The interval between subsequent pollings of the Leader for migrated queries
     poll_interval: std::time::Duration,
     /// Receiver to return the shutdown signal on
@@ -20,7 +18,7 @@ pub struct OutputsSynchronizer {
 impl OutputsSynchronizer {
     pub fn new(
         controller: ControllerHandle,
-        query_status_cache: Arc<QueryStatusCache>,
+        query_status_cache: &'static QueryStatusCache,
         poll_interval: std::time::Duration,
         shutdown_recv: tokio::sync::broadcast::Receiver<()>,
     ) -> Self {

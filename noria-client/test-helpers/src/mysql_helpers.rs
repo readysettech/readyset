@@ -7,6 +7,7 @@ use mysql_async::Conn;
 use mysql_srv::MysqlIntermediary;
 use noria_client::backend::noria_connector::ReadBehavior;
 use noria_client::backend::{BackendBuilder, MigrationMode, QueryInfo};
+use noria_client::query_status_cache::QueryStatusCache;
 use noria_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
 use noria_server::Handle;
 use tokio::net::TcpStream;
@@ -122,7 +123,7 @@ pub async fn setup_with_read_behavior(read_behavior: ReadBehavior) -> (mysql_asy
 }
 
 pub async fn query_cache_setup(
-    query_status_cache: std::sync::Arc<noria_client::query_status_cache::QueryStatusCache>,
+    query_status_cache: &'static QueryStatusCache,
     fallback: bool,
     migration_mode: MigrationMode,
 ) -> (mysql_async::Opts, Handle) {

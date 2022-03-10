@@ -46,7 +46,7 @@ async fn main() {
         ReadBehavior::Blocking,
     )
     .await;
-    let query_status_cache = Arc::new(QueryStatusCache::new());
+    let query_status_cache = Box::leak(Box::new(QueryStatusCache::new()));
 
     let mut b: Backend<_, MySqlQueryHandler> = BackendBuilder::new()
         .require_authentication(false)

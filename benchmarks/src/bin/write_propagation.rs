@@ -109,7 +109,7 @@ impl Writer {
 
         let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
         let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
-        let query_status_cache = Arc::new(QueryStatusCache::new());
+        let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
         let upstream = Some(MySqlUpstream::connect(self.database_url.clone()).await?);
         let noria = NoriaConnector::new(
             ch.clone(),

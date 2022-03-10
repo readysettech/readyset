@@ -239,7 +239,7 @@ impl BackendBuilder {
         self,
         noria: NoriaConnector,
         upstream: Option<DB>,
-        qsc: Arc<QueryStatusCache>,
+        query_status_cache: &'static QueryStatusCache,
     ) -> Backend<DB, Handler> {
         metrics::increment_gauge!(recorded::CONNECTED_CLIENTS, 1.0);
         Backend {
@@ -256,7 +256,7 @@ impl BackendBuilder {
             timestamp_client: self.timestamp_client,
             query_log_sender: self.query_log_sender,
             query_log_ad_hoc_queries: self.query_log_ad_hoc_queries,
-            query_status_cache: qsc,
+            query_status_cache,
             validate_queries: self.validate_queries,
             fail_invalidated_queries: self.fail_invalidated_queries,
             allow_unsupported_set: self.allow_unsupported_set,
@@ -440,7 +440,7 @@ where
     query_log_ad_hoc_queries: bool,
 
     /// A cache of queries that we've seen, and their current state, used for processing
-    query_status_cache: Arc<QueryStatusCache>,
+    query_status_cache: &'static QueryStatusCache,
 
     /// Run select statements with query validation.
     validate_queries: bool,

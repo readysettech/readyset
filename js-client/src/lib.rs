@@ -87,7 +87,7 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
     });
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
-    let query_status_cache = Arc::new(QueryStatusCache::new());
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
 
     let noria = rt.block_on(NoriaConnector::new(
         ch,

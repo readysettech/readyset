@@ -6,7 +6,6 @@
 //! The migration handler may change a queries state based on the
 //! response from Noria.
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Instant;
 
 use metrics::counter;
@@ -33,7 +32,7 @@ pub struct MigrationHandler<DB> {
 
     /// The query status cache is polled on a regular interval to
     /// determine which queries require processing.
-    query_status_cache: Arc<QueryStatusCache>,
+    query_status_cache: &'static QueryStatusCache,
 
     /// Whether the queries should be validated against MySQL during
     /// migration.
@@ -66,7 +65,7 @@ where
         noria: NoriaConnector,
         upstream: DB,
         controller: Option<ControllerHandle>,
-        query_status_cache: Arc<QueryStatusCache>,
+        query_status_cache: &'static QueryStatusCache,
         validate_queries: bool,
         min_poll_interval: std::time::Duration,
         max_retry: std::time::Duration,
