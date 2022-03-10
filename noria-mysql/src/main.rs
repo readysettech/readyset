@@ -2,7 +2,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use async_trait::async_trait;
 use clap::Parser;
-use msql_srv::MysqlIntermediary;
+use mysql_srv::MysqlIntermediary;
 use nom_sql::Dialect;
 use noria_client_adapter::{ConnectionHandler, DatabaseType, NoriaAdapter};
 use tokio::net;
@@ -43,9 +43,9 @@ impl ConnectionHandler for MysqlHandler {
     }
 
     async fn immediate_error(self, stream: net::TcpStream, error_message: String) {
-        if let Err(error) = msql_srv::send_immediate_err(
+        if let Err(error) = mysql_srv::send_immediate_err(
             stream,
-            msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+            mysql_srv::ErrorKind::ER_UNKNOWN_ERROR,
             error_message.as_bytes(),
         )
         .await

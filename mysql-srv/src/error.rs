@@ -3,10 +3,10 @@
 use std::io;
 
 use thiserror::Error;
-/// Enum of errors returned from msql-srv
+/// Enum of errors returned from mysql-srv
 #[derive(Debug, Error)]
 pub enum MsqlSrvError {
-    /// Error returned by msql TryFrom implementations.
+    /// Error returned by mysql TryFrom implementations.
     #[error("Value conversion error: invalid type conversion from {src_type} to {target_type}")]
     InvalidConversion {
         /// The type that TryFrom attempts to convert the value into.

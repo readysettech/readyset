@@ -13,7 +13,7 @@
 //! all commands with a "no results" reply:
 //!
 //! ```
-//! # extern crate msql_srv;
+//! # extern crate mysql_srv;
 //! extern crate mysql;
 //! extern crate mysql_common as myc;
 //! # use std::io;
@@ -22,8 +22,8 @@
 //! use std::iter;
 //!
 //! use async_trait::async_trait;
-//! use msql_srv::*;
 //! use mysql::prelude::*;
+//! use mysql_srv::*;
 //! use tokio::io::AsyncWrite;
 //!
 //! struct Backend;

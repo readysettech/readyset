@@ -4,8 +4,8 @@ use nom_sql::{self, ColumnConstraint, SqlType};
 use noria_errors::{unsupported, ReadySetResult};
 
 /// Checks if `c1` is a subtype of `c2`.
-pub(crate) fn is_subtype(c1: msql_srv::ColumnType, c2: msql_srv::ColumnType) -> bool {
-    use msql_srv::ColumnType::*;
+pub(crate) fn is_subtype(c1: mysql_srv::ColumnType, c2: mysql_srv::ColumnType) -> bool {
+    use mysql_srv::ColumnType::*;
 
     if c1 == c2 {
         return true;
@@ -30,9 +30,9 @@ pub(crate) fn is_subtype(c1: msql_srv::ColumnType, c2: msql_srv::ColumnType) -> 
 
 pub(crate) fn convert_column(
     col: &nom_sql::ColumnSpecification,
-) -> ReadySetResult<msql_srv::Column> {
-    let mut colflags = msql_srv::ColumnFlags::empty();
-    use msql_srv::ColumnType::*;
+) -> ReadySetResult<mysql_srv::Column> {
+    let mut colflags = mysql_srv::ColumnFlags::empty();
+    use mysql_srv::ColumnType::*;
 
     let coltype = match col.sql_type {
         SqlType::Mediumtext => MYSQL_TYPE_VAR_STRING,
@@ -41,22 +41,22 @@ pub(crate) fn convert_column(
         SqlType::Varchar(_) => MYSQL_TYPE_VAR_STRING,
         SqlType::Int(_) => MYSQL_TYPE_LONG,
         SqlType::UnsignedInt(_) => {
-            colflags |= msql_srv::ColumnFlags::UNSIGNED_FLAG;
+            colflags |= mysql_srv::ColumnFlags::UNSIGNED_FLAG;
             MYSQL_TYPE_LONG
         }
         SqlType::Bigint(_) => MYSQL_TYPE_LONGLONG,
         SqlType::UnsignedBigint(_) => {
-            colflags |= msql_srv::ColumnFlags::UNSIGNED_FLAG;
+            colflags |= mysql_srv::ColumnFlags::UNSIGNED_FLAG;
             MYSQL_TYPE_LONGLONG
         }
         SqlType::Tinyint(_) => MYSQL_TYPE_TINY,
         SqlType::UnsignedTinyint(_) => {
-            colflags |= msql_srv::ColumnFlags::UNSIGNED_FLAG;
+            colflags |= mysql_srv::ColumnFlags::UNSIGNED_FLAG;
             MYSQL_TYPE_TINY
         }
         SqlType::Smallint(_) => MYSQL_TYPE_SHORT,
         SqlType::UnsignedSmallint(_) => {
-            colflags |= msql_srv::ColumnFlags::UNSIGNED_FLAG;
+            colflags |= mysql_srv::ColumnFlags::UNSIGNED_FLAG;
             MYSQL_TYPE_SHORT
         }
         SqlType::Bool => MYSQL_TYPE_BIT,
@@ -92,17 +92,17 @@ pub(crate) fn convert_column(
         }
         SqlType::Binary(_) => {
             // TODO(grfn): I don't know if this is right
-            colflags |= msql_srv::ColumnFlags::BINARY_FLAG;
+            colflags |= mysql_srv::ColumnFlags::BINARY_FLAG;
             MYSQL_TYPE_STRING
         }
         SqlType::Varbinary(_) => {
             // TODO(grfn): I don't know if this is right
-            colflags |= msql_srv::ColumnFlags::BINARY_FLAG;
+            colflags |= mysql_srv::ColumnFlags::BINARY_FLAG;
             MYSQL_TYPE_VAR_STRING
         }
         SqlType::Enum(_) => {
             // TODO(grfn): I don't know if this is right
-            colflags |= msql_srv::ColumnFlags::ENUM_FLAG;
+            colflags |= mysql_srv::ColumnFlags::ENUM_FLAG;
             MYSQL_TYPE_VAR_STRING
         }
         SqlType::Time => MYSQL_TYPE_TIME,
@@ -128,22 +128,22 @@ pub(crate) fn convert_column(
     for c in &col.constraints {
         match *c {
             ColumnConstraint::AutoIncrement => {
-                colflags |= msql_srv::ColumnFlags::AUTO_INCREMENT_FLAG;
+                colflags |= mysql_srv::ColumnFlags::AUTO_INCREMENT_FLAG;
             }
             ColumnConstraint::NotNull => {
-                colflags |= msql_srv::ColumnFlags::NOT_NULL_FLAG;
+                colflags |= mysql_srv::ColumnFlags::NOT_NULL_FLAG;
             }
             ColumnConstraint::PrimaryKey => {
-                colflags |= msql_srv::ColumnFlags::PRI_KEY_FLAG;
+                colflags |= mysql_srv::ColumnFlags::PRI_KEY_FLAG;
             }
             ColumnConstraint::Unique => {
-                colflags |= msql_srv::ColumnFlags::UNIQUE_KEY_FLAG;
+                colflags |= mysql_srv::ColumnFlags::UNIQUE_KEY_FLAG;
             }
             _ => (),
         }
     }
 
-    Ok(msql_srv::Column {
+    Ok(mysql_srv::Column {
         table: col.column.table.clone().unwrap_or_default().to_string(),
         column: col.column.name.to_string(),
         coltype,
@@ -153,7 +153,7 @@ pub(crate) fn convert_column(
 
 #[cfg(test)]
 mod tests {
-    use msql_srv::ColumnType::{self, *};
+    use mysql_srv::ColumnType::{self, *};
     use proptest::prelude::*;
     use test_strategy::proptest;
 

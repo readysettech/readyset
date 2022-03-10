@@ -4,11 +4,11 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use msql_srv::{
+use mysql_async::consts::StatusFlags;
+use mysql_srv::{
     Column, ColumnFlags, ColumnType, InitWriter, MsqlSrvError, MysqlShim, QueryResultWriter,
     RowWriter, StatementMetaWriter,
 };
-use mysql_async::consts::StatusFlags;
 use noria_client::backend::noria_connector::MetaVariable;
 use noria_client::backend::{noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare};
 use noria_data::DataType;
@@ -25,7 +25,7 @@ use crate::{Error, MySqlQueryHandler};
 async fn write_column<W: AsyncWrite + Unpin>(
     rw: &mut RowWriter<'_, W>,
     c: &DataType,
-    cs: &msql_srv::Column,
+    cs: &mysql_srv::Column,
 ) -> Result<(), Error> {
     let written = match *c {
         DataType::None | DataType::Max => rw.write_col(None::<i32>),
@@ -49,16 +49,16 @@ async fn write_column<W: AsyncWrite + Unpin>(
         DataType::Text(ref t) => rw.write_col(t.as_str()),
         DataType::TinyText(ref t) => rw.write_col(t.as_str()),
         ref dt @ (DataType::Float(..) | DataType::Double(..)) => match cs.coltype {
-            msql_srv::ColumnType::MYSQL_TYPE_DECIMAL
-            | msql_srv::ColumnType::MYSQL_TYPE_NEWDECIMAL => {
+            mysql_srv::ColumnType::MYSQL_TYPE_DECIMAL
+            | mysql_srv::ColumnType::MYSQL_TYPE_NEWDECIMAL => {
                 let f = dt.to_string();
                 rw.write_col(f)
             }
-            msql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {
+            mysql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {
                 let f: f64 = <f64>::try_from(dt)?;
                 rw.write_col(f)
             }
-            msql_srv::ColumnType::MYSQL_TYPE_FLOAT => {
+            mysql_srv::ColumnType::MYSQL_TYPE_FLOAT => {
                 let f: f32 = <f32>::try_from(dt)?;
                 rw.write_col(f)
             }
@@ -67,10 +67,10 @@ async fn write_column<W: AsyncWrite + Unpin>(
             }
         },
         DataType::TimestampTz(ts) => match cs.coltype {
-            msql_srv::ColumnType::MYSQL_TYPE_DATETIME
-            | msql_srv::ColumnType::MYSQL_TYPE_DATETIME2
-            | msql_srv::ColumnType::MYSQL_TYPE_TIMESTAMP
-            | msql_srv::ColumnType::MYSQL_TYPE_TIMESTAMP2 => {
+            mysql_srv::ColumnType::MYSQL_TYPE_DATETIME
+            | mysql_srv::ColumnType::MYSQL_TYPE_DATETIME2
+            | mysql_srv::ColumnType::MYSQL_TYPE_TIMESTAMP
+            | mysql_srv::ColumnType::MYSQL_TYPE_TIMESTAMP2 => {
                 rw.write_col(ts.to_chrono().naive_local())
             }
             ColumnType::MYSQL_TYPE_DATE => rw.write_col(ts.to_chrono().naive_local().date()),
@@ -193,7 +193,7 @@ impl DerefMut for Backend {
 }
 
 struct CachedSchema {
-    mysql_schema: Vec<msql_srv::Column>,
+    mysql_schema: Vec<mysql_srv::Column>,
     column_map: Vec<Option<usize>>,
     preencoded_schema: Arc<[u8]>,
 }
@@ -209,7 +209,7 @@ macro_rules! convert_columns {
             Err(e) => {
                 return $results
                     .error(
-                        msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                        mysql_srv::ErrorKind::ER_UNKNOWN_ERROR,
                         e.to_string().as_bytes(),
                     )
                     .await;
@@ -303,7 +303,7 @@ where
     async fn on_execute(
         &mut self,
         id: u32,
-        params: msql_srv::ParamParser<'_>,
+        params: mysql_srv::ParamParser<'_>,
         results: QueryResultWriter<'_, W>,
     ) -> io::Result<()> {
         // TODO(DAN): Param conversions are unecessary for fallback execution. Params should be
@@ -340,7 +340,7 @@ where
                     self.schema_cache.get(&id).unwrap()
                 } else {
                     let mysql_schema = convert_columns!(select_schema.schema, results);
-                    let preencoded_schema = msql_srv::prepare_column_definitions(&mysql_schema);
+                    let preencoded_schema = mysql_srv::prepare_column_definitions(&mysql_schema);
 
                     // Now append the right position too
                     let column_map = mysql_schema
@@ -505,7 +505,7 @@ where
                         w.ok().await
                     } else {
                         w.error(
-                            msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                            mysql_srv::ErrorKind::ER_UNKNOWN_ERROR,
                             "Tried to use database that ReadySet is not replicating from"
                                 .to_string()
                                 .as_bytes(),

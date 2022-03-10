@@ -1,9 +1,9 @@
-# msql-srv-rs
+# mysql-srv-rs
 
-[![Crates.io](https://img.shields.io/crates/v/msql_srv.svg)](https://crates.io/crates/msql_srv)
-[![Documentation](https://docs.rs/msql-srv/badge.svg)](https://docs.rs/msql-srv/)
-[![Build Status](https://travis-ci.com/jonhoo/msql-srv.svg?branch=master)](https://travis-ci.com/jonhoo/msql-srv)
-[![Codecov](https://codecov.io/github/jonhoo/msql-srv/coverage.svg?branch=master)](https://codecov.io/gh/jonhoo/msql-srv)
+[![Crates.io](https://img.shields.io/crates/v/mysql_srv.svg)](https://crates.io/crates/mysql_srv)
+[![Documentation](https://docs.rs/mysql-srv/badge.svg)](https://docs.rs/mysql-srv/)
+[![Build Status](https://travis-ci.com/jonhoo/mysql-srv.svg?branch=master)](https://travis-ci.com/jonhoo/mysql-srv)
+[![Codecov](https://codecov.io/github/jonhoo/mysql-srv/coverage.svg?branch=master)](https://codecov.io/gh/jonhoo/mysql-srv)
 
 Bindings for emulating a MySQL/MariaDB server.
 
@@ -21,7 +21,7 @@ all commands with a "no results" reply:
 
 ```rust
 extern crate mysql;
-use msql_srv::*;
+use mysql_srv::*;
 
 struct Backend;
 impl<W: io::Write> MysqlShim<W> for Backend {

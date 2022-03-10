@@ -7,7 +7,7 @@ eui48 = { git = "https://github.com/readysettech/eui48.git", branch = "master" }
 
 [workspace]
 members = [
-    "msql-srv",
+    "mysql-srv",
     "mysql-time",
     "nom-sql",
     "noria-client",

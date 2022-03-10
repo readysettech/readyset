@@ -21,10 +21,10 @@ noria-server = { path = "../../noria/server/" }
 readyset-logging = { path = "../../readyset-logging" }
 noria-mysql = { path = "../../noria-mysql", optional = true }
 noria-psql = { path = "../../noria-psql", optional = true }
-msql-srv = { path = "../../msql-srv", optional = true }
+mysql-srv = { path = "../../mysql-srv", optional = true }
 psql-srv = { path = "../../psql-srv", optional = true }
 
 [features]
 default = []
-mysql = ["mysql_async", "noria-mysql", "msql-srv"]
+mysql = ["mysql_async", "noria-mysql", "mysql-srv"]
 postgres = ["tokio-postgres", "noria-psql", "psql-srv"]

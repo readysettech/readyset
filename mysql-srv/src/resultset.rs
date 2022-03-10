@@ -240,7 +240,7 @@ impl<'a, W: AsyncWrite + Unpin> Drop for QueryResultWriter<'a, W> {
     fn drop(&mut self) {
         if let Some(x) = self.last_end.take() {
             eprintln!(
-                "WARNING(msql-srv): QueryResultWriter dropped without finalizing {:?}",
+                "WARNING(mysql-srv): QueryResultWriter dropped without finalizing {:?}",
                 x
             );
         }

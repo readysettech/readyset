@@ -1,7 +1,7 @@
 use std::convert::{TryFrom, TryInto};
 
-use msql_srv::{Value, ValueInner};
 use mysql_common::chrono::{NaiveDate, NaiveDateTime};
+use mysql_srv::{Value, ValueInner};
 use noria_data::DataType;
 use noria_errors::{ReadySetError, ReadySetResult};
 
