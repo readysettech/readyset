@@ -34,6 +34,7 @@ use stream_cancel::Valve;
 use tokio::net::UdpSocket;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::time::timeout;
 use tokio::{net, select};
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, debug_span, error, info, info_span, span, Level};
@@ -42,6 +43,9 @@ use tracing_futures::Instrument;
 const REGISTER_HTTP_INTERVAL: Duration = Duration::from_secs(20);
 const AWS_PRIVATE_IP_ENDPOINT: &str = "http://169.254.169.254/latest/meta-data/local-ipv4";
 const AWS_METADATA_TOKEN_ENDPOINT: &str = "http://169.254.169.254/latest/api/token";
+
+/// Timeout to use when connecting to the upstream database
+const UPSTREAM_CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[async_trait]
 pub trait ConnectionHandler {
@@ -522,11 +526,16 @@ where
                 .await;
 
                 let upstream_res = if let Some(upstream_db_url) = &upstream_db_url {
-                    H::UpstreamDatabase::connect(upstream_db_url.0.clone())
-                        .instrument(info_span!("Connecting to upstream database"))
-                        .await
-                        .map(Some)
-                        .map_err(|e| format!("Error connecting to upstream database: {}", e))
+                    timeout(
+                        UPSTREAM_CONNECTION_TIMEOUT,
+                        H::UpstreamDatabase::connect(upstream_db_url.0.clone()),
+                    )
+                    .instrument(info_span!("Connecting to upstream database"))
+                    .await
+                    .map_err(|_| "Connection timed out".to_owned())
+                    .and_then(|r| r.map_err(|e| e.to_string()))
+                    .map_err(|e| format!("Error connecting to upstream database: {}", e))
+                    .map(Some)
                 } else {
                     Ok(None)
                 };
