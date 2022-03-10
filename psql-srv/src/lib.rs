@@ -28,6 +28,7 @@ use std::convert::TryInto;
 
 use async_trait::async_trait;
 use postgres_types::Type;
+use protocol::Protocol;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub use crate::error::Error;
@@ -135,4 +136,14 @@ pub enum QueryResponse<S> {
 ///   returned to the frontend. When `channel` is closed by the frontend, `run_backend` returns.
 pub async fn run_backend<B: Backend, C: AsyncRead + AsyncWrite + Unpin>(backend: B, channel: C) {
     runner::Runner::run(backend, channel).await
+}
+
+pub async fn send_immediate_err<B, C>(channel: C, error: Error) -> Result<(), Error>
+where
+    B: Backend,
+    C: AsyncRead + AsyncWrite + Unpin,
+{
+    let packet = Protocol::new().on_error::<B>(error).await?;
+    channel::Channel::new(channel).send(packet).await?;
+    Ok(())
 }

@@ -155,6 +155,7 @@ use constants::{PROTOCOL_41, RESERVED, SECURE_CONNECTION};
 use error::{other_error, OtherErrorKind};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net;
+use writers::write_err;
 
 pub use crate::myc::constants::{ColumnFlags, ColumnType, StatusFlags};
 pub use crate::writers::prepare_column_definitions;
@@ -290,6 +291,15 @@ impl<B: MysqlShim<S> + Send, S: AsyncRead + AsyncWrite + Clone + Unpin + Send>
     pub async fn run_on_stream(shim: B, stream: S) -> Result<(), io::Error> {
         MysqlIntermediary::run_on(shim, stream.clone(), stream).await
     }
+}
+
+/// Send an error packet to the given stream, then close it
+pub async fn send_immediate_err<S>(stream: S, error_kind: ErrorKind, msg: &[u8]) -> io::Result<()>
+where
+    S: AsyncWrite + Unpin + Send,
+{
+    let mut w = packet::PacketWriter::new(stream);
+    write_err(error_kind, msg, &mut w).await
 }
 
 #[derive(Default)]

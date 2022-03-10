@@ -8,7 +8,7 @@ use noria_client_adapter::{ConnectionHandler, DatabaseType, NoriaAdapter};
 use noria_psql::{Backend, PostgreSqlQueryHandler, PostgreSqlUpstream};
 use psql_srv::run_backend;
 use tokio::net;
-use tracing::instrument;
+use tracing::{error, instrument};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -30,6 +30,17 @@ impl ConnectionHandler for PsqlHandler {
     ) {
         let backend = Backend(backend);
         run_backend(backend, stream).await;
+    }
+
+    async fn immediate_error(self, stream: net::TcpStream, error_message: String) {
+        if let Err(error) = psql_srv::send_immediate_err::<Backend, _>(
+            stream,
+            psql_srv::Error::InternalError(error_message),
+        )
+        .await
+        {
+            error!(%error, "Could not send immediate error packet")
+        }
     }
 }
 
