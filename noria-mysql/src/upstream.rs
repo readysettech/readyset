@@ -11,7 +11,7 @@ use noria_client::upstream_database::NoriaCompare;
 use noria_client::{UpstreamDatabase, UpstreamPrepare};
 use noria_data::DataType;
 use noria_errors::{internal_err, ReadySetError};
-use tracing::{debug, error};
+use tracing::{debug, error, info, info_span, Instrument};
 
 use crate::schema::{convert_column, is_subtype};
 use crate::Error;
@@ -105,14 +105,25 @@ impl UpstreamDatabase for MySqlUpstream {
         // gated.
         let opts =
             Opts::from_url(&url).map_err(|e: UrlError| Error::MySql(mysql_async::Error::Url(e)))?;
+        let span = info_span!(
+            "Connecting to MySQL upstream",
+            host = %opts.ip_or_hostname(),
+            port = %opts.tcp_port(),
+            user = %opts.user().unwrap_or("<NO USER>"),
+        );
+        span.in_scope(|| info!("Establishing connection"));
         let conn = if cfg!(feature = "ryw") {
             Conn::new(
                 OptsBuilder::from_opts(opts).add_capability(CapabilityFlags::CLIENT_SESSION_TRACK),
             )
+            .instrument(span.clone())
             .await?
         } else {
-            Conn::new(OptsBuilder::from_opts(opts)).await?
+            Conn::new(OptsBuilder::from_opts(opts))
+                .instrument(span.clone())
+                .await?
         };
+        span.in_scope(|| info!("Established connection to upstream"));
         let prepared_statements = HashMap::new();
         Ok(Self {
             conn,

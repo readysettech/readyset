@@ -36,7 +36,7 @@ use tokio::sync::broadcast;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::{net, select};
 use tokio_stream::wrappers::TcpListenerStream;
-use tracing::{debug, error, info, info_span, span, Level};
+use tracing::{debug, debug_span, error, info, info_span, span, Level};
 use tracing_futures::Instrument;
 
 const REGISTER_HTTP_INTERVAL: Duration = Duration::from_secs(20);
@@ -482,12 +482,16 @@ where
         }
 
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
+            let connection = span!(Level::INFO, "connection", addr = ?s.peer_addr().unwrap());
+            connection.in_scope(|| info!("Accepted new connection"));
+
             // bunch of stuff to move into the async block below
             let ch = ch.clone();
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
             let mut connection_handler = self.connection_handler.clone();
             let region = options.region.clone();
             let upstream_db_url = options.upstream_db_url.clone();
+            let query_status_cache = query_status_cache.clone();
             let backend_builder = BackendBuilder::new()
                 .slowlog(options.log_slow)
                 .users(users.clone())
@@ -502,12 +506,7 @@ where
                 .query_max_failure_seconds(options.query_max_failure_seconds)
                 .fallback_recovery_seconds(options.fallback_recovery_seconds);
 
-            // can't move query_status_cache into the async move block
-            let query_status_cache = query_status_cache.clone();
             let fut = async move {
-                let connection = span!(Level::INFO, "connection", addr = ?s.peer_addr().unwrap());
-                connection.in_scope(|| info!("Accepted new connection"));
-
                 let noria = NoriaConnector::new(
                     ch.clone(),
                     auto_increments.clone(),
@@ -515,30 +514,29 @@ where
                     region.clone(),
                     noria_read_behavior,
                 )
-                .instrument(connection.in_scope(|| span!(Level::DEBUG, "Building noria connector")))
+                .instrument(debug_span!("Building noria connector"))
                 .await;
 
-                let upstream =
-                    if let Some(upstream_db_url) = &upstream_db_url {
-                        Some(
-                            H::UpstreamDatabase::connect(upstream_db_url.0.clone())
-                                .instrument(connection.in_scope(|| {
-                                    span!(Level::INFO, "Connecting to upstream database")
-                                }))
-                                .await
-                                .unwrap(),
-                        )
-                    } else {
-                        None
-                    };
+                let upstream = if let Some(upstream_db_url) = &upstream_db_url {
+                    Some(
+                        H::UpstreamDatabase::connect(upstream_db_url.0.clone())
+                            .instrument(info_span!("Connecting to upstream database"))
+                            .await
+                            .unwrap(),
+                    )
+                } else {
+                    None
+                };
 
                 let backend =
                     backend_builder
                         .clone()
                         .build(noria, upstream, query_status_cache.clone());
                 connection_handler.process_connection(s, backend).await;
-                connection.in_scope(|| debug!("disconnected"));
-            };
+                debug!("disconnected");
+            }
+            .instrument(connection);
+
             rt.handle().spawn(fut);
         }
 
