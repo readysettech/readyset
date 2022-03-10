@@ -1,14 +1,15 @@
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::str;
 use std::vec::Vec;
 
 use changelist::ChangeList;
 use nom_sql::{CreateTableStatement, Dialect, SqlIdentifier, SqlQuery};
 use noria::ActivationResult;
-use noria_errors::{internal, internal_err, ReadySetError};
+use noria_errors::{internal, ReadySetError};
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 use super::sql;
 use crate::controller::recipe::changelist::{Change, SqlExpression};
@@ -23,7 +24,7 @@ pub(crate) mod changelist;
 /// must translate into this dialect as part of handling requests from users
 pub const CANONICAL_DIALECT: Dialect = Dialect::MySQL;
 
-type QueryID = u64;
+type QueryID = u128;
 
 /// Represents a Soup recipe.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -60,12 +61,11 @@ pub(super) enum Schema {
 }
 
 fn hash_query(q: &SqlQuery) -> QueryID {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut h = DefaultHasher::new();
-    q.hash(&mut h);
-    h.finish()
+    use sha1::{Digest, Sha1};
+    let mut hasher = Sha1::new();
+    hasher.update(q.to_string().as_bytes());
+    // Sha1 digest is 20 byte long, so it is safe to consume only 16 bytes
+    u128::from_le_bytes(hasher.finalize()[..16].try_into().unwrap())
 }
 
 #[allow(unused)]
@@ -74,6 +74,7 @@ impl Recipe {
     pub(crate) fn id_from_alias(&self, alias: &str) -> Option<&QueryID> {
         self.aliases.get(alias)
     }
+
     /// Get the SqlQuery associated with a query ID
     pub(crate) fn expression(&self, id: &QueryID) -> Option<&SqlQuery> {
         self.expressions.get(id).map(|expr| &expr.query)
@@ -194,6 +195,25 @@ impl Recipe {
         for change in changelist.changes {
             match change {
                 Change::Add(expr) => {
+                    let qid = hash_query(&expr.query);
+                    if let Some(cur) = self.expressions.get(&qid) {
+                        if cur.is_leaf {
+                            // The recipe already contains this select, so just alias it if
+                            // possible, or ignore if not
+                            if let Some(ref name) = expr.name {
+                                info!("Aliasing query {name} as existing query {qid}");
+                                if *self.aliases.entry(name.clone()).or_insert(qid) != qid {
+                                    return Err(ReadySetError::RecipeInvariantViolated(format!(
+                                        "Query name exists but existing query is different: {name}"
+                                    )));
+                                }
+                            }
+                            // We are re-adding a query that was already there
+                            to_remove.retain(|remove_qid| *remove_qid != qid);
+                            continue;
+                        }
+                    }
+
                     // add the query
                     let qfp = self.inc.add_parsed_query(
                         expr.query.clone(),
@@ -202,27 +222,6 @@ impl Recipe {
                         mig,
                     )?;
 
-                    let qid = hash_query(&expr.query);
-
-                    if let Some(ref name) = expr.name {
-                        if qfp.reused_nodes.get(0) == Some(&qfp.query_leaf)
-                            && qfp.reused_nodes.len() == 1
-                        {
-                            self.alias_query(&qfp.name, name.clone()).map_err(|_| {
-                                internal_err(
-                                    "SqlIncorporator told recipe about a query it doesn't know about!",
-                                )
-                            })?;
-                        }
-                        if self.aliases.contains_key(name) && self.aliases[name] != qid {
-                            return Err(ReadySetError::RecipeInvariantViolated(format!(
-                                "Query name exists but existing query is different: {}",
-                                name
-                            )));
-                        }
-                        self.aliases.insert(name.clone(), qid);
-                    }
-
                     // If the user provided us with a query name, use that.
                     // If not, use the name internally used by the QFP.
                     let query_name = expr
@@ -230,11 +229,17 @@ impl Recipe {
                         .as_ref()
                         .cloned()
                         .unwrap_or_else(|| qfp.name.clone());
+
+                    if let Some(ref name) = expr.name {
+                        self.aliases.insert(name.clone(), qid);
+                    }
+
                     if self.expressions.insert(qid, expr).is_some() {
                         // We are re-adding a query that was already there.
                         to_remove.retain(|remove_qid| *remove_qid != qid);
                     }
                     self.expression_order.push(qid);
+
                     result.new_nodes.insert(query_name, qfp.query_leaf);
                     result.expressions_added += 1;
                 }
@@ -330,41 +335,43 @@ impl Recipe {
         ChangeList { changes }
     }
 
+    pub(crate) fn remove_leaf_aliases(&mut self, nodes: &[NodeIndex]) {
+        for node in nodes {
+            if let Some(name) = self.inc.get_leaf_name(*node) {
+                if let Some(qid) = self.aliases.remove(name) {
+                    self.expressions.remove(&qid);
+                    self.aliases.retain(|_, i| *i != qid);
+                }
+            }
+        }
+    }
+
     /// Helper method to reparent a recipe. This is needed for some of t
     pub(super) fn sql_inc(&self) -> &SqlIncorporator {
         &self.inc
     }
 
     /// Remove the expression with the given alias, `qname`, from the recipe.
-    pub(super) fn remove_query(&self, qname: &str) -> Option<ChangeList> {
-        let res = self.aliases.get(qname).and_then(|n| {
-            self.expressions.get(n).cloned().map(|expr| ChangeList {
-                changes: vec![Change::Remove(expr)],
-            })
-        });
+    pub(super) fn remove_query(&mut self, qname: &str) -> Option<ChangeList> {
+        let alias = match self.aliases.remove(qname) {
+            None => {
+                warn!(%qname, "Query not found in expressions");
+                return None;
+            }
+            Some(alias) => alias,
+        };
 
-        if res.is_none() {
-            warn!(%qname, "Query not found in expressions");
+        // Check that this is indeed the last alias remaining
+        if self.aliases.iter().any(|(_, qid)| *qid == alias) {
+            info!("Removing alias {qname} for query {alias}");
+            return None;
         }
 
-        res
-    }
-
-    /// Alias `query` as `alias`. Subsequent calls to `node_addr_for(alias)` will return the node
-    /// addr for `query`.
-    ///
-    /// Returns an Err if `query` is not found in the recipe
-    pub(super) fn alias_query(&mut self, query: &str, alias: SqlIdentifier) -> Result<(), String> {
-        // NOTE: this is (consciously) O(n) because we don't have a reverse index from query name to
-        // QueryID and I don't feel like it's worth the time-space tradeoff given this is only
-        // called on migration
-        let qid = self
-            .expressions
-            .iter()
-            .find(|(_, expr)| expr.name.as_deref() == Some(query))
-            .ok_or_else(|| "Query not found".to_string())?
-            .0;
-        self.aliases.insert(alias, *qid);
-        Ok(())
+        self.expressions
+            .get(&alias)
+            .cloned()
+            .map(|expr| ChangeList {
+                changes: vec![Change::Remove(expr)],
+            })
     }
 }
