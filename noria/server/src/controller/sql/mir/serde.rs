@@ -397,19 +397,6 @@ where
                     .expect("Reference to node does not exist")
                     .clone();
             }
-            MirNodeInner::Leaf { ref mut node, .. } => {
-                let (name, version) = {
-                    let inner_node = node.borrow();
-                    (inner_node.name.clone(), inner_node.from_version)
-                };
-                // Expect is allowed, since the node we are referencing must be in the nodes map.
-                // Otherwise, we can assume there was an error during deserialization.
-                #[allow(clippy::expect_used)]
-                *node = all_nodes
-                    .get(&MirNodeId { name, version })
-                    .expect("Reference to node does not exist")
-                    .clone();
-            }
             _ => (),
         }
     }

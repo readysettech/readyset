@@ -524,7 +524,7 @@ mod tests {
             "q".into(),
             0,
             join_columns,
-            MirNodeInner::leaf(exists_join.clone(), vec![], IndexType::HashMap),
+            MirNodeInner::leaf(vec![], IndexType::HashMap),
             vec![Rc::downgrade(&exists_join)],
             vec![],
         );
@@ -814,7 +814,7 @@ mod tests {
             "q".into(),
             0,
             join_columns,
-            MirNodeInner::leaf(exists_join.clone(), vec![], IndexType::HashMap),
+            MirNodeInner::leaf(vec![], IndexType::HashMap),
             vec![Rc::downgrade(&exists_join)],
             vec![],
         );
