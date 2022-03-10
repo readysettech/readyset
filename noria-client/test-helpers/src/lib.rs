@@ -59,7 +59,7 @@ pub async fn setup<A>(
 where
     A: Adapter + 'static,
 {
-    let query_status_cache = Arc::new(QueryStatusCache::new());
+    let query_status_cache = Box::leak(Box::new(QueryStatusCache::new()));
     setup_inner::<A>(
         backend_builder,
         if fallback { Some(A::url()) } else { None },
@@ -102,7 +102,7 @@ pub async fn setup_like_prod_with_handle<A>(
 where
     A: Adapter + 'static,
 {
-    let query_status_cache = Arc::new(QueryStatusCache::new());
+    let query_status_cache = Box::leak(Box::new(QueryStatusCache::new()));
     setup_inner::<A>(
         backend_builder,
         fallback,
@@ -125,7 +125,7 @@ pub async fn setup_inner<A>(
     fallback: Option<String>,
     partial: bool,
     wait_for_backend: bool,
-    query_status_cache: Arc<QueryStatusCache>,
+    query_status_cache: &'static QueryStatusCache,
     mode: MigrationMode,
     recreate_database: bool,
     allow_unsupported_set: bool,
@@ -172,7 +172,6 @@ where
             let (s, _) = listener.accept().await.unwrap();
             let query_cache = query_cache.clone();
             let backend_builder = backend_builder.clone();
-            let query_status_cache = query_status_cache.clone();
             let auto_increments = auto_increments.clone();
             let authority = authority.clone();
 

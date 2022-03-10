@@ -534,7 +534,7 @@ impl TestScript {
                 ReadBehavior::Blocking,
             )
             .await;
-            let query_status_cache = Arc::new(QueryStatusCache::new());
+            let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
 
             macro_rules! make_backend {
                 ($upstream:ty, $handler:ty) => {{

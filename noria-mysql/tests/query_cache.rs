@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use mysql_async::prelude::*;
 use mysql_async::{Conn, Result, Row, Statement};
 use noria_client::backend::MigrationMode;
@@ -15,7 +13,7 @@ use serial_test::serial;
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn in_request_path_query_with_fallback() {
-    let query_status_cache = Arc::new(QueryStatusCache::new());
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle) = query_cache_setup(
         query_status_cache.clone(),
         true, // fallback enabled
@@ -60,7 +58,7 @@ async fn in_request_path_query_with_fallback() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn in_request_path_query_without_fallback() {
-    let query_status_cache = Arc::new(QueryStatusCache::new());
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle) = query_cache_setup(
         query_status_cache.clone(),
         false, // fallback disabled
@@ -90,7 +88,7 @@ async fn in_request_path_query_without_fallback() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn out_of_band_query_with_fallback() {
-    let query_status_cache = Arc::new(QueryStatusCache::new());
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle) = query_cache_setup(
         query_status_cache.clone(),
         true, // fallback enabled
@@ -142,7 +140,7 @@ async fn out_of_band_query_with_fallback() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn in_request_path_prep_exec_with_fallback() {
-    let query_status_cache = Arc::new(QueryStatusCache::new());
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle) = query_cache_setup(
         query_status_cache.clone(),
         true, // fallback enabled
@@ -219,7 +217,7 @@ async fn in_request_path_prep_exec_with_fallback() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn in_request_path_prep_without_fallback() {
-    let query_status_cache = Arc::new(QueryStatusCache::new());
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle) = query_cache_setup(
         query_status_cache.clone(),
         false, // fallback disabled
@@ -249,7 +247,7 @@ async fn in_request_path_prep_without_fallback() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn out_of_band_prep_exec_with_fallback() {
-    let query_status_cache = Arc::new(QueryStatusCache::new());
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle) = query_cache_setup(
         query_status_cache.clone(),
         true, // fallback enabled
@@ -344,7 +342,7 @@ async fn out_of_band_prep_exec_with_fallback() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn in_request_path_rewritten_query_without_fallback() {
-    let query_status_cache = Arc::new(QueryStatusCache::new());
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle) = query_cache_setup(
         query_status_cache.clone(),
         false, // fallback disabled
@@ -376,7 +374,7 @@ async fn in_request_path_rewritten_query_without_fallback() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn out_of_band_rewritten_query_without_fallback() {
-    let query_status_cache = Arc::new(QueryStatusCache::new());
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
     let (opts, _handle) = query_cache_setup(
         query_status_cache.clone(),
         false, // fallback disabled

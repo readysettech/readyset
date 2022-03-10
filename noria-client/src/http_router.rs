@@ -2,7 +2,6 @@ use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use anyhow::anyhow;
@@ -27,7 +26,7 @@ pub struct NoriaAdapterHttpRouter {
     /// The address to attempt to listen on.
     pub listen_addr: SocketAddr,
     /// A reference to the QueryStatusCache that is in use by the adapter.
-    pub query_cache: Arc<QueryStatusCache>,
+    pub query_cache: &'static QueryStatusCache,
     /// A valve for the http stream to trigger closing.
     pub valve: Valve,
 
@@ -83,7 +82,7 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
 
         match (req.method(), req.uri().path()) {
             (&Method::GET, "/allow-list") => {
-                let query_cache = self.query_cache.clone();
+                let query_cache = self.query_cache;
                 Box::pin(async move {
                     let allow_list = query_cache.allow_list();
                     let res = match serde_json::to_string(&allow_list) {
@@ -100,7 +99,7 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
                 })
             }
             (&Method::GET, "/deny-list") => {
-                let query_cache = self.query_cache.clone();
+                let query_cache = self.query_cache;
                 Box::pin(async move {
                     let deny_list = query_cache
                         .deny_list()

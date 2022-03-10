@@ -375,7 +375,8 @@ where
         } else {
             MigrationStyle::InRequestPath
         };
-        let query_status_cache = Arc::new(QueryStatusCache::with_style(migration_style));
+        let query_status_cache: &'static _ =
+            Box::leak(Box::new(QueryStatusCache::with_style(migration_style)));
 
         if options.async_migrations || options.explicit_migrations {
             #[allow(clippy::unwrap_used)] // async_migrations requires upstream_db_url
@@ -386,7 +387,6 @@ where
             let loop_interval = options.migration_task_interval;
             let max_retry = options.max_processing_minutes;
             let validate_queries = options.validate_queries;
-            let cache = query_status_cache.clone();
             let dry_run = options.explicit_migrations;
 
             let fut = async move {
@@ -418,7 +418,7 @@ where
                     noria,
                     upstream,
                     controller_handle,
-                    cache,
+                    query_status_cache,
                     validate_queries,
                     std::time::Duration::from_millis(loop_interval),
                     std::time::Duration::from_secs(max_retry * 60),
@@ -434,7 +434,6 @@ where
         if options.explicit_migrations {
             let ch = ch.clone();
             let loop_interval = options.outputs_polling_interval;
-            let query_status_cache = query_status_cache.clone();
             let shutdown_recv = shutdown_sender.subscribe();
             let fut = async move {
                 let mut outputs_synchronizer = OutputsSynchronizer::new(
@@ -451,7 +450,7 @@ where
         // Spawn a thread for handling this adapter's HTTP request server.
         let router_handle = {
             let (handle, valve) = Valve::new();
-            let query_cache = query_status_cache.clone();
+            let query_cache = query_status_cache;
             let http_server = NoriaAdapterHttpRouter {
                 listen_addr: options.metrics_address,
                 query_cache,
@@ -499,7 +498,6 @@ where
             let mut connection_handler = self.connection_handler.clone();
             let region = options.region.clone();
             let upstream_db_url = options.upstream_db_url.clone();
-            let query_status_cache = query_status_cache.clone();
             let backend_builder = BackendBuilder::new()
                 .slowlog(options.log_slow)
                 .users(users.clone())
@@ -542,11 +540,10 @@ where
 
                 match upstream_res {
                     Ok(upstream) => {
-                        let backend = backend_builder.clone().build(
-                            noria,
-                            upstream,
-                            query_status_cache.clone(),
-                        );
+                        let backend =
+                            backend_builder
+                                .clone()
+                                .build(noria, upstream, query_status_cache);
                         connection_handler.process_connection(s, backend).await;
                     }
                     Err(error) => {
