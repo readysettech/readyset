@@ -20,7 +20,6 @@ enum Field {
     Int,
     Double,
     Text,
-    Timestamp,
     Time,
     Float,
     ByteArray,
@@ -41,8 +40,8 @@ where
     S: serde::ser::Serializer,
     T: ?Sized + serde::Serialize,
 {
-    // The compiler should be able to inline the constant name here, so no lookups are done at
-    // runtime
+    // The compiler should be able to inline the constant name here, so no lookups are done
+    // at runtime
     let variant_name = Field::VARIANTS[variant as usize];
     serializer.serialize_newtype_variant("DataType", variant as _, variant_name, value)
 }
@@ -111,7 +110,7 @@ impl<'de> Deserialize<'de> for DataType {
                 } else {
                     Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Unsigned(val),
-                        &"variant index 0 <= i < 12",
+                        &"variant index 0 <= i < 11",
                     ))
                 }
             }
@@ -185,10 +184,6 @@ impl<'de> Deserialize<'de> for DataType {
                             TextOrTinyText::Text(t) => DataType::Text(t),
                         })
                     }
-                    // We deserialize the NaiveDateTime by extracting nsecs from the top 64 bits of
-                    // the encoded i128, and secs from the low 64 bits
-                    (Field::Timestamp, variant) => VariantAccess::newtype_variant::<u128>(variant)
-                        .map(|r| NaiveDateTime::from_timestamp(r as _, (r >> 64) as _).into()),
                     (Field::Time, variant) => {
                         VariantAccess::newtype_variant::<MysqlTime>(variant).map(DataType::Time)
                     }
@@ -205,6 +200,8 @@ impl<'de> Deserialize<'de> for DataType {
                         [u8; 3],
                     )>(variant)
                     .map(|(ts, extra)| {
+                        // We deserialize the NaiveDateTime by extracting nsecs from the top 64 bits
+                        // of the encoded i128, and secs from the low 64 bits
                         let datetime = NaiveDateTime::from_timestamp(ts as _, (ts >> 64) as _);
                         DataType::TimestampTz(TimestampTz { datetime, extra })
                     }),
