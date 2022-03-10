@@ -373,7 +373,7 @@ pub struct NoriaConnector {
     region: Option<String>,
 
     /// Set of views that have failed on previous requests. Separate from the backend
-    /// to allow returning references to schemas from views all the way to msql-srv,
+    /// to allow returning references to schemas from views all the way to mysql-srv,
     /// but on subsequent requests, do not use a failed view.
     failed_views: HashSet<String>,
 

@@ -9,7 +9,7 @@ eui48 = { git = "https://github.com/readysettech/eui48.git", branch = "master" }
 members = [
     "buildkite-pipeline-rs",
     "js-client",
-    "msql-srv",
+    "mysql-srv",
     "mysql-time",
     "nom-sql",
     "noria-client",

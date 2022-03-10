@@ -12,7 +12,7 @@ use std::{io, mem};
 use anyhow::{anyhow, bail, Context};
 use colored::*;
 use itertools::Itertools;
-use msql_srv::MysqlIntermediary;
+use mysql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
 use noria::consensus::{Authority, LocalAuthorityStore};
 use noria::ControllerHandle;

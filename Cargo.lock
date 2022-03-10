@@ -2740,7 +2740,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "maplit",
- "msql-srv",
+ "mysql-srv",
  "mysql_async",
  "neon",
  "nom-sql",
@@ -3264,29 +3264,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "msql-srv"
-version = "0.8.8"
-dependencies = [
- "async-trait",
- "byteorder",
- "chrono",
- "futures",
- "getrandom 0.2.3",
- "mysql",
- "mysql-time",
- "mysql_async",
- "mysql_common",
- "nom 7.1.0",
- "sha-1 0.9.8",
- "slab",
- "test_utils",
- "thiserror",
- "time 0.3.6",
- "tokio",
- "tokio-postgres",
-]
-
-[[package]]
 name = "mysql"
 version = "22.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3311,6 +3288,29 @@ dependencies = [
  "socket2",
  "twox-hash",
  "url",
+]
+
+[[package]]
+name = "mysql-srv"
+version = "0.8.8"
+dependencies = [
+ "async-trait",
+ "byteorder",
+ "chrono",
+ "futures",
+ "getrandom 0.2.3",
+ "mysql",
+ "mysql-time",
+ "mysql_async",
+ "mysql_common",
+ "nom 7.1.0",
+ "sha-1 0.9.8",
+ "slab",
+ "test_utils",
+ "thiserror",
+ "time 0.3.6",
+ "tokio",
+ "tokio-postgres",
 ]
 
 [[package]]
@@ -3734,7 +3734,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
- "msql-srv",
+ "mysql-srv",
  "mysql_async",
  "nom-sql",
  "noria",
@@ -3894,8 +3894,8 @@ dependencies = [
  "maplit",
  "maths",
  "md5",
- "msql-srv",
  "mysql",
+ "mysql-srv",
  "mysql-time",
  "mysql_async",
  "mysql_common",
@@ -3952,8 +3952,8 @@ dependencies = [
  "derive_more",
  "itertools",
  "maplit",
- "msql-srv",
  "mysql",
+ "mysql-srv",
  "mysql_async",
  "mysql_common",
  "nom-sql",
@@ -5835,9 +5835,9 @@ checksum = "9def91fd1e018fe007022791f865d0ccc9b3a0d5001e01aabb8b40e46000afb5"
 
 [[package]]
 name = "smallvec"
-version = "1.7.0"
+version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ecab6c735a6bb4139c0caafd0cc3635748bbb3acf4550e8138122099251f309"
+checksum = "f2dd574626839106c320a323308629dcb1acfc96e32a8cba364ddc61ac23ee83"
 
 [[package]]
 name = "snowflake"

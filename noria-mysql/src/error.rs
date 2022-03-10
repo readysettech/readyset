@@ -1,6 +1,6 @@
 use std::io;
 
-use msql_srv::MsqlSrvError;
+use mysql_srv::MsqlSrvError;
 use noria::ReadySetError;
 use noria_client::upstream_database::IsFatalError;
 use thiserror::Error;
@@ -23,7 +23,7 @@ pub enum Error {
 impl Error {
     /// Transforms each error to the closest mysql error.
     /// Sometimes, there is not a good one and UNKNOWN is used.
-    pub fn error_kind(&self) -> msql_srv::ErrorKind {
+    pub fn error_kind(&self) -> mysql_srv::ErrorKind {
         // TODO(peter): Implement the rest of this error translation logic.
         /*
         match self {
@@ -45,9 +45,9 @@ impl Error {
             Self::MySql(_) => {
                 // TODO(peter): We need to translate these to appropriate
                 // mysql error codes. Currently mysql_async is only used by fallback.
-                msql_srv::ErrorKind::ER_UNKNOWN_ERROR
+                mysql_srv::ErrorKind::ER_UNKNOWN_ERROR
             }
-            _ => msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+            _ => mysql_srv::ErrorKind::ER_UNKNOWN_ERROR,
         }
     }
 }

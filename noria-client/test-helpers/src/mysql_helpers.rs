@@ -2,9 +2,9 @@ use std::env;
 use std::fmt::Display;
 
 use async_trait::async_trait;
-use msql_srv::MysqlIntermediary;
 use mysql_async::prelude::Queryable;
 use mysql_async::Conn;
+use mysql_srv::MysqlIntermediary;
 use noria_client::backend::noria_connector::ReadBehavior;
 use noria_client::backend::{BackendBuilder, MigrationMode, QueryInfo};
 use noria_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};

@@ -1,9 +1,9 @@
 #![feature(async_closure)]
 
 extern crate chrono;
-extern crate msql_srv;
 extern crate mysql;
 extern crate mysql_common as myc;
+extern crate mysql_srv;
 extern crate nom;
 extern crate tokio;
 
@@ -14,12 +14,12 @@ use std::pin::Pin;
 use std::{io, net, thread};
 
 use async_trait::async_trait;
-use msql_srv::{
+use mysql::prelude::Queryable;
+use mysql::Row;
+use mysql_srv::{
     Column, ErrorKind, InitWriter, MysqlIntermediary, MysqlShim, ParamParser, QueryResultWriter,
     StatementMetaWriter,
 };
-use mysql::prelude::Queryable;
-use mysql::Row;
 use tokio::io::AsyncWrite;
 use tokio::net::tcp::OwnedWriteHalf;
 
@@ -44,7 +44,7 @@ where
     P: FnMut(&str) -> u32 + Send,
     E: for<'a> FnMut(
             u32,
-            Vec<msql_srv::ParamValue>,
+            Vec<mysql_srv::ParamValue>,
             QueryResultWriter<'a, W>,
         ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send,
@@ -128,7 +128,7 @@ where
     P: FnMut(&str) -> u32 + Send + 'static,
     E: for<'a> FnMut(
             u32,
-            Vec<msql_srv::ParamValue>,
+            Vec<mysql_srv::ParamValue>,
             QueryResultWriter<'a, OwnedWriteHalf>,
         ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a + Send>>
         + Send

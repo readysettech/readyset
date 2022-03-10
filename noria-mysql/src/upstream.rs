@@ -325,7 +325,7 @@ impl UpstreamDatabase for MySqlUpstream {
 
 #[cfg(test)]
 mod tests {
-    use msql_srv::ColumnType;
+    use mysql_srv::ColumnType;
     use nom_sql::{Column as NomColumn, ColumnSpecification, SqlType};
 
     use super::*;

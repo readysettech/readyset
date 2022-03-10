@@ -68,7 +68,7 @@ where
 }
 
 // NOTE: these rules can all go away when TryFrom stabilizes
-//       see https://github.com/jonhoo/msql-srv/commit/13e5e753e5042a42cc45ad57c2b760561da2fb50
+//       see https://github.com/jonhoo/mysql-srv/commit/13e5e753e5042a42cc45ad57c2b760561da2fb50
 // NOTE: yes, I know the = / => distinction is ugly
 macro_rules! like_try_into {
     ($self:ident, $source:ty = $target:ty, $w:ident, $m:ident, $c:ident) => {{

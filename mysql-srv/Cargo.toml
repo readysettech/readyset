@@ -1,5 +1,5 @@
 [package]
-name = "msql-srv"
+name = "mysql-srv"
 publish = false
 version = "0.8.8"
 edition = "2018"
