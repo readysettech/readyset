@@ -256,7 +256,7 @@ impl SqlToMirConverter {
                     c
                 })
                 .collect(),
-            MirNodeInner::leaf(n.clone(), params, index_type),
+            MirNodeInner::leaf(params, index_type),
             vec![MirNodeRef::downgrade(&n)],
             vec![],
         );
@@ -361,7 +361,6 @@ impl SqlToMirConverter {
                 self.schema_version,
                 sanitized_columns,
                 MirNodeInner::leaf(
-                    final_node.clone(),
                     vec![],
                     // TODO: is this right?
                     IndexType::HashMap,
@@ -2056,7 +2055,6 @@ impl SqlToMirConverter {
                     self.schema_version,
                     columns,
                     MirNodeInner::Leaf {
-                        node: leaf_project_node.clone(),
                         keys: view_key.columns,
                         index_type: view_key.index_type,
                         order_by: st.order.as_ref().map(|order| {

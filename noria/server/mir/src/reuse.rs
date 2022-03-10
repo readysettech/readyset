@@ -260,7 +260,6 @@ mod tests {
             0,
             vec![Column::from("aa"), Column::from("ba")],
             MirNodeInner::leaf(
-                c.clone(),
                 vec![(Column::from("ba"), ViewPlaceholder::Generated)],
                 IndexType::HashMap,
             ),

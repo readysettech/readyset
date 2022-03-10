@@ -127,7 +127,6 @@ pub enum MirNodeInner {
     },
     /// leaf (reader) node, keys
     Leaf {
-        node: MirNodeRef,
         /// Keys is a tuple of the key column, and if the column was derived from a SQL
         /// placeholder, the index of the placeholder in the SQL query.
         keys: Vec<(Column, ViewPlaceholder)>,
@@ -148,15 +147,10 @@ pub enum MirNodeInner {
 }
 
 impl MirNodeInner {
-    /// Construct a new [`MirNodeInner::Leaf`] for the given node and with the given keys and index
+    /// Construct a new [`MirNodeInner::Leaf`] with the given keys and index
     /// type, without any post-lookup operations
-    pub fn leaf(
-        node: MirNodeRef,
-        keys: Vec<(Column, ViewPlaceholder)>,
-        index_type: IndexType,
-    ) -> Self {
+    pub fn leaf(keys: Vec<(Column, ViewPlaceholder)>, index_type: IndexType) -> Self {
         Self::Leaf {
-            node,
             keys,
             index_type,
             order_by: None,
