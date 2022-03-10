@@ -174,6 +174,7 @@ Resources:
         PasswordResetRequired: true
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/CloudWatchReadOnlyAccess
+        - arn:aws:iam::aws:policy/AmazonSNSReadOnlyAccess
         - arn:aws:iam::aws:policy/AWSCloudFormationReadOnlyAccess
         - arn:aws:iam::aws:policy/AutoScalingConsoleReadOnlyAccess
         - arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess
@@ -188,6 +189,10 @@ Resources:
                 Action: iam:PassRole
                 Resource:
                   - !GetAtt ReadySetCloudFormationExecutionRole.Arn
+          PolicyName: ReadySetCloudFormationPassRole
+        - PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
               - Effect: Allow
                 Action:
                   - iam:CreateAccessKey
@@ -195,8 +200,30 @@ Resources:
                   - iam:ListAccessKeys
                   - iam:UpdateAccessKey
                 Resource: arn:aws:iam::*:user/${aws:username}
+            PolicyName: AllowAccessKeyCreation
+        - PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
               - Effect: Allow
                 Action:
                   - ec2:Get*
                 Resource: '*'
-          PolicyName: ReadySetCloudFormationPassRole
+            PolicyName: AllowAdditionalEC2Access
+        - PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:PutMetricFilter
+                  - cloudwatch:PutMetricAlarm
+                  - cloudwatch:PutDashboard
+                  - cloudwatch:DeleteAlarms
+                  - cloudwatch:DeleteDashboards
+                  - cloudwatch:EnableAlarmActions
+                  - cloudwatch:DisableAlarmActions
+                  - sns:CreateTopic
+                  - sns:Subscribe
+                  - sns:Unsubscribe
+                  - sns:ConfirmSubscription
+                Resource: '*'
+            PolicyName: AllowAlarmAndDashboardModification
