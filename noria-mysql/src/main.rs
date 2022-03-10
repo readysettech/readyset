@@ -41,6 +41,18 @@ impl ConnectionHandler for MysqlHandler {
             error!(err = %e, "connection lost");
         }
     }
+
+    async fn immediate_error(self, stream: net::TcpStream, error_message: String) {
+        if let Err(error) = msql_srv::send_immediate_err(
+            stream,
+            msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+            error_message.as_bytes(),
+        )
+        .await
+        {
+            error!(%error, "Could not send immediate error packet")
+        }
+    }
 }
 
 #[derive(Parser)]

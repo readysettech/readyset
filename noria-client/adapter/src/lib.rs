@@ -47,11 +47,15 @@ const AWS_METADATA_TOKEN_ENDPOINT: &str = "http://169.254.169.254/latest/api/tok
 pub trait ConnectionHandler {
     type UpstreamDatabase: UpstreamDatabase;
     type Handler: QueryHandler;
+
     async fn process_connection(
         &mut self,
         stream: net::TcpStream,
         backend: Backend<Self::UpstreamDatabase, Self::Handler>,
     );
+
+    /// Return an immediate error to a newly-established connection, then immediately disconnect
+    async fn immediate_error(self, stream: net::TcpStream, error_message: String);
 }
 
 /// Represents which database interface is being adapted to
@@ -517,22 +521,31 @@ where
                 .instrument(debug_span!("Building noria connector"))
                 .await;
 
-                let upstream = if let Some(upstream_db_url) = &upstream_db_url {
-                    Some(
-                        H::UpstreamDatabase::connect(upstream_db_url.0.clone())
-                            .instrument(info_span!("Connecting to upstream database"))
-                            .await
-                            .unwrap(),
-                    )
+                let upstream_res = if let Some(upstream_db_url) = &upstream_db_url {
+                    H::UpstreamDatabase::connect(upstream_db_url.0.clone())
+                        .instrument(info_span!("Connecting to upstream database"))
+                        .await
+                        .map(Some)
+                        .map_err(|e| format!("Error connecting to upstream database: {}", e))
                 } else {
-                    None
+                    Ok(None)
                 };
 
-                let backend =
-                    backend_builder
-                        .clone()
-                        .build(noria, upstream, query_status_cache.clone());
-                connection_handler.process_connection(s, backend).await;
+                match upstream_res {
+                    Ok(upstream) => {
+                        let backend = backend_builder.clone().build(
+                            noria,
+                            upstream,
+                            query_status_cache.clone(),
+                        );
+                        connection_handler.process_connection(s, backend).await;
+                    }
+                    Err(error) => {
+                        error!(%error, "Error during initial connection establishment");
+                        connection_handler.immediate_error(s, error).await;
+                    }
+                }
+
                 debug!("disconnected");
             }
             .instrument(connection);
