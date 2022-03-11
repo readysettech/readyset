@@ -12,7 +12,7 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use noria::metrics::recorded;
 use noria_server::consensus::AuthorityType;
 use noria_server::metrics::{install_global_recorder, CompositeMetricsRecorder, MetricsRecorder};
-use noria_server::{Builder, DurabilityMode, NoriaMetricsRecorder, ReuseConfigType, VolumeId};
+use noria_server::{Builder, DurabilityMode, NoriaMetricsRecorder, VolumeId};
 use tracing::{error, info};
 
 #[cfg(not(target_env = "msvc"))]
@@ -116,10 +116,6 @@ struct Opts {
     /// The strategy to use when memory is freed from reader nodes
     #[clap(long = "eviction-policy", arg_enum, default_value_t = dataflow::EvictionKind::Random)]
     eviction_kind: dataflow::EvictionKind,
-
-    /// Enable query graph node reuse
-    #[clap(long)]
-    enable_reuse: bool,
 
     /// Disable partial
     #[clap(long = "nopartial")]
@@ -269,11 +265,9 @@ fn main() -> anyhow::Result<()> {
         builder.enable_packet_filters();
     }
 
-    if opts.enable_reuse {
-        builder.set_reuse(Some(ReuseConfigType::Finkelstein));
-    } else {
-        builder.set_reuse(None)
-    }
+    // TODO(fran): Reuse will be disabled until we refactor MIR to make it serializable.
+    // See `noria/server/src/controller/sql/serde.rs` for details.
+    builder.set_reuse(None);
 
     builder.set_allow_topk(opts.enable_experimental_topk_support);
     builder.set_allow_paginate(opts.enable_experimental_paginate_support);

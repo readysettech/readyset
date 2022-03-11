@@ -153,11 +153,12 @@ pub(crate) struct Config {
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct SqlToMirConverter {
-    config: Config,
-    base_schemas: HashMap<SqlIdentifier, Vec<(usize, Vec<ColumnSpecification>)>>,
-    current: HashMap<SqlIdentifier, usize>,
-    nodes: HashMap<(SqlIdentifier, usize), MirNodeRef>,
-    schema_version: usize,
+    pub(in crate::controller::sql) config: Config,
+    pub(in crate::controller::sql) base_schemas:
+        HashMap<SqlIdentifier, Vec<(usize, Vec<ColumnSpecification>)>>,
+    pub(in crate::controller::sql) current: HashMap<SqlIdentifier, usize>,
+    pub(in crate::controller::sql) nodes: HashMap<(SqlIdentifier, usize), MirNodeRef>,
+    pub(in crate::controller::sql) schema_version: usize,
 }
 
 impl SqlToMirConverter {
