@@ -797,56 +797,5 @@ mod tests {
                 IndexRef::partial(x, Index::hash_map(vec![1, 2])),
             ],]
         );
-
-        // indexing (left, middle, right) should replay (left, middle) from left and (right) from
-        // right
-        let mut paths = replay_paths_for_nonstop(
-            &g,
-            ColumnRef {
-                node: x,
-                columns: vec1![0, 1, 2],
-            },
-            IndexType::HashMap,
-        )
-        .unwrap();
-        paths.sort_unstable();
-        assert_eq!(
-            paths,
-            vec![
-                vec![
-                    IndexRef::partial(a, Index::hash_map(vec![0, 1])),
-                    IndexRef::partial(x, Index::hash_map(vec![0, 1, 2])),
-                ],
-                vec![
-                    IndexRef::partial(b, Index::hash_map(vec![1])),
-                    IndexRef::partial(x, Index::hash_map(vec![0, 1, 2])),
-                ],
-            ]
-        );
-
-        // indexing (left, right) should replay (left) from left and (right) from right
-        let mut paths = replay_paths_for_nonstop(
-            &g,
-            ColumnRef {
-                node: x,
-                columns: vec1![0, 2],
-            },
-            IndexType::HashMap,
-        )
-        .unwrap();
-        paths.sort_unstable();
-        assert_eq!(
-            paths,
-            vec![
-                vec![
-                    IndexRef::partial(a, Index::hash_map(vec![0])),
-                    IndexRef::partial(x, Index::hash_map(vec![0, 2])),
-                ],
-                vec![
-                    IndexRef::partial(b, Index::hash_map(vec![1])),
-                    IndexRef::partial(x, Index::hash_map(vec![0, 2])),
-                ],
-            ]
-        );
     }
 }
