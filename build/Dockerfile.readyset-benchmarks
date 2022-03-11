@@ -14,28 +14,30 @@ COPY . readyset
 WORKDIR /tmp/readyset
 
 COPY rust-toolchain ./rust-toolchain
-RUN rustup toolchain install "$(cat ./rust-toolchain)" && \
+RUN set -eux; \
+    rustup toolchain install "$(cat ./rust-toolchain)"; \
     rustup component add rustfmt
 
-RUN set -eux && \
-    cargo --locked build ${release:+--release} --bin benchmarks && \
+RUN set -eux; \
+    cargo --locked build ${release:+--release} --bin benchmarks; \
     if [ -z "${release+x}" ]; then strip target/debug/benchmarks; else strip target/release/benchmarks; fi
 
 FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/ubuntu:20.04
 
-RUN set -eux && \
-    apt-get update && \
+RUN set -eux; \
+    apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         libssl-dev \
         mariadb-client-10.3 \
         ca-certificates \
         curl \
-        jq && \
+        jq; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /tmp/readyset/target/*/benchmarks /usr/local/bin
 
-RUN mkdir -p /usr/src/app && \
+RUN set -eux; \
+    mkdir -p /usr/src/app; \
     chmod +x /usr/local/bin/benchmarks
 
 COPY --from=builder /tmp/readyset/benchmarks/src/data/ /usr/src/app/src/data/
