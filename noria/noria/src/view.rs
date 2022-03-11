@@ -502,6 +502,21 @@ impl KeyComparison {
     pub fn is_range(&self) -> bool {
         matches!(self, KeyComparison::Range(..))
     }
+
+    /// Construct a new [`KeyComparison`] of the same kind as `self` by mapping the given function
+    /// over either the equal key or one or both endpoints of the range key
+    #[must_use]
+    pub fn map_endpoints<F>(self, mut f: F) -> Self
+    where
+        F: FnMut(Vec1<DataType>) -> Vec1<DataType>,
+    {
+        match self {
+            KeyComparison::Equal(k) => KeyComparison::Equal(f(k)),
+            KeyComparison::Range((lower, upper)) => {
+                KeyComparison::Range((lower.map(&mut f), upper.map(&mut f)))
+            }
+        }
+    }
 }
 
 impl PartialEq for KeyComparison {

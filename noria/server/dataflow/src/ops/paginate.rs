@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ops::utils::Order;
 use crate::prelude::*;
-use crate::processing::LookupIndex;
+use crate::processing::{ColumnMiss, LookupIndex};
 
 /// Data structure used internally to Paginate to track rows currently within a group. Contains a
 /// reference to the `order` of the operator itself to allow for a custom Ord implementation, which
@@ -301,14 +301,51 @@ impl Ingredient for Paginate {
 
     fn column_source(&self, cols: &[usize]) -> ColumnSource {
         if cols.contains(&self.page_number_column()) {
-            // TODO(grfn): ColumnSource::GeneratedFromColumns
-            ColumnSource::RequiresFullReplay(vec1![self.src.as_global()])
+            if cols.len() == 1 {
+                // Ungrouped page lookups (currently) require a full replay
+                return ColumnSource::RequiresFullReplay(vec1![self.src.as_global()]);
+            }
+
+            #[allow(clippy::unwrap_used)]
+            // Once we remove the page number column, we have to have at least one column left
+            // (because we just checked len > 1)
+            let columns = cols
+                .iter()
+                .copied()
+                .filter(|c| *c != self.page_number_column())
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap();
+            ColumnSource::GeneratedFromColumns(vec1![ColumnRef {
+                node: self.our_index.unwrap().as_global(),
+                columns,
+            }])
         } else {
             ColumnSource::ExactCopy(ColumnRef {
                 node: self.src.as_global(),
                 columns: cols.to_vec().try_into().unwrap(),
             })
         }
+    }
+
+    fn handle_upquery(&mut self, miss: ColumnMiss) -> ReadySetResult<Vec<ColumnMiss>> {
+        let page_number_column = miss
+            .column_indices
+            .iter()
+            .position(|ci| *ci == self.page_number_column())
+            .expect("handle_upquery invariant");
+
+        Ok(vec![ColumnMiss {
+            node: *self.our_index.unwrap(),
+            column_indices: self.group_by.clone().try_into().unwrap(),
+            missed_keys: miss.missed_keys.mapped(|k| {
+                k.map_endpoints(|mut r| {
+                    r.remove(page_number_column)
+                        .expect("handle_upquery invariant");
+                    r
+                })
+            }),
+        }])
     }
 
     fn description(&self, detailed: bool) -> String {
@@ -333,6 +370,7 @@ impl Ingredient for Paginate {
 mod tests {
     use super::*;
     use crate::ops::test::MockGraph;
+    use crate::processing::ColumnMiss;
 
     fn setup() -> (MockGraph, IndexPair) {
         let mut g = MockGraph::new();
@@ -373,6 +411,26 @@ mod tests {
     }
 
     #[test]
+    fn column_source_for_grouped_page_lookup() {
+        let (g, _) = setup();
+        let src = g.node().column_source(&[1, 2]);
+        assert_eq!(
+            src,
+            ColumnSource::GeneratedFromColumns(vec1![ColumnRef {
+                node: g.node_index().as_global(),
+                columns: vec1![1],
+            }])
+        );
+    }
+
+    #[test]
+    fn column_source_for_page_only_lookup() {
+        let (g, s) = setup();
+        let src = g.node().column_source(&[2]);
+        assert_eq!(src, ColumnSource::RequiresFullReplay(vec1![s.as_global()]));
+    }
+
+    #[test]
     fn suggest_indexes() {
         let (g, _) = setup();
         let res = g.node().suggest_indexes(g.node_index().as_global());
@@ -380,6 +438,29 @@ mod tests {
         assert_eq!(
             res[&g.node_index().as_global()],
             LookupIndex::Strict(Index::hash_map(vec![1]))
+        );
+    }
+
+    #[test]
+    fn handle_upquery_for_page_query() {
+        let (g, _) = setup();
+        let res = g
+            .node_mut()
+            .handle_upquery(ColumnMiss {
+                node: *g.node_index(),
+                column_indices: vec1![1, 2],
+                missed_keys: vec1![vec1![DataType::from("a"), DataType::from(1)].into()],
+            })
+            .unwrap();
+
+        assert_eq!(res.len(), 1);
+        assert_eq!(
+            *res.first().unwrap(),
+            ColumnMiss {
+                node: *g.node_index(),
+                column_indices: vec1![1],
+                missed_keys: vec1![vec1![DataType::from("a")].into()]
+            }
         );
     }
 

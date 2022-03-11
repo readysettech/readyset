@@ -197,7 +197,6 @@ pub enum DomainRequest {
         partial_unicast_sharder: Option<NodeIndex>,
         notify_done: bool,
         trigger: TriggerEndpoint,
-        raw_path: Vec<IndexRef>,
     },
 
     /// Instruct domain to replay the state of a particular node along an existing replay path,

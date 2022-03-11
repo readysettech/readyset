@@ -538,13 +538,9 @@ impl Materializations {
                     // Some of these replay paths might start at nodes other than the one we're
                     // passing to replay_paths_for, if generated columns are involved. We need to
                     // materialize those nodes, too.
-                    let n_to_skip = if path.last().unwrap().node == ni {
-                        1
-                    } else {
-                        0
-                    };
+                    let n_to_skip = if path.target().node == ni { 1 } else { 0 };
                     for (i, IndexRef { node, index }) in
-                        path.into_iter().rev().skip(n_to_skip).enumerate()
+                        path.segments().iter().rev().enumerate().skip(n_to_skip)
                     {
                         match index {
                             None => {
@@ -556,22 +552,22 @@ impl Materializations {
                                 break 'attempt;
                             }
                             Some(index) => {
-                                if let Some(m) = self.have.get(&node) {
-                                    if !m.contains(&index) {
+                                if let Some(m) = self.have.get(node) {
+                                    if !m.contains(index) {
                                         // we'd need to add an index to this view,
-                                        add.entry(node)
+                                        add.entry(*node)
                                             .or_insert_with(HashSet::new)
                                             .insert(index.clone());
                                     }
                                     break;
                                 }
-                                if i == 0 && n_to_skip == 0 {
-                                    self.have.entry(node).or_insert_with(|| {
+                                if i == path.len() - 1 && path.broken() {
+                                    self.have.entry(*node).or_insert_with(|| {
                                         debug!(node = %node.index(), "forcing materialization for node with generated columns");
                                         HashSet::new()
                                     });
 
-                                    add.entry(node)
+                                    add.entry(*node)
                                         .or_insert_with(HashSet::new)
                                         .insert(index.clone());
                                 }
@@ -586,10 +582,7 @@ impl Materializations {
                 self.partial.insert(ni);
                 debug!(node = %ni.index(), "using partial materialization");
                 for (mi, indices) in add {
-                    let m = replay_obligations.entry(mi).or_default();
-                    for index in indices {
-                        m.insert(index);
-                    }
+                    replay_obligations.entry(mi).or_default().extend(indices);
                 }
             } else if !graph[ni].is_base() && !self.config.allow_full_materialization {
                 unsupported!("Creation of fully materialized query is forbidden");
@@ -778,12 +771,12 @@ impl Materializations {
                     )?;
 
                     for path in paths {
-                        for IndexRef { node, index } in path.into_iter().rev() {
+                        for IndexRef { node, index } in path.segments().iter().rev() {
                             match index {
                                 None => break,
                                 Some(child_index) => {
-                                    if self.partial.contains(&node) {
-                                        'outer: for parent_index in &self.have[&node] {
+                                    if self.partial.contains(node) {
+                                        'outer: for parent_index in &self.have[node] {
                                             // is this node partial over some of the child's partial
                                             // columns, but not others? if so, we run into really
                                             // sad
@@ -823,8 +816,8 @@ impl Materializations {
                                                 // the parent, since then the overlapping index
                                                 // logic in
                                                 // `MemoryState::lookup` will save us.
-                                                for other_idx in &self.have[&node] {
-                                                    if *other_idx == child_index {
+                                                for other_idx in &self.have[node] {
+                                                    if other_idx == child_index {
                                                         // Looks like we have the necessary index,
                                                         // so we'll
                                                         // be okay.
@@ -848,7 +841,7 @@ impl Materializations {
                                                 );
                                                 internal!(
                                                     "partially overlapping partial indices (parent {:?} cols {:?} all {:?}, child {:?} cols {:?})",
-                                                    node.index(), parent_index, &self.have[&node], ni.index(), parent_index
+                                                    node.index(), parent_index, &self.have[node], ni.index(), parent_index
                                                 );
                                             }
                                         }

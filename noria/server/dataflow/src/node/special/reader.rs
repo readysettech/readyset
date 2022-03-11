@@ -105,6 +105,12 @@ impl Reader {
         self.index.as_ref().map(|index| index.index_type)
     }
 
+    #[must_use]
+    pub fn with_index(mut self, index: &Index) -> Self {
+        self.set_index(index);
+        self
+    }
+
     pub fn set_index(&mut self, index: &Index) {
         if let Some(ref m_index) = self.index {
             debug_assert_eq!(m_index, index);
