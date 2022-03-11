@@ -15,10 +15,10 @@ use dataflow::payload::{ReplayPathSegment, SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use noria::ReadySetError;
-use tracing::{debug, trace};
+use tracing::{debug, instrument, trace};
 use vec1::Vec1;
 
-use crate::controller::keys::{self, IndexRef};
+use crate::controller::keys::{self, IndexRef, RawReplayPath};
 use crate::controller::migrate::DomainMigrationPlan;
 use crate::controller::state::graphviz;
 
@@ -94,7 +94,10 @@ impl<'a> Plan<'a> {
 
     /// Compute the set of replay paths required to construct and maintain the given `index` in our
     /// node.
-    fn paths(&self, index: &Index) -> Result<Vec<Vec<IndexRef>>, ReadySetError> {
+    ///
+    /// Note that if passed an index for a set of generated columns, this may return paths targeting
+    /// a different index than the passed `index`.
+    fn paths(&self, index: &Index) -> Result<Vec<RawReplayPath>, ReadySetError> {
         let graph = self.graph;
         let ni = self.node;
         let mut paths = keys::replay_paths_for_opt(
@@ -130,7 +133,7 @@ impl<'a> Plan<'a> {
         //
         // also, don't include paths that don't end at this node.
         #[allow(clippy::unwrap_used)] // We check that len() > 1 before the unwrap
-        paths.retain(|x| x.len() > 1 && x.last().unwrap().node == ni);
+        paths.retain(|x| x.len() > 1 && x.target().node == ni);
 
         // since we cut off part of each path, we *may* now have multiple paths that are the same
         // (i.e., if there was a union above the nearest materialization). this would be bad, as it
@@ -181,9 +184,10 @@ impl<'a> Plan<'a> {
             if a.len() != b.len() {
                 a.cmp(b)
             } else {
-                a.iter()
+                a.segments()
+                    .iter()
                     .rev()
-                    .zip(b.iter().rev())
+                    .zip(b.segments().iter().rev())
                     .fold(Ordering::Equal, |acc, (item_a, item_b)| {
                         acc.then(item_a.node.cmp(&item_b.node))
                     })
@@ -192,7 +196,11 @@ impl<'a> Plan<'a> {
         paths.dedup();
 
         // all columns better resolve if we're doing partial
-        if self.partial && !paths.iter().all(|p| p.iter().all(|cr| cr.index.is_some())) {
+        if self.partial
+            && !paths
+                .iter()
+                .all(|p| p.segments().iter().all(|cr| cr.index.is_some()))
+        {
             internal!("tried to be partial over replay paths that require full materialization: paths = {:?}", paths);
         }
 
@@ -203,6 +211,7 @@ impl<'a> Plan<'a> {
     /// paths about them. It also notes if any data backfills will need to be run, which is
     /// eventually reported back by `finalize`.
     #[allow(clippy::cognitive_complexity)]
+    #[instrument(level = "debug", "index", skip(self), fields(node = ?self.node))]
     pub(super) fn add(&mut self, index_on: Index) -> Result<(), ReadySetError> {
         // if we are recovering, we must build the paths again. Otherwise
         // if we're full and we already have some paths added... (either this run, or from previous
@@ -219,7 +228,52 @@ impl<'a> Plan<'a> {
             return Ok(());
         }
 
-        let paths = self.paths(&index_on)?;
+        let mut paths = self.paths(&index_on)?;
+        // Discard paths for indices we already have.
+        //
+        // We do this both because we generally want to be as idempotent as possible, and (perhaps
+        // more importantly) in case we get passed two subsequent indexes for generated columns that
+        // happen to remap to the same set of columns upstream
+        paths.retain(|p| {
+            p.target()
+                .index
+                .iter()
+                .all(|idx| !self.tags.contains_key(idx))
+        });
+        if paths.is_empty() {
+            // If we aren't making any replay paths for this index, we *do* still need to make sure
+            // the node actually has the index. This gets hit if the node has generated columns,
+            // since in that case we make an index for the target of the downstream replay path, and
+            // an index for the source of the upstream path. If the second one gets `add`ed first,
+            // it won't create the index, since the actual target index of the replay is different
+            // than the one that the downstream replay path wants to do a lookup into.
+            self.tags.entry(index_on).or_default();
+            return Ok(());
+        }
+
+        #[allow(clippy::indexing_slicing)] // paths can't be empty
+        {
+            invariant!(
+                paths
+                    .iter()
+                    .skip(1)
+                    .all(|p| p.target().index == paths[0].target().index),
+                "All paths should target the same index"
+            );
+        }
+        #[allow(clippy::unwrap_used)] // paths can't be empty
+        let target_index = if let Some(idx) = paths.first().unwrap().target().index.clone() {
+            // This might be different than `index_on` if this replay path is for a generated set of
+            // columns
+            if idx != index_on {
+                // If so, still make sure to index the original set of columns so the downstream
+                // replay has something to look up into
+                self.tags.entry(index_on).or_default();
+            }
+            idx
+        } else {
+            index_on
+        };
 
         // all right, story time!
         //
@@ -304,13 +358,12 @@ impl<'a> Plan<'a> {
             .enumerate()
             .flat_map(|(pi, path)| {
                 let graph = &self.graph;
-                path.iter()
-                    .enumerate()
-                    .filter_map(move |(at, &IndexRef { node, .. })| {
+                path.segments().iter().enumerate().filter_map(
+                    move |(at, &IndexRef { node, .. })| {
                         #[allow(clippy::indexing_slicing)] // replay paths contain valid indices
                         let n = &graph[node];
                         if n.is_union() && !n.is_shard_merger() {
-                            let suffix = match path.get((at + 1)..) {
+                            let suffix = match path.segments().get((at + 1)..) {
                                 Some(x) => x,
                                 None => {
                                     // FIXME(eta): would like to return a proper internal!() here
@@ -321,7 +374,8 @@ impl<'a> Plan<'a> {
                         } else {
                             None
                         }
-                    })
+                    },
+                )
             })
             .fold(BTreeMap::new(), |mut map, (key, pi)| {
                 map.entry(key).or_insert_with(Vec::new).push(pi);
@@ -355,19 +409,17 @@ impl<'a> Plan<'a> {
             // TODO(eta): figure out a way to check partial replay path idempotency
             self.paths.insert(
                 tag,
-                path.iter().map(|&IndexRef { node, .. }| node).collect(),
+                path.segments()
+                    .iter()
+                    .map(|&IndexRef { node, .. }| node)
+                    .collect(),
             );
 
             // what index are we using for partial materialization (if any)?
             let mut partial: Option<Index> = None;
+            #[allow(clippy::unwrap_used)] // paths for partial indices must always be partial
             if self.partial {
-                #[allow(clippy::unwrap_used)]
-                if let Some(IndexRef { index, .. }) = path.first() {
-                    // unwrap: ok since `Plan::paths` validates paths if we're partial
-                    partial = Some(index.clone().unwrap());
-                } else {
-                    internal!("Plan::paths should have deleted zero-length path");
-                }
+                partial = Some(path.source().index.clone().unwrap());
             }
 
             // if this is a partial replay path, and the target node is sharded, then we need to
@@ -376,9 +428,9 @@ impl<'a> Plan<'a> {
             // needs to know who it is!
             let mut partial_unicast_sharder = None;
             #[allow(clippy::indexing_slicing)] // paths contain valid node indices
-            #[allow(clippy::unwrap_used)] // paths aren't 0-length (internal!'d earlier)
-            if partial.is_some() && !self.graph[path.last().unwrap().node].sharded_by().is_none() {
+            if partial.is_some() && !self.graph[path.target().node].sharded_by().is_none() {
                 partial_unicast_sharder = path
+                    .segments()
                     .iter()
                     .rev()
                     .map(|&IndexRef { node, .. }| node)
@@ -388,7 +440,7 @@ impl<'a> Plan<'a> {
             // first, find out which domains we are crossing
             let mut segments = Vec::new();
             let mut last_domain = None;
-            for IndexRef { node, index } in path.clone() {
+            for IndexRef { node, index } in path.segments().iter().cloned() {
                 #[allow(clippy::indexing_slicing)] // paths contain valid node indices
                 let domain = self.graph[node].domain();
 
@@ -489,7 +541,6 @@ impl<'a> Plan<'a> {
                     notify_done: false,
                     partial_unicast_sharder,
                     trigger: TriggerEndpoint::None,
-                    raw_path: path.clone(),
                 };
 
                 // the first domain also gets to know source node
@@ -739,7 +790,7 @@ impl<'a> Plan<'a> {
             tags.push((tag, last_domain.unwrap()));
         }
 
-        self.tags.entry(index_on).or_default().extend(tags);
+        self.tags.entry(target_index).or_default().extend(tags);
 
         Ok(())
     }

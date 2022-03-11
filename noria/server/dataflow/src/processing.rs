@@ -354,10 +354,16 @@ pub struct ColumnRef {
 /// A miss on a node's column(s).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ColumnMiss {
-    /// Which columns the miss occurred on.
-    pub missed_columns: ColumnRef,
+    /// The node that was missed on when doing the lookup
+    pub node: LocalNodeIndex,
+    /// The column indices that the lookup was performed in
+    ///
+    /// Invariant: this will have the same length as all the keys in `missed_key`
+    pub column_indices: Vec1<usize>,
     /// The keys that we missed on.
-    pub missed_key: Vec1<KeyComparison>,
+    ///
+    /// Invariant: this will have the same length as `column_indices`
+    pub missed_keys: Vec1<KeyComparison>,
 }
 
 /// A description of where some node columns come from, used by the materialization planner

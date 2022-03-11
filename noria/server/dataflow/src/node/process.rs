@@ -113,9 +113,6 @@ impl Node {
         swap: bool,
         replay_path: Option<&crate::domain::ReplayPath>,
         ex: &mut dyn Executor,
-        // if true, forces a materialization into all indices of the node, not just those for the
-        // current replay path tag
-        materialize_into_all: bool,
     ) -> ReadySetResult<NodeProcessingResult> {
         let addr = self.local_addr();
         let gaddr = self.global_addr();
@@ -377,7 +374,7 @@ impl Node {
                         tag,
                         context: payload::ReplayPieceContext::Partial { .. },
                         ..
-                    } if !materialize_into_all => {
+                    } => {
                         // NOTE: non-partial replays shouldn't be materialized only for a
                         // particular index, and so the tag shouldn't be forwarded to the
                         // materialization code. this allows us to keep some asserts deeper in

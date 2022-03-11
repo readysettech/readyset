@@ -26,7 +26,7 @@ fn serde(c: &mut Criterion) {
         &chrono::FixedOffset::west(18_000),
         &chrono::NaiveDateTime::from_timestamp(0, 42_000_000),
     ));
-    let timestamp = DataType::Timestamp(chrono::NaiveDateTime::from_timestamp(0, 42_000_000));
+    let timestamp = DataType::from(chrono::NaiveDateTime::from_timestamp(0, 42_000_000));
 
     let time: DataType = MysqlTime::from_hmsus(false, 10, 30, 24, 100).into();
 

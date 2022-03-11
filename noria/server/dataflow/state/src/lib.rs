@@ -467,6 +467,12 @@ impl<'a> Debug for RecordResult<'a> {
     }
 }
 
+impl<'a> Default for RecordResult<'a> {
+    fn default() -> Self {
+        Self::Owned(vec![])
+    }
+}
+
 impl<'a> RecordResult<'a> {
     pub fn len(&self) -> usize {
         match *self {

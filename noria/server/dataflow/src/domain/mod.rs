@@ -383,8 +383,6 @@ impl DomainBuilder {
             aggressively_update_state_sizes: self.config.aggressively_update_state_sizes,
             replay_completed: false,
             generated_columns: Default::default(),
-            raw_replay_paths: Default::default(),
-            active_remaps: Default::default(),
 
             metrics: domain_metrics::DomainMetrics::new(self.index, self.shard.unwrap_or(0)),
 
@@ -428,32 +426,13 @@ pub struct Domain {
 
     mode: DomainMode,
     waiting: NodeMap<Waiting>,
-    /// Contains information about active upquery remaps (i.e. when the
-    /// [`Ingredient::handle_upquery`] API is used). These result in lots of secondary upqueries to
-    /// fill the hole of the original upquery that was remapped, and the state required is stored
-    /// here.
-    ///
-    /// This is a map of holes in nodes (that we're trying to fill via `handle_upquery`) to a set
-    /// of upqueries that are in-flight to fill that hole (identified by tag and keycomparison).
-    /// When all of the upqueries in the set are done, the original hole is considered filled
-    /// and the results to the original upquery can be sent.
-    ///
-    /// FIXME(eta): There are likely more efficient ways to access / store this data; currently,
-    ///             dealing with remaps involves a fair deal of heavy looping / iteration.
-    ///             See ENG-228.
-    active_remaps: HashMap<(LocalNodeIndex, Hole), HashSet<(Tag, KeyComparison)>>,
+
     /// Map of replay paths by tag
     ///
     /// Invariant: All nodes mentioned in replay paths must exist in `self.nodes`
     ///
     /// TODO(grfn): Write a doc somewhere explaining what replay paths are, and link to that here
     replay_paths: HashMap<Tag, ReplayPath>,
-    /// Raw replay paths, as returned by `replay_paths_for` in `keys.rs`. Used to inform processing
-    /// for the `handle_upquery` API.
-    ///
-    /// These include the whole replay path, not just the parts relevant to this domain, and don't
-    /// include the domain-specific information in `ReplayPath` and `ReplayPathSegment`.
-    raw_replay_paths: HashMap<Tag, Vec<IndexRef>>,
 
     /// Map from node ID to an interval tree of the keys of all current pending upqueries to that
     /// node
@@ -538,6 +517,7 @@ impl Domain {
     ///
     /// * `miss_columns` must not be empty
     /// * `miss_in` must be a node in the graph
+    #[allow(clippy::indexing_slicing)] // Documented invariant
     fn find_tags_and_replay(
         &mut self,
         miss_keys: Vec<KeyComparison>,
@@ -566,92 +546,18 @@ impl Domain {
             .cloned()
             .unwrap_or_default();
 
-        let remapped_upqueries = if self
-            .generated_columns
-            .contains(&(miss_in, miss_columns.to_owned()))
-        {
-            #[allow(clippy::indexing_slicing)] // Documented invariant
-            let mut n = self.nodes[miss_in].borrow_mut();
-            let miss_node = n.global_addr();
-            #[allow(clippy::unwrap_used)] // Documented invariant
-            let upqueries = n.handle_upquery(ColumnMiss {
-                missed_columns: ColumnRef {
-                    node: miss_node,
-                    columns: Vec1::try_from(miss_columns).unwrap(),
-                },
-                missed_key: Vec1::try_from(miss_keys.clone()).unwrap(),
-            })?;
-            drop(n);
-            if upqueries.is_empty() {
-                internal!(
-                    "columns {:?} in l{} are generated, but could not remap an upquery",
-                    miss_index,
-                    miss_in.id()
-                );
-            }
-            upqueries
-        } else {
-            vec![]
-        };
-        let mut processed = 0;
+        invariant!(
+            !tags.is_empty(),
+            "no tag found to fill missing value {:?} in {}.{:?}; available tags: {:?}",
+            miss_keys,
+            miss_in,
+            miss_index,
+            self.replay_paths_by_dst.get(miss_in)
+        );
+
         for &tag in &tags {
             // send a message to the source domain(s) responsible
             // for the chosen tag so they'll start replay.
-            let keys = if remapped_upqueries.is_empty() {
-                miss_keys.clone()
-            } else {
-                // If `handle_upquery` was used, we need to filter tags down to only include those
-                // that are mentioned in the list of remapped upqueries.
-                // We also need to twiddle the `keys` to be the key associated with the remapped
-                // upquery for the given tag.
-                #[allow(clippy::indexing_slicing)] // Tag must exist
-                let replay_path = &self.raw_replay_paths[&tag];
-                let mut new_keys = None;
-                for IndexRef { node, index } in replay_path.iter() {
-                    if let Some(index) = index {
-                        for upquery in remapped_upqueries.iter() {
-                            if *node == upquery.missed_columns.node
-                                // TODO(grfn): Why is this matching on `len()` rather than the
-                                // columns themselves?
-                                && upquery.missed_columns.columns.len() == index.columns.len()
-                                && upquery
-                                    .missed_key
-                                    .iter()
-                                    // TODO(grfn): Btrees support point keys - what if we find a
-                                    // btree first while a hash already exists?  I *think* this is
-                                    // fine, but should be double checked later
-                                    .all(|k| index.index_type.supports_key(k))
-                            {
-                                // This tag is one we want to replay along.
-                                if new_keys.is_some() {
-                                    // We should only match one remapped upquery per tag.
-                                    internal!(
-                                        "conflicting remapped upqueries while finding tags for {:?} in l{}: {:?}",
-                                        miss_index,
-                                        miss_in.id(),
-                                        remapped_upqueries
-                                    );
-                                }
-                                new_keys = Some(upquery.missed_key.clone().into_vec());
-                            }
-                        }
-                    }
-                }
-                if let Some(nk) = new_keys {
-                    for (orig_key, new_key) in
-                        miss_keys.clone().into_iter().zip(nk.clone().into_iter())
-                    {
-                        self.active_remaps
-                            .entry((miss_in, (miss_index.columns.to_owned(), orig_key)))
-                            .or_default()
-                            .insert((tag, new_key));
-                    }
-                    nk
-                } else {
-                    continue;
-                }
-            };
-            processed += 1;
             #[allow(clippy::indexing_slicing)] // Tag must exist
             if let TriggerEndpoint::Local(..) = self.replay_paths[&tag].trigger {
                 // *in theory* we could just call self.seed_all, and everything would be good.
@@ -676,7 +582,7 @@ impl Domain {
                 self.delayed_for_self
                     .push_back(Box::new(Packet::RequestPartialReplay {
                         tag,
-                        keys,
+                        keys: miss_keys.clone(),
                         unishard: true, // local replays are necessarily single-shard
                         requesting_shard: self.shard.unwrap_or(0),
                     }));
@@ -686,28 +592,9 @@ impl Domain {
             // NOTE: due to max_concurrent_replays, it may be that we only replay from *some* of
             // these ancestors now, and some later. this will cause more of the replay to be
             // buffered up at the union above us, but that's probably fine.
-            self.request_partial_replay(tag, keys)?;
+            self.request_partial_replay(tag, miss_keys.clone())?;
         }
 
-        if tags.is_empty() {
-            internal!(
-                "no tag found to fill missing value {:?} in {}.{:?}; available tags: {:?}",
-                miss_keys,
-                miss_in,
-                miss_index,
-                self.replay_paths_by_dst.get(miss_in)
-            );
-        }
-        if processed == 0 {
-            internal!(
-                "no tag found to fill missing value {:?} in {}.{:?} after remap; available tags: {:?}; remapped upqueries: {:?}",
-                miss_keys,
-                miss_in,
-                miss_index,
-                self.replay_paths_by_dst.get(miss_in),
-                remapped_upqueries
-            );
-        }
         Ok(())
     }
 
@@ -716,57 +603,99 @@ impl Domain {
         &mut self,
         miss_in: LocalNodeIndex,
         miss_columns: &[usize],
-        misses: HashSet<(KeyComparison, KeyComparison)>,
+        missed_keys: HashSet<(KeyComparison, KeyComparison)>,
         was_single_shard: bool,
         requesting_shard: usize,
         needed_for: Tag,
-    ) -> Result<(), ReadySetError> {
+    ) -> ReadySetResult<()> {
         use std::collections::hash_map::Entry;
         use std::ops::AddAssign;
-
-        let mut miss_keys = Vec::with_capacity(misses.len());
 
         // when the replay eventually succeeds, we want to re-do the replay.
         let mut w = self.waiting.remove(miss_in).unwrap_or_default();
 
         self.metrics
-            .inc_replay_misses(miss_in, needed_for, misses.len());
+            .inc_replay_misses(miss_in, needed_for, missed_keys.len());
 
-        for (replay_key, miss_key) in misses {
+        // Was this miss on a set of generated columns?
+        let is_generated = self
+            .generated_columns
+            .contains(&(miss_in, miss_columns.to_vec()));
+
+        // Map of replays we need to do, grouped by the set of columns at the *target* of the replay
+        // (which in the case of remapped upqueries might be different than the columns we missed
+        // on!)
+        let mut needed_replays: HashMap<Vec1<usize>, Vec<KeyComparison>> = Default::default();
+
+        for (replay_key, miss_key) in missed_keys {
+            let miss = ColumnMiss {
+                node: miss_in,
+                column_indices: Vec1::try_from(miss_columns).unwrap(),
+                missed_keys: vec1![miss_key],
+            };
+            let misses = if is_generated {
+                // If these columns were generated, ask the node to remap them for us
+                let misses = self.nodes[miss_in].borrow_mut().handle_upquery(miss)?;
+                trace!(?misses, "Remapped misses on generated columns");
+                invariant!(
+                    !misses.is_empty(),
+                    "columns {:?} in {} are generated, but could not remap an upquery",
+                    miss_columns,
+                    miss_in
+                );
+                misses
+            } else {
+                vec![miss]
+            };
+
             let redo = Redo {
                 tag: needed_for,
                 replay_key,
                 unishard: was_single_shard,
                 requesting_shard,
             };
-            match w.redos.entry((Vec::from(miss_columns), miss_key.clone())) {
-                Entry::Occupied(e) => {
-                    // we have already requested backfill of this key
-                    // remember to notify this Redo when backfill completes
-                    if e.into_mut().insert(redo.clone()) {
-                        // this Redo should wait for this backfill to complete before redoing
-                        w.holes.entry(redo).or_default().add_assign(1);
+            for ColumnMiss {
+                // TODO: this might be different if nodes generate columns from their parents, which
+                // we currently don't allow
+                node: _,
+                column_indices,
+                missed_keys,
+            } in misses
+            {
+                let replays = needed_replays.entry(column_indices.clone()).or_default();
+                for miss_key in missed_keys {
+                    match w
+                        .redos
+                        .entry((column_indices.clone().into(), miss_key.clone()))
+                    {
+                        Entry::Occupied(e) => {
+                            // we have already requested backfill of this key
+                            // remember to notify this Redo when backfill completes
+                            if e.into_mut().insert(redo.clone()) {
+                                // this Redo should wait for this backfill to complete before
+                                // redoing
+                                w.holes.entry(redo.clone()).or_default().add_assign(1);
+                            }
+                        }
+                        Entry::Vacant(e) => {
+                            // we haven't already requested backfill of this key
+                            // remember to notify this Redo when backfill completes
+                            e.insert(HashSet::from([redo.clone()]));
+                            // this Redo should wait for this backfill to complete before redoing
+                            w.holes.entry(redo.clone()).or_default().add_assign(1);
+
+                            replays.push(miss_key);
+                        }
                     }
-                    continue;
-                }
-                Entry::Vacant(e) => {
-                    // we haven't already requested backfill of this key
-                    let mut redos = HashSet::new();
-                    // remember to notify this Redo when backfill completes
-                    redos.insert(redo.clone());
-                    e.insert(redos);
-                    // this Redo should wait for this backfill to complete before redoing
-                    w.holes.entry(redo).or_default().add_assign(1);
                 }
             }
-            miss_keys.push(miss_key);
         }
 
         self.waiting.insert(miss_in, w);
 
-        if !miss_keys.is_empty() {
-            self.find_tags_and_replay(miss_keys, miss_columns, miss_in)?
-        };
+        for (columns, keys) in needed_replays {
+            self.find_tags_and_replay(keys, &columns, miss_in)?
+        }
 
         Ok(())
     }
@@ -1028,7 +957,6 @@ impl Domain {
                 true,
                 None,
                 executor,
-                false,
             )?;
             assert_eq!(captured.len(), 0);
             self.process_ptimes.stop();
@@ -1614,20 +1542,21 @@ impl Domain {
                 notify_done,
                 partial_unicast_sharder,
                 trigger,
-                raw_path,
             } => {
                 if notify_done {
                     debug!(
-                        path = %PrettyReplayPath(&path),
                         ?tag,
+                        ?source,
+                        path = %PrettyReplayPath(&path),
                         "told about terminating replay path",
                     );
                     // NOTE: we set self.replaying_to when we first receive a replay with
                     // this tag
                 } else {
                     debug!(
-                        path = %PrettyReplayPath(&path),
                         ?tag,
+                        ?source,
+                        path = %PrettyReplayPath(&path),
                         "told about replay path"
                     );
                 }
@@ -1690,7 +1619,6 @@ impl Domain {
                         trigger,
                     },
                 );
-                self.raw_replay_paths.insert(tag, raw_path);
                 Ok(None)
             }
             DomainRequest::StartReplay { tag, from } => {
@@ -2505,14 +2433,14 @@ impl Domain {
                         .as_reader()
                         .map(|r| r.is_materialized())
                         .unwrap_or(false);
+                    // Is the destination of this replay path within this domain the *target* of the
+                    // replay, rather than just an egress?
                     let dst_is_target = !self
                         .nodes
                         .get(dst)
                         .ok_or_else(|| ReadySetError::NoSuchNode(dst.id()))?
                         .borrow()
                         .is_sender();
-                    let mut holes_for_remap = vec![];
-                    let mut remap_holes_mark_filled = vec![];
 
                     if dst_is_target {
                         // prune keys and data for keys we're not waiting for
@@ -2523,74 +2451,13 @@ impl Domain {
                             let had = for_keys.len();
                             let partial_index = path.last().partial_index.as_ref().unwrap();
                             if let Some(w) = self.waiting.get(dst) {
-                                let mut remapped_keys_to_holes = vec![];
-                                // Scan the list of active upquery maps to see if this replay is
-                                // going to fill part of a remapped hole.
-                                for ((_, hole), tag_keys) in self
-                                    .active_remaps
-                                    .iter()
-                                    .filter(|(&(miss_in, ..), _)| miss_in == dst)
-                                {
-                                    // Find keys that are relevant to the tag we're replaying along.
-                                    let keys_for_this_tag = tag_keys
-                                        .iter()
-                                        .filter(|&(t, _)| tag == *t)
-                                        .map(|(_, keyc)| keyc.clone())
-                                        .collect::<HashSet<_>>();
-                                    // Get the total number of keys required to fill the remapped
-                                    // hole, including the `keys_for_this_tag`. This becomes
-                                    // relevant later.
-                                    let total_keys = tag_keys.len();
-                                    if !keys_for_this_tag.is_empty() {
-                                        // If we get here, the `hole` requires the
-                                        // `keys_for_this_tag`
-                                        // to be filled before it gets filled.
-                                        remapped_keys_to_holes.push((
-                                            keys_for_this_tag,
-                                            hole.clone(),
-                                            total_keys,
-                                        ));
-                                    }
-                                }
-                                // If we didn't find any remaps for this tag, it's probably just a
-                                // regular replay.
-                                if remapped_keys_to_holes.is_empty() {
-                                    // discard all the keys that we aren't waiting for
-                                    for_keys.retain(|k| {
-                                        w.redos.contains_key(&(
-                                            partial_index.columns.to_owned(),
-                                            k.clone(),
-                                        ))
-                                    });
-                                } else {
-                                    // discard keys that won't fill any remapped holes
-                                    for_keys.retain(|k| {
-                                        remapped_keys_to_holes
-                                            .iter()
-                                            .any(|(keys, ..)| keys.contains(k))
-                                    });
-                                    for (keys_for_hole, hole, total_keys) in remapped_keys_to_holes
-                                    {
-                                        let filled_keys_count = for_keys
-                                            .iter()
-                                            .filter(|k| keys_for_hole.contains(k))
-                                            .count();
-                                        if filled_keys_count == 0 {
-                                            // we won't fill any of this hole with `for_keys`, so
-                                            // ignore it
-                                            continue;
-                                        }
-                                        holes_for_remap.push(hole.clone());
-                                        // if the keys we'll fill with this replay fully fill the
-                                        // `hole`...
-                                        if total_keys - filled_keys_count == 0 {
-                                            // ...we need to remember to mark the hole as filled
-                                            // before doing the replay, because the ingredient will
-                                            // give us some records to materialize
-                                            remap_holes_mark_filled.push(hole);
-                                        }
-                                    }
-                                }
+                                // discard all the keys that we aren't waiting for
+                                for_keys.retain(|k| {
+                                    w.redos.contains_key(&(
+                                        partial_index.columns.to_owned(),
+                                        k.clone(),
+                                    ))
+                                });
                             } else if let Some(prev) = self.reader_triggered.get(dst) {
                                 // discard all the keys or subranges of keys that we aren't waiting
                                 // for
@@ -2705,7 +2572,7 @@ impl Domain {
                         assert!(!target || i == path.len() - 1);
 
                         // are we about to fill a hole?
-                        if target && (holes_for_remap.is_empty() || segment.node != dst) {
+                        if target {
                             if let Some(backfill_keys) = &backfill_keys {
                                 // mark the state for the key being replayed as *not* a hole
                                 // otherwise we'll just end up with
@@ -2732,21 +2599,6 @@ impl Domain {
                                 }
                             }
                         }
-                        let mut materialize_into_all = false;
-                        if segment.node == dst && !holes_for_remap.is_empty() {
-                            // remap case: mark the previously noted holes as filled
-                            materialize_into_all = true;
-                            if let Some(state) = self.state.get_mut(segment.node) {
-                                for (_, keys) in remap_holes_mark_filled.clone() {
-                                    // using the current tag is fine, because state impls don't
-                                    // have multiple indices for the same set of columns, so marking
-                                    // this tag as filled will mark other remapped replay paths'
-                                    // tags as filled, too
-                                    trace!(?keys, ?tag, local = %segment.node, "Marking filled");
-                                    state.mark_filled(keys, tag);
-                                }
-                            }
-                        }
                         // process the current message in this node
                         let process_result = n.process(
                             &mut m,
@@ -2757,7 +2609,6 @@ impl Domain {
                             false,
                             Some(rp),
                             ex,
-                            materialize_into_all,
                         )?;
 
                         let misses = process_result.unique_misses();
@@ -2776,13 +2627,6 @@ impl Domain {
 
                         if target {
                             if !misses.is_empty() {
-                                if !holes_for_remap.is_empty() {
-                                    // dealing with misses during remaps is possible but hard.
-                                    // no current use-cases for remaps require this to work, so we
-                                    // don't implement it yet -- fail obviously in order to prevent
-                                    // subtle bugs from happening
-                                    internal!("Ingredients are currently not allowed to miss during a remapped replay");
-                                }
                                 // we missed while processing
                                 // it's important that we clear out any partially-filled holes.
                                 if let Some(state) = self.state.get_mut(segment.node) {
@@ -3219,33 +3063,7 @@ impl Domain {
                                 if finished_partial == 0 {
                                     assert!(for_keys.is_empty());
                                 }
-                                let mut actually_finished = holes_for_remap.is_empty();
-                                let mut new_for_keys = HashSet::new();
-                                for hole in holes_for_remap {
-                                    let done = {
-                                        let waiting_for = self
-                                            .active_remaps
-                                            .get_mut(&(dst, hole.clone()))
-                                            .unwrap();
-                                        for for_key in for_keys.clone() {
-                                            waiting_for.remove(&(tag, for_key));
-                                        }
-                                        waiting_for.is_empty()
-                                    };
-                                    if done {
-                                        self.active_remaps.remove(&(dst, hole.clone()));
-                                        new_for_keys.insert(hole.1);
-                                        actually_finished = true;
-                                    }
-                                }
-                                if actually_finished {
-                                    let keys = if new_for_keys.is_empty() {
-                                        for_keys
-                                    } else {
-                                        new_for_keys
-                                    };
-                                    finished = Some((tag, dst, Some(keys)));
-                                }
+                                finished = Some((tag, dst, Some(for_keys)));
                             } else {
                                 // we're just on the replay path
                             }
