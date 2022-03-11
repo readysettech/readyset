@@ -35,15 +35,9 @@ source = '''
 type = "remap"
 inputs = ["in"]
 source = '''
-  log_json, err = parse_json!(.message)
-  if err != null {
-    log("Unable to parse JSON: " + err, level: "error")
-    . = { "host": .host, "app": .SYSLOG_IDENTIFIER, "message": .message }
-  } else {
-    . = merge(., log_json)
-    server_info = { "host": .host, "app": .SYSLOG_IDENTIFIER }
-    . = merge!(log_json, server_info)
-  }
+  log_json = parse_json!(.message)
+  server_info = { "host": .host, "app": .SYSLOG_IDENTIFIER }
+  . = merge!(log_json, server_info)
 '''
 
 [sinks.out]

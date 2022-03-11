@@ -48,19 +48,6 @@ scrape_interval_secs = 15
    .tags.job = "readyset-monitor"
 '''
 
-[transforms.app_logs]
-  type = "remap"
-  inputs = ["in"]
-  source = '''
-    if !exists(.app) {
-      if exists(.SYSLOG_IDENTIFIER) {
-        .app = .SYSLOG_IDENTIFIER
-      } else {
-        .app = "systemlogs"
-      }
-    }
-  '''
-
 [sinks.out]
 inputs = ["in"]
 type = "console"
@@ -69,13 +56,13 @@ encoding.codec = "json"
 
 [sinks.cloudwatch_logs]
 type = "aws_cloudwatch_logs"
-inputs = ["app_logs"]
+inputs = ["in"]
 create_missing_group = true
 create_missing_stream = true
 group_name = "${AWS_CLOUDFORMATION_STACK}"
 compression = "none"
 region = "${AWS_CLOUDFORMATION_REGION}"
-stream_name = "{{ app }}"
+stream_name = "readyset"
 encoding.codec = "json"
 
 [sinks.cloudwatch_metrics]
