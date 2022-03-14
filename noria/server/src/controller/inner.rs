@@ -47,7 +47,9 @@ pub struct Leader {
 
     /// The amount of time to wait for a worker request to complete.
     worker_request_timeout: Duration,
-
+    /// The amount of time to wait before restarting the replicator on error.
+    replicator_restart_timeout: Duration,
+    /// Upstream database URL to issue replicator commands to.
     pub(super) replicator_url: Option<String>,
     /// A handle to the replicator task
     pub(super) replicator_task: Option<tokio::task::JoinHandle<()>>,
@@ -105,6 +107,7 @@ impl Leader {
 
         let server_id = self.server_id;
         let authority = Arc::clone(&self.authority);
+        let replicator_restart_timeout = self.replicator_restart_timeout;
         self.replicator_task = Some(tokio::spawn(async move {
             loop {
                 let noria: noria::ControllerHandle =
@@ -129,7 +132,7 @@ impl Leader {
                     Err(err) => {
                         // On each replication error we wait for 30 seconds and then try again
                         tracing::error!(error = %err, "replication error");
-                        tokio::time::sleep(Duration::from_secs(30)).await;
+                        tokio::time::sleep(replicator_restart_timeout).await;
                     }
                 }
             }
@@ -597,6 +600,7 @@ impl Leader {
         replicator_url: Option<String>,
         server_id: Option<u32>,
         worker_request_timeout: Duration,
+        replicator_restart_timeout: Duration,
     ) -> Self {
         assert_ne!(state.config.quorum, 0);
 
@@ -622,6 +626,7 @@ impl Leader {
             authority,
             server_id,
             worker_request_timeout,
+            replicator_restart_timeout,
         }
     }
 }

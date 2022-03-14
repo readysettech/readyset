@@ -1139,7 +1139,7 @@ async fn writes_survive_restarts() {
             .await
         );
 
-        counter = counter + 1;
+        counter += 1;
     }
 
     deployment.teardown().await.unwrap();
@@ -1215,6 +1215,131 @@ async fn replication_test_inner(test: &str, query: &str, metric_label: &str) {
         sleep(Duration::from_millis(5)).await;
     }
     assert_eq!(found_metric, Some(DumpedMetricValue::Counter(1f64)));
+
+    deployment.teardown().await.unwrap();
+}
+
+#[clustertest]
+async fn correct_deployment_permissions() {
+    let mut deployment = readyset_mysql("ct_correct_deployment_permissions")
+        .with_servers(1, ServerParams::default())
+        .with_user("client", "password")
+        .quorum(1)
+        .start_with_seed(&[
+            "CREATE USER IF NOT EXISTS 'client'@'%' IDENTIFIED BY 'password';",
+            "REVOKE ALL PRIVILEGES ON *.* FROM 'client'@'%';",
+            "GRANT SELECT, RELOAD, LOCK TABLES, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'client'@'%';",
+            "FLUSH PRIVILEGES",
+            "CREATE TABLE t1 (uid INT NOT NULL, value INT NOT NULL);",
+            "INSERT INTO t1 VALUES (1, 4), (2, 5);",
+        ], Duration::from_secs(5))
+        .await
+        .unwrap();
+
+    let mut adapter = deployment.adapter().await;
+    assert!(
+        query_until_expected_from_noria(
+            &mut adapter,
+            deployment.metrics(),
+            QueryExecution::PrepareExecute(r"SELECT * FROM t1 where uid = ?", (2,)),
+            &EventuallyConsistentResults::empty_or(&[(2, 5)]),
+            Duration::from_secs(5),
+        )
+        .await
+    );
+
+    deployment.teardown().await.unwrap();
+}
+
+#[clustertest]
+async fn post_deployment_permissions_lock_table() {
+    if skip_slow_tests() {
+        return;
+    }
+
+    let mut deployment = readyset_mysql("ct_post_deployment_permissions_lock_table")
+        .with_servers(1, ServerParams::default())
+        .with_user("client", "password")
+        .replicator_restart_timeout(5)
+        .start_with_seed(&[
+            "CREATE USER IF NOT EXISTS 'client'@'%' IDENTIFIED BY 'password';",
+            "REVOKE ALL PRIVILEGES ON *.* FROM 'client'@'%';",
+            "GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'client'@'%';",
+            "FLUSH PRIVILEGES",
+            "CREATE TABLE t1 (uid INT NOT NULL, value INT NOT NULL);",
+            "INSERT INTO t1 VALUES (1, 4), (2, 5);",
+        ], Duration::from_secs(5))
+        .await
+        .unwrap();
+
+    let mut upstream = deployment.upstream().await;
+    upstream
+        .query_drop("GRANT LOCK TABLES ON *.* TO 'client'@'%';")
+        .await
+        .unwrap();
+
+    // Time for replication to work, 4x the replicator restart timeout.
+    sleep(Duration::from_secs(20)).await;
+
+    let mut adapter = deployment.adapter().await;
+    assert!(
+        query_until_expected_from_noria(
+            &mut adapter,
+            deployment.metrics(),
+            QueryExecution::PrepareExecute(r"SELECT * FROM t1 where uid = ?", (2,)),
+            &EventuallyConsistentResults::empty_or(&[(2, 5)]),
+            Duration::from_secs(20),
+        )
+        .await
+    );
+
+    deployment.teardown().await.unwrap();
+}
+
+#[clustertest]
+async fn post_deployment_permissions_replication() {
+    if skip_slow_tests() {
+        return;
+    }
+
+    let mut deployment = readyset_mysql("ct_post_deployment_permissions_replication")
+        .with_servers(1, ServerParams::default())
+        .with_user("client", "password")
+        .replicator_restart_timeout(5)
+        .start_with_seed(
+            &[
+                "CREATE USER IF NOT EXISTS 'client'@'%' IDENTIFIED BY 'password';",
+                "REVOKE ALL PRIVILEGES ON *.* FROM 'client'@'%';",
+                "GRANT SELECT, RELOAD, LOCK TABLES, SHOW DATABASES ON *.* TO 'client'@'%';",
+                "FLUSH PRIVILEGES",
+                "CREATE TABLE t1 (uid INT NOT NULL, value INT NOT NULL);",
+                "INSERT INTO t1 VALUES (1, 4), (2, 5);",
+            ],
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+
+    let mut upstream = deployment.upstream().await;
+    upstream
+        .query_drop("GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'client'@'%';")
+        .await
+        .unwrap();
+
+    // Time for replication to work, 4x the replicator restart timeout.
+    sleep(Duration::from_secs(20)).await;
+
+    let mut adapter = deployment.adapter().await;
+    assert!(
+        query_until_expected_from_noria(
+            &mut adapter,
+            deployment.metrics(),
+            QueryExecution::PrepareExecute(r"SELECT * FROM t1 where uid = ?", (2,)),
+            &EventuallyConsistentResults::empty_or(&[(2, 5)]),
+            Duration::from_secs(20),
+        )
+        .await
+    );
 
     deployment.teardown().await.unwrap();
 }

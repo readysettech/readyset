@@ -487,6 +487,8 @@ pub struct Config {
     /// The duration to wait before canceling a task waiting on a worker request. Worker requests
     /// are typically issued as part of migrations.
     pub(crate) worker_request_timeout: Duration,
+    // The duration to wait after a failure of the replication task before restarting it.
+    pub(crate) replicator_restart_timeout: Duration,
 }
 
 impl Default for Config {
@@ -518,6 +520,7 @@ impl Default for Config {
             keep_prior_recipes: true,
             upquery_timeout: Duration::from_millis(5000),
             worker_request_timeout: Duration::from_millis(1800000),
+            replicator_restart_timeout: Duration::from_secs(30),
         }
     }
 }

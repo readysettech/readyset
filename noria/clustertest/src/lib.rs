@@ -361,6 +361,12 @@ pub struct DeploymentBuilder {
     /// that query has continously failed for query_max_failure_seconds.
     /// None if not enabled.
     fallback_recovery_seconds: Option<u64>,
+    /// Optional username for the MySQL user.
+    mysql_user: Option<String>,
+    /// Optional password for the MySQL user.
+    mysql_pass: Option<String>,
+    /// Replicator restart timeout in seconds.
+    replicator_restart_timeout: Option<u64>,
 }
 
 impl DeploymentBuilder {
@@ -399,6 +405,9 @@ impl DeploymentBuilder {
             dry_run_migration_interval: None,
             query_max_failure_seconds: None,
             fallback_recovery_seconds: None,
+            mysql_user: None,
+            mysql_pass: None,
+            replicator_restart_timeout: None,
         }
     }
 
@@ -483,6 +492,21 @@ impl DeploymentBuilder {
         self
     }
 
+    /// Sets the value of the MySQL user and password to use for the upstream database in the
+    /// adapter and the server. The upstream connection returned will always be the root connection
+    /// to allow making changes without worrying about permissions to the upstream database.
+    pub fn with_user(mut self, user: &str, pass: &str) -> Self {
+        self.mysql_user = Some(user.to_string());
+        self.mysql_pass = Some(pass.to_string());
+        self
+    }
+
+    /// Sets the amount of time that the replicator should wait before restarting in seconds.
+    pub fn replicator_restart_timeout(mut self, secs: u64) -> Self {
+        self.replicator_restart_timeout = Some(secs);
+        self
+    }
+
     /// Checks the set of deployment params for invalid configurations
     fn check_deployment_params(&self) -> anyhow::Result<()> {
         match &self.primary_region {
@@ -513,26 +537,60 @@ impl DeploymentBuilder {
         Ok(())
     }
 
-    /// Creates the local multi-process deployment from the set of parameters
-    /// specified in the builder.
-    pub async fn start(self) -> anyhow::Result<DeploymentHandle> {
+    /// Starts the local multi-process deployment after running a set of commands in the
+    /// upstream database. This can be useful for checking snapshotting properties. This also
+    /// includes the `leader_timeout` parameter, how long to wait for the leader to be ready,
+    /// since certain configurations may make it so that the leader is *never* ready.
+    pub async fn start_with_seed<'a, Q>(
+        self,
+        cmds: &[Q],
+        leader_timeout: Duration,
+    ) -> anyhow::Result<DeploymentHandle>
+    where
+        Q: AsRef<str> + Send + Sync + 'a,
+    {
         self.check_deployment_params()?;
         let mut port = get_next_good_port(None);
         // If this deployment includes binlog replication and a mysql instance.
         let mut upstream_mysql_addr = None;
-        if self.mysql {
-            let addr = format!(
+        let server_upstream = if self.mysql {
+            let root_addr = format!(
                 "mysql://root:{}@{}:{}",
                 &self.mysql_root_password, &self.mysql_host, &self.mysql_port
             );
-            let opts = mysql_async::Opts::from_url(&addr).unwrap();
+            upstream_mysql_addr = Some(format!("{}/{}", &root_addr, &self.name));
+            let opts = mysql_async::Opts::from_url(&root_addr).unwrap();
             let mut conn = mysql_async::Conn::new(opts).await.unwrap();
             let _ = conn
-                .query_drop(format!("CREATE DATABASE {};", &self.name))
+                .query_drop(format!(
+                    "CREATE DATABASE {}; USE {}",
+                    &self.name, &self.name
+                ))
                 .await
                 .unwrap();
-            upstream_mysql_addr = Some(format!("{}/{}", &addr, &self.name));
-        }
+
+            for c in cmds {
+                conn.query_drop(&c).await?;
+            }
+
+            let user = self
+                .mysql_user
+                .clone()
+                .unwrap_or_else(|| "root".to_string());
+            let pass = self
+                .mysql_pass
+                .clone()
+                .unwrap_or_else(|| self.mysql_root_password.clone());
+
+            let user_addr = format!(
+                "mysql://{}:{}@{}:{}",
+                &user, &pass, &self.mysql_host, &self.mysql_port
+            );
+
+            Some(format!("{}/{}", &user_addr, &self.name))
+        } else {
+            None
+        };
 
         // Create the noria-server instances.
         let mut handles = HashMap::new();
@@ -548,7 +606,8 @@ impl DeploymentBuilder {
                 &self.authority_address,
                 &self.authority.to_string(),
                 port,
-                upstream_mysql_addr.as_ref(),
+                server_upstream.as_ref(),
+                self.replicator_restart_timeout,
             )?;
 
             handles.insert(handle.addr.clone(), handle);
@@ -581,7 +640,7 @@ impl DeploymentBuilder {
                 &self.authority.to_string(),
                 port,
                 metrics_port,
-                upstream_mysql_addr.as_ref(),
+                server_upstream.as_ref(),
                 self.async_migration_interval,
                 self.dry_run_migration_interval,
                 self.query_max_failure_seconds,
@@ -612,12 +671,20 @@ impl DeploymentBuilder {
             primary_region: self.primary_region,
             port,
             mysql_adapter: mysql_adapter_handle,
+            replicator_restart_timeout: self.replicator_restart_timeout,
         };
 
         handle.wait_for_workers(Duration::from_secs(90)).await?;
-        handle.backend_ready(Duration::from_secs(90)).await?;
+        handle.backend_ready(leader_timeout).await?;
 
         Ok(handle)
+    }
+
+    /// Creates the local multi-process deployment from the set of parameters
+    /// specified in the builder.
+    pub async fn start(self) -> anyhow::Result<DeploymentHandle> {
+        self.start_with_seed::<String>(&[], Duration::from_secs(90))
+            .await
     }
 }
 
@@ -699,6 +766,8 @@ pub struct DeploymentHandle {
     /// Holds a handle to the mysql adapter if this deployment includes
     /// a mysql adapter.
     mysql_adapter: Option<AdapterHandle>,
+    /// Replicator restart timeout in seconds.
+    replicator_restart_timeout: Option<u64>,
 }
 
 impl DeploymentHandle {
@@ -802,6 +871,7 @@ impl DeploymentHandle {
             &self.authority.to_string(),
             port,
             self.upstream_mysql_addr.as_ref(),
+            self.replicator_restart_timeout,
         )?;
         let server_addr = handle.addr.clone();
         self.noria_server_handles
@@ -939,6 +1009,7 @@ fn start_server(
     authority: &str,
     port: u16,
     mysql: Option<&String>,
+    replicator_restart_timeout: Option<u64>,
 ) -> Result<ServerHandle> {
     let mut builder = NoriaServerBuilder::new(noria_server_path)
         .deployment(deployment_name)
@@ -963,6 +1034,9 @@ fn start_server(
     }
     if let Some(mysql) = mysql {
         builder = builder.mysql(mysql);
+    }
+    if let Some(t) = replicator_restart_timeout {
+        builder = builder.replicator_restart_timeout(t);
     }
     let addr = Url::parse(&format!("http://127.0.0.1:{}", port)).unwrap();
     Ok(ServerHandle {
