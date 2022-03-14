@@ -207,7 +207,7 @@ impl MySqlReplicator {
     {
         let mut conn = self.pool.get_conn().await?;
         let query = format!("LOCK TABLES `{}` READ", name);
-        conn.query_drop(query).await.unwrap();
+        conn.query_drop(query).await?;
         Ok(conn)
     }
 
