@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
+use dataflow_state::SnapshotMode;
 use itertools::Itertools;
 use launchpad::Indices;
 use maplit::hashmap;
@@ -20,18 +21,6 @@ use crate::processing::LookupIndex;
 pub enum SetSnapshotMode {
     EnterSnapshotMode,
     FinishSnapshotMode,
-}
-
-#[derive(PartialEq, Clone, Copy)]
-pub enum SnapshotMode {
-    SnapshotModeEnabled,
-    SnapshotModeDisabled,
-}
-
-impl SnapshotMode {
-    pub fn is_enabled(&self) -> bool {
-        matches!(self, SnapshotMode::SnapshotModeEnabled)
-    }
 }
 
 /// A batch of writes to be persisted to the state backing a [`Base`] node
@@ -571,8 +560,9 @@ mod tests {
     mod process {
         use std::convert::TryInto;
 
+        use dataflow_state::MaterializedNodeState;
+
         use super::*;
-        use crate::state::MaterializedNodeState;
 
         fn test_lots_of_changes_in_same_batch(mut state: MaterializedNodeState) {
             use crate::node;

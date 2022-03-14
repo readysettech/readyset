@@ -294,12 +294,12 @@ impl Ingredient for Project {
 mod tests {
     use std::convert::TryFrom;
 
+    use dataflow_state::MaterializedNodeState;
     use nom_sql::BinaryOperator;
     use Expression::{Column, Literal, Op};
 
     use super::*;
     use crate::ops;
-    use crate::state::MaterializedNodeState;
 
     fn setup(materialized: bool, all: bool, add: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();

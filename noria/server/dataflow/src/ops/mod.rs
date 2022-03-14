@@ -208,12 +208,12 @@ pub mod test {
     use std::cell;
     use std::collections::HashMap;
 
+    use dataflow_state::MaterializedNodeState;
     use petgraph::graph::NodeIndex;
 
     use crate::node;
     use crate::prelude::*;
     use crate::processing::LookupIndex;
-    use crate::state::MaterializedNodeState;
 
     pub(super) struct MockGraph {
         graph: Graph,

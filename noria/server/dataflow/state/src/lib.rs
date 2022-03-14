@@ -1,3 +1,5 @@
+#![feature(stmt_expr_attributes, bound_map, iter_order_by, bound_as_ref)]
+
 mod keyed_state;
 mod memory_state;
 mod mk_key;
@@ -12,31 +14,33 @@ use std::rc::Rc;
 use std::vec;
 
 use ahash::RandomState;
-use common::SizeOf;
+use common::{KeyType, RangeKey, Records, SizeOf, Tag};
 use derive_more::From;
 use hashbag::HashBag;
+use noria::internal::Index;
 use noria::replication::ReplicationOffset;
 use noria::KeyComparison;
+use noria_data::DataType;
+use noria_errors::ReadySetResult;
 pub use partial_map::PartialMap;
-#[cfg(feature = "bench")]
-pub use persistent_state::bench;
 
-pub(crate) use self::memory_state::MemoryState;
-pub(crate) use self::persistent_state::PersistentState;
-use crate::prelude::*;
+pub use self::memory_state::MemoryState;
+pub use self::persistent_state::{
+    DurabilityMode, PersistenceParameters, PersistentState, SnapshotMode,
+};
 
 /// Information about state evicted via a call to [`State::evict_bytes`]
-pub(crate) struct StateEvicted<'a> {
+pub struct StateEvicted<'a> {
     /// The index that was evicted from
-    pub(crate) index: &'a Index,
+    pub index: &'a Index,
     /// The keys that were evicted
-    pub(crate) keys_evicted: Vec<Vec<DataType>>,
+    pub keys_evicted: Vec<Vec<DataType>>,
     /// The number of bytes removed from the state
-    pub(crate) bytes_freed: u64,
+    pub bytes_freed: u64,
 }
 
 /// The state of an individual, non-reader node in the graph
-pub(crate) enum MaterializedNodeState {
+pub enum MaterializedNodeState {
     /// The state that stores all the materialized rows in-memory.
     Memory(MemoryState),
     /// The state that stores all the materialized rows in a persistent
@@ -68,7 +72,7 @@ pub(crate) enum MaterializedNodeState {
 /// [`add_weak_key`]: State::add_weak_key
 /// [`lookup_weak`]: State::lookup_weak
 /// [weak-keys-doc]: https://docs.google.com/document/d/1JFyvA_3GhMaTewaR0Bsk4N8uhzOwMtB0uH7dD4gJvoQ
-pub(crate) trait State: SizeOf + Send {
+pub trait State: SizeOf + Send {
     /// Add an index of the given type, keyed by the given columns and replayed to by the given
     /// partial tags.
     fn add_key(&mut self, index: Index, tags: Option<Vec<Tag>>);
@@ -365,9 +369,9 @@ impl State for MaterializedNodeState {
 }
 
 #[derive(Debug, Hash, PartialEq, Eq)]
-pub(crate) struct Row(Rc<Vec<DataType>>);
+pub struct Row(Rc<Vec<DataType>>);
 
-pub(crate) type Rows = HashBag<Row, RandomState>;
+pub type Rows = HashBag<Row, RandomState>;
 
 unsafe impl Send for Row {}
 
@@ -376,7 +380,7 @@ impl Row {
     /// and have two `Row`s with an inner Rc being sent to two different threads leading
     /// to undefined behaviour. In the context of `State` it is only safe because all references
     /// to the same row always belong to the same state.
-    pub(in crate::state) unsafe fn clone(&self) -> Self {
+    pub(crate) unsafe fn clone(&self) -> Self {
         Row(Rc::clone(&self.0))
     }
 }
@@ -427,7 +431,7 @@ impl SizeOf for Row {
 
 /// An std::borrow::Cow-like wrapper around a collection of rows.
 #[derive(From)]
-pub(crate) enum RecordResult<'a> {
+pub enum RecordResult<'a> {
     Borrowed(&'a HashBag<Row, RandomState>),
     #[from(ignore)]
     References(Vec<&'a Row>),
@@ -464,7 +468,7 @@ impl<'a> Debug for RecordResult<'a> {
 }
 
 impl<'a> RecordResult<'a> {
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         match *self {
             RecordResult::Borrowed(rs) => rs.len(),
             RecordResult::Owned(ref rs) => rs.len(),
@@ -472,7 +476,7 @@ impl<'a> RecordResult<'a> {
         }
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         match *self {
             RecordResult::Borrowed(rs) => rs.is_empty(),
             RecordResult::Owned(ref rs) => rs.is_empty(),
@@ -480,7 +484,7 @@ impl<'a> RecordResult<'a> {
         }
     }
 
-    pub(crate) fn retain<F>(&mut self, func: F)
+    pub fn retain<F>(&mut self, func: F)
     where
         F: Fn(&[DataType]) -> bool,
     {
@@ -518,7 +522,7 @@ impl<'a> IntoIterator for RecordResult<'a> {
     }
 }
 
-pub(crate) enum RecordResultIterator<'a> {
+pub enum RecordResultIterator<'a> {
     Owned(vec::IntoIter<Vec<DataType>>),
     Borrowed(hashbag::Iter<'a, Row>),
     References(vec::IntoIter<&'a Row>),
@@ -535,7 +539,7 @@ impl<'a> Iterator for RecordResultIterator<'a> {
     }
 }
 
-pub(crate) enum LookupResult<'a> {
+pub enum LookupResult<'a> {
     Some(RecordResult<'a>),
     Missing,
 }
@@ -567,10 +571,10 @@ impl<'a> LookupResult<'a> {
     }
 }
 
-pub(crate) type Misses = Vec<(Bound<Vec<DataType>>, Bound<Vec<DataType>>)>;
+pub type Misses = Vec<(Bound<Vec<DataType>>, Bound<Vec<DataType>>)>;
 
 #[derive(Eq, PartialEq, Debug)]
-pub(crate) enum RangeLookupResult<'a> {
+pub enum RangeLookupResult<'a> {
     Some(RecordResult<'a>),
     /// We encountered a miss in some partial state
     Missing(Misses),

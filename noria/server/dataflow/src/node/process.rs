@@ -2,18 +2,18 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::mem;
 
+use dataflow_state::{MaterializedNodeState, SnapshotMode};
 use noria::consistency::Timestamp;
 use noria::replication::ReplicationOffset;
 use noria::{KeyComparison, PacketData, ReadySetError};
 use noria_errors::ReadySetResult;
 use tracing::{debug_span, trace};
 
-use crate::node::special::base::{BaseWrite, SetSnapshotMode, SnapshotMode};
+use crate::node::special::base::{BaseWrite, SetSnapshotMode};
 use crate::node::NodeType;
 use crate::payload;
 use crate::prelude::*;
 use crate::processing::{MissLookupKey, MissReplayKey};
-use crate::state::MaterializedNodeState;
 
 /// The results of running a forward pass on a node
 #[derive(Debug, PartialEq, Eq, Default)]
@@ -143,7 +143,7 @@ impl Node {
                         let snapshot_mode = state
                             .get(addr)
                             .and_then(|s| s.as_persistent())
-                            .map(|p| p.snapshot_mode)
+                            .map(|p| p.snapshot_mode())
                             .unwrap_or(SnapshotMode::SnapshotModeDisabled);
 
                         let BaseWrite {

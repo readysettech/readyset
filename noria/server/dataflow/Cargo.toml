@@ -68,6 +68,7 @@ noria-data = { path = "../../data" }
 reader_map = { path = "reader_map" }
 partial_map = { path = "partial_map" }
 failpoint-macros = { path = "../../../failpoint-macros" }
+dataflow_state = { path = "state" }
 
 [dev-dependencies]
 pretty_assertions = "0.7.2"

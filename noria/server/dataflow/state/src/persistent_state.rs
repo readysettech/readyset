@@ -66,22 +66,26 @@ use std::cmp::Ordering;
 use std::fs;
 use std::io::Read;
 use std::ops::Bound;
+use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use bincode::Options;
-use common::SizeOf;
+use common::{IndexType, KeyType, RangeKey, Record, Records, SizeOf, Tag};
+use noria::internal::Index;
 use noria::replication::ReplicationOffset;
 use noria::KeyComparison;
+use noria_data::DataType;
+use noria_errors::{ReadySetError, ReadySetResult};
 use rocksdb::{self, PlainTableFactoryOptions, SliceTransform, WriteBatch};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tempfile::{tempdir, TempDir};
 use test_strategy::Arbitrary;
+use thiserror::Error;
 use tracing::{error, info, warn};
 
-use crate::node::special::base::SnapshotMode;
-use crate::prelude::*;
-use crate::state::{RangeLookupResult, RecordResult, State};
+use crate::{LookupResult, RangeLookupResult, RecordResult, State};
 
 // Incremented on each PersistentState initialization so that IndexSeq
 // can be used to create unique identifiers for rows.
@@ -170,6 +174,103 @@ fn increment_epoch(db: &rocksdb::DB) -> PersistentMeta<'static> {
     meta
 }
 
+#[derive(PartialEq, Clone, Copy)]
+pub enum SnapshotMode {
+    SnapshotModeEnabled,
+    SnapshotModeDisabled,
+}
+
+impl SnapshotMode {
+    pub fn is_enabled(&self) -> bool {
+        matches!(self, SnapshotMode::SnapshotModeEnabled)
+    }
+}
+
+/// Indicates to what degree updates should be persisted.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum DurabilityMode {
+    /// Don't do any durability
+    MemoryOnly,
+    /// Delete any log files on exit. Useful mainly for tests.
+    DeleteOnExit,
+    /// Persist updates to disk, and don't delete them later.
+    Permanent,
+}
+
+#[derive(Debug, Error)]
+#[error("Invalid durability mode; expected one of persistent, ephemeral, or memory")]
+pub struct InvalidDurabilityMode;
+
+impl FromStr for DurabilityMode {
+    type Err = InvalidDurabilityMode;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "persistent" => Ok(Self::Permanent),
+            "ephemeral" => Ok(Self::DeleteOnExit),
+            "memory" => Ok(Self::MemoryOnly),
+            _ => Err(InvalidDurabilityMode),
+        }
+    }
+}
+
+/// Parameters to control the operation of GroupCommitQueue.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PersistenceParameters {
+    /// Whether the output files should be deleted when the GroupCommitQueue is dropped.
+    pub mode: DurabilityMode,
+    /// Filename prefix for the RocksDB database folder
+    pub db_filename_prefix: String,
+    /// Number of background threads PersistentState can use (shared acrosss all worker threads).
+    pub persistence_threads: i32,
+    /// An optional path to a directory where to store the DB files, if None will be stored in the
+    /// current working directory
+    pub db_dir: Option<PathBuf>,
+}
+
+impl Default for PersistenceParameters {
+    fn default() -> Self {
+        Self {
+            mode: DurabilityMode::MemoryOnly,
+            db_filename_prefix: String::from("soup"),
+            persistence_threads: 1,
+            db_dir: None,
+        }
+    }
+}
+
+impl PersistenceParameters {
+    /// Parameters to control the persistence mode, and parameters related to persistence.
+    ///
+    /// Three modes are available:
+    ///
+    ///  1. `DurabilityMode::Permanent`: all writes to base nodes should be written to disk.
+    ///  2. `DurabilityMode::DeleteOnExit`: all writes to base nodes are written to disk, but the
+    ///     persistent files are deleted once the `ControllerHandle` is dropped. Useful for tests.
+    ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory.
+    ///     Useful for baseline numbers.
+    pub fn new(
+        mode: DurabilityMode,
+        db_filename_prefix: Option<String>,
+        persistence_threads: i32,
+        db_dir: Option<PathBuf>,
+    ) -> Self {
+        // NOTE(fran): DO NOT impose a particular format on `db_filename_prefix`. If you need to,
+        // modify it before use, but do not make assertions on it. The reason being, we use
+        // Noria's deployment name as db filename prefix (which makes sense), and we don't
+        // want to impose any restriction on it (since sometimes we automate the deployments
+        // and deployment name generation).
+        let db_filename_prefix = db_filename_prefix.unwrap_or_else(|| String::from("soup"));
+
+        Self {
+            mode,
+            db_filename_prefix,
+            persistence_threads,
+            db_dir,
+        }
+    }
+}
+
 /// Data structure used to persist metadata about the [`PersistentState`] to rocksdb
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct PersistentMeta<'a> {
@@ -210,7 +311,7 @@ pub struct PersistentState {
     _tmpdir: Option<TempDir>,
     /// When set to true [`SnapshotMode::SnapshotModeEnabled`] compaction will be disabled and
     /// writes will bypass WAL and fsync
-    pub(crate) snapshot_mode: SnapshotMode,
+    snapshot_mode: SnapshotMode,
 }
 
 impl<'a> PersistentMeta<'a> {
@@ -986,7 +1087,7 @@ impl PersistentState {
     /// disabled and writes don't go to WAL first. When set to false manual compaction
     /// will be triggered, which may block for some time.
     /// In addition all column families will be dropped prior to entering this mode.
-    pub(crate) fn set_snapshot_mode(&mut self, snapshot: SnapshotMode) {
+    pub fn set_snapshot_mode(&mut self, snapshot: SnapshotMode) {
         self.snapshot_mode = snapshot;
 
         if snapshot.is_enabled() {
@@ -1347,7 +1448,7 @@ impl PersistentState {
 
     /// Perform a lookup for multiple equal keys at once, the results are returned in order of the
     /// original keys
-    pub(crate) fn lookup_multi<'a>(
+    pub fn lookup_multi<'a>(
         &'a self,
         columns: &[usize],
         keys: &[KeyType],
@@ -1411,6 +1512,11 @@ impl PersistentState {
 
     pub fn is_snapshotting(&self) -> bool {
         self.snapshot_mode.is_enabled()
+    }
+
+    /// Get the persistent state's snapshot mode.
+    pub fn snapshot_mode(&self) -> SnapshotMode {
+        self.snapshot_mode
     }
 }
 
@@ -2628,210 +2734,5 @@ mod tests {
                 )
             );
         }
-    }
-}
-
-#[cfg(feature = "bench")]
-pub mod bench {
-    use itertools::Itertools;
-
-    use super::*;
-
-    const UNIQUE_ENTIRES: usize = 100000;
-
-    lazy_static::lazy_static! {
-        static ref STATE: PersistentState = {
-            let mut state = PersistentState::new(
-                String::from("bench"),
-                vec![&[0usize][..], &[3][..]],
-                &PersistenceParameters::default(),
-            );
-
-            state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-            state.add_key(Index::new(IndexType::HashMap, vec![1, 2]), None);
-            state.add_key(Index::new(IndexType::HashMap, vec![3]), None);
-
-            let animals = ["Cat", "Dog", "Bat"];
-
-            for i in 0..UNIQUE_ENTIRES {
-                let rec: Vec<DataType> = vec![
-                    i.into(),
-                    animals[i % 3].into(),
-                    (i % 99).into(),
-                    i.into(),
-                ];
-                state.process_records(&mut vec![rec].into(), None, None);
-            }
-
-            state
-        };
-
-        static ref LARGE_STRINGS: Vec<String> = ["a", "b", "c"].iter().map(|s| {
-            std::iter::once(s).cycle().take(10000).join("")
-        }).collect::<Vec<_>>();
-
-        static ref STATE_LARGE_STRINGS: PersistentState = {
-            let mut state = PersistentState::new(
-                String::from("bench"),
-                vec![&[0usize][..], &[3][..]],
-                &PersistenceParameters::default(),
-            );
-
-            state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-            state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
-            state.add_key(Index::new(IndexType::HashMap, vec![3]), None);
-
-            for i in 0..UNIQUE_ENTIRES {
-                let rec: Vec<DataType> = vec![
-                    i.into(),
-                    LARGE_STRINGS[i % 3].clone().into(),
-                    (i % 99).into(),
-                    i.into(),
-                ];
-                state.process_records(&mut vec![rec].into(), None, None);
-            }
-
-            state
-        };
-    }
-
-    pub fn rocksdb_get_primary_key(c: &mut criterion::Criterion) {
-        let state = &*STATE;
-
-        let mut group = c.benchmark_group("RockDB get primary key");
-        group.bench_function("lookup_multi", |b| {
-            let mut iter = 0usize;
-            b.iter(|| {
-                criterion::black_box(state.lookup_multi(
-                    &[0],
-                    &[
-                        KeyType::Single(&iter.into()),
-                        KeyType::Single(&(iter + 100).into()),
-                        KeyType::Single(&(iter + 200).into()),
-                        KeyType::Single(&(iter + 300).into()),
-                        KeyType::Single(&(iter + 400).into()),
-                        KeyType::Single(&(iter + 500).into()),
-                        KeyType::Single(&(iter + 600).into()),
-                        KeyType::Single(&(iter + 700).into()),
-                        KeyType::Single(&(iter + 800).into()),
-                        KeyType::Single(&(iter + 900).into()),
-                    ],
-                ));
-                iter = (iter + 1) % (UNIQUE_ENTIRES - 1000);
-            })
-        });
-
-        group.bench_function("lookup", |b| {
-            let mut iter = 0usize;
-            b.iter(|| {
-                criterion::black_box({
-                    state.lookup(&[0], &KeyType::Single(&iter.into()));
-                    state.lookup(&[0], &KeyType::Single(&(iter + 100).into()));
-                    state.lookup(&[0], &KeyType::Single(&(iter + 200).into()));
-                    state.lookup(&[0], &KeyType::Single(&(iter + 300).into()));
-                    state.lookup(&[0], &KeyType::Single(&(iter + 400).into()));
-                    state.lookup(&[0], &KeyType::Single(&(iter + 500).into()));
-                    state.lookup(&[0], &KeyType::Single(&(iter + 600).into()));
-                    state.lookup(&[0], &KeyType::Single(&(iter + 700).into()));
-                    state.lookup(&[0], &KeyType::Single(&(iter + 800).into()));
-                    state.lookup(&[0], &KeyType::Single(&(iter + 900).into()));
-                });
-                iter = (iter + 1) % (UNIQUE_ENTIRES - 1000);
-            })
-        });
-
-        group.finish();
-    }
-
-    pub fn rocksdb_get_secondary_key(c: &mut criterion::Criterion) {
-        let state = &*STATE;
-
-        let mut group = c.benchmark_group("RockDB get secondary key");
-        group.bench_function("lookup_multi", |b| {
-            b.iter(|| {
-                criterion::black_box(state.lookup_multi(
-                    &[1, 2],
-                    &[
-                        KeyType::Double(("Dog".into(), 1.into())),
-                        KeyType::Double(("Cat".into(), 2.into())),
-                    ],
-                ));
-            })
-        });
-
-        group.bench_function("lookup", |b| {
-            b.iter(|| {
-                criterion::black_box({
-                    state.lookup(&[1, 2], &KeyType::Double(("Dog".into(), 1.into())));
-                    state.lookup(&[1, 2], &KeyType::Double(("Cat".into(), 2.into())));
-                })
-            })
-        });
-
-        group.finish();
-    }
-
-    pub fn rocksdb_get_secondary_unique_key(c: &mut criterion::Criterion) {
-        let state = &*STATE;
-
-        let mut group = c.benchmark_group("RockDB get secondary unique key");
-        group.bench_function("lookup_multi", |b| {
-            let mut iter = 0usize;
-            b.iter(|| {
-                criterion::black_box(state.lookup_multi(
-                    &[3],
-                    &[
-                        KeyType::Single(&iter.into()),
-                        KeyType::Single(&(iter + 100).into()),
-                        KeyType::Single(&(iter + 200).into()),
-                        KeyType::Single(&(iter + 300).into()),
-                        KeyType::Single(&(iter + 400).into()),
-                        KeyType::Single(&(iter + 500).into()),
-                        KeyType::Single(&(iter + 600).into()),
-                        KeyType::Single(&(iter + 700).into()),
-                        KeyType::Single(&(iter + 800).into()),
-                        KeyType::Single(&(iter + 900).into()),
-                    ],
-                ));
-                iter = (iter + 1) % (UNIQUE_ENTIRES - 1000);
-            })
-        });
-
-        group.bench_function("lookup", |b| {
-            let mut iter = 0usize;
-            b.iter(|| {
-                criterion::black_box({
-                    state.lookup(&[3], &KeyType::Single(&iter.into()));
-                    state.lookup(&[3], &KeyType::Single(&(iter + 100).into()));
-                    state.lookup(&[3], &KeyType::Single(&(iter + 200).into()));
-                    state.lookup(&[3], &KeyType::Single(&(iter + 300).into()));
-                    state.lookup(&[3], &KeyType::Single(&(iter + 400).into()));
-                    state.lookup(&[3], &KeyType::Single(&(iter + 500).into()));
-                    state.lookup(&[3], &KeyType::Single(&(iter + 600).into()));
-                    state.lookup(&[3], &KeyType::Single(&(iter + 700).into()));
-                    state.lookup(&[3], &KeyType::Single(&(iter + 800).into()));
-                    state.lookup(&[3], &KeyType::Single(&(iter + 900).into()));
-                });
-                iter = (iter + 1) % (UNIQUE_ENTIRES - 1000);
-            })
-        });
-
-        group.finish();
-    }
-
-    pub fn rocksdb_range_lookup_large_strings(c: &mut criterion::Criterion) {
-        let state = &*STATE_LARGE_STRINGS;
-        let key = DataType::from(LARGE_STRINGS[0].clone());
-
-        let mut group = c.benchmark_group("RocksDB with large strings");
-        group.bench_function("lookup_range", |b| {
-            b.iter(|| {
-                criterion::black_box(state.lookup_range(
-                    &[1],
-                    &RangeKey::Single((Bound::Included(&key), Bound::Unbounded)),
-                ));
-            })
-        });
-        group.finish();
     }
 }
