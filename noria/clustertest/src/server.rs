@@ -91,6 +91,10 @@ impl NoriaServerBuilder {
     pub fn mysql(self, addr: &str) -> Self {
         self.push_arg("--replication-url", addr)
     }
+
+    pub fn replicator_restart_timeout(self, addr: u64) -> Self {
+        self.push_arg("--replicator-restart-timeout", &addr.to_string())
+    }
 }
 
 /// Manages running a noria-mysql binary with the correct arguments.

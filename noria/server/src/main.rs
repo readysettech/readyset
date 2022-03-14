@@ -193,6 +193,10 @@ struct Opts {
     /// current working directory.
     #[clap(long, env = "DB_DIR")]
     db_dir: Option<PathBuf>,
+
+    /// The time to wait before restarting the replicator in seconds.
+    #[clap(long, hide = true)]
+    replicator_restart_timeout: Option<u64>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -307,6 +311,10 @@ fn main() -> anyhow::Result<()> {
 
     if let Some(url) = opts.replication_url {
         builder.set_replicator_url(url.0);
+    }
+
+    if let Some(t) = opts.replicator_restart_timeout {
+        builder.set_replicator_restart_timeout(Duration::from_secs(t));
     }
 
     let authority = opts.authority;

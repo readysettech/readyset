@@ -206,6 +206,12 @@ impl Builder {
         self.config.domain_config.table_request_timeout = value;
     }
 
+    /// Sets the value of [`Config::replicator_restart_timeout`]. See documentation of
+    /// that field for more information.
+    pub fn set_replicator_restart_timeout(&mut self, value: std::time::Duration) {
+        self.config.replicator_restart_timeout = value;
+    }
+
     /// Sets the value of [`Config::domain_config::eviction_kind`]. See documentation of
     /// that field for more information.
     pub fn set_eviction_kind(&mut self, value: dataflow::EvictionKind) {
