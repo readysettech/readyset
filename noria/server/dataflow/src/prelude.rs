@@ -13,14 +13,12 @@ pub(crate) use crate::processing::{
 pub(crate) type Edge = ();
 
 // dataflow types
+pub(crate) use dataflow_state::{LookupResult, MemoryState, PersistentState, RecordResult, State};
 pub(crate) use noria::PacketPayload;
 
 // domain local state
 pub use crate::node_map::NodeMap;
 pub(crate) use crate::payload::ReplayPathSegment;
-pub(crate) use crate::state::{
-    LookupResult, MemoryState, PersistentState, RecordResult, Row, Rows, State,
-};
 pub(crate) type StateMap = NodeMap<MaterializedNodeState>;
 pub type DomainNodes = NodeMap<cell::RefCell<Node>>;
 pub(crate) type ReplicaAddr = (DomainIndex, usize);
@@ -35,12 +33,13 @@ pub use crate::ops::NodeOperator;
 pub use crate::payload::Packet;
 pub use crate::Sharding;
 pub type Graph = petgraph::Graph<Node, Edge>;
+use dataflow_state::MaterializedNodeState;
+pub use dataflow_state::{DurabilityMode, PersistenceParameters};
 pub use noria_errors::*;
 pub use vec1::vec1;
 
 pub use crate::processing::{ColumnRef, ColumnSource};
-use crate::state::MaterializedNodeState;
-pub use crate::{DurabilityMode, EvictionKind, PersistenceParameters};
+pub use crate::EvictionKind;
 
 /// Channel coordinator type specialized for domains
 pub type ChannelCoordinator = noria::channel::ChannelCoordinator<(DomainIndex, usize), Box<Packet>>;

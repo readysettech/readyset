@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::{cell, cmp, mem, time};
 
 use ahash::RandomState;
+use dataflow_state::{MaterializedNodeState, RangeLookupResult};
 use failpoint_macros::failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
@@ -30,7 +31,6 @@ use crate::node::NodeProcessingResult;
 use crate::payload::{PrettyReplayPath, ReplayPieceContext, SourceSelection};
 use crate::prelude::*;
 use crate::processing::ColumnMiss;
-use crate::state::{MaterializedNodeState, RangeLookupResult};
 use crate::{DomainRequest, Readers};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

@@ -23,6 +23,7 @@ members = [
     "noria/server/sql-passes",
     "noria/server/dataflow/partial_map",
     "noria/server/dataflow/reader_map",
+    "noria/server/dataflow/state",
     "noria/applications",
     "noria/clustertest",
     "noria/clustertest/macros",

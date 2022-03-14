@@ -1,17 +1,17 @@
 use std::ops::{Bound, RangeBounds};
 use std::rc::Rc;
 
-use common::SizeOf;
+use common::{IndexType, KeyType, RangeKey, SizeOf};
 use itertools::Either;
+use noria::internal::Index;
 use noria::KeyComparison;
+use noria_data::DataType;
 use rand::prelude::*;
 use vec1::Vec1;
 
-use super::mk_key::MakeKey;
-use super::RangeLookupResult;
-use crate::prelude::*;
-use crate::state::keyed_state::KeyedState;
-use crate::state::Rows;
+use crate::keyed_state::KeyedState;
+use crate::mk_key::MakeKey;
+use crate::{LookupResult, RangeLookupResult, RecordResult, Row, Rows};
 
 /// A single index of a [`MemoryState`].
 ///

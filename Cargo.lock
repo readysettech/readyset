@@ -1683,6 +1683,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "dataflow_state"
+version = "0.0.1"
+dependencies = [
+ "ahash",
+ "anyhow",
+ "bincode",
+ "criterion",
+ "derive_more",
+ "hashbag",
+ "indexmap",
+ "itertools",
+ "launchpad",
+ "lazy_static",
+ "noria",
+ "noria-common",
+ "noria-data",
+ "noria-errors",
+ "notify",
+ "partial_map",
+ "pretty_assertions",
+ "proptest",
+ "rand 0.7.3",
+ "rocksdb",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "test-strategy",
+ "thiserror",
+ "tracing",
+ "tuple",
+ "vec1",
+]
+
+[[package]]
 name = "deployment-tools"
 version = "0.1.0"
 dependencies = [
@@ -3838,6 +3872,7 @@ dependencies = [
  "clap 3.0.4",
  "criterion",
  "dataflow_expression",
+ "dataflow_state",
  "derivative",
  "derive_more",
  "fail",

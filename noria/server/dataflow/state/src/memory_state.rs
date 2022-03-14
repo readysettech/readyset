@@ -1,16 +1,20 @@
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
-use common::SizeOf;
+use common::{IndexType, KeyType, RangeKey, Record, Records, SizeOf, Tag};
+use noria::internal::Index;
 use noria::replication::ReplicationOffset;
 use noria::KeyComparison;
+use noria_data::DataType;
+use noria_errors::ReadySetResult;
 use rand::{self, Rng};
 use tracing::trace;
 
-use super::keyed_state::KeyedState;
-use super::{RangeLookupResult, Rows, StateEvicted};
-use crate::prelude::*;
-use crate::state::single_state::SingleState;
+use crate::keyed_state::KeyedState;
+use crate::single_state::SingleState;
+use crate::{
+    LookupResult, PersistentState, RangeLookupResult, RecordResult, Row, Rows, State, StateEvicted,
+};
 
 #[derive(Default)]
 pub struct MemoryState {
@@ -347,10 +351,7 @@ impl State for MemoryState {
                 }
             }
 
-            let key_bytes = keys
-                .iter()
-                .map(|k| base_row_bytes_from_comparison(k))
-                .sum::<u64>();
+            let key_bytes = keys.iter().map(base_row_bytes_from_comparison).sum::<u64>();
 
             self.mem_size = self.mem_size.saturating_sub(bytes + key_bytes);
             (self.state[state_index].index(), bytes)
@@ -461,6 +462,8 @@ impl MemoryState {
 mod tests {
     use std::convert::TryInto;
     use std::ops::Bound;
+
+    use vec1::vec1;
 
     use super::*;
 
