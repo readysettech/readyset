@@ -8,9 +8,13 @@ extern crate pretty_assertions;
 
 pub use sql_identifier::SqlIdentifier;
 
+pub use self::alter::{
+    alter_table_statement, AlterColumnOperation, AlterTableDefinition, AlterTableStatement,
+};
 pub use self::column::{Column, ColumnConstraint, ColumnSpecification};
 pub use self::common::{
-    Double, FieldDefinitionExpression, Float, ItemPlaceholder, Literal, SqlType, TableKey,
+    Double, FieldDefinitionExpression, Float, IndexType, ItemPlaceholder, Literal, SqlType,
+    TableKey,
 };
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 pub use self::create::{

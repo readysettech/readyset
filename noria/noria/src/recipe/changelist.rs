@@ -34,8 +34,8 @@ use std::convert::TryFrom;
 use std::str::FromStr;
 
 use nom_sql::{
-    CacheInner, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
-    DropTableStatement, SelectStatement, SqlIdentifier, SqlQuery,
+    AlterTableStatement, CacheInner, CreateCacheStatement, CreateTableStatement,
+    CreateViewStatement, DropTableStatement, SelectStatement, SqlIdentifier, SqlQuery,
 };
 use noria_errors::{unsupported, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -112,6 +112,7 @@ impl FromStr for ChangeList {
                             SqlQuery::CreateTable(cts) => changes.push(Change::CreateTable(cts)),
                             SqlQuery::CreateView(cvs) => changes.push(Change::CreateView(cvs)),
                             SqlQuery::CreateCache(ccs) => changes.push(Change::CreateCache(ccs)),
+                            SqlQuery::AlterTable(ats) => changes.push(Change::AlterTable(ats)),
                             SqlQuery::DropTable(dts) => {
                                 let if_exists = dts.if_exists;
                                 changes.extend(dts.tables.into_iter().map(|t| Change::Drop {
@@ -167,6 +168,8 @@ pub enum Change {
     CreateView(CreateViewStatement),
     /// Expression that represents a `CREATE CACHE` statement.
     CreateCache(CreateCacheStatement),
+    /// Expression that represents an ALTER TABLE statement.
+    AlterTable(AlterTableStatement),
     /// The removal of a [`RecipeExpression`].
     Drop {
         /// The [`SqlIdentifier`] of the query/view to remove.
