@@ -35,12 +35,9 @@ source = '''
 type = "remap"
 inputs = ["in"]
 source = '''
+  log_json = parse_json!(.message)
   server_info = { "host": .host, "app": .SYSLOG_IDENTIFIER }
-  structured, err = parse_json(.message)
-  . = merge(., server_info)
-  if err == null {
-    . = merge!(., structured)
-  }
+  . = merge!(log_json, server_info)
 '''
 
 [sinks.out]
