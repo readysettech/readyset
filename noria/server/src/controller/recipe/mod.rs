@@ -7,17 +7,19 @@ use nom_sql::{
 };
 use noria::recipe::changelist::{Change, ChangeList};
 use noria::ActivationResult;
-use noria_errors::{internal, ReadySetError};
+use noria_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, warn};
 
 use super::sql;
+use crate::controller::recipe::alter_table::rewrite_table_definition;
 use crate::controller::recipe::registry::{ExpressionRegistry, RecipeExpression};
 use crate::controller::sql::SqlIncorporator;
 use crate::controller::Migration;
 use crate::ReuseConfigType;
 
+mod alter_table;
 pub(super) mod registry;
 
 /// The canonical SQL dialect used for central Noria server recipes. All direct clients of
@@ -237,42 +239,62 @@ impl Recipe {
                         removed.remove(&qfp.query_leaf);
                     };
                 }
-                Change::Drop { name, if_exists } => {
-                    let ni = match self.registry.remove_expression(&name) {
-                        Some(RecipeExpression::Table(cts)) => {
-                            // a base may have many dependent queries, including ones that also lost
-                            // nodes; the code handling `removed_leaves` therefore needs to take
-                            // care not to remove bases while they still
-                            // have children, or to try removing
-                            // them twice.
-                            self.inc.remove_base(&cts.table.name)?;
-                            match self.node_addr_for(&cts.table.name) {
-                                Ok(ni) => Some(ni),
-                                Err(e) => {
-                                    error!(
-                                        err = %e,
-                                        name = %cts.table.name,
-                                        "failed to remove base whose address could not be resolved",
-                                    );
-                                    internal!(
-                                    "failed to remove base {} whose address could not be resolved",
-                                    cts.table.name
-                                );
-                                }
-                            }
-                        }
-                        Some(expression) => self.inc.remove_query(expression.name())?,
+                // We process ALTER TABLE statements in the following way:
+                // 1. Create a copy of the table that is being altered. If it doesn't exist, then
+                // return an error.
+                // 2. Rewrite the table copy to reflect the changes specified by the ALTER TABLE
+                // statement.
+                // 3. Drop the original table.
+                // 4. Install the new table.
+                Change::AlterTable(ats) => {
+                    let original_expression =
+                        self.registry.get(&ats.table.name).ok_or_else(|| {
+                            internal_err(format!(
+                                "Tried to alter table {}, but table doesn't exist.",
+                                ats.table.name
+                            ))
+                        })?;
+                    let original_table = match original_expression {
+                        RecipeExpression::Table(ref table) => table,
+                        _ => internal!(
+                            "Tried to alter table {}, but that name belongs to a different expression.",
+                            ats.table.name
+                        ),
+                    };
+                    let new_table = rewrite_table_definition(&ats, original_table.clone())?;
+                    let removed_ni = self.remove_expression(&ats.table.name)?;
+                    match removed_ni {
                         None => {
-                            if !if_exists {
-                                error!("attempted to DROP {} but it does not exist", name);
-                                internal!("DROP {} does not exist", name);
-                            }
-                            None
+                            error!(table = %ats.table.name,
+                                "attempted to issue ALTER TABLE, but table does not exist");
+                            internal!(
+                                "attempted to issue ALTER TABLE, but table {} does not exist",
+                                ats.table.name
+                            );
+                        }
+                        Some(ni) => {
+                            added.remove(&ats.table.name);
+                            removed.insert(ni);
                         }
                     };
+                    let query = SqlQuery::CreateTable(new_table.clone());
+                    let new_name = new_table.table.name.clone();
+                    let qfp =
+                        self.inc
+                            .add_parsed_query(query, Some(new_name.clone()), false, mig)?;
+                    self.registry
+                        .add_query(RecipeExpression::Table(new_table))?;
+                    added.insert(new_name, qfp.query_leaf);
+                    removed.remove(&qfp.query_leaf);
+                }
+                Change::Drop { name, if_exists } => {
+                    let ni = self.remove_expression(&name)?;
                     if let Some(ni) = ni {
                         added.retain(|_, v| *v != ni);
                         removed.insert(ni);
+                    } else if !if_exists {
+                        error!(table = %name, "attempted to DROP TABLE, but table does not exist");
+                        internal!("attempted to DROP TABLE, but table {} does not exist", name);
                     }
                 }
             }
@@ -296,5 +318,38 @@ impl Recipe {
     /// Helper method to reparent a recipe. This is needed for some of t
     pub(super) fn sql_inc(&self) -> &SqlIncorporator {
         &self.inc
+    }
+
+    /// Remove the expression with the given name or alias, from the recipe.
+    pub(super) fn remove_expression(
+        &mut self,
+        name_or_alias: &SqlIdentifier,
+    ) -> ReadySetResult<Option<NodeIndex>> {
+        Ok(match self.registry.remove_expression(name_or_alias) {
+            Some(RecipeExpression::Table(cts)) => {
+                // a base may have many dependent queries, including ones that also lost
+                // nodes; the code handling `removed_leaves` therefore needs to take
+                // care not to remove bases while they still
+                // have children, or to try removing
+                // them twice.
+                self.inc.remove_base(&cts.table.name)?;
+                match self.node_addr_for(&cts.table.name) {
+                    Ok(ni) => Some(ni),
+                    Err(e) => {
+                        error!(
+                            err = %e,
+                            name = %cts.table.name,
+                            "failed to remove base whose address could not be resolved",
+                        );
+                        internal!(
+                            "failed to remove base {} whose address could not be resolved",
+                            cts.table.name
+                        );
+                    }
+                }
+            }
+            Some(expression) => self.inc.remove_query(expression.name())?,
+            None => None,
+        })
     }
 }

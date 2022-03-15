@@ -25,7 +25,9 @@ use dataflow::post_lookup::PostLookup;
 use dataflow::{DurabilityMode, Expression as DataflowExpression, PersistenceParameters};
 use futures::StreamExt;
 use itertools::Itertools;
-use nom_sql::{BinaryOperator, OrderType};
+use nom_sql::{
+    BinaryOperator, Column, ColumnConstraint, ColumnSpecification, OrderType, SqlType, TableKey,
+};
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::consistency::Timestamp;
 use noria::internal::LocalNodeIndex;
@@ -6000,7 +6002,7 @@ async fn round_unsignedbigint_to_unsignedbitint() {
     let mut g = start_simple_unsharded("round_unsignedbigint_to_unsignedbitint").await;
 
     g.extend_recipe(
-            "CREATE TABLE test (value bigint unsigned);
+        "CREATE TABLE test (value bigint unsigned);
          CREATE VIEW roundunsignedbiginttounsignedbigint AS SELECT round(value, -3) as r FROM test;".parse()
         .unwrap(),
     )
@@ -6148,8 +6150,7 @@ async fn partial_distinct() {
 async fn partial_distinct_multi() {
     let mut g = start_simple("partial_distinct_multi").await;
 
-    g.extend_recipe(
-            "CREATE TABLE test (value int, number int, k int);
+    g.extend_recipe("CREATE TABLE test (value int, number int, k int);
           CREATE CACHE distinctselectmulti FROM SELECT DISTINCT value, SUM(number) as s FROM test WHERE k = ?;".parse()
         .unwrap(),
     )
@@ -8492,6 +8493,31 @@ async fn create_and_drop_table() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn drop_and_recreate_different_columns() {
+    let mut g = start_simple("create_and_drop_table").await;
+    let create_table = "
+        # base tables
+        CREATE TABLE table_1 (column_1 INT);
+        DROP TABLE table_1;
+        CREATE TABLE table_1 (column_1 INT, column_2 INT);
+
+        CREATE CACHE t1 FROM SELECT * FROM table_1;
+    ";
+    g.extend_recipe(create_table.parse().unwrap())
+        .await
+        .unwrap();
+
+    let mut table = g.table("table_1").await.unwrap();
+    table.insert(vec![11.into(), 12.into()]).await.unwrap();
+
+    let mut view = g.view("t1").await.unwrap();
+    let results = view.lookup(&[0.into()], true).await.unwrap();
+    assert!(!results.is_empty());
+    assert_eq!(results[0][0], 11.into());
+    assert_eq!(results[0][1], 12.into());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn simple_dry_run() {
     let mut g = start_simple("simple_dry_run").await;
     let query = "
@@ -8530,4 +8556,266 @@ async fn simple_dry_run_unsupported() {
             ..
         })
     ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn simple_alter_table_add_column() {
+    let mut g = start_simple_unsharded("simple_alter_table_add_column").await;
+
+    let create_table = "
+        # base tables
+        CREATE TABLE table_1 (column_1 INT);
+        CREATE CACHE t1 FROM SELECT * FROM table_1;
+    ";
+    g.extend_recipe(create_table.parse().unwrap())
+        .await
+        .unwrap();
+
+    let mut table = g.table("table_1").await.unwrap();
+    table.insert(vec![11.into()]).await.unwrap();
+    table.insert(vec![21.into()]).await.unwrap();
+
+    let alter_table = "ALTER TABLE table_1 ADD COLUMN column_2 INT;";
+    g.extend_recipe(alter_table.parse().unwrap()).await.unwrap();
+
+    // Altering a table currently means we delete and recreate the whole thing.
+    assert!(g.view("t1").await.is_err());
+
+    let recreate_view = "CREATE CACHE t1 FROM SELECT * FROM table_1;";
+    g.extend_recipe(recreate_view.parse().unwrap())
+        .await
+        .unwrap();
+
+    let mut view = g.view("t1").await.unwrap();
+    let results = view.lookup(&[0.into()], true).await.unwrap();
+    assert!(results.is_empty());
+
+    let mut table = g.table("table_1").await.unwrap();
+    // This should fail as we currently have more columns than before
+    assert!(table.insert(vec![11.into()]).await.is_err());
+
+    table.insert(vec![11.into(), 12.into()]).await.unwrap();
+    table.insert(vec![21.into(), 22.into()]).await.unwrap();
+
+    let results = view.lookup(&[0.into()], true).await.unwrap();
+    assert!(!results.is_empty());
+    assert_eq!(results[0][0], 11.into());
+    assert_eq!(results[0][1], 12.into());
+    assert_eq!(results[1][0], 21.into());
+    assert_eq!(results[1][1], 22.into());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn simple_alter_table_drop_column() {
+    let mut g = start_simple_unsharded("simple_alter_table_drop_column").await;
+
+    let create_table = "
+        # base tables
+        CREATE TABLE table_1 (column_1 INT, column_2 INT);
+        CREATE CACHE t1 FROM SELECT * FROM table_1;
+    ";
+    g.extend_recipe(create_table.parse().unwrap())
+        .await
+        .unwrap();
+
+    let mut table = g.table("table_1").await.unwrap();
+    table.insert(vec![11.into(), 12.into()]).await.unwrap();
+    table.insert(vec![21.into(), 22.into()]).await.unwrap();
+
+    let alter_table = "ALTER TABLE table_1 DROP COLUMN column_2;";
+    g.extend_recipe(alter_table.parse().unwrap()).await.unwrap();
+
+    // Altering a table currently means we delete and recreate the whole thing.
+    assert!(g.view("t1").await.is_err());
+
+    let recreate_view = "CREATE CACHE t1 FROM SELECT * FROM table_1;";
+    g.extend_recipe(recreate_view.parse().unwrap())
+        .await
+        .unwrap();
+
+    let mut view = g.view("t1").await.unwrap();
+    let results = view.lookup(&[0.into()], true).await.unwrap();
+    assert!(results.is_empty());
+
+    let mut table = g.table("table_1").await.unwrap();
+    // This should fail as we currently have more columns than before
+    assert!(table.insert(vec![11.into(), 12.into()]).await.is_err());
+
+    table.insert(vec![11.into()]).await.unwrap();
+    table.insert(vec![21.into()]).await.unwrap();
+
+    let results = view.lookup(&[0.into()], true).await.unwrap();
+    assert!(!results.is_empty());
+    assert_eq!(results[0][0], 11.into());
+    assert_eq!(results[1][0], 21.into());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn simple_alter_table_add_key() {
+    let mut g = start_simple_unsharded("simple_alter_table_add_key").await;
+
+    let create_table = "
+        # base tables
+        CREATE TABLE table_1 (column_1 INT, column_2 INT PRIMARY KEY);
+        CREATE CACHE t1 FROM SELECT * FROM table_1;
+    ";
+    g.extend_recipe(create_table.parse().unwrap())
+        .await
+        .unwrap();
+
+    let mut table = g.table("table_1").await.unwrap();
+    // Same value for column 2
+    table
+        .insert(vec![11i32.into(), 12i32.into()])
+        .await
+        .unwrap();
+    table
+        .insert(vec![21i32.into(), 12i32.into()])
+        .await
+        .unwrap();
+
+    let alter_table = "ALTER TABLE table_1 ADD UNIQUE KEY test_key (column_2);";
+    g.extend_recipe(alter_table.parse().unwrap()).await.unwrap();
+
+    // Altering a table currently means we delete and recreate the whole thing.
+    assert!(g.view("t1").await.is_err());
+
+    let table = g.table("table_1").await.unwrap();
+    let statement = table.schema().unwrap();
+    assert_eq!(statement.table.name, "table_1");
+    let keys = statement.keys.as_ref().unwrap();
+    let column = Column {
+        name: "column_2".into(),
+        table: Some("table_1".into()),
+    };
+    match &keys[0] {
+        TableKey::PrimaryKey { name, columns } => {
+            assert_eq!(name.clone(), None);
+            assert_eq!(columns.clone(), vec![column.clone()]);
+        }
+        _ => panic!(),
+    }
+    match &keys[1] {
+        TableKey::UniqueKey {
+            name,
+            columns,
+            index_type,
+        } => {
+            assert_eq!(name.clone(), Some("test_key".into()));
+            assert_eq!(columns.clone(), vec![column]);
+            assert_eq!(index_type.clone(), None);
+        }
+        _ => panic!(),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn simple_alter_table_change_column() {
+    let mut g = start_simple_unsharded("simple_alter_table_drop_column").await;
+
+    let create_table = "
+        # base tables
+        CREATE TABLE table_1 (column_1 INT, column_2 TEXT);
+        CREATE CACHE t1 FROM SELECT * FROM table_1;
+    ";
+    g.extend_recipe(create_table.parse().unwrap())
+        .await
+        .unwrap();
+
+    let mut table = g.table("table_1").await.unwrap();
+    table.insert(vec![11i32.into(), "12".into()]).await.unwrap();
+    table.insert(vec![21i32.into(), "22".into()]).await.unwrap();
+
+    let alter_table = "ALTER TABLE table_1 CHANGE COLUMN column_2 column_2_new INT;";
+    g.extend_recipe(alter_table.parse().unwrap()).await.unwrap();
+
+    // Altering a table currently means we delete and recreate the whole thing.
+    assert!(g.view("t1").await.is_err());
+
+    let table = g.table("table_1").await.unwrap();
+    let statement = table.schema().unwrap();
+    assert_eq!(statement.table.name, "table_1");
+    let columns = &statement.fields;
+    assert_eq!(columns.len(), 2);
+    assert_eq!(
+        columns[0].clone(),
+        ColumnSpecification {
+            column: Column {
+                name: "column_1".into(),
+                table: Some("table_1".into()),
+            },
+            constraints: vec![],
+            comment: None,
+            sql_type: SqlType::Int(None),
+        },
+    );
+    assert_eq!(
+        columns[1].clone(),
+        ColumnSpecification {
+            column: Column {
+                name: "column_2_new".into(),
+                table: Some("table_1".into()),
+            },
+            constraints: vec![],
+            comment: None,
+            sql_type: SqlType::Int(None),
+        },
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn simple_alter_table_alter_column() {
+    let mut g = start_simple_unsharded("simple_alter_table_drop_column").await;
+
+    let create_table = "
+        # base tables
+        CREATE TABLE table_1 (column_1 INT, column_2 INT);
+        CREATE CACHE t1 FROM SELECT * FROM table_1;
+    ";
+    g.extend_recipe(create_table.parse().unwrap())
+        .await
+        .unwrap();
+
+    let mut table = g.table("table_1").await.unwrap();
+    table.insert(vec![11i32.into(), 12.into()]).await.unwrap();
+    table.insert(vec![21i32.into(), 22.into()]).await.unwrap();
+
+    // This should fail as column 2 does not have a default value.
+    assert!(table.insert(vec![21i32.into()]).await.is_err());
+
+    let alter_table = "ALTER TABLE table_1 ALTER COLUMN column_2 SET DEFAULT 1;";
+    g.extend_recipe(alter_table.parse().unwrap()).await.unwrap();
+
+    // Altering a table currently means we delete and recreate the whole thing.
+    assert!(g.view("t1").await.is_err());
+
+    let table = g.table("table_1").await.unwrap();
+    let statement = table.schema().unwrap();
+    assert_eq!(statement.table.name, "table_1");
+    let columns = &statement.fields;
+    assert_eq!(columns.len(), 2);
+    assert_eq!(
+        columns[0].clone(),
+        ColumnSpecification {
+            column: Column {
+                name: "column_1".into(),
+                table: Some("table_1".into()),
+            },
+            constraints: vec![],
+            comment: None,
+            sql_type: SqlType::Int(None),
+        },
+    );
+    assert_eq!(
+        columns[1].clone(),
+        ColumnSpecification {
+            column: Column {
+                name: "column_2".into(),
+                table: Some("table_1".into()),
+            },
+            constraints: vec![ColumnConstraint::DefaultValue(1.into())],
+            comment: None,
+            sql_type: SqlType::Int(None),
+        },
+    );
 }
