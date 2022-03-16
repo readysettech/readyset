@@ -36,6 +36,7 @@ Metadata:
           - ReadySetMonitorInstanceType
           - ReadySetMemoryLimitGB
           - ReadySetDeploymentName
+          - ReadySetLogLevel
       - Label:
           default: DB Configuration
         Parameters:
@@ -123,6 +124,11 @@ Parameters:
     MinLength: 1
     AllowedPattern: ^[^/ ]+$
     ConstraintDescription: Must be non-empty and cannot contain slashes ("/") or spaces
+
+  ReadySetLogLevel:
+    Description: A log level directive as defined by tracing env-filter.
+    Type: String
+    Default: "info"
 
   KeyPairName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instances.
@@ -284,6 +290,7 @@ Resources:
             export CONSUL_TAG_KEY="${ConsulEc2RetryJoinTagKey}"
             export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
             export DEPLOYMENT="${ReadySetDeploymentName}"
+            export LOG_LEVEL="${ReadySetLogLevel}"
             # Connection Parameters
             export SSM_PATH_DB_PASSWORD=${SSMPathRDSDatabasePassword}
             export USERNAME=${DatabaseAdapterUsername}
@@ -491,6 +498,7 @@ Resources:
             export INITIAL_VOLUME_SIZE_GB="${ReadySetServerInitialVolumeSizeGB}"
             export AUTO_GROW_VOLUME="${ReadySetServerAutoGrowVolume}"
             export MAX_VOLUME_SIZE_GB="${ReadySetServerMaxVolumeSizeGB}"
+            export LOG_LEVEL="${ReadySetLogLevel}"
             # Connection Parameters
             export SSM_PATH_DB_PASSWORD=${SSMPathRDSDatabasePassword}
             export USERNAME=${DatabaseAdapterUsername}
