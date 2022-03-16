@@ -14,7 +14,7 @@ use noria::metrics::recorded::{self, SnapshotStatusTag};
 use noria::replication::{ReplicationOffset, ReplicationOffsets};
 use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table, TableOperation};
 use tokio::sync::Notify;
-use tracing::{debug, error, info, info_span, warn, Instrument};
+use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
 use crate::mysql_connector::{MySqlBinlogConnector, MySqlReplicator};
@@ -517,7 +517,7 @@ impl NoriaAdapter {
             let (action, pos) = self.connector.next_action(position, until.as_ref()).await?;
             *position = pos.clone();
 
-            debug!(?action);
+            trace!(?action);
 
             if let Err(err) = self.handle_action(action, pos).await {
                 error!(error = %err, "Aborting replication task on error");
