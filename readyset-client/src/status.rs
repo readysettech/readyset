@@ -11,8 +11,13 @@ use std::fmt::{self, Display};
 
 use serde::{Deserialize, Serialize};
 
+use crate::replication::ReplicationOffset;
+
 // Consts for variable names.
+
 const SNAPSHOT_STATUS_VARIABLE: &str = "Snapshot Status";
+const MAX_REPLICATION_OFFSET: &str = "Maximum Replication Offset";
+const MIN_REPLICATION_OFFSET: &str = "Minimum Replication Offset";
 
 /// ReadySetStatus holds information regarding the status of ReadySet, similar to
 /// [`SHOW STATUS`](https://dev.mysql.com/doc/refman/8.0/en/show-status.html) in MySQL.
@@ -22,15 +27,34 @@ const SNAPSHOT_STATUS_VARIABLE: &str = "Snapshot Status";
 pub struct ReadySetStatus {
     /// The snapshot status of the current leader.
     pub snapshot_status: SnapshotStatus,
-    //TODO: Include binlog position and other fields helpful for evaluating a ReadySet cluster.
+    /// The current maximum replication offset known by the leader.
+    pub max_replication_offset: Option<ReplicationOffset>,
+    /// The current minimum replication offset known by the leader.
+    pub min_replication_offset: Option<ReplicationOffset>,
 }
 
 impl From<ReadySetStatus> for Vec<(String, String)> {
     fn from(status: ReadySetStatus) -> Vec<(String, String)> {
-        vec![(
+        let mut res = vec![(
             SNAPSHOT_STATUS_VARIABLE.to_string(),
             status.snapshot_status.to_string(),
-        )]
+        )];
+
+        if let Some(replication_offset) = status.max_replication_offset {
+            res.push((
+                MAX_REPLICATION_OFFSET.to_string(),
+                replication_offset.to_string(),
+            ))
+        }
+
+        if let Some(replication_offset) = status.min_replication_offset {
+            res.push((
+                MIN_REPLICATION_OFFSET.to_string(),
+                replication_offset.to_string(),
+            ))
+        }
+
+        res
     }
 }
 

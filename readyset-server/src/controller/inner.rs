@@ -460,6 +460,14 @@ impl Leader {
                     return_serialized!(leader_ready);
                 }
                 (&Method::POST, "/status") => {
+                    let ds = self.dataflow_state_handle.read().await;
+                    let replication_offsets =
+                        if self.pending_recovery || ds.workers.len() < self.quorum {
+                            None
+                        } else {
+                            Some(ds.replication_offsets().await?)
+                        };
+
                     let status = ReadySetStatus {
                         // Use whether the leader is ready or not as a proxy for if we have
                         // completed snapshotting.
@@ -468,6 +476,13 @@ impl Leader {
                         } else {
                             SnapshotStatus::InProgress
                         },
+
+                        max_replication_offset: replication_offsets
+                            .as_ref()
+                            .and_then(|offs| offs.max_offset().ok().flatten().cloned()),
+                        min_replication_offset: replication_offsets
+                            .as_ref()
+                            .and_then(|offs| offs.min_present_offset().ok().flatten().cloned()),
                     };
                     return_serialized!(status);
                 }
