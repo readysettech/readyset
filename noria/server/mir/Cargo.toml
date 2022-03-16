@@ -20,7 +20,7 @@ regex = "1.5"
 lazy_static = "1.4"
 petgraph = { version = "0.5", features = ["serde-1"] }
 itertools = "0.10"
-tracing = { version = "0.1", features = ["release_max_level_info"] }
+tracing = { version = "0.1", features = ["release_max_level_debug"] }
 noria = { path = "../../noria" }
 noria-errors = { path = "../../errors" }
 serde = { version = "1.0.8", features = ["rc", "derive"] }

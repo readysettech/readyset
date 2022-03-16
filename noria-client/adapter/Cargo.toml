@@ -14,7 +14,7 @@ metrics = "0.18"
 metrics-exporter-prometheus = "0.8"
 tokio = { version = "1.15", features = ["signal", "rt-multi-thread", "time", "net"] }
 tokio-stream = { version = "0.1.5", features = ["net"] }
-tracing = { version = "0.1", features = ["release_max_level_info"] }
+tracing = { version = "0.1", features = ["release_max_level_debug"] }
 tracing-subscriber = "0.2.20"
 tracing-futures = "0.2.5"
 stream-cancel = "0.8.0"

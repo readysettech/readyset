@@ -38,7 +38,7 @@ tower-service = "0.3.1"
 tower-layer = "0.3.1"
 tokio-tower = "0.5.1"
 tower = { version = "0.4.6", features = ["limit", "balance", "buffer", "discover", "util", "timeout"] }
-tracing = { version = "0.1", features = ["release_max_level_info"] }
+tracing = { version = "0.1", features = ["release_max_level_debug"] }
 tracing-futures = "0.2.2"
 slab = "0.4"
 pin-project = "1.0"
