@@ -516,6 +516,7 @@ impl NoriaAdapter {
 
             let (action, pos) = self.connector.next_action(position, until.as_ref()).await?;
             *position = pos.clone();
+            debug!(?position, "Received replication action");
 
             trace!(?action);
 
@@ -525,6 +526,7 @@ impl NoriaAdapter {
                 return Err(err);
             };
             counter!(recorded::REPLICATOR_SUCCESS, 1u64);
+            debug!(?position, "Successfully applied replication action");
         }
     }
 
