@@ -656,3 +656,9 @@ Outputs:
     Value: !GetAtt ReadySetMonitorInstance.PrivateIp
     Export:
       Name: !Join ['-', [!Ref "AWS::StackName", ReadySetMonitorInstanceLANIP]]
+
+  ReadySetMySQLAdapterTargetGroupARN:
+    Description: ARN of the MySQL Adapter Target Group.
+    Value: !Ref ReadySetMySQLAdapterTargetGroup
+    Export:
+      Name: !Join ['-', [!Ref "AWS::StackName", ReadySetMySQLAdapterTargetGroupARN]]

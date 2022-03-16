@@ -147,6 +147,7 @@ RUN set -eux; \
     python3.8 -m pip install \
         awscli \
         cfn-lint
+
 # Install internal shell tools
 COPY sh-tools/ytt_apply.sh /usr/local/bin/ytt_apply.sh
 RUN chmod +x /usr/local/bin/ytt_apply.sh

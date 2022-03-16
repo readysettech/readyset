@@ -6,7 +6,7 @@ exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
 
 on_error() {
   local exit_code="$?"
-
+  journalctl -xe
   /usr/local/bin/cfn-signal-wrapper.sh "$exit_code"
 }
 
@@ -15,6 +15,7 @@ trap 'on_error' ERR
 /usr/local/bin/cfn-init-wrapper.sh
 /usr/local/bin/set-host-description.sh
 /usr/local/bin/configure-consul-client.sh
+# Possible Race Condition? 🐎
 /usr/local/bin/configure-prometheus.sh
 /usr/local/bin/configure-grafana.sh
 

@@ -91,6 +91,7 @@ data "aws_iam_policy_document" "internal-cfn-access-policy-role-document" {
       "elasticloadbalancing:DescribeListeners",
       "elasticloadbalancing:DescribeLoadBalancers",
       "elasticloadbalancing:DescribeTargetGroups",
+      "elasticloadbalancing:DescribeTargetHealth",
       "iam:AddRoleToInstanceProfile",
       "iam:AttachRolePolicy",
       "iam:AttachUserPolicy",

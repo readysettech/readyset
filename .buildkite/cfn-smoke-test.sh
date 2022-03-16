@@ -66,6 +66,58 @@ ssh -o StrictHostKeyChecking=no \
   ubuntu@"$bastion_eip" \
   basic_validation_test --help #check if we can reach the bastion box
 
+# check if we can reach the monitor and if prometheus is running
+ssh -o StrictHostKeyChecking=no \
+  -o LogLevel=ERROR \
+  -o UserKnownHostsFile=/dev/null \
+  -i ~/keys/"$key_name".pem \
+  ubuntu@"$bastion_eip" \
+  "curl -I -X GET --fail $prometheus_addr/-/healthy"
+
+# check if we can reach RDS and the database is healthy
+ssh -o StrictHostKeyChecking=no \
+  -o LogLevel=ERROR \
+  -o UserKnownHostsFile=/dev/null \
+  -i ~/keys/"$key_name".pem \
+  ubuntu@"$bastion_eip" \
+  /bin/bash << EOF
+  sudo DEBIAN_FRONTEND=noninteractive apt-get update
+  sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -o "Dpkg::Options::=--force-confdef" -o "Dpkg::Options::=--force-confold"
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install mysql-client -y -o "Dpkg::Options::=--force-confdef" -o "Dpkg::Options::=--force-confold"
+  mysqladmin ping -h $rds_host -u $adapter_db_user -p$adapter_db_pass
+  sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -y --purge mysql-client
+EOF
+
+# check if we can reach the adapters and they are healthy
+adapter_group_arn=$(echo "$stack_description" | jq -r '.Stacks[0].Outputs | .[] | select(.OutputKey == "ReadySetMySQLAdapterTargetGroupARN").OutputValue')
+
+function check_adapter_health {
+
+  local target_group_arn
+  target_group_arn=$1
+
+  local unhealthy_adapters
+  unhealthy_adapters=$(aws elbv2 describe-target-health \
+      --region us-east-2 \
+      --target-group-arn "$target_group_arn" \
+      --query 'TargetHealthDescriptions[?TargetHealth.State!=`healthy`]')
+
+  local num_unhealthy_adapters
+  num_unhealthy_adapters=$(echo "$unhealthy_adapters" | jq -r 'length')
+
+  if [ "$num_unhealthy_adapters" -gt "0" ]; then
+    echo "Some ReadySet Adapters in target group ARN weren't healthy."
+    echo "$unhealthy_adapters"
+    return 254
+  else
+    echo "All ReadySet Adapters in target group ARN are healthy."
+    return 0
+  fi
+
+}
+
+check_adapter_health "$adapter_group_arn"
+
 ssh -o StrictHostKeyChecking=no \
   -o LogLevel=ERROR \
   -o UserKnownHostsFile=/dev/null \

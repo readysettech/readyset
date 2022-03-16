@@ -1,8 +1,27 @@
-//! This program is a basic validation test that confirms the following:
-//!   - We can install DDL that creates Noria base tables.
-//!   - We can perform writes to a customer database.
-//!   - Writes to a customer database are propagated
-//!   - We can create a Noria view.
+// This program is a basic validation test that confirms the following:
+// - We can install DDL that creates Noria base tables.
+// - We can perform writes to a customer database.
+// - Writes to a customer database are propagated
+// - We can create a Noria view.
+//
+// Arguments:
+// | long                | short | env                | Description                            |
+// |---------------------|-------|--------------------|----------------------------------------|
+// | -adapter            | N/A   | N/A                | ReadySet Adapter MySQL String          |
+// | -rds                | N/A   | N/A                | MySQL DB MySQL String                  |
+// | -prometheus_address | -p    | PROMETHEUS_ADDRESS | Host and port for Prometheus API calls |
+// | -migration_mode     | N/A   | N/A                | ReadySet Migration Mode                |
+//
+// Example usage:
+// readyset_rds=mysql://$adapter_user:$adapter_pass@$rds_host:$adapter_port/$adapter_name
+// readyset_adapter=mysql://$adapter_user:$adapter_pass@$adapter_host:$adapter_port/$adapter_name
+// prometheus_addr=$prom_host:9091
+//
+// basic_validation_test
+// --adapter $readyset_adapter
+// --rds $readyset_rds
+// --prometheus-address $prometheus_addr
+// --migration-mode explicit-migration
 use std::str::FromStr;
 
 use anyhow::bail;

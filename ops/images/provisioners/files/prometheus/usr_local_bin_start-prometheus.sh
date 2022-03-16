@@ -9,6 +9,10 @@ then
   exit 1
 fi
 
+# If having issues with Consul, use the following
+# Consul *should* always return local host since vector is running locally
+#log_aggregator_address="0.0.0.0"
+
 cat > /etc/prometheus.d/prometheus.yaml <<EOF
 global:
   scrape_interval: 15s

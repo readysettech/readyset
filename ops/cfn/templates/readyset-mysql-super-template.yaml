@@ -425,3 +425,6 @@ Outputs:
     Description: Host for ReadySet connection string.
     Value: !GetAtt ReadySetMySQLStack.Outputs.ReadySetAdapterNLBDNSName
 
+  ReadySetMySQLAdapterTargetGroupARN:
+    Description: ARN of the MySQL Adapter Target Group.
+    Value: !GetAtt ReadySetMySQLStack.Outputs.ReadySetMySQLAdapterTargetGroupARN
