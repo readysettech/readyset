@@ -9,7 +9,7 @@ use noria_data::DataType;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use tokio_postgres as pgsql;
-use tracing::{debug, error};
+use tracing::{error, trace};
 
 use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
 
@@ -75,7 +75,7 @@ impl WalReader {
                 }
                 WalData::XLogData { end, data, .. } => (end, data),
                 msg => {
-                    debug!(?msg, "Unhandled message");
+                    trace!(?msg, "Unhandled message");
                     // For any other message, just keep going
                     continue;
                 }

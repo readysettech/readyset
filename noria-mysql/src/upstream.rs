@@ -11,7 +11,7 @@ use noria_client::upstream_database::NoriaCompare;
 use noria_client::{UpstreamDatabase, UpstreamPrepare};
 use noria_data::DataType;
 use noria_errors::{internal_err, ReadySetError};
-use tracing::{debug, error, info, info_span, Instrument};
+use tracing::{error, info, info_span, Instrument};
 
 use crate::schema::{convert_column, is_subtype};
 use crate::Error;
@@ -247,8 +247,6 @@ impl UpstreamDatabase for MySqlUpstream {
 
         let affected_rows = transaction.affected_rows();
         let last_insert_id = transaction.last_insert_id();
-        debug!("results : {:?}, {:?}", affected_rows, last_insert_id);
-
         let status_flags = transaction.status();
         let txid = transaction.commit_returning_gtid().await.map_err(|e| {
             internal_err(format!(

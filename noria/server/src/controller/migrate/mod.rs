@@ -70,7 +70,7 @@ pub struct StoredDomainRequest {
 
 impl StoredDomainRequest {
     pub async fn apply(self, mainline: &mut DataflowState) -> ReadySetResult<()> {
-        debug!(req=?self, "Applying domain request");
+        trace!(req=?self, "Applying domain request");
         let dom = mainline.domains.get_mut(&self.domain).ok_or_else(|| {
             ReadySetError::MigrationUnknownDomain {
                 domain_index: self.domain.index(),
