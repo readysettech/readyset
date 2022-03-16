@@ -1,14 +1,12 @@
 #!/bin/sh
 set -eux
 
-sudo apt-get install -y apt-transport-https
-sudo apt-get install -y software-properties-common wget
-wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
+curl -1fsSL https://packages.grafana.com/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/grafana-keyring.gpg
 
-echo "deb https://packages.grafana.com/enterprise/deb stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/grafana-keyring.gpg] https://packages.grafana.com/oss/deb stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list
 
 sudo DEBIAN_FRONTEND=noninteractive apt-get update
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y grafana-enterprise
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y grafana
 
 sudo install -o root -g root -m 644 \
   /tmp/grafana/etc_systemd_system_grafana-server.service \

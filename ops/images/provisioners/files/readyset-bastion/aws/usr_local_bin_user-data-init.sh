@@ -14,6 +14,6 @@ trap 'on_error' ERR
 
 /usr/local/bin/cfn-init-wrapper.sh
 /usr/local/bin/set-host-description.sh
-/usr/local/bin/configure-vector.sh || true
 /usr/local/bin/associate-eip.sh
+
 /usr/local/bin/cfn-signal-wrapper.sh 0

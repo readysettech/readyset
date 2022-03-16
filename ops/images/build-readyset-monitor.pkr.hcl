@@ -17,16 +17,6 @@ build {
   }
 
   provisioner "file" {
-    source      = "provisioners/files/vector-aggregator"
-    destination = "/tmp/"
-  }
-
-  provisioner "file" {
-    source      = "provisioners/files/vector"
-    destination = "/tmp/"
-  }
-
-  provisioner "file" {
     source      = "provisioners/files/prometheus"
     destination = "/tmp/"
   }
@@ -60,13 +50,11 @@ build {
       "provisioners/scripts/external-base/00-init.sh",
       "provisioners/scripts/external-base/10-aws.sh",
       "provisioners/scripts/external-base/20-set-host-description.sh",
-      "provisioners/scripts/consul-client/00-init.sh",
+      "provisioners/scripts/consul/00-init.sh",
       "provisioners/scripts/consul-client/10-aws.sh",
       "provisioners/scripts/node_exporter/00-init.sh",
       "provisioners/scripts/setup-data-volume/00-init.sh",
-      "provisioners/scripts/vector-aggregator/00-init.sh",
       "provisioners/scripts/vector/00-init.sh",
-      "provisioners/scripts/vector/10-aws.sh",
       "provisioners/scripts/prometheus/00-init.sh",
       "provisioners/scripts/prometheus/10-aws.sh",
       "provisioners/scripts/grafana/00-init.sh",

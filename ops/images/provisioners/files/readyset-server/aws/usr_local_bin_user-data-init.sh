@@ -13,10 +13,15 @@ on_error() {
 trap 'on_error' ERR
 
 /usr/local/bin/cfn-init-wrapper.sh
+/usr/local/bin/set-host-description.sh
 /usr/local/bin/configure-consul-client.sh
 # Build connection string from inputs
 source /usr/local/bin/get-connection-string.sh
 REPLICATION_URL=${DB_URL}
+
+export NORIA_TYPE="readyset-server"
+export PROMETHEUS_PORT=6033
+/usr/local/bin/configure-vector-agent.sh
 
 NORIA_MEMORY_BYTES=$((${NORIA_MEMORY_LIMIT_GB}<<30))
 
@@ -32,18 +37,6 @@ AUTHORITY_ADDRESS=${AUTHORITY_ADDRESS:-127.0.0.1:8500}
 LOG_LEVEL=${LOG_LEVEL:-info}
 EOF
 chmod 600 /etc/default/readyset-server
-
-IMDS_TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
-SERVER_ADDRESS=`curl -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/local-ipv4`
-
-cat >> /etc/vector.d/env <<EOF
-NORIA_DEPLOYMENT=${DEPLOYMENT}
-NORIA_TYPE="readyset-server"
-SERVER_ADDRESS=${SERVER_ADDRESS}
-EOF
-
-/usr/local/bin/set-host-description.sh
-/usr/local/bin/configure-vector.sh || true
 
 cat > /etc/default/ensure-ebs-volume <<EOF
 AWS_CLOUDFORMATION_STACK=${AWS_CLOUDFORMATION_STACK}
@@ -65,6 +58,7 @@ if [ "$AUTO_GROW_VOLUME" = "true" ]; then
     echo "MAX_VOLUME_SIZE_GB=${MAX_VOLUME_SIZE_GB}" >> /etc/default/ensure-ebs-volume
   fi
 fi
+
 
 mkdir -p /var/lib/readyset-server
 systemctl reset-failed

@@ -1,0 +1,30 @@
+[sources.journald]
+type = "journald"
+
+[sources.node-exporter]
+type = "prometheus_scrape"
+endpoints = [ "http://localhost:9100/metrics" ]
+scrape_interval_secs = 15
+
+[transforms.metadata]
+type = "remap"
+inputs = ["journald"]
+source = '''
+  server_info = { "host": .host, "app": .SYSLOG_IDENTIFIER }
+  structured, err = parse_json(.message)
+  . = merge(., server_info)
+  if err == null {
+    . = merge!(., structured)
+  }
+'''
+
+[sinks.cloudwatch_logs]
+type = "aws_cloudwatch_logs"
+inputs = ["metadata"]
+create_missing_group = true
+create_missing_stream = true
+group_name = "${AWS_CLOUDFORMATION_STACK}"
+compression = "none"
+region = "${AWS_CLOUDFORMATION_REGION}"
+stream_name = "{{ app }}"
+encoding.codec = "json"

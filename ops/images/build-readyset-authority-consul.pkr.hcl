@@ -12,12 +12,7 @@ build {
   }
 
   provisioner "file" {
-    source      = "provisioners/files/setup-data-volume"
-    destination = "/tmp/"
-  }
-
-  provisioner "file" {
-    source      = "provisioners/files/consul-server"
+    source      = "provisioners/files/readyset-authority-consul"
     destination = "/tmp/"
   }
 
@@ -28,9 +23,10 @@ build {
       "provisioners/scripts/external-base/10-aws.sh",
       "provisioners/scripts/external-base/20-set-host-description.sh",
       "provisioners/scripts/node_exporter/00-init.sh",
-      "provisioners/scripts/setup-data-volume/00-init.sh",
-      "provisioners/scripts/consul-server/00-init.sh",
-      "provisioners/scripts/consul-server/10-aws.sh",
+      "provisioners/scripts/vector/00-init.sh",
+      "provisioners/scripts/consul/00-init.sh",
+      "provisioners/scripts/readyset-authority-consul/10-aws.sh",
+      "provisioners/scripts/reset-cloud-init.sh",
     ]
   }
 

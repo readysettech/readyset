@@ -14,7 +14,6 @@ Metadata:
           default: SSH Access Configuration
         Parameters:
           - KeyPairName
-          - KeyPairName
       - Label:
           default: Consul Configuration
         Parameters:
@@ -121,6 +120,20 @@ Resources:
     Properties:
       ManagedPolicyArns:
         - !Ref ConsulJoinManagedPolicy
+      Policies:
+        - PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:CreateLogGroup
+                  - logs:PutLogEvents
+                  - cloudwatch:PutMetricData
+                Resource: '*'
+          PolicyName: CloudWatchWrite
       AssumeRolePolicyDocument:
         Statement:
           - Action: sts:AssumeRole

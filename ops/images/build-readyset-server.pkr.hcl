@@ -22,11 +22,6 @@ build {
   }
 
   provisioner "file" {
-    source      = "provisioners/files/vector"
-    destination = "/tmp/"
-  }
-
-  provisioner "file" {
     source      = "provisioners/files/setup-data-volume"
     destination = "/tmp/"
   }
@@ -52,20 +47,16 @@ build {
   }
 
   provisioner "shell" {
-    environment_vars = [
-      "PROMETHEUS_PORT=6033"
-    ]
     scripts = [
       "provisioners/scripts/wait-for-cloud-init.sh",
       "provisioners/scripts/external-base/00-init.sh",
       "provisioners/scripts/external-base/10-aws.sh",
       "provisioners/scripts/external-base/20-set-host-description.sh",
       "provisioners/scripts/node_exporter/00-init.sh",
-      "provisioners/scripts/consul-client/00-init.sh",
+      "provisioners/scripts/consul/00-init.sh",
       "provisioners/scripts/consul-client/10-aws.sh",
-      "provisioners/scripts/vector-agent/00-init.sh",
       "provisioners/scripts/vector/00-init.sh",
-      "provisioners/scripts/vector/10-aws.sh",
+      "provisioners/scripts/vector-agent/00-init.sh",
       "provisioners/scripts/ensure-ebs-volume/00-init.sh",
       "provisioners/scripts/readyset-server/00-init.sh",
       "provisioners/scripts/readyset-server/10-aws.sh",

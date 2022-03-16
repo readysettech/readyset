@@ -19,6 +19,10 @@ trap 'on_error' ERR
 source /usr/local/bin/get-connection-string.sh
 UPSTREAM_DB_URL=${DB_URL}
 
+export NORIA_TYPE="readyset-adapter"
+export PROMETHEUS_PORT=6034
+/usr/local/bin/configure-vector-agent.sh
+
 cat > /etc/default/readyset-mysql-adapter <<EOF
 UPSTREAM_DB_URL=${UPSTREAM_DB_URL}
 NORIA_DEPLOYMENT=${DEPLOYMENT}
@@ -28,17 +32,6 @@ ALLOWED_PASSWORD=${PASSWORD}
 LOG_LEVEL=${LOG_LEVEL:-info}
 EOF
 chmod 600 /etc/default/readyset-mysql-adapter
-
-IMDS_TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
-SERVER_ADDRESS=$(curl -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/local-ipv4)
-
-cat >> /etc/vector.d/env <<EOF
-NORIA_DEPLOYMENT=${DEPLOYMENT}
-NORIA_TYPE="readyset-adapter"
-SERVER_ADDRESS=${SERVER_ADDRESS}
-EOF
-
-/usr/local/bin/configure-vector.sh || true
 
 systemctl reset-failed
 systemctl enable readyset-mysql-adapter

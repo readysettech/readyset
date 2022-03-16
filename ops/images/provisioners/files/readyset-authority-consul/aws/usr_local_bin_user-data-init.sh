@@ -15,20 +15,27 @@ trap 'on_error' ERR
 /usr/local/bin/set-host-description.sh
 /usr/local/bin/cfn-init-wrapper.sh
 
-mkdir -p /opt/consul
-# TODO: Maintain state in a separate EBS volume
-# setup-data-volume /opt/consul
+cat >> /etc/default/vector <<EOF
+AWS_CLOUDFORMATION_STACK=${AWS_CLOUDFORMATION_STACK}
+AWS_CLOUDFORMATION_REGION=${AWS_CLOUDFORMATION_REGION}
+EOF
+
+systemctl reset-failed
+
+systemctl enable vector.service
+systemctl restart vector.service
 
 cat > /etc/consul.d/consul.hcl <<EOF
 data_dir = "/opt/consul"
 client_addr = "0.0.0.0"
 server = true
-bootstrap_expect=${CONSUL_BOOTSTRAP_EXPECT:-1}
+bootstrap_expect = ${CONSUL_BOOTSTRAP_EXPECT:-1}
 disable_update_check = true
 retry_join = ["provider=aws tag_key=${CONSUL_TAG_KEY:-consul-server} tag_value=${CONSUL_TAG_VALUE}"]
 EOF
 
 systemctl reset-failed
+
 systemctl enable consul.service
 systemctl restart consul.service
 
