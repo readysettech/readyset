@@ -464,18 +464,23 @@ impl NoriaAdapter {
         Ok(())
     }
 
-    /// Handle a single BinlogAction by calling the proper Noria RPC
+    /// Handle a single BinlogAction by calling the proper Noria RPC. If `catchup` is set,
+    /// we will not log warnings for skipping entries, as we may iterate over many entries tables
+    /// have already seen when catching each table up to the current binlog offset.
     async fn handle_action(
         &mut self,
         action: ReplicationAction,
         pos: ReplicationOffset,
+        catchup: bool,
     ) -> ReadySetResult<()> {
         // First check if we should skip this action due to insufficient log position
         match &action {
             ReplicationAction::SchemaChange { .. } | ReplicationAction::LogPosition => {
                 match &self.replication_offsets.schema {
                     Some(cur) if pos <= *cur => {
-                        debug!(?pos, ?cur, "Skipping schema update for earlier entry");
+                        if !catchup {
+                            warn!(?pos, ?cur, "Skipping schema update for earlier entry");
+                        }
                         return Ok(());
                     }
                     _ => {}
@@ -484,7 +489,9 @@ impl NoriaAdapter {
             ReplicationAction::TableAction { table, .. } => {
                 match self.replication_offsets.tables.get(table.as_str()) {
                     Some(Some(cur)) if pos <= *cur => {
-                        debug!(%table, ?pos, ?cur, "Skipping table action for earlier entry");
+                        if !catchup {
+                            warn!(%table, ?pos, ?cur, "Skipping table action for earlier entry");
+                        }
                         return Ok(());
                     }
                     _ => {}
@@ -503,7 +510,8 @@ impl NoriaAdapter {
         }
     }
 
-    /// Loop over the actions
+    /// Loop over the actions. `until` may be passed to set a replication offset to stop
+    /// replicating at.
     async fn main_loop(
         &mut self,
         position: &mut ReplicationOffset,
@@ -520,7 +528,7 @@ impl NoriaAdapter {
 
             trace!(?action);
 
-            if let Err(err) = self.handle_action(action, pos).await {
+            if let Err(err) = self.handle_action(action, pos, until.is_some()).await {
                 error!(error = %err, "Aborting replication task on error");
                 counter!(recorded::REPLICATOR_FAILURE, 1u64,);
                 return Err(err);
