@@ -217,10 +217,10 @@ impl WorkloadEmulator {
 
             let generator = match distribution {
                 WorkloadDistributionKind::Uniform { .. } => {
-                    Sampler::Uniform(Uniform::new(0, data.len()))
+                    Sampler::Uniform(Uniform::new(0, data.len() - 1))
                 }
                 WorkloadDistributionKind::Zipf { zipf } => {
-                    Sampler::Zipf(ZipfDistribution::new(data.len(), zipf).unwrap())
+                    Sampler::Zipf(ZipfDistribution::new(data.len() - 1, zipf).unwrap())
                 }
             };
 
