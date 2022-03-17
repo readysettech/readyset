@@ -11,7 +11,7 @@ use crate::processing::LookupIndex;
 mod process;
 #[cfg(test)]
 pub(crate) use self::process::materialize;
-pub(crate) use self::process::NodeProcessingResult;
+pub(crate) use self::process::{NodeProcessingResult, ProcessEnv};
 
 pub mod special;
 
