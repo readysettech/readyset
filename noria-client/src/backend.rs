@@ -1344,6 +1344,17 @@ where
         name: Option<&str>,
         mut stmt: SelectStatement,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        // If we have another query with the same name, drop that query first
+        if let Some(name) = name {
+            if let Some(stmt) = self.noria.select_statement_from_name(name) {
+                warn!(
+                    "Dropping query previously cached as {}, stmt={}",
+                    name, stmt
+                );
+                self.drop_cached_query(name).await?;
+            }
+        }
+        // Now migrate the new query
         rewrite::process_query(&mut stmt)?;
         self.noria.handle_create_cached_query(name, &stmt).await?;
         self.query_status_cache
