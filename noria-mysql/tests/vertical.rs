@@ -662,7 +662,7 @@ macro_rules! vertical_tests {
     // Build up the hashmap of Tables
     (@tables $($table_name: expr => (
         $create_table: expr,
-        schema: [$($col_name: ident : $col_strat : expr),* $(,)?],
+        schema: [$($col_name: ident : $col_strat: expr),* $(,)?],
         primary_key: $pk_index: expr,
         key_columns: [$($kc: expr),* $(,)?]
         $(,)?
@@ -703,6 +703,13 @@ macro_rules! vertical_tests {
         }
     };
 
+    (@column_strategy nullable($schema_type: ty)) => {
+        ColumnStrategy::Value(any::<Option<$schema_type>>().prop_map(|ov| match ov {
+            Some(v) => DataType::from(v),
+            None => DataType::None,
+        }).boxed())
+    };
+
     (@column_strategy value($value: expr)) => {
         ColumnStrategy::Value(Just(DataType::try_from($value).unwrap()).boxed())
     };
@@ -722,6 +729,22 @@ vertical_tests! {
             schema: [id: i32, name: String],
             primary_key: 0,
             key_columns: [0],
+        )
+    );
+
+    aggregate_with_filter(
+        "SELECT count(*) FROM users_groups WHERE group_id = ? AND joined_at IS NOT NULL";
+        "users_groups" => (
+            "CREATE TABLE users_groups (
+                id int NOT NULL,
+                user_id int NOT NULL,
+                group_id int NOT NULL,
+                joined_at int DEFAULT NULL,
+                PRIMARY KEY (id)
+            )",
+            schema: [id: i32, user_id: i32, group_id: i32, joined_at: nullable(i32)],
+            primary_key: 0,
+            key_columns: [2],
         )
     );
 
