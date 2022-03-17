@@ -101,18 +101,23 @@ impl NodeProcessingResult {
     }
 }
 
+/// Information about the domain required by [`Node::process`].
+pub(crate) struct ProcessEnv<'domain> {
+    pub(crate) state: &'domain mut StateMap,
+    pub(crate) nodes: &'domain DomainNodes,
+    pub(crate) executor: &'domain mut dyn Executor,
+    pub(crate) shard: Option<usize>,
+}
+
 impl Node {
-    #[allow(clippy::too_many_arguments, clippy::unreachable)]
+    #[allow(clippy::unreachable)]
     pub(crate) fn process(
         &mut self,
         m: &mut Option<Box<Packet>>,
         keyed_by: Option<&Vec<usize>>,
-        state: &mut StateMap,
-        nodes: &DomainNodes,
-        on_shard: Option<usize>,
-        swap: bool,
         replay_path: Option<&crate::domain::ReplayPath>,
-        ex: &mut dyn Executor,
+        swap_reader: bool,
+        env: ProcessEnv,
     ) -> ReadySetResult<NodeProcessingResult> {
         let addr = self.local_addr();
         let gaddr = self.global_addr();
@@ -125,7 +130,7 @@ impl Node {
                 let m = m.as_mut().unwrap();
                 let tag = m.tag();
                 m.map_data(|rs| {
-                    materialize(rs, None, tag, state.get_mut(addr));
+                    materialize(rs, None, tag, env.state.get_mut(addr));
                 });
             }
             NodeType::Base(ref mut b) => {
@@ -137,7 +142,8 @@ impl Node {
                             .try_into()
                             .expect("Payload of Input packet was not of Input type");
 
-                        let snapshot_mode = state
+                        let snapshot_mode = env
+                            .state
                             .get(addr)
                             .and_then(|s| s.as_persistent())
                             .map(|p| p.snapshot_mode())
@@ -147,11 +153,11 @@ impl Node {
                             records: mut rs,
                             replication_offset,
                             set_snapshot_mode,
-                        } = b.process(addr, data, &*state, snapshot_mode)?;
+                        } = b.process(addr, data, &*env.state, snapshot_mode)?;
 
                         if let (Some(SetSnapshotMode::EnterSnapshotMode), Some(s)) = (
                             set_snapshot_mode,
-                            state.get_mut(addr).and_then(|s| s.as_persistent_mut()),
+                            env.state.get_mut(addr).and_then(|s| s.as_persistent_mut()),
                         ) {
                             s.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
                         }
@@ -165,12 +171,12 @@ impl Node {
                         //
                         // So: only materialize if the message we're processing is not a replay!
                         if keyed_by.is_none() {
-                            materialize(&mut rs, replication_offset, None, state.get_mut(addr));
+                            materialize(&mut rs, replication_offset, None, env.state.get_mut(addr));
                         }
 
                         if let (Some(SetSnapshotMode::FinishSnapshotMode), Some(s)) = (
                             set_snapshot_mode,
-                            state.get_mut(addr).and_then(|s| s.as_persistent_mut()),
+                            env.state.get_mut(addr).and_then(|s| s.as_persistent_mut()),
                         ) {
                             s.set_snapshot_mode(SnapshotMode::SnapshotModeDisabled);
                         }
@@ -194,19 +200,24 @@ impl Node {
                 }
             }
             NodeType::Reader(ref mut r) => {
-                r.process(m, swap);
+                r.process(m, swap_reader);
             }
             NodeType::Egress(None) => internal!("tried to process through taken egress"),
             NodeType::Egress(Some(ref mut e)) => {
-                e.process(m, keyed_by.map(Vec::as_slice), on_shard.unwrap_or(0), ex)?;
+                e.process(
+                    m,
+                    keyed_by.map(Vec::as_slice),
+                    env.shard.unwrap_or(0),
+                    env.executor,
+                )?;
             }
             NodeType::Sharder(ref mut s) => {
                 s.process(
                     m,
                     addr,
-                    on_shard.is_some(),
+                    env.shard.is_some(),
                     replay_path.and_then(|rp| rp.partial_unicast_sharder.map(|ni| ni == gaddr)),
-                    ex,
+                    env.executor,
                 )?;
             }
             NodeType::Internal(ref mut i) => {
@@ -274,7 +285,7 @@ impl Node {
                     // we need to own the data
                     let old_data = mem::take(data);
 
-                    match i.on_input_raw(from, old_data, replay, nodes, state)? {
+                    match i.on_input_raw(from, old_data, replay, env.nodes, env.state)? {
                         RawProcessingResult::Regular(m) => {
                             *data = m.results;
                             lookups = m.lookups;
@@ -385,12 +396,12 @@ impl Node {
                     _ => None,
                 };
                 m.map_data(|rs| {
-                    materialize(rs, None, tag, state.get_mut(addr));
+                    materialize(rs, None, tag, env.state.get_mut(addr));
                 });
 
                 for miss in misses.iter_mut() {
                     if miss.on != addr {
-                        self.reroute_miss(nodes, miss)?;
+                        self.reroute_miss(env.nodes, miss)?;
                     }
                 }
 

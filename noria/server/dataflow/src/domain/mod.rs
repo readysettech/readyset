@@ -27,7 +27,7 @@ use tracing::{debug, error, info, trace, warn};
 use unbounded_interval_tree::IntervalTree;
 use vec1::Vec1;
 
-use crate::node::NodeProcessingResult;
+use crate::node::{NodeProcessingResult, ProcessEnv};
 use crate::payload::{PrettyReplayPath, ReplayPieceContext, SourceSelection};
 use crate::prelude::*;
 use crate::processing::ColumnMiss;
@@ -951,12 +951,14 @@ impl Domain {
             } = n.process(
                 &mut m,
                 None,
-                &mut self.state,
-                &self.nodes,
-                self.shard,
-                true,
                 None,
-                executor,
+                true,
+                ProcessEnv {
+                    state: &mut self.state,
+                    nodes: &self.nodes,
+                    executor,
+                    shard: self.shard,
+                },
             )?;
             assert_eq!(captured.len(), 0);
             self.process_ptimes.stop();
@@ -2603,12 +2605,14 @@ impl Domain {
                         let process_result = n.process(
                             &mut m,
                             segment.partial_index.as_ref().map(|idx| &idx.columns),
-                            &mut self.state,
-                            &self.nodes,
-                            self.shard,
-                            false,
                             Some(rp),
-                            ex,
+                            false,
+                            ProcessEnv {
+                                state: &mut self.state,
+                                nodes: &self.nodes,
+                                executor: ex,
+                                shard: self.shard,
+                            },
                         )?;
 
                         let misses = process_result.unique_misses();
