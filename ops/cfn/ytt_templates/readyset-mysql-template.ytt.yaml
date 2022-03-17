@@ -130,7 +130,7 @@ Parameters:
   ReadySetLogLevel:
     Description: A log level directive as defined by tracing env-filter.
     Type: String
-    Default: "info"
+    Default: info
 
   KeyPairName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instances.
