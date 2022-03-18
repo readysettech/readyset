@@ -6,18 +6,27 @@ providers:
     options:
       path: /var/lib/grafana/dashboards/readyset_external.json
 
+  - name: System Overview
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards/system_overview.json
+
   - name: Readyset Internal
     type: file
     options:
       path: /var/lib/grafana/dashboards/readyset_internal.json
-
-  - name: Solidus Queries
+      
+  - name: Query Overview
     type: file
     options:
-      path: /var/lib/grafana/dashboards/solidus-demo.json
+      path: /var/lib/grafana/dashboards/query_overview.json
+
+  - name: Specific Query
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards/query_specific.json
 
   - name: Connected
     type: file
-    folder: Onboarding
     options:
       path: /var/lib/grafana/dashboards/connected.json

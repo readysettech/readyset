@@ -2,9 +2,11 @@
 
 set -euo pipefail
 
-export RAILS_ENV=development
+export RAILS_ENV=production
 export IN_DOCKER=1
 export AUTO_ACCEPT=1
+
+sleep 30
 
 bundle exec rake db:migrate
 if [ ! -f /state/loaded ]; then

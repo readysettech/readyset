@@ -10,3 +10,18 @@ providers:
     type: file
     options:
       path: /var/lib/grafana/dashboards/readyset_internal.json
+
+  - name: Query Overview
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards/query_overview.json
+
+  - name: Specific Query
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards/query_specific.json
+
+  - name: Connected
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards/connected.json

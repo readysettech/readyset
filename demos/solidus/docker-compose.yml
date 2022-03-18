@@ -27,7 +27,7 @@ services:
       timeout: 2s
       retries: 5
   readyset-server:
-    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:release-eb53b0bd611d8205c96e4afea52ada38945f2565"
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:release-2190606a3c43f239f9735a0fa6b42468dbcf4ac3"
     expose:
       - "32768-60999"
     environment:
@@ -39,7 +39,7 @@ services:
       REPLICATION_URL: mysql://root:noria@mysql/solidus
       PROMETHEUS_METRICS: 1
       EXPERIMENTAL_TOPK_SUPPORT: 1
-      FORBID_FULL_MATERIALIZATION: 1
+      #FORBID_FULL_MATERIALIZATION: 1
       DB_DIR: /state
     links:
       - mysql
@@ -56,7 +56,7 @@ services:
       retries: 5
       start_period: 5s
   db:
-    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:release-eb53b0bd611d8205c96e4afea52ada38945f2565"
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:release-2190606a3c43f239f9735a0fa6b42468dbcf4ac3"
     expose:
       - 3306
     ports:

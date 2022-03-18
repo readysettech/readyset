@@ -21,7 +21,7 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "iteration": 1643841267420,
+  "iteration": 1644972459093,
   "links": [],
   "panels": [
     {
@@ -38,95 +38,24 @@
             "filterable": false
           },
           "decimals": 4,
+          "links": [],
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "red",
                 "value": null
               },
               {
-                "color": "red",
-                "value": 80
+                "color": "green",
+                "value": 0
               }
             ]
           },
           "unit": "ms"
         },
         "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Noria 50p"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "MySQL 50p"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Noria 90p"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "MySQL 90p"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Noria 99p"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "MySQL 99p"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              }
-            ]
-          },
           {
             "matcher": {
               "id": "byName",
@@ -147,7 +76,11 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 118
+                "value": 90
+              },
+              {
+                "id": "decimals",
+                "value": 2
               }
             ]
           },
@@ -159,7 +92,11 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 124
+                "value": 90
+              },
+              {
+                "id": "decimals",
+                "value": 2
               }
             ]
           },
@@ -171,7 +108,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 134
+                "value": 90
               },
               {
                 "id": "decimals",
@@ -211,15 +148,111 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 109
+                "value": 90
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "0": {
+                        "color": "green",
+                        "index": 0,
+                        "text": "Readyset"
+                      }
+                    },
+                    "type": "value"
+                  },
+                  {
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "color": "green",
+                        "index": 1,
+                        "text": "Readyset"
+                      }
+                    },
+                    "type": "special"
+                  },
+                  {
+                    "options": {
+                      "from": -9999999,
+                      "result": {
+                        "color": "red",
+                        "index": 2,
+                        "text": "MySQL"
+                      },
+                      "to": 0
+                    },
+                    "type": "range"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total Duration"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Query Text"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": true,
+                    "title": "Query specific dashboard",
+                    "url": "http://10.0.37.8:4000/d/jAoEkfF7z/specific-query?Deployment=${Deployment:queryparam}&var-QueryFilter=${__value.raw}&__url_time_range"
+                  }
+                ]
               }
             ]
           }
         ]
       },
       "gridPos": {
-        "h": 7,
-        "w": 22,
+        "h": 13,
+        "w": 24,
         "x": 0,
         "y": 0
       },
@@ -233,7 +266,29 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "avg by (query) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.5\", event_type=~\"query|execute\"}) *1000",
+          "expr": "sum by (query)\n(increase(query_log_execution_time_count{deployment=\"$deployment\",database_type=\"noria\",query!=\"\", event_type=~\"query|execute\"}[$__range]))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "Readyset count"
+        },
+        {
+          "exemplar": true,
+          "expr": "sum by (query)\n(increase(query_log_execution_time_count{deployment=\"$deployment\",database_type=\"mysql\",query!=\"\", event_type=~\"query|execute\"}[$__range]))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "MySQL count"
+        },
+        {
+          "exemplar": true,
+          "expr": "avg by (query) (query_log_execution_time{deployment=\"$deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.5\", event_type=~\"query|execute\"}) *1000",
           "format": "table",
           "instant": true,
           "interval": "",
@@ -243,7 +298,7 @@
         },
         {
           "exemplar": true,
-          "expr": "avg by (query) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.9\", event_type=~\"query|execute\"}) *1000  ",
+          "expr": "avg by (query) (query_log_execution_time{deployment=\"$deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.9\", event_type=~\"query|execute\"}) *1000  ",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -254,7 +309,7 @@
         },
         {
           "exemplar": true,
-          "expr": "avg by (query) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.99\", event_type=~\"query|execute\"}) *1000",
+          "expr": "avg by (query) (query_log_execution_time{deployment=\"$deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.99\", event_type=~\"query|execute\"}) *1000",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -265,25 +320,27 @@
         },
         {
           "exemplar": true,
-          "expr": "sum by (query) (query_log_execution_time_count{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", event_type=~\"query|execute\"})",
+          "expr": "sum by (query)\n(query_log_execution_time_sum{deployment=\"$deployment\",database_type=\"noria\",query!=\"\", event_type=~\"query|execute\"}) *1000",
           "format": "table",
           "hide": false,
           "instant": true,
           "interval": "",
           "legendFormat": "",
-          "refId": "B"
+          "refId": "F"
         },
         {
           "exemplar": true,
-          "expr": "sum by (query) (query_log_execution_time_count{deployment=\"$Deployment\",database_type=\"mysql\",query!=\"\", event_type=~\"query|execute\"})",
+          "expr": "avg by (query) (query_log_execution_time{deployment=\"$deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.5\", event_type=~\"query|execute\"}) *1000",
           "format": "table",
-          "hide": false,
+          "hide": true,
           "instant": true,
           "interval": "",
           "legendFormat": "",
-          "refId": "D"
+          "queryType": "randomWalk",
+          "refId": "G"
         }
       ],
+      "timeShift": null,
       "title": "Query Log",
       "transformations": [
         {
@@ -295,6 +352,9 @@
           "options": {
             "excludeByName": {
               "Time": true,
+              "Value #B": true,
+              "Value #D": true,
+              "Value #Readyset count": false,
               "deployment": true,
               "instance": true,
               "job": true
@@ -302,10 +362,11 @@
             "indexByName": {
               "Time": 0,
               "Value #A": 4,
-              "Value #B": 2,
               "Value #C": 5,
-              "Value #D": 3,
               "Value #E": 6,
+              "Value #F": 7,
+              "Value #MySQL count": 3,
+              "Value #Readyset count": 2,
               "query": 1
             },
             "renameByName": {
@@ -313,11 +374,15 @@
               "Value #90p Noria": "Noria 90p",
               "Value #99p Noria": "Noria 99p",
               "Value #A": "ReadySet 50p",
-              "Value #B": "ReadySet Count",
+              "Value #B": "old rs count",
               "Value #C": "ReadySet 90p",
-              "Value #D": "MySQL Count",
+              "Value #D": "old msqyl count",
               "Value #E": "ReadySet 99p",
-              "Value #F": "MySQL 99p",
+              "Value #F": "Total Duration",
+              "Value #MySQL count": "MySQL Count",
+              "Value #Readyset Count": "Readyset Count",
+              "Value #Readyset count": "ReadySet Count",
+              "Value #test": "Readyset Count",
               "query": "Query Text"
             }
           }
@@ -328,77 +393,38 @@
             "fields": {},
             "sort": [
               {
-                "field": "ReadySet 50p"
+                "desc": false,
+                "field": "Total Duration"
               }
             ]
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "alias": "Status",
+            "binary": {
+              "left": "ReadySet Count",
+              "operator": "-",
+              "reducer": "sum",
+              "right": "MySQL Count"
+            },
+            "mode": "binary",
+            "reduce": {
+              "include": [
+                "ReadySet Count",
+                "MySQL Count"
+              ],
+              "reducer": "diff"
+            },
+            "replaceFields": false
           }
         }
       ],
       "type": "table"
-    },
-    {
-      "datasource": "DS_PROMETHEUS",
-      "description": "The number of queries per second executed against ReadySet split by the ReadySet and MySQL backends.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "yellow",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 14,
-        "x": 0,
-        "y": 7
-      },
-      "id": 2,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "8.0.6",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum by (database_type) (rate(query_log_execution_time_count{deployment=\"$Deployment\"}[1m]))",
-          "interval": "",
-          "legendFormat": "{{database_type}}",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "title": "Queries Per Second (1 minute intervals)",
-      "type": "stat"
     }
   ],
-  "refresh": "5s",
+  "refresh": "",
   "schemaVersion": 30,
   "style": "dark",
   "tags": [],
@@ -417,9 +443,9 @@
         "error": null,
         "hide": 0,
         "includeAll": false,
-        "label": null,
+        "label": "Deployment",
         "multi": false,
-        "name": "Deployment",
+        "name": "deployment",
         "options": [],
         "query": {
           "query": "label_values(deployment)",
@@ -430,43 +456,16 @@
         "skipUrlSync": false,
         "sort": 0,
         "type": "query"
-      },
-      {
-        "allValue": null,
-        "current": {
-          "selected": false,
-          "text": "SELECT `active_storage_attachments`.* FROM `active_storage_attachments` WHERE ((`active_storage_attachments`.`record_id` = '<anonymized>') AND ((`active_storage_attachments`.`record_type` = '<anonymized>') AND (`active_storage_attachments`.`name` = '<anonymized>'))) LIMIT '<anonymized>'",
-          "value": "SELECT `active_storage_attachments`.* FROM `active_storage_attachments` WHERE ((`active_storage_attachments`.`record_id` = '<anonymized>') AND ((`active_storage_attachments`.`record_type` = '<anonymized>') AND (`active_storage_attachments`.`name` = '<anonymized>'))) LIMIT '<anonymized>'"
-        },
-        "datasource": "DS_PROMETHEUS",
-        "definition": "label_values(query)",
-        "description": null,
-        "error": null,
-        "hide": 0,
-        "includeAll": false,
-        "label": "Query Filter",
-        "multi": false,
-        "name": "QueryFilter",
-        "options": [],
-        "query": {
-          "query": "label_values(query)",
-          "refId": "StandardVariableQuery"
-        },
-        "refresh": 2,
-        "regex": "",
-        "skipUrlSync": false,
-        "sort": 0,
-        "type": "query"
       }
     ]
   },
   "time": {
-    "from": "now-15m",
+    "from": "now-30m",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Solidus query focused",
+  "title": "Query Overview",
   "uid": "38II-qb7z",
-  "version": 1
+  "version": 3
 }
