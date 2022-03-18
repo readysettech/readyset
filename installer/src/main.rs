@@ -37,6 +37,9 @@ mod aws;
 mod deployment;
 #[macro_use]
 mod console;
+mod constants;
+mod docker_compose;
+mod template;
 
 use crate::aws::cloudformation::{deploy_stack, StackConfig};
 use crate::aws::{

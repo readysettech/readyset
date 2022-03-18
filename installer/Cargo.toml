@@ -16,6 +16,7 @@ aws-types = "0.9.0"
 clap = { version = "3.0", features = ["derive", "env"] }
 console = "0.15.0"
 derive_more = "0.99.17"
+derive_builder = "0.11.0"
 dialoguer = "0.9.0"
 directories = "4.0"
 futures = "0.3"
