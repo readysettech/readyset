@@ -13,7 +13,9 @@ use aws_types::credentials::{CredentialsError, ProvideCredentials};
 use aws_types::region::Region;
 use aws_types::{Credentials, SdkConfig};
 use clap::Parser;
-use deployment::{DatabaseCredentials, TemplateType};
+use deployment::{
+    DatabaseCredentials, Deployment, DeploymentData, DockerComposeDeployment, TemplateType,
+};
 use directories::ProjectDirs;
 use ec2::model::{AttributeBooleanValue, KeyType, Subnet, VpcAttributeName};
 use futures::stream::{FuturesUnordered, TryStreamExt};
@@ -26,12 +28,15 @@ use rds::model::{ApplyMethod, DbInstance, DbParameterGroup, Parameter};
 use regex::Regex;
 use rusoto_credential::ProfileProvider;
 use ssm::model::{ParameterStringFilter, ParameterType};
-use tokio::fs::{DirBuilder, OpenOptions};
+use tokio::fs::{DirBuilder, File, OpenOptions};
 use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
 use {
     aws_sdk_cloudformation as cfn, aws_sdk_ec2 as ec2, aws_sdk_kms as kms, aws_sdk_rds as rds,
     aws_sdk_ssm as ssm,
 };
+
+use crate::docker_compose::Compose;
 
 mod aws;
 mod deployment;
@@ -47,7 +52,7 @@ use crate::aws::{
     validate_ssm_parameter_name, vpc_cidr, wait_for_rds_db_available,
 };
 use crate::console::{confirm, input, password, prompt_to_continue, select, spinner, GREEN_CHECK};
-pub use crate::deployment::Deployment;
+pub use crate::deployment::CloudformationDeployment;
 use crate::deployment::{
     CreateNew, DatabasePasswordParameter, Engine, Existing, MaybeExisting, RdsDb,
 };
@@ -63,6 +68,10 @@ const MIN_AVAILABILITY_ZONES: usize = 3;
 /// Public cloudformation template for the VPC
 const VPC_CLOUDFORMATION_TEMPLATE_URL: &str =
     "https://aws-quickstart.s3.amazonaws.com/quickstart-aws-vpc/templates/aws-vpc.template.yaml";
+
+// Public cloudformation template prefix for the ReadySet stacks
+// TODO: Not needed right now but would be good to have in the future.
+// const READYSET_CLOUDFORMATION_S3_PREFIX: &str = readyset_cloudformation_s3_prefix!();
 
 /// Install and configure a ReadySet cluster in AWS
 #[derive(Parser)]
@@ -144,8 +153,109 @@ impl Installer {
             .await
     }
 
-    /// Run the install process, picking up where the user left off if necessary
+    /// Run the install process, picking up where the user left off if necessary.
     pub async fn run(&mut self) -> Result<()> {
+        match self.deployment.inner {
+            DeploymentData::Cloudformation(_) => self.run_cfn().await,
+            DeploymentData::Compose(_) => self.run_compose().await,
+        }
+    }
+
+    /// Run the install process for deploying locally using docker-compose, picking up where the
+    /// user left off if necessary.
+    pub async fn run_compose(&mut self) -> Result<()> {
+        let res = self._compose_user_input();
+        self.save().await?;
+        res?;
+
+        let compose = Compose::try_from(&self.deployment)?;
+
+        let compose_dir = self.options.state_directory()?.join("compose");
+        tokio::fs::create_dir_all(&compose_dir).await?;
+        let path = compose_dir.join(format!("{}.yml", self.deployment.name()));
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| anyhow!("Path does not contain valid unicode characters"))?;
+
+        let mut file = File::create(&path).await?;
+        file.write_all(&serde_yaml::to_vec(&compose)?).await?;
+        let dest_text = format!(
+            "Your docker-compose file has been saved here: {}",
+            &path_str
+        );
+        println!("{}", style(dest_text).bold());
+
+        if confirm()
+            .with_prompt("Deploy with docker-compose now?")
+            .interact()?
+        {
+            let status = Command::new("docker-compose")
+                .args(["-f", path_str, "up", "-d"])
+                .status()
+                .await?;
+            if !status.success() {
+                bail!("Command exited with {}", status);
+            }
+
+            let compose = &self.compose_deployment()?;
+            if let (Some(db_pass), Some(port), Some(db_name)) = (
+                &compose.mysql_db_root_pass,
+                compose.adapter_port,
+                &compose.mysql_db_name,
+            ) {
+                println!("ReadySet should be available in a few seconds.");
+                let conn_cmd = format!("To connect to ReadySet using the mysql client, run the following command:\n\n    $ mysql -h127.0.0.1 -uroot -p{} -P{} --database={}", db_pass, port, db_name);
+                println!("{}", style(conn_cmd).bold());
+            } else {
+                bail!("Missing one of mysql database name, mysql root password, or ReadySet deployment port");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Exists so if any step fails we save before returning error.
+    fn _compose_user_input(&mut self) -> Result<()> {
+        self.compose_deployment()?
+            .set_db_name()?
+            .set_db_password()?
+            .set_migration_mode()?
+            .set_adapter_port()?;
+        Ok(())
+    }
+
+    /// Returns a CFNDeployment if the inner deployment type matches, otherwise returns an error.
+    /// This should only be used if you know for sure the deployment type is already a
+    /// CFNDeployment.
+    fn cfn_deployment(&mut self) -> Result<&mut CloudformationDeployment> {
+        match self.deployment.inner {
+            DeploymentData::Cloudformation(ref mut c) => Ok(c),
+            _ => {
+                // This should be unreachable in practice.
+                bail!("Should not have run aws cloudformation deployment functionality unless our deployment type was for a CFN deployment.")
+            }
+        }
+    }
+
+    /// Returns a DockerComposeDeployment if the inner deployment type matches, otherwise returns an
+    /// error. This should only be used if you know for sure the deployment type is already a
+    /// DockerComposeDeployment.
+    fn compose_deployment(&mut self) -> Result<&mut DockerComposeDeployment> {
+        match self.deployment.inner {
+            DeploymentData::Compose(ref mut c) => Ok(c),
+            _ => {
+                // This should be unreachable in practice.
+                bail!("Should not have run docker-compose functionality unless our deployment type was docker-compose.")
+            }
+        }
+    }
+
+    /// Run the install process for deploying to aws cloudformation, picking up where the user left
+    /// off if necessary.
+    pub async fn run_cfn(&mut self) -> Result<()> {
+        // Unfortunately we have to do this at the top of each run method, because we can't mutably
+        // borrow from self more than once (which would happen if we tried to pass in a mutable
+        // borrow to CFNDeployment).
         self.save().await?;
 
         self.load_aws_config().await?;
@@ -155,7 +265,7 @@ impl Installer {
 
         self.save().await?;
 
-        if let Some(vpc_id) = &self.deployment.vpc_id {
+        if let Some(vpc_id) = &self.cfn_deployment()?.vpc_id {
             match vpc_id {
                 Existing(vpc_id) => println!("Using existing AWS VPC: {}", style(vpc_id).bold()),
                 CreateNew => println!("Deploying to a {} AWS VPC", style("new").bold()),
@@ -165,12 +275,12 @@ impl Installer {
         };
         self.save().await?;
 
-        if let Existing(vpc_id) = self.deployment.vpc_id.clone().unwrap() {
+        if let Existing(vpc_id) = self.cfn_deployment()?.vpc_id.clone().unwrap() {
             self.validate_vpc(vpc_id).await?;
             self.save().await?;
         }
 
-        if let Some(rds_db) = &self.deployment.rds_db {
+        if let Some(rds_db) = &self.cfn_deployment()?.rds_db {
             match &rds_db.db_id {
                 CreateNew => println!(
                     "OK, we'll create a new {} RDS database instance.",
@@ -186,42 +296,52 @@ impl Installer {
         }
         self.save().await?;
 
-        let rds_db = self.deployment.rds_db.clone().unwrap();
+        let rds_db = self.cfn_deployment()?.rds_db.clone().unwrap();
         if let Existing(db_id) = rds_db.db_id {
             self.validate_rds_database(db_id, rds_db.engine).await?;
         }
 
-        if self.deployment.database_credentials.is_some() {
+        if self.cfn_deployment()?.database_credentials.is_some() {
             success!("Using previously-configured database credentials");
         } else {
             self.prompt_for_database_credentials().await?;
             self.save().await?;
         }
 
-        if let Some(key_pair_name) = &self.deployment.key_pair_name {
+        if let Some(key_pair_name) = &self.cfn_deployment()?.key_pair_name {
             success!("Using SSH key pair: {}", key_pair_name)
         } else {
             self.configure_key_pair().await?;
         }
         self.save().await?;
 
-        if self.deployment.vpc_id.as_ref().unwrap().is_create_new() {
+        if self
+            .cfn_deployment()?
+            .vpc_id
+            .as_ref()
+            .unwrap()
+            .is_create_new()
+        {
             self.deploy_vpc().await?;
             self.save().await?;
         }
 
-        if self.deployment.vpc_supplemental_stack_outputs.is_none() {
+        if self
+            .cfn_deployment()?
+            .vpc_supplemental_stack_outputs
+            .is_none()
+        {
             self.deploy_vpc_supplemental_stack().await?;
             self.save().await?;
         }
 
-        if self.deployment.consul_stack_outputs.is_none() {
+        if self.cfn_deployment()?.consul_stack_outputs.is_none() {
             self.deploy_consul_stack().await?;
             self.save().await?;
         }
 
         if self
-            .deployment
+            .cfn_deployment()?
             .rds_db
             .as_ref()
             .unwrap()
@@ -234,12 +354,15 @@ impl Installer {
 
         self.connect_db().await?;
 
-        let outputs = if let Some(outputs) = &self.deployment.readyset_stack_outputs {
+        let outputs = if let Some(outputs) = &self.cfn_deployment()?.readyset_stack_outputs {
             outputs
         } else {
             self.deploy_readyset_cluster().await?;
             self.save().await?;
-            self.deployment.readyset_stack_outputs.as_ref().unwrap()
+            self.cfn_deployment()?
+                .readyset_stack_outputs
+                .as_ref()
+                .unwrap()
         };
 
         success!("ReadySet cluster deployed successfully!");
@@ -253,7 +376,7 @@ impl Installer {
 
     async fn connect_db(&mut self) -> Result<()> {
         let security_group = self
-            .deployment
+            .cfn_deployment()?
             .vpc_supplemental_stack_outputs
             .as_ref()
             .unwrap()
@@ -263,7 +386,7 @@ impl Installer {
             })?
             .clone();
         let db_id = self
-            .deployment
+            .cfn_deployment()?
             .rds_db
             .as_ref()
             .unwrap()
@@ -316,44 +439,53 @@ impl Installer {
     async fn deploy_readyset_cluster(&mut self) -> Result<()> {
         let stack_name = format!("{}-readyset", self.deployment.name);
 
-        let template_url = match self.deployment.rds_db.as_ref().unwrap().engine {
+        let template_url = match self.cfn_deployment()?.rds_db.as_ref().unwrap().engine {
             Engine::MySQL => self
-                .deployment
+                .cfn_deployment()?
                 .cloudformation_template_url(TemplateType::Mysql),
             Engine::PostgreSQL => self
-                .deployment
+                .cfn_deployment()?
                 .cloudformation_template_url(TemplateType::Postgres),
         };
 
         let deployment_name = self.deployment.name.clone();
-        let key_pair_name = self.deployment.key_pair_name.clone().unwrap();
+        let key_pair_name = self.cfn_deployment()?.key_pair_name.clone().unwrap();
         let vpc_id = self
-            .deployment
+            .cfn_deployment()?
             .vpc_id
             .as_ref()
             .unwrap()
             .as_existing()
             .unwrap()
             .to_owned();
-        let mut subnets = self.deployment.subnet_ids.clone().unwrap().into_iter();
-        let consul_stack_outputs = self.deployment.consul_stack_outputs.as_ref().unwrap();
+        let mut subnets = self
+            .cfn_deployment()?
+            .subnet_ids
+            .clone()
+            .unwrap()
+            .into_iter();
+        let consul_stack_outputs = self
+            .cfn_deployment()?
+            .consul_stack_outputs
+            .as_ref()
+            .unwrap();
         let retry_join_tag_key = consul_stack_outputs["ConsulEc2RetryJoinTagKey"].clone();
         let retry_join_tag_value = consul_stack_outputs["ConsulEc2RetryJoinTagValue"].clone();
         let consul_join_managed_policy_arn =
             consul_stack_outputs["ConsulJoinManagedPolicyArn"].clone();
         let supplemental_stack_outputs = self
-            .deployment
+            .cfn_deployment()?
             .vpc_supplemental_stack_outputs
             .clone()
             .unwrap();
         let DatabaseCredentials { username, password } =
-            self.deployment.database_credentials.clone().unwrap();
+            self.cfn_deployment()?.database_credentials.clone().unwrap();
         let database_hostname = self
             .rds_client()
             .await?
             .describe_db_instances()
             .db_instance_identifier(
-                self.deployment
+                self.cfn_deployment()?
                     .rds_db
                     .as_ref()
                     .unwrap()
@@ -404,7 +536,12 @@ impl Installer {
             )
             .with_non_modifiable_parameter(
                 "DatabaseName",
-                self.deployment.rds_db.as_ref().unwrap().db_name.clone(),
+                self.cfn_deployment()?
+                    .rds_db
+                    .as_ref()
+                    .unwrap()
+                    .db_name
+                    .clone(),
             )
             .with_non_modifiable_parameter("DatabaseHostname", database_hostname)
             .with_non_modifiable_parameter("DatabaseAdapterUsername", username)
@@ -449,7 +586,7 @@ impl Installer {
             .into_iter()
             .filter_map(|output| Some((output.output_key?, output.output_value?)))
             .collect();
-        self.deployment.readyset_stack_outputs = Some(outputs);
+        self.cfn_deployment()?.readyset_stack_outputs = Some(outputs);
 
         Ok(())
     }
@@ -459,17 +596,17 @@ impl Installer {
         prompt_to_continue()?;
         let stack_name = format!("{}-rds", self.deployment.name);
 
-        let template_url = match self.deployment.rds_db.as_ref().unwrap().engine {
+        let template_url = match self.cfn_deployment()?.rds_db.as_ref().unwrap().engine {
             Engine::MySQL => self
-                .deployment
+                .cfn_deployment()?
                 .cloudformation_template_url(TemplateType::RdsMysql),
             Engine::PostgreSQL => self
-                .deployment
+                .cfn_deployment()?
                 .cloudformation_template_url(TemplateType::RdsPostgres),
         };
 
         let vpc_id = self
-            .deployment
+            .cfn_deployment()?
             .vpc_id
             .as_ref()
             .unwrap()
@@ -478,9 +615,20 @@ impl Installer {
             .to_owned();
         let vpc_cidr = vpc_cidr(self.ec2_client().await?, &vpc_id).await?;
         let DatabaseCredentials { username, password } =
-            self.deployment.database_credentials.clone().unwrap();
-        let db_name = self.deployment.rds_db.as_ref().unwrap().db_name.clone();
-        let mut subnets = self.deployment.subnet_ids.clone().unwrap().into_iter();
+            self.cfn_deployment()?.database_credentials.clone().unwrap();
+        let db_name = self
+            .cfn_deployment()?
+            .rds_db
+            .as_ref()
+            .unwrap()
+            .db_name
+            .clone();
+        let mut subnets = self
+            .cfn_deployment()?
+            .subnet_ids
+            .clone()
+            .unwrap()
+            .into_iter();
 
         let cfn_client = self.cfn_client().await?;
         let stack = deploy_stack(
@@ -526,7 +674,7 @@ impl Installer {
                 .physical_resource_id
                 .unwrap(),
         };
-        self.deployment.rds_db.as_mut().unwrap().db_id = Existing(rds_db_id);
+        self.cfn_deployment()?.rds_db.as_mut().unwrap().db_id = Existing(rds_db_id);
 
         Ok(())
     }
@@ -536,17 +684,22 @@ impl Installer {
         prompt_to_continue()?;
         let stack_name = format!("{}-consul", self.deployment.name);
         let template_url: String = self
-            .deployment
+            .cfn_deployment()?
             .cloudformation_template_url(TemplateType::Consul);
 
-        let key_pair_name = self.deployment.key_pair_name.clone().unwrap();
+        let key_pair_name = self.cfn_deployment()?.key_pair_name.clone().unwrap();
         let consul_server_security_group_id = self
-            .deployment
+            .cfn_deployment()?
             .vpc_supplemental_stack_outputs
             .as_ref()
             .unwrap()["ConsulServerSecurityGroupID"]
             .clone();
-        let mut subnets = self.deployment.subnet_ids.clone().unwrap().into_iter();
+        let mut subnets = self
+            .cfn_deployment()?
+            .subnet_ids
+            .clone()
+            .unwrap()
+            .into_iter();
 
         let cfn_client = self.cfn_client().await?;
         let stack = deploy_stack(
@@ -579,7 +732,7 @@ impl Installer {
             .into_iter()
             .filter_map(|output| Some((output.output_key?, output.output_value?)))
             .collect();
-        self.deployment.consul_stack_outputs = Some(outputs);
+        self.cfn_deployment()?.consul_stack_outputs = Some(outputs);
 
         Ok(())
     }
@@ -601,11 +754,11 @@ impl Installer {
         prompt_to_continue()?;
         let stack_name = format!("{}-vpc-supplemental", self.deployment.name);
         let template_url = self
-            .deployment
+            .cfn_deployment()?
             .cloudformation_template_url(TemplateType::VpcSupplemental);
 
         let vpc_id = self
-            .deployment
+            .cfn_deployment()?
             .vpc_id
             .as_ref()
             .unwrap()
@@ -630,7 +783,12 @@ impl Installer {
             .group_id
             .unwrap();
 
-        let subnet_ids = self.deployment.subnet_ids.as_ref().unwrap().join(",");
+        let subnet_ids = self
+            .cfn_deployment()?
+            .subnet_ids
+            .as_ref()
+            .unwrap()
+            .join(",");
 
         let cfn_client = self.cfn_client().await?;
         let stack = deploy_stack(
@@ -657,7 +815,7 @@ impl Installer {
             .into_iter()
             .filter_map(|output| Some((output.output_key?, output.output_value?)))
             .collect();
-        self.deployment.vpc_supplemental_stack_outputs = Some(outputs);
+        self.cfn_deployment()?.vpc_supplemental_stack_outputs = Some(outputs);
 
         Ok(())
     }
@@ -677,7 +835,7 @@ impl Installer {
             .describe_availability_zones()
             .filters(filter(
                 "region-name",
-                self.deployment.aws_region.as_ref().unwrap(),
+                self.cfn_deployment()?.aws_region.as_ref().unwrap(),
             ))
             .send()
             .await?
@@ -706,7 +864,7 @@ impl Installer {
             .and_then(|output| output.output_value())
             .ok_or_else(|| anyhow!("CloudFormation stack missing VPCID output key"))?;
 
-        self.deployment.vpc_id = Some(Existing(vpc_id.to_owned()));
+        self.cfn_deployment()?.vpc_id = Some(Existing(vpc_id.to_owned()));
 
         let subnet_ids = stack_outputs
             .iter()
@@ -721,13 +879,13 @@ impl Installer {
             .filter_map(|output| output.output_value.clone())
             .collect();
 
-        self.deployment.subnet_ids = Some(subnet_ids);
+        self.cfn_deployment()?.subnet_ids = Some(subnet_ids);
 
         Ok(())
     }
 
     async fn prompt_for_database_credentials(&mut self) -> Result<()> {
-        let rds_db = self.deployment.rds_db.as_ref().unwrap();
+        let rds_db = self.cfn_deployment()?.rds_db.as_ref().unwrap();
         if rds_db.db_id.is_existing() {
             println!("ReadySet needs credentials to connect to your RDS database.");
             println!("This user needs to have at least the following permissions:");
@@ -830,7 +988,8 @@ impl Installer {
             }
         };
 
-        self.deployment.database_credentials = Some(DatabaseCredentials { username, password });
+        self.cfn_deployment()?.database_credentials =
+            Some(DatabaseCredentials { username, password });
 
         Ok(())
     }
@@ -914,7 +1073,7 @@ impl Installer {
             }
         };
 
-        self.deployment.key_pair_name = Some(key_pair_name);
+        self.cfn_deployment()?.key_pair_name = Some(key_pair_name);
 
         success!("Configured SSH key");
 
@@ -924,13 +1083,13 @@ impl Installer {
     async fn validate_rs_ami_access(&mut self) -> Result<()> {
         let futures = FuturesUnordered::new();
         for template_url in [
-            self.deployment
+            self.cfn_deployment()?
                 .cloudformation_template_url(TemplateType::Mysql),
-            self.deployment
+            self.cfn_deployment()?
                 .cloudformation_template_url(TemplateType::Postgres),
         ] {
             let template = Template::download(template_url).await?;
-            let region = self.deployment.aws_region.as_ref().unwrap();
+            let region = self.cfn_deployment()?.aws_region.as_ref().unwrap();
 
             if let Some(mappings) = template.mappings {
                 if let Some(region_map) = mappings.aws_ami_region_map.get(region) {
@@ -988,7 +1147,7 @@ impl Installer {
                 self.prompt_for_vpc().await?;
                 self.save().await?;
 
-                match self.deployment.vpc_id.as_ref().unwrap() {
+                match self.cfn_deployment()?.vpc_id.as_ref().unwrap() {
                     CreateNew => return Ok(()),
                     Existing(new_vpc_id) => {
                         vpc_id = new_vpc_id.clone();
@@ -1092,7 +1251,7 @@ impl Installer {
                 .describe_availability_zones()
                 .filters(filter(
                     "region-name",
-                    self.deployment.aws_region.as_ref().unwrap(),
+                    self.cfn_deployment()?.aws_region.as_ref().unwrap(),
                 ))
                 .send()
                 .await?
@@ -1151,7 +1310,7 @@ impl Installer {
             {
                 let mut subnet_ids = self.create_subnets(vpc_id, subnet_az_cidrs).await?;
                 subnet_ids.extend(existing_subnet_ids);
-                self.deployment.subnet_ids = Some(subnet_ids);
+                self.cfn_deployment()?.subnet_ids = Some(subnet_ids);
             } else {
                 bail!(
                     "Please create subnets in the missing availability zones in your VPC, then \
@@ -1163,7 +1322,7 @@ impl Installer {
                 "VPC has subnets in at least {} availability zones",
                 MIN_AVAILABILITY_ZONES
             );
-            self.deployment.subnet_ids = Some(existing_subnet_ids)
+            self.cfn_deployment()?.subnet_ids = Some(existing_subnet_ids)
         }
 
         Ok(())
@@ -1234,7 +1393,7 @@ impl Installer {
                     self.prompt_for_rds_database().await?;
                     self.save().await?;
 
-                    let rds_db = self.deployment.rds_db.as_ref().unwrap();
+                    let rds_db = self.cfn_deployment()?.rds_db.as_ref().unwrap();
                     match &rds_db.db_id {
                         CreateNew => return Ok(()),
                         Existing(new_db_id) => {
@@ -1570,7 +1729,7 @@ impl Installer {
     }
 
     async fn prompt_for_rds_database(&mut self) -> Result<()> {
-        let rds_db = if let Existing(vpc_id) = self.deployment.vpc_id.clone().unwrap() {
+        let rds_db = if let Existing(vpc_id) = self.cfn_deployment()?.vpc_id.clone().unwrap() {
             println!(
                 "ReadySet will keep cached query results up-to-date based on data changes in \
                  your database.\n"
@@ -1660,7 +1819,7 @@ impl Installer {
             })
         })?;
 
-        self.deployment.rds_db = Some(rds_db);
+        self.cfn_deployment()?.rds_db = Some(rds_db);
 
         Ok(())
     }
@@ -1703,7 +1862,7 @@ impl Installer {
             println!(
                 "Found {} VPCs in {}",
                 style(vpcs.len()).bold(),
-                style(self.deployment.aws_region.as_ref().unwrap()).bold()
+                style(self.cfn_deployment()?.aws_region.as_ref().unwrap()).bold()
             );
             let idx = select()
                 .with_prompt("Which VPC should we deploy to?")
@@ -1716,7 +1875,7 @@ impl Installer {
             CreateNew
         };
 
-        Ok(self.deployment.vpc_id.insert(vpc_id).as_deref())
+        Ok(self.cfn_deployment()?.vpc_id.insert(vpc_id).as_deref())
     }
 
     async fn ec2_client(&mut self) -> Result<&ec2::Client> {
@@ -1789,22 +1948,23 @@ impl Installer {
     async fn load_aws_config(&mut self) -> Result<&SdkConfig> {
         let mut loader = aws_config::from_env();
 
-        let profile =
-            if let Some(aws_credentials_profile) = &self.deployment.aws_credentials_profile {
-                println!(
-                    "Using AWS profile: {}",
-                    style(aws_credentials_profile).bold()
-                );
-                aws_credentials_profile
-            } else {
-                self.prompt_for_aws_credentials_profile()?
-            };
+        let profile = if let Some(aws_credentials_profile) =
+            &self.cfn_deployment()?.aws_credentials_profile
+        {
+            println!(
+                "Using AWS profile: {}",
+                style(aws_credentials_profile).bold()
+            );
+            aws_credentials_profile
+        } else {
+            self.prompt_for_aws_credentials_profile()?
+        };
 
         loader = loader.credentials_provider(RusotoAWSWrapper(
             ProfileProvider::with_default_credentials(profile)?,
         ));
 
-        let region = if let Some(aws_region) = &self.deployment.aws_region {
+        let region = if let Some(aws_region) = &self.cfn_deployment()?.aws_region {
             println!("Using AWS region: {}", style(aws_region).bold());
             aws_region
         } else {
@@ -1838,7 +1998,10 @@ impl Installer {
             .interact_text()?;
         println!();
 
-        Ok(self.deployment.aws_credentials_profile.insert(profile))
+        Ok(self
+            .cfn_deployment()?
+            .aws_credentials_profile
+            .insert(profile))
     }
 
     fn prompt_for_aws_region(&mut self) -> Result<&str> {
@@ -1858,7 +2021,10 @@ impl Installer {
 
         let idx = prompt.interact()?;
 
-        Ok(self.deployment.aws_region.insert(REGIONS[idx].to_owned()))
+        Ok(self
+            .cfn_deployment()?
+            .aws_region
+            .insert(REGIONS[idx].to_owned()))
     }
 }
 

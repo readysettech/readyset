@@ -11,7 +11,7 @@ use tokio::fs::{read_dir, File};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 pub(crate) use MaybeExisting::{CreateNew, Existing};
 
-use crate::console::{confirm, input, select};
+use crate::console::{confirm, input, password, select};
 
 /// Used in build to match this installer a set of CFN templates.
 const PAIRED_VERSION: Option<&str> = option_env!("READYSET_CFN_PREFIX");
@@ -156,11 +156,45 @@ pub(crate) struct DatabaseCredentials {
     pub(crate) password: DatabasePasswordParameter,
 }
 
-/// A (potentially partially-completed) deployment of a readyset cluster
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
+/// A (potentially partially-completed) deployment of a readyset cluster.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct Deployment {
     pub(crate) name: String,
 
+    pub(crate) inner: DeploymentData,
+}
+
+/// Represents the different ways in which we may choose to deploy ReadySet.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub enum DeploymentData {
+    Cloudformation(Box<CloudformationDeployment>),
+    Compose(DockerComposeDeployment),
+}
+
+/// A (potentially partially-completed) deployment of a local readyset cluster.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct DockerComposeDeployment {
+    pub(crate) name: Option<String>,
+
+    pub(crate) migration_mode: Option<MigrationMode>,
+
+    pub(crate) mysql_db_name: Option<String>,
+
+    pub(crate) mysql_db_root_pass: Option<String>,
+
+    pub(crate) adapter_port: Option<u16>,
+}
+
+/// Whether the user wants to use the async migration feature, or the explicit migration feature.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub enum MigrationMode {
+    Async,
+    Explicit,
+}
+
+/// A (potentially partially-completed) deployment of a readyset CFN cluster.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct CloudformationDeployment {
     #[serde(default)]
     pub(crate) aws_credentials_profile: Option<String>,
 
@@ -210,15 +244,17 @@ pub enum TemplateType {
     Postgres,
 }
 
-impl Deployment {
+impl CloudformationDeployment {
     /// Create a new Deployment with the given name
-    pub fn new<S>(name: S) -> Self
+    pub fn new_deployment<S>(name: S) -> Deployment
     where
         S: Into<String>,
     {
         Deployment {
             name: name.into(),
-            ..Default::default()
+            inner: DeploymentData::Cloudformation(Box::new(CloudformationDeployment {
+                ..Default::default()
+            })),
         }
     }
 
@@ -237,7 +273,82 @@ impl Deployment {
             S3_PREFIX, version_to_use, TEMPLATE_DIR, template_file
         )
     }
+}
 
+impl DockerComposeDeployment {
+    /// Create a new Deployment with the given name
+    pub fn new_deployment<S>(name: S) -> Deployment
+    where
+        S: Into<String>,
+    {
+        Deployment {
+            name: name.into(),
+            inner: DeploymentData::Compose(DockerComposeDeployment {
+                ..Default::default()
+            }),
+        }
+    }
+
+    pub fn set_db_name(&mut self) -> Result<&mut DockerComposeDeployment> {
+        if self.mysql_db_name.is_some() {
+            return Ok(self);
+        }
+        self.mysql_db_name = Some(input().with_prompt("Database name").interact_text()?);
+        Ok(self)
+    }
+
+    pub fn set_db_password(&mut self) -> Result<&mut DockerComposeDeployment> {
+        if self.mysql_db_root_pass.is_some() {
+            return Ok(self);
+        }
+        self.mysql_db_root_pass = Some(
+            password()
+                .with_prompt("Database password")
+                .with_confirmation("Confirm password", "Passwords mismatching")
+                .interact()?,
+        );
+        Ok(self)
+    }
+
+    pub fn set_migration_mode(&mut self) -> Result<&mut DockerComposeDeployment> {
+        if self.migration_mode.is_some() {
+            return Ok(self);
+        }
+        println!("Now we need to select a migration mode.\n");
+        println!("There are two ways in which we can manage migrations. If you choose the async option, then a background process will automatically determine which of your queries can be supported, and automatically send all supported queries to ReadySet.\n");
+        println!("If you would prefer more explicit way of managing which queries you would like to be handled by ReadySet, you can choose the explicit migration mode instead. With the explicit migration mode, you need to manually migrate each query, by connecting to ReadySet and issuing a CREATE CACHED QUERY command\n");
+        println!("Here is an example of a CREATE CACHED QUERY command for a simple select statement:\nCREATE CACHED QUERY select * from table1\n");
+        let migration_modes = &["Async", "Explicit"];
+        match select()
+            .with_prompt("Preferred migration mode")
+            .items(migration_modes)
+            .default(1)
+            .interact()?
+        {
+            0 => {
+                self.migration_mode = Some(MigrationMode::Async);
+            }
+            1 => {
+                self.migration_mode = Some(MigrationMode::Explicit);
+            }
+            _ => {
+                panic!("Not a valid option for preferred migration mode");
+            }
+        }
+        Ok(self)
+    }
+
+    pub fn set_adapter_port(&mut self) -> Result<&mut DockerComposeDeployment> {
+        if self.adapter_port.is_some() {
+            return Ok(self);
+        }
+        println!("Which port should ReadySet listen on?");
+        self.adapter_port = Some(input().with_prompt("ReadySet port").interact_text()?);
+        Ok(self)
+    }
+}
+
+impl Deployment {
     /// Returns a reference to the name of the given deployment
     pub fn name(&self) -> &str {
         &self.name
@@ -287,7 +398,15 @@ impl Deployment {
 
 fn prompt_for_and_create_deployment() -> Result<Deployment> {
     let deployment_name: String = input().with_prompt("Deployment name").interact_text()?;
-    Ok(Deployment::new(deployment_name))
+    match select()
+        .with_prompt("Where would you like to deploy ReadySet?")
+        .items(&["Docker-Compose", "AWS Cloudformation"])
+        .interact()?
+    {
+        0 => Ok(DockerComposeDeployment::new_deployment(deployment_name)),
+        1 => Ok(CloudformationDeployment::new_deployment(deployment_name)),
+        _ => bail!("Must choose a destination to deploy ReadySet to"),
+    }
 }
 
 async fn select_deployment<P>(
@@ -366,7 +485,6 @@ where
 }
 
 #[cfg(test)]
-
 mod tests {
     use std::env;
 
@@ -378,7 +496,7 @@ mod tests {
     #[tokio::test]
     async fn save_and_load() {
         let state_dir = TempDir::new().unwrap();
-        let deployment = Deployment::new("save_and_load");
+        let deployment = CloudformationDeployment::new_deployment("save_and_load");
         deployment
             .save_to_directory(state_dir.path())
             .await
@@ -394,7 +512,7 @@ mod tests {
         let state_dir = TempDir::new().unwrap();
         assert!(Deployment::list(state_dir.path()).await.unwrap().is_empty());
 
-        Deployment::new("list_deployments_1")
+        CloudformationDeployment::new_deployment("list_deployments_1")
             .save_to_directory(state_dir.path())
             .await
             .unwrap();
@@ -403,7 +521,7 @@ mod tests {
             vec!["list_deployments_1"]
         );
 
-        Deployment::new("list_deployments_2")
+        CloudformationDeployment::new_deployment("list_deployments_2")
             .save_to_directory(state_dir.path())
             .await
             .unwrap();
@@ -413,10 +531,10 @@ mod tests {
     }
 
     #[proptest]
-    fn serialize_round_trip(deployment: Deployment) {
+    fn serialize_round_trip(deployment: CloudformationDeployment) {
         let serialized = serde_json::to_string(&deployment).unwrap();
         eprintln!("JSON: {}", serialized);
-        let rt = serde_json::from_str::<Deployment>(&serialized).unwrap();
+        let rt = serde_json::from_str::<CloudformationDeployment>(&serialized).unwrap();
         assert_eq!(rt, deployment);
     }
 
@@ -424,8 +542,12 @@ mod tests {
     fn cloudformation_template_url_fallback() {
         env::set_var("READYSET_CFN_PREFIX", "");
         let expected = format!("https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/{}/readyset/templates/readyset-authority-consul-template.yaml", FALLBACK_VERSION);
-        let deployment = Deployment::new("cloudformation_template_url");
-        let actual = deployment.cloudformation_template_url(TemplateType::Consul);
+        let deployment = CloudformationDeployment::new_deployment("cloudformation_template_url");
+        let actual = if let DeploymentData::Cloudformation(cfn) = deployment.inner {
+            cfn.cloudformation_template_url(TemplateType::Consul)
+        } else {
+            panic!("We are trying to generate a cloudformation template URL with an inner deployment type that is not DeploymentData::Cloudformation");
+        };
         assert_eq!(expected, actual)
     }
 
@@ -436,8 +558,12 @@ mod tests {
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890",
         ); // valid hash characters
         let expected = format!("https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/{}/readyset/templates/readyset-authority-consul-template.yaml", FALLBACK_VERSION);
-        let deployment = Deployment::new("cloudformation_template_url");
-        let actual = deployment.cloudformation_template_url(TemplateType::Consul);
+        let deployment = CloudformationDeployment::new_deployment("cloudformation_template_url");
+        let actual = if let DeploymentData::Cloudformation(cfn) = deployment.inner {
+            cfn.cloudformation_template_url(TemplateType::Consul)
+        } else {
+            panic!("We are trying to generate a cloudformation template URL with an inner deployment type that is not DeploymentData::Cloudformation");
+        };
         assert_eq!(expected, actual)
     }
 }

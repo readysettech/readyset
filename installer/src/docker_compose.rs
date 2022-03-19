@@ -1,8 +1,12 @@
 use std::collections::HashMap;
 
+use anyhow::bail;
 use derive_builder::*;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
+
+use crate::deployment::{Deployment, DeploymentData, MigrationMode};
+use crate::template::generate_base_template;
 
 #[skip_serializing_none]
 #[derive(Debug, Serialize, Deserialize)]
@@ -15,8 +19,37 @@ pub struct Compose {
     pub service: Option<Service>,
 }
 
+impl TryFrom<&Deployment> for Compose {
+    type Error = anyhow::Error;
+    fn try_from(value: &Deployment) -> Result<Self, Self::Error> {
+        let (name, compose) = match &value.inner {
+            DeploymentData::Compose(c) => (&value.name, c),
+            _ => {
+                bail!("Tried to convert a Deployment whose inner type was not a DeploymentType::Compose to a docker Compose type");
+            }
+        };
+        match (
+            &compose.mysql_db_name,
+            &compose.mysql_db_root_pass,
+            &compose.adapter_port,
+            &compose.migration_mode,
+        ) {
+            (Some(db_name), Some(db_pass), Some(adapter_port), Some(migration_mode)) => {
+                let mut default = generate_base_template();
+                default.fill_deployment(name);
+                default.fill_credentials(db_name, db_pass);
+                default.fill_adapter_port(*adapter_port);
+                default.fill_migration_mode(migration_mode);
+                Ok(default)
+            }
+            _ => {
+                bail!("Tried to convert to a Compose type, but missing one of mysql_db_name, mysql_db_root_pass, adapter_port, or migration_mode");
+            }
+        }
+    }
+}
+
 impl Compose {
-    #[allow(unused)]
     pub fn fill_deployment(&mut self, deployment: &str) {
         if let Some(ref mut services) = self.services {
             services.set_service_env_var("readyset-server", "NORIA_DEPLOYMENT", deployment);
@@ -25,7 +58,6 @@ impl Compose {
     }
 
     /// Fills database name, root password, and replication urls for mysql upstream database.
-    #[allow(unused)]
     pub fn fill_credentials(&mut self, db_name: &str, pass: &str) {
         if let Some(ref mut services) = self.services {
             services.set_service_env_var("mysql", "MYSQL_DATABASE", db_name);
@@ -41,7 +73,6 @@ impl Compose {
     }
 
     /// Fills in the port an end user would like to host the ReadySet adapter on.
-    #[allow(unused)]
     pub fn fill_adapter_port(&mut self, port: u16) {
         if let Some(ref mut services) = self.services {
             let addr = format!("0.0.0.0:{}", port);
@@ -53,6 +84,20 @@ impl Compose {
                     list.push(ports);
                 } else {
                     service.ports = Some(vec![ports]);
+                }
+            }
+        }
+    }
+
+    /// Sets the desired migration mode for the ReadySet adapter.
+    pub fn fill_migration_mode(&mut self, mode: &MigrationMode) {
+        if let Some(ref mut services) = self.services {
+            match mode {
+                MigrationMode::Async => {
+                    services.set_service_env_var("db", "ASYNC_MIGRATIONS", "1");
+                }
+                MigrationMode::Explicit => {
+                    services.set_service_env_var("db", "EXPLICIT_MIGRATIONS", "1");
                 }
             }
         }
@@ -161,7 +206,6 @@ impl Services {
 
     /// Adds the env var for the service, if the service exists, and no-ops if the service does not
     /// exist. If the service exists and the env var already exists, will overwrite the old value.
-    #[allow(unused)]
     pub fn set_service_env_var(&mut self, name: &str, key: &str, val: &str) {
         if let Some(Some(ref mut service)) = self.0.get_mut(name) {
             if let Some(ref mut map) = service.environment {

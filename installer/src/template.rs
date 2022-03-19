@@ -22,7 +22,6 @@ fn mysql_adapter_img() -> String {
     format!("{}{}:{}", IMG_PREFIX, READYSET_MYSQL_POSTFIX, READYSET_TAG)
 }
 
-#[allow(unused)]
 pub fn generate_base_template() -> Compose {
     let base_yml = include_str!("../base_template.yml");
     let mut template: Compose = serde_yaml::from_str::<Compose>(base_yml).unwrap();
