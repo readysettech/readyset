@@ -23,6 +23,7 @@
 // --prometheus-address $prometheus_addr
 // --migration-mode explicit-migration
 use std::str::FromStr;
+use std::time::Duration;
 
 use anyhow::bail;
 use clap::{ArgEnum, Parser};
@@ -81,9 +82,9 @@ impl BasicValidationTest {
     pub async fn run(self) -> anyhow::Result<()> {
         let mut current = 1;
         let total = match self.migration_mode {
-            MigrationMode::ExplicitMigration => 9,
-            MigrationMode::AsyncMigration => 9,
-            MigrationMode::RequestPath => 8,
+            MigrationMode::ExplicitMigration => 10,
+            MigrationMode::AsyncMigration => 10,
+            MigrationMode::RequestPath => 9,
         };
 
         let opts = mysql_async::Opts::from_url(&self.rds)?;
@@ -148,7 +149,7 @@ impl BasicValidationTest {
         }
 
         let result = tokio::time::timeout(
-            std::time::Duration::from_secs(1),
+            Duration::from_secs(1),
             adapter.exec("SELECT * FROM t1 where uid = ?", (3,)),
         )
         .await;
@@ -165,7 +166,6 @@ impl BasicValidationTest {
         }
 
         // Step 4: Create a connection to prometheus.
-
         step(
             &mut current,
             total,
@@ -178,7 +178,7 @@ impl BasicValidationTest {
         pb.enable_steady_tick(120);
         pb.set_style(ProgressStyle::default_spinner().template("{spinner:.blue} {msg}"));
         pb.set_message("Waiting 40 seconds for metrics to be propagated...");
-        std::thread::sleep(std::time::Duration::from_secs(40));
+        std::thread::sleep(Duration::from_secs(40));
         println!();
 
         // Step 5: Check that these queries executed against the correct database.
@@ -218,7 +218,7 @@ impl BasicValidationTest {
                 pb.enable_steady_tick(120);
                 pb.set_style(ProgressStyle::default_spinner().template("{spinner:.blue} {msg}"));
                 pb.set_message("Waiting just a little bit longer to make sure we have performed the migration async...");
-                std::thread::sleep(std::time::Duration::from_secs(20));
+                std::thread::sleep(Duration::from_secs(20));
                 println!();
             }
             MigrationMode::RequestPath => {
@@ -233,7 +233,7 @@ impl BasicValidationTest {
         );
 
         let result = tokio::time::timeout(
-            std::time::Duration::from_secs(1),
+            Duration::from_secs(1),
             adapter.exec("SELECT * FROM t1 where uid = ?", (3,)),
         )
         .await;
@@ -254,7 +254,7 @@ impl BasicValidationTest {
         pb.enable_steady_tick(120);
         pb.set_style(ProgressStyle::default_spinner().template("{spinner:.blue} {msg}"));
         pb.set_message("Waiting 40 seconds for metrics to be propagated...");
-        std::thread::sleep(std::time::Duration::from_secs(40));
+        tokio::time::sleep(Duration::from_secs(40)).await;
         println!();
 
         step(
@@ -263,6 +263,38 @@ impl BasicValidationTest {
             "Checking that the query executed against Noria",
         );
         prometheus::verify_db_queried(&client, "noria").await?;
+
+        step(
+            &mut current,
+            total,
+            "Checking that we can propagate writes in dataflow",
+        );
+
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            adapter.query_drop("UPDATE t1 SET value=100 WHERE uid = 3"),
+        )
+        .await??;
+
+        // Sleep to allow for propagation.
+        tokio::time::sleep(Duration::from_secs(10)).await;
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            adapter.exec("SELECT * FROM t1 where uid = ?", (3u32,)),
+        )
+        .await;
+
+        if let Ok(result) = result {
+            let result: Vec<(i32, i32)> = result?;
+            if result.len() != 1 {
+                println!("Incorrect number of rows returned");
+            } else if (result[0].0, result[0].1) != (3i32, 100i32) {
+                println!("Incorrect result returned from query");
+            }
+        } else {
+            println!("Query did not complete in 1 second");
+        }
 
         println!();
 
