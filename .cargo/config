@@ -6,9 +6,6 @@ substrate = "run --package readyset-substrate --"
 [build]
 rustflags = ["-C", "link-args=-llz4"]
 
-[target.'cfg(target_arch = "x86_64")']
-rustflags = ["-C", "target-feature=+popcnt,+aes,+pclmulqdq,+rdrand,+cmpxchg16b,+sse4.2,+sse4.1"]
-
 [target.'cfg(feature = "cargo-clippy")']
 rustflags = [
   "-Dclippy::dbg_macro"
