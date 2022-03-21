@@ -232,14 +232,21 @@ where
             return;
         }
         let qname = utils::generate_query_name(stmt);
-        if controller
+        match controller
             .dry_run(&format!("QUERY {}: {}", qname, &stmt))
             .await
-            .is_ok()
         {
-            self.start_time.remove(stmt);
-            self.query_status_cache
-                .update_query_migration_state(stmt, MigrationState::DryRunSucceeded);
+            Ok(_) => {
+                self.start_time.remove(stmt);
+                self.query_status_cache
+                    .update_query_migration_state(stmt, MigrationState::DryRunSucceeded);
+            }
+            Err(e) if e.caused_by_unsupported() => {
+                self.start_time.remove(stmt);
+                self.query_status_cache
+                    .update_query_migration_state(stmt, MigrationState::Unsupported);
+            }
+            _ => {} // Leave it as pending.
         }
     }
 }
