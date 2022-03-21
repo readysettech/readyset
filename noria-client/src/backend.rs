@@ -1728,7 +1728,10 @@ where
                     SqlQuery::DropTable(stmt) => {
                         handle_ddl!(handle_table_operation(stmt.clone()))
                     }
-                    SqlQuery::AlterTable(_) | SqlQuery::RenameTable(_) => {
+                    SqlQuery::AlterTable(stmt) => {
+                        handle_ddl!(handle_table_operation(stmt.clone()))
+                    }
+                    SqlQuery::RenameTable(_) => {
                         unsupported!("{} not yet supported", parsed_query.query_type());
                     }
                     SqlQuery::Set(_) | SqlQuery::CompoundSelect(_) | SqlQuery::Show(_) => {
@@ -1775,6 +1778,7 @@ where
                     // CREATE VIEW will still trigger migrations with epxlicit-migrations enabled
                     SqlQuery::CreateView(q) => self.noria.handle_create_view(q).await,
                     SqlQuery::CreateTable(q) => self.noria.handle_table_operation(q.clone()).await,
+                    SqlQuery::AlterTable(q) => self.noria.handle_table_operation(q.clone()).await,
                     SqlQuery::DropTable(q) => self.noria.handle_table_operation(q.clone()).await,
                     SqlQuery::Select(q) => {
                         let res = self

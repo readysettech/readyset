@@ -159,6 +159,14 @@ impl From<DropTableStatement> for ChangeList {
     }
 }
 
+impl From<AlterTableStatement> for ChangeList {
+    fn from(ats: AlterTableStatement) -> Self {
+        ChangeList {
+            changes: vec![Change::AlterTable(ats)],
+        }
+    }
+}
+
 /// Describes a singe change to be made to the MIR and dataflow graphs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Change {
