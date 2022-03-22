@@ -11,11 +11,31 @@ use vec1::Vec1;
 
 use crate::prelude::*;
 
+/// A single segment (node that is passed through) of a replay path within a particular domain
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReplayPathSegment {
+    /// The index of the node this replay path passes through
     pub node: LocalNodeIndex,
+
     pub force_tag_to: Option<Tag>,
+
+    /// If this node is partially materialized, the index we should mark filled when replays are
+    /// executed through this node
     pub partial_index: Option<Index>,
+
+    /// Is this replay path segment the *target* of the replay path?
+    ///
+    /// Replay paths may have at most one segment as their target, but may not have any, if the
+    /// source node happens to be the same as the target node.
+    ///
+    /// Usually this will be true for the last segment of the path, but that may not be the case if
+    /// this is an *extended* replay path
+    ///
+    /// See [the docs section on straddled joins][straddled-joins] for more information about
+    /// extended replay paths
+    ///
+    /// [straddled-joins]: http://docs/dataflow/replay_paths.html#straddled-joins
+    pub is_target: bool,
 }
 
 /// [`Display`] wrapper struct for a list of [`ReplayPathSegment`]s, to write them using a more
@@ -30,11 +50,16 @@ impl<'a> Display for PrettyReplayPath<'a> {
                 node,
                 force_tag_to,
                 partial_index,
+                is_target,
             },
         ) in self.0.iter().enumerate()
         {
             if i != 0 {
                 write!(f, " → ")?;
+            }
+
+            if *is_target {
+                write!(f, "◎ ")?;
             }
 
             write!(f, "{}", node)?;
@@ -51,7 +76,6 @@ impl<'a> Display for PrettyReplayPath<'a> {
                 write!(f, " force: {:?}", tag)?;
             }
         }
-
         Ok(())
     }
 }
@@ -193,6 +217,7 @@ pub enum DomainRequest {
     SetupReplayPath {
         tag: Tag,
         source: Option<LocalNodeIndex>,
+        source_index: Option<Index>,
         path: Vec1<ReplayPathSegment>,
         partial_unicast_sharder: Option<NodeIndex>,
         notify_done: bool,
@@ -223,11 +248,14 @@ pub enum DomainRequest {
     /// Process the packet, as per usual
     Packet(Packet),
 
-    /// Informs a domain that a given node's columns are generated, and upqueries from them
+    /// Informs a domain that a particular index in a node is generated, and upqueries from them
     /// should use `Ingredient::handle_upquery`.
     GeneratedColumns {
         node: LocalNodeIndex,
-        cols: Vec<usize>,
+        /// The generated index itself
+        index: Index,
+        /// The Tag for the replay path that will be making upqueries *to* this generated index
+        tag: Tag,
     },
 }
 
@@ -405,8 +433,7 @@ impl Packet {
 
     pub(crate) fn tag(&self) -> Option<Tag> {
         match *self {
-            Packet::ReplayPiece { tag, .. } => Some(tag),
-            Packet::EvictKeys { tag, .. } => Some(tag),
+            Packet::ReplayPiece { tag, .. } | Packet::EvictKeys { tag, .. } => Some(tag),
             _ => None,
         }
     }
