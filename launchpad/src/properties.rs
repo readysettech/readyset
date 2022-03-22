@@ -171,7 +171,9 @@ macro_rules! hash_laws {
 
             #[proptest]
             fn matches_eq(#[$meta] x: $ty, #[$meta] y: $ty) {
-                assert_eq!(x == y, hash(&x) == hash(&y));
+                if x == y {
+                    assert_eq!(hash(&x), hash(&y));
+                }
             }
         }
     };
