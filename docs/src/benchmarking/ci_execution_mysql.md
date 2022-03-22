@@ -137,8 +137,8 @@ As of writing this document, the `benchmark` queue is currently underpinned by B
 
 When metrics are emitted by benchmarks running in CI, the following infrastructure is used to store, scrape, buffer, and visualize the data.
 
-| Name                 	| URL 	| Network Controls    	| K8s Namespace 	|
-|-------------------------	|-----	|---------------------	|---------------	|
-| Prometheus (Datastore)  	| https://benchmark-prometheus.build.readyset.name 	| Internal Only (VPN) 	| `build`       	|
-| Prometheus Push Gateway 	| https://benchmark-pushgw.build.readyset.name    	| Internal Only (VPN) 	| `build`       	|
-| Grafana                 	| https://benchmark-grafana.build.readyset.name	    | Internal Only (VPN) 	| `build`       	|
+| Name                    | URL                                                | Network Controls    | K8s Namespace |
+|-------------------------|----------------------------------------------------|---------------------|---------------|
+| Prometheus (Datastore)  | <https://benchmark-prometheus.build.readyset.name> | Internal Only (VPN) | `build`       |
+| Prometheus Push Gateway | <https://benchmark-pushgw.build.readyset.name>     | Internal Only (VPN) | `build`       |
+| Grafana                 | <https://benchmark-grafana.build.readyset.name>    | Internal Only (VPN) | `build`       |
