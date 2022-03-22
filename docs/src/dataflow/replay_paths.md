@@ -126,10 +126,70 @@ Which could create this graph:
 In that query, the key for the reader for the second query (node 8) traces to
 the *result* column for the `COUNT` aggregate in the view (column 1 in node 2),
 but then we get stuck - there isn't a parent of that aggregate node that
-contains the result of the aggregate unchanged! Currently, this situation
-*forces* node 2 to be fully materialized, as that's the only way we currently
-know to query a node for all rows matching a column which that node generates.
+contains the result of the aggregate unchanged! This corresponds to a return
+value of [`ColumnSource::RequiresFullReplay`][] from the [`column_source`][]
+method. Currently, this situation *forces* node 2 to be fully materialized, as
+that's the only way we currently know to query a node for all rows matching a
+column which that node generates.
 
-### Remapped columns
+[`ColumnSource::RequiresFullReplay`]: http://docs/rustdoc/noria_dataflow/prelude/enum.ColumnSource.html#variant.RequiresFullReplay
 
-Coming soon!
+#### Generated columns, but remapped
+
+We'd like to avoid making fully materialized queries as often as we can,
+however, since the whole raison d'être of Noria's invention is the ability to
+use partial materialization to only store the individual results of a query in
+memory that users have actually asked for. As an optimization, it's possible for
+a node to request that an upquery to it for a particular set of columns be
+remapped into an upquery for a *different* set of columns. For example, consider
+the `Paginate` operator, which groups rows by a set of columns, orders each of
+those groups by a different set of columns, then emits a "page number" column
+indicating the page number within each group up to a configured page size. For
+example, if we have a Paginate operator that groups by columns `[0]`, orders by
+columns `[1]` ascending, and has a configured page size of 3, an input of:
+
+```
+["a", 1]
+["a", 3]
+["a", 2]
+["a", 4]
+["b", 2]
+["b", 3]
+["b", 5]
+```
+
+Would produce the following output (the page number column is always last):
+
+```
+["a", 1, 0]
+["a", 3, 0]
+["a", 2, 0]
+["a", 4, 1]
+["b", 2, 0]
+["b", 3, 0]
+["b", 5, 0]
+```
+
+Similarly to the aggregate node example above, column index 2 (the page number
+column) in the output of the paginate node is "generated" by that node - there's
+no direct way of querying any of the parents of the node to determine all of the
+rows that would go into page 0, for example. However, we can get a little bit
+closer - if instead we consider an index on both the group *and* the page (which
+is likely to be the actual lookup key for a real-world query), we can
+*approximate* an upquery for that index by making an upquery for *only* the
+group - we'll load (potentially many) more rows than we need, but at least we'll
+be better than fully materialized! Concretely, today, if you call
+[`column_source`][] on a `Paginate` node with a set of columns containing both
+the group columns and the page number, the return value will contain
+[`ColumnSource::GeneratedFromColumns`][] with a column reference to *only* the
+group, on the *node itself*. This semantically indicates that the page number
+column is "generated" from the group column. In other words, the node is saying
+"if you want only one page of a group, you can get that by replaying *all* rows
+in the group through me, and then I'll be able to satisfy a lookup of only one
+page".
+
+[`ColumnSource::GeneratedFromColumns`]: http://docs/rustdoc/noria_dataflow/prelude/enum.ColumnSource.html#variant.GeneratedFromColumns
+
+### Straddled joins
+
+Coming Soon!
