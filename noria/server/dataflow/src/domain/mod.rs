@@ -84,8 +84,15 @@ enum TriggerEndpoint {
     Local(Index),
 }
 
+/// Information about the subset of a replay path that is relevant to a particular domain.
+///
+/// For more information about replay paths, see the [docs page][]
+///
+/// [docs page]: http://docs/dataflow/replay_paths.html
 pub(crate) struct ReplayPath {
     source: Option<LocalNodeIndex>,
+    /// Partial index (if any) at the *target* of this replay path.
+    target_index: Option<Index>,
     /// The nodes in the replay path.
     path: Vec1<ReplayPathSegment>,
     notify_done: bool,
@@ -98,9 +105,16 @@ impl ReplayPath {
     pub(crate) fn last_segment(&self) -> &ReplayPathSegment {
         self.path.last()
     }
-}
 
-type Hole = (Vec<usize>, KeyComparison);
+    /// If the target of this replay path is in this domain, return the node index of that target
+    pub(crate) fn target_node(&self) -> Option<LocalNodeIndex> {
+        self.path
+            .iter()
+            .find(|segment| segment.is_target)
+            .map(|segment| segment.node)
+            .or(self.source)
+    }
+}
 
 /// The result of do_lookup, consists of the vector of the found records
 /// the hashset of the fullfilled keys, and a hashset of the missed key/replay key tuples
@@ -159,6 +173,15 @@ struct Redo {
     replay_key: KeyComparison,
     unishard: bool,
     requesting_shard: usize,
+}
+
+/// Struct indicating a single hole in a partial materialization that needs to be filled to satisfy
+/// some downstream replay. Used in [`Waiting`].
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+struct Hole {
+    node: LocalNodeIndex,
+    column_indices: Vec<usize>,
+    key: KeyComparison,
 }
 
 /// When a replay misses while being processed, it triggers a replay to backfill the hole that it
@@ -447,14 +470,22 @@ pub struct Domain {
     /// * Each node referenced by a `view` of a TimedPurge must be a reader node
     timed_purges: VecDeque<TimedPurge>,
 
-    /// Map from terminating nodes of replay paths, to indexes, to tags for those replay paths
-    replay_paths_by_dst: NodeMap<HashMap<Index, Vec<Tag>>>,
+    /// Map from destination nodes of replay paths, to *target* nodes of replay paths, to indexes,
+    /// to tags for those replay paths.
+    ///
+    /// The target of a replay path will almost always be the same as the destination, except in
+    /// the case of *extended* replay paths. See [the docs section on straddled
+    /// joins][straddled-joins] for more information about extended replay paths
+    ///
+    /// [straddled-joins]: http://docs/dataflow/replay_paths.html#straddled-joins
+    replay_paths_by_dst: NodeMap<NodeMap<HashMap<Index, Vec<Tag>>>>,
 
-    /// Set of nodes and columns which are "generated" by that node, meaning those columns do not
-    /// appear unchanged in exactly one of that node's parents. If a  If a (node, cols) pair
-    /// appears in this set, then misses on those columns require the use of
-    /// [`Ingredient::handle_upquery`]
-    generated_columns: HashSet<(LocalNodeIndex, Vec<usize>)>,
+    /// Map from nodes and columns which are "generated" by that node, meaning those columns do not
+    /// appear unchanged in exactly one of that node's parents, to the list of *downstream* tags
+    /// for the replay paths which will attempt to query an index on those generated columns.
+    /// If a (node, cols) pair appears as a key of this map, then misses on those columns
+    /// require the use of [`Ingredient::handle_upquery`]
+    generated_columns: HashMap<(LocalNodeIndex, Vec<usize>), Vec<Tag>>,
 
     concurrent_replays: usize,
     max_concurrent_replays: usize,
@@ -513,23 +544,33 @@ impl Domain {
     /// Initiate a replay for a miss represented by the given keys and column indices in the given
     /// node.
     ///
+    /// Passed both the *destination* node (the node which must be the final node in the replay
+    /// path) in addition to the *target* node (the node containing the index which must be filled).
+    /// Usually, these will be the same node, except in  the case of *extended* replay paths. See
+    /// [the docs section on straddled joins][straddled-joins] for more information about extended
+    /// replay paths
+    ///
+    /// [straddled-joins]: http://docs/dataflow/replay_paths.html#straddled-joins
+    ///
     /// # Invariants
     ///
     /// * `miss_columns` must not be empty
-    /// * `miss_in` must be a node in the graph
+    /// * `dst` and `target` must both be nodes in this domain
     #[allow(clippy::indexing_slicing)] // Documented invariant
     fn find_tags_and_replay(
         &mut self,
         miss_keys: Vec<KeyComparison>,
         miss_columns: &[usize],
-        miss_in: LocalNodeIndex,
+        dst: LocalNodeIndex,
+        target: LocalNodeIndex,
     ) -> Result<(), ReadySetError> {
         let miss_index = Index::new(IndexType::best_for_keys(&miss_keys), miss_columns.to_vec());
         // the cloned is a bit sad; self.request_partial_replay doesn't use
         // self.replay_paths_by_dst.
         let tags = self
             .replay_paths_by_dst
-            .get(miss_in)
+            .get(dst)
+            .and_then(|by_target| by_target.get(target))
             .and_then(|indexes| {
                 // we might be doing what is effectively a point lookup into a BTree index if we do
                 // a lookup of a double-ended range where both ends are inclusive bounds of the same
@@ -550,9 +591,9 @@ impl Domain {
             !tags.is_empty(),
             "no tag found to fill missing value {:?} in {}.{:?}; available tags: {:?}",
             miss_keys,
-            miss_in,
+            dst,
             miss_index,
-            self.replay_paths_by_dst.get(miss_in)
+            self.replay_paths_by_dst.get(dst)
         );
 
         for &tag in &tags {
@@ -579,6 +620,8 @@ impl Domain {
                 // so instead, we simply keep track of the fact that we have a replay to handle,
                 // and then get back to it after all processing has finished (at the bottom of
                 // `Self::handle()`)
+
+                trace!(?tag, keys = ?miss_keys, "sending replay request to self");
                 self.delayed_for_self
                     .push_back(Box::new(Packet::RequestPartialReplay {
                         tag,
@@ -617,15 +660,15 @@ impl Domain {
         self.metrics
             .inc_replay_misses(miss_in, needed_for, missed_keys.len());
 
-        // Was this miss on a set of generated columns?
         let is_generated = self
             .generated_columns
-            .contains(&(miss_in, miss_columns.to_vec()));
+            .contains_key(&(miss_in, miss_columns.to_vec()));
 
         // Map of replays we need to do, grouped by the set of columns at the *target* of the replay
         // (which in the case of remapped upqueries might be different than the columns we missed
         // on!)
-        let mut needed_replays: HashMap<Vec1<usize>, Vec<KeyComparison>> = Default::default();
+        let mut needed_replays: HashMap<(LocalNodeIndex, Vec1<usize>), Vec<KeyComparison>> =
+            Default::default();
 
         for (replay_key, miss_key) in missed_keys {
             let miss = ColumnMiss {
@@ -655,19 +698,20 @@ impl Domain {
                 requesting_shard,
             };
             for ColumnMiss {
-                // TODO: this might be different if nodes generate columns from their parents, which
-                // we currently don't allow
-                node: _,
+                node,
                 column_indices,
                 missed_keys,
             } in misses
             {
-                let replays = needed_replays.entry(column_indices.clone()).or_default();
+                let replays = needed_replays
+                    .entry((node, column_indices.clone()))
+                    .or_default();
                 for miss_key in missed_keys {
-                    match w
-                        .redos
-                        .entry((column_indices.clone().into(), miss_key.clone()))
-                    {
+                    match w.redos.entry(Hole {
+                        node,
+                        column_indices: column_indices.clone().into(),
+                        key: miss_key.clone(),
+                    }) {
                         Entry::Occupied(e) => {
                             // we have already requested backfill of this key
                             // remember to notify this Redo when backfill completes
@@ -693,8 +737,8 @@ impl Domain {
 
         self.waiting.insert(miss_in, w);
 
-        for (columns, keys) in needed_replays {
-            self.find_tags_and_replay(keys, &columns, miss_in)?
+        for ((node, columns), keys) in needed_replays {
+            self.find_tags_and_replay(keys, &columns, miss_in, node)?
         }
 
         Ok(())
@@ -711,6 +755,7 @@ impl Domain {
         keys: Vec<KeyComparison>,
     ) -> ReadySetResult<()> {
         debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
+
         #[allow(clippy::unwrap_used)] // documented invariant
         if let TriggerEndpoint::End {
             source,
@@ -852,20 +897,31 @@ impl Domain {
                 let mut requests_satisfied = 0;
                 #[allow(clippy::unwrap_used)] // Replay paths can't be empty
                 let last = self.replay_paths[&tag].last_segment();
-                if let Some(cs) = self.replay_paths_by_dst.get(last.node) {
-                    // We already know it's a partial replay path, so it must have a partial key
-                    #[allow(clippy::unwrap_used)]
-                    if let Some(tags) = cs.get(last.partial_index.as_ref().unwrap()) {
-                        requests_satisfied = tags
-                            .iter()
-                            .filter(|tag| {
-                                matches!(
-                                    self.replay_paths[tag].trigger,
-                                    TriggerEndpoint::End { .. }
-                                )
-                            })
-                            .count();
+                if let Some(target) = self.replay_paths[&tag].target_node() {
+                    if let Some(by_index) = self
+                        .replay_paths_by_dst
+                        .get(last.node)
+                        .and_then(|by_target| by_target.get(target))
+                    {
+                        // We already know it's a partial replay path, so it must have a partial key
+                        #[allow(clippy::unwrap_used)]
+                        if let Some(tags) = by_index.get(last.partial_index.as_ref().unwrap()) {
+                            requests_satisfied = tags
+                                .iter()
+                                .filter(|tag| {
+                                    matches!(
+                                        self.replay_paths[tag].trigger,
+                                        TriggerEndpoint::End { .. }
+                                    )
+                                })
+                                .count();
+                        }
                     }
+                } else {
+                    internal!(
+                        "Finished replay to a domain that does not contain the target of the replay path (tag: {:?})",
+                        tag
+                    );
                 }
 
                 // we also sent that many requests *per key*.
@@ -1540,6 +1596,7 @@ impl Domain {
             DomainRequest::SetupReplayPath {
                 tag,
                 source,
+                source_index,
                 path,
                 notify_done,
                 partial_unicast_sharder,
@@ -1549,6 +1606,7 @@ impl Domain {
                     debug!(
                         ?tag,
                         ?source,
+                        ?source_index,
                         path = %PrettyReplayPath(&path),
                         "told about terminating replay path",
                     );
@@ -1558,6 +1616,7 @@ impl Domain {
                     debug!(
                         ?tag,
                         ?source,
+                        ?source_index,
                         path = %PrettyReplayPath(&path),
                         "told about replay path"
                     );
@@ -1600,21 +1659,50 @@ impl Domain {
                     }
                 };
 
-                if let TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) = trigger {
-                    let last = path.last();
+                let target_index = if let TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) =
+                    trigger
+                {
+                    let (target_node, target_index) = if let Some(target_segment) =
+                        path.iter().find(|segment| segment.is_target)
+                    {
+                        (
+                            target_segment.node,
+                            target_segment.partial_index.clone().unwrap(),
+                        )
+                    } else {
+                        (
+                            source.ok_or_else(|| {
+                                internal_err(
+                                    "Path without target must have source in the same domain",
+                                )
+                            })?,
+                            source_index.ok_or_else(|| {
+                                // I think?
+                                internal_err("Partial replay path must have an index at the source")
+                            })?,
+                        )
+                    };
+
                     #[allow(clippy::unwrap_used)] // Replay path must have a partial key
                     self.replay_paths_by_dst
-                        .entry(last.node)
-                        .or_insert_with(HashMap::new)
-                        .entry(last.partial_index.clone().unwrap())
-                        .or_insert_with(Vec::new)
+                        .entry(path.last().node)
+                        .or_default()
+                        .entry(target_node)
+                        .or_default()
+                        .entry(target_index.clone())
+                        .or_default()
                         .push(tag);
-                }
+
+                    Some(target_index)
+                } else {
+                    None
+                };
 
                 self.replay_paths.insert(
                     tag,
                     ReplayPath {
                         source,
+                        target_index,
                         path,
                         notify_done,
                         partial_unicast_sharder,
@@ -1943,8 +2031,18 @@ impl Domain {
                 self.replay_completed = false;
                 Ok(Some(bincode::serialize(&ret)?))
             }
-            DomainRequest::GeneratedColumns { node, cols } => {
-                self.generated_columns.insert((node, cols));
+            DomainRequest::GeneratedColumns { node, index, tag } => {
+                // Record that these columns are generated...
+                self.generated_columns
+                    .entry((node, index.columns.clone()))
+                    .or_default()
+                    .push(tag);
+                // ...and also make sure we use that tag to index those columns in this node, so we
+                // know what hole to fill when we've satisfied replays to those columns
+                self.state
+                    .entry(node)
+                    .or_insert_with(|| MaterializedNodeState::Memory(MemoryState::default()))
+                    .add_key(index, Some(vec![tag]));
                 Ok(None)
             }
         };
@@ -2046,7 +2144,7 @@ impl Domain {
                     .or_insert_with(|| RequestedKeys::new(reader_index_type));
                 already_requested.extend(&mut keys);
                 if !keys.is_empty() {
-                    self.find_tags_and_replay(keys, &cols[..], node)?;
+                    self.find_tags_and_replay(keys, &cols[..], node, node)?;
                 }
 
                 self.total_replay_time.stop();
@@ -2429,23 +2527,31 @@ impl Domain {
 
                     // let's collect some information about the destination of this replay
                     let dst = path.last().node;
+                    let target = path
+                        .iter()
+                        .find(|s| s.is_target)
+                        .map(|s| s.node)
+                        .or(*source);
                     #[allow(clippy::indexing_slicing)] // dst came from a replay path
                     let dst_is_reader = self.nodes[dst]
                         .borrow()
                         .as_reader()
                         .map(|r| r.is_materialized())
                         .unwrap_or(false);
-                    // Is the destination of this replay path within this domain the *target* of the
-                    // replay, rather than just an egress?
-                    let dst_is_target = !self
+                    // Is the destination of this replay path within this domain just going to
+                    // forward packets on to another node (is it an egress or sharder)?
+                    let dst_is_sender = self
                         .nodes
                         .get(dst)
                         .ok_or_else(|| ReadySetError::NoSuchNode(dst.id()))?
                         .borrow()
                         .is_sender();
+                    // Is the target of this replay path inside this domain?
+                    let target_in_self = path.iter().any(|n| n.is_target);
 
-                    if dst_is_target {
-                        // prune keys and data for keys we're not waiting for
+                    if target_in_self {
+                        // If this replay pathh is bound for us, prune keys and data for keys we're
+                        // not waiting for
                         if let ReplayPieceContext::Partial {
                             ref mut for_keys, ..
                         } = context
@@ -2455,10 +2561,11 @@ impl Domain {
                             if let Some(w) = self.waiting.get(dst) {
                                 // discard all the keys that we aren't waiting for
                                 for_keys.retain(|k| {
-                                    w.redos.contains_key(&(
-                                        partial_index.columns.to_owned(),
-                                        k.clone(),
-                                    ))
+                                    w.redos.contains_key(&Hole {
+                                        node: target.expect("already checked target_in_self"),
+                                        column_indices: partial_index.columns.to_owned(),
+                                        key: k.clone(),
+                                    })
                                 });
                             } else if let Some(prev) = self.reader_triggered.get(dst) {
                                 // discard all the keys or subranges of keys that we aren't waiting
@@ -2469,6 +2576,7 @@ impl Domain {
                             } else {
                                 // this packet contained no keys that we're waiting for, so it's
                                 // useless to us.
+                                debug!("Received packet with no keys that we were waiting for");
                                 return Ok(());
                             }
 
@@ -2546,7 +2654,6 @@ impl Domain {
                         #[allow(clippy::indexing_slicing)]
                         // we know replay paths only contain real nodes
                         let mut n = self.nodes[segment.node].borrow_mut();
-                        let is_reader = n.as_reader().map(|r| r.is_materialized()).unwrap_or(false);
 
                         // keep track of whether we're filling any partial holes
                         let partial_key_cols = segment.partial_index.as_ref();
@@ -2562,20 +2669,21 @@ impl Domain {
                             None
                         };
 
-                        // figure out if we're the target of a partial replay.
-                        // this is the case either if the current node is waiting for a replay,
-                        // *or* if the target is a reader. the last case is special in that when a
-                        // client requests a replay, the Reader isn't marked as "waiting".
-                        let target = backfill_keys.is_some()
-                            && i == path.len() - 1
-                            && (is_reader || !n.is_sender());
-
-                        // targets better be last
-                        assert!(!target || i == path.len() - 1);
+                        // Is this segment the target of the replay path?
+                        let is_target = backfill_keys.is_some() && segment.is_target;
+                        let cols = segment.partial_index.as_ref().map(|idx| &idx.columns);
+                        // If this replay path is targeting a set of generated columns, figure out
+                        // what the tag is for those generated columns so we can mark it as filled
+                        // later
+                        let tag_for_generated = cols
+                            .and_then(|cols| {
+                                self.generated_columns.get(&(segment.node, cols.clone()))
+                            })
+                            .cloned();
 
                         // are we about to fill a hole?
-                        if target {
-                            if let Some(backfill_keys) = &backfill_keys {
+                        if let Some(backfill_keys) = &backfill_keys {
+                            if is_target {
                                 // mark the state for the key being replayed as *not* a hole
                                 // otherwise we'll just end up with
                                 // the same "need replay" response that
@@ -2599,12 +2707,70 @@ impl Domain {
                                         }
                                     }
                                 }
+                            } else if tag_for_generated.is_some() {
+                                // If we're processing a replay that ends at a set of generated
+                                // columns, and there's some downstream replay that's waiting on us,
+                                // we need to mark that downstream replay's key as filled before
+                                // processing the records, so that when we materialize the result
+                                // we don't miss when processing the redo
+                                //
+                                // TODO(grfn): there's an opportunity for an optimization here -
+                                // since we're ostensibly querying for considerably more data than
+                                // we actually need (think eg paginate where we query for all the
+                                // rows in a group in order to satisfy a lookup of an individual
+                                // page) we could instead mark all keys taken from the column
+                                // indices of the redo in *all* rows returned from the node as
+                                // filled (since because of the semantics of
+                                // ColumnSource::GeneratedFromColumns we know we've just loaded all
+                                // the rows we'd need to mark those holes as filled!).
+                                // Unfortunately, we don't actually know what those rows are going
+                                // to be at this point (since we haven't processed through the node
+                                // yet), not to mention that optimization doesn't make sense for
+                                // range keys (since we can't just take the key out of the rows
+                                // themselves). So for now we just mark the original key as filled,
+                                // and any subsequent queries that remap to the same upstream key
+                                // have to replay the same set of rows over again (sad!)
+                                if let Some(state) = self.state.get_mut(segment.node) {
+                                    if let Some(waiting) = self.waiting.get(segment.node) {
+                                        for key in backfill_keys.clone() {
+                                            let hole = Hole {
+                                                node: target.unwrap(),
+                                                column_indices: self.replay_paths[&tag]
+                                                    .target_index
+                                                    .as_ref()
+                                                    .unwrap()
+                                                    .columns
+                                                    .clone(),
+                                                key,
+                                            };
+                                            if let Some(redos) = waiting.redos.get(&hole) {
+                                                for redo in redos {
+                                                    // Are we about to satisfy the last hole this
+                                                    // redo was waiting for?
+                                                    if waiting.holes.get(redo) == Some(&1) {
+                                                        trace!(
+                                                            key = ?redo.replay_key,
+                                                            tag = ?redo.tag,
+                                                            local = %segment.node,
+                                                            "Marking remapped hole filled"
+                                                        );
+                                                        state.mark_filled(
+                                                            redo.replay_key.clone(),
+                                                            redo.tag,
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
+
                         // process the current message in this node
                         let process_result = n.process(
                             &mut m,
-                            segment.partial_index.as_ref().map(|idx| &idx.columns),
+                            cols,
                             Some(rp),
                             false,
                             ProcessEnv {
@@ -2629,7 +2795,7 @@ impl Domain {
                             HashSet::new()
                         };
 
-                        if target {
+                        if is_target {
                             if !misses.is_empty() {
                                 // we missed while processing
                                 // it's important that we clear out any partially-filled holes.
@@ -2663,7 +2829,7 @@ impl Domain {
                             }
                         }
 
-                        if target && !process_result.captured.is_empty() {
+                        if is_target && !process_result.captured.is_empty() {
                             // materialized union ate some of our keys,
                             // so we didn't *actually* fill those keys after all!
                             if let Some(state) = self.state.get_mut(segment.node) {
@@ -2706,7 +2872,7 @@ impl Domain {
                         //     *current* node is a target/reader, because we could miss during a
                         //     join along the path.
                         if let Some(backfill_keys) = &backfill_keys {
-                            if finished_partial == 0 && (dst_is_reader || dst_is_target) {
+                            if finished_partial == 0 && (dst_is_reader || !dst_is_sender) {
                                 finished_partial = backfill_keys.len();
                             }
                         }
@@ -2906,9 +3072,8 @@ impl Domain {
                                 #[allow(clippy::unwrap_used)]
                                 // we know this is a partial replay path
                                 let tag_match = |rp: &ReplayPath, pn| {
-                                    let path_index =
-                                        rp.last_segment().partial_index.as_ref().unwrap();
-                                    rp.last_segment().node == pn
+                                    let path_index = rp.target_index.as_ref().unwrap();
+                                    rp.target_node() == Some(pn)
                                         && path_index.columns == lookup.cols
                                         && path_index.index_type.supports_key(&lookup.key)
                                 };
@@ -2928,7 +3093,11 @@ impl Domain {
                                     assert!(state.is_partial());
 
                                     if evict_tags.is_empty() {
-                                        if let Some(cs) = self.replay_paths_by_dst.get(pn) {
+                                        if let Some(cs) = self
+                                            .replay_paths_by_dst
+                                            .get(pn)
+                                            .and_then(|by_target| by_target.get(pn))
+                                        {
                                             #[allow(clippy::indexing_slicing)]
                                             // we check len is 1 first
                                             for index_type in IndexType::all_for_key(&lookup.key) {
@@ -3034,7 +3203,7 @@ impl Domain {
                             debug!(terminal = notify_done, "last batch processed");
                             if notify_done {
                                 debug!(local = dst.id(), "last batch received");
-                                finished = Some((tag, dst, None));
+                                finished = Some((tag, dst, target.unwrap(), None));
                             }
                         }
                         ReplayPieceContext::Regular { .. } => {
@@ -3062,12 +3231,12 @@ impl Domain {
                                     });
                                 }
                                 assert_ne!(finished_partial, 0);
-                            } else if dst_is_target {
+                            } else if !dst_is_sender {
                                 trace!(local = dst.id(), "partial replay completed");
                                 if finished_partial == 0 {
                                     assert!(for_keys.is_empty());
                                 }
-                                finished = Some((tag, dst, Some(for_keys)));
+                                finished = Some((tag, dst, target.unwrap(), Some(for_keys)));
                             } else {
                                 // we're just on the replay path
                             }
@@ -3116,13 +3285,14 @@ impl Domain {
             )?;
         }
 
-        if let Some((tag, ni, for_keys)) = finished {
+        if let Some((tag, dst, target, for_keys)) = finished {
             trace!(
-                node = ?ni,
+                %dst,
+                %target,
                 keys = ?for_keys,
                 "partial replay finished"
             );
-            if let Some(mut waiting) = self.waiting.remove(ni) {
+            if let Some(mut waiting) = self.waiting.remove(dst) {
                 trace!(
                     keys = ?for_keys,
                     ?waiting,
@@ -3133,11 +3303,7 @@ impl Domain {
                 // tag came from an internal data structure that guarantees it exists
                 #[allow(clippy::unwrap_used)]
                 // We already know this is a partial replay path
-                let key_index = self.replay_paths[&tag]
-                    .last_segment()
-                    .partial_index
-                    .clone()
-                    .unwrap();
+                let key_index = self.replay_paths[&tag].target_index.clone().unwrap();
 
                 // We try to batch as many redos together, so they can be later issued in a single
                 // call to `RequestPartialReplay`
@@ -3149,13 +3315,18 @@ impl Domain {
                 #[allow(clippy::unwrap_used)]
                 // this is a partial replay (since it's in waiting), so it must have keys
                 for key in for_keys.unwrap() {
-                    let hole = (key_index.columns.clone(), key);
+                    let hole = Hole {
+                        node: target,
+                        column_indices: key_index.columns.clone(),
+                        key,
+                    };
                     let replay = match waiting.redos.remove(&hole) {
                         Some(x) => x,
                         None => internal!(
-                            "got backfill for unnecessary key {:?} via tag {:?}",
-                            hole.1,
-                            tag
+                            "got backfill for unnecessary hole {:?} via tag {:?} (destined for node {})",
+                            hole,
+                            tag,
+                            dst
                         ),
                     };
 
@@ -3213,23 +3384,23 @@ impl Domain {
                     assert!(!waiting.redos.is_empty());
 
                     // restore Waiting in case seeding triggers more replays
-                    self.waiting.insert(ni, waiting);
+                    self.waiting.insert(dst, waiting);
                 } else {
                     // there are no more holes that are filling, so there can't be more redos
                     assert!(waiting.redos.is_empty());
                 }
                 return Ok(());
             } else if for_keys.is_some() {
-                internal!("got unexpected replay of {:?} for {:?}", for_keys, ni);
+                internal!("got unexpected replay of {:?} for {:?}", for_keys, dst);
             } else {
                 // must be a full replay
                 // NOTE: node is now ready, in the sense that it shouldn't ignore all updates since
                 // replaying_to is still set, "normal" dispatch calls will continue to be buffered,
                 // but this allows finish_replay to dispatch into the node by
                 // overriding replaying_to.
-                self.not_ready.remove(&ni);
+                self.not_ready.remove(&dst);
                 self.delayed_for_self
-                    .push_back(Box::new(Packet::Finish(tag, ni)));
+                    .push_back(Box::new(Packet::Finish(tag, dst)));
             }
         }
         Ok(())

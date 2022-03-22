@@ -49,7 +49,14 @@ pub(super) struct Plan<'a> {
     dmp: &'a mut DomainMigrationPlan,
     partial: bool,
 
-    tags: HashMap<Index, Vec<(Tag, DomainIndex)>>,
+    /// Map from indexes we're adding to this node, to the list of tags which identify those
+    /// indexes
+    indexes: HashMap<Index, Vec<Tag>>,
+    /// Indexes in *parent* nodes for extended replay paths we've already added
+    ///
+    /// Used to prevent adding the same replay path for an extended replay path twice, for example
+    /// if two different downstream sets of columns remap to the same set of columns in the parent
+    parent_indexes: HashMap<NodeIndex, HashSet<Index>>,
     /// New paths added in this run of the planner.
     paths: HashMap<Tag, Vec<NodeIndex>>,
     /// Paths that already exist for this node.
@@ -82,13 +89,13 @@ impl<'a> Plan<'a> {
             graph,
             node,
             dmp,
-            paths: Default::default(),
-            old_paths,
-
             partial,
 
+            indexes: Default::default(),
+            parent_indexes: Default::default(),
+            paths: Default::default(),
+            old_paths,
             pending: Vec::new(),
-            tags: Default::default(),
         }
     }
 
@@ -123,17 +130,9 @@ impl<'a> Plan<'a> {
         .into_iter()
         .collect::<Vec<_>>();
 
-        // it doesn't make sense for a replay path to have <=1 nodes in it; this can, however,
-        // happen now that we run the materialization planner when adding indices to already
-        // materialized nodes (presumably because they might originate the columns indices are
-        // being added to?)
-        //
-        // *NOTE* changing this invariant (replay paths contain >=1 nodes) will hit an
-        // `unreachable!` later on!
-        //
-        // also, don't include paths that don't end at this node.
-        #[allow(clippy::unwrap_used)] // We check that len() > 1 before the unwrap
-        paths.retain(|x| x.len() > 1 && x.target().node == ni);
+        // don't include paths that don't end at this node.
+        // TODO(grfn): is this necessary anymore? I don't think so
+        paths.retain(|x| x.last_segment().node == ni);
 
         // since we cut off part of each path, we *may* now have multiple paths that are the same
         // (i.e., if there was a union above the nearest materialization). this would be bad, as it
@@ -224,7 +223,7 @@ impl<'a> Plan<'a> {
             // non-partial views should not have one replay path per index. that would cause us to
             // replay several times, even though one full replay should always be sufficient.
             // we do need to keep track of the fact that there should be an index here though.
-            self.tags.entry(index_on).or_default();
+            self.indexes.entry(index_on).or_default();
             return Ok(());
         }
 
@@ -235,11 +234,20 @@ impl<'a> Plan<'a> {
         // more importantly) in case we get passed two subsequent indexes for generated columns that
         // happen to remap to the same set of columns upstream
         paths.retain(|p| {
-            p.target()
-                .index
-                .iter()
-                .all(|idx| !self.tags.contains_key(idx))
+            if p.has_extension() {
+                p.target().index.iter().all(|idx| {
+                    self.parent_indexes
+                        .get(&p.target().node)
+                        .map_or(true, |idxs| !idxs.contains(idx))
+                })
+            } else {
+                p.target()
+                    .index
+                    .iter()
+                    .all(|idx| !self.indexes.contains_key(idx))
+            }
         });
+
         if paths.is_empty() {
             // If we aren't making any replay paths for this index, we *do* still need to make sure
             // the node actually has the index. This gets hit if the node has generated columns,
@@ -247,32 +255,26 @@ impl<'a> Plan<'a> {
             // an index for the source of the upstream path. If the second one gets `add`ed first,
             // it won't create the index, since the actual target index of the replay is different
             // than the one that the downstream replay path wants to do a lookup into.
-            self.tags.entry(index_on).or_default();
+            self.indexes.entry(index_on).or_default();
             return Ok(());
         }
 
-        #[allow(clippy::indexing_slicing)] // paths can't be empty
-        {
-            invariant!(
-                paths
-                    .iter()
-                    .skip(1)
-                    .all(|p| p.target().index == paths[0].target().index),
-                "All paths should target the same index"
-            );
-        }
+        invariant!(
+            paths.iter().skip(1).all(|p| {
+                #[allow(clippy::indexing_slicing)] // just checked paths isn't empty
+                {
+                    p.last_segment().index == paths[0].last_segment().index
+                }
+            }),
+            "All paths should have the same index"
+        );
         #[allow(clippy::unwrap_used)] // paths can't be empty
         let target_index = if let Some(idx) = paths.first().unwrap().target().index.clone() {
             // This might be different than `index_on` if this replay path is for a generated set of
             // columns
-            if idx != index_on {
-                // If so, still make sure to index the original set of columns so the downstream
-                // replay has something to look up into
-                self.tags.entry(index_on).or_default();
-            }
             idx
         } else {
-            index_on
+            index_on.clone()
         };
 
         // all right, story time!
@@ -399,7 +401,6 @@ impl<'a> Plan<'a> {
             .collect();
 
         // inform domains about replay paths
-        let mut tags = Vec::new();
         for (pi, path) in paths.into_iter().enumerate() {
             // paths contains a set of `pi` from above, which are generated from
             // `paths.iter().enumerate()` we have one assigned_tag for each `pi` by
@@ -414,6 +415,21 @@ impl<'a> Plan<'a> {
                     .map(|&IndexRef { node, .. }| node)
                     .collect(),
             );
+
+            if path.has_extension() {
+                if let Some(index) = path.target().index.clone() {
+                    self.parent_indexes
+                        .entry(path.target().node)
+                        .or_default()
+                        .insert(index);
+                }
+                self.indexes.entry(index_on.clone()).or_default().push(tag);
+            } else {
+                self.indexes
+                    .entry(target_index.clone())
+                    .or_default()
+                    .push(tag);
+            }
 
             // what index are we using for partial materialization (if any)?
             let mut partial: Option<Index> = None;
@@ -438,9 +454,14 @@ impl<'a> Plan<'a> {
             }
 
             // first, find out which domains we are crossing
-            let mut segments = Vec::new();
+            let mut segments: Vec<(
+                DomainIndex,
+                Vec<(NodeIndex, Option<Index>, /* is_target: */ bool)>,
+            )> = Vec::new();
             let mut last_domain = None;
-            for IndexRef { node, index } in path.segments().iter().cloned() {
+            for (i, IndexRef { node, index }) in
+                path.segments_with_extension().iter().cloned().enumerate()
+            {
                 #[allow(clippy::indexing_slicing)] // paths contain valid node indices
                 let domain = self.graph[node].domain();
 
@@ -453,10 +474,13 @@ impl<'a> Plan<'a> {
                 invariant!(!segments.is_empty());
 
                 #[allow(clippy::unwrap_used)] // checked by invariant!()
-                segments.last_mut().unwrap().1.push((node, index));
+                segments.last_mut().unwrap().1.push((
+                    node,
+                    index,
+                    /* is_target = */ i == path.target_index(),
+                ));
             }
 
-            // technically redundant because path.len() > 1, but still
             invariant!(!segments.is_empty());
 
             debug!(%tag, "domain replay path is {:?}", segments);
@@ -492,6 +516,7 @@ impl<'a> Plan<'a> {
                         if generated {
                             debug!(
                                 domain = %domain.index(),
+                                ?tag,
                                 "telling domain about generated columns {:?} on {}",
                                 index.columns,
                                 first.0.index()
@@ -502,7 +527,8 @@ impl<'a> Plan<'a> {
                                 domain,
                                 DomainRequest::GeneratedColumns {
                                     node: self.graph[first.0].local_addr(),
-                                    cols: index.columns.clone(),
+                                    index: index.clone(),
+                                    tag,
                                 },
                             )?;
                         }
@@ -517,10 +543,11 @@ impl<'a> Plan<'a> {
                 let locals: Vec<_> = nodes
                     .iter()
                     .skip(skip_first)
-                    .map(|&(ni, ref key)| ReplayPathSegment {
+                    .map(|&(ni, ref key, is_target)| ReplayPathSegment {
                         node: self.graph[ni].local_addr(),
                         partial_index: key.clone(),
                         force_tag_to: path_grouping.get(&(ni, pi)).copied(),
+                        is_target,
                     })
                     .collect();
 
@@ -537,6 +564,7 @@ impl<'a> Plan<'a> {
                 let mut setup = DomainRequest::SetupReplayPath {
                     tag,
                     source: None,
+                    source_index: path.source().index.clone(),
                     path: locals,
                     notify_done: false,
                     partial_unicast_sharder,
@@ -694,7 +722,7 @@ impl<'a> Plan<'a> {
                                     || segments
                                         .iter()
                                         .flat_map(|s| s.1.iter())
-                                        .any(|&(n, _)| self.graph[n].is_shard_merger())
+                                        .any(|&(n, _, _)| self.graph[n].is_shard_merger())
                                 {
                                     SourceSelection::AllShards(shards)
                                 } else {
@@ -774,23 +802,19 @@ impl<'a> Plan<'a> {
                 self.dmp.add_message(domain, setup)?;
             }
 
-            if !self.partial {
+            #[allow(clippy::indexing_slicing)] // we know our node is in the graph
+            if !self.partial && !self.graph[self.node].is_base() {
                 // this path requires doing a replay and then waiting for the replay to finish
                 if let Some(pending) = pending {
                     self.pending.push(pending);
                 } else {
                     internal!(
-                        "no replay planned for non-partially materialized node {}!",
+                        "no replay planned for fully materialized non-base node {}!",
                         self.node.index()
                     );
                 }
             }
-            invariant!(last_domain.is_some());
-            #[allow(clippy::unwrap_used)] // checked by invariant!()
-            tags.push((tag, last_domain.unwrap()));
         }
-
-        self.tags.entry(target_index).or_default().extend(tags);
 
         Ok(())
     }
@@ -851,14 +875,10 @@ impl<'a> Plan<'a> {
             let weak = self.m.added_weak.remove(&self.node).unwrap_or_default();
 
             if self.partial {
-                let strict = self
-                    .tags
-                    .drain()
-                    .map(|(k, paths)| (k, paths.into_iter().map(|(tag, _)| tag).collect()))
-                    .collect();
+                let strict = self.indexes.drain().collect();
                 InitialState::PartialLocal { strict, weak }
             } else {
-                let strict = self.tags.drain().map(|(k, _)| k).collect();
+                let strict = self.indexes.drain().map(|(k, _)| k).collect();
                 InitialState::IndexedLocal { strict, weak }
             }
         };

@@ -192,4 +192,88 @@ page".
 
 ### Straddled joins
 
-Coming Soon!
+Another way we can fail to trace all columns in an index back to one node is if
+some of those columns come from one parent of a node, and some come from a
+different parent. Currently, this can happen if a query has a join, and
+parameters that filter on columns from both sides of that join. We call this a
+**straddled join**. For example, consider the following query:
+
+```sql
+SELECT posts.id FROM posts
+JOIN users
+ON posts.author_id = users.id
+WHERE users.name = ?
+AND posts.title = ?
+```
+
+which could create the following graph:
+
+![straddled join](/images/straddled-join.png)
+
+In that query, the index for the reader on columns `[1, 2]` traces back to
+columns `[3, 1]` on the join, but then we get stuck - we can't trace back those
+columns to **only one parent**, because column 3 comes from node 2, but column 1
+comes from node 6 - this breaks the rule for direct provenance that you have to
+be able to load *all* the rows for a single replay from one and only one node.
+
+Instead, what we can do is request that an upquery to the join be *remapped*
+into a pair of parallel upqueries, one to each parent, with the subsets of the
+columns for the lookup key that trace back to those parents[^1]. In the case of
+the [`column_source`][] function, this consists of returning
+[`ColumnSource::GeneratedFromColumns`][], with *two* column references, each
+pointing at the corresponding part of the index in the respective parent. For
+example, if we called `column_source(&[3, 1])` on the join (node 3) in the above
+graph, we'd get a return value of:
+
+```rust
+ColumnSource::GeneratedFromColumns(vec1![
+    ColumnRef {
+        node: NodeIndex(2),
+        columns: vec1![1]
+    },
+    ColumnRef {
+        node: NodeIndex(6),
+        columns: vec1![0]
+    }
+])
+```
+
+Note that unlike the generated-from-self case above, the node indexes in the
+`ColumnRef`s returned by a straddled join are the indexes of the **parents** of
+the join, not the join itself. This creates some complexity when tracking and
+executing the replays - since there's no corresponding index in the join
+*itself* for the remapped upstream indices (`[1]` in node 2, and `[0]` in node
+6, in this case), we need to make replay paths that *target* those parent
+nodes - filling holes in their indices and processing through them as normal -
+but we *also* need to ensure that the join receives the replay as well, since
+that's how we're going to be able to satisfy the original downstream query.
+Essentially, what we want is a replay path where the *target* (the index in a
+node that we're trying to fill) is different than the *destination* (the last
+node in the path). Internally, we call these **"extended" replay paths**, and
+there's some special handling both in the
+[`keys`][`noria_server::controller::keys`] module and in actual dataflow
+execution both to resolve them when replaying to a straddled join and to handle
+the resulting replays and redos.
+
+There are a couple of important things to be aware of when dealing with extended
+replay paths:
+
+- It may be the case, and in fact often *is* the case, that the *target* of an
+  extended replay path is the same node as the *source* - this is the case if
+  the immediate parent of the join is a materialization that can directly
+  satisfy the remapped replay.
+- The last segment of the extended replay path contains the index of the
+  *original* set of columns, pre-remapping, in the join (columns `[3, 1]` in the
+  example above). This is used to mark the *original* upquery key as filled
+  before processing the final of the two replays through the straddled join, so
+  that we can actually satisfy the lookup for the original replay.
+- Within the domain, replay paths are indexed by both the target *and* the
+  destination of the path - this is to allow us to differentiate between
+  extended replay paths that go through a node, and ones that go directly to
+  that index (we may end up with both!)
+
+[^1]: This is actually a relatively inefficient execution strategy, and we know
+    of a much better way of executing straddled joins - see [this design
+    doc][faster-straddled-joins] for more information
+
+[faster-straddled-joins]: https://docs.google.com/document/d/1EUKvsVqgk9cqmo-VQsZwjd8zQQ2o3t2XqGDTRRkKelc/edit#
