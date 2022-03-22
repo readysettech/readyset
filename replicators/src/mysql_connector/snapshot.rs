@@ -19,6 +19,8 @@ use super::BinlogPosition;
 
 const BATCH_SIZE: usize = 1000; // How many queries to buffer before pushing to Noria
 
+const MAX_SNAPSHOT_BATCH: usize = 8; // How many tables to snapshot at the same time
+
 /// Pass the error forward while logging it
 fn log_err<E: Error>(err: E) -> E {
     error!(error = %err);
@@ -388,12 +390,18 @@ impl MySqlReplicator {
         let mut replication_tasks = FuturesUnordered::new();
         let mut compacting_tasks = FuturesUnordered::new();
 
-        // For each table we spawn a new task to parallelize the replication process
-        for table_name in self.tables.clone().unwrap() {
+        let mut table_list = self.tables.clone().expect("Must have loaded table list");
+
+        // For each table we spawn a new task to parallelize the replication process, with a limit
+        while let Some(table_name) = table_list.pop() {
             if replication_offsets.has_table(table_name.as_str()) {
                 info!(%table_name, "Replication offset already exists for table, skipping snapshot");
             } else {
                 replication_tasks.push(self.dumper_task_for_table(noria, table_name).await?);
+            }
+
+            if replication_tasks.len() == MAX_SNAPSHOT_BATCH {
+                break;
             }
         }
 
@@ -424,6 +432,16 @@ impl MySqlReplicator {
                 }
                 (table_name, _, Err(err)) => {
                     error!(table = %table_name, error = %err, "Replication failed, retrying");
+                    replication_tasks.push(self.dumper_task_for_table(noria, table_name).await?);
+                }
+            }
+
+            // If still have tables to snapshot add them to the task list
+            while replication_tasks.len() < MAX_SNAPSHOT_BATCH && !table_list.is_empty() {
+                let table_name = table_list.pop().expect("Not empty");
+                if replication_offsets.has_table(table_name.as_str()) {
+                    info!(%table_name, "Replication offset already exists for table, skipping snapshot");
+                } else {
                     replication_tasks.push(self.dumper_task_for_table(noria, table_name).await?);
                 }
             }
