@@ -21,6 +21,12 @@ Metadata:
           - ConsulEc2RetryJoinTagKey
           - ConsulEc2RetryJoinTagValue
           - ConsulServerNodes
+      - Label:
+          default: Disk Configuration
+        Parameters:
+          - ConsulServerVolumeType
+          - ConsulServerVolumeIops
+          - ConsulServerVolumeSize
 
 Parameters:
   ConsulInstanceType:
@@ -53,6 +59,21 @@ Parameters:
   ConsulServerSecurityGroupID:
     Description: ID of the security group to apply to ReadySet Consul Server instances.
     Type: AWS::EC2::SecurityGroup::Id
+
+  ConsulServerVolumeType:
+    Description: Volume type to be applied to the root volume of ReadySet Consul Server instances.
+    Type: String
+    Default: gp3
+
+  ConsulServerVolumeIops:
+    Description: Volume IOPS to be applied to the root volume of ReadySet Consul Server instances.
+    Type: Number
+    Default: 3000
+
+  ConsulServerVolumeSize:
+    Description: Volume size to be applied to the root volume of ReadySet Consul Server instances.
+    Type: Number
+    Default: 100
 
   KeyPairName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
@@ -127,6 +148,13 @@ Resources:
         - AWSAMIRegionMap
         - !Ref "AWS::Region"
         - READYSETAUTHORITYCONSUL
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: !Ref ConsulServerVolumeType
+            Iops: !Ref ConsulServerVolumeIops
+            VolumeSize: !Ref ConsulServerVolumeSize
+            DeleteOnTermination: "true"
       IamInstanceProfile: !Ref ConsulServerProfile
       UserData: !Base64
         Fn::Sub:
