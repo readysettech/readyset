@@ -139,6 +139,6 @@ When metrics are emitted by benchmarks running in CI, the following infrastructu
 
 | Name                 	| URL 	| Network Controls    	| K8s Namespace 	|
 |-------------------------	|-----	|---------------------	|---------------	|
-| Prometheus (Datastore)  	| https://benchmarks-prometheus.build.readyset.name    	| Internal Only (VPN) 	| `build`       	|
-| Prometheus Push Gateway 	| https://benchmarks-prometheus.build.readyset.name    	| Internal Only (VPN) 	| `build`       	|
-| Grafana                 	| https://benchmarks-prometheus.build.readyset.name    	| Internal Only (VPN) 	| `build`       	|
+| Prometheus (Datastore)  	| https://benchmark-prometheus.build.readyset.name 	| Internal Only (VPN) 	| `build`       	|
+| Prometheus Push Gateway 	| https://benchmark-pushgw.build.readyset.name    	| Internal Only (VPN) 	| `build`       	|
+| Grafana                 	| https://benchmark-grafana.build.readyset.name	    | Internal Only (VPN) 	| `build`       	|
