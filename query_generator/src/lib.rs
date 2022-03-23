@@ -1870,6 +1870,11 @@ pub enum QueryOperation {
         order_type: OrderType,
         limit: u64,
     },
+    Paginate {
+        order_type: OrderType,
+        limit: u64,
+        page_number: u64,
+    },
     #[weight(0)]
     Subquery(SubqueryPosition),
 }
@@ -1891,7 +1896,7 @@ const JOIN_OPERATORS: &[JoinOperator] = &[
     JoinOperator::InnerJoin,
 ];
 
-const DEFAULT_LIMIT: u64 = 10;
+const DEFAULT_LIMIT: u64 = 3;
 
 const ALL_TOPK: &[QueryOperation] = &[
     QueryOperation::TopK {
@@ -1901,6 +1906,29 @@ const ALL_TOPK: &[QueryOperation] = &[
     QueryOperation::TopK {
         order_type: OrderType::OrderDescending,
         limit: DEFAULT_LIMIT,
+    },
+];
+
+const ALL_PAGINATE: &[QueryOperation] = &[
+    QueryOperation::Paginate {
+        order_type: OrderType::OrderAscending,
+        limit: DEFAULT_LIMIT,
+        page_number: 0,
+    },
+    QueryOperation::Paginate {
+        order_type: OrderType::OrderDescending,
+        limit: DEFAULT_LIMIT,
+        page_number: 0,
+    },
+    QueryOperation::Paginate {
+        order_type: OrderType::OrderAscending,
+        limit: DEFAULT_LIMIT,
+        page_number: 1,
+    },
+    QueryOperation::Paginate {
+        order_type: OrderType::OrderDescending,
+        limit: DEFAULT_LIMIT,
+        page_number: 1,
     },
 ];
 
@@ -2063,6 +2091,7 @@ impl QueryOperation {
                 | QueryOperation::InParameter { .. }
                 | QueryOperation::RangeParameter
                 | QueryOperation::MultipleRangeParameters
+                | QueryOperation::Paginate { .. }
         )
     }
 
@@ -2411,6 +2440,38 @@ impl QueryOperation {
                     })
                 }
             }
+            QueryOperation::Paginate {
+                order_type,
+                limit,
+                page_number,
+            } => {
+                let table = state.some_table_in_query_mut(query);
+
+                if query.tables.is_empty() {
+                    query.tables.push(table.name.clone().into());
+                }
+
+                let column_name = table.some_column_name();
+                let column = Column {
+                    table: Some(table.name.clone().into()),
+                    ..column_name.into()
+                };
+                query.order = Some(OrderClause {
+                    order_by: vec![(Expression::Column(column.clone()), Some(*order_type))],
+                });
+
+                query.limit = Some(LimitClause {
+                    limit: Literal::Integer(*limit as _),
+                    offset: Some(Literal::Integer((*limit * *page_number) as _)),
+                });
+
+                if query.distinct {
+                    query.fields.push(FieldDefinitionExpression::Expression {
+                        expr: Expression::Column(column),
+                        alias: Some(state.fresh_alias()),
+                    })
+                }
+            }
             // Subqueries are turned into QuerySeed::subqueries as part of
             // GeneratorOps::into_query_seeds
             QueryOperation::Subquery(_) => {}
@@ -2428,43 +2489,44 @@ impl QueryOperation {
 /// Operations can be converted from a user-supplied string using [`FromStr::from_str`], which
 /// supports the following speccifications:
 ///
-/// | Specification                           | Meaning                           |
-/// |-----------------------------------------|-----------------------------------|
-/// | aggregates                              | All [`AggregateType`]s            |
-/// | count                                   | COUNT aggregates                  |
-/// | count_distinct                          | COUNT(DISTINCT) aggregates        |
-/// | sum                                     | SUM aggregates                    |
-/// | sum_distinct                            | SUM(DISTINCT) aggregates          |
-/// | avg                                     | AVG aggregates                    |
-/// | avg_distinct                            | AVG(DISTINCT) aggregates          |
-/// | group_concat                            | GROUP_CONCAT aggregates           |
-/// | max                                     | MAX aggregates                    |
-/// | min                                     | MIN aggregates                    |
-/// | filters                                 | All constant-valued [`Filter`]s   |
-/// | equal_filters                           | Constant-valued `=` filters       |
-/// | not_equal_filters                       | Constant-valued `!=` filters      |
-/// | greater_filters                         | Constant-valued `>` filters       |
-/// | greater_or_equal_filters                | Constant-valued `>=` filters      |
-/// | less_filters                            | Constant-valued `<` filters       |
-/// | less_or_equal_filters                   | Constant-valued `<=` filters      |
-/// | between_filters                         | Constant-valued `BETWEEN` filters |
-/// | is_null_filters                         | IS NULL and IS NOT NULL filters   |
-/// | distinct                                | `SELECT DISTINCT`                 |
-/// | joins                                   | Joins, with all [`JoinOperator`]s |
-/// | inner_join                              | `INNER JOIN`s                     |
-/// | left_join                               | `LEFT JOIN`s                      |
-/// | single_parameter / single_param / param | A single query parameter          |
-/// | range_param                             | A range query parameter           |
-/// | multiple_parameters / params            | Multiple query parameters         |
-/// | multiple_range_params                   | Multiple range query parameters   |
-/// | in_parameter                            | IN with multiple query parameters |
-/// | project_literal                         | A projected literal value         |
-/// | project_builtin                         | Project a built-in function       |
-/// | subqueries                              | All subqueries                    |
-/// | cte                                     | CTEs (WITH statements)            |
-/// | join_subquery                           | JOIN to a subquery directly       |
-/// | topk                                    | ORDER BY combined with LIMIT      |
-/// | exists                                  | EXISTS with a subquery            |
+/// | Specification                           | Meaning                                 |
+/// |-----------------------------------------|-----------------------------------------|
+/// | aggregates                              | All [`AggregateType`]s                  |
+/// | count                                   | COUNT aggregates                        |
+/// | count_distinct                          | COUNT(DISTINCT) aggregates              |
+/// | sum                                     | SUM aggregates                          |
+/// | sum_distinct                            | SUM(DISTINCT) aggregates                |
+/// | avg                                     | AVG aggregates                          |
+/// | avg_distinct                            | AVG(DISTINCT) aggregates                |
+/// | group_concat                            | GROUP_CONCAT aggregates                 |
+/// | max                                     | MAX aggregates                          |
+/// | min                                     | MIN aggregates                          |
+/// | filters                                 | All constant-valued [`Filter`]s         |
+/// | equal_filters                           | Constant-valued `=` filters             |
+/// | not_equal_filters                       | Constant-valued `!=` filters            |
+/// | greater_filters                         | Constant-valued `>` filters             |
+/// | greater_or_equal_filters                | Constant-valued `>=` filters            |
+/// | less_filters                            | Constant-valued `<` filters             |
+/// | less_or_equal_filters                   | Constant-valued `<=` filters            |
+/// | between_filters                         | Constant-valued `BETWEEN` filters       |
+/// | is_null_filters                         | IS NULL and IS NOT NULL filters         |
+/// | distinct                                | `SELECT DISTINCT`                       |
+/// | joins                                   | Joins, with all [`JoinOperator`]s       |
+/// | inner_join                              | `INNER JOIN`s                           |
+/// | left_join                               | `LEFT JOIN`s                            |
+/// | single_parameter / single_param / param | A single query parameter                |
+/// | range_param                             | A range query parameter                 |
+/// | multiple_parameters / params            | Multiple query parameters               |
+/// | multiple_range_params                   | Multiple range query parameters         |
+/// | in_parameter                            | IN with multiple query parameters       |
+/// | project_literal                         | A projected literal value               |
+/// | project_builtin                         | Project a built-in function             |
+/// | subqueries                              | All subqueries                          |
+/// | cte                                     | CTEs (WITH statements)                  |
+/// | join_subquery                           | JOIN to a subquery directly             |
+/// | topk                                    | ORDER BY combined with LIMIT            |
+/// | paginate                                | ORDER BY combined with LIMIT and OFFSET |
+/// | exists                                  | EXISTS with a subquery                  |
 #[repr(transparent)]
 #[derive(Debug, PartialEq, Eq, Clone, From, Into)]
 pub struct Operations(pub Vec<QueryOperation>);
@@ -2600,6 +2662,7 @@ impl FromStr for Operations {
             ]
             .into()),
             "topk" => Ok(ALL_TOPK.to_vec().into()),
+            "paginate" => Ok(ALL_PAGINATE.to_vec().into()),
             s => Err(anyhow!("unknown query operation: {}", s)),
         }
     }
