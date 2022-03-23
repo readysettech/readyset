@@ -561,6 +561,8 @@ pub enum ColumnGenerationSpec {
         max: DataType,
         alpha: f64,
     },
+    /// Always generate the same value
+    Constant(DataType),
 }
 
 impl ColumnGenerationSpec {
@@ -595,6 +597,9 @@ impl ColumnGenerationSpec {
             ColumnGenerationSpec::RandomString(r) => ColumnGenerator::RandomString(r.into()),
             ColumnGenerationSpec::Zipfian { min, max, alpha } => {
                 ColumnGenerator::Zipfian(ZipfianGenerator::new(min.clone(), max.clone(), *alpha))
+            }
+            ColumnGenerationSpec::Constant(val) => {
+                ColumnGenerator::Constant(val.coerce_to(&col_type).unwrap().into())
             }
         }
     }
