@@ -2,6 +2,7 @@ use std::iter;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use anyhow::anyhow;
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::{Either, Itertools};
@@ -106,6 +107,7 @@ impl Permute {
             ),
         };
 
+        let mut failures = vec![];
         let pb = ProgressBar::new(num_tests as _).with_style(
             ProgressStyle::default_bar()
                 .template("{wide_bar} {msg} {pos}/{len} ({elapsed} / {duration})"),
@@ -144,11 +146,27 @@ impl Permute {
                     script_options: self.script_options.clone(),
                     output: Some(output.clone()),
                 };
-                generate.run()?;
+                if let Err(e) = generate.run() {
+                    pb.println(format!(
+                        "Error generating test {}: {:#}",
+                        output.display(),
+                        e
+                    ));
+                    failures.push((output.display().to_string(), e.to_string()));
+                }
             }
         }
         pb.finish();
 
-        Ok(())
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            eprintln!("The following tests failed to generate:\n");
+            for (filename, errmsg) in failures {
+                eprintln!(" * {}\n   Error: {:#}", filename, errmsg);
+            }
+
+            Err(anyhow!("Some tests failed to generate"))
+        }
     }
 }
