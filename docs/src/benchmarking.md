@@ -67,15 +67,17 @@ Each benchmark may specify a unique set of parameters. Run `cargo run --bin benc
 for the set of benchmark parameters.
 
 > <b>Annotations</b>
-> 
+>
 > Annotations may be written for database schemas and queries to configure how to generate data,
-> and how to generate queries in the benchmark, respectively. See: 
->  * `DistributionAnnotation` docs for the complete annotation spec format.
+> and how to generate queries in the benchmark, respectively. See:
+>  * [`DistributionAnnotation`][] docs for the complete annotation spec format.
 >  * `//benchmarks/src/data/irl` for examples on how to annotate schemas and query specs.
 
 Executing any benchmark outputs a benchmark specification at the start of the run that can be copied to
 a file. The argument `--only-to-spec <file>` may be used to write the benchmark spec to a file instead
 of executing it.
+
+[`DistributionAnnotation`]: http://docs/rustdoc/query_generator/struct.DistributionAnnotation.html
 
 ### Data Generation
 
