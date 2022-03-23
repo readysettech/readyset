@@ -30,9 +30,9 @@ use proptest::test_runner::TestCaseResult;
 use test_strategy::proptest;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Operation<const K: usize> {
+enum Operation {
     Query {
-        key: [DataType; K],
+        key: Vec<DataType>,
     },
     Insert {
         table: String,
@@ -54,7 +54,7 @@ enum Operation<const K: usize> {
         /// Note that we don't know how many nodes a query will have until after we install it in
         /// noria, so the actual node index will be this modulo the number of non-base-table nodes
         node_seed: usize,
-        key: [DataType; K],
+        key: Vec<DataType>,
     },
     */
 }
@@ -109,19 +109,22 @@ impl RowStrategy {
     }
 }
 
-pub struct OperationParameters<'a, const K: usize> {
-    already_generated: &'a [Operation<K>],
+pub struct OperationParameters<'a> {
+    already_generated: &'a [Operation],
 
     /// table name, index in table
-    key_columns: [(&'a str, usize); K],
+    key_columns: Vec<(&'a str, usize)>,
+
+    /// Added on to the end of every key
+    extra_key_strategies: Vec<BoxedStrategy<DataType>>,
 
     row_strategies: HashMap<&'static str, RowStrategy>,
 }
 
-impl<'a, const K: usize> OperationParameters<'a, K> {
+impl<'a> OperationParameters<'a> {
     /// Return an iterator over all the query lookup keys that match rows previously inserted into
     /// the table
-    fn existing_keys(&'a self) -> impl Iterator<Item = [DataType; K]> + 'a {
+    fn existing_keys(&'a self) -> impl Iterator<Item = Vec<DataType>> + 'a {
         let mut rows: HashMap<&'a str, Vec<&'a Vec<DataType>>> = HashMap::new();
         for op in self.already_generated {
             match op {
@@ -169,45 +172,42 @@ impl<'a, const K: usize> OperationParameters<'a, K> {
     }
 
     /// Return a proptest [`Strategy`] for generating new keys for the query
-    fn key_strategy(&'a self) -> impl Strategy<Value = [DataType; K]> + 'static
-    where
-        [BoxedStrategy<DataType>; K]: Strategy<Value = [DataType; K]>,
-    {
-        self.key_columns.map(move |(t, idx)| {
-            self.row_strategies[t]
-                .clone()
-                .no_foreign_keys()
-                .expect("foreign key can't be a key_column")
-                .prop_map(move |mut r| r.remove(idx))
-                .boxed()
-        })
+    fn key_strategy(&'a self) -> impl Strategy<Value = Vec<DataType>> + 'static {
+        self.key_columns
+            .clone()
+            .into_iter()
+            .map(move |(t, idx)| {
+                self.row_strategies[t]
+                    .clone()
+                    .no_foreign_keys()
+                    .expect("foreign key can't be a key_column")
+                    .prop_map(move |mut r| r.remove(idx))
+                    .boxed()
+            })
+            .chain(self.extra_key_strategies.clone())
+            .collect::<Vec<_>>()
     }
 }
 
-impl<const K: usize> Operation<K>
-where
-    [DataType; K]: Arbitrary,
-    [BoxedStrategy<DataType>; K]: Strategy<Value = [DataType; K]>,
-{
+impl Operation {
     /// Return a proptest [`Strategy`] for generating the *first* [`Operation`] in the sequence (eg
     /// not dependent on previous operations)
     fn first_arbitrary(
-        key_columns: [(&str, usize); K],
+        key_columns: Vec<(&str, usize)>,
+        extra_key_strategies: Vec<BoxedStrategy<DataType>>,
         row_strategies: HashMap<&'static str, RowStrategy>,
     ) -> impl Strategy<Value = Self> {
         Self::arbitrary(OperationParameters {
             already_generated: &[],
             key_columns,
+            extra_key_strategies,
             row_strategies,
         })
     }
 
     /// Return a proptest [`Strategy`] for generating all but the first [`Operation`], based on the
     /// previously generated operations
-    fn arbitrary(params: OperationParameters<K>) -> impl Strategy<Value = Self> + 'static
-    where
-        [BoxedStrategy<DataType>; K]: Strategy<Value = [DataType; K]>,
-    {
+    fn arbitrary(params: OperationParameters) -> impl Strategy<Value = Self> + 'static {
         use Operation::*;
 
         let no_fk_strategies = params
@@ -398,7 +398,7 @@ impl From<mysql_async::Result<()>> for OperationResult {
     }
 }
 
-impl<const K: usize> Operation<K> {
+impl Operation {
     async fn run(
         &self,
         conn: &mut mysql_async::Conn,
@@ -492,38 +492,49 @@ impl<const K: usize> Operation<K> {
     }
 }
 
-struct OperationsParams<const K: usize> {
+#[derive(Default)]
+struct TestOptions {
+    /// Added on to the end of every key
+    extra_key_strategies: Vec<BoxedStrategy<DataType>>,
+}
+
+struct OperationsParams {
     size_range: Range<usize>,
-    key_columns: [(&'static str, usize); K],
+    key_columns: Vec<(&'static str, usize)>,
     row_strategies: HashMap<&'static str, RowStrategy>,
+    options: TestOptions,
 }
 
 #[derive(Default, Debug, Clone)]
-struct Operations<const K: usize>(Vec<Operation<K>>);
+struct Operations(Vec<Operation>);
 
-impl<const K: usize> Operations<K>
-where
-    [DataType; K]: Arbitrary,
-    [BoxedStrategy<DataType>; K]: Strategy<Value = [DataType; K]>,
-{
-    fn arbitrary(mut params: OperationsParams<K>) -> impl Strategy<Value = Self> {
+impl Operations {
+    fn arbitrary(mut params: OperationsParams) -> impl Strategy<Value = Self> {
         let key_columns = params.key_columns;
         let row_strategies = mem::take(&mut params.row_strategies);
+        let extra_key_strategies = mem::take(&mut params.options.extra_key_strategies);
         params.size_range.prop_flat_map(move |len| {
             if len == 0 {
                 return Just(Default::default()).boxed();
             }
 
-            let mut res = Operation::first_arbitrary(key_columns, row_strategies.clone())
-                .prop_map(|op| vec![op])
-                .boxed();
+            let mut res = Operation::first_arbitrary(
+                key_columns.clone(),
+                extra_key_strategies.clone(),
+                row_strategies.clone(),
+            )
+            .prop_map(|op| vec![op])
+            .boxed();
             for _ in 0..len {
                 let row_strategies = row_strategies.clone();
+                let extra_key_strategies = extra_key_strategies.clone();
+                let key_columns = key_columns.clone();
                 res = res
                     .prop_flat_map(move |ops| {
                         let op_params = OperationParameters {
                             already_generated: &ops,
-                            key_columns,
+                            key_columns: key_columns.clone(),
+                            extra_key_strategies: extra_key_strategies.clone(),
                             row_strategies: row_strategies.clone(),
                         };
 
@@ -538,7 +549,7 @@ where
     }
 }
 
-impl<const K: usize> Operations<K> {
+impl Operations {
     async fn run(self, query: &str, tables: &HashMap<&str, Table>) -> TestCaseResult {
         noria_client_test_helpers::mysql_helpers::recreate_database("vertical").await;
         let mut mysql = mysql_async::Conn::new(
@@ -581,12 +592,6 @@ impl<const K: usize> Operations<K> {
     }
 }
 
-macro_rules! replace_expr {
-    ($_t:tt $sub:expr) => {
-        $sub
-    };
-}
-
 macro_rules! vertical_tests {
     ($name:ident($($params: tt)*); $($rest: tt)*) => {
         vertical_tests!(@test $name($($params)*));
@@ -594,9 +599,9 @@ macro_rules! vertical_tests {
     };
 
     // define the test itself
-    (@test $(#[$meta:meta])* $name:ident($query: expr; $($tables: tt)*)) => {
+    (@test $(#[$meta:meta])* $name:ident($query: expr; $options: expr; $($tables: tt)*)) => {
         paste! {
-        fn [<$name _generate_ops>]() -> impl Strategy<Value = Operations<{vertical_tests!(@key_len $($tables)*)}>> {
+        fn [<$name _generate_ops>]() -> impl Strategy<Value = Operations> {
             let size_range = 1..100; // TODO make configurable
             let row_strategies = vertical_tests!(@row_strategies $($tables)*);
             let key_columns = vertical_tests!(@key_columns $($tables)*);
@@ -605,6 +610,7 @@ macro_rules! vertical_tests {
                 size_range,
                 key_columns,
                 row_strategies,
+                options: $options,
             };
 
             Operations::arbitrary(params)
@@ -616,7 +622,7 @@ macro_rules! vertical_tests {
         $(#[$meta])*
         fn $name(
             #[strategy([<$name _generate_ops>]())]
-            operations: Operations<{vertical_tests!(@key_len $($tables)*)}>
+            operations: Operations
         ) {
             let tables = vertical_tests!(@tables $($tables)*);
             let rt = tokio::runtime::Builder::new_multi_thread()
@@ -627,25 +633,8 @@ macro_rules! vertical_tests {
         }
         }
     };
-
-    // make the const literal for the K type parameter by summing up the lengths of the
-    // `key_columns` in the tables
-    (@key_len $(,)?) => {0usize};
-    (@key_len $(,)? $table_name: expr => (
-        $create_table: expr,
-        schema: [$($schema: tt)*],
-        primary_key: $pk_index: expr,
-        key_columns: []
-        $(,)?
-    ) $($tables: tt)*) => {vertical_tests!(@key_len $($tables)*)};
-    (@key_len $(,)? $table_name: expr => (
-        $create_table: expr,
-        schema: [$($schema: tt)*],
-        primary_key: $pk_index: expr,
-        key_columns: [$($kc: expr),* $(,)?]
-        $(,)?
-    ) $($tables: tt)*) => {
-        0usize $(+ replace_expr!($kc 1usize))* + vertical_tests!(@key_len $($tables)*)
+    (@test $(#[$meta:meta])* $name:ident($query: expr; $($tables: tt)*)) => {
+        vertical_tests!(@test $(#[$meta])* $name($query;Default::default();$($tables)*));
     };
 
     // collect together all of the key columns from the tables into a single array
@@ -656,7 +645,7 @@ macro_rules! vertical_tests {
         key_columns: [$($kc: expr),* $(,)?]
         $(,)?
     )),* $(,)?) => {
-        [$($(($table_name, $kc),)*)*]
+        vec![$($(($table_name, $kc),)*)*]
     };
 
     // Build up the hashmap of Tables
@@ -808,6 +797,21 @@ vertical_tests! {
         "posts" => (
             "CREATE TABLE posts (id INT, name TEXT, score INT, PRIMARY KEY (id))",
             schema: [id: i32, name: String, score: i32],
+            primary_key: 0,
+            key_columns: [2],
+        )
+    );
+
+    paginate_grouped(
+        "SELECT id FROM posts WHERE author_id = ? ORDER BY score DESC LIMIT 3 OFFSET ?";
+        TestOptions {
+            extra_key_strategies: vec![
+                (0u32..=15u32).prop_map(|i| DataType::from(i * 3)).boxed()
+            ]
+        };
+        "posts" => (
+            "CREATE TABLE posts (id INT, author_id INT, score INT, PRIMARY KEY (id))",
+            schema: [id: i32, author_id: i32, score: i32],
             primary_key: 0,
             key_columns: [2],
         )
