@@ -38,6 +38,7 @@ const SMALL_OPERATIONS: &[&str] = &[
     "cte",
     "join_subquery",
     "topk",
+    "paginate",
 ];
 
 /// Generate exhaustive suites of logictests by permuting all combinations of operators up to a
