@@ -7,4 +7,5 @@ CacheHitBenchmark:
   data_generator:
     schema: fastly/fastly_db_tiny.sql
     var_overrides: {}
-  num_queries_each: 5
+  num_cache_hits: 5
+  num_cache_misses: 5
