@@ -49,6 +49,10 @@ impl FromStr for DistributionAnnotation {
                 let num: u32 = chunks.next().unwrap().parse().unwrap();
                 ColumnGenerationSpec::UniqueRepeated(num)
             }
+            "constant" => {
+                let val: DataType = chunks.next().unwrap().into();
+                ColumnGenerationSpec::Constant(val)
+            }
             _ => bail!("Unrecognized annotation"),
         };
 
@@ -83,5 +87,12 @@ mod tests {
                 true
             )
         ));
+    }
+
+    #[test]
+    fn parse_constant_spec() {
+        let q = "constant 5";
+        let s = q.parse::<DistributionAnnotation>().unwrap();
+        assert!(matches!(s.spec, ColumnGenerationSpec::Constant(dt) if dt == DataType::from("5")));
     }
 }
