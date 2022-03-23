@@ -17,6 +17,7 @@ use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::utils::query::{ArbitraryQueryParameters, CachingQueryGenerator, Query};
 use crate::utils::us_to_ms;
 
+/// Measure query execution time for both cache hits and cache misses of a single query
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct CacheHitBenchmark {
     /// Parameters to handle generating parameters for arbitrary queries.
