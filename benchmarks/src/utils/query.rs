@@ -41,8 +41,10 @@ pub struct ArbitraryQueryParameters {
     #[clap(long)]
     query_spec_file: Option<PathBuf>,
 
-    /// An query spec passed in as a comma separated list. See
-    /// `DistributionAnnotation` for the format for each parameters annotation.
+    /// An query spec passed in as a semicolon-separated list. See `DistributionAnnotation` for the
+    /// format for each parameters annotation.
+    ///
+    /// Query specs give a specification for how parameters are generated for queries
     #[clap(long, conflicts_with = "query-spec-file")]
     query_spec: Option<String>,
 }
@@ -118,10 +120,10 @@ impl ArbitraryQueryParameters {
     }
 }
 
-/// Utility wrapper around Vec<DistributionAnnotation>. A list of DistributionAnnotation
-/// delimited by a comma ',' or newline '\n' can be converted from a String
-/// through DistributionAnnotations::try_from. A wrapper to convert from a file
-/// including DistributionAnnotations is also provided.
+/// Utility wrapper around Vec<DistributionAnnotation>. A list of DistributionAnnotation delimited
+/// by a semicolon ';' or newline '\n' can be converted from a String through
+/// DistributionAnnotations::try_from. A wrapper to convert from a file including
+/// DistributionAnnotations is also provided.
 pub struct DistributionAnnotations(Vec<DistributionAnnotation>);
 
 impl TryFrom<String> for DistributionAnnotations {
