@@ -1,0 +1,2 @@
+push:
+	docker buildx build

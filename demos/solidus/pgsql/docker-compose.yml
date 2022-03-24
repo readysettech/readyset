@@ -1,0 +1,127 @@
+version: "3.8"
+volumes:
+  readyset-server-state:
+services:
+  consul:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/consul
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "8500"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+  postgres:
+    image: postgres
+    ports:
+      - 5432:5432
+    expose:
+      - 5432
+    environment: 
+      - POSTGRES_PASSWORD=noria
+      - POSTGRES_DB=solidus 
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+    depends_on:
+      consul:
+        condition: service_healthy
+  readyset-server:
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:release-2190606a3c43f239f9735a0fa6b42468dbcf4ac3"
+    expose:
+      - "32768-60999"
+    environment:
+      AUTHORITY_ADDRESS: consul:8500
+      AUTHORITY: "consul"
+      LISTEN_ADDRESS: 0.0.0.0
+      EXTERNAL_ADDRESS: readyset-server
+      NORIA_DEPLOYMENT: solidus
+      REPLICATION_URL: postgresql://postgres:noria@postgres/solidus
+      PROMETHEUS_METRICS: 1
+      EXPERIMENTAL_TOPK_SUPPORT: 1
+      #FORBID_FULL_MATERIALIZATION: 1
+      DB_DIR: /state
+    links:
+      - postgres
+      - consul
+    volumes:
+      - readyset-server-state:/state
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "127.0.0.1:6033/prometheus"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+  db:
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-psql:release-2190606a3c43f239f9735a0fa6b42468dbcf4ac3"
+    expose:
+      - 5433
+    ports:
+      - 5433:5432
+    environment:
+      AUTHORITY_ADDRESS: consul:8500
+      AUTHORITY: "consul"
+      LISTEN_ADDRESS: 0.0.0.0:5432
+      NORIA_DEPLOYMENT: solidus
+      UPSTREAM_DB_URL: postgresql://postgres:noria@postgres/solidus
+      ALLOWED_USERNAME: postgres
+      ALLOWED_PASSWORD: noria
+      PROMETHEUS_METRICS: 1
+      QUERY_LOG: 1
+      QUERY_LOG_AD_HOC: 1
+      EXPLAIN_LAST_STATEMENT: 1
+      ALLOW_UNSUPPORTED_SET: 1
+      EXPLICIT_MIGRATIONS: 1
+    links:
+      - readyset-server
+      - postgres
+      - consul
+  solidus:
+    build: .
+    ports:
+      - 3000:3000
+    links:
+            - postgres
+    healthcheck:
+      test: ["CMD", "curl", "localhost:3000", ]
+      interval: 2m
+      timeout: 30s
+      retries: 5
+      start_period: 45s
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "9090"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s 
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - 9090:9090
+  pushgateway:
+    image: prom/pushgateway
+  grafana:
+    image: grafana/grafana:8.0.6
+    volumes:
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/config/grafana.ini:/etc/grafana/grafana.ini
+    ports:
+      - 4000:4000
+  vector:
+    image: timberio/vector:0.16.1-debian
+    volumes:
+      - ./vector/aggregator.toml:/etc/vector/vector.toml
+  node_exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    container_name: node_exporter
+    command:
+      - '--path.rootfs=/host'
+    pid: host
+    restart: unless-stopped
+    volumes:
+      - '/:/host:ro,rslave'
