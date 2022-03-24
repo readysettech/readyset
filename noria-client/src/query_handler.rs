@@ -13,4 +13,11 @@ pub trait QueryHandler: Sized + Send {
     /// This should only be used in cases where the query can't be executed by Noria
     /// and there is no fallback mechanism enabled.
     fn default_response(query: &SqlQuery) -> ReadySetResult<noria_connector::QueryResult<'static>>;
+
+    /// Is the given SET statement allowed?
+    ///
+    /// If this function returns true, the statement will be proxied to the upstream database, and
+    /// hence cannot change the behavior of upstream queries in a way that would not also be
+    /// reflected by ReadySet
+    fn is_set_allowed(stmt: &nom_sql::SetStatement) -> bool;
 }
