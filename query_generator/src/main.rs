@@ -4,31 +4,8 @@ use anyhow::bail;
 use clap::Parser;
 use query_generator::GenerateOpts;
 
-mod benchmark;
-
 #[derive(Parser)]
 struct Opts {
-    #[clap(subcommand)]
-    subcommand: Command,
-}
-
-#[derive(Parser)]
-enum Command {
-    Generate(Generate),
-    Benchmark(benchmark::Benchmark),
-}
-
-impl Command {
-    pub fn run(self) -> anyhow::Result<()> {
-        match self {
-            Command::Generate(generate) => generate.run(),
-            Command::Benchmark(benchmark) => benchmark.run(),
-        }
-    }
-}
-
-#[derive(Parser)]
-struct Generate {
     #[clap(flatten)]
     options: GenerateOpts,
 
@@ -39,7 +16,7 @@ struct Generate {
     queries_only: bool,
 }
 
-impl Generate {
+impl Opts {
     pub fn run(self) -> anyhow::Result<()> {
         if self.ddl_only && self.queries_only {
             bail!("Cannot specify both --ddl-only and --queries-only")
@@ -72,5 +49,5 @@ impl Generate {
 
 fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
-    opts.subcommand.run()
+    opts.run()
 }
