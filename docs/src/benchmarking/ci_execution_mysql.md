@@ -1,44 +1,56 @@
-## Benchmarking in CI (Buildkite)
+## Benchmarking In CI (Buildkite)
 
-At ReadySet, one way we're choosing to execute our performance benchmarks is by using Docker-Compose in CI, with a pre-built test database filled with a dynamically generated dataset.
-
-The purpose of this document is to give the reader an understanding of what is happening during the benchmarking process, where the results can be found, as well as how one can add new benchmark scenarios to the pipeline. This document won't cover how to write benchmarks, but more-so how written benchmarks can be incorporated into the benchmarking CI pipeline. Additionally, after reading this document, you should have a clear idea of the infrastructure that powers the benchmark runners themselves.
+The purpose of this document is to give the reader an understanding of what is happening during the benchmarking process, where the results can be found, as well as how one can add new benchmark scenarios to the pipeline. This document won't cover how to write benchmarks, but more so how written benchmarks can be incorporated into the benchmarking CI pipeline. Additionally, after reading this document, you should have a clear idea of the infrastructure that powers the benchmark runners themselves.
 
 ## Table of Contents
 
 1. [Process Automation Overview](#process-automation-overview)
 2. [Container Images Involved](#container-images-involved)
-3. [When Are Benchmarks Invoked?](#when-are-benchmarks-invoked)
-4. [Where Are Benchmarks Invoked?](#where-are-benchmarks-invoked-in-our-pipelines)
-5. [Where Are Benchmarks Defined in Code?](#where-are-benchmarks-defined-in-code)
-6. [Viewing CI Benchmark Results](#viewing-ci-benchmark-results)
-7. [What Infrastructure Are Tests Run On?](#what-infrastructure-are-tests-run-on)
+3. [Docker-Compose Benchmarking](#docker-compose-benchmarking)
+4. [CloudFormation Benchmarking](#cloudformation-benchmarking-with-k8s-runner)
+5. [When Are Benchmarks Invoked?](#when-are-benchmarks-invoked)
+6. [Where Are Benchmarks Invoked?](#where-are-benchmarks-invoked-in-our-pipelines)
+7. [Where Are Benchmarks Defined in Code?](#where-are-benchmarks-defined-in-code)
+8. [Viewing CI Benchmark Results](#viewing-ci-benchmark-results)
+9. [What Infrastructure Are Tests Run On?](#what-infrastructure-are-tests-run-on)
     * [Infrastructure To Know About](#infrastructure-hostnames)
 
 ### Process Automation Overview
 
-> A picture is worth a thousand words.
+Currently at ReadySet, from a high-level, we're executing our product benchmarks in the following ways:
 
-![Docker-Compose Benchmarking Automation Overview](./images/ci-automation-dc-architecture.png)
+1. On Buildkite agents using Docker-Compose.
+2. In AWS, with CloudFormation provisioned ReadySet Stack. Benchmark runners execute in build K8s cluster.
 
 ### Container Images Involved
 
-In the above diagram, you may have noticed that this pipeline builds `readyset-server`, `readyset-adapter`, and `benchmarks`.
+| Image Name         | Purpose | Builds Occur | Dockerfile                             |
+|--------------------|--------------------|--------------------|----------------------------------------|
+| `305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-benchmarks` | Benchmark runner | In benchmark pipeline | `build/Dockerfile.readyset-benchmarks` |
+| `305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server` | Core ReadySet server with rocksDB | In main readyset pipeline | `build/Dockerfile.readyset-server`     |
+| `305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql`| ReadySet MySQL adapter | In main readyset pipeline | `build/Dockerfile.readyset-mysql`    |
 
-This is necessary in order for benchmarks to be executed using release binaries, versus those running under debug mode. As you might anticipate, binaries build in debug mode can significantly skew the results of the benchmarks, for the worse. Since customers won't be receiving debug binaries, testing release makes sense.
+### Docker-Compose Benchmarking
 
-For the **benchmark runner** container, aka the `benchmarks` service in the `.buildkite/docker-compose.readyset-benchmark-mysql80.yml` file,
-here is where you can find the Dockerfile:
+To gauge how one might expect docker-compose-based ReadySet environments to perform, we're executing benchmarks in CI using docker-compose. A rather hefty EC2 instance is assigned to the Buildkite queue, which executes this step of the benchmarking pipeline.
 
-`build/Dockerfile.readyset-benchmarks`
+For an overview of how it all works, see the diagram below:
 
-**For ReadySet-Server:**
+<img src="./images/ci-automation-dc-arch.png" width="1024">
 
-`build/Dockerfile.readyset-server`
+### CloudFormation Benchmarking With K8s Runner
 
-**For ReadySet-MySQL (Adapter):**
+Similarly to the docker-compose benchmarks, in this case, we want to benchmark how ReadySet performs when deployed using our ReadySet MySQL CloudFormation template, via in this case `benchmark-super-template.yaml`. This stack deploys an RDS instance using a DB snapshot associated with the DB version, engine, etc. that the benchmarks will be executed against. This snapshot's source DB instance was populated using the data generator.
 
-`build/Dockerfile.readyset-mysql`
+In contrast to the docker-compose setup, this process runs the benchmark binary in Kubernetes, not on the build agent directly. The benchmark runner is implemented in the form of a K8s job, which is templatized and deployed into the build Kubernetes cluster using [Helm](https://helm.sh/docs/). The chart for the job can be found here:
+
+`benchmarks/provisioning/helm/charts/readyset-benchmarks/`
+
+As demand for benchmark runner capacity increases, `cluster-autoscaler` will dynamically scale the fleet of EC2 instances in our autoscaling group. If there's not enough capacity, new nodes will be added on-demand to execute a benchmark.
+
+For an overview of how it all works, see the diagram below:
+
+<img src="./images/ci-automation-cfn-k8s-arch.png" width="1024">
 
 ### When Are Benchmarks Invoked?
 
@@ -108,7 +120,7 @@ There are now two options for viewing benchmark results:
 
   `benchmark_<metric_name_here>{instance="ci-benchmark-${benchmark_pipeline_build_number}-{commit_sha:0:7}"}`
 
-2) Under the artifacts section of the `:pipeline: Run Noria Benchmark in Docker-Compose` step in the benchmark pipeline, as seen below:
+2) Under the artifacts section of the `:pipeline: Run ReadySet Benchmark in Docker-Compose` or the `:algolia: Launching benchmark job in :k8s:` step in the benchmark pipeline, as seen below:
 
 ![Artifact Example](./images/ci-results-file-artifact.png)
 
