@@ -7,7 +7,7 @@ use anyhow::{anyhow, bail, Result};
 use aws_sdk_cloudformation as cfn;
 use cfn::client::fluent_builders::CreateStack;
 use cfn::model::{Stack, StackStatus};
-use cfn::SdkError;
+use cfn::types::SdkError;
 use console::{style, Emoji};
 use regex::Regex;
 use reqwest::IntoUrl;

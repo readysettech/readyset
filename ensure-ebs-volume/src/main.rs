@@ -9,8 +9,8 @@ use aws_config::provider_config::ProviderConfig;
 use aws_sdk_ec2::model::{
     Filter, InstanceStateName, ResourceType, Tag, TagSpecification, VolumeState,
 };
-use aws_types::config::Config;
 use aws_types::region::Region;
+use aws_types::SdkConfig;
 use clap::Parser;
 use futures::future::{self, Either};
 use lazy_static::lazy_static;
@@ -422,7 +422,7 @@ impl Opts {
         self.region.as_ref().unwrap()
     }
 
-    async fn aws_config(&self) -> Config {
+    async fn aws_config(&self) -> SdkConfig {
         aws_config::from_env()
             .region(Region::new(self.region().to_owned()))
             .load()

@@ -11,7 +11,7 @@ use aws::vpc_attribute;
 use aws_types::credentials::future::ProvideCredentials as ProvideCredentialsFut;
 use aws_types::credentials::{CredentialsError, ProvideCredentials};
 use aws_types::region::Region;
-use aws_types::Credentials;
+use aws_types::{Credentials, SdkConfig};
 use clap::Parser;
 use deployment::{DatabaseCredentials, TemplateType};
 use directories::ProjectDirs;
@@ -112,7 +112,7 @@ struct Installer {
     deployment: Deployment,
 
     // Runtime state
-    aws_config: Option<aws_config::Config>,
+    aws_config: Option<SdkConfig>,
     ec2_client: Option<ec2::Client>,
     rds_client: Option<rds::Client>,
     cfn_client: Option<cfn::Client>,
@@ -435,7 +435,7 @@ impl Installer {
                     .create_stack()
                     .stack_name(&stack_name)
                     .template_url(template_url)
-                    .capabilities("CAPABILITY_IAM"),
+                    .capabilities(cfn::model::Capability::CapabilityIam),
             ),
         )
         .await?;
@@ -566,7 +566,7 @@ impl Installer {
                     "ConsulServerSecurityGroupID",
                     consul_server_security_group_id,
                 ))
-                .capabilities("CAPABILITY_IAM"),
+                .capabilities(cfn::model::Capability::CapabilityIam),
         )
         .await?;
 
@@ -1776,14 +1776,14 @@ impl Installer {
         Ok(self.kms_client.insert(kms_client))
     }
 
-    async fn aws_config(&mut self) -> Result<&aws_config::Config> {
+    async fn aws_config(&mut self) -> Result<&SdkConfig> {
         if self.aws_config.is_none() {
             self.load_aws_config().await?;
         }
         Ok(self.aws_config.as_ref().unwrap())
     }
 
-    async fn load_aws_config(&mut self) -> Result<&aws_config::Config> {
+    async fn load_aws_config(&mut self) -> Result<&SdkConfig> {
         let mut loader = aws_config::from_env();
 
         let profile =
