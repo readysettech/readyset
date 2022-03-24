@@ -3,6 +3,7 @@
 use std::borrow::Borrow;
 use std::cmp::{min_by_key, Ordering};
 use std::collections::HashMap;
+use std::fmt;
 use std::hash::Hash;
 
 use nom_sql::SqlIdentifier;
@@ -26,6 +27,25 @@ pub struct ReplicationOffset {
     /// The name of the replication log that this offset is within. [`ReplicationOffset`]s with
     /// different log names are not comparable
     pub replication_log_name: String,
+}
+
+impl fmt::Display for ReplicationOffset {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.replication_log_name.is_empty() {
+            // Wish we could simply convert to BinlogPosition, but including it in the manifest
+            // creates a cyclic dependency hell, so duplicate the code here.
+            let suffix_len = (self.offset >> 123) as usize;
+            let suffix = (self.offset >> 64) as u32;
+            let position = self.offset as u32;
+            write!(
+                f,
+                "{0}.{1:02$}:{3}",
+                self.replication_log_name, suffix, suffix_len, position
+            )
+        } else {
+            write!(f, "wal[{}]", self.offset)
+        }
+    }
 }
 
 impl PartialOrd for ReplicationOffset {
