@@ -1,8 +1,9 @@
+use std::collections::HashSet;
 use std::iter;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, bail, Result};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::{Either, Itertools};
@@ -42,17 +43,111 @@ const SMALL_OPERATIONS: &[&str] = &[
     "paginate",
 ];
 
-/// Generate exhaustive suites of logictests by permuting all combinations of operators up to a
-/// certain depth
 #[derive(Parser, Debug)]
-pub struct Permute {
+struct PermutationGenerator {
     /// Only generate scripts with these operations
     #[clap(long)]
     only: Option<String>,
 
+    /// Exclude these operations from all generated scripts
+    #[clap(long)]
+    exclude: Vec<String>,
+
     /// Generate scripts with this many operations
     #[clap(long, short = 'd')]
     depth: usize,
+}
+
+fn num_permutations_upto(num_ops: usize, depth: usize) -> usize {
+    (1..=depth)
+        .map(|l| (0..l).map(|n| (num_ops - n)).product::<usize>())
+        .sum::<usize>()
+}
+
+struct OpsPermutations {
+    inner: Box<dyn Iterator<Item = Vec<&'static str>>>,
+    len: usize,
+}
+
+impl Iterator for OpsPermutations {
+    type Item = Vec<&'static str>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = self.inner.next();
+        if next.is_some() {
+            self.len -= 1;
+        }
+        next
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
+    }
+}
+
+impl ExactSizeIterator for OpsPermutations {}
+
+impl PermutationGenerator {
+    fn generate_tests(self) -> Result<OpsPermutations> {
+        let ops = SMALL_OPERATIONS.iter().copied();
+        let (ops, num_ops) = if self.exclude.is_empty() {
+            (Either::Left(ops), SMALL_OPERATIONS.len())
+        } else {
+            let exclude = self
+                .exclude
+                .into_iter()
+                .map(|exclude_op| {
+                    if !SMALL_OPERATIONS.contains(&exclude_op.as_str()) {
+                        bail!("Unknown operation passed to --exclude: {}", exclude_op)
+                    } else {
+                        Ok(exclude_op)
+                    }
+                })
+                .collect::<Result<HashSet<_>>>()?;
+            let num_excluded = exclude.len();
+            (
+                Either::Right(ops.filter(move |op| !exclude.contains(*op))),
+                SMALL_OPERATIONS.len() - num_excluded,
+            )
+        };
+
+        let (len, ops) = match self.only {
+            None => (
+                num_permutations_upto(num_ops, self.depth),
+                Either::Left((1..=self.depth).flat_map(move |l| ops.clone().permutations(l))),
+            ),
+            Some(only) => {
+                let op: &'static str = *SMALL_OPERATIONS
+                    .iter()
+                    .find(|op| ***op == only)
+                    .ok_or_else(|| anyhow!("Unknown operation: {}", only))?;
+                (
+                    1 + num_permutations_upto(num_ops, self.depth - 1),
+                    Either::Right(iter::once(vec![op]).chain((1..=(self.depth - 1)).flat_map(
+                        move |l| {
+                            ops.clone().permutations(l).map(move |mut perm| {
+                                perm.push(op);
+                                perm
+                            })
+                        },
+                    ))),
+                )
+            }
+        };
+
+        Ok(OpsPermutations {
+            inner: Box::new(ops),
+            len,
+        })
+    }
+}
+
+/// Generate exhaustive suites of logictests by permuting all combinations of operators up to a
+/// certain depth
+#[derive(Parser, Debug)]
+pub struct Permute {
+    #[clap(flatten)]
+    permutation_generator: PermutationGenerator,
 
     /// Directory to write tests to
     #[clap(long, short = 'o')]
@@ -74,45 +169,15 @@ pub struct Permute {
     script_options: GenerateOpts,
 }
 
-fn num_permutations_upto(depth: usize) -> usize {
-    let num_ops = SMALL_OPERATIONS.len();
-    (1..=depth)
-        .map(|l| (0..l).map(|n| (num_ops - n)).product::<usize>())
-        .sum::<usize>()
-}
-
 impl Permute {
-    pub fn run(self) -> anyhow::Result<()> {
-        let (num_tests, ops) = match &self.only {
-            None => (
-                num_permutations_upto(self.depth),
-                Either::Left(
-                    (1..=self.depth).flat_map(|l| SMALL_OPERATIONS.iter().copied().permutations(l)),
-                ),
-            ),
-            Some(only) => (
-                1 + num_permutations_upto(self.depth - 1),
-                Either::Right(iter::once(vec![only.as_str()]).chain(
-                    (1..=(self.depth - 1)).flat_map(move |l| {
-                        SMALL_OPERATIONS
-                            .iter()
-                            .copied()
-                            .permutations(l)
-                            .map(move |mut perm| {
-                                perm.push(only.as_str());
-                                perm
-                            })
-                    }),
-                )),
-            ),
-        };
-
+    pub fn run(self) -> Result<()> {
         let mut failures = vec![];
-        let pb = ProgressBar::new(num_tests as _).with_style(
+        let tests = self.permutation_generator.generate_tests()?;
+        let pb = ProgressBar::new(tests.len() as _).with_style(
             ProgressStyle::default_bar()
                 .template("{wide_bar} {msg} {pos}/{len} ({elapsed} / {duration})"),
         );
-        for test in ops {
+        for test in tests {
             pb.inc(1);
             let mut output = self.out_dir.clone();
             output.push(format!("{}.test", test.iter().join(",")));
@@ -138,7 +203,7 @@ impl Permute {
                         operations: Some(OperationList(
                             test.into_iter()
                                 .map(Operations::from_str)
-                                .collect::<anyhow::Result<Vec<_>>>()?,
+                                .collect::<Result<Vec<_>>>()?,
                         )),
                         subquery_depth: self.subquery_depth,
                         num_operations: None,
@@ -168,5 +233,34 @@ impl Permute {
 
             Err(anyhow!("Some tests failed to generate"))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_exclude() {
+        let generator = PermutationGenerator {
+            only: None,
+            exclude: vec!["topk".to_owned()],
+            depth: 1,
+        };
+        let mut tests = generator.generate_tests().unwrap();
+
+        assert!(tests.all(|test| !test.contains(&"topk")))
+    }
+
+    #[test]
+    fn generate_exclude_and_only() {
+        let generator = PermutationGenerator {
+            only: Some("max".to_owned()),
+            exclude: vec!["topk".to_owned()],
+            depth: 2,
+        };
+        let mut tests = generator.generate_tests().unwrap();
+
+        assert!(tests.all(|test| !test.contains(&"topk") && test.contains(&"max")))
     }
 }
