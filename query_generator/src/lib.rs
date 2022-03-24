@@ -14,10 +14,6 @@
 //!   `noria-logictest` crate elsewhere in the repository) to evaluate the correctness of our system
 //!   and catch regressions.
 //!
-//! Alongside the library component of this crate is a command-line interface with a runtime for
-//! running benchmarks on generated queries against noria and collecting metrics - see the
-//! documentation for `main.rs` for more information.
-//!
 //! # Examples
 //!
 //! Generating a simple query, with a single query parameter and a single inner join:

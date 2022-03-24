@@ -11,25 +11,17 @@ chrono = "0.4.19"
 clap = { version = "3.0", features = ["derive","env"] }
 derive_more = "0.99.11"
 futures-util = "0.3.13"
-humantime = "2.1.0"
-indicatif = "0.16"
 itertools = "0.10"
 lazy_static = "1.4.0"
 nom-sql = { path = "../nom-sql" }
-noria = { path = "../noria/noria/" }
-noria-server = { path = "../noria/server/" }
 noria-data = { path = "../noria/data/" }
-prettytable-rs = "0.8.0"
 rand = "0.8.3"
 regex = "1.4.3"
 serde = { version = "1.0.123", features = ["derive"] }
 serde_json = "1.0.63"
-serde_with = "1.6.4"
-size_format = "1.0.2"
 strum = "0.23"
 strum_macros = "0.23"
 thiserror = "1.0.26"
-tokio = "1.15"
 launchpad = { path = "../launchpad" }
 proptest = "1.0.0"
 test-strategy = "0.1.1"
