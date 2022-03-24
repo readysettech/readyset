@@ -72,7 +72,6 @@ use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -80,8 +79,8 @@ use futures::future::{self, OptionFuture};
 use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
     CachedQueryInner, CreateCachedQueryStatement, DeleteStatement, Dialect,
-    DropCachedQueryStatement, Expression, InsertStatement, Literal, SelectStatement, ShowStatement,
-    SqlIdentifier, SqlQuery, UpdateStatement,
+    DropCachedQueryStatement, InsertStatement, SelectStatement, ShowStatement, SqlIdentifier,
+    SqlQuery, UpdateStatement,
 };
 use noria::consistency::Timestamp;
 use noria::results::Results;
@@ -107,58 +106,6 @@ use crate::{rewrite, QueryHandler, UpstreamDatabase};
 pub mod noria_connector;
 
 pub use self::noria_connector::NoriaConnector;
-
-const ALLOWED_SQL_MODES: [SqlMode; 7] = [
-    SqlMode::OnlyFullGroupBy,
-    SqlMode::StrictTransTables,
-    SqlMode::NoZeroInDate,
-    SqlMode::NoZeroDate,
-    SqlMode::ErrorForDivisionByZero,
-    SqlMode::NoAutoCreateUser,
-    SqlMode::NoEngineSubstitution,
-];
-
-// SqlMode holds the current list of known sql modes that we care to deal with.
-// TODO(peter): expand this later to include ALL sql modes.
-#[derive(PartialEq, Eq, Hash)]
-enum SqlMode {
-    OnlyFullGroupBy,
-    StrictTransTables,
-    NoZeroInDate,
-    NoZeroDate,
-    ErrorForDivisionByZero,
-    NoAutoCreateUser,
-    NoEngineSubstitution,
-}
-
-// TODO(vlad): replace with strum
-impl FromStr for SqlMode {
-    type Err = ReadySetError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let res = match &s.trim().to_ascii_lowercase()[..] {
-            "only_full_group_by" => SqlMode::OnlyFullGroupBy,
-            "strict_trans_tables" => SqlMode::StrictTransTables,
-            "no_zero_in_date" => SqlMode::NoZeroInDate,
-            "no_zero_date" => SqlMode::NoZeroDate,
-            "error_for_division_by_zero" => SqlMode::ErrorForDivisionByZero,
-            "no_auto_create_user" => SqlMode::NoAutoCreateUser,
-            "no_engine_substitution" => SqlMode::NoEngineSubstitution,
-            _ => {
-                return Err(ReadySetError::SqlModeParseFailed(s.to_string()));
-            }
-        };
-        Ok(res)
-    }
-}
-
-fn raw_sql_modes_to_list(sql_modes: &str) -> Result<Vec<SqlMode>, ReadySetError> {
-    sql_modes
-        .split(',')
-        .into_iter()
-        .map(SqlMode::from_str)
-        .collect::<Result<Vec<SqlMode>, ReadySetError>>()
-}
 
 /// Query metadata used to plan query prepare
 #[allow(clippy::large_enum_variant)]
@@ -663,49 +610,7 @@ where
     /// Check whether the set statement is explicitly allowed. All other set
     /// statements should return an error
     pub fn is_allowed_set_statement(&self, set: &nom_sql::SetStatement) -> bool {
-        if self.allow_unsupported_set {
-            return true;
-        }
-
-        match set {
-            nom_sql::SetStatement::Variable(set) => set.variables.iter().all(|(variable, value)| {
-                match variable.as_non_user_var() {
-                    Some("time_zone") => {
-                        matches!(value, Expression::Literal(Literal::String(ref s)) if s == "+00:00")
-                    }
-                    Some("autocommit") => {
-                        matches!(value, Expression::Literal(Literal::Integer(i)) if *i == 1)
-                    }
-                    Some("sql_mode") => {
-                        if let Expression::Literal(Literal::String(ref s)) = value {
-                            match raw_sql_modes_to_list(&s[..]) {
-                                Ok(sql_modes) => {
-                                    sql_modes.iter().all(|sql_mode| ALLOWED_SQL_MODES.contains(sql_mode))
-                                }
-                                Err(e) => {
-                                    warn!(%e, "unknown sql modes in set");
-                                    false
-                                }
-                            }
-                        } else {
-                            false
-                        }
-                    }
-                    Some("names") => {
-                        if let Expression::Literal(Literal::String(ref s)) = value {
-                            matches!(&s[..], "latin1" | "utf8" | "utf8mb4")
-                        } else {
-                            false
-                        }
-                    }
-                    Some("foreign_key_checks") => true,
-                    _ => false,
-                }
-            }),
-            nom_sql::SetStatement::Names(names) => {
-                names.collation.is_none() && matches!(&names.charset[..], "latin1" | "utf8" | "utf8mb4")
-            }
-        }
+        self.allow_unsupported_set || Handler::is_set_allowed(set)
     }
 
     /// Executes query on the upstream database, for when it cannot be parsed or executed by noria.

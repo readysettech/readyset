@@ -26,4 +26,8 @@ impl QueryHandler for PostgreSqlQueryHandler {
             },
         })
     }
+
+    fn is_set_allowed(_: &nom_sql::SetStatement) -> bool {
+        false
+    }
 }
