@@ -18,11 +18,10 @@ use crate::noria_adapter::{Connector, ReplicationAction};
 /// The connector user must have the following permissions:
 /// `REPLICATION` - to be able to create a replication slot.
 /// `SELECT` - In order to be able to copy the initial table data, the role used for the replication
-/// connection must have the            `SELECT` privilege on the published tables (or be a
-/// superuser). `CREATE` - To create a publication, the user must have the CREATE privilege in the
-/// database.            To add tables to a publication, the user must have ownership rights on the
-/// table. To create a publication that            publishes all tables automatically, the user must
-/// be a superuser.
+/// connection must have the `SELECT` privilege on the published tables (or be a superuser).
+/// `CREATE` - To create a publication, the user must have the CREATE privilege in the database. To
+/// add tables to a publication, the user must have ownership rights on the table. To create a
+/// publication that publishes all tables automatically, the user must be a superuser.
 pub struct PostgresWalConnector {
     /// This is the underlying (regular) PostgreSQL client
     client: pgsql::Client,

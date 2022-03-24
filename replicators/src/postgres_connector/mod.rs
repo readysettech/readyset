@@ -9,8 +9,8 @@ pub use connector::PostgresWalConnector;
 use noria::replication::ReplicationOffset;
 pub use snapshot::PostgresReplicator;
 
-pub(crate) const REPLICATION_SLOT: &str = "noria";
-pub(crate) const PUBLICATION_NAME: &str = "noria";
+pub(crate) const REPLICATION_SLOT: &str = "readyset";
+pub(crate) const PUBLICATION_NAME: &str = "readyset";
 
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy, Default)]
 pub struct PostgresPosition {
