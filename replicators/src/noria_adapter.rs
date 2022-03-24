@@ -267,10 +267,7 @@ impl NoriaAdapter {
         // Only once binlog advanced to that point, can we send a ready signal to noria.
         match adapter.replication_offsets.max_offset()? {
             Some(max) if max > &current_pos => {
-                info!(
-                    start = ?BinlogPosition::from(&current_pos),
-                    end = ?BinlogPosition::from(max),
-                    "Catching up");
+                info!(start = %current_pos, end = %max, "Catching up");
                 let max = max.clone();
                 adapter.main_loop(&mut current_pos, Some(max)).await?;
             }
@@ -278,7 +275,7 @@ impl NoriaAdapter {
         }
 
         info!("MySQL connected");
-        info!(binlog_position = ?BinlogPosition::from(&current_pos));
+        info!(binlog_position = %current_pos);
 
         // Let waiters know that the initial snapshotting is complete.
         if let Some(notify) = ready_notify {
@@ -479,7 +476,7 @@ impl NoriaAdapter {
                 match &self.replication_offsets.schema {
                     Some(cur) if pos <= *cur => {
                         if !catchup {
-                            warn!(?pos, ?cur, "Skipping schema update for earlier entry");
+                            warn!(%pos, %cur, "Skipping schema update for earlier entry");
                         }
                         return Ok(());
                     }
@@ -490,7 +487,7 @@ impl NoriaAdapter {
                 match self.replication_offsets.tables.get(table.as_str()) {
                     Some(Some(cur)) if pos <= *cur => {
                         if !catchup {
-                            warn!(%table, ?pos, ?cur, "Skipping table action for earlier entry");
+                            warn!(%table, %pos, %cur, "Skipping table action for earlier entry");
                         }
                         return Ok(());
                     }
