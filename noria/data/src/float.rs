@@ -12,7 +12,7 @@ where
     i64: TryInto<I>,
 {
     // First get the integer part of the float, then downcast to the appropriate type
-    let val = val.trunc();
+    let val = val.round();
     let val_int = val as i64;
     let val_back = val_int as f64;
     // If the float represent an actual integer value, return it. Around the value of 0.0 there are
@@ -286,7 +286,7 @@ mod tests {
         } else {
             assert_eq!(
                 DataType::Double(val as f64).coerce_to(&SqlType::Tinyint(None)),
-                Ok(DataType::Int(val as i64))
+                Ok(DataType::Int(val.round() as i64))
             );
         }
         // Yes, this is indeed the valid range for MySQL float to u8 conversion
@@ -311,7 +311,7 @@ mod tests {
         } else {
             assert_eq!(
                 DataType::Double(val as f64).coerce_to(&SqlType::Smallint(None)),
-                Ok(DataType::Int(val as i64))
+                Ok(DataType::Int(val.round() as i64))
             );
         }
         if val < -0.5f32 || val > u16::MAX as f32 {
@@ -335,7 +335,7 @@ mod tests {
         } else {
             assert_eq!(
                 DataType::Double(val as f64).coerce_to(&SqlType::Int(None)),
-                Ok(DataType::Int(val as i64))
+                Ok(DataType::Int(val.round() as i64))
             );
         }
         if val < -0.5f64 || val > u32::MAX as f64 {
@@ -359,7 +359,7 @@ mod tests {
         } else {
             assert_eq!(
                 DataType::Double(val as f64).coerce_to(&SqlType::Bigint(None)),
-                Ok(DataType::Int(val as i64))
+                Ok(DataType::Int(val.round() as i64))
             );
         }
         if val < -0.5f64 || val > u64::MAX as f64 {
@@ -420,6 +420,37 @@ mod tests {
         assert_eq!(
             DataType::Double(-5000.0).coerce_to(&SqlType::Json).unwrap(),
             DataType::from("-5000")
+        );
+    }
+
+    #[test]
+    fn float_to_int_manual() {
+        assert_eq!(
+            DataType::Float(-0.6874218).coerce_to(&SqlType::Tinyint(None)),
+            Ok(DataType::Int(-1))
+        );
+
+        assert_eq!(
+            DataType::Float(0.6874218).coerce_to(&SqlType::Tinyint(None)),
+            Ok(DataType::Int(1))
+        );
+
+        assert!(DataType::Float(-128.9039)
+            .coerce_to(&SqlType::Tinyint(None))
+            .is_err());
+
+        assert!(DataType::Float(127.9039)
+            .coerce_to(&SqlType::Tinyint(None))
+            .is_err());
+
+        assert_eq!(
+            DataType::Float(-128.4039).coerce_to(&SqlType::Tinyint(None)),
+            Ok(DataType::Int(-128))
+        );
+
+        assert_eq!(
+            DataType::Float(127.4039).coerce_to(&SqlType::Tinyint(None)),
+            Ok(DataType::Int(127))
         );
     }
 }
