@@ -164,6 +164,23 @@ impl<'a> OperationParameters<'a> {
             })
     }
 
+    /// If there are any rows previously inserted into the table, return a proptest [`Strategy`] for
+    /// generating one of those keys, otherwise return None
+    fn existing_key_strategy(&'a self) -> Option<impl Strategy<Value = Vec<DataType>> + 'static> {
+        let keys = self.existing_keys().collect::<Vec<_>>();
+        if keys.is_empty() {
+            return None;
+        }
+
+        let extra_key_strategies = self.extra_key_strategies.clone();
+        Some(select(keys).prop_flat_map(move |key| {
+            key.into_iter()
+                .map(|val| Just(val).boxed())
+                .chain(extra_key_strategies.clone())
+                .collect::<Vec<_>>()
+        }))
+    }
+
     fn existing_rows(&'a self) -> impl Iterator<Item = (String, Vec<DataType>)> + 'a {
         self.already_generated.iter().filter_map(|op| match op {
             Operation::Insert { table, row } => Some((table.clone(), row.clone())),
@@ -225,11 +242,11 @@ impl Operation {
             ))
         ];
 
-        let keys = params.existing_keys().collect::<Vec<_>>();
-        if keys.is_empty() {
-            non_key_ops.boxed()
-        } else {
-            let key_ops = prop_oneof![non_key_ops, select(keys).prop_map(|key| Query { key })];
+        if let Some(existing_key_strategy) = params.existing_key_strategy() {
+            let key_ops = prop_oneof![
+                non_key_ops,
+                existing_key_strategy.prop_map(|key| Query { key })
+            ];
 
             let rows = params.existing_rows().collect::<Vec<_>>();
             if rows.is_empty() {
@@ -303,6 +320,8 @@ impl Operation {
                     prop_oneof![key_ops, mk_update, mk_delete].boxed()
                 }
             }
+        } else {
+            non_key_ops.boxed()
         }
     }
 }
@@ -802,7 +821,6 @@ vertical_tests! {
         )
     );
 
-    #[ignore = "Broken right now"]
     paginate_grouped(
         "SELECT id FROM posts WHERE author_id = ? ORDER BY score DESC LIMIT 3 OFFSET ?";
         TestOptions {
