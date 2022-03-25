@@ -12,7 +12,6 @@ Metadata:
           - VPCPrivateSubnetIds
           - ReadySetServerSecurityGroupID
           - ReadySetAdapterSecurityGroupID
-          - ReadySetMonitoringSecurityGroupID
       - Label:
           default: SSH Access Configuration
         Parameters:
@@ -33,7 +32,6 @@ Metadata:
           - ReadySetServerInitialVolumeSizeGB
           - ReadySetServerAutoGrowVolume
           - ReadySetServerMaxVolumeSizeGB
-          - ReadySetMonitorInstanceType
           - ReadySetMemoryLimitGB
           - ReadySetDeploymentName
           - ReadySetLogLevel
@@ -48,6 +46,11 @@ Metadata:
           - DatabaseAdapterUsername
           - SSMParameterKmsKeyArn
           - SSMPathRDSDatabasePassword
+      - Label:
+          default: Logging and Metrics
+        Parameters:
+          - EnableCloudwatch
+          - EnableAggregation
 
 Parameters:
   ReadySetAdapterInstanceType:
@@ -61,13 +64,6 @@ Parameters:
     Description: The EC2 instance type to use for ReadySet Server instances.
     Type: String
     Default: c5.4xlarge
-    AllowedPattern: ^(\w)5.*
-    ConstraintDescription: Instance type must be 5th generation.
-
-  ReadySetMonitorInstanceType:
-    Description: The EC2 instance type to use for the ReadySet monitoring instance.
-    Type: String
-    Default: c5.large
     AllowedPattern: ^(\w)5.*
     ConstraintDescription: Instance type must be 5th generation.
 
@@ -89,10 +85,6 @@ Parameters:
 
   ReadySetAdapterSecurityGroupID:
     Description: ID of the security group to apply to ReadySet Adapter instances.
-    Type: AWS::EC2::SecurityGroup::Id
-
-  ReadySetMonitoringSecurityGroupID:
-    Description: ID of the security group to apply to ReadySet Monitoring instances.
     Type: AWS::EC2::SecurityGroup::Id
 
   ReadySetServerInitialVolumeSizeGB:
@@ -135,12 +127,12 @@ Parameters:
   ReadySetAdapterExtraEnvironment:
     Description: Extra environment variables to pass to the ReadySet Adapter process, separated by commas
     Type: String
-    Default: ''
+    Default: ""
 
   ReadySetServerExtraEnvironment:
     Description: Extra environment variables to pass to the ReadySet Server process, separated by commas
     Type: String
-    Default: ''
+    Default: ""
 
   KeyPairName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instances.
@@ -207,20 +199,27 @@ Parameters:
     Description: Path to SSM secure string parameter that contains the backend database password.
     Type: String
 
+  EnableCloudwatch:
+    Description: Send logs and metrics directly to Cloudwatch
+    Type: String
+    Default: true
+
+  EnableAggregation:
+    Description: Send logs and metrics to Prometheus
+    Type: String
+    Default: false
+
 Mappings:
   AWSAMIRegionMap:
     us-east-1:
       READYSETPOSTGRESQLADAPTER: ami-xxxxxxxxxxxxxxxxx #@ {readyset_psql_adapter_us_east_1}
       READYSETSERVER: ami-xxxxxxxxxxxxxxxxx #@ {readyset_server_us_east_1}
-      READYSETMONITOR: ami-xxxxxxxxxxxxxxxxx #@ {readyset_monitor_us_east_1}
     us-east-2:
       READYSETPOSTGRESQLADAPTER: ami-xxxxxxxxxxxxxxxxx #@ {readyset_psql_adapter_us_east_2}
       READYSETSERVER: ami-xxxxxxxxxxxxxxxxx #@ {readyset_server_us_east_2}
-      READYSETMONITOR: ami-xxxxxxxxxxxxxxxxx #@ {readyset_monitor_us_east_2}
     us-west-2:
       READYSETPOSTGRESQLADAPTER: ami-xxxxxxxxxxxxxxxxx #@ {readyset_psql_adapter_us_west_2}
       READYSETSERVER: ami-xxxxxxxxxxxxxxxxx #@ {readyset_server_us_west_2}
-      READYSETMONITOR: ami-xxxxxxxxxxxxxxxxx #@ {readyset_monitor_us_west_2}
 
 Resources:
   ReadySetPostgreSQLAdapterRole:
@@ -244,7 +243,7 @@ Resources:
                 Action:
                   - ssm:GetParameter*
                 Resource:
-                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SSMPathRDSDatabasePassword}"
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SSMPathRDSDatabasePassword}
         - PolicyName: KMSPermissions
           PolicyDocument:
             Version: "2012-10-17"
@@ -284,7 +283,7 @@ Resources:
       KeyName: !Ref KeyPairName
       ImageId: !FindInMap
         - AWSAMIRegionMap
-        - !Ref "AWS::Region"
+        - !Ref AWS::Region
         - READYSETPOSTGRESQLADAPTER
       IamInstanceProfile: !Ref ReadySetPostgreSQLAdapterProfile
       UserData: !Base64
@@ -311,6 +310,8 @@ Resources:
             export DB_HOST=${DatabaseHostname}
             export DB_PORT=${DatabasePort}
             export DB_NAME=${DatabaseName}
+            export ENABLE_CW=${EnableCloudwatch}
+            export ENABLE_AGG=${EnableAggregation}
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - {}
@@ -339,7 +340,10 @@ Resources:
       VPCZoneIdentifier: !Ref VPCPrivateSubnetIds
       Tags:
         - Key: Name
-          Value: !Join ['-', [!Ref "AWS::StackName", ReadySet-PostgreSQLAdapter]]
+          Value: !Join
+            - '-'
+            - - !Ref AWS::StackName
+              - ReadySet-PostgreSQLAdapter
           PropagateAtLaunch: true
 
   ReadySetPostgreSQLAdapterNLB:
@@ -454,7 +458,7 @@ Resources:
                 Action:
                   - ssm:GetParameter*
                 Resource:
-                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SSMPathRDSDatabasePassword}"
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SSMPathRDSDatabasePassword}
         - PolicyName: KMSPermissions
           PolicyDocument:
             Version: "2012-10-17"
@@ -484,7 +488,7 @@ Resources:
       KeyName: !Ref KeyPairName
       ImageId: !FindInMap
         - AWSAMIRegionMap
-        - !Ref "AWS::Region"
+        - !Ref AWS::Region
         - READYSETSERVER
       IamInstanceProfile: !Ref ReadySetServerProfile
       UserData: !Base64
@@ -552,7 +556,10 @@ Resources:
           RoleARN: !GetAtt ReadySetServerASGRole.Arn
       Tags:
         - Key: Name
-          Value: !Join ['-', [!Ref "AWS::StackName", ReadySet-Server]]
+          Value: !Join
+            - '-'
+            - - !Ref AWS::StackName
+              - ReadySet-Server
           PropagateAtLaunch: true
         - Key: ReadySet:ServerInstance
           Value: !Ref ReadySetDeploymentName
@@ -574,75 +581,21 @@ Resources:
               - cloudwatch:PutMetricData
             Resource: '*'
 
-  ReadySetMonitorRole:
-    Type: AWS::IAM::Role
-    Properties:
-      ManagedPolicyArns:
-        - !Ref ConsulJoinManagedPolicyArn
-        - !Ref ReadySetAggregatorCloudWatchLogsManagedPolicy
-      AssumeRolePolicyDocument:
-        Statement:
-          - Action: sts:AssumeRole
-            Principal:
-              Service: ec2.amazonaws.com
-            Effect: Allow
-            Sid: ""
-
-  ReadySetMonitorProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      Path: /
-      Roles:
-        - !Ref ReadySetMonitorRole
-
-  ReadySetMonitorInstance:
-    CreationPolicy:
-      ResourceSignal:
-        Count: 1
-        Timeout: PT20M
-    Type: AWS::EC2::Instance
-    Properties:
-      InstanceType: !Ref ReadySetMonitorInstanceType
-      SubnetId: !Select [0, !Ref VPCPrivateSubnetIds]
-      SecurityGroupIds:
-        - !Ref ReadySetMonitoringSecurityGroupID
-      KeyName: !Ref KeyPairName
-      ImageId: !FindInMap
-        - AWSAMIRegionMap
-        - !Ref "AWS::Region"
-        - READYSETMONITOR
-      Tags:
-        - Key: Name
-          Value: !Join ['-', [!Ref "AWS::StackName", Monitor]]
-      IamInstanceProfile: !Ref ReadySetMonitorProfile
-      UserData: !Base64
-        Fn::Sub:
-          - |
-            Content-Type: multipart/mixed; boundary="==BOUNDARY=="
-            MIME-Version: 1.0
-            --==BOUNDARY==
-            Content-Type: text/x-shellscript; charset="us-ascii"
-            #!/bin/bash -v
-            set -eu -o pipefail
-            export AWS_CLOUDFORMATION_STACK="${AWS::StackName}"
-            export AWS_CLOUDFORMATION_RESOURCE="ReadySetMonitorInstance"
-            export AWS_CLOUDFORMATION_REGION="${AWS::Region}"
-            export CONSUL_TAG_KEY="${ConsulEc2RetryJoinTagKey}"
-            export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
-            export DEPLOYMENT="${ReadySetDeploymentName}"
-            exec /usr/local/bin/user-data-init.sh
-            --==BOUNDARY==
-          - {}
-
 Outputs:
   ReadySetAdapterNLBDNSName:
     Description: Host for ReadySet connection string.
     Value: !GetAtt ReadySetPostgreSQLAdapterNLB.DNSName
     Export:
-      Name: !Join ['-', [!Ref "AWS::StackName", ReadySetPostgreSQLAdapterNLBDNSName]]
+      Name: !Join
+        - '-'
+        - - !Ref AWS::StackName
+          - ReadySetPostgreSQLAdapterNLBDNSName
 
   ReadySetPostgreSQLVPCEndpointService:
     Description: VPC Endpoint Service to allow connections from outside the VPC.
     Value: !Ref ReadySetPostgreSQLAdapterVPCEndpointService
     Export:
-      Name: !Join ['-', [!Ref "AWS::StackName", ReadySetPostgreSQLVPCEndpointService]]
+      Name: !Join
+        - '-'
+        - - !Ref AWS::StackName
+          - ReadySetPostgreSQLVPCEndpointService

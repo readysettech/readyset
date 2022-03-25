@@ -1,0 +1,10 @@
+[sinks.cloudwatch_logs]
+type = "aws_cloudwatch_logs"
+inputs = ["metadata"]
+create_missing_group = true
+create_missing_stream = true
+group_name = "${AWS_CLOUDFORMATION_STACK}"
+compression = "none"
+region = "${AWS_CLOUDFORMATION_REGION}"
+stream_name = "{{ app }}"
+encoding.codec = "json"

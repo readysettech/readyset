@@ -1,0 +1,161 @@
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: VPC Network Configuration
+        Parameters:
+          - PrivateSubnet1ID
+          - ReadySetMonitoringSecurityGroupID
+      - Label:
+          default: SSH Access Configuration
+        Parameters:
+          - KeyPairName
+      - Label:
+          default: Consul Configuration
+        Parameters:
+          - ConsulJoinManagedPolicyArn
+          - ConsulEc2RetryJoinTagKey
+          - ConsulEc2RetryJoinTagValue
+      - Label:
+          default: ReadySet Configuration
+        Parameters:
+          - ReadySetDeploymentName
+
+Parameters:
+  ReadySetMonitorInstanceType:
+    Description: The EC2 instance type to use for the ReadySet monitoring instance.
+    Type: String
+    Default: c5.large
+    AllowedPattern: ^(\w)5.*
+    ConstraintDescription: Instance type must be 5th generation.
+
+  ReadySetMonitoringSecurityGroupID:
+    Description: ID of the security group to apply to ReadySet Monitoring instances.
+    Type: AWS::EC2::SecurityGroup::Id
+
+  PrivateSubnet1ID:
+    Type: AWS::EC2::Subnet::Id
+
+  KeyPairName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances.
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair.
+
+  ConsulEc2RetryJoinTagKey:
+    Description: The EC2 instance tag key to filter on when joining to other Consul nodes.
+    Type: String
+    Default: ReadysetConsulNodeType
+    ConstraintDescription: Must match EC2 Tag Name requirements.
+
+  ConsulEc2RetryJoinTagValue:
+    Description: The EC2 instance tag value to filter on when joining to other Consul nodes.
+    Type: String
+    Default: Server
+    ConstraintDescription: Must match EC2 Tag Value requirements.
+
+  ReadySetDeploymentName:
+    Description: A unique name for the ReadySet deployment. This is used to differentiate multiple ReadySet deployments with the same Consul cluster
+    Type: String
+    MinLength: 1
+    AllowedPattern: ^[^/ ]+$
+    ConstraintDescription: Must be non-empty and cannot contain slashes ("/") or spaces
+
+  ConsulJoinManagedPolicyArn:
+    Description: ARN of an managed IAM policy that the permissions to find Consul Servers
+    Type: String
+
+Mappings:
+  AWSAMIRegionMap:
+    us-east-1:
+      READYSETMONITOR: ami-xxxxxxxxxxxxxxxxx #@ {readyset_monitor_us_east_1}
+    us-east-2:
+      READYSETMONITOR: ami-xxxxxxxxxxxxxxxxx #@ {readyset_monitor_us_east_2}
+    us-west-2:
+      READYSETMONITOR: ami-xxxxxxxxxxxxxxxxx #@ {readyset_monitor_us_west_2}
+
+Resources:
+  ReadySetAggregatorCloudWatchLogsManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:DescribeLogGroups
+              - logs:DescribeLogStreams
+              - logs:CreateLogGroup
+              - logs:PutLogEvents
+              - cloudwatch:PutMetricData
+            Resource: '*'
+
+  ReadySetMonitorInstance:
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT20M
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref ReadySetMonitorInstanceType
+      SubnetId: !Ref PrivateSubnet1ID
+      SecurityGroupIds:
+        - !Ref ReadySetMonitoringSecurityGroupID
+      KeyName: !Ref KeyPairName
+      ImageId: !FindInMap
+        - AWSAMIRegionMap
+        - !Ref AWS::Region
+        - READYSETMONITOR
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref AWS::StackName
+              - Monitor
+      IamInstanceProfile: !Ref ReadySetMonitorProfile
+      UserData: !Base64
+        Fn::Sub:
+          - |
+            Content-Type: multipart/mixed; boundary="==BOUNDARY=="
+            MIME-Version: 1.0
+            --==BOUNDARY==
+            Content-Type: text/x-shellscript; charset="us-ascii"
+            #!/bin/bash -v
+            set -eu -o pipefail
+            export AWS_CLOUDFORMATION_STACK="${AWS::StackName}"
+            export AWS_CLOUDFORMATION_RESOURCE="ReadySetMonitorInstance"
+            export AWS_CLOUDFORMATION_REGION="${AWS::Region}"
+            export CONSUL_TAG_KEY="${ConsulEc2RetryJoinTagKey}"
+            export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
+            export DEPLOYMENT="${ReadySetDeploymentName}"
+            exec /usr/local/bin/user-data-init.sh
+            --==BOUNDARY==
+          - {}
+
+  ReadySetMonitorProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref ReadySetMonitorRole
+
+  ReadySetMonitorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - !Ref ConsulJoinManagedPolicyArn
+        - !Ref ReadySetAggregatorCloudWatchLogsManagedPolicy
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Principal:
+              Service: ec2.amazonaws.com
+            Effect: Allow
+            Sid: ""
+
+Outputs:
+  ReadySetMonitorInstanceLANIP:
+    Description: VPC LAN address of monitor instance.
+    Value: !GetAtt ReadySetMonitorInstance.PrivateIp
+    Export:
+      Name: !Join ['-', [!Ref "AWS::StackName", ReadySetMonitorInstanceLANIP]]

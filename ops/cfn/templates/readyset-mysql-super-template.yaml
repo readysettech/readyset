@@ -350,10 +350,28 @@ Resources:
         DatabaseName: !Ref DatabaseName
         SSMPathRDSDatabasePassword: !Ref SSMPathRDSDatabasePassword
 
+  # ReadySet Monitoring Stack
+
+  ReadySetMonitoringStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub >-
+        https://${ReadySetS3BucketName}.s3.amazonaws.com${ReadySetS3KeyPrefix}templates/readyset-monitoring-template.yaml
+      Parameters:
+        ReadySetMonitorInstanceType: !Ref ReadySetMonitorInstanceType
+        ReadySetMonitoringSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetMonitoringSecurityGroupID
+        PrivateSubnet1ID: !GetAtt VPCStack.Outputs.PrivateSubnet1AID
+        KeyPairName: !Ref KeyPairName
+        ConsulEc2RetryJoinTagKey: !GetAtt ReadySetConsulStack.Outputs.ConsulEc2RetryJoinTagKey
+        ConsulEc2RetryJoinTagValue: !GetAtt ReadySetConsulStack.Outputs.ConsulEc2RetryJoinTagValue
+        ReadySetDeploymentName: !Ref ReadySetDeploymentName
+        ConsulJoinManagedPolicyArn: !GetAtt ReadySetConsulStack.Outputs.ConsulJoinManagedPolicyArn
+
   # ReadySet for MySQL
 
   ReadySetMySQLStack:
     Type: AWS::CloudFormation::Stack
+    DependsOn: ReadySetMonitoringStack
     Properties:
       TemplateURL: !Sub >-
         https://${ReadySetS3BucketName}.s3.amazonaws.com${ReadySetS3KeyPrefix}templates/readyset-mysql-template.yaml
@@ -373,13 +391,11 @@ Resources:
         ReadySetServerInitialVolumeSizeGB: !Ref ReadySetServerInitialVolumeSizeGB
         ReadySetServerAutoGrowVolume: !Ref ReadySetServerAutoGrowVolume
         ReadySetServerMaxVolumeSizeGB: !Ref ReadySetServerMaxVolumeSizeGB
-        ReadySetMonitorInstanceType: !Ref ReadySetMonitorInstanceType
         ReadySetMemoryLimitGB: !Ref ReadySetMemoryLimitGB
         ReadySetDeploymentName: !Ref ReadySetDeploymentName
         # Networking Inputs
         ReadySetServerSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetServerSecurityGroupID
         ReadySetAdapterSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetAdapterSecurityGroupID
-        ReadySetMonitoringSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetMonitoringSecurityGroupID
         # Backend DB Inputs
         SSMParameterKmsKeyArn: !Ref SSMParameterKmsKeyArn
         SSMPathRDSDatabasePassword: !Ref SSMPathRDSDatabasePassword
@@ -419,7 +435,7 @@ Outputs:
 
   ReadySetMonitorLANIP:
     Description: VPC IP of monitor instance.
-    Value: !GetAtt ReadySetMySQLStack.Outputs.ReadySetMonitorInstanceLANIP
+    Value: !GetAtt ReadySetMonitoringStack.Outputs.ReadySetMonitorInstanceLANIP
 
   ReadySetAdapterNLBDNSName:
     Description: Host for ReadySet connection string.

@@ -1,0 +1,5 @@
+[sinks.cloudwatch_metrics]
+type = "aws_cloudwatch_metrics"
+inputs = ["metrics"]
+default_namespace = "${AWS_CLOUDFORMATION_STACK}"
+region = "${AWS_CLOUDFORMATION_REGION}"

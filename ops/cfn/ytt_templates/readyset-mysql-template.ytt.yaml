@@ -14,7 +14,6 @@ Metadata:
           - PrivateSubnet3ID
           - ReadySetServerSecurityGroupID
           - ReadySetAdapterSecurityGroupID
-          - ReadySetMonitoringSecurityGroupID
       - Label:
           default: SSH Access Configuration
         Parameters:
@@ -26,6 +25,11 @@ Metadata:
           - ConsulEc2RetryJoinTagKey
           - ConsulEc2RetryJoinTagValue
       - Label:
+          default: Logging and Metrics
+        Parameters:
+          - EnableCloudwatch
+          - EnableAggregation
+      - Label:
           default: ReadySet Configuration
         Parameters:
           - ReadySetAdapterInstanceType
@@ -35,7 +39,6 @@ Metadata:
           - ReadySetServerInitialVolumeSizeGB
           - ReadySetServerAutoGrowVolume
           - ReadySetServerMaxVolumeSizeGB
-          - ReadySetMonitorInstanceType
           - ReadySetMemoryLimitGB
           - ReadySetDeploymentName
           - ReadySetLogLevel
@@ -66,13 +69,6 @@ Parameters:
     AllowedPattern: ^(\w)5.*
     ConstraintDescription: Instance type must be 5th generation.
 
-  ReadySetMonitorInstanceType:
-    Description: The EC2 instance type to use for the ReadySet monitoring instance.
-    Type: String
-    Default: c5.large
-    AllowedPattern: ^(\w)5.*
-    ConstraintDescription: Instance type must be 5th generation.
-
   ReadySetAdapterNodes:
     Description: Number of Adapter nodes to create.
     Type: String
@@ -91,10 +87,6 @@ Parameters:
 
   ReadySetAdapterSecurityGroupID:
     Description: ID of the security group to apply to ReadySet Adapter instances.
-    Type: AWS::EC2::SecurityGroup::Id
-
-  ReadySetMonitoringSecurityGroupID:
-    Description: ID of the security group to apply to ReadySet Monitoring instances.
     Type: AWS::EC2::SecurityGroup::Id
 
   ReadySetServerInitialVolumeSizeGB:
@@ -137,12 +129,12 @@ Parameters:
   ReadySetAdapterExtraEnvironment:
     Description: Extra environment variables to pass to the ReadySet Adapter process, separated by commas
     Type: String
-    Default: ''
+    Default: ""
 
   ReadySetServerExtraEnvironment:
     Description: Extra environment variables to pass to the ReadySet Server process, separated by commas
     Type: String
-    Default: ''
+    Default: ""
 
   KeyPairName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instances.
@@ -214,20 +206,27 @@ Parameters:
     Description: Path to SSM secure string parameter that contains the backend database password.
     Type: String
 
+  EnableCloudwatch:
+    Description: Send logs and metrics directly to Cloudwatch
+    Type: String
+    Default: true
+
+  EnableAggregation:
+    Description: Send logs and metrics to Prometheus
+    Type: String
+    Default: false
+
 Mappings:
   AWSAMIRegionMap:
     us-east-1:
       READYSETMYSQLADAPTER: ami-xxxxxxxxxxxxxxxxx #@ {readyset_mysql_adapter_us_east_1}
       READYSETSERVER: ami-xxxxxxxxxxxxxxxxx #@ {readyset_server_us_east_1}
-      READYSETMONITOR: ami-xxxxxxxxxxxxxxxxx #@ {readyset_monitor_us_east_1}
     us-east-2:
       READYSETMYSQLADAPTER: ami-xxxxxxxxxxxxxxxxx #@ {readyset_mysql_adapter_us_east_2}
       READYSETSERVER: ami-xxxxxxxxxxxxxxxxx #@ {readyset_server_us_east_2}
-      READYSETMONITOR: ami-xxxxxxxxxxxxxxxxx #@ {readyset_monitor_us_east_2}
     us-west-2:
       READYSETMYSQLADAPTER: ami-xxxxxxxxxxxxxxxxx #@ {readyset_mysql_adapter_us_west_2}
       READYSETSERVER: ami-xxxxxxxxxxxxxxxxx #@ {readyset_server_us_west_2}
-      READYSETMONITOR: ami-xxxxxxxxxxxxxxxxx #@ {readyset_monitor_us_west_2}
 
 Resources:
   ReadySetMySQLAdapterRole:
@@ -235,6 +234,7 @@ Resources:
     Properties:
       ManagedPolicyArns:
         - !Ref ConsulJoinManagedPolicyArn
+        - !Ref ReadySetAggregatorCloudWatchLogsManagedPolicy
       AssumeRolePolicyDocument:
         Statement:
           - Action: sts:AssumeRole
@@ -318,6 +318,8 @@ Resources:
             export DB_HOST=${DatabaseHostname}
             export DB_PORT=${DatabasePort}
             export DB_NAME=${DatabaseName}
+            export ENABLE_CW=${EnableCloudwatch}
+            export ENABLE_AGG=${EnableAggregation}
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - {}
@@ -337,7 +339,6 @@ Resources:
         WaitOnResourceSignals: true
         PauseTime: PT20M
     Type: AWS::AutoScaling::AutoScalingGroup
-    DependsOn: ReadySetMonitorInstance
     Properties:
       LaunchConfigurationName: !Ref ReadySetMySQLAdapterLC
       MaxSize: !Ref ReadySetAdapterNodes
@@ -402,6 +403,7 @@ Resources:
     Properties:
       ManagedPolicyArns:
         - !Ref ConsulJoinManagedPolicyArn
+        - !Ref ReadySetAggregatorCloudWatchLogsManagedPolicy
       AssumeRolePolicyDocument:
         Statement:
           - Action: sts:AssumeRole
@@ -534,6 +536,8 @@ Resources:
             export DB_HOST=${DatabaseHostname}
             export DB_PORT=${DatabasePort}
             export DB_NAME=${DatabaseName}
+            export ENABLE_CW=${EnableCloudwatch}
+            export ENABLE_AGG=${EnableAggregation}
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - SqsQueueUrl: !Ref ReadySetServerASGLifecycleTerminateSQS
@@ -553,7 +557,6 @@ Resources:
         WaitOnResourceSignals: true
         PauseTime: PT20M
     Type: AWS::AutoScaling::AutoScalingGroup
-    DependsOn: ReadySetMonitorInstance
     Properties:
       LaunchConfigurationName: !Ref ReadySetServerLC
       MaxSize: !Ref ReadySetServerNodes
@@ -592,66 +595,6 @@ Resources:
               - cloudwatch:PutMetricData
             Resource: '*'
 
-  ReadySetMonitorRole:
-    Type: AWS::IAM::Role
-    Properties:
-      ManagedPolicyArns:
-        - !Ref ConsulJoinManagedPolicyArn
-        - !Ref ReadySetAggregatorCloudWatchLogsManagedPolicy
-      AssumeRolePolicyDocument:
-        Statement:
-          - Action: sts:AssumeRole
-            Principal:
-              Service: ec2.amazonaws.com
-            Effect: Allow
-            Sid: ""
-
-  ReadySetMonitorProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      Path: /
-      Roles:
-        - !Ref ReadySetMonitorRole
-
-  ReadySetMonitorInstance:
-    CreationPolicy:
-      ResourceSignal:
-        Count: 1
-        Timeout: PT20M
-    Type: AWS::EC2::Instance
-    Properties:
-      InstanceType: !Ref ReadySetMonitorInstanceType
-      SubnetId: !Ref PrivateSubnet1ID
-      SecurityGroupIds:
-        - !Ref ReadySetMonitoringSecurityGroupID
-      KeyName: !Ref KeyPairName
-      ImageId: !FindInMap
-        - AWSAMIRegionMap
-        - !Ref "AWS::Region"
-        - READYSETMONITOR
-      Tags:
-        - Key: Name
-          Value: !Join ['-', [!Ref "AWS::StackName", Monitor]]
-      IamInstanceProfile: !Ref ReadySetMonitorProfile
-      UserData: !Base64
-        Fn::Sub:
-          - |
-            Content-Type: multipart/mixed; boundary="==BOUNDARY=="
-            MIME-Version: 1.0
-            --==BOUNDARY==
-            Content-Type: text/x-shellscript; charset="us-ascii"
-            #!/bin/bash -v
-            set -eu -o pipefail
-            export AWS_CLOUDFORMATION_STACK="${AWS::StackName}"
-            export AWS_CLOUDFORMATION_RESOURCE="ReadySetMonitorInstance"
-            export AWS_CLOUDFORMATION_REGION="${AWS::Region}"
-            export CONSUL_TAG_KEY="${ConsulEc2RetryJoinTagKey}"
-            export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
-            export DEPLOYMENT="${ReadySetDeploymentName}"
-            exec /usr/local/bin/user-data-init.sh
-            --==BOUNDARY==
-          - {}
-
 Outputs:
   ReadySetAdapterNLBDNSName:
     Description: Host for ReadySet connection string.
@@ -664,12 +607,6 @@ Outputs:
     Value: !Ref ReadySetMySQLAdapterVPCEndpointService
     Export:
       Name: !Join ['-', [!Ref "AWS::StackName", ReadySetMySQLVPCEndpointService]]
-
-  ReadySetMonitorInstanceLANIP:
-    Description: VPC LAN address of monitor instance.
-    Value: !GetAtt ReadySetMonitorInstance.PrivateIp
-    Export:
-      Name: !Join ['-', [!Ref "AWS::StackName", ReadySetMonitorInstanceLANIP]]
 
   ReadySetMySQLAdapterTargetGroupARN:
     Description: ARN of the MySQL Adapter Target Group.

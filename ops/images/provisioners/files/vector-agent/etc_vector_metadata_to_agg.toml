@@ -1,0 +1,4 @@
+[sinks.metadata_to_aggregator]
+inputs = ["metadata"]
+type = "vector"
+address = "${LOG_AGGREGATOR_ADDRESS}:9000"
