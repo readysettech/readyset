@@ -2,15 +2,15 @@ use std::{fmt, str};
 
 use itertools::Itertools;
 use nom::branch::alt;
-use nom::bytes::complete::{tag, tag_no_case};
+use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
-use nom::sequence::{separated_pair, terminated, tuple};
-use nom::IResult;
+use nom::sequence::{terminated, tuple};
+use nom::{IResult, Parser};
 use serde::{Deserialize, Serialize};
 
 use crate::common::statement_terminator;
-use crate::expression::{expression, scoped_var};
+use crate::expression::expression;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Expression, SqlIdentifier};
 
@@ -40,12 +40,40 @@ impl SetStatement {
     }
 }
 
+/// Scope for a [`Variable`]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub enum VariableScope {
+    User,
+    Local,
+    Global,
+    Session,
+}
+
+impl fmt::Display for VariableScope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            VariableScope::User => Ok(()),
+            VariableScope::Local => write!(f, "LOCAL"),
+            VariableScope::Global => write!(f, "GLOBAL"),
+            VariableScope::Session => write!(f, "SESSION"),
+        }
+    }
+}
+
+pub(crate) fn variable_scope_prefix(i: &[u8]) -> IResult<&[u8], VariableScope> {
+    alt((
+        map(tag_no_case("@@LOCAL."), |_| VariableScope::Local),
+        map(tag_no_case("@@GLOBAL."), |_| VariableScope::Global),
+        map(tag_no_case("@@SESSION."), |_| VariableScope::Session),
+        map(tag_no_case("@@"), |_| VariableScope::Session),
+        map(tag_no_case("@"), |_| VariableScope::User),
+    ))(i)
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub enum Variable {
-    User(SqlIdentifier),
-    Local(SqlIdentifier),
-    Global(SqlIdentifier),
-    Session(SqlIdentifier),
+pub struct Variable {
+    pub scope: VariableScope,
+    pub name: SqlIdentifier,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -57,29 +85,22 @@ pub struct SetVariables {
 impl Variable {
     /// If the variable is one of Local, Global or Session, returns the variable name
     pub fn as_non_user_var(&self) -> Option<&str> {
-        match self {
-            Variable::Local(v) | Variable::Session(v) | Variable::Global(v) => Some(v.as_str()),
-            _ => None,
-        }
-    }
-
-    /// If the variable is a User variable, returns the variable name
-    pub fn as_user_var(&self) -> Option<&str> {
-        match self {
-            Variable::User(v) => Some(v.as_str()),
-            _ => None,
+        if self.scope == VariableScope::User {
+            None
+        } else {
+            Some(&self.name)
         }
     }
 }
 
 impl fmt::Display for Variable {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Variable::Global(var) => write!(f, "@@GLOBAL.{}", var),
-            Variable::Session(var) => write!(f, "@@SESSION.{}", var),
-            Variable::Local(var) => write!(f, "@@LOCAL.{}", var),
-            Variable::User(var) => write!(f, "@{}", var),
+        if self.scope == VariableScope::User {
+            write!(f, "@")?;
+        } else {
+            write!(f, "@@{}.", self.scope)?;
         }
+        write!(f, "{}", self.name)
     }
 }
 
@@ -112,32 +133,33 @@ impl fmt::Display for SetNames {
     }
 }
 
+fn set_variable_scope_prefix(i: &[u8]) -> IResult<&[u8], VariableScope> {
+    alt((
+        variable_scope_prefix,
+        map(terminated(tag_no_case("GLOBAL"), whitespace1), |_| {
+            VariableScope::Global
+        }),
+        map(terminated(tag_no_case("SESSION"), whitespace1), |_| {
+            VariableScope::Session
+        }),
+        map(terminated(tag_no_case("LOCAL"), whitespace1), |_| {
+            VariableScope::Local
+        }),
+    ))(i)
+}
+
 /// check for one of three ways to specify scope and reformat to a single formatting. Returns none
 /// if scope is not specified
-pub fn varkind(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Variable> {
+fn variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Variable> {
     move |i| {
-        let (i, scope) = alt((
-            scoped_var(dialect),
-            map(
-                separated_pair(tag_no_case("GLOBAL"), whitespace1, dialect.identifier()),
-                |(_, ident)| Variable::Global(ident.to_ascii_lowercase().into()),
-            ),
-            map(
-                separated_pair(tag_no_case("SESSION"), whitespace1, dialect.identifier()),
-                |(_, ident)| Variable::Session(ident.to_ascii_lowercase().into()),
-            ),
-            map(
-                separated_pair(tag_no_case("LOCAL"), whitespace1, dialect.identifier()),
-                |(_, ident)| Variable::Local(ident.to_ascii_lowercase().into()),
-            ),
-            map(dialect.identifier(), |ident| {
-                Variable::Local(ident.to_ascii_lowercase().into())
-            }),
-        ))(i)?;
-
-        //scope may be followed by '.' or whitespace
-        let (i, _) = alt((tag("."), map(whitespace0, |_| "".as_bytes())))(i)?;
-        Ok((i, scope))
+        let (i, scope) = set_variable_scope_prefix
+            .or(|i| Ok((i, VariableScope::Local)))
+            .parse(i)?;
+        let (i, name) = dialect
+            .identifier()
+            .map(|ident| ident.to_ascii_lowercase().into())
+            .parse(i)?;
+        Ok((i, Variable { scope, name }))
     }
 }
 
@@ -146,7 +168,7 @@ pub fn set(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetStatement> {
         let (i, _) = tag_no_case("set")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, statement) = alt((
-            map(set_variable(dialect), SetStatement::Variable),
+            map(set_variables(dialect), SetStatement::Variable),
             map(set_names(dialect), SetStatement::Names),
         ))(i)?;
 
@@ -154,21 +176,23 @@ pub fn set(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetStatement> {
     }
 }
 
-fn set_variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetVariables> {
+fn set_variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Variable, Expression)> {
+    move |i| {
+        let (i, variable) = variable(dialect)(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = alt((tag_no_case("="), tag_no_case(":=")))(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, value) = expression(dialect)(i)?;
+        Ok((i, (variable, value)))
+    }
+}
+
+fn set_variables(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetVariables> {
     move |i| {
         let (remaining_input, variables) = terminated(
             separated_list1(
                 tuple((tag_no_case(","), whitespace0)),
-                map(
-                    tuple((
-                        varkind(dialect),
-                        whitespace0,
-                        alt((tag_no_case("="), tag_no_case(":="))),
-                        whitespace0,
-                        expression(dialect),
-                    )),
-                    |(variable, _, _, _, value)| (variable, value),
-                ),
+                set_variable(dialect),
             ),
             statement_terminator,
         )(i)?;
@@ -206,7 +230,10 @@ mod tests {
             res.unwrap().1,
             SetStatement::Variable(SetVariables {
                 variables: vec!((
-                    Variable::Local("sql_auto_is_null".into()),
+                    Variable {
+                        scope: VariableScope::Local,
+                        name: "sql_auto_is_null".into()
+                    },
                     Expression::Literal(0.into())
                 )),
             })
@@ -221,7 +248,10 @@ mod tests {
             res.unwrap().1,
             SetStatement::Variable(SetVariables {
                 variables: vec!((
-                    Variable::User("var".into()),
+                    Variable {
+                        scope: VariableScope::User,
+                        name: "var".into()
+                    },
                     Expression::Literal(123.into())
                 )),
             })
@@ -241,10 +271,10 @@ mod tests {
         let qstring1 = "set gloBal var = 2";
         let qstring2 = "set @@gLobal.var = 2";
         let expected = "SET @@GLOBAL.var = 2";
-        let res1 = set(Dialect::MySQL)(qstring1.as_bytes());
-        let res2 = set(Dialect::MySQL)(qstring2.as_bytes());
-        assert_eq!(format!("{}", res1.unwrap().1), expected);
-        assert_eq!(format!("{}", res2.unwrap().1), expected);
+        let res1 = test_parse!(set(Dialect::MySQL), qstring1.as_bytes());
+        let res2 = test_parse!(set(Dialect::MySQL), qstring2.as_bytes());
+        assert_eq!(format!("{}", res1), expected);
+        assert_eq!(format!("{}", res2), expected);
     }
 
     #[test]
@@ -302,7 +332,10 @@ mod tests {
             res.unwrap().1,
             SetStatement::Variable(SetVariables {
                 variables: vec!((
-                    Variable::User("myvar".into()),
+                    Variable {
+                        scope: VariableScope::User,
+                        name: "myvar".into()
+                    },
                     Expression::BinaryOp {
                         lhs: Box::new(Expression::Literal(100.into())),
                         op: crate::BinaryOperator::Add,
@@ -322,7 +355,10 @@ mod tests {
             SetStatement::Variable(SetVariables {
                 variables: vec!(
                     (
-                        Variable::User("myvar".into()),
+                        Variable {
+                            scope: VariableScope::User,
+                            name: "myvar".into()
+                        },
                         Expression::BinaryOp {
                             lhs: Box::new(Expression::Literal(100.into())),
                             op: crate::BinaryOperator::Add,
@@ -330,12 +366,21 @@ mod tests {
                         }
                     ),
                     (
-                        Variable::Session("notmyvar".into()),
+                        Variable {
+                            scope: VariableScope::Session,
+                            name: "notmyvar".into()
+                        },
                         Expression::Literal("value".into()),
                     ),
                     (
-                        Variable::Global("g".into()),
-                        Expression::Variable(Variable::Global("v".into())),
+                        Variable {
+                            scope: VariableScope::Global,
+                            name: "g".into()
+                        },
+                        Expression::Variable(Variable {
+                            scope: VariableScope::Global,
+                            name: "v".into()
+                        }),
                     )
                 ),
             })

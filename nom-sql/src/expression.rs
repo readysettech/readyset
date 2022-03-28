@@ -9,7 +9,7 @@ use nom::character::complete::char;
 use nom::combinator::{complete, map, opt};
 use nom::multi::{many0, separated_list0};
 use nom::sequence::{delimited, pair, preceded, terminated, tuple};
-use nom::IResult;
+use nom::{IResult, Parser};
 use pratt::{Affix, Associativity, PrattParser, Precedence};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -19,7 +19,7 @@ use crate::common::{
     column_function, column_identifier_no_alias, literal, type_identifier, ws_sep_comma,
 };
 use crate::select::nested_selection;
-use crate::set::Variable;
+use crate::set::{variable_scope_prefix, Variable};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Column, Dialect, Literal, SelectStatement, SqlType};
 
@@ -863,28 +863,13 @@ fn parenthesized_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr
 
 pub(crate) fn scoped_var(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Variable> {
     move |i| {
-        alt((
-            map(
-                preceded(tag_no_case("@@GLOBAL."), dialect.identifier()),
-                |identifier| Variable::Global(identifier.to_ascii_lowercase().into()),
-            ),
-            map(
-                preceded(tag_no_case("@@SESSION."), dialect.identifier()),
-                |identifier| Variable::Session(identifier.to_ascii_lowercase().into()),
-            ),
-            map(
-                preceded(tag_no_case("@@LOCAL."), dialect.identifier()),
-                |identifier| Variable::Local(identifier.to_ascii_lowercase().into()),
-            ),
-            map(
-                preceded(tag_no_case("@@"), dialect.identifier()),
-                |identifier| Variable::Session(identifier.to_ascii_lowercase().into()),
-            ),
-            map(
-                preceded(tag_no_case("@"), dialect.identifier()),
-                |identifier| Variable::User(identifier.to_ascii_lowercase().into()),
-            ),
-        ))(i)
+        let (i, scope) = variable_scope_prefix(i)?;
+        let (i, name) = dialect
+            .identifier()
+            .map(|ident| ident.to_ascii_lowercase().into())
+            .parse(i)?;
+
+        Ok((i, Variable { scope, name }))
     }
 }
 

@@ -31,7 +31,7 @@ pub use self::parser::*;
 pub use self::select::{
     CommonTableExpression, GroupByClause, JoinClause, LimitClause, SelectStatement,
 };
-pub use self::set::SetStatement;
+pub use self::set::{SetStatement, Variable, VariableScope};
 pub use self::show::ShowStatement;
 pub use self::table::Table;
 pub use self::update::UpdateStatement;
