@@ -28,6 +28,7 @@ mod types {
     };
     use noria_client_test_helpers::sleep;
     use proptest::prelude::ProptestConfig;
+    use proptest::string::string_regex;
     use rust_decimal::Decimal;
     use tokio_postgres::types::{FromSql, ToSql};
     use uuid::Uuid;
@@ -119,6 +120,7 @@ mod types {
         double_f64("double precision", f64);
         text_string("text", String);
         bytea_bytes("bytea", Vec<u8>);
+        name_string("name", #[strategy(string_regex("[a-zA-Z0-9]{1,63}").unwrap())] String);
         // TODO(fran): Add numeric with precision and scale when we start correctly
         //  handling them.
         numeric_decimal("numeric", #[strategy(arbitrary_decimal())] Decimal);

@@ -12,6 +12,7 @@ pub enum Value {
     Bool(bool),
     Char(Text),
     Varchar(Text),
+    Name(Text),
     Int(i32),
     Bigint(i64),
     Smallint(i16),

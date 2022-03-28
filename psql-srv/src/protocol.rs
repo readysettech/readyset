@@ -454,6 +454,7 @@ fn make_field_description(
         Type::CHAR => TYPLEN_1,
         Type::TEXT => TYPLEN_VARLENA,
         Type::VARCHAR => TYPLEN_VARLENA,
+        Type::NAME => TYPLEN_VARLENA,
         Type::INT2 => TYPLEN_2,
         Type::INT4 => TYPLEN_4,
         Type::INT8 => TYPLEN_8,

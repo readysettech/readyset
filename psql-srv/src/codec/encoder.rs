@@ -316,6 +316,9 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::Varchar(v) => {
             v.as_bytes().to_sql(&Type::VARCHAR, dst)?;
         }
+        Value::Name(v) => {
+            v.as_bytes().to_sql(&Type::NAME, dst)?;
+        }
         Value::Int(v) => {
             v.to_sql(&Type::INT4, dst)?;
         }
@@ -404,10 +407,7 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
             };
             write!(dst, "{}", text)?;
         }
-        Value::Char(v) => {
-            dst.extend_from_slice(v.as_bytes());
-        }
-        Value::Varchar(v) => {
+        Value::Char(v) | Value::Varchar(v) | Value::Name(v) | Value::Text(v) => {
             dst.extend_from_slice(v.as_bytes());
         }
         Value::Int(v) => {
@@ -432,9 +432,6 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         }
         Value::Numeric(v) => {
             write!(dst, "{}", v)?;
-        }
-        Value::Text(v) => {
-            dst.extend_from_slice(v.as_bytes());
         }
         Value::Timestamp(v) => {
             // TODO: Does not correctly handle all valid timestamp representations. For example,
