@@ -5400,6 +5400,7 @@ dependencies = [
  "nom-sql",
  "noria",
  "noria-data",
+ "noria-errors",
  "noria-server",
  "postgres-native-tls",
  "postgres-types",
