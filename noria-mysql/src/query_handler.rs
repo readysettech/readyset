@@ -186,6 +186,7 @@ impl QueryHandler for MySqlQueryHandler {
                 names.collation.is_none()
                     && matches!(&names.charset[..], "latin1" | "utf8" | "utf8mb4")
             }
+            nom_sql::SetStatement::PostgresParameter(_) => false,
         }
     }
 }
