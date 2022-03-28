@@ -14,7 +14,8 @@ use nom_sql::{
 };
 use noria::{PlaceholderIdx, ViewPlaceholder};
 use noria_errors::{
-    internal, internal_err, invariant, invariant_eq, unsupported, unsupported_err, ReadySetResult,
+    internal, internal_err, invalid_err, invariant, invariant_eq, no_table_for_col, unsupported,
+    unsupported_err, ReadySetResult,
 };
 use noria_sql_passes::{is_aggregate, is_predicate, map_aggregates, LogicalOp};
 use serde::{Deserialize, Serialize};
@@ -366,6 +367,7 @@ impl QueryGraph {
                 }
             }
 
+            #[allow(clippy::expect_used)]
             Ok(ViewKey {
                 columns,
                 index_type: index_type.expect("Checked self.parameters() isn't empty above"),
@@ -489,6 +491,7 @@ fn classify_conditionals(
                                 "can only combine two or fewer ConditionExpression's"
                             );
                             if ces.len() == 2 {
+                                #[allow(clippy::unwrap_used)] // checked ces.len() first
                                 let new_ce = Expression::BinaryOp {
                                     op: BinaryOperator::And,
                                     lhs: Box::new(ces.first().unwrap().clone()),
@@ -518,10 +521,13 @@ fn classify_conditionals(
                         }
                         if new_local.keys().len() == 1 && new_global.is_empty() {
                             // OR over a single table => local predicate
+                            // just checked that new_local has one entry
+                            #[allow(clippy::unwrap_used)]
                             let (t, ces) = new_local.into_iter().next().unwrap();
                             if ces.len() != 2 {
                                 unsupported!("should combine only 2 ConditionExpressions");
                             }
+                            #[allow(clippy::unwrap_used)] // ces.len() == 2
                             let new_ce = Expression::BinaryOp {
                                 lhs: Box::new(ces.first().unwrap().clone()),
                                 op: BinaryOperator::Or,
@@ -547,6 +553,7 @@ fn classify_conditionals(
                     Expression::Column(ref rf) => {
                         match **lhs {
                             // column/column comparison
+                            #[allow(clippy::unwrap_used)] // we check lf/rf.table.is_some()
                             Expression::Column(ref lf)
                                 if lf.table.is_some()
                                     && tables.contains(&Table::from(
@@ -607,6 +614,7 @@ fn classify_conditionals(
                         if let Expression::Column(ref lf) = **lhs {
                             // we assume that implied table names have previously been expanded
                             // and thus all non-computed columns carry table names
+                            #[allow(clippy::unwrap_used)] // checked lf.table.is_some()
                             if lf.table.is_some() {
                                 let e = local.entry(lf.table.clone().unwrap()).or_default();
                                 e.push(ce.clone());
@@ -859,7 +867,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
     // 2a. Explicit joins
     // The table specified in the query is available for USING joins.
-    let prev_table = Some(st.tables.last().as_ref().unwrap().name.clone());
+    // TODO(DAN): why is prev_table tables.last()?
+    let prev_table = st.tables.last().map(|t| t.name.clone());
     for jc in &st.join {
         let rhs_name = match &jc.right {
             JoinRightSide::Table(table) => &table.name,
@@ -886,6 +895,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     // tables can appear in any order in the join predicate, but
                     // we cannot just rely on that order, since it may lead us to
                     // flip LEFT JOINs by accident (yes, this happened)
+                    #[allow(clippy::indexing_slicing)] // len() == 2
                     if tables_mentioned[1] != *rhs_name {
                         // tables are in the wrong order in join predicate, swap
                         tables_mentioned.swap(0, 1);
@@ -914,8 +924,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         Expression::Column(f) => f,
                         ref x => unsupported!("join condition not supported: {:?}", x),
                     };
-                    if *l.table.as_ref().unwrap() == right_table
-                        && *r.table.as_ref().unwrap() == left_table
+                    if *l.table.as_ref().ok_or_else(|| no_table_for_col())? == right_table
+                        && *r.table.as_ref().ok_or_else(|| no_table_for_col())? == left_table
                     {
                         mem::swap(&mut pred.left, &mut pred.right);
                     }
@@ -925,8 +935,11 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
             }
             JoinConstraint::Using(cols) => {
                 invariant_eq!(cols.len(), 1);
+                #[allow(clippy::unwrap_used)] // cols.len() == 1
                 let col = cols.iter().next().unwrap();
 
+                // prev_table must exist because we error on st.tables.is_empty()
+                #[allow(clippy::unwrap_used)]
                 left_table = prev_table.as_ref().unwrap().clone();
                 right_table = rhs_name.clone();
 
@@ -936,6 +949,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                 }]
             }
             JoinConstraint::Empty => {
+                // prev_table must exist because we error on st.tables.is_empty()
+                #[allow(clippy::unwrap_used)]
                 left_table = prev_table.as_ref().unwrap().clone();
                 right_table = rhs_name.clone();
                 // An empty predicate indicates a cartesian product is expected
@@ -989,6 +1004,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     rel
                 );
             } else {
+                #[allow(clippy::unwrap_used)] // checked that this key is in qg.relations
                 qg.relations.get_mut(&rel).unwrap().predicates.extend(preds);
             }
         }
@@ -997,19 +1013,26 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         for jp in join_predicates {
             if let Expression::Column(l) = &jp.left {
                 if let Expression::Column(r) = &jp.right {
-                    let nn = new_node(l.table.clone().unwrap(), Vec::new(), st)?;
+                    let nn = new_node(
+                        l.table.clone().ok_or_else(|| no_table_for_col())?,
+                        Vec::new(),
+                        st,
+                    )?;
                     // If tables aren't already in the relations, add them.
                     qg.relations
-                        .entry(l.table.clone().unwrap())
+                        .entry(l.table.clone().ok_or_else(|| no_table_for_col())?)
                         .or_insert_with(|| nn.clone());
 
                     qg.relations
-                        .entry(r.table.clone().unwrap())
+                        .entry(r.table.clone().ok_or_else(|| no_table_for_col())?)
                         .or_insert_with(|| nn.clone());
 
                     let e = qg
                         .edges
-                        .entry((l.table.clone().unwrap(), r.table.clone().unwrap()))
+                        .entry((
+                            l.table.clone().ok_or_else(|| no_table_for_col())?,
+                            r.table.clone().ok_or_else(|| no_table_for_col())?,
+                        ))
                         .or_insert_with(|| QueryGraphEdge::Join { on: vec![] });
                     match *e {
                         QueryGraphEdge::Join { on: ref mut preds } => preds.push(jp.clone()),
@@ -1029,7 +1052,12 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     unsupported!("each parameter's column must have an associated table! (no such column \"{}\")", param.col);
                 }
                 Some(ref table) => {
-                    let rel = qg.relations.get_mut(table).unwrap();
+                    let rel = qg.relations.get_mut(table).ok_or_else(|| {
+                        invalid_err(format!(
+                            "Column {} references non-existent table {}",
+                            param.col.name, table
+                        ))
+                    })?;
                     if !rel.columns.contains(&param.col) {
                         rel.columns.push(param.col.clone());
                     }
@@ -1174,6 +1202,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     Ok(qg)
 }
 
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::panic)]
 #[cfg(test)]
 mod tests {
     use nom_sql::{parse_query, Dialect, FunctionExpression, SqlQuery};

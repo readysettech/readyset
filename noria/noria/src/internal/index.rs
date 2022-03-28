@@ -89,6 +89,7 @@ pub struct Index {
     pub index_type: IndexType,
 
     /// The column indices in the underlying relation that this index is on
+    /// TODO: Convert to Vec1
     pub columns: Vec<usize>,
 }
 
