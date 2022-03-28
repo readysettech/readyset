@@ -113,7 +113,7 @@ mod types {
         bool_bool("bool", bool);
         smallint_i16("smallint", i16);
         int_i32("integer", i32);
-        #[ignore] oid_u32("oid", u32);
+        oid_u32("oid", u32);
         bigint_i64("bigint", i64);
         real_f32("real", f32);
         double_f64("double precision", f64);

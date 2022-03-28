@@ -457,6 +457,7 @@ fn make_field_description(
         Type::INT2 => TYPLEN_2,
         Type::INT4 => TYPLEN_4,
         Type::INT8 => TYPLEN_8,
+        Type::OID => TYPLEN_4,
         Type::FLOAT4 => TYPLEN_4,
         Type::FLOAT8 => TYPLEN_8,
         Type::NUMERIC => TYPLEN_VARLENA,

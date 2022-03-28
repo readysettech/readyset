@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 
 use eui48::MacAddress;
 use noria_data::DataType;
@@ -40,6 +40,9 @@ impl TryFrom<Value> for ps::Value {
             (Type::INT2, DataType::UnsignedInt(v)) => Ok(ps::Value::Smallint(v as _)),
             (Type::INT4, DataType::UnsignedInt(v)) => Ok(ps::Value::Int(v as _)),
             (Type::INT8, DataType::UnsignedInt(v)) => Ok(ps::Value::Bigint(v as _)),
+
+            (Type::OID, DataType::UnsignedInt(v)) => Ok(ps::Value::Oid(v.try_into()?)),
+            (Type::OID, DataType::Int(v)) => Ok(ps::Value::Oid(v.try_into()?)),
 
             (Type::FLOAT4, DataType::Float(f)) => Ok(ps::Value::Float(f)),
             (Type::FLOAT8, DataType::Double(f)) => Ok(ps::Value::Double(f)),

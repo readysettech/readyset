@@ -310,6 +310,7 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
         Type::INT4 => Ok(Value::Int(i32::from_sql(t, buf)?)),
         Type::INT8 => Ok(Value::Bigint(i64::from_sql(t, buf)?)),
         Type::INT2 => Ok(Value::Smallint(i16::from_sql(t, buf)?)),
+        Type::OID => Ok(Value::Oid(u32::from_sql(t, buf)?)),
         Type::FLOAT8 => Ok(Value::Double(f64::from_sql(t, buf)?)),
         Type::FLOAT4 => Ok(Value::Float(f32::from_sql(t, buf)?)),
         Type::NUMERIC => Ok(Value::Numeric(Decimal::from_sql(t, buf)?)),
@@ -358,6 +359,7 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
         Type::INT4 => Ok(Value::Int(text_str.parse::<i32>()?)),
         Type::INT8 => Ok(Value::Bigint(text_str.parse::<i64>()?)),
         Type::INT2 => Ok(Value::Smallint(text_str.parse::<i16>()?)),
+        Type::OID => Ok(Value::Oid(text_str.parse::<u32>()?)),
         Type::FLOAT8 => {
             // TODO: Ensure all values are properly parsed, including +/-0 and +/-inf.
             Ok(Value::Double(text_str.parse::<f64>()?))

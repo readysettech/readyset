@@ -325,6 +325,9 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::Smallint(v) => {
             v.to_sql(&Type::INT2, dst)?;
         }
+        Value::Oid(v) => {
+            v.to_sql(&Type::OID, dst)?;
+        }
         Value::Double(v) => {
             v.to_sql(&Type::FLOAT8, dst)?;
         }
@@ -414,6 +417,9 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
             write!(dst, "{}", v)?;
         }
         Value::Smallint(v) => {
+            write!(dst, "{}", v)?;
+        }
+        Value::Oid(v) => {
             write!(dst, "{}", v)?;
         }
         Value::Double(v) => {
