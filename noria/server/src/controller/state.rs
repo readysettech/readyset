@@ -45,7 +45,7 @@ use noria::{
     ActivationResult, ReaderReplicationResult, ReaderReplicationSpec, ReadySetError,
     ReadySetResult, ViewFilter, ViewRequest, ViewSchema,
 };
-use noria_errors::{bad_request_err, internal, internal_err, invariant, invariant_eq, NodeType};
+use noria_errors::{bad_request_err, internal, internal_err, invariant_eq, NodeType};
 use petgraph::visit::Bfs;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -717,7 +717,7 @@ impl DataflowState {
         gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS, 1.0);
         let mut m = Migration {
             dataflow_state: self,
-            added: Default::default(),
+            changes: Default::default(),
             columns: Default::default(),
             readers: Default::default(),
             worker: None,
@@ -828,7 +828,7 @@ impl DataflowState {
         self.migrate(false, move |mig| {
             mig.worker = worker_addr;
             for (node_index, reader_index) in reader_nodes {
-                mig.added.insert(reader_index);
+                mig.changes.add_node(reader_index);
                 mig.readers.insert(node_index, reader_index);
             }
         })
@@ -1064,106 +1064,6 @@ impl DataflowState {
         Ok(())
     }
 
-    pub(super) async fn remove_leaf(&mut self, mut leaf: NodeIndex) -> Result<(), ReadySetError> {
-        let mut removals = vec![];
-        let start = leaf;
-        if self.ingredients.node_weight(leaf).is_none() {
-            return Err(ReadySetError::NodeNotFound {
-                index: leaf.index(),
-            });
-        }
-        #[allow(clippy::indexing_slicing)] // checked above
-        {
-            invariant!(!self.ingredients[leaf].is_source());
-        }
-
-        info!(
-            node = %leaf.index(),
-            "Computing removals for removing node",
-        );
-
-        let nchildren = self
-            .ingredients
-            .neighbors_directed(leaf, petgraph::EdgeDirection::Outgoing)
-            .count();
-        if nchildren > 0 {
-            // This query leaf node has children -- typically, these are readers, but they can also
-            // include egress nodes or other, dependent queries. We need to find the actual reader,
-            // and remove that.
-            if nchildren != 1 {
-                internal!(
-                    "cannot remove node {}, as it still has multiple children",
-                    leaf.index()
-                );
-            }
-
-            let mut readers = Vec::new();
-            let mut bfs = Bfs::new(&self.ingredients, leaf);
-            while let Some(child) = bfs.next(&self.ingredients) {
-                #[allow(clippy::indexing_slicing)] // just came from self.ingredients
-                let n = &self.ingredients[child];
-                if n.is_reader_for(leaf) {
-                    readers.push(child);
-                }
-            }
-
-            // nodes can have only one reader attached
-            invariant_eq!(readers.len(), 1);
-            #[allow(clippy::indexing_slicing)]
-            let reader = readers[0];
-            #[allow(clippy::indexing_slicing)]
-            {
-                debug!(
-                    node = %leaf.index(),
-                    really = %reader.index(),
-                    "Removing query leaf \"{}\"", self.ingredients[leaf].name()
-                );
-            }
-            removals.push(reader);
-            leaf = reader;
-        }
-
-        // `node` now does not have any children any more
-        assert_eq!(
-            self.ingredients
-                .neighbors_directed(leaf, petgraph::EdgeDirection::Outgoing)
-                .count(),
-            0
-        );
-
-        let mut nodes = vec![leaf];
-        while let Some(node) = nodes.pop() {
-            let mut parents = self
-                .ingredients
-                .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
-                .detach();
-            while let Some(parent) = parents.next_node(&self.ingredients) {
-                #[allow(clippy::expect_used)]
-                let edge = self.ingredients.find_edge(parent, node).expect(
-                    "unreachable: neighbors_directed returned something that wasn't a neighbour",
-                );
-                self.ingredients.remove_edge(edge);
-
-                #[allow(clippy::indexing_slicing)]
-                if !self.ingredients[parent].is_source()
-                    && !self.ingredients[parent].is_base()
-                    // ok to remove original start leaf
-                    && (parent == start || !self.recipe.sql_inc().is_leaf_address(parent))
-                    && self
-                    .ingredients
-                    .neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
-                    .count() == 0
-                {
-                    nodes.push(parent);
-                }
-            }
-
-            removals.push(node);
-        }
-
-        self.remove_nodes(removals.as_slice()).await
-    }
-
     pub(super) fn set_domain_placement_local(
         &mut self,
         node_name: &str,
@@ -1245,51 +1145,13 @@ impl DataflowState {
         // I hate this, but there's no way around for now, as migrations
         // are super entangled with the recipe and the graph.
         let mut new = self.recipe.clone();
+
         let r = self
             .migrate(dry_run, |mig| new.activate(mig, changelist))
             .await?;
 
         match r {
-            Ok(ref ra) => {
-                let (removed_bases, removed_other): (Vec<_>, Vec<_>) =
-                    ra.removed_leaves.iter().cloned().partition(|ni| {
-                        self.ingredients
-                            .node_weight(*ni)
-                            .map(|x| x.is_base())
-                            .unwrap_or(false)
-                    });
-
-                // first remove query nodes in reverse topological order
-                let mut topo_removals = Vec::with_capacity(removed_other.len());
-                let mut topo = petgraph::visit::Topo::new(&self.ingredients);
-                while let Some(node) = topo.next(&self.ingredients) {
-                    if removed_other.contains(&node) {
-                        topo_removals.push(node);
-                    }
-                }
-                topo_removals.reverse();
-
-                for leaf in topo_removals {
-                    self.remove_leaf(leaf).await?;
-                }
-
-                let mut nodes_to_remove: Vec<NodeIndex> = Vec::new();
-                // Now remove bases and all its children, recursively.
-                for base in removed_bases {
-                    let mut stack = vec![base];
-                    while let Some(node) = stack.pop() {
-                        nodes_to_remove.push(node);
-                        stack.extend(
-                            self.ingredients
-                                .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
-                                .filter(|ni| !self.ingredients[*ni].is_dropped()),
-                        );
-                    }
-                }
-
-                self.remove_nodes(&nodes_to_remove).await?;
-                self.recipe = new;
-            }
+            Ok(_) => self.recipe = new,
             Err(ref e) => {
                 error!(error = %e, "failed to apply recipe");
             }

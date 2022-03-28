@@ -180,6 +180,13 @@ impl SqlIncorporator {
         self.leaf_addresses.values().any(|nn| *nn == ni)
     }
 
+    pub(super) fn get_leaf_name(&self, ni: NodeIndex) -> Option<&SqlIdentifier> {
+        self.leaf_addresses
+            .iter()
+            .find(|(_, idx)| **idx == ni)
+            .map(|(name, _)| name)
+    }
+
     fn consider_query_graph(
         &mut self,
         query_name: &str,
