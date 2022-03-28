@@ -112,6 +112,16 @@ pub enum PostgresParameterValue {
     List(Vec<PostgresParameterValueInner>),
 }
 
+impl PostgresParameterValue {
+    /// Construct a [`PostgresParameterValue`] for a single literal
+    pub fn literal<L>(literal: L) -> Self
+    where
+        Literal: From<L>,
+    {
+        Self::Single(PostgresParameterValueInner::Literal(literal.into()))
+    }
+}
+
 impl Display for PostgresParameterValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
