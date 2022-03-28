@@ -57,6 +57,10 @@ pub enum NodeType {
 /// General error type to be used across all of the ReadySet codebase.
 #[derive(Eq, PartialEq, Serialize, Deserialize, Error, Debug, Clone)]
 pub enum ReadySetError {
+    /// The query is invalid
+    #[error("The provided query is invalid: {0}")]
+    InvalidQuery(String),
+
     /// The adapter received a query id in CREATE CACHE that does not correspond to a known
     /// query
     #[error("No query known by id {id}")]
@@ -612,6 +616,11 @@ pub fn internal_err<T: Into<String>>(err: T) -> ReadySetError {
     ReadySetError::Internal(err.into())
 }
 
+/// Make a new [`ReadySetError::InvalidQuery`] with the provided string-able argument.
+pub fn invalid_err<T: Into<String>>(err: T) -> ReadySetError {
+    ReadySetError::InvalidQuery(err.into())
+}
+
 /// Make a new [`ReadySetError::Unsupported`] with the provided string-able argument.
 pub fn unsupported_err<T: Into<String>>(err: T) -> ReadySetError {
     ReadySetError::Unsupported(err.into())
@@ -620,6 +629,14 @@ pub fn unsupported_err<T: Into<String>>(err: T) -> ReadySetError {
 /// Make a new [`ReadySetError::BadRequest`] with the provided string-able argument.
 pub fn bad_request_err<T: Into<String>>(err: T) -> ReadySetError {
     ReadySetError::BadRequest(err.into())
+}
+
+/// Make a new [`ReadySetError::Internal`] for a column with no associated table. An internal error
+/// is used, because the implied table expansion should guarantee that this should not happen.
+pub fn no_table_for_col() -> ReadySetError {
+    ReadySetError::Internal(
+        "Implied table expansion should guarantee all columns reference a table".to_string(),
+    )
 }
 
 /// Renders information about the current source location *if* building in debug mode, for use in

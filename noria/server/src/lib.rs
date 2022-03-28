@@ -1,5 +1,5 @@
 /*
- * Left commented while noria-server error handling refactor is still in progress ~eta
+ * Left commented while noria-server error handling refactor is still in progress
 #![warn(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -8,7 +8,7 @@
     clippy::unimplemented,
     clippy::unreachable
 )]
- */
+*/
 
 //! # Note to engineers
 //!
