@@ -24,6 +24,10 @@
 | Name | Type |
 |------|------|
 | [aws_kms_key.eks-main](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_key) | resource |
+| [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
+| [aws_kms_key.default-secrets-mgr](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/kms_key) | data source |
+| [aws_kms_key.default-ssm](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/kms_key) | data source |
+| [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 | [aws_subnet_ids.private](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/subnet_ids) | data source |
 | [aws_subnet_ids.public](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/subnet_ids) | data source |
 | [aws_vpc.network](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/vpc) | data source |
@@ -36,6 +40,7 @@
 | <a name="input_alb_internal_ingress_enabled"></a> [alb\_internal\_ingress\_enabled](#input\_alb\_internal\_ingress\_enabled) | Toggles deployment of Internal load balancer ingress definitions. | `bool` | `false` | no |
 | <a name="input_aws_region"></a> [aws\_region](#input\_aws\_region) | The AWS region to create resources in. | `string` | n/a | yes |
 | <a name="input_benchmark_prom_grafana_enabled"></a> [benchmark\_prom\_grafana\_enabled](#input\_benchmark\_prom\_grafana\_enabled) | Toggles provisioning of the benchmarking initiative's Prometheus and Grafana related resources. | `bool` | `false` | no |
+| <a name="input_benchmark_prom_pushgw_enabled"></a> [benchmark\_prom\_pushgw\_enabled](#input\_benchmark\_prom\_pushgw\_enabled) | Toggles creation of Prometheus Push Gateway resources for benchmarking. | `bool` | `false` | no |
 | <a name="input_chart_versions"></a> [chart\_versions](#input\_chart\_versions) | Chart version override map. Setting values here will override what's set in chart\_version\_defaults of the module. | `map(any)` | `{}` | no |
 | <a name="input_cluster_autoscaler_enabled"></a> [cluster\_autoscaler\_enabled](#input\_cluster\_autoscaler\_enabled) | Toggles provisioning of the Cluster Autoscaler's related resources. | `bool` | `false` | no |
 | <a name="input_cluster_endpoint_private_only_access"></a> [cluster\_endpoint\_private\_only\_access](#input\_cluster\_endpoint\_private\_only\_access) | Toggles private-only access mechanisms for the EKS cluster. | `bool` | `true` | no |
@@ -52,12 +57,18 @@
 | <a name="input_external_dns_internal_zone_mode"></a> [external\_dns\_internal\_zone\_mode](#input\_external\_dns\_internal\_zone\_mode) | Determines what DNS zone the internal deployment will use. Can be used with a public zone. | `string` | `"private"` | no |
 | <a name="input_external_dns_private_zone_domain"></a> [external\_dns\_private\_zone\_domain](#input\_external\_dns\_private\_zone\_domain) | Private hosted zone domain to use for ExternalDNS private DNS records. | `string` | `"readyset.name"` | no |
 | <a name="input_external_dns_pub_zone_domain"></a> [external\_dns\_pub\_zone\_domain](#input\_external\_dns\_pub\_zone\_domain) | Public hosted zone domain to use for ExternalDNS public DNS records. | `string` | `"readyset.name"` | no |
+| <a name="input_external_secrets_secretsmanager_auth_limits"></a> [external\_secrets\_secretsmanager\_auth\_limits](#input\_external\_secrets\_secretsmanager\_auth\_limits) | List of Secrets Manager resources to grant External Secrets read access to. Supports wildcards. | `list(string)` | <pre>[<br>  "rs-build-us-east-2/*"<br>]</pre> | no |
+| <a name="input_external_secrets_ssm_auth_limits"></a> [external\_secrets\_ssm\_auth\_limits](#input\_external\_secrets\_ssm\_auth\_limits) | List of SSM resources to grant External Secrets read access to. Supports wildcards. | `list(string)` | <pre>[<br>  "rs-build-us-east-2/*"<br>]</pre> | no |
 | <a name="input_kubernetes_namespaces"></a> [kubernetes\_namespaces](#input\_kubernetes\_namespaces) | List of Kubernetes namespaces to be created and deployed to. | `list(string)` | `[]` | no |
+| <a name="input_map_accounts"></a> [map\_accounts](#input\_map\_accounts) | Additional AWS account numbers to add to the aws-auth configmap. | `list(string)` | `[]` | no |
+| <a name="input_map_roles"></a> [map\_roles](#input\_map\_roles) | Additional IAM roles to add to the aws-auth configmap. | <pre>list(object({<br>    rolearn  = string<br>    username = string<br>    groups   = list(string)<br>  }))</pre> | `[]` | no |
+| <a name="input_map_users"></a> [map\_users](#input\_map\_users) | Additional IAM users to add to the aws-auth configmap. | <pre>list(object({<br>    userarn  = string<br>    username = string<br>    groups   = list(string)<br>  }))</pre> | `[]` | no |
 | <a name="input_node_termination_handler_enabled"></a> [node\_termination\_handler\_enabled](#input\_node\_termination\_handler\_enabled) | Toggles provisioning of the Node Termination Handler's related resources. | `bool` | `false` | no |
 | <a name="input_ns_ingress_routing_rules"></a> [ns\_ingress\_routing\_rules](#input\_ns\_ingress\_routing\_rules) | map(map(list)) representing per-namespace ingress hosts to be provisioned. Top-level key should be namespace name. | `map(any)` | `{}` | no |
 | <a name="input_resource_tags"></a> [resource\_tags](#input\_resource\_tags) | Base AWS resource tags to apply to any resources. | `map(any)` | `{}` | no |
 | <a name="input_self_managed_node_group_configs"></a> [self\_managed\_node\_group\_configs](#input\_self\_managed\_node\_group\_configs) | Worker node configurations for the cluster. | `map(any)` | <pre>{<br>  "main": {<br>    "desired_size": 1,<br>    "instance_refresh": {<br>      "preferences": {<br>        "checkpoint_delay": 600,<br>        "checkpoint_percentages": [<br>          35,<br>          70,<br>          100<br>        ],<br>        "instance_warmup": 240,<br>        "min_healthy_percentage": 50<br>      },<br>      "strategy": "Rolling",<br>      "triggers": [<br>        "tag"<br>      ]<br>    },<br>    "instance_type": "m5.large",<br>    "max_size": 2,<br>    "propogate_tags": [<br>      {<br>        "key": "aws-node-termination-handler/managed",<br>        "propagate_at_launch": true,<br>        "value": true<br>      }<br>    ]<br>  }<br>}</pre> | no |
 | <a name="input_self_managed_node_group_defaults"></a> [self\_managed\_node\_group\_defaults](#input\_self\_managed\_node\_group\_defaults) | Map of self-managed node group default configurations. | `any` | n/a | yes |
+| <a name="input_vpc_dns_resolver_ip"></a> [vpc\_dns\_resolver\_ip](#input\_vpc\_dns\_resolver\_ip) | Private IP of the VPC DNS resolver which is hosting the k8s cluster. | `string` | `""` | no |
 | <a name="input_vpc_id"></a> [vpc\_id](#input\_vpc\_id) | ID of the VPC to deploy resources within. | `string` | n/a | yes |
 | <a name="input_workers_ssh_cidr_allowed"></a> [workers\_ssh\_cidr\_allowed](#input\_workers\_ssh\_cidr\_allowed) | CIDR ranges to allow inbound SSH access to EKS worker nodes from. | `list` | <pre>[<br>  "10.0.0.0/8"<br>]</pre> | no |
 

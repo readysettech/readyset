@@ -117,3 +117,10 @@ external_dns_private_zone_domain = "readyset.name"
 # Benchmarking Prom/Grafana Stack
 benchmark_prom_grafana_enabled = true
 benchmark_prom_pushgw_enabled  = true
+
+# AWS-auth Configmap Customizations
+map_roles=[{
+  rolearn  = "arn:aws:iam::305232526136:role/readyset-ci-k8s-build-us-east-2"
+  username = "user:{{AccountID}}:{{SessionName}}"
+  groups   = ["ci-runner-build"]
+}]

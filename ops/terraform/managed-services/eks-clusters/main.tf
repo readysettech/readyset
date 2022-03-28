@@ -23,7 +23,6 @@ module "eks-main" {
   cluster_vpn_cidr_blocks              = var.cluster_vpn_cidr_blocks
 
   # Workers
-  //self_managed_node_groups         = [ for k, v in var.self_managed_node_group_configs : {k = v} if lookup(v, "single_az", "false") !=  "true" ]
   self_managed_node_groups = {
     for index, x in var.self_managed_node_group_configs :
     index => merge(x, {
@@ -72,6 +71,10 @@ module "eks-main" {
   external_secrets_ssm_auth_limits            = local.ext_secrets_ssm_auth_limits
   external_secrets_secretsmanager_auth_limits = local.ext_secrets_secmgr_auth_limits
 
+  # AWS-Auth Config Map
+  map_roles    = var.map_roles
+  map_accounts = var.map_accounts
+  map_users    = var.map_users
 }
 
 # KMS key for Kubernetes Secret Wrapper Encryption
