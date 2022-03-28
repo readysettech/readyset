@@ -303,10 +303,13 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
 
     match *t {
         // Postgres does not allow interior 0 bytes, even thought is is valid UTF-8
-        Type::CHAR | Type::VARCHAR | Type::TEXT if buf.contains(&0) => Err(Error::InvalidUtf8),
+        Type::CHAR | Type::VARCHAR | Type::TEXT | Type::NAME if buf.contains(&0) => {
+            Err(Error::InvalidUtf8)
+        }
         Type::BOOL => Ok(Value::Bool(bool::from_sql(t, buf)?)),
         Type::CHAR => Ok(Value::Char(<&str>::from_sql(t, buf)?.into())),
         Type::VARCHAR => Ok(Value::Varchar(<&str>::from_sql(t, buf)?.into())),
+        Type::NAME => Ok(Value::Name(<&str>::from_sql(t, buf)?.into())),
         Type::INT4 => Ok(Value::Int(i32::from_sql(t, buf)?)),
         Type::INT8 => Ok(Value::Bigint(i64::from_sql(t, buf)?)),
         Type::INT2 => Ok(Value::Smallint(i16::from_sql(t, buf)?)),
@@ -356,6 +359,7 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
         Type::BOOL => Ok(Value::Bool(text_str == BOOL_TRUE_TEXT_REP)),
         Type::CHAR => Ok(Value::Char(text_str.into())),
         Type::VARCHAR => Ok(Value::Varchar(text_str.into())),
+        Type::NAME => Ok(Value::Name(text_str.into())),
         Type::INT4 => Ok(Value::Int(text_str.parse::<i32>()?)),
         Type::INT8 => Ok(Value::Bigint(text_str.parse::<i64>()?)),
         Type::INT2 => Ok(Value::Smallint(text_str.parse::<i16>()?)),

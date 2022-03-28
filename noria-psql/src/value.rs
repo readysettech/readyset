@@ -32,6 +32,8 @@ impl TryFrom<Value> for ps::Value {
             (Type::CHAR, DataType::TinyText(t)) => Ok(ps::Value::Char(t.as_str().into())),
             (Type::VARCHAR, DataType::Text(v)) => Ok(ps::Value::Varchar(v)),
             (Type::VARCHAR, DataType::TinyText(t)) => Ok(ps::Value::Varchar(t.as_str().into())),
+            (Type::NAME, DataType::Text(t)) => Ok(ps::Value::Name(t)),
+            (Type::NAME, DataType::TinyText(t)) => Ok(ps::Value::Name(t.as_str().into())),
 
             (Type::INT2, DataType::Int(v)) => Ok(ps::Value::Smallint(v as _)),
             (Type::INT4, DataType::Int(v)) => Ok(ps::Value::Int(v as _)),
