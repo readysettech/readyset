@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::common::statement_terminator;
 use crate::expression::{expression, scoped_var};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expression};
+use crate::{Dialect, Expression, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SetStatement {
@@ -42,10 +42,10 @@ impl SetStatement {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Variable {
-    User(String),
-    Local(String),
-    Global(String),
-    Session(String),
+    User(SqlIdentifier),
+    Local(SqlIdentifier),
+    Global(SqlIdentifier),
+    Session(SqlIdentifier),
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -120,18 +120,18 @@ pub fn varkind(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Variable> {
             scoped_var(dialect),
             map(
                 separated_pair(tag_no_case("GLOBAL"), whitespace1, dialect.identifier()),
-                |(_, ident)| Variable::Global(ident.to_ascii_lowercase()),
+                |(_, ident)| Variable::Global(ident.to_ascii_lowercase().into()),
             ),
             map(
                 separated_pair(tag_no_case("SESSION"), whitespace1, dialect.identifier()),
-                |(_, ident)| Variable::Session(ident.to_ascii_lowercase()),
+                |(_, ident)| Variable::Session(ident.to_ascii_lowercase().into()),
             ),
             map(
                 separated_pair(tag_no_case("LOCAL"), whitespace1, dialect.identifier()),
-                |(_, ident)| Variable::Local(ident.to_ascii_lowercase()),
+                |(_, ident)| Variable::Local(ident.to_ascii_lowercase().into()),
             ),
             map(dialect.identifier(), |ident| {
-                Variable::Local(ident.to_ascii_lowercase())
+                Variable::Local(ident.to_ascii_lowercase().into())
             }),
         ))(i)?;
 
@@ -206,7 +206,7 @@ mod tests {
             res.unwrap().1,
             SetStatement::Variable(SetVariables {
                 variables: vec!((
-                    Variable::Local("sql_auto_is_null".to_owned()),
+                    Variable::Local("sql_auto_is_null".into()),
                     Expression::Literal(0.into())
                 )),
             })
@@ -221,7 +221,7 @@ mod tests {
             res.unwrap().1,
             SetStatement::Variable(SetVariables {
                 variables: vec!((
-                    Variable::User("var".to_owned()),
+                    Variable::User("var".into()),
                     Expression::Literal(123.into())
                 )),
             })
@@ -302,7 +302,7 @@ mod tests {
             res.unwrap().1,
             SetStatement::Variable(SetVariables {
                 variables: vec!((
-                    Variable::User("myvar".to_owned()),
+                    Variable::User("myvar".into()),
                     Expression::BinaryOp {
                         lhs: Box::new(Expression::Literal(100.into())),
                         op: crate::BinaryOperator::Add,
@@ -322,7 +322,7 @@ mod tests {
             SetStatement::Variable(SetVariables {
                 variables: vec!(
                     (
-                        Variable::User("myvar".to_owned()),
+                        Variable::User("myvar".into()),
                         Expression::BinaryOp {
                             lhs: Box::new(Expression::Literal(100.into())),
                             op: crate::BinaryOperator::Add,
@@ -330,11 +330,11 @@ mod tests {
                         }
                     ),
                     (
-                        Variable::Session("notmyvar".to_owned()),
+                        Variable::Session("notmyvar".into()),
                         Expression::Literal("value".into()),
                     ),
                     (
-                        Variable::Global("g".to_owned()),
+                        Variable::Global("g".into()),
                         Expression::Variable(Variable::Global("v".into())),
                     )
                 ),

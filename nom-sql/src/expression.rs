@@ -866,23 +866,23 @@ pub(crate) fn scoped_var(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], V
         alt((
             map(
                 preceded(tag_no_case("@@GLOBAL."), dialect.identifier()),
-                |identifier| Variable::Global(identifier.to_ascii_lowercase()),
+                |identifier| Variable::Global(identifier.to_ascii_lowercase().into()),
             ),
             map(
                 preceded(tag_no_case("@@SESSION."), dialect.identifier()),
-                |identifier| Variable::Session(identifier.to_ascii_lowercase()),
+                |identifier| Variable::Session(identifier.to_ascii_lowercase().into()),
             ),
             map(
                 preceded(tag_no_case("@@LOCAL."), dialect.identifier()),
-                |identifier| Variable::Local(identifier.to_ascii_lowercase()),
+                |identifier| Variable::Local(identifier.to_ascii_lowercase().into()),
             ),
             map(
                 preceded(tag_no_case("@@"), dialect.identifier()),
-                |identifier| Variable::Session(identifier.to_ascii_lowercase()),
+                |identifier| Variable::Session(identifier.to_ascii_lowercase().into()),
             ),
             map(
                 preceded(tag_no_case("@"), dialect.identifier()),
-                |identifier| Variable::User(identifier.to_ascii_lowercase()),
+                |identifier| Variable::User(identifier.to_ascii_lowercase().into()),
             ),
         ))(i)
     }
