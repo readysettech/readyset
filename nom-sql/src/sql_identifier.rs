@@ -227,6 +227,13 @@ impl From<&SqlIdentifier> for SqlIdentifier {
     }
 }
 
+impl From<SqlIdentifier> for String {
+    #[inline]
+    fn from(ident: SqlIdentifier) -> Self {
+        ident.as_str().to_owned()
+    }
+}
+
 impl std::ops::Deref for SqlIdentifier {
     type Target = str;
 

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use nom_sql::{
     Column, ColumnSpecification, Expression, FieldDefinitionExpression, Literal, SqlIdentifier,
-    SqlQuery, SqlType,
+    SqlQuery, SqlType, VariableScope,
 };
 use noria::results::Results;
 use noria::{ColumnSchema, ReadySetError};
@@ -146,14 +146,17 @@ impl QueryHandler for MySqlQueryHandler {
     fn is_set_allowed(stmt: &nom_sql::SetStatement) -> bool {
         match stmt {
             nom_sql::SetStatement::Variable(set) => set.variables.iter().all(|(variable, value)| {
-                match variable.as_non_user_var() {
-                    Some("time_zone") => {
+                if variable.scope == VariableScope::User {
+                    return false;
+                }
+                match variable.name.as_str() {
+                    "time_zone" => {
                         matches!(value, Expression::Literal(Literal::String(ref s)) if s == "+00:00")
                     }
-                    Some("autocommit") => {
+                    "autocommit" => {
                         matches!(value, Expression::Literal(Literal::Integer(i)) if *i == 1)
                     }
-                    Some("sql_mode") => {
+                    "sql_mode" => {
                         if let Expression::Literal(Literal::String(ref s)) = value {
                             match raw_sql_modes_to_list(&s[..]) {
                                 Ok(sql_modes) => {
@@ -168,14 +171,14 @@ impl QueryHandler for MySqlQueryHandler {
                             false
                         }
                     }
-                    Some("names") => {
+                    "names" => {
                         if let Expression::Literal(Literal::String(ref s)) = value {
                             matches!(&s[..], "latin1" | "utf8" | "utf8mb4")
                         } else {
                             false
                         }
                     }
-                    Some("foreign_key_checks") => true,
+                    "foreign_key_checks" => true,
                     _ => false,
                 }
             }),
