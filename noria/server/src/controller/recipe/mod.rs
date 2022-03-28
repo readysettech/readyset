@@ -7,10 +7,13 @@ use nom_sql::{
 };
 use noria::recipe::changelist::{Change, ChangeList};
 use noria::ActivationResult;
-use noria_errors::{internal, internal_err, ReadySetError, ReadySetResult};
+use noria_errors::{
+    internal, internal_err, invariant, invariant_eq, ReadySetError, ReadySetResult,
+};
 use petgraph::graph::NodeIndex;
+use petgraph::visit::Bfs;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 use super::sql;
 use crate::controller::recipe::alter_table::rewrite_table_definition;
@@ -262,8 +265,8 @@ impl Recipe {
                         ),
                     };
                     let new_table = rewrite_table_definition(&ats, original_table.clone())?;
-                    let removed_ni = self.remove_expression(&ats.table.name)?;
-                    match removed_ni {
+                    let removed_node_indices = self.remove_expression(&ats.table.name, mig)?;
+                    match removed_node_indices {
                         None => {
                             error!(table = %ats.table.name,
                                 "attempted to issue ALTER TABLE, but table does not exist");
@@ -272,9 +275,11 @@ impl Recipe {
                                 ats.table.name
                             );
                         }
-                        Some(ni) => {
-                            added.remove(&ats.table.name);
-                            removed.insert(ni);
+                        Some(removed_node_indices) => {
+                            for removed_node_index in removed_node_indices {
+                                added.retain(|_, v| *v != removed_node_index);
+                                removed.insert(removed_node_index);
+                            }
                         }
                     };
                     let query = SqlQuery::CreateTable(new_table.clone());
@@ -288,10 +293,12 @@ impl Recipe {
                     removed.remove(&qfp.query_leaf);
                 }
                 Change::Drop { name, if_exists } => {
-                    let ni = self.remove_expression(&name)?;
-                    if let Some(ni) = ni {
-                        added.retain(|_, v| *v != ni);
-                        removed.insert(ni);
+                    let removed_indices = self.remove_expression(&name, mig)?;
+                    if let Some(removed_indices) = removed_indices {
+                        for removed_index in removed_indices {
+                            added.retain(|_, v| *v != removed_index);
+                            removed.insert(removed_index);
+                        }
                     } else if !if_exists {
                         error!(table = %name, "attempted to DROP TABLE, but table does not exist");
                         internal!("attempted to DROP TABLE, but table {} does not exist", name);
@@ -321,35 +328,203 @@ impl Recipe {
     }
 
     /// Remove the expression with the given name or alias, from the recipe.
+    /// Returns the node indices that were removed due to the removal of the expression.
+    /// Returns `Ok(None)` if the expression was not found.
+    ///
+    /// # Errors
+    /// This method will return an error whenever there's an inconsistence between the
+    /// [`ExpressionRegistry`] and the [`SqlIncorporator`], i.e, an expression exists in one but not
+    /// in the other.
+    // TODO(fran): As we keep improving the `Recipe`, we should refactor the `SqlIncorporator` and
+    //  make sure there are no inconsistencies between it and the `ExpressionRegistry`.
+    //  It might be worth looking into what the `SqlIncorporator` is storing, and how. I feel like
+    //  these inconsistencies are only possible because of redundant information (the expressions
+    //  belong  to both the `SqlIncorporator` and the `ExpressionRegistry`), and that feels
+    //  unnecessary.
+    //  Could we store the `RecipeExpression`s along with their associated `MirQuery`?
+    //  Would we still need a `Recipe` structure if that's the case?
     pub(super) fn remove_expression(
         &mut self,
         name_or_alias: &SqlIdentifier,
-    ) -> ReadySetResult<Option<NodeIndex>> {
-        Ok(match self.registry.remove_expression(name_or_alias) {
-            Some(RecipeExpression::Table(cts)) => {
+        mig: &mut Migration<'_>,
+    ) -> ReadySetResult<Option<Vec<NodeIndex>>> {
+        let expression = match self.registry.remove_expression(name_or_alias) {
+            Some(expression) => expression,
+            None => {
+                return Ok(None);
+            }
+        };
+        let name = expression.name();
+        let ni = match expression {
+            RecipeExpression::Table(_) => {
                 // a base may have many dependent queries, including ones that also lost
-                // nodes; the code handling `removed_leaves` therefore needs to take
-                // care not to remove bases while they still
-                // have children, or to try removing
+                // nodes; the code handling `removed_leaves` therefore needs to take care
+                // not to remove bases while they still have children, or to try removing
                 // them twice.
-                self.inc.remove_base(&cts.table.name)?;
-                match self.node_addr_for(&cts.table.name) {
-                    Ok(ni) => Some(ni),
+                self.inc.remove_base(name)?;
+                match self.node_addr_for(name) {
+                    Ok(ni) => ni,
                     Err(e) => {
                         error!(
                             err = %e,
-                            name = %cts.table.name,
+                            %name,
                             "failed to remove base whose address could not be resolved",
                         );
                         internal!(
                             "failed to remove base {} whose address could not be resolved",
-                            cts.table.name
+                            name
                         );
                     }
                 }
             }
-            Some(expression) => self.inc.remove_query(expression.name())?,
-            None => None,
-        })
+            _ => self.inc.remove_query(name)?
+                .ok_or_else(|| internal_err(format!("Inconsistent state in recipe: query exists in recipe but not in SqlIncorporator. Query name: {}", name)))?
+        };
+        let is_base = mig
+            .dataflow_state
+            .ingredients
+            .node_weight(ni)
+            .map(|x| x.is_base())
+            .unwrap_or(false);
+
+        if !is_base {
+            Ok(Some(self.remove_leaf(ni, mig)?))
+        } else {
+            let mut nodes_to_remove: Vec<NodeIndex> = Vec::new();
+            let mut stack = vec![ni];
+            while let Some(node) = stack.pop() {
+                nodes_to_remove.push(node);
+                mig.changes.drop_node(node);
+                stack.extend(
+                    mig.dataflow_state
+                        .ingredients
+                        .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
+                        .filter(|ni| !mig.dataflow_state.ingredients[*ni].is_dropped()),
+                );
+            }
+
+            self.remove_leaf_aliases(&nodes_to_remove);
+            Ok(Some(nodes_to_remove))
+        }
+    }
+
+    fn remove_leaf(
+        &mut self,
+        mut leaf: NodeIndex,
+        mig: &mut Migration<'_>,
+    ) -> ReadySetResult<Vec<NodeIndex>> {
+        let mut removals = vec![];
+        let start = leaf;
+        if mig.dataflow_state.ingredients.node_weight(leaf).is_none() {
+            return Err(ReadySetError::NodeNotFound {
+                index: leaf.index(),
+            });
+        }
+        #[allow(clippy::indexing_slicing)] // checked above
+        {
+            invariant!(!mig.dataflow_state.ingredients[leaf].is_source());
+        }
+
+        info!(
+            node = %leaf.index(),
+            "Computing removals for removing node",
+        );
+
+        let nchildren = mig
+            .dataflow_state
+            .ingredients
+            .neighbors_directed(leaf, petgraph::EdgeDirection::Outgoing)
+            .count();
+        if nchildren > 0 {
+            // This query leaf node has children -- typically, these are readers, but they can also
+            // include egress nodes or other, dependent queries. We need to find the actual reader,
+            // and remove that.
+            if nchildren != 1 {
+                internal!(
+                    "cannot remove node {}, as it still has multiple children",
+                    leaf.index()
+                );
+            }
+
+            let mut readers = Vec::new();
+            let mut bfs = Bfs::new(&mig.dataflow_state.ingredients, leaf);
+            while let Some(child) = bfs.next(&mig.dataflow_state.ingredients) {
+                #[allow(clippy::indexing_slicing)] // just came from self.ingredients
+                let n = &mig.dataflow_state.ingredients[child];
+                if n.is_reader_for(leaf) {
+                    readers.push(child);
+                }
+            }
+
+            // nodes can have only one reader attached
+            invariant_eq!(readers.len(), 1);
+            #[allow(clippy::indexing_slicing)]
+            let reader = readers[0];
+            #[allow(clippy::indexing_slicing)]
+            {
+                debug!(
+                    node = %leaf.index(),
+                    really = %reader.index(),
+                    "Removing query leaf \"{}\"", mig.dataflow_state.ingredients[leaf].name()
+                );
+            }
+            removals.push(reader);
+            mig.changes.drop_node(reader);
+            leaf = reader;
+        }
+
+        // `node` now does not have any children any more
+        assert_eq!(
+            mig.dataflow_state
+                .ingredients
+                .neighbors_directed(leaf, petgraph::EdgeDirection::Outgoing)
+                .count(),
+            0
+        );
+
+        let mut nodes = vec![leaf];
+        while let Some(node) = nodes.pop() {
+            let mut parents = mig
+                .dataflow_state
+                .ingredients
+                .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
+                .detach();
+            while let Some(parent) = parents.next_node(&mig.dataflow_state.ingredients) {
+                #[allow(clippy::expect_used)]
+                let edge = mig
+                    .dataflow_state
+                    .ingredients
+                    .find_edge(parent, node)
+                    .expect(
+                    "unreachable: neighbors_directed returned something that wasn't a neighbour",
+                );
+                mig.dataflow_state.ingredients.remove_edge(edge);
+
+                #[allow(clippy::indexing_slicing)]
+                if !mig.dataflow_state.ingredients[parent].is_source()
+                    && !mig.dataflow_state.ingredients[parent].is_base()
+                    // ok to remove original start leaf
+                    && (parent == start || !mig.dataflow_state.recipe.sql_inc().is_leaf_address(parent))
+                    && mig.dataflow_state
+                    .ingredients
+                    .neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
+                    .count() == 0
+                {
+                    nodes.push(parent);
+                }
+            }
+
+            removals.push(node);
+            mig.changes.drop_node(node);
+        }
+        Ok(removals)
+    }
+
+    pub(crate) fn remove_leaf_aliases(&mut self, nodes: &[NodeIndex]) {
+        for node in nodes {
+            if let Some(name) = self.inc.get_leaf_name(*node) {
+                self.registry.remove_expression(name);
+            }
+        }
     }
 }

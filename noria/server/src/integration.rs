@@ -8644,6 +8644,8 @@ async fn simple_alter_table_drop_column() {
     table.insert(vec![11.into()]).await.unwrap();
     table.insert(vec![21.into()]).await.unwrap();
 
+    sleep().await;
+
     let results = view.lookup(&[0.into()], true).await.unwrap();
     assert!(!results.is_empty());
     assert_eq!(results[0][0], 11.into());
