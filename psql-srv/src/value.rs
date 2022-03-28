@@ -15,6 +15,7 @@ pub enum Value {
     Int(i32),
     Bigint(i64),
     Smallint(i16),
+    Oid(u32),
     Double(f64),
     Float(f32),
     Numeric(Decimal),
