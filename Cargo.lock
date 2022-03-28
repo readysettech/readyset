@@ -4115,6 +4115,7 @@ dependencies = [
  "futures",
  "itertools",
  "launchpad",
+ "lazy_static",
  "native-tls",
  "nom-sql",
  "noria",
