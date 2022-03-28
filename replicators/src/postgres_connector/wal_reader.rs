@@ -6,6 +6,7 @@ use bit_vec::BitVec;
 use mysql_time::MysqlTime;
 use noria::{ReadySetError, ReadySetResult};
 use noria_data::DataType;
+use noria_errors::unsupported;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use tokio_postgres as pgsql;
@@ -296,11 +297,7 @@ impl wal::TupleData {
                             DataType::from(bits)
                         }
                         ref t => {
-                            unimplemented!(
-                                "Conversion not implemented for type {:?}; value {:?}",
-                                t,
-                                str
-                            );
+                            unsupported!("Conversion not implemented for type {:?}", t);
                         }
                     };
 
