@@ -307,9 +307,9 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
             Err(Error::InvalidUtf8)
         }
         Type::BOOL => Ok(Value::Bool(bool::from_sql(t, buf)?)),
-        Type::CHAR => Ok(Value::Char(<&str>::from_sql(t, buf)?.into())),
         Type::VARCHAR => Ok(Value::Varchar(<&str>::from_sql(t, buf)?.into())),
         Type::NAME => Ok(Value::Name(<&str>::from_sql(t, buf)?.into())),
+        Type::CHAR => Ok(Value::Char(i8::from_sql(t, buf)?)),
         Type::INT4 => Ok(Value::Int(i32::from_sql(t, buf)?)),
         Type::INT8 => Ok(Value::Bigint(i64::from_sql(t, buf)?)),
         Type::INT2 => Ok(Value::Smallint(i16::from_sql(t, buf)?)),
@@ -357,9 +357,9 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
     let text_str: &str = text.borrow();
     match *t {
         Type::BOOL => Ok(Value::Bool(text_str == BOOL_TRUE_TEXT_REP)),
-        Type::CHAR => Ok(Value::Char(text_str.into())),
         Type::VARCHAR => Ok(Value::Varchar(text_str.into())),
         Type::NAME => Ok(Value::Name(text_str.into())),
+        Type::CHAR => Ok(Value::Char(text_str.parse::<i8>()?)),
         Type::INT4 => Ok(Value::Int(text_str.parse::<i32>()?)),
         Type::INT8 => Ok(Value::Bigint(text_str.parse::<i64>()?)),
         Type::INT2 => Ok(Value::Smallint(text_str.parse::<i16>()?)),
@@ -943,11 +943,11 @@ mod tests {
     #[test]
     fn test_decode_binary_char() {
         let mut buf = BytesMut::new();
-        buf.put_i32(6); // size
-        buf.extend_from_slice(b"mighty"); // value
+        buf.put_i32(1); // size
+        buf.put_i8(8); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::CHAR).unwrap(),
-            DataValue::Char("mighty".into())
+            DataValue::Char(8)
         );
     }
 
@@ -1208,11 +1208,11 @@ mod tests {
     #[test]
     fn test_decode_text_char() {
         let mut buf = BytesMut::new();
-        buf.put_i32(6); // size
-        buf.extend_from_slice(b"mighty"); // value
+        buf.put_i32(1); // size
+        buf.extend_from_slice(b"8"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::CHAR).unwrap(),
-            DataValue::Char("mighty".into())
+            DataValue::Char(8)
         );
     }
 

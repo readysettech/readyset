@@ -91,10 +91,10 @@ impl TryFrom<ParamRef<'_>> for DataType {
         match v.0 {
             ps::Value::Null => Ok(DataType::None),
             ps::Value::Bool(b) => Ok(DataType::from(*b)),
-            ps::Value::Char(v)
-            | ps::Value::Varchar(v)
-            | ps::Value::Name(v)
-            | ps::Value::Text(v) => Ok(v.as_str().into()),
+            ps::Value::Varchar(v) | ps::Value::Name(v) | ps::Value::Text(v) => {
+                Ok(v.as_str().into())
+            }
+            ps::Value::Char(v) => Ok((*v).into()),
             ps::Value::Int(v) => Ok((*v).into()),
             ps::Value::Bigint(v) => Ok((*v).into()),
             ps::Value::Smallint(v) => Ok((*v).into()),

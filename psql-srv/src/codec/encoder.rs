@@ -310,14 +310,14 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::Bool(v) => {
             v.to_sql(&Type::BOOL, dst)?;
         }
-        Value::Char(v) => {
-            v.as_bytes().to_sql(&Type::CHAR, dst)?;
-        }
         Value::Varchar(v) => {
             v.as_bytes().to_sql(&Type::VARCHAR, dst)?;
         }
         Value::Name(v) => {
             v.as_bytes().to_sql(&Type::NAME, dst)?;
+        }
+        Value::Char(v) => {
+            v.to_sql(&Type::CHAR, dst)?;
         }
         Value::Int(v) => {
             v.to_sql(&Type::INT4, dst)?;
@@ -407,8 +407,11 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
             };
             write!(dst, "{}", text)?;
         }
-        Value::Char(v) | Value::Varchar(v) | Value::Name(v) | Value::Text(v) => {
+        Value::Varchar(v) | Value::Name(v) | Value::Text(v) => {
             dst.extend_from_slice(v.as_bytes());
+        }
+        Value::Char(v) => {
+            write!(dst, "{}", v)?;
         }
         Value::Int(v) => {
             write!(dst, "{}", v)?;
@@ -960,10 +963,10 @@ mod tests {
     #[test]
     fn test_encode_binary_char() {
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::Char("some stuff".into()), &mut buf).unwrap();
+        put_binary_value(DataValue::Char(8), &mut buf).unwrap();
         let mut exp = BytesMut::new();
-        exp.put_i32(10); // length
-        exp.extend_from_slice(b"some stuff"); // value
+        exp.put_i32(1); // length
+        exp.put_i8(8); // value
         assert_eq!(buf, exp);
     }
 
@@ -1207,10 +1210,10 @@ mod tests {
     #[test]
     fn test_encode_text_char() {
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::Char("some stuff".into()), &mut buf).unwrap();
+        put_text_value(DataValue::Char(8), &mut buf).unwrap();
         let mut exp = BytesMut::new();
-        exp.put_i32(10); // length
-        exp.extend_from_slice(b"some stuff"); // value
+        exp.put_i32(1); // length
+        exp.extend_from_slice(b"8"); // value
         assert_eq!(buf, exp);
     }
 

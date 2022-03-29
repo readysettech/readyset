@@ -1514,6 +1514,8 @@ impl ToSql for DataType {
     ) -> Result<IsNull, Box<dyn Error + 'static + Sync + Send>> {
         match (self, ty) {
             (Self::None | Self::Max, _) => None::<i8>.to_sql(ty, out),
+            (Self::Int(x), &Type::CHAR) => i8::try_from(*x)?.to_sql(ty, out),
+            (Self::UnsignedInt(x), &Type::CHAR) => i8::try_from(*x)?.to_sql(ty, out),
             (Self::Int(x), &Type::INT2) => (*x as i16).to_sql(ty, out),
             (Self::Int(x), &Type::INT4) => (*x as i32).to_sql(ty, out),
             (Self::Int(x), _) => x.to_sql(ty, out),
