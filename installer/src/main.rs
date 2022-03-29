@@ -1729,6 +1729,23 @@ impl Installer {
     }
 
     async fn prompt_for_rds_database(&mut self) -> Result<()> {
+        let deploy_new_instance = |vpc_id: &str| -> Result<bool> {
+            if confirm()
+                .with_prompt(
+                    "Would you like to deploy a new RDS database instance to the current VPC?",
+                )
+                .default(true)
+                .interact()?
+            {
+                println!(
+                    "OK, we'll create a new RDS database instance in {}.",
+                    vpc_id
+                );
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        };
         let rds_db = if let Existing(vpc_id) = self.cfn_deployment()?.vpc_id.clone().unwrap() {
             println!(
                 "ReadySet will keep cached query results up-to-date based on data changes in \
@@ -1743,50 +1760,54 @@ impl Installer {
             {
                 let mut instances = aws::rds_dbs_in_vpc(self.rds_client().await?, &vpc_id).await?;
                 if instances.is_empty() {
-                    bail!("No RDS database instances found in {}", vpc_id);
-                }
-                println!(
-                    "Found {} RDS database instances in {}",
-                    style(instances.len()).bold(),
-                    style(&vpc_id).bold()
-                );
-                let idx = select()
-                    .with_prompt("Which RDS database instance would you like to connect to?")
-                    .items(
-                        &instances
-                            .iter()
-                            .map(|db_instance| db_instance.db_instance_identifier().unwrap())
-                            .collect::<Vec<_>>(),
-                    )
-                    .interact()?;
+                    println!("No RDS database instances found in {}", vpc_id);
+                    if deploy_new_instance(&vpc_id)? {
+                        None
+                    } else {
+                        bail!("No RDS database instance found in {} and you have elected to not deploy a new one. We can't proceed with deployment without a RDS database instance.", vpc_id);
+                    }
+                } else {
+                    println!(
+                        "Found {} RDS database instances in {}",
+                        style(instances.len()).bold(),
+                        style(&vpc_id).bold()
+                    );
+                    let idx = select()
+                        .with_prompt("Which RDS database instance would you like to connect to?")
+                        .items(
+                            &instances
+                                .iter()
+                                .map(|db_instance| db_instance.db_instance_identifier().unwrap())
+                                .collect::<Vec<_>>(),
+                        )
+                        .interact()?;
 
-                let instance = instances.remove(idx);
-                let engine = Engine::from_aws_engine(
-                    instance
-                        .engine()
-                        .ok_or_else(|| anyhow!("RDS instance missing engine"))?,
-                )?;
-                let mut input = input();
-                input.with_prompt(format!("Which {} database should we connect to?", engine));
-                if let Some(instance_db) = instance.db_name() {
-                    input.default(instance_db.to_owned());
-                }
-                let db_name = input.interact_text()?;
-                Some(RdsDb {
-                    db_id: Existing(
+                    let instance = instances.remove(idx);
+                    let engine = Engine::from_aws_engine(
                         instance
-                            .db_instance_identifier
-                            .ok_or_else(|| anyhow!("RDS instance missing identifier"))?,
-                    ),
-                    db_name,
-                    engine,
-                })
-            } else {
-                println!(
-                    "OK, we'll create a new RDS database instance in {}.",
-                    vpc_id
-                );
+                            .engine()
+                            .ok_or_else(|| anyhow!("RDS instance missing engine"))?,
+                    )?;
+                    let mut input = input();
+                    input.with_prompt(format!("Which {} database should we connect to?", engine));
+                    if let Some(instance_db) = instance.db_name() {
+                        input.default(instance_db.to_owned());
+                    }
+                    let db_name = input.interact_text()?;
+                    Some(RdsDb {
+                        db_id: Existing(
+                            instance
+                                .db_instance_identifier
+                                .ok_or_else(|| anyhow!("RDS instance missing identifier"))?,
+                        ),
+                        db_name,
+                        engine,
+                    })
+                }
+            } else if deploy_new_instance(&vpc_id)? {
                 None
+            } else {
+                bail!("You have elected to not use an existing RDS instance in vpc {}, and have also elected to not deploy a new RDS instance. We can't proceed without an RDS database instance.", &vpc_id);
             }
         } else {
             None
