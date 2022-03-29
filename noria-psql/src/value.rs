@@ -26,8 +26,9 @@ impl TryFrom<Value> for ps::Value {
     fn try_from(v: Value) -> Result<Self, Self::Error> {
         match (v.col_type, v.value) {
             (_, DataType::None) => Ok(ps::Value::Null),
-            (Type::CHAR, DataType::Text(v)) => Ok(ps::Value::Char(v)),
-            (Type::CHAR, DataType::TinyText(t)) => Ok(ps::Value::Char(t.as_str().into())),
+            (Type::CHAR, DataType::Int(v)) => Ok(ps::Value::Char(v.try_into()?)),
+            (Type::CHAR, DataType::UnsignedInt(v)) => Ok(ps::Value::Char(v.try_into()?)),
+
             (Type::VARCHAR, DataType::Text(v)) => Ok(ps::Value::Varchar(v)),
             (Type::VARCHAR, DataType::TinyText(t)) => Ok(ps::Value::Varchar(t.as_str().into())),
             (Type::NAME, DataType::Text(t)) => Ok(ps::Value::Name(t)),
@@ -118,15 +119,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tiny_text_char() {
+    fn i8_char() {
         let val = Value {
             col_type: Type::CHAR,
-            value: DataType::TinyText(TinyText::from_arr(b"aaaaaaaaaaaaaa")),
+            value: DataType::Int(8i8 as _),
         };
-        assert_eq!(
-            ps::Value::try_from(val).unwrap(),
-            ps::Value::Char("aaaaaaaaaaaaaa".into())
-        );
+        assert_eq!(ps::Value::try_from(val).unwrap(), ps::Value::Char(8));
     }
 
     #[test]

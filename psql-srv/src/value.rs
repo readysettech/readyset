@@ -10,9 +10,9 @@ use uuid::Uuid;
 pub enum Value {
     Null,
     Bool(bool),
-    Char(Text),
     Varchar(Text),
     Name(Text),
+    Char(i8),
     Int(i32),
     Bigint(i64),
     Smallint(i16),
