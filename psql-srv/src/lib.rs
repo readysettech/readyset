@@ -39,6 +39,14 @@ pub use crate::value::Value;
 /// trait is the primary interface for the `psql-srv` crate.
 #[async_trait]
 pub trait Backend {
+    /// The postgresql server version number to send to the client on startup.
+    ///
+    /// Note that this should be in a format parseable by [the server_version handling code in
+    /// libpq][libpq-server-version]
+    ///
+    /// [libpq-server-version]: https://github.com/postgres/postgres/blob/d22646922d66012705e0e2948cfb5b4a07092a29/src/interfaces/libpq/fe-exec.c#L1146-L1178
+    const SERVER_VERSION: &'static str;
+
     /// An associated type that can be converted into this crate's `Value` type.
     type Value: TryInto<Value, Error = Error>;
 
