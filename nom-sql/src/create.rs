@@ -2295,4 +2295,16 @@ mod tests {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3";
         test_parse!(creation(Dialect::MySQL), qstring);
     }
+
+    #[test]
+    fn ar_internal_metadata() {
+        let qstring_orig = b"CREATE TABLE `ar_internal_metadata` (
+`key` character varying NOT NULL,
+`value` character varying,
+`created_at` timestamp(6) without time zone NOT NULL,
+`updated_at` timestamp(6) without time zone NOT NULL,
+PRIMARY KEY (`key`));";
+        let res = test_parse!(creation(Dialect::MySQL), qstring_orig);
+        assert_eq!(res.table.name, "ar_internal_metadata");
+    }
 }
