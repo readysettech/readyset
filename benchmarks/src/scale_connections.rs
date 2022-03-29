@@ -8,7 +8,7 @@ use metrics::Unit;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::{benchmark_counter, benchmark_histogram};
 
@@ -42,7 +42,9 @@ impl BenchmarkControl for ScaleConnections {
 
         let mut connections = Vec::new();
         let mut results = BenchmarkResults::new();
-        for i in 0..self.num_connections {
+        let duration_data =
+            results.entry("connect_time", Unit::Microseconds, MetricGoal::Decreasing);
+        for _ in 0..self.num_connections {
             let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
 
             let start = Instant::now();
@@ -59,13 +61,7 @@ impl BenchmarkControl for ScaleConnections {
                 connection_time.as_secs_f64() * 1000.0,
             );
 
-            if i == 0 || i == self.num_connections || i == self.num_connections / 2 {
-                results.append(&[(
-                    &format!("connect @ {}", i),
-                    (connection_time.as_secs_f64() * 1000.0, Unit::Seconds),
-                )]);
-            }
-
+            duration_data.push(connection_time.as_micros() as f64);
             benchmark_histogram!(
                 "scale_connections.connection_duration",
                 Seconds,
@@ -96,5 +92,9 @@ impl BenchmarkControl for ScaleConnections {
 
     fn forward_metrics(&self, _: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics> {
         vec![]
+    }
+
+    fn name(&self) -> &'static str {
+        "scale_connections"
     }
 }

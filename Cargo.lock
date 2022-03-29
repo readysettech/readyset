@@ -880,6 +880,7 @@ dependencies = [
  "serde_yaml",
  "thiserror",
  "tokio",
+ "tokio-postgres",
  "tracing",
  "url",
  "vec1",

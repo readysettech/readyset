@@ -23,7 +23,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::info;
 use zipf::ZipfDistribution;
 
-use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::spec::{
     WorkloadDistribution, WorkloadDistributionKind, WorkloadDistributionSource, WorkloadQuery,
     WorkloadSpec,
@@ -166,6 +166,10 @@ impl BenchmarkControl for WorkloadEmulator {
 
     fn forward_metrics(&self, _deployment: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics> {
         vec![]
+    }
+
+    fn name(&self) -> &'static str {
+        "workload_emulator"
     }
 }
 
@@ -339,17 +343,40 @@ impl MultithreadBenchmark for WorkloadEmulator {
             None => return Ok(()),
         };
 
+        let mut overall = vec![];
+        let mut per_query: HashMap<u32, Vec<f64>> = HashMap::new();
         for u in results {
             for WorkloadResult {
                 query_id,
                 latency_us,
             } in u.queries
             {
+                overall.push(latency_us as f64);
+                per_query
+                    .entry(query_id)
+                    .or_default()
+                    .push(latency_us as f64);
                 hist.record(latency_us as _).unwrap();
                 per_query_hist[query_id as usize]
                     .record(latency_us as _)
                     .unwrap();
             }
+        }
+        benchmark_results
+            .entry(
+                "duration_overall",
+                Unit::Microseconds,
+                MetricGoal::Decreasing,
+            )
+            .extend(overall);
+        for (query_id, data) in per_query {
+            benchmark_results
+                .entry(
+                    &format!("duration_{}", query_id),
+                    Unit::Microseconds,
+                    MetricGoal::Decreasing,
+                )
+                .extend(data);
         }
 
         let qps = hist.len() as f64 / interval.as_secs() as f64;
@@ -362,26 +389,6 @@ impl MultithreadBenchmark for WorkloadEmulator {
             us_to_ms(hist.value_at_quantile(0.9999))
         );
 
-        let mut results = vec![
-            ("qps".to_string(), (qps, Unit::Count)),
-            (
-                "latency p50".to_string(),
-                (us_to_ms(hist.value_at_quantile(0.5)), Unit::Milliseconds),
-            ),
-            (
-                "latency p90".to_string(),
-                (us_to_ms(hist.value_at_quantile(0.9)), Unit::Milliseconds),
-            ),
-            (
-                "latency p99".to_string(),
-                (us_to_ms(hist.value_at_quantile(0.99)), Unit::Milliseconds),
-            ),
-            (
-                "latency p99.99".to_string(),
-                (us_to_ms(hist.value_at_quantile(0.9999)), Unit::Milliseconds),
-            ),
-        ];
-
         for (i, hist) in per_query_hist.into_iter().enumerate() {
             let qps = hist.len() as f64 / interval.as_secs() as f64;
             info!(
@@ -391,28 +398,7 @@ impl MultithreadBenchmark for WorkloadEmulator {
                 us_to_ms(hist.value_at_quantile(0.99)),
                 us_to_ms(hist.value_at_quantile(0.9999))
             );
-
-            results.push((format!("query {i} qps"), (qps, Unit::Count)));
-            results.push((
-                format!("query {i} latency p50"),
-                (us_to_ms(hist.value_at_quantile(0.5)), Unit::Milliseconds),
-            ));
-            results.push((
-                format!("query {i} latency p90"),
-                (us_to_ms(hist.value_at_quantile(0.9)), Unit::Milliseconds),
-            ));
-            results.push((
-                format!("query {i} latency p99"),
-                (us_to_ms(hist.value_at_quantile(0.99)), Unit::Milliseconds),
-            ));
-            results.push((
-                format!("query {i} latency p99.99"),
-                (us_to_ms(hist.value_at_quantile(0.9999)), Unit::Milliseconds),
-            ));
         }
-
-        // This benchmark returns the last seen benchmark results.
-        *benchmark_results = BenchmarkResults::from(&results);
 
         Ok(())
     }

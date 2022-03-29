@@ -4,8 +4,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::bail;
-use benchmarks::benchmark::{Benchmark, BenchmarkControl, BenchmarkResults, DeploymentParameters};
+use benchmarks::benchmark::{Benchmark, BenchmarkControl, DeploymentParameters};
 use benchmarks::benchmark_histogram;
+use benchmarks::reporting::ReportMode;
 use benchmarks::utils::readyset_ready;
 use clap::{AppSettings, Parser, ValueHint};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
@@ -79,6 +80,22 @@ struct BenchmarkRunner {
     /// If this argument is passed, the deployment parameter is ignored.
     #[clap(long)]
     local_with_mysql: Option<String>,
+
+    /// Location where benchmark reports are stored, either for validation or storage purposes
+    #[clap(long, env = "REPORT_TARGET", requires_all(&["report-mode", "report-profile"]))]
+    report_target: Option<String>,
+
+    /// Enables storage / validation of benchmark results, when combined with report_target
+    #[clap(long, arg_enum, long, env = "REPORT_MODE", requires_all(&["report-target", "report-profile"]))]
+    report_mode: Option<ReportMode>,
+
+    /// Profile name to save the report under, distinct tests should have unique profiles
+    #[clap(long, requires_all(&["report-target", "report-mode"]))]
+    report_profile: Option<String>,
+
+    /// Records the commit id to aid potential future analysis
+    #[clap(long, hide(true), env = "BUILDKITE_COMMIT")]
+    report_commit_id: Option<String>,
 }
 
 impl BenchmarkRunner {
@@ -301,6 +318,8 @@ impl BenchmarkRunner {
         // Check that ReadySet has completed snapshotting via the readyset status.
         readyset_ready(&self.deployment_params.target_conn_str).await?;
 
+        let bench_start_time = std::time::SystemTime::now();
+
         let mut results = Vec::new();
         for i in 0..self.iterations {
             if self.iterations > 1 {
@@ -317,13 +336,40 @@ impl BenchmarkRunner {
                 "Time, in microseconds, that it took to run the benchmark.",
                 duration.as_micros() as f64
             );
-            println!("{}", result);
+
+            if let Some(report_mode) = self.report_mode {
+                let session = benchmarks::reporting::BenchSession {
+                    start_time: bench_start_time,
+                    commit_id: self.report_commit_id.clone().unwrap_or_default(),
+                    template: benchmark_cmd.name().into(),
+                    profile_name: self.report_profile.clone().unwrap(),
+                };
+
+                let analysis = benchmarks::reporting::report(
+                    self.report_target.as_ref().unwrap(),
+                    &session,
+                    &result,
+                    report_mode,
+                )
+                .await?;
+                println!("Regression Analysis: {:?}", analysis);
+            }
             results.push(result);
         }
 
         println!("Benchmark Results -----------------------");
-        let results = BenchmarkResults::aggregate(&results);
-        println!("{}", results);
+        for (index, iteration) in results.iter().enumerate() {
+            let iteration_num = index + 1;
+            println!("Iteration {iteration_num} Results:");
+            for (metric, data) in &iteration.results {
+                let hist = data.to_histogram(0.0, 1.0);
+                let samples = hist.len();
+                let min = hist.min();
+                let max = hist.max();
+                let mean = hist.mean();
+                println!("\t{metric} ({} - {:?} goal) - Samples: {samples} - Min: {min} - Max: {max} - Mean: {mean}", data.unit, data.desired_action);
+            }
+        }
 
         // Write human-readable outputs if specified.
         if let Some(f) = self.results_file {
@@ -333,7 +379,7 @@ impl BenchmarkRunner {
                 .open(f)?;
             file.write_all(&serde_yaml::to_vec(&self.benchmark_cmd)?)?;
             file.write_all(&serde_yaml::to_vec(&self.deployment_params)?)?;
-            file.write_all(format!("{}", results).as_bytes())?;
+            file.write_all(format!("{:?}", results).as_bytes())?;
         }
 
         if let Some((handle, tx)) = importer {

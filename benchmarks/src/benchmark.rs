@@ -11,13 +11,12 @@
 //!     - Add the type's name as a variant `Benchmark`.
 
 use std::collections::HashMap;
-use std::fmt::{self, Display};
 
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
 use enum_dispatch::enum_dispatch;
-use itertools::Itertools;
+use hdrhistogram::Histogram;
 use mysql_async::{Conn, Opts};
 use serde::{Deserialize, Serialize};
 
@@ -125,11 +124,53 @@ impl DeploymentParameters {
     }
 }
 
-/// Key-value pair of benchmark results that can be used to calculate
-/// distributions across multiple benchmark iterations.
-#[derive(Debug, Serialize, Deserialize)]
+/// Indicates whether increasing or decreasing is the more desirable property for a metric
+#[derive(Debug, Clone, Copy)]
+pub enum MetricGoal {
+    Increasing,
+    Decreasing,
+}
+
+#[derive(Debug)]
+pub struct BenchmarkData {
+    pub unit: String,
+    pub desired_action: MetricGoal,
+    pub values: Vec<f64>,
+}
+
+impl BenchmarkData {
+    pub fn new(unit: metrics::Unit, desired_action: MetricGoal) -> Self {
+        Self {
+            unit: format!("{:?}", unit),
+            desired_action,
+            values: vec![],
+        }
+    }
+
+    pub fn push(&mut self, value: f64) {
+        self.values.push(value);
+    }
+
+    pub fn to_histogram(&self, lower: f64, upper: f64) -> Histogram<u64> {
+        let mut data = self.values.clone();
+        data.sort_unstable_by(|a, b| {
+            // We shouldn't have any NaNs/infs
+            a.partial_cmp(b).unwrap()
+        });
+        let data = &data
+            [(((data.len() as f64) * lower) as usize)..(((data.len() as f64) * upper) as usize)];
+
+        let mut hist = Histogram::<u64>::new(3).unwrap();
+        for value in data.iter().copied() {
+            hist.record(value as u64).unwrap();
+        }
+        hist
+    }
+}
+
+#[derive(Default, Debug)]
 pub struct BenchmarkResults {
-    results: HashMap<String, (f64, String)>,
+    pub results: HashMap<String, BenchmarkData>,
 }
 
 impl BenchmarkResults {
@@ -139,128 +180,43 @@ impl BenchmarkResults {
         }
     }
 
-    pub fn from<S, T>(results: &[(S, (T, metrics::Unit))]) -> Self
-    where
-        S: Display,
-        T: fmt::Display + Clone,
-        f64: From<T>,
-    {
+    pub fn entry(
+        &mut self,
+        key: &str,
+        unit: metrics::Unit,
+        desired_action: MetricGoal,
+    ) -> &mut Vec<f64> {
+        &mut self
+            .results
+            .entry(key.to_string())
+            .or_insert_with(|| BenchmarkData::new(unit, desired_action))
+            .values
+    }
+
+    pub fn push(&mut self, key: &str, unit: metrics::Unit, desired_action: MetricGoal, value: f64) {
+        self.results
+            .entry(key.to_string())
+            .or_insert_with(|| BenchmarkData::new(unit, desired_action))
+            .push(value);
+    }
+
+    #[must_use]
+    pub fn prefix(self, p: &str) -> Self {
         Self {
-            results: results
-                .iter()
-                .map(|(k, v)| {
-                    (
-                        k.to_string(),
-                        (v.0.clone().into(), v.1.as_canonical_label().to_string()),
-                    )
-                })
+            results: self
+                .results
+                .into_iter()
+                .map(|(k, v)| (format!("{}_{}", p, k), v))
                 .collect(),
         }
     }
 
-    pub fn append<T>(&mut self, results: &[(&str, (T, metrics::Unit))])
-    where
-        T: fmt::Display + Clone,
-        f64: From<T>,
-    {
-        for (k, v) in results {
-            self.results.insert(
-                k.to_string(),
-                (v.0.clone().into(), v.1.as_canonical_label().to_string()),
-            );
+    pub fn merge(input: Vec<BenchmarkResults>) -> Self {
+        let mut results = HashMap::new();
+        for r in input {
+            results.extend(r.results);
         }
-    }
-
-    /// Prefixes the set of keys in this set of results with `p`.
-    /// If a key with it's prefix already exists, the key may be
-    /// value may be overwritten.
-    #[must_use]
-    pub fn prefix(mut self, p: &str) -> Self {
-        // Make a copy of all the keys so we can mutably borrow the map as we
-        // iterate.
-        let keys: Vec<_> = self.results.keys().cloned().collect();
-        for k in keys.iter() {
-            // Iterating over the set of keys that are in the map.
-            #[allow(clippy::unwrap_used)]
-            self.results
-                .insert(format!("{} {}", p, k), self.results.get(k).unwrap().clone());
-            self.results.remove(k);
-        }
-
-        self
-    }
-
-    /// Merges a set of benchmark results into a single set of results.
-    /// The set of benchmark results should have *different* keys otherwise
-    /// keys will be overwritten by other benchmark results.
-    ///
-    /// [`BenchmarkResults::prefix`] can be used to give different sets of
-    /// results unique keys, via unique prefixes.
-    pub fn merge(results: Vec<BenchmarkResults>) -> Self {
-        let mut merged = BenchmarkResults {
-            results: HashMap::new(),
-        };
-
-        for r in results {
-            merged.results.extend(r.results);
-        }
-
-        merged
-    }
-
-    /// Aggregates a set of benchmark results into a single set of
-    /// results. For each metric in the benchmark results, we calculate
-    /// the min, max, median and mean for each metric. This assumes that
-    /// each result in `results` has the same set of metrics.
-    pub fn aggregate(results: &[BenchmarkResults]) -> Self {
-        let mut agg = BenchmarkResults {
-            results: HashMap::new(),
-        };
-
-        // For each metric get all values from the set of benchmarks. Calculate the
-        // min, max, median, mean over the values for the result.
-
-        let keys = results[0].results.keys().clone();
-        for k in keys {
-            let mut values: Vec<_> = results.iter().map(|r| r.results.get(k).unwrap()).collect();
-            values.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-            let len = values.len();
-
-            let metric_units = values[0].1.clone();
-            agg.results.insert(k.clone() + " min", values[0].clone());
-            agg.results
-                .insert(k.clone() + " max", values[values.len() - 1].clone());
-            agg.results
-                .insert(k.clone() + " median", values[values.len() / 2].clone());
-            agg.results.insert(
-                k.clone() + " mean",
-                (
-                    values.into_iter().map(|t| t.0).sum::<f64>() / len as f64,
-                    metric_units,
-                ),
-            );
-        }
-
-        agg
-    }
-}
-
-impl Default for BenchmarkResults {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl fmt::Display for BenchmarkResults {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for key in self.results.keys().sorted() {
-            writeln!(
-                f,
-                "{}: {} {}",
-                key, self.results[key].0, self.results[key].1
-            )?;
-        }
-        Ok(())
+        BenchmarkResults { results }
     }
 }
 
@@ -268,7 +224,6 @@ impl fmt::Display for BenchmarkResults {
 /// to a file.
 // TODO(justin): use this struct for serializing and deserializing baselines.
 #[allow(dead_code)]
-#[derive(Serialize, Deserialize)]
 pub struct BenchmarkOutput {
     benchmark: Benchmark,
     deployment: DeploymentParameters,
@@ -317,4 +272,7 @@ pub trait BenchmarkControl {
     /// re-export as part of the benchmark's metrics. Only called if `deployment` has a
     /// PrometheusEndpoint.
     fn forward_metrics(&self, deployment: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics>;
+
+    /// The benchmark template's name
+    fn name(&self) -> &'static str;
 }

@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error};
 
-use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
@@ -155,6 +155,10 @@ impl BenchmarkControl for ReadWriteBenchmark {
     fn forward_metrics(&self, _: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics> {
         vec![]
     }
+
+    fn name(&self) -> &'static str {
+        "read_write_benchmark"
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -186,8 +190,11 @@ impl MultithreadBenchmark for ReadWriteBenchmark {
     ) -> Result<()> {
         let mut read_hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
         let mut update_hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
+        let mut read_data = vec![];
+        let mut update_data = vec![];
         for u in results {
             for l in u.read_queries {
+                read_data.push(l as f64);
                 read_hist.record(u64::try_from(l).unwrap()).unwrap();
                 benchmark_histogram!(
                     "read_write_benchmark.read_query_duration",
@@ -198,6 +205,7 @@ impl MultithreadBenchmark for ReadWriteBenchmark {
             }
 
             for l in u.update_queries {
+                update_data.push(l as f64);
                 update_hist.record(u64::try_from(l).unwrap()).unwrap();
                 benchmark_histogram!(
                     "read_write_benchmark.update_query_duration",
@@ -207,6 +215,16 @@ impl MultithreadBenchmark for ReadWriteBenchmark {
                 );
             }
         }
+        benchmark_results
+            .entry("read_duration", Unit::Microseconds, MetricGoal::Decreasing)
+            .extend(read_data);
+        benchmark_results
+            .entry(
+                "update_duration",
+                Unit::Microseconds,
+                MetricGoal::Decreasing,
+            )
+            .extend(update_data);
         let read_qps = read_hist.len() as f64 / interval.as_secs() as f64;
         benchmark_histogram!(
             "read_write_benchmark.read_qps",
@@ -238,68 +256,6 @@ impl MultithreadBenchmark for ReadWriteBenchmark {
             us_to_ms(update_hist.value_at_quantile(0.99)),
             us_to_ms(update_hist.value_at_quantile(0.9999))
         );
-
-        // This benchmark returns the last seen benchmark results.
-        *benchmark_results = BenchmarkResults::from(&[
-            ("read qps", (read_qps, Unit::Count)),
-            (
-                "read latency p50",
-                (
-                    us_to_ms(read_hist.value_at_quantile(0.5)),
-                    Unit::Milliseconds,
-                ),
-            ),
-            (
-                "read latency p90",
-                (
-                    us_to_ms(read_hist.value_at_quantile(0.9)),
-                    Unit::Milliseconds,
-                ),
-            ),
-            (
-                "read latency p99",
-                (
-                    us_to_ms(read_hist.value_at_quantile(0.99)),
-                    Unit::Milliseconds,
-                ),
-            ),
-            (
-                "read latency p99.99",
-                (
-                    us_to_ms(read_hist.value_at_quantile(0.9999)),
-                    Unit::Milliseconds,
-                ),
-            ),
-            ("update qps", (update_qps, Unit::Count)),
-            (
-                "update latency p50",
-                (
-                    us_to_ms(update_hist.value_at_quantile(0.5)),
-                    Unit::Milliseconds,
-                ),
-            ),
-            (
-                "update latency p90",
-                (
-                    us_to_ms(update_hist.value_at_quantile(0.9)),
-                    Unit::Milliseconds,
-                ),
-            ),
-            (
-                "update latency p99",
-                (
-                    us_to_ms(update_hist.value_at_quantile(0.99)),
-                    Unit::Milliseconds,
-                ),
-            ),
-            (
-                "update latency p99.99",
-                (
-                    us_to_ms(update_hist.value_at_quantile(0.9999)),
-                    Unit::Milliseconds,
-                ),
-            ),
-        ]);
 
         Ok(())
     }

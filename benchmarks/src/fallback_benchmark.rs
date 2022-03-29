@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error};
 
-use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
@@ -142,6 +142,10 @@ impl BenchmarkControl for FallbackBenchmark {
     fn forward_metrics(&self, _: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics> {
         vec![]
     }
+
+    fn name(&self) -> &'static str {
+        "fallback_benchmark"
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -169,9 +173,12 @@ impl MultithreadBenchmark for FallbackBenchmark {
         interval: Duration,
         benchmark_results: &mut BenchmarkResults,
     ) -> Result<()> {
+        let results_data =
+            benchmark_results.entry("duration", Unit::Microseconds, MetricGoal::Decreasing);
         let mut hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
         for u in results {
             for l in u.queries {
+                results_data.push(l as f64);
                 hist.record(u64::try_from(l).unwrap()).unwrap();
             }
         }
@@ -184,27 +191,6 @@ impl MultithreadBenchmark for FallbackBenchmark {
             us_to_ms(hist.value_at_quantile(0.99)),
             us_to_ms(hist.value_at_quantile(0.9999))
         );
-
-        // This benchmark returns the last seen benchmark results.
-        *benchmark_results = BenchmarkResults::from(&[
-            ("qps", (qps, Unit::Count)),
-            (
-                "latency p50",
-                (us_to_ms(hist.value_at_quantile(0.5)), Unit::Milliseconds),
-            ),
-            (
-                "latency p90",
-                (us_to_ms(hist.value_at_quantile(0.9)), Unit::Milliseconds),
-            ),
-            (
-                "latency p99",
-                (us_to_ms(hist.value_at_quantile(0.99)), Unit::Milliseconds),
-            ),
-            (
-                "latency p99.99",
-                (us_to_ms(hist.value_at_quantile(0.9999)), Unit::Milliseconds),
-            ),
-        ]);
 
         Ok(())
     }

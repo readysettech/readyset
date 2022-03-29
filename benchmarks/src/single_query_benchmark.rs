@@ -12,12 +12,11 @@ use mysql_async::prelude::Queryable;
 use mysql_async::Row;
 use serde::{Deserialize, Serialize};
 
-use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::benchmark_histogram;
 use crate::utils::generate::DataGenerator;
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::utils::query::{ArbitraryQueryParameters, PreparedStatement};
-use crate::utils::us_to_ms;
 
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct SingleQueryBenchmark {
@@ -77,6 +76,10 @@ impl BenchmarkControl for SingleQueryBenchmark {
     fn forward_metrics(&self, _: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics> {
         vec![]
     }
+
+    fn name(&self) -> &'static str {
+        "single_query_benchmark"
+    }
 }
 
 impl SingleQueryBenchmark {
@@ -88,6 +91,7 @@ impl SingleQueryBenchmark {
         let mut results = BenchmarkResults::new();
         // Generates 1000 cache misses.
         let mut hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
+        let duration = results.entry("duration", Unit::Microseconds, MetricGoal::Decreasing);
         for _ in 0..self.num_executions {
             let elapsed = if self.ad_hoc {
                 let query = statement.generate_ad_hoc_query();
@@ -100,6 +104,7 @@ impl SingleQueryBenchmark {
                 let _: Vec<Row> = conn.exec(query, params).await?;
                 start.elapsed()
             };
+            duration.push(elapsed.as_micros() as f64);
             hist.record(u64::try_from(elapsed.as_micros()).unwrap())
                 .unwrap();
 
@@ -110,25 +115,6 @@ impl SingleQueryBenchmark {
                 elapsed.as_micros() as f64
             );
         }
-
-        results.append(&[
-            (
-                "latency p50",
-                (us_to_ms(hist.value_at_quantile(0.5)), Unit::Milliseconds),
-            ),
-            (
-                "latency p90",
-                (us_to_ms(hist.value_at_quantile(0.9)), Unit::Milliseconds),
-            ),
-            (
-                "latency p99",
-                (us_to_ms(hist.value_at_quantile(0.99)), Unit::Milliseconds),
-            ),
-            (
-                "latency p99.99",
-                (us_to_ms(hist.value_at_quantile(0.9999)), Unit::Milliseconds),
-            ),
-        ]);
 
         Ok(results)
     }

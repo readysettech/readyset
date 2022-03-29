@@ -41,6 +41,7 @@ indicatif = "0.16"
 prometheus-parse = "0.2.2"
 mysql = "22.0"
 walkdir = "2.3"
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
 
 # local dependencies
 database-utils = { path = "../database-utils" }

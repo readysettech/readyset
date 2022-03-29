@@ -9,7 +9,7 @@ use metrics::Unit;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::benchmark_histogram;
 use crate::utils::generate::DataGenerator;
 use crate::utils::prometheus::ForwardPrometheusMetrics;
@@ -56,10 +56,13 @@ impl BenchmarkControl for MigrationBenchmark {
         let mut hist_create = hdrhistogram::Histogram::<u64>::new(3).unwrap();
         let mut hist_drop = hdrhistogram::Histogram::<u64>::new(3).unwrap();
 
+        let mut migrations = vec![];
+        let mut unmigrations = vec![];
         for _ in 0..(self.num_migrations) {
             let start = Instant::now();
             self.query.migrate(&mut conn).await?;
             let create_elapsed = start.elapsed();
+            migrations.push(create_elapsed.as_micros() as f64);
             hist_create
                 .record(u64::try_from(create_elapsed.as_micros()).unwrap())
                 .unwrap();
@@ -73,6 +76,7 @@ impl BenchmarkControl for MigrationBenchmark {
             let start = Instant::now();
             self.query.unmigrate(&mut conn).await?;
             let drop_elapsed = start.elapsed();
+            unmigrations.push(drop_elapsed.as_micros() as f64);
             hist_drop
                 .record(u64::try_from(drop_elapsed.as_micros()).unwrap())
                 .unwrap();
@@ -90,65 +94,15 @@ impl BenchmarkControl for MigrationBenchmark {
                 us_to_ms(drop_elapsed.as_micros() as u64),
             );
         }
+        let mut benchmark_results = BenchmarkResults::new();
+        benchmark_results
+            .entry("migrate", Unit::Microseconds, MetricGoal::Decreasing)
+            .extend(migrations);
+        benchmark_results
+            .entry("unmigrate", Unit::Microseconds, MetricGoal::Decreasing)
+            .extend(unmigrations);
 
-        Ok(BenchmarkResults::from(&[
-            (
-                "migrate latency p50",
-                (
-                    us_to_ms(hist_create.value_at_quantile(0.5)),
-                    Unit::Milliseconds,
-                ),
-            ),
-            (
-                "migrate latency p90",
-                (
-                    us_to_ms(hist_create.value_at_quantile(0.9)),
-                    Unit::Milliseconds,
-                ),
-            ),
-            (
-                "migrate latency p99",
-                (
-                    us_to_ms(hist_create.value_at_quantile(0.99)),
-                    Unit::Milliseconds,
-                ),
-            ),
-            (
-                "migrate latency p99.99",
-                (
-                    us_to_ms(hist_create.value_at_quantile(0.9999)),
-                    Unit::Milliseconds,
-                ),
-            ),
-            (
-                "unmigrate latency p50",
-                (
-                    us_to_ms(hist_drop.value_at_quantile(0.5)),
-                    Unit::Milliseconds,
-                ),
-            ),
-            (
-                "unmigrate latency p90",
-                (
-                    us_to_ms(hist_drop.value_at_quantile(0.9)),
-                    Unit::Milliseconds,
-                ),
-            ),
-            (
-                "unmigrate latency p99",
-                (
-                    us_to_ms(hist_drop.value_at_quantile(0.99)),
-                    Unit::Milliseconds,
-                ),
-            ),
-            (
-                "unmigrate latency p99.99",
-                (
-                    us_to_ms(hist_drop.value_at_quantile(0.9999)),
-                    Unit::Milliseconds,
-                ),
-            ),
-        ]))
+        Ok(benchmark_results)
     }
 
     fn labels(&self) -> HashMap<String, String> {
@@ -164,5 +118,9 @@ impl BenchmarkControl for MigrationBenchmark {
 
     fn forward_metrics(&self, _: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics> {
         vec![]
+    }
+
+    fn name(&self) -> &'static str {
+        "migration_benchmark"
     }
 }

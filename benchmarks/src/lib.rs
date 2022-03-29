@@ -74,6 +74,10 @@
 //!     fn forward_metrics(&self, _: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics> {
 //!         vec![]
 //!     }
+//!
+//!     fn name(&self) -> &'static str {
+//!         "my_benchmark"
+//!     }
 //! }
 //! ```
 
@@ -81,6 +85,7 @@
 #![feature(type_alias_impl_trait)]
 
 pub mod benchmark;
+pub mod reporting;
 pub mod template;
 pub mod utils;
 

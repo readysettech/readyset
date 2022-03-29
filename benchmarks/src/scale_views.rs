@@ -18,7 +18,7 @@ use mysql_async::prelude::Queryable;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
-use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::{benchmark_counter, benchmark_histogram};
 
@@ -96,12 +96,15 @@ impl BenchmarkControl for ScaleViews {
 
         let mut results = BenchmarkResults::new();
         assert!(permutations.len() >= self.num_views);
-        for (i, c) in permutations.iter().enumerate().take(self.num_views) {
+        let mut connect_durations = vec![];
+        let mut prepare_durations = vec![];
+        for c in permutations.iter().take(self.num_views) {
             let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
 
             let start = Instant::now();
             let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
             let connection_time = start.elapsed();
+            connect_durations.push(connection_time.as_micros() as f64);
 
             let condition = c
                 .iter()
@@ -115,25 +118,13 @@ impl BenchmarkControl for ScaleViews {
                 .await
                 .unwrap();
             let prepare_time = start.elapsed();
+            prepare_durations.push(prepare_time.as_micros() as f64);
 
             debug!(
                 "connection:\t{:.1}ms\tprepare:\t{:.1}ms",
                 connection_time.as_secs_f64() * 1000.0,
                 prepare_time.as_secs_f64() * 1000.0
             );
-
-            if i == 0 || i == self.num_views || i == self.num_views / 2 {
-                results.append(&[
-                    (
-                        &format!("connect @ view {}", i),
-                        (connection_time.as_secs_f64() * 1000.0, Unit::Seconds),
-                    ),
-                    (
-                        &format!("prepare @ view {}", i),
-                        (connection_time.as_secs_f64() * 1000.0, Unit::Seconds),
-                    ),
-                ]);
-            }
 
             benchmark_histogram!(
                 "scale_views.connection_duration",
@@ -155,6 +146,20 @@ impl BenchmarkControl for ScaleViews {
                 1
             )
         }
+        results
+            .entry(
+                "connect_duration",
+                Unit::Microseconds,
+                MetricGoal::Decreasing,
+            )
+            .extend(connect_durations);
+        results
+            .entry(
+                "prepare_duration",
+                Unit::Microseconds,
+                MetricGoal::Decreasing,
+            )
+            .extend(prepare_durations);
 
         Ok(results)
     }
@@ -168,5 +173,9 @@ impl BenchmarkControl for ScaleViews {
 
     fn forward_metrics(&self, _: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics> {
         vec![]
+    }
+
+    fn name(&self) -> &'static str {
+        "scale_views"
     }
 }

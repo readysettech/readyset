@@ -10,12 +10,11 @@ use mysql_async::prelude::Queryable;
 use mysql_async::Row;
 use serde::{Deserialize, Serialize};
 
-use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::benchmark_histogram;
 use crate::utils::generate::DataGenerator;
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::utils::query::{ArbitraryQueryParameters, CachingQueryGenerator, Query};
-use crate::utils::us_to_ms;
 
 /// Measure query execution time for both cache hits and cache misses of a single query
 #[derive(Parser, Clone, Serialize, Deserialize)]
@@ -85,6 +84,10 @@ impl BenchmarkControl for CacheHitBenchmark {
     fn forward_metrics(&self, _: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics> {
         vec![]
     }
+
+    fn name(&self) -> &'static str {
+        "cache_hit_benchmark"
+    }
 }
 
 impl CacheHitBenchmark {
@@ -101,6 +104,8 @@ impl CacheHitBenchmark {
             true => self.num_cache_misses,
             false => self.num_cache_hits,
         };
+        let query_type = if cache_miss { "misses" } else { "hits" };
+        let results_data = results.entry(query_type, Unit::Milliseconds, MetricGoal::Decreasing);
         for _ in 0..count {
             let Query { prep, params } = if cache_miss {
                 gen.generate_cache_miss()?
@@ -110,6 +115,7 @@ impl CacheHitBenchmark {
             let start = Instant::now();
             let _: Vec<Row> = conn.exec(prep, params).await?;
             let elapsed = start.elapsed();
+            results_data.push(elapsed.as_millis() as f64);
             hist.record(u64::try_from(elapsed.as_micros()).unwrap())
                 .unwrap();
 
@@ -124,26 +130,6 @@ impl CacheHitBenchmark {
                 elapsed.as_micros() as f64
             );
         }
-
-        let query_type = if cache_miss { "misses" } else { "hits" };
-        results.append(&[
-            (
-                &format!("{} {}", query_type, "latency p50"),
-                (us_to_ms(hist.value_at_quantile(0.5)), Unit::Milliseconds),
-            ),
-            (
-                &format!("{} {}", query_type, "latency p90"),
-                (us_to_ms(hist.value_at_quantile(0.9)), Unit::Milliseconds),
-            ),
-            (
-                &format!("{} {}", query_type, "latency p99"),
-                (us_to_ms(hist.value_at_quantile(0.99)), Unit::Milliseconds),
-            ),
-            (
-                &format!("{} {}", query_type, "latency p99.99"),
-                (us_to_ms(hist.value_at_quantile(0.9999)), Unit::Milliseconds),
-            ),
-        ]);
 
         Ok(())
     }

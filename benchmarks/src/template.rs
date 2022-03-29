@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
+use metrics::Unit;
 use serde::{Deserialize, Serialize};
 
-use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::benchmark_gauge;
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 
@@ -37,7 +38,11 @@ impl BenchmarkControl for Template {
             "label_key_1" => "label_value_1",
             "label_key_2" => "label_value_2"
         );
-        Ok(BenchmarkResults::new())
+        let mut results = BenchmarkResults::new();
+        results
+            .entry("fake_metric", Unit::Microseconds, MetricGoal::Decreasing)
+            .push(1.0);
+        Ok(results)
     }
 
     fn labels(&self) -> HashMap<String, String> {
@@ -46,5 +51,9 @@ impl BenchmarkControl for Template {
 
     fn forward_metrics(&self, _: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics> {
         vec![]
+    }
+
+    fn name(&self) -> &'static str {
+        "template"
     }
 }
