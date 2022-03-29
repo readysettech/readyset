@@ -1,10 +1,12 @@
 use std::convert::{TryFrom, TryInto};
+use std::error::Error;
 use std::fmt::{self, Display};
 
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt};
+use nom_sql::{parse_key_specification_string, Dialect, TableKey};
 use noria::{ReadySetError, ReadySetResult};
-use postgres_types::Type;
+use postgres_types::{accepts, FromSql, Type};
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, info_span, trace, Instrument};
 
@@ -62,9 +64,25 @@ struct ColumnEntry {
 struct ConstraintEntry {
     #[allow(dead_code)]
     name: String,
-    definition: String,
+    definition: TableKey,
     #[allow(dead_code)]
     kind: ConstraintKind,
+}
+
+/// Newtype struct to allow converting TableKey from a SQL column in a way that lets us wrap the
+/// error in a pgsql::Error
+struct ConstraintDefinition(TableKey);
+
+impl<'a> FromSql<'a> for ConstraintDefinition {
+    fn from_sql(ty: &Type, raw: &'a [u8]) -> Result<Self, Box<dyn Error + Sync + Send>> {
+        let s = String::from_sql(ty, raw)?;
+        Ok(ConstraintDefinition(parse_key_specification_string(
+            Dialect::PostgreSQL,
+            s,
+        )?))
+    }
+
+    accepts!(TEXT);
 }
 
 impl TryFrom<pgsql::Row> for ColumnEntry {
@@ -84,7 +102,7 @@ impl Display for ColumnEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} {}{}",
+            "`{}` {}{}",
             self.name,
             self.definition,
             if self.not_null { " NOT NULL" } else { "" },
@@ -96,9 +114,11 @@ impl TryFrom<pgsql::Row> for ConstraintEntry {
     type Error = pgsql::Error;
 
     fn try_from(row: pgsql::Row) -> Result<Self, Self::Error> {
+        let ConstraintDefinition(definition) = row.try_get(1)?;
+
         Ok(ConstraintEntry {
             name: row.try_get(0)?,
-            definition: row.try_get(1)?,
+            definition,
             kind: match row.try_get::<_, i8>(2)? as u8 {
                 b'f' => ConstraintKind::ForeignKey,
                 b'p' => ConstraintKind::PrimaryKey,
@@ -356,7 +376,7 @@ impl<'a> PostgresReplicator<'a> {
             let create_view = view.get_create_view(&self.transaction).await?;
             // Postgres returns a postgres style CREATE statement, but Noria only accepts MySQL
             // style
-            let view = match nom_sql::parse_query(nom_sql::Dialect::PostgreSQL, &create_view) {
+            let view = match nom_sql::parse_query(Dialect::PostgreSQL, &create_view) {
                 Ok(v) => v.to_string(),
                 Err(err) => {
                     error!(%err, "Error parsing CREATE VIEW, view will not be used");
@@ -449,5 +469,77 @@ impl<'a> PostgresReplicator<'a> {
         let query = format!("SET TRANSACTION SNAPSHOT '{}'", name);
         self.transaction.query(query.as_str(), &[]).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nom_sql::{parse_query, Column, Dialect, SqlQuery, TableKey};
+
+    use super::*;
+
+    #[test]
+    fn table_description_with_reserved_keywords_to_string_parses() {
+        let desc = TableDescription {
+            schema: "public".into(),
+            name: "ar_internal_metadata".into(),
+            columns: vec![
+                ColumnEntry {
+                    name: "key".into(),
+                    definition: "varchar".into(),
+                    not_null: true,
+                    type_oid: Type::VARCHAR,
+                },
+                ColumnEntry {
+                    name: "value".into(),
+                    definition: "varchar".into(),
+                    not_null: false,
+                    type_oid: Type::VARCHAR,
+                },
+                ColumnEntry {
+                    name: "created_at".into(),
+                    definition: "timestamp(6) without time zone".into(),
+                    not_null: true,
+                    type_oid: Type::TIMESTAMP,
+                },
+                ColumnEntry {
+                    name: "updated_at".into(),
+                    definition: "timestamp(6) without time zone".into(),
+                    not_null: true,
+                    type_oid: Type::TIMESTAMP,
+                },
+            ],
+            constraints: vec![ConstraintEntry {
+                name: "ar_internal_metadata_pkey".into(),
+                definition: TableKey::PrimaryKey {
+                    name: None,
+                    columns: vec![Column {
+                        name: "key".into(),
+                        table: None,
+                    }],
+                },
+                kind: ConstraintKind::PrimaryKey,
+            }],
+        };
+        let res = parse_query(Dialect::MySQL, desc.to_string());
+        assert!(res.is_ok(), "{}", res.err().unwrap());
+        let create_table = match res.unwrap() {
+            SqlQuery::CreateTable(ct) => ct,
+            _ => panic!(),
+        };
+
+        assert_eq!(create_table.table.name, "ar_internal_metadata");
+        assert_eq!(create_table.fields.len(), 4);
+        assert!(create_table.keys.is_some());
+        assert_eq!(create_table.keys.as_ref().unwrap().len(), 1);
+        let pkey = create_table.keys.as_ref().unwrap().first().unwrap();
+        match pkey {
+            TableKey::PrimaryKey { name, columns } => {
+                assert!(name.is_none());
+                assert_eq!(columns.len(), 1);
+                assert_eq!(columns.first().unwrap().name, "key");
+            }
+            _ => panic!(),
+        }
     }
 }

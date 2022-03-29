@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::alter::{alter_table_statement, AlterTableStatement};
 use crate::compound_select::{compound_selection, CompoundSelectStatement};
 use crate::create::{
-    create_cached_query, creation, view_creation, CreateCacheStatement, CreateTableStatement,
-    CreateViewStatement,
+    create_cached_query, creation, key_specification, view_creation, CreateCacheStatement,
+    CreateTableStatement, CreateViewStatement,
 };
 use crate::delete::{deletion, DeleteStatement};
 use crate::drop::{drop_cached_query, drop_table, DropCacheStatement, DropTableStatement};
@@ -25,7 +25,7 @@ use crate::transaction::{
 };
 use crate::update::{updating, UpdateStatement};
 use crate::use_statement::{use_statement, UseStatement};
-use crate::Dialect;
+use crate::{Dialect, TableKey};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
@@ -138,6 +138,7 @@ pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery>
     }
 }
 
+/// Parse a SQL query from a byte slice
 pub fn parse_query_bytes<T>(dialect: Dialect, input: T) -> Result<SqlQuery, &'static str>
 where
     T: AsRef<[u8]>,
@@ -148,11 +149,37 @@ where
     }
 }
 
+/// Parse a SQL query from a string
 pub fn parse_query<T>(dialect: Dialect, input: T) -> Result<SqlQuery, &'static str>
 where
     T: AsRef<str>,
 {
     parse_query_bytes(dialect, input.as_ref().trim().as_bytes())
+}
+
+/// Parse a specification for a table key or constraint from a byte slice
+pub fn parse_key_specification_bytes<T>(
+    dialect: Dialect,
+    input: T,
+) -> Result<TableKey, &'static str>
+where
+    T: AsRef<[u8]>,
+{
+    match key_specification(dialect)(input.as_ref()) {
+        Ok((_, o)) => Ok(o),
+        Err(_) => Err("failed to parse query"),
+    }
+}
+
+/// Parse a specification for a table key or constraint from a string
+pub fn parse_key_specification_string<T>(
+    dialect: Dialect,
+    input: T,
+) -> Result<TableKey, &'static str>
+where
+    T: AsRef<str>,
+{
+    parse_key_specification_bytes(dialect, input.as_ref().trim().as_bytes())
 }
 
 #[cfg(test)]
