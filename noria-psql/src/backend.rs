@@ -50,6 +50,8 @@ impl ps::Backend for Backend {
     type Row = Row;
     type Resultset = Resultset;
 
+    const SERVER_VERSION: &'static str = "13.4 (ReadySet)";
+
     async fn on_init(&mut self, _database: &str) -> Result<(), ps::Error> {
         Ok(())
     }

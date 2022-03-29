@@ -26,6 +26,8 @@ impl Backend for ServeOneBackend {
     type Row = Vec<Value>;
     type Resultset = Vec<Self::Row>;
 
+    const SERVER_VERSION: &'static str = "example";
+
     async fn on_init(&mut self, _database: &str) -> Result<(), Error> {
         Ok(())
     }

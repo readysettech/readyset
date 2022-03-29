@@ -161,6 +161,10 @@ impl Protocol {
                             parameter_name: "TimeZone".to_owned(),
                             parameter_value: "UTC".to_owned(),
                         },
+                        BackendMessage::ParameterStatus {
+                            parameter_name: "server_version".to_owned(),
+                            parameter_value: B::SERVER_VERSION.to_owned(),
+                        },
                         BackendMessage::ready_for_query_idle(),
                     ]))
                 }
@@ -558,6 +562,8 @@ mod tests {
         type Row = Vec<Self::Value>;
         type Resultset = Vec<Self::Row>;
 
+        const SERVER_VERSION: &'static str = "test";
+
         async fn on_init(&mut self, database: &str) -> Result<(), Error> {
             self.database = Some(database.to_string());
             Ok(())
@@ -719,6 +725,10 @@ mod tests {
                 BackendMessage::ParameterStatus {
                     parameter_name: "TimeZone".to_owned(),
                     parameter_value: "UTC".to_owned(),
+                },
+                BackendMessage::ParameterStatus {
+                    parameter_name: "server_version".to_owned(),
+                    parameter_value: "test".to_owned(),
                 },
                 BackendMessage::ready_for_query_idle()
             ])
