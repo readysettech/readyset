@@ -1,11 +1,11 @@
 ---
 CacheHitBenchmark:
   query:
-    query: benchmarks/src/data/minimal/paginate.sql
+    query: minimal/paginate.sql
     query_spec_file: ~
     query_spec: group 100;constant 0
   data_generator:
-    schema: benchmarks/src/data/minimal/db.sql
+    schema: minimal/db.sql
     var_overrides: {}
   num_cache_hits: 0
   num_cache_misses: 1000
