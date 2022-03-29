@@ -360,7 +360,15 @@ impl<'a> PostgresReplicator<'a> {
         // For each table, retreive its structure
         let mut tables = Vec::with_capacity(table_list.len());
         for table in table_list {
-            let create_table = table.get_table(&self.transaction).await?;
+            trace!(table = %table.name, "Looking up table");
+            let create_table = match table.get_table(&self.transaction).await {
+                Ok(ct) => ct,
+                Err(error) => {
+                    error!(%error, "Error looking up table, table will not be used");
+                    continue;
+                }
+            };
+
             debug!(%create_table, "Extending recipe");
             match self
                 .noria
@@ -368,7 +376,9 @@ impl<'a> PostgresReplicator<'a> {
                 .await
             {
                 Ok(_) => tables.push(create_table),
-                Err(err) => error!(%err, "Error extending CREATE TABLE, table will not be used"),
+                Err(error) => {
+                    error!(%error, "Error extending CREATE TABLE, table will not be used")
+                }
             }
         }
 
