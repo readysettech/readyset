@@ -1,8 +1,20 @@
 locals {
+  # Adding keys to the map will
+  # deploy new Buildkite queues with the
+  # name of the queue = the key
   instance_types = {
-    "t3a.small"   = 10,
-    "r5a.2xlarge" = 3,
-    "c5a.4xlarge" = 3,
+      "t3a.small" = {
+        min_size = 3,
+        max_size = 20,
+      }
+      "r5a.2xlarge" = {
+        min_size = 1,
+        max_size = 15,
+      }
+      "c5a.4xlarge" = {
+        min_size = 0,
+        max_size = 20
+    }
   }
 
   extra_iam_policy_arns = [
@@ -34,7 +46,7 @@ resource "aws_s3_bucket_public_access_block" "sccache" {
 module "buildkite_queue_shared" {
   source           = "../../../../../modules/buildkite-queue-shared/regional"
   environment      = "build"
-  buildkite_queues = [for it in local.instance_types : replace(it, ".", "-")]
+  buildkite_queues = [for k, _ in local.instance_types : replace(k, ".", "-")]
 
   agent_token_allowed_roles = concat(
     tolist(module.buildkite_ops_queue.iam_roles),
@@ -61,7 +73,8 @@ module "buildkite_queue" {
   extra_iam_policy_arns = local.extra_iam_policy_arns
 
   instance_type = each.key
-  max_size      = each.value
+  min_size      = each.value["min_size"]
+  max_size      = each.value["max_size"]
 }
 
 resource "aws_s3_bucket" "ops-secrets" {
