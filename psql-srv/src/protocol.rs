@@ -14,6 +14,7 @@ use crate::message::StatementName::*;
 use crate::message::TransferFormat::{self, *};
 use crate::message::{CommandCompleteTag, ErrorSeverity, FieldDescription, SqlState};
 use crate::response::Response;
+use crate::util::type_is_oid;
 use crate::value::Value;
 use crate::QueryResponse::*;
 use crate::{Backend, Column, PrepareResponse};
@@ -458,7 +459,7 @@ fn make_field_description(
         Type::INT2 => TYPLEN_2,
         Type::INT4 => TYPLEN_4,
         Type::INT8 => TYPLEN_8,
-        Type::OID => TYPLEN_4,
+        ref t if type_is_oid(t) => TYPLEN_4,
         Type::FLOAT4 => TYPLEN_4,
         Type::FLOAT8 => TYPLEN_8,
         Type::NUMERIC => TYPLEN_VARLENA,

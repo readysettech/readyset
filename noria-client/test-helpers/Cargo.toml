@@ -13,6 +13,7 @@ tokio = { version = "1.15", features = ["signal", "rt-multi-thread", "time"] }
 chrono = "0.4"
 mysql_async = { version = "0.29.0", optional = true }
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"], optional = true }
+tracing = "0.1.32"
 
 nom-sql = { path = "../../nom-sql" }
 noria = { path = "../../noria/noria/" }

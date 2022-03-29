@@ -26,11 +26,14 @@ mod types {
         arbitrary_json_without_f64, arbitrary_mac_address, arbitrary_naive_date,
         arbitrary_naive_time, arbitrary_systemtime, arbitrary_uuid,
     };
+    use noria_client_test_helpers::psql_helpers::upstream_config;
     use noria_client_test_helpers::sleep;
+    use noria_data::DataType;
     use proptest::prelude::ProptestConfig;
     use proptest::string::string_regex;
     use rust_decimal::Decimal;
     use tokio_postgres::types::{FromSql, ToSql};
+    use tokio_postgres::NoTls;
     use uuid::Uuid;
 
     use super::*;
@@ -139,5 +142,60 @@ mod types {
         bit_varying_unlimited_bitvec("bit varying", #[strategy(arbitrary_bitvec(0..=20))] bit_vec::BitVec);
         bit_varying_bitvec("bit varying(10)", #[strategy(arbitrary_bitvec(0..=10))] bit_vec::BitVec);
         timestamp_tz_datetime("timestamp with time zone", #[strategy(arbitrary_date_time())] chrono::DateTime::<chrono::FixedOffset>);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial_test::serial]
+    async fn regclass() {
+        let (config, _handle) = setup().await;
+        let client = connect(config).await;
+
+        client
+            .simple_query("CREATE TABLE t (id int primary key)")
+            .await
+            .unwrap();
+
+        client
+            .query_one("SELECT 't'::regclass", &[])
+            .await
+            .unwrap()
+            .get::<_, DataType>(0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial_test::serial]
+    async fn regproc() {
+        let (upstream, upstream_conn) = upstream_config()
+            .dbname("postgres")
+            .connect(NoTls)
+            .await
+            .unwrap();
+        tokio::spawn(upstream_conn);
+
+        let upstream_res: DataType = upstream
+            .query_one("SELECT typinput FROM pg_type WHERE typname = 'bool'", &[])
+            .await
+            .unwrap()
+            .get(0);
+
+        let (config, _handle) = setup().await;
+        let client = connect(config).await;
+
+        let typinput: DataType = client
+            .query_one("SELECT typinput FROM pg_type WHERE typname = 'bool'", &[])
+            .await
+            .unwrap()
+            .get(0);
+        assert_eq!(typinput, upstream_res);
+
+        let typname: String = client
+            .query_one(
+                "SELECT typname FROM pg_type WHERE typinput = $1",
+                &[&typinput],
+            )
+            .await
+            .unwrap()
+            .get(0);
+        assert_eq!(typname, "bool");
     }
 }

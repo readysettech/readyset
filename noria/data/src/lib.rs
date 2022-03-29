@@ -1518,7 +1518,21 @@ impl ToSql for DataType {
             (Self::Int(x), &Type::INT4) => (*x as i32).to_sql(ty, out),
             (Self::Int(x), _) => x.to_sql(ty, out),
             (Self::UnsignedInt(x), &Type::BOOL) => (*x != 0).to_sql(ty, out),
-            (Self::UnsignedInt(x), &Type::OID) => u32::try_from(*x)?.to_sql(ty, out),
+            (
+                Self::UnsignedInt(x),
+                &Type::OID
+                | &Type::REGCLASS
+                | &Type::REGCOLLATION
+                | &Type::REGCONFIG
+                | &Type::REGDICTIONARY
+                | &Type::REGNAMESPACE
+                | &Type::REGOPER
+                | &Type::REGOPERATOR
+                | &Type::REGPROC
+                | &Type::REGPROCEDURE
+                | &Type::REGROLE
+                | &Type::REGTYPE,
+            ) => u32::try_from(*x)?.to_sql(ty, out),
             (Self::UnsignedInt(x), _) => (*x as i64).to_sql(ty, out),
             (Self::Float(x), _) => x.to_sql(ty, out),
             (Self::Double(x), _) => x.to_sql(ty, out),
@@ -1576,6 +1590,17 @@ impl ToSql for DataType {
         INT4,
         INT8,
         OID,
+        REGCLASS,
+        REGCOLLATION,
+        REGCONFIG,
+        REGDICTIONARY,
+        REGNAMESPACE,
+        REGOPER,
+        REGOPERATOR,
+        REGPROC,
+        REGPROCEDURE,
+        REGROLE,
+        REGTYPE,
         FLOAT4,
         FLOAT8,
         NUMERIC,
@@ -1615,7 +1640,18 @@ impl<'a> FromSql<'a> for DataType {
             Type::INT2 => mk_from_sql!(i16),
             Type::INT4 => mk_from_sql!(i32),
             Type::INT8 => mk_from_sql!(i64),
-            Type::OID => mk_from_sql!(u32),
+            Type::OID
+            | Type::REGCLASS
+            | Type::REGCOLLATION
+            | Type::REGCONFIG
+            | Type::REGDICTIONARY
+            | Type::REGNAMESPACE
+            | Type::REGOPER
+            | Type::REGOPERATOR
+            | Type::REGPROC
+            | Type::REGPROCEDURE
+            | Type::REGROLE
+            | Type::REGTYPE => mk_from_sql!(u32),
             Type::TEXT | Type::VARCHAR | Type::NAME => mk_from_sql!(&str),
             Type::FLOAT4 => mk_from_sql!(f32),
             Type::FLOAT8 => mk_from_sql!(f64),
@@ -1654,6 +1690,17 @@ impl<'a> FromSql<'a> for DataType {
         INT4,
         INT8,
         OID,
+        REGCLASS,
+        REGCOLLATION,
+        REGCONFIG,
+        REGDICTIONARY,
+        REGNAMESPACE,
+        REGOPER,
+        REGOPERATOR,
+        REGPROC,
+        REGPROCEDURE,
+        REGROLE,
+        REGTYPE,
         FLOAT4,
         FLOAT8,
         NUMERIC,
