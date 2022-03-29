@@ -86,6 +86,9 @@ if [[ "$BUILDKITE_BRANCH" == "refs/heads/main" ]]; then
     fi
     docker tag "$image:$tag" "$image:$latest_tag"
     tags_to_push+=("$image:$latest_tag")
+    # Always push image for commit
+    docker tag "$image:$tag" "$image:$VERSION"
+    tags_to_push+=("$image:$VERSION")
 fi
 
 for tag in "${tags_to_push[@]}"; do
