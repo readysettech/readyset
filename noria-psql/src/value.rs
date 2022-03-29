@@ -2,6 +2,7 @@ use std::convert::{TryFrom, TryInto};
 
 use eui48::MacAddress;
 use noria_data::DataType;
+use ps::util::type_is_oid;
 use psql_srv as ps;
 use rust_decimal::Decimal;
 use tokio_postgres::types::Type;
@@ -40,8 +41,10 @@ impl TryFrom<Value> for ps::Value {
             (Type::INT4, DataType::UnsignedInt(v)) => Ok(ps::Value::Int(v as _)),
             (Type::INT8, DataType::UnsignedInt(v)) => Ok(ps::Value::Bigint(v as _)),
 
-            (Type::OID, DataType::UnsignedInt(v)) => Ok(ps::Value::Oid(v.try_into()?)),
-            (Type::OID, DataType::Int(v)) => Ok(ps::Value::Oid(v.try_into()?)),
+            (ref ty, DataType::UnsignedInt(v)) if type_is_oid(ty) => {
+                Ok(ps::Value::Oid(v.try_into()?))
+            }
+            (ref ty, DataType::Int(v)) if type_is_oid(ty) => Ok(ps::Value::Oid(v.try_into()?)),
 
             (Type::FLOAT4, DataType::Float(f)) => Ok(ps::Value::Float(f)),
             (Type::FLOAT8, DataType::Double(f)) => Ok(ps::Value::Double(f)),

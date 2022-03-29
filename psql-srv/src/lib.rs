@@ -22,6 +22,7 @@ mod message;
 mod protocol;
 mod response;
 mod runner;
+pub mod util;
 mod value;
 
 use std::convert::TryInto;

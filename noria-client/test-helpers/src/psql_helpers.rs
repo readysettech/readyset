@@ -8,6 +8,7 @@ use noria_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use noria_server::Handle;
 use tokio::net::TcpStream;
 use tokio_postgres::NoTls;
+use tracing::error;
 
 use crate::{sleep, Adapter};
 
@@ -31,6 +32,25 @@ pub async fn setup(partial: bool) -> (tokio_postgres::Config, Handle) {
         ReadBehavior::Blocking,
     )
     .await
+}
+
+pub fn upstream_config() -> tokio_postgres::Config {
+    let mut config = tokio_postgres::Config::new();
+    config
+        .user(&env::var("PGUSER").unwrap_or_else(|_| "postgres".into()))
+        .password(
+            env::var("PGPASSWORD")
+                .unwrap_or_else(|_| "noria".into())
+                .as_bytes(),
+        )
+        .host(&env::var("PGHOST").unwrap_or_else(|_| "localhost".into()))
+        .port(
+            env::var("PGPORT")
+                .unwrap_or_else(|_| "5432".into())
+                .parse()
+                .unwrap(),
+        );
+    config
 }
 
 pub struct PostgreSQLAdapter;
@@ -60,29 +80,12 @@ impl Adapter for PostgreSQLAdapter {
     }
 
     async fn recreate_database() {
-        let mut config = tokio_postgres::Config::new();
-        config
-            .user(&env::var("PGUSER").unwrap_or_else(|_| "postgres".into()))
-            .password(
-                env::var("PGPASSWORD")
-                    .unwrap_or_else(|_| "noria".into())
-                    .as_bytes(),
-            )
-            .host(&env::var("PGHOST").unwrap_or_else(|_| "localhost".into()))
-            .port(
-                env::var("PGPORT")
-                    .unwrap_or_else(|_| "5432".into())
-                    .parse()
-                    .unwrap(),
-            );
+        let mut config = upstream_config();
 
         let (client, connection) = config.dbname("postgres").connect(NoTls).await.unwrap();
         tokio::spawn(connection);
-        while client
-            .simple_query("DROP DATABASE IF EXISTS noria")
-            .await
-            .is_err()
-        {
+        while let Err(error) = client.simple_query("DROP DATABASE IF EXISTS noria").await {
+            error!(%error, "Error dropping database");
             sleep().await
         }
 
