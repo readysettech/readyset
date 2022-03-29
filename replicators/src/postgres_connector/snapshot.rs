@@ -71,19 +71,9 @@ impl TryFrom<pgsql::Row> for ColumnEntry {
     type Error = pgsql::Error;
 
     fn try_from(row: pgsql::Row) -> Result<Self, Self::Error> {
-        // Postgres is sending full type names for column types, but noria doesn't handle them
-        // properly yet
-        let definition = match row.try_get(1)? {
-            "timestamp without time zone" => "timestamp".to_string(),
-            val if val.starts_with("character varying") => {
-                val.replace("character varying", "varchar")
-            }
-            val => val.to_string(),
-        };
-
         Ok(ColumnEntry {
             name: row.try_get(0)?,
-            definition,
+            definition: row.try_get(1)?,
             not_null: row.try_get(2)?,
             type_oid: Type::from_oid(row.try_get(3)?).unwrap(),
         })

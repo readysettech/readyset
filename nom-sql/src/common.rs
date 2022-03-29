@@ -1965,5 +1965,20 @@ mod tests {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"varchar");
             assert_eq!(res, SqlType::Varchar(None));
         }
+
+        #[test]
+        fn character_varying() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"character varying");
+            assert_eq!(res, SqlType::Varchar(None));
+        }
+
+        #[test]
+        fn character_varying_with_length() {
+            let res = test_parse!(
+                type_identifier(Dialect::PostgreSQL),
+                b"character varying(20)"
+            );
+            assert_eq!(res, SqlType::Varchar(Some(20)));
+        }
     }
 }
