@@ -66,7 +66,7 @@ struct ConstraintEntry {
     name: String,
     definition: TableKey,
     #[allow(dead_code)]
-    kind: ConstraintKind,
+    kind: Option<ConstraintKind>,
 }
 
 /// Newtype struct to allow converting TableKey from a SQL column in a way that lets us wrap the
@@ -119,12 +119,12 @@ impl TryFrom<pgsql::Row> for ConstraintEntry {
         Ok(ConstraintEntry {
             name: row.try_get(0)?,
             definition,
-            kind: match row.try_get::<_, i8>(2)? as u8 {
+            kind: row.try_get::<_, Option<i8>>(2)?.map(|c| match c as u8 {
                 b'f' => ConstraintKind::ForeignKey,
                 b'p' => ConstraintKind::PrimaryKey,
                 b'u' => ConstraintKind::UniqueKey,
                 b => ConstraintKind::Other(b),
-            },
+            }),
         })
     }
 }
@@ -169,7 +169,10 @@ impl TableEntry {
             SELECT c2.relname, pg_catalog.pg_get_constraintdef(con.oid, true), contype
             FROM pg_catalog.pg_class c, pg_catalog.pg_class c2, pg_catalog.pg_index i
             LEFT JOIN pg_catalog.pg_constraint con ON (conrelid = i.indrelid AND conindid = i.indexrelid AND contype IN ('f','p','u'))
-            WHERE c.oid = $1 AND c.oid = i.indrelid AND i.indexrelid = c2.oid
+            WHERE c.oid = $1
+            AND c.oid = i.indrelid
+            AND i.indexrelid = c2.oid
+            AND pg_catalog.pg_get_constraintdef(con.oid, true) IS NOT NULL
             ORDER BY i.indisprimary DESC, c2.relname;
             ";
 
@@ -528,7 +531,7 @@ mod tests {
                         table: None,
                     }],
                 },
-                kind: ConstraintKind::PrimaryKey,
+                kind: Some(ConstraintKind::PrimaryKey),
             }],
         };
         let res = parse_query(Dialect::MySQL, desc.to_string());
