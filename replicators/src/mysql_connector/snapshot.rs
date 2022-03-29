@@ -78,9 +78,11 @@ fn tx_opts() -> TxOpts {
 }
 
 impl MySqlReplicator {
-    /// Load all the `CREATE TABLE` statements for the database and concatenate them
-    /// into a single String that can be installed as a recipe in Noria. Return the stirng
-    /// and the transaction that holds the DDL locks for the tables.
+    /// Load all the `CREATE TABLE` statements for the tables in the MySQL database. Returns the the
+    /// transaction that holds the DDL locks for the tables.
+    ///
+    /// If `install` is set to `true`, will also install the tables in Noria one-by-one, skipping
+    /// over any tables that fail to install
     pub async fn load_recipe_with_meta_lock(
         &mut self,
         noria: &mut noria::ControllerHandle,
