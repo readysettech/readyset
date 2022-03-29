@@ -4,6 +4,7 @@ use serial_test::serial;
 
 mod common;
 use common::connect;
+use tokio_postgres::SimpleQueryMessage;
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
@@ -31,6 +32,26 @@ async fn create_table() {
         .unwrap()
         .get::<_, i32>(0);
     assert_eq!(result, 1)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn unsupported_query_ad_hoc() {
+    let (config, _handle) = setup_w_fallback().await;
+    let client = connect(config).await;
+    let result = match client
+        .simple_query("SELECT relname FROM pg_class WHERE oid = 'pg_type'::regclass")
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap()
+    {
+        SimpleQueryMessage::Row(row) => row.get(0).unwrap().to_owned(),
+        _ => panic!(),
+    };
+
+    assert_eq!(result, "pg_type");
 }
 
 #[tokio::test(flavor = "multi_thread")]

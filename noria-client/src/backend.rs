@@ -1393,6 +1393,7 @@ where
 
     async fn query_adhoc_select(
         &mut self,
+        original_query: &str,
         stmt: &SelectStatement,
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
@@ -1439,7 +1440,7 @@ where
                     &status.execution_info.unwrap().last_transition_time,
                 );
             }
-            return self.query_fallback(&stmt.to_string(), event).await;
+            return self.query_fallback(original_query, event).await;
         }
 
         let noria_res = {
@@ -1502,7 +1503,7 @@ where
                     event.destination = Some(QueryDestination::NoriaThenFallback);
                     let _t = event.start_upstream_timer();
                     fallback
-                        .query(&stmt.to_string())
+                        .query(&original_query)
                         .await
                         .map(QueryResult::Upstream)
                 } else {
@@ -1554,7 +1555,7 @@ where
             Ok(ref parsed_query) if let Some(noria_extension) = self.query_noria_extensions(parsed_query, &mut event).await => {
                 noria_extension.map(Into::into).map_err(Into::into)
             }
-            Ok(SqlQuery::Select(ref stmt)) => self.query_adhoc_select(stmt, &mut event).await,
+            Ok(SqlQuery::Select(ref stmt)) => self.query_adhoc_select(query, stmt, &mut event).await,
             Ok(parsed_query) => self.query_adhoc_non_select(query, &mut event, parsed_query).await,
         }
         .map(|r| r.into_owned());
