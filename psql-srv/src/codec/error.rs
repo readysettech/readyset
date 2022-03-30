@@ -1,9 +1,8 @@
-use std::fmt;
 use std::marker::{Send, Sync};
 use std::num::{ParseFloatError, ParseIntError, TryFromIntError};
 use std::str::Utf8Error;
+use std::{fmt, net};
 
-use eui48::ParseError;
 use hex::FromHexError;
 use postgres_types::Type;
 use thiserror::Error;
@@ -45,7 +44,10 @@ pub enum DecodeError {
     InvalidTextByteArrayValue(FromHexError),
 
     #[error("invalid text mac address value: {0}")]
-    InvalidTextMacAddressValue(ParseError),
+    InvalidTextMacAddressValue(eui48::ParseError),
+
+    #[error("invalid text ip address value: {0}")]
+    InvalidTextIpAddressValue(net::AddrParseError),
 
     #[error("invalid text uuid value: {0}")]
     InvalidTextUuidValue(uuid::Error),

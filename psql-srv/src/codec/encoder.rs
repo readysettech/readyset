@@ -361,6 +361,9 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::MacAddress(m) => {
             m.to_sql(&Type::MACADDR, dst)?;
         }
+        Value::Inet(ip) => {
+            ip.to_sql(&Type::INET, dst)?;
+        }
         Value::Uuid(u) => {
             u.to_sql(&Type::UUID, dst)?;
         }
@@ -463,6 +466,7 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
             )?;
         }
         Value::MacAddress(m) => write!(dst, "{}", m.to_string(MacAddressFormat::HexString))?,
+        Value::Inet(ip) => write!(dst, "{}", ip)?,
         Value::Uuid(u) => write!(dst, "{}", u)?,
         Value::Json(v) => write!(dst, "{}", v)?,
         Value::Jsonb(v) => write!(dst, "{}", v)?,

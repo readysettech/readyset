@@ -1,3 +1,5 @@
+use std::net::IpAddr;
+
 use bit_vec::BitVec;
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use eui48::MacAddress;
@@ -27,6 +29,7 @@ pub enum Value {
     Time(NaiveTime),
     ByteArray(Vec<u8>),
     MacAddress(MacAddress),
+    Inet(IpAddr),
     Uuid(Uuid),
     Json(serde_json::Value),
     Jsonb(serde_json::Value),

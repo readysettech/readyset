@@ -3,6 +3,7 @@
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::hash::{Hash, Hasher};
+use std::net::IpAddr;
 use std::ops::{Add, Div, Mul, Sub};
 use std::{fmt, mem};
 
@@ -1549,6 +1550,16 @@ impl ToSql for DataType {
                     })
                     .and_then(|m| m.to_sql(ty, out))
             }
+            (Self::Text(_) | Self::TinyText(_), &Type::INET) => <&str>::try_from(self)
+                .unwrap()
+                .parse::<IpAddr>()
+                .map_err(|e| {
+                    Box::<dyn Error + Send + Sync>::from(format!(
+                        "Could not convert Text into an IP Address: {}",
+                        e
+                    ))
+                })
+                .and_then(|ip| ip.to_sql(ty, out)),
             (Self::Text(_) | Self::TinyText(_), &Type::UUID) => {
                 Uuid::parse_str(<&str>::try_from(self).unwrap())
                     .map_err(|e| {
@@ -1613,6 +1624,7 @@ impl ToSql for DataType {
         TIMESTAMP,
         TIMESTAMPTZ,
         MACADDR,
+        INET,
         UUID,
         JSON,
         JSONB,
@@ -1666,6 +1678,7 @@ impl<'a> FromSql<'a> for DataType {
             Type::MACADDR => Ok(DataType::from(
                 MacAddress::from_sql(ty, raw)?.to_string(MacAddressFormat::HexString),
             )),
+            Type::INET => Ok(DataType::from(IpAddr::from_sql(ty, raw)?.to_string())),
             Type::UUID => Ok(DataType::from(Uuid::from_sql(ty, raw)?.to_string())),
             Type::JSON | Type::JSONB => Ok(DataType::from(
                 serde_json::Value::from_sql(ty, raw)?.to_string(),
@@ -1713,6 +1726,7 @@ impl<'a> FromSql<'a> for DataType {
         TIMESTAMP,
         TIMESTAMPTZ,
         MACADDR,
+        INET,
         JSON,
         JSONB,
         BIT,

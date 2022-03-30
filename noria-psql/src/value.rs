@@ -1,4 +1,5 @@
 use std::convert::{TryFrom, TryInto};
+use std::net::IpAddr;
 
 use eui48::MacAddress;
 use noria_data::DataType;
@@ -6,7 +7,7 @@ use ps::util::type_is_oid;
 use psql_srv as ps;
 use rust_decimal::Decimal;
 use tokio_postgres::types::Type;
-use tracing::error;
+use tracing::{error, trace};
 use uuid::Uuid;
 
 /// An encapsulation of a Noria `DataType` value that facilitates conversion of this `DataType`
@@ -74,6 +75,12 @@ impl TryFrom<Value> for ps::Value {
                 MacAddress::parse_str(m.as_str())
                     .map_err(|e| ps::Error::ParseError(e.to_string()))?,
             )),
+            (Type::INET, dt @ (DataType::Text(_) | DataType::TinyText(_))) => Ok(ps::Value::Inet(
+                <&str>::try_from(&dt)
+                    .unwrap()
+                    .parse::<IpAddr>()
+                    .map_err(|e| ps::Error::ParseError(e.to_string()))?,
+            )),
             (Type::UUID, DataType::Text(u)) => Ok(ps::Value::Uuid(
                 Uuid::parse_str(u.as_str()).map_err(|e| ps::Error::ParseError(e.to_string()))?,
             )),
@@ -100,6 +107,7 @@ impl TryFrom<Value> for ps::Value {
             (Type::BIT, DataType::BitVector(ref b)) => Ok(ps::Value::Bit(b.as_ref().clone())),
             (Type::VARBIT, DataType::BitVector(ref b)) => Ok(ps::Value::VarBit(b.as_ref().clone())),
             (t, dt) => {
+                trace!(?t, ?dt);
                 error!(
                     psql_type = %t,
                     data_type = ?dt.sql_type(),

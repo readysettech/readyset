@@ -114,6 +114,7 @@ impl TryFrom<ParamRef<'_>> for DataType {
             ps::Value::MacAddress(m) => {
                 Ok(DataType::from(m.to_string(MacAddressFormat::HexString)))
             }
+            ps::Value::Inet(ip) => Ok(DataType::from(ip.to_string())),
             ps::Value::Uuid(uuid) => Ok(DataType::from(uuid.to_string())),
             ps::Value::Json(v) | ps::Value::Jsonb(v) => Ok(DataType::from(v.to_string())),
             ps::Value::Bit(bits) | ps::Value::VarBit(bits) => Ok(DataType::from(bits.clone())),

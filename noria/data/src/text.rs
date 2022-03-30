@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::net::IpAddr;
 use std::num::{IntErrorKind, ParseIntError};
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
@@ -337,8 +338,8 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DataType> {
 
             SqlType::MacAddr => {
                 // Since MAC addresses can be represented in many ways, if we want to store them as
-                // a string, we have to at least normalize to the same
-                // representation. I.e. we want to make sure that
+                // a string, we have to at least normalize to the same representation.
+                // I.e. we want to make sure that:
                 // '08:00:2b:01:02:03'
                 // '08-00-2b-01-02-03'
                 // '08002b:010203'
@@ -355,6 +356,20 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DataType> {
                 } else {
                     Ok(mac.into())
                 }
+            }
+
+            SqlType::Inet => {
+                // Since MAC addresses can be represented in many ways, if we want to store them as
+                // a string, we have to at least normalize to the same representation.
+                // I.e. we want to make sure that:
+                // '0::beef',
+                // '0:0::beef', and
+                // '::beef' are equal
+                let ip = str
+                    .parse::<IpAddr>()
+                    .map_err(|e| Self::coerce_err(sql_type, e))?
+                    .to_string();
+                Ok(ip.into())
             }
 
             SqlType::Uuid => {
@@ -604,6 +619,13 @@ mod tests {
                 .coerce_to(&SqlType::MacAddr)
                 .unwrap(),
             DataType::from("08:00:2b:01:02:03"),
+        );
+        // TEXT to INET
+        assert_eq!(
+            DataType::from("feed:0:0::beef")
+                .coerce_to(&SqlType::Inet)
+                .unwrap(),
+            DataType::from("feed::beef")
         );
     }
 }

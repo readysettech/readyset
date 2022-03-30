@@ -19,6 +19,7 @@ async fn setup() -> (tokio_postgres::Config, Handle) {
 
 mod types {
     use std::fmt::Display;
+    use std::net::IpAddr;
 
     use eui48::MacAddress;
     use launchpad::arbitrary::{
@@ -130,6 +131,7 @@ mod types {
         numeric_decimal("numeric", #[strategy(arbitrary_decimal())] Decimal);
         decimal("decimal", #[strategy(arbitrary_decimal())] Decimal);
         timestamp_systemtime("timestamp", #[strategy(arbitrary_systemtime())] std::time::SystemTime);
+        inet_ipaddr("inet", IpAddr);
         macaddr_string("macaddr", #[strategy(arbitrary_mac_address())] MacAddress);
         uuid_string("uuid", #[strategy(arbitrary_uuid())] Uuid);
         date_naivedate("date", #[strategy(arbitrary_naive_date())] chrono::NaiveDate);

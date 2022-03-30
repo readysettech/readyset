@@ -110,6 +110,7 @@ pub(crate) fn convert_column(
         SqlType::ByteArray => MYSQL_TYPE_BLOB,
         SqlType::Numeric(_) => MYSQL_TYPE_DECIMAL,
         SqlType::MacAddr => unsupported!("MySQL does not support the MACADDR type"),
+        SqlType::Inet => unsupported!("MySQL does not support the INET type"),
         SqlType::Uuid => unsupported!("MySQL does not support the UUID type"),
         SqlType::Jsonb => unsupported!("MySQL does not support the JSONB type"),
         SqlType::Bit(size_opt) => {

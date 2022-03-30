@@ -1,5 +1,6 @@
 use std::borrow::Borrow;
 use std::convert::{TryFrom, TryInto};
+use std::net::IpAddr;
 
 use bit_vec::BitVec;
 use bytes::{Buf, Bytes, BytesMut};
@@ -326,6 +327,7 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
         )?)),
         Type::BYTEA => Ok(Value::ByteArray(<Vec<u8>>::from_sql(t, buf)?)),
         Type::MACADDR => Ok(Value::MacAddress(MacAddress::from_sql(t, buf)?)),
+        Type::INET => Ok(Value::Inet(IpAddr::from_sql(t, buf)?)),
         Type::UUID => Ok(Value::Uuid(Uuid::from_sql(t, buf)?)),
         Type::JSON => Ok(Value::Json(serde_json::Value::from_sql(t, buf)?)),
         Type::JSONB => Ok(Value::Jsonb(serde_json::Value::from_sql(t, buf)?)),
@@ -393,6 +395,10 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
         Type::MACADDR => MacAddress::parse_str(text_str)
             .map_err(DecodeError::InvalidTextMacAddressValue)
             .map(Value::MacAddress),
+        Type::INET => text_str
+            .parse::<IpAddr>()
+            .map_err(DecodeError::InvalidTextIpAddressValue)
+            .map(Value::Inet),
         Type::UUID => Uuid::parse_str(text_str)
             .map_err(DecodeError::InvalidTextUuidValue)
             .map(Value::Uuid),
