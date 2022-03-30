@@ -6,7 +6,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case};
 use nom::character::complete::digit1;
 use nom::combinator::{map, map_res, opt};
-use nom::multi::{many0, many1, separated_list0};
+use nom::multi::{separated_list0, separated_list1};
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::IResult;
 use serde::{Deserialize, Serialize};
@@ -181,11 +181,14 @@ pub fn index_col_name(
 // Helper for list of index columns
 pub fn index_col_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Column>> {
     move |i| {
-        many0(map(
-            terminated(index_col_name(dialect), opt(ws_sep_comma)),
-            // XXX(malte): ignores length and order
-            |e| e.0,
-        ))(i)
+        separated_list0(
+            ws_sep_comma,
+            map(
+                index_col_name(dialect),
+                // XXX(malte): ignores length and order
+                |e| e.0,
+            ),
+        )(i)
     }
 }
 
@@ -449,14 +452,14 @@ fn check_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableK
 
 // Parse rule for a comma-separated list.
 pub fn key_specification_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<TableKey>> {
-    move |i| many1(terminated(key_specification(dialect), opt(ws_sep_comma)))(i)
+    move |i| separated_list1(ws_sep_comma, key_specification(dialect))(i)
 }
 
 // Parse rule for a comma-separated list.
 pub fn field_specification_list(
     dialect: Dialect,
 ) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<ColumnSpecification>> {
-    move |i| many1(terminated(column_specification(dialect), opt(ws_sep_comma)))(i)
+    move |i| separated_list1(ws_sep_comma, column_specification(dialect))(i)
 }
 
 // Parse rule for a column definition constraint.
@@ -480,7 +483,7 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
             whitespace0,
             field_specification_list(dialect),
             whitespace0,
-            opt(key_specification_list(dialect)),
+            opt(preceded(ws_sep_comma, key_specification_list(dialect))),
             whitespace0,
             tag(")"),
             whitespace0,
@@ -934,7 +937,7 @@ mod tests {
           id int,
           group_id int,
           primary key (id),
-          constraint users_group foreign key (group_id) references `groups` (id),
+          constraint users_group foreign key (group_id) references `groups` (id)
         ) AUTO_INCREMENT=1000";
 
         let (rem, res) = creation(Dialect::MySQL)(qstring).unwrap();

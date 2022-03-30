@@ -7599,7 +7599,7 @@ async fn aggressive_eviction_impl() {
             `keywords` varchar(40) NOT NULL,
             `title` varchar(128) NOT NULL,
             `short_text` varchar(512) NOT NULL,
-            `url` varchar(128) NOT NULL,
+            `url` varchar(128) NOT NULL
         );
 
         CREATE TABLE `users` (

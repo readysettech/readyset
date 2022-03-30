@@ -16,7 +16,7 @@ use nom::bytes::complete::{tag, tag_no_case, take_until};
 use nom::character::complete::{digit1, line_ending};
 use nom::combinator::{map, map_parser, map_res, opt, peek, recognize};
 use nom::error::{ErrorKind, ParseError};
-use nom::multi::{many0, many1, separated_list0};
+use nom::multi::{separated_list0, separated_list1};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
 use nom::{IResult, InputLength};
 use proptest::strategy::Strategy;
@@ -1260,17 +1260,12 @@ where
 pub fn assignment_expr_list(
     dialect: Dialect,
 ) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(Column, Expression)>> {
-    move |i| many1(terminated(assignment_expr(dialect), opt(ws_sep_comma)))(i)
+    move |i| separated_list1(ws_sep_comma, assignment_expr(dialect))(i)
 }
 
 // Parse rule for a comma-separated list of fields without aliases.
 pub fn field_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Column>> {
-    move |i| {
-        many0(terminated(
-            column_identifier_no_alias(dialect),
-            opt(ws_sep_comma),
-        ))(i)
-    }
+    move |i| separated_list0(ws_sep_comma, column_identifier_no_alias(dialect))(i)
 }
 
 fn expression_field(
@@ -1306,12 +1301,7 @@ pub fn field_definition_expr(
 
 // Parse list of table names.
 pub fn table_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Table>> {
-    move |i| {
-        many1(terminated(
-            schema_table_reference(dialect),
-            opt(ws_sep_comma),
-        ))(i)
-    }
+    move |i| separated_list1(ws_sep_comma, schema_table_reference(dialect))(i)
 }
 
 // Integer literal value
@@ -1407,7 +1397,7 @@ pub fn literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
 
 // Parse a list of values (e.g., for INSERT syntax).
 pub fn value_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Literal>> {
-    move |i| many0(delimited(whitespace0, literal(dialect), opt(ws_sep_comma)))(i)
+    move |i| separated_list0(ws_sep_comma, literal(dialect))(i)
 }
 
 // Parse a reference to a named schema.table, with an optional alias

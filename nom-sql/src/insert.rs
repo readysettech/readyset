@@ -2,8 +2,8 @@ use std::{fmt, str};
 
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::opt;
-use nom::multi::many1;
-use nom::sequence::{delimited, preceded, tuple};
+use nom::multi::separated_list1;
+use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 
@@ -71,9 +71,9 @@ fn fields(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Column>> {
 fn data(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Literal>> {
     move |i| {
         delimited(
-            tag("("),
+            terminated(tag("("), whitespace0),
             value_list(dialect),
-            preceded(tag(")"), opt(ws_sep_comma)),
+            preceded(whitespace0, tag(")")),
         )(i)
     }
 }
@@ -108,7 +108,7 @@ pub fn insertion(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], InsertSta
             opt(fields(dialect)),
             tag_no_case("values"),
             whitespace0,
-            many1(data(dialect)),
+            separated_list1(ws_sep_comma, data(dialect)),
             opt(on_duplicate(dialect)),
             statement_terminator,
         ))(i)?;
