@@ -1,5 +1,6 @@
 use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
+use std::net::IpAddr;
 use std::ops::{Range, RangeFrom, RangeTo};
 use std::str;
 use std::str::FromStr;
@@ -78,6 +79,7 @@ pub enum SqlType {
     Jsonb,
     ByteArray,
     MacAddr,
+    Inet,
     Uuid,
     Bit(Option<u16>),
     Varbit(Option<u16>),
@@ -171,6 +173,7 @@ impl fmt::Display for SqlType {
             SqlType::Jsonb => write!(f, "JSONB"),
             SqlType::ByteArray => write!(f, "BYTEA"),
             SqlType::MacAddr => write!(f, "MACADDR"),
+            SqlType::Inet => write!(f, "INET"),
             SqlType::Uuid => write!(f, "UUID"),
             SqlType::Bit(n) => {
                 write!(f, "BIT")?;
@@ -429,6 +432,9 @@ impl Literal {
                 .boxed(),
             SqlType::Enum(_) => unimplemented!("Enums aren't implemented yet"),
             SqlType::Json | SqlType::Jsonb => arbitrary_json()
+                .prop_map(|v| Self::String(v.to_string()))
+                .boxed(),
+            SqlType::Inet => any::<IpAddr>()
                 .prop_map(|v| Self::String(v.to_string()))
                 .boxed(),
             SqlType::MacAddr => any::<[u8; 6]>()
@@ -1020,6 +1026,7 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
         ),
         map(tag_no_case("bytea"), |_| SqlType::ByteArray),
         map(tag_no_case("macaddr"), |_| SqlType::MacAddr),
+        map(tag_no_case("inet"), |_| SqlType::Inet),
         map(tag_no_case("uuid"), |_| SqlType::Uuid),
         map(tag_no_case("jsonb"), |_| SqlType::Jsonb),
         map(tag_no_case("json"), |_| SqlType::Json),
@@ -1854,6 +1861,12 @@ mod tests {
         fn macaddr_type() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"macaddr");
             assert_eq!(res, SqlType::MacAddr);
+        }
+
+        #[test]
+        fn inet_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"inet");
+            assert_eq!(res, SqlType::Inet);
         }
 
         #[test]

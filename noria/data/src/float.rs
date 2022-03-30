@@ -161,6 +161,7 @@ pub(crate) fn coerce_f64(val: f64, sql_type: &SqlType) -> ReadySetResult<DataTyp
 
         SqlType::Enum(_)
         | SqlType::MacAddr
+        | SqlType::Inet
         | SqlType::Uuid
         | SqlType::Bit(_)
         | SqlType::Varbit(_) => Err(err("not allowed")),
@@ -252,6 +253,7 @@ pub(crate) fn coerce_decimal(val: &Decimal, sql_type: &SqlType) -> ReadySetResul
 
         SqlType::Enum(_)
         | SqlType::MacAddr
+        | SqlType::Inet
         | SqlType::Uuid
         | SqlType::Bit(_)
         | SqlType::Varbit(_) => Err(ReadySetError::DataTypeConversionError {

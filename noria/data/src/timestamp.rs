@@ -412,6 +412,7 @@ impl TimestampTz {
             SqlType::Enum(_)
             | SqlType::Jsonb
             | SqlType::MacAddr
+            | SqlType::Inet
             | SqlType::Uuid
             | SqlType::Bit(_)
             | SqlType::Varbit(_) => Err(ReadySetError::DataTypeConversionError {

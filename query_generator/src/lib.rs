@@ -67,6 +67,7 @@ use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::hash::Hash;
 use std::iter::{self, FromIterator};
+use std::net::{IpAddr, Ipv4Addr};
 use std::ops::{Bound, DerefMut};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -160,6 +161,7 @@ fn value_of_type(typ: &SqlType) -> DataType {
         SqlType::Enum(_) => unimplemented!(),
         SqlType::Json | SqlType::Jsonb => "{}".into(),
         SqlType::MacAddr => "01:23:45:67:89:AF".into(),
+        SqlType::Inet => "::beef".into(),
         SqlType::Uuid => "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11".into(),
         SqlType::Bit(size_opt) => {
             DataType::from(BitVec::with_capacity(size_opt.unwrap_or(1) as usize))
@@ -279,6 +281,9 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
                     .to_string(MacAddressFormat::HexString),
             )
         }
+        SqlType::Inet => DataType::from(
+            IpAddr::V4(Ipv4Addr::new(rng.gen(), rng.gen(), rng.gen(), rng.gen())).to_string(),
+        ),
         SqlType::Uuid => {
             let mut bytes = [0_u8, 16];
             rng.fill(&mut bytes);
@@ -385,6 +390,13 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
                     .unwrap()
                     .to_string(MacAddressFormat::HexString),
             )
+        }
+        SqlType::Inet => {
+            let b1: u8 = ((idx >> 24) & 0xff) as u8;
+            let b2: u8 = ((idx >> 16) & 0xff) as u8;
+            let b3: u8 = ((idx >> 8) & 0xff) as u8;
+            let b4: u8 = (idx & 0xff) as u8;
+            DataType::from(IpAddr::V4(Ipv4Addr::new(b1, b2, b3, b4)).to_string())
         }
         SqlType::Uuid => {
             let mut bytes = [u8::MAX; 16];

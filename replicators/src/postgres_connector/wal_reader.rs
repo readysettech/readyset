@@ -258,6 +258,7 @@ impl wal::TupleData {
                         | PGType::VARCHAR
                         | PGType::CHAR
                         | PGType::MACADDR
+                        | PGType::INET
                         | PGType::UUID
                         | PGType::NAME => DataType::from(str.as_ref()),
                         // JSONB might rearrange the json value (like the order of the keys in an

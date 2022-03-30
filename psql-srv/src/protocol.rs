@@ -473,6 +473,7 @@ fn make_field_description(
         Type::TIME => TYPLEN_8,
         Type::BYTEA => TYPLEN_VARLENA,
         Type::MACADDR => TYPLEN_6,
+        Type::INET => TYPLEN_VARLENA,
         Type::UUID => TYPLEN_16,
         Type::JSON | Type::JSONB | Type::BIT | Type::VARBIT => TYPLEN_VARLENA,
         _ => return Err(Error::UnsupportedType(col.col_type.clone())),
