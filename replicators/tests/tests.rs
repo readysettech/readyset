@@ -18,13 +18,13 @@ const CREATE_SCHEMA: &str = "
     DROP VIEW IF EXISTS noria_view;
     CREATE TABLE `groups` (
         id int NOT NULL PRIMARY KEY,
-        string varchar(20) NOT NULL,
+        string varchar(20),
         bignum int
     );
     CREATE VIEW noria_view AS SELECT id,string,bignum FROM `groups` ORDER BY id ASC";
 
 const POPULATE_SCHEMA: &str =
-    "INSERT INTO `groups` VALUES (1, 'abc', 2), (2, 'bcd', 3), (40, 'xyz', 4)";
+    "INSERT INTO `groups` VALUES (1, 'abc', 2), (2, 'bcd', 3), (3, NULL, NULL), (40, 'xyz', 4)";
 
 /// A convenience init to convert 3 character byte slice to TinyText noria type
 const fn tiny<const N: usize>(text: &[u8; N]) -> DataType {
@@ -34,6 +34,7 @@ const fn tiny<const N: usize>(text: &[u8; N]) -> DataType {
 const SNAPSHOT_RESULT: &[&[DataType]] = &[
     &[DataType::Int(1), tiny(b"abc"), DataType::Int(2)],
     &[DataType::Int(2), tiny(b"bcd"), DataType::Int(3)],
+    &[DataType::Int(3), DataType::None, DataType::None],
     &[DataType::Int(40), tiny(b"xyz"), DataType::Int(4)],
 ];
 
@@ -44,6 +45,7 @@ const TESTS: &[(&str, &str, &[&[DataType]])] = &[
         &[
             &[DataType::Int(11), tiny(b"abc"), DataType::Int(2)],
             &[DataType::Int(12), tiny(b"bcd"), DataType::Int(3)],
+            &[DataType::Int(13), DataType::None, DataType::None],
             &[DataType::Int(50), tiny(b"xyz"), DataType::Int(4)],
         ],
     ),
@@ -52,6 +54,7 @@ const TESTS: &[(&str, &str, &[&[DataType]])] = &[
         "DELETE FROM `groups` WHERE string='bcd'",
         &[
             &[DataType::Int(11), tiny(b"abc"), DataType::Int(2)],
+            &[DataType::Int(13), DataType::None, DataType::None],
             &[DataType::Int(50), tiny(b"xyz"), DataType::Int(4)],
         ],
     ),
@@ -62,6 +65,7 @@ const TESTS: &[(&str, &str, &[&[DataType]])] = &[
             &[DataType::Int(1), tiny(b"abc"), DataType::Int(2)],
             &[DataType::Int(2), tiny(b"bcd"), DataType::Int(3)],
             &[DataType::Int(11), tiny(b"abc"), DataType::Int(2)],
+            &[DataType::Int(13), DataType::None, DataType::None],
             &[DataType::Int(40), tiny(b"xyz"), DataType::Int(4)],
             &[DataType::Int(50), tiny(b"xyz"), DataType::Int(4)],
         ],
@@ -73,6 +77,7 @@ const TESTS: &[(&str, &str, &[&[DataType]])] = &[
             &[DataType::Int(1), tiny(b"abc"), DataType::Int(11)],
             &[DataType::Int(2), tiny(b"bcd"), DataType::Int(12)],
             &[DataType::Int(11), tiny(b"abc"), DataType::Int(21)],
+            &[DataType::Int(13), DataType::None, DataType::Int(23)],
             &[DataType::Int(40), tiny(b"xyz"), DataType::Int(50)],
             &[DataType::Int(50), tiny(b"xyz"), DataType::Int(60)],
         ],
@@ -88,6 +93,7 @@ const RECONNECT_RESULT: &[&[DataType]] = &[
     &[DataType::Int(3), tiny(b"abc"), DataType::Int(2)],
     &[DataType::Int(5), tiny(b"xyz"), DataType::Int(4)],
     &[DataType::Int(11), tiny(b"abc"), DataType::Int(21)],
+    &[DataType::Int(13), DataType::None, DataType::Int(23)],
     &[DataType::Int(40), tiny(b"xyz"), DataType::Int(50)],
     &[DataType::Int(50), tiny(b"xyz"), DataType::Int(60)],
 ];
