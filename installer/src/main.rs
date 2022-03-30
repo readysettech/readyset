@@ -1236,13 +1236,26 @@ impl Installer {
                 .push(subnet)
         }
 
-        // Just use the first subnet we find in each AZ, for now.
-        //
-        // Later, we can modify this to prefer private / public subnets
-        let existing_subnet_ids = subnets_by_az
-            .values()
-            .map(|subnets| subnets.first().unwrap().subnet_id.clone().unwrap())
-            .collect::<Vec<_>>();
+        // Iterate through AZs, getting one subnet per AZ.
+        let mut existing_subnet_ids: Vec<String> = vec![];
+        for (az, subnets) in &subnets_by_az {
+            if subnets.is_empty() {
+                // No subnets in this az, let's try the next one.
+                continue;
+            }
+            let subnet_ids: Vec<&str> = subnets.iter().map(|s| s.subnet_id().unwrap()).collect();
+            if subnet_ids.len() > 1 {
+                println!("Found more than one subnet in availability zone {}", az);
+
+                let idx = select()
+                    .with_prompt("Which subnet would you like to use?")
+                    .items(&subnet_ids)
+                    .interact()?;
+                existing_subnet_ids.push(subnet_ids[idx].to_string())
+            } else {
+                existing_subnet_ids.push(subnet_ids.first().unwrap().to_string());
+            }
+        }
 
         if existing_subnet_ids.len() < MIN_AVAILABILITY_ZONES {
             let other_azs = self
