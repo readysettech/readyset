@@ -2534,6 +2534,8 @@ async fn pkey_then_full_table_with_bogokey() {
         .collect();
     posts.insert_many(rows.clone()).await.unwrap();
 
+    sleep().await;
+
     // Looking up post with id 1 should return the correct post.
     assert_eq!(
         by_id.lookup(&[1.into()], true).await.unwrap(),
