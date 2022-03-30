@@ -2310,4 +2310,36 @@ PRIMARY KEY (`key`));";
         let res = test_parse!(creation(Dialect::MySQL), qstring_orig);
         assert_eq!(res.table.name, "ar_internal_metadata");
     }
+
+    #[test]
+    fn discourse_uploads() {
+        let qstring = b"CREATE TABLE `uploads` (
+`id` integer NOT NULL,
+`user_id` integer NOT NULL,
+`original_filename` character varying NOT NULL,
+`filesize` bigint NOT NULL,
+`width` integer,
+`height` integer,
+`url` character varying NOT NULL,
+`created_at` timestamp without time zone NOT NULL,
+`updated_at` timestamp without time zone NOT NULL,
+`sha1` character varying(40),
+`origin` character varying(1000),
+`retain_hours` integer,
+`extension` character varying(10),
+`thumbnail_width` integer,
+`thumbnail_height` integer,
+`etag` character varying,
+`secure` boolean NOT NULL,
+`access_control_post_id` bigint,
+`original_sha1` character varying,
+`animated` boolean,
+`verification_status` integer NOT NULL,
+`security_last_changed_at` timestamp without time zone,
+`security_last_changed_reason` character varying,
+PRIMARY KEY (`id`));";
+        let res = test_parse!(creation(Dialect::MySQL), qstring);
+        assert_eq!(res.table.name, "uploads");
+        assert_eq!(res.fields.len(), 23);
+    }
 }

@@ -884,7 +884,9 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
             |i| int_type("integer", SqlType::UnsignedInt, SqlType::Int, i),
             |i| int_type("int", SqlType::UnsignedInt, SqlType::Int, i),
             |i| int_type("bigint", SqlType::UnsignedBigint, SqlType::Bigint, i),
-            map(tag_no_case("bool"), |_| SqlType::Bool),
+            map(alt((tag_no_case("boolean"), tag_no_case("bool"))), |_| {
+                SqlType::Bool
+            }),
             map(preceded(tag_no_case("datetime"), opt(delim_u16)), |fsp| {
                 SqlType::DateTime(fsp)
             }),
@@ -1540,6 +1542,12 @@ mod tests {
                 SqlType::DateTime(Some(16))
             ]
         );
+    }
+
+    #[test]
+    fn boolean_bool() {
+        let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"boolean");
+        assert_eq!(res, SqlType::Bool);
     }
 
     #[test]
