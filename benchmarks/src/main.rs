@@ -98,6 +98,13 @@ struct BenchmarkRunner {
     report_commit_id: Option<String>,
 }
 
+fn make_prometheus_url(base: &str, benchmark_name_label: &str, instance_label: &str) -> String {
+    format!(
+        "{}/metrics/job/{}/instance/{}",
+        base, benchmark_name_label, instance_label
+    )
+}
+
 impl BenchmarkRunner {
     pub async fn init_prometheus(&mut self) -> anyhow::Result<Option<PrometheusHandle>> {
         // Append the full pushgateway config path to the user provided
@@ -107,11 +114,10 @@ impl BenchmarkRunner {
             .prometheus_push_gateway
             .as_ref()
             .map(|s| {
-                format!(
-                    "{}/metrics/job/{}/instance/{}",
+                make_prometheus_url(
                     s,
                     self.benchmark_cmd.as_ref().unwrap().name_label(),
-                    self.deployment_params.instance_label
+                    &self.deployment_params.instance_label,
                 )
             });
 
@@ -417,4 +423,18 @@ async fn main() -> anyhow::Result<()> {
     benchmark_cmd_runner.tracing.init("benchmarks")?;
 
     benchmark_cmd_runner.run().await
+}
+
+#[cfg(test)]
+mod tests {
+    use test_strategy::proptest;
+    #[proptest]
+    fn make_prometheus_url(
+        #[strategy("[a-z]+://[a-z0-9/]+")] base: String,
+        benchmark_name_label: String,
+        instance_label: String,
+    ) {
+        let url = super::make_prometheus_url(&base, &benchmark_name_label, &instance_label);
+        assert!(url::Url::parse(&url).is_ok())
+    }
 }

@@ -100,3 +100,6 @@ path = "src/bin/snapshot_time.rs"
 [dev-dependencies]
 indoc = "1.0.3"
 itertools = "0.10"
+proptest = "1.0.0"
+test-strategy = "0.2.0"
+url = "2.2.2"
