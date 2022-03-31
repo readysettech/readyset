@@ -119,9 +119,7 @@ async fn out_of_band_query_with_fallback() {
         QueryDestination::Fallback
     );
 
-    let res: Result<Vec<Row>> = conn
-        .query("CREATE CACHED QUERY test AS SELECT * FROM t")
-        .await;
+    let res: Result<Vec<Row>> = conn.query("CREATE CACHE test FROM SELECT * FROM t").await;
     assert!(res.is_ok());
 
     let res: Result<Vec<Row>> = conn.query("SELECT * FROM t").await;
@@ -297,7 +295,7 @@ async fn out_of_band_prep_exec_with_fallback() {
     );
 
     let res: Result<_> = conn
-        .query_drop("CREATE CACHED QUERY test AS SELECT * FROM t")
+        .query_drop("CREATE CACHE test FROM SELECT * FROM t")
         .await;
     assert!(res.is_ok());
 
@@ -321,7 +319,7 @@ async fn out_of_band_prep_exec_with_fallback() {
         QueryDestination::Noria
     );
 
-    let res: Result<_> = conn.query_drop("DROP CACHED QUERY test").await;
+    let res: Result<_> = conn.query_drop("DROP CACHE test").await;
     assert!(res.is_ok());
 
     // Should go back to fallback after we dropped the query
@@ -356,7 +354,7 @@ async fn in_request_path_rewritten_query_without_fallback() {
         .unwrap();
     sleep().await;
     let res: Result<Vec<Row>> = conn
-        .query("CREATE CACHED QUERY test AS SELECT * FROM t WHERE a = ? AND b = ?")
+        .query("CREATE CACHE test FROM SELECT * FROM t WHERE a = ? AND b = ?")
         .await;
     assert!(res.is_ok());
     assert_eq!(query_status_cache.allow_list().len(), 1);
@@ -388,7 +386,7 @@ async fn out_of_band_rewritten_query_without_fallback() {
         .unwrap();
     sleep().await;
     let res: Result<Vec<Row>> = conn
-        .query("CREATE CACHED QUERY test AS SELECT * FROM t WHERE a = ? AND b = ?")
+        .query("CREATE CACHE test FROM SELECT * FROM t WHERE a = ? AND b = ?")
         .await;
     assert!(res.is_ok());
     assert_eq!(query_status_cache.allow_list().len(), 1);

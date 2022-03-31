@@ -26,7 +26,7 @@ impl fmt::Display for ShowStatement {
         match self {
             Self::Events => write!(f, "EVENTS"),
             Self::Tables(tables) => write!(f, "{}", tables),
-            Self::CachedQueries => write!(f, "CACHED QUERIES"),
+            Self::CachedQueries => write!(f, "CACHES"),
             Self::ProxiedQueries => write!(f, "PROXIED QUERIES"),
             Self::ReadySetStatus => write!(f, "READYSET STATUS"),
         }
@@ -39,10 +39,7 @@ pub fn show(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ShowStatement>
         let (i, _) = whitespace1(i)?;
         let (i, statement) = alt((
             //ReadySet specific show statement
-            map(
-                tuple((tag_no_case("cached"), whitespace1, tag_no_case("queries"))),
-                |_| ShowStatement::CachedQueries,
-            ),
+            map(tag_no_case("caches"), |_| ShowStatement::CachedQueries),
             map(
                 tuple((tag_no_case("proxied"), whitespace1, tag_no_case("queries"))),
                 |_| ShowStatement::ProxiedQueries,
@@ -214,10 +211,10 @@ mod tests {
     }
 
     #[test]
-    fn show_cached_queries() {
-        let qstring1 = "SHOW CACHED QUERIES";
+    fn show_caches() {
+        let qstring1 = "SHOW CACHES";
         let res1 = show(Dialect::MySQL)(qstring1.as_bytes()).unwrap().1;
-        let qstring2 = "SHOW\tCACHED\tQUERIES";
+        let qstring2 = "SHOW\tCACHES\t";
         let res2 = show(Dialect::MySQL)(qstring2.as_bytes()).unwrap().1;
         assert_eq!(res1, ShowStatement::CachedQueries);
         assert_eq!(res2, ShowStatement::CachedQueries);

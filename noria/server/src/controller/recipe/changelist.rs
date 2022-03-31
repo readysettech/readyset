@@ -263,7 +263,7 @@ impl FromStr for ChangeList {
                                 | SqlQuery::CreateView(_)
                                 | SqlQuery::Select(_)
                                 | SqlQuery::CompoundSelect(_) => changes.push(Change::Add(c)),
-                                SqlQuery::DropTable(_) | SqlQuery::DropCachedQuery(_) => {
+                                SqlQuery::DropTable(_) | SqlQuery::DropCache(_) => {
                                     changes.push(Change::Remove(c));
                                 }
                                 // TODO(fran): I've added this as a separate clause, since I'm not

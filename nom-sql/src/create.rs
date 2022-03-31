@@ -132,29 +132,29 @@ impl fmt::Display for CreateViewStatement {
     }
 }
 
-/// The SelectStatement or query ID referenced in a [`CreateCachedQueryStatement`]
+/// The SelectStatement or query ID referenced in a [`CreateCacheStatement`]
 #[derive(Clone, Debug, Display, Eq, Hash, PartialEq, Serialize, Deserialize, From)]
-pub enum CachedQueryInner {
+pub enum CacheInner {
     Statement(Box<SelectStatement>),
     Id(SqlIdentifier),
 }
 
-/// `CREATE CACHED QUERY [<name>] AS ...`
+/// `CREATE CACHE [<name>] FROM ...`
 ///
 /// This is a non-standard ReadySet specific extension to SQL
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub struct CreateCachedQueryStatement {
+pub struct CreateCacheStatement {
     pub name: Option<SqlIdentifier>,
-    pub inner: CachedQueryInner,
+    pub inner: CacheInner,
 }
 
-impl fmt::Display for CreateCachedQueryStatement {
+impl fmt::Display for CreateCacheStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "CREATE CACHED QUERY ")?;
+        write!(f, "CREATE CACHE ")?;
         if let Some(name) = &self.name {
             write!(f, "`{}` ", name)?;
         }
-        write!(f, "AS {}", self.inner)
+        write!(f, "FROM {}", self.inner)
     }
 }
 
@@ -698,33 +698,31 @@ pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Creat
     }
 }
 
-/// Extract the [`SelectStatement`] or Query ID from a CREATE CACHED QUERY statement. Query ID is
+/// Extract the [`SelectStatement`] or Query ID from a CREATE CACHE statement. Query ID is
 /// parsed as a SqlIdentifier
-pub fn cached_query_inner(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CachedQueryInner> {
+pub fn cached_query_inner(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CacheInner> {
     move |i| {
         alt((
-            map(map(selection(dialect), Box::new), CachedQueryInner::from),
-            map(dialect.identifier(), CachedQueryInner::from),
+            map(map(selection(dialect), Box::new), CacheInner::from),
+            map(dialect.identifier(), CacheInner::from),
         ))(i)
     }
 }
 
-/// Parse a [`CreateCachedQueryStatement`]
+/// Parse a [`CreateCacheStatement`]
 pub fn create_cached_query(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], CreateCachedQueryStatement> {
+) -> impl Fn(&[u8]) -> IResult<&[u8], CreateCacheStatement> {
     move |i| {
         let (i, _) = tag_no_case("create")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, _) = tag_no_case("cached")(i)?;
-        let (i, _) = whitespace1(i)?;
-        let (i, _) = tag_no_case("query")(i)?;
+        let (i, _) = tag_no_case("cache")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, name) = opt(terminated(dialect.identifier(), whitespace1))(i)?;
-        let (i, _) = tag_no_case("as")(i)?;
+        let (i, _) = tag_no_case("from")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, inner) = cached_query_inner(dialect)(i)?;
-        Ok((i, CreateCachedQueryStatement { name, inner }))
+        Ok((i, CreateCacheStatement { name, inner }))
     }
 }
 
@@ -1450,11 +1448,11 @@ mod tests {
         fn create_cached_query_with_name() {
             let res = test_parse!(
                 create_cached_query(Dialect::MySQL),
-                b"CREATE CACHED QUERY foo AS SELECT id FROM users WHERE name = ?"
+                b"CREATE CACHE foo FROM SELECT id FROM users WHERE name = ?"
             );
             assert_eq!(res.name, Some("foo".into()));
             let statement = match res.inner {
-                CachedQueryInner::Statement(s) => s,
+                CacheInner::Statement(s) => s,
                 _ => panic!(),
             };
             assert_eq!(statement.tables, vec!["users".into()]);
@@ -1464,11 +1462,11 @@ mod tests {
         fn create_cached_query_without_name() {
             let res = test_parse!(
                 create_cached_query(Dialect::MySQL),
-                b"CREATE CACHED QUERY AS SELECT id FROM users WHERE name = ?"
+                b"CREATE CACHE FROM SELECT id FROM users WHERE name = ?"
             );
             assert_eq!(res.name, None);
             let statement = match res.inner {
-                CachedQueryInner::Statement(s) => s,
+                CacheInner::Statement(s) => s,
                 _ => panic!(),
             };
             assert_eq!(statement.tables, vec!["users".into()]);
@@ -1478,11 +1476,11 @@ mod tests {
         fn create_cached_query_from_id_with_name() {
             let res = test_parse!(
                 create_cached_query(Dialect::MySQL),
-                b"CREATE CACHED QUERY foo AS q_0123456789ABCDEF"
+                b"CREATE CACHE foo FROM q_0123456789ABCDEF"
             );
             assert_eq!(res.name.unwrap(), "foo");
             let id = match res.inner {
-                CachedQueryInner::Id(s) => s,
+                CacheInner::Id(s) => s,
                 _ => panic!(),
             };
             assert_eq!(id.as_str(), "q_0123456789ABCDEF")
@@ -1492,11 +1490,11 @@ mod tests {
         fn create_cached_query_from_id_without_name() {
             let res = test_parse!(
                 create_cached_query(Dialect::MySQL),
-                b"CREATE CACHED QUERY AS q_0123456789ABCDEF"
+                b"CREATE CACHE FROM q_0123456789ABCDEF"
             );
             assert!(res.name.is_none());
             let id = match res.inner {
-                CachedQueryInner::Id(s) => s,
+                CacheInner::Id(s) => s,
                 _ => panic!(),
             };
             assert_eq!(id.as_str(), "q_0123456789ABCDEF")
@@ -1506,12 +1504,12 @@ mod tests {
         fn display_create_query_cache() {
             let stmt = test_parse!(
                 create_cached_query(Dialect::MySQL),
-                b"CREATE CACHED QUERY foo AS SELECT id FROM users WHERE name = ?"
+                b"CREATE CACHE foo FROM SELECT id FROM users WHERE name = ?"
             );
             let res = stmt.to_string();
             assert_eq!(
                 res,
-                "CREATE CACHED QUERY `foo` AS SELECT `id` FROM `users` WHERE (`name` = ?)"
+                "CREATE CACHE `foo` FROM SELECT `id` FROM `users` WHERE (`name` = ?)"
             );
         }
 

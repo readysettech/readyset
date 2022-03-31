@@ -43,8 +43,8 @@
 //!       rows from the dataset, however uing `col: 0` followed by `col: 1` will reuse the same row.
 //!   * `weight` - Integer. The absolute weight of the query. I.e. how often this query will be run.
 //!     The relative weight is computed out of the total weight of the queries.
-//!   * `migrate` - Boolean. Specifies if `CREATE CACHED QUERY` should be run for this query before
-//!     the benchmark begins.
+//!   * `migrate` - Boolean. Specifies if `CREATE CACHE` should be run for this query before the
+//!     benchmark begins.
 //!
 //! Example:
 //! ```yaml
@@ -99,7 +99,7 @@ pub struct WorkloadQuery {
     pub spec: nom_sql::SqlQuery,
     /// The list of parameters to generate for each instance of the query
     pub params: Vec<WorkloadParam>,
-    /// Specify whever to call `CREATE CACHED QUERY` for this query
+    /// Specify whever to call `CREATE CACHE` for this query
     pub migrate: bool,
     /// The absolute weight of this query. The relative weight will depend on the total weight of
     /// all queries.

@@ -78,7 +78,7 @@ where
 /// similarly match production. Useful for use in tools like benchmarks to get a better picture of
 /// expected prod performance.
 ///
-/// This uses `OutOfBand` migrations and as a result requires `CREATE CACHED QUERY` statements to
+/// This uses `OutOfBand` migrations and as a result requires `CREATE CACHE` statements to
 /// migrate queries in Noria, using this in tests is usually not preferred.
 ///
 /// `setup_like_prod_with_handle` returns a [`ConnectionOpts`] which may be used to connect with
@@ -109,7 +109,7 @@ where
         true, // partial
         wait_for_backend,
         query_status_cache,
-        MigrationMode::OutOfBand, // Must use CREATE CACHED QUERY to migrate queries.
+        MigrationMode::OutOfBand, // Must use CREATE CACHE to migrate queries.
         recreate_database,
         true, // Allow unsupported set for testing.
         ReadBehavior::Blocking,

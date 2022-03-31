@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize};
 use crate::alter::{alter_table_statement, AlterTableStatement};
 use crate::compound_select::{compound_selection, CompoundSelectStatement};
 use crate::create::{
-    create_cached_query, creation, view_creation, CreateCachedQueryStatement, CreateTableStatement,
+    create_cached_query, creation, view_creation, CreateCacheStatement, CreateTableStatement,
     CreateViewStatement,
 };
 use crate::delete::{deletion, DeleteStatement};
-use crate::drop::{drop_cached_query, drop_table, DropCachedQueryStatement, DropTableStatement};
+use crate::drop::{drop_cached_query, drop_table, DropCacheStatement, DropTableStatement};
 use crate::explain::{explain_statement, ExplainStatement};
 use crate::insert::{insertion, InsertStatement};
 use crate::rename::{rename_table, RenameTableStatement};
@@ -32,8 +32,8 @@ use crate::Dialect;
 pub enum SqlQuery {
     CreateTable(CreateTableStatement),
     CreateView(CreateViewStatement),
-    CreateCachedQuery(CreateCachedQueryStatement),
-    DropCachedQuery(DropCachedQueryStatement),
+    CreateCache(CreateCacheStatement),
+    DropCache(DropCacheStatement),
     AlterTable(AlterTableStatement),
     Insert(InsertStatement),
     CompoundSelect(CompoundSelectStatement),
@@ -58,8 +58,8 @@ impl fmt::Display for SqlQuery {
             SqlQuery::Insert(ref insert) => write!(f, "{}", insert),
             SqlQuery::CreateTable(ref create) => write!(f, "{}", create),
             SqlQuery::CreateView(ref create) => write!(f, "{}", create),
-            SqlQuery::CreateCachedQuery(ref create) => write!(f, "{}", create),
-            SqlQuery::DropCachedQuery(ref drop) => write!(f, "{}", drop),
+            SqlQuery::CreateCache(ref create) => write!(f, "{}", create),
+            SqlQuery::DropCache(ref drop) => write!(f, "{}", drop),
             SqlQuery::Delete(ref delete) => write!(f, "{}", delete),
             SqlQuery::DropTable(ref drop) => write!(f, "{}", drop),
             SqlQuery::Update(ref update) => write!(f, "{}", update),
@@ -93,8 +93,8 @@ impl SqlQuery {
             Self::Insert(_) => "INESRT",
             Self::CreateTable(_) => "CREATE TABLE",
             Self::CreateView(_) => "CREATE VIEW",
-            Self::CreateCachedQuery(_) => "CREATE CACHED QUERY",
-            Self::DropCachedQuery(_) => "DROP CACHED QUERY",
+            Self::CreateCache(_) => "CREATE CACHE",
+            Self::DropCache(_) => "DROP CACHE",
             Self::Delete(_) => "DELETE",
             Self::DropTable(_) => "DROP TABLE",
             Self::Update(_) => "UPDATE",
@@ -124,8 +124,8 @@ pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery>
             map(updating(dialect), SqlQuery::Update),
             map(set(dialect), SqlQuery::Set),
             map(view_creation(dialect), SqlQuery::CreateView),
-            map(create_cached_query(dialect), SqlQuery::CreateCachedQuery),
-            map(drop_cached_query(dialect), SqlQuery::DropCachedQuery),
+            map(create_cached_query(dialect), SqlQuery::CreateCache),
+            map(drop_cached_query(dialect), SqlQuery::DropCache),
             map(alter_table_statement(dialect), SqlQuery::AlterTable),
             map(start_transaction(dialect), SqlQuery::StartTransaction),
             map(commit(dialect), SqlQuery::Commit),

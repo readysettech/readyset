@@ -6,7 +6,7 @@ use std::iter;
 use maplit::hashset;
 
 use crate::{
-    CachedQueryInner, Column, CreateCachedQueryStatement, Expression, FieldDefinitionExpression,
+    CacheInner, Column, CreateCacheStatement, Expression, FieldDefinitionExpression,
     FunctionExpression, InValue, JoinConstraint, SelectStatement, SqlQuery, Table,
 };
 
@@ -23,10 +23,9 @@ impl ReferredTables for SqlQuery {
             SqlQuery::AlterTable(ref atq) => hashset![atq.table.clone()],
             SqlQuery::Insert(ref iq) => hashset![iq.table.clone()],
             SqlQuery::Select(ref sq) => sq.tables.iter().cloned().collect(),
-            SqlQuery::CreateCachedQuery(CreateCachedQueryStatement { inner: ref i, .. }) => match i
-            {
-                CachedQueryInner::Statement(sq) => sq.tables.iter().cloned().collect(),
-                CachedQueryInner::Id(_) => HashSet::new(),
+            SqlQuery::CreateCache(CreateCacheStatement { inner: ref i, .. }) => match i {
+                CacheInner::Statement(sq) => sq.tables.iter().cloned().collect(),
+                CacheInner::Id(_) => HashSet::new(),
             },
             SqlQuery::CompoundSelect(ref csq) => csq
                 .selects
@@ -54,7 +53,7 @@ impl ReferredTables for SqlQuery {
             | SqlQuery::Use(_)
             | SqlQuery::Show(_)
             | SqlQuery::Explain(_)
-            | SqlQuery::DropCachedQuery(_) => HashSet::new(),
+            | SqlQuery::DropCache(_) => HashSet::new(),
         }
     }
 }

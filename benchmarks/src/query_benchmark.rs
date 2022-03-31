@@ -75,7 +75,7 @@ impl BenchmarkControl for QueryBenchmark {
         // Explicitely migrate the query before benchmarking.
         let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
         let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-        // For now drop the result of migrate as CREATE CACHED QUERY does not support
+        // For now drop the result of migrate as CREATE CACHE does not support
         // non-select queries.
         let _ = self.query.migrate(&mut conn).await;
 
@@ -86,7 +86,7 @@ impl BenchmarkControl for QueryBenchmark {
         // Explicitely migrate the query before benchmarking.
         let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
         let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-        // For now drop the result of migrate as CREATE CACHED QUERY does not support
+        // For now drop the result of migrate as CREATE CACHE does not support
         // non-select queries.
         let _ = self.query.unmigrate(&mut conn).await;
         Ok(())
@@ -96,7 +96,7 @@ impl BenchmarkControl for QueryBenchmark {
         // Explicitely migrate the query before benchmarking.
         let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
         let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-        // For now drop the result of migrate as CREATE CACHED QUERY does not support
+        // For now drop the result of migrate as CREATE CACHE does not support
         // non-select queries.
         let _ = self.query.migrate(&mut conn).await;
         let prepared_statement =

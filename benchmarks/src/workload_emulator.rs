@@ -257,7 +257,7 @@ impl WorkloadEmulator {
         {
             if migrate {
                 let _ = conn
-                    .query_drop(format!("CREATE CACHED QUERY {i} AS {spec}"))
+                    .query_drop(format!("CREATE CACHE {i} FROM {spec}"))
                     .await;
             }
 

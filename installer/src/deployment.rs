@@ -316,8 +316,8 @@ impl DockerComposeDeployment {
         }
         println!("Now we need to select a migration mode.\n");
         println!("There are two ways in which we can manage migrations. If you choose the async option, then a background process will automatically determine which of your queries can be supported, and automatically send all supported queries to ReadySet.\n");
-        println!("If you would prefer more explicit way of managing which queries you would like to be handled by ReadySet, you can choose the explicit migration mode instead. With the explicit migration mode, you need to manually migrate each query, by connecting to ReadySet and issuing a CREATE CACHED QUERY command\n");
-        println!("Here is an example of a CREATE CACHED QUERY command for a simple select statement:\nCREATE CACHED QUERY select * from table1\n");
+        println!("If you would prefer more explicit way of managing which queries you would like to be handled by ReadySet, you can choose the explicit migration mode instead. With the explicit migration mode, you need to manually migrate each query, by connecting to ReadySet and issuing a CREATE CACHE command\n");
+        println!("Here is an example of a CREATE CACHE command for a simple select statement:\nCREATE CACHE FROM select * from table1\n");
         let migration_modes = &["Async", "Explicit"];
         match select()
             .with_prompt("Preferred migration mode")
