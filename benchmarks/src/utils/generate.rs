@@ -54,7 +54,7 @@ fn multi_ddl(input: &[u8]) -> IResult<&[u8], Vec<SqlQuery>> {
 impl DataGenerator {
     pub async fn install(&self, conn_str: &str) -> anyhow::Result<()> {
         let mut conn = DatabaseURL::from_str(conn_str)?.connect().await?;
-        let ddl = std::fs::read_to_string(benchmark_path(self.schema.clone())?.as_path())?;
+        let ddl = std::fs::read_to_string(&benchmark_path(&self.schema)?)?;
 
         let parsed = multi_ddl(ddl.as_bytes())
             .map_err(|e| anyhow!("Error parsing DDL {}", e.to_string()))?;
@@ -114,7 +114,7 @@ impl DataGenerator {
 
         let old_size = Self::adjust_mysql_vars(&db_url).await;
 
-        let schema = DatabaseSchema::try_from((benchmark_path(self.schema.clone())?, user_vars))?;
+        let schema = DatabaseSchema::try_from((benchmark_path(&self.schema)?, user_vars))?;
         let database_spec = DatabaseGenerationSpec::new(schema);
         let status = parallel_load(db_url.clone(), database_spec.clone()).await;
 

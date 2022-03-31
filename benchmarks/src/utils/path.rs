@@ -1,10 +1,10 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 use walkdir::WalkDir;
 
 /// Walks the directory referenced by `dir` recursively up to a depth of 5.
-fn walk_dirs_for(p: PathBuf, dir: PathBuf) -> Option<PathBuf> {
+fn walk_dirs_for(p: &Path, dir: &Path) -> Option<PathBuf> {
     let walk = WalkDir::new(dir)
         .follow_links(true)
         .max_depth(5)
@@ -37,23 +37,23 @@ fn walk_dirs_for(p: PathBuf, dir: PathBuf) -> Option<PathBuf> {
 ///
 /// This will allow us to reference files independent of their absolute paths or the
 /// directory the benchmark script is run from.
-pub fn benchmark_path(p: PathBuf) -> Result<PathBuf> {
+pub fn benchmark_path(p: &Path) -> Result<PathBuf> {
     if p.is_absolute() || p.exists() {
-        return Ok(p);
+        return Ok(p.to_owned());
     }
 
     // If we cannot find the path, check if we can find it in the benchmarks directory.
     // Iterate over all benchmark directories recursively and check if appending `p` to the
     // path yields a file.
     if let Ok(dir) = std::env::var("CARGO_MANIFEST_DIR") {
-        if let Some(path) = walk_dirs_for(p.clone(), PathBuf::from(dir)) {
+        if let Some(path) = walk_dirs_for(p, dir.as_ref()) {
             return Ok(path);
         }
     }
 
     // Search the current directory as well.
     if let Ok(dir) = std::env::current_dir() {
-        if let Some(path) = walk_dirs_for(p.clone(), dir) {
+        if let Some(path) = walk_dirs_for(p, &dir) {
             return Ok(path);
         }
     }

@@ -69,13 +69,13 @@ impl ArbitraryQueryParameters {
         // Mapping against two different parameters.
         #[allow(clippy::manual_map)]
         let spec = if let Some(f) = &self.query_spec_file {
-            Some(DistributionAnnotations::try_from(benchmark_path(f.clone())?.as_path()).unwrap())
+            Some(DistributionAnnotations::try_from(benchmark_path(f)?.as_path()).unwrap())
         } else if let Some(s) = &self.query_spec {
             Some(DistributionAnnotations::try_from(s.clone()).unwrap())
         } else {
             None
         };
-        let query = fs::read_to_string(&benchmark_path(self.query.clone())?).unwrap();
+        let query = fs::read_to_string(&benchmark_path(&self.query)?).unwrap();
         let stmt = conn.prep(query.clone()).await?;
 
         Ok(match spec {
@@ -107,7 +107,7 @@ impl ArbitraryQueryParameters {
         let _ = self.unmigrate(conn).await;
 
         // TODO(justin): Cache this so we don't have to read from file each time.
-        let query = fs::read_to_string(&benchmark_path(self.query.clone())?).unwrap();
+        let query = fs::read_to_string(&benchmark_path(&self.query)?).unwrap();
         let stmt = "CREATE CACHE q FROM ".to_string() + &query;
         conn.query_drop(stmt).await?;
         Ok(())
