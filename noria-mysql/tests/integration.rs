@@ -1564,19 +1564,19 @@ async fn create_query_cache_where_in() {
     conn.query_drop("CREATE TABLE t (id INT);").await.unwrap();
     sleep().await;
 
-    conn.query_drop("CREATE CACHED QUERY test AS SELECT id FROM t WHERE id IN (?);")
+    conn.query_drop("CREATE CACHE test FROM SELECT id FROM t WHERE id IN (?);")
         .await
         .unwrap();
     sleep().await;
 
-    let queries: Vec<(String, String)> = conn.query("SHOW CACHED QUERIES;").await.unwrap();
+    let queries: Vec<(String, String)> = conn.query("SHOW CACHES;").await.unwrap();
     assert!(queries.iter().any(|(query_name, _)| query_name == "test"));
 
-    conn.query_drop("CREATE CACHED QUERY test AS SELECT id FROM t WHERE id IN (?, ?);")
+    conn.query_drop("CREATE CACHE test FROM SELECT id FROM t WHERE id IN (?, ?);")
         .await
         .unwrap();
     sleep().await;
-    let new_queries: Vec<(String, String)> = conn.query("SHOW CACHED QUERIES;").await.unwrap();
+    let new_queries: Vec<(String, String)> = conn.query("SHOW CACHES;").await.unwrap();
     assert_eq!(new_queries.len(), queries.len());
 }
 

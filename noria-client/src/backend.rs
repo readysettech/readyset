@@ -28,7 +28,7 @@
 //! When a prepared statement is not immediately available for execution on Noria, we will
 //! perform a migration, migrations can happen in one of three ways:
 //!
-//! * Explicit migrations: only `CREATE CACHED QUERY` and `CREATE VIEW` will cause migrations.
+//! * Explicit migrations: only `CREATE CACHE` and `CREATE VIEW` will cause migrations.
 //! A `CREATE PREPARED STATEMENT` will not cause a migration, and queries will go to upstream
 //! fallback. Enabled with the `--explicit-migrations` flag. However if a migration already
 //! happened, we will use it.
@@ -36,7 +36,7 @@
 //! thread will perform migrations in the background. Once a statement finished migration it
 //! will execute on Noria, while it is waiting for a migration to happen it will execute on
 //! fallback. Enabled with the `--async-migrations` flag.
-//! * In request path: migrations will happen when either `CREATE CACHED QUERY` or
+//! * In request path: migrations will happen when either `CREATE CACHE` or
 //! `CREATE PREPARED STATEMENT` are called. It is also the only available option when a
 //! upstream fallback is not availbale.
 //!
@@ -78,9 +78,8 @@ use std::time::{Duration, Instant};
 use futures::future::{self, OptionFuture};
 use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
-    CachedQueryInner, CreateCachedQueryStatement, DeleteStatement, Dialect,
-    DropCachedQueryStatement, InsertStatement, SelectStatement, ShowStatement, SqlIdentifier,
-    SqlQuery, UpdateStatement,
+    CacheInner, CreateCacheStatement, DeleteStatement, Dialect, DropCacheStatement,
+    InsertStatement, SelectStatement, ShowStatement, SqlIdentifier, SqlQuery, UpdateStatement,
 };
 use noria::consistency::Timestamp;
 use noria::results::Results;
@@ -465,7 +464,7 @@ pub enum MigrationMode {
     /// migrations and updating a queries migration status. Either
     /// --async-migrations which runs migrations in a separate thread,
     /// or --explicit-migrations which enables special syntax to perform
-    /// migrations "CREATE CACHED QUERY ..." may be used.
+    /// migrations "CREATE CACHE ..." may be used.
     OutOfBand,
 }
 
@@ -825,8 +824,8 @@ where
             | SqlQuery::DropTable(..)
             | SqlQuery::AlterTable(..)
             | SqlQuery::RenameTable(..)
-            | SqlQuery::CreateCachedQuery(..)
-            | SqlQuery::DropCachedQuery(..)
+            | SqlQuery::CreateCache(..)
+            | SqlQuery::DropCache(..)
             | SqlQuery::Explain(_) => {
                 warn!(statement = %parsed_query, "Statement cannot be prepared by ReadySet");
                 PrepareMeta::Unimplemented
@@ -1246,7 +1245,7 @@ where
         }
     }
 
-    /// Forwards a `CREATE CACHED QUERY` request to noria
+    /// Forwards a `CREATE CACHE` request to noria
     async fn create_cached_query(
         &mut self,
         name: Option<&str>,
@@ -1270,7 +1269,7 @@ where
         Ok(noria_connector::QueryResult::Empty)
     }
 
-    /// Forwards a `DROP CACHED QUERY` request to noria
+    /// Forwards a `DROP CACHE` request to noria
     async fn drop_cached_query(
         &mut self,
         name: &str,
@@ -1364,10 +1363,10 @@ where
             SqlQuery::Explain(nom_sql::ExplainStatement::Graphviz { simplified }) => {
                 self.noria.graphviz(*simplified).await
             }
-            SqlQuery::CreateCachedQuery(CreateCachedQueryStatement { name, inner }) => {
+            SqlQuery::CreateCache(CreateCacheStatement { name, inner }) => {
                 let st = match inner {
-                    CachedQueryInner::Statement(st) => *st.clone(),
-                    CachedQueryInner::Id(id) => match self.query_status_cache.query(id.as_str()) {
+                    CacheInner::Statement(st) => *st.clone(),
+                    CacheInner::Id(id) => match self.query_status_cache.query(id.as_str()) {
                         Some(st) => st,
                         None => {
                             return Some(Err(ReadySetError::NoQueryForId { id: id.to_string() }))
@@ -1376,7 +1375,7 @@ where
                 };
                 self.create_cached_query(name.as_deref(), st).await
             }
-            SqlQuery::DropCachedQuery(DropCachedQueryStatement { name }) => {
+            SqlQuery::DropCache(DropCacheStatement { name }) => {
                 self.drop_cached_query(name.as_str()).await
             }
             SqlQuery::Show(ShowStatement::CachedQueries) => self.noria.verbose_outputs().await,
@@ -1752,9 +1751,7 @@ where
                             }
                         }
                     }
-                    SqlQuery::CreateCachedQuery(_)
-                    | SqlQuery::DropCachedQuery(_)
-                    | SqlQuery::Explain(_) => {
+                    SqlQuery::CreateCache(_) | SqlQuery::DropCache(_) | SqlQuery::Explain(_) => {
                         unreachable!("path returns prior")
                     }
                 }

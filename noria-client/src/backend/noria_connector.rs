@@ -894,7 +894,7 @@ impl NoriaConnector {
 }
 
 impl NoriaConnector {
-    /// This function handles CREATE CACHED QUERY statements. When explicit-migrations is enabled,
+    /// This function handles CREATE CACHE statements. When explicit-migrations is enabled,
     /// this function is the only way to create a view in noria.
     pub async fn handle_create_cached_query(
         &mut self,

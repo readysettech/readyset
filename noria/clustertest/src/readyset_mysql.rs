@@ -188,7 +188,7 @@ async fn failure_during_query() {
 
     let mut adapter = deployment.adapter().await;
     adapter
-        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 WHERE uid = ?")
+        .query_drop("CREATE CACHE FROM SELECT * FROM t1 WHERE uid = ?")
         .await
         .unwrap();
 
@@ -231,7 +231,7 @@ async fn query_cached_view_after_failure() {
         .unwrap();
 
     adapter
-        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 WHERE uid = ?")
+        .query_drop("CREATE CACHE FROM SELECT * FROM t1 WHERE uid = ?")
         .await
         .unwrap();
 
@@ -313,7 +313,7 @@ async fn test_fallback_recovery_period() {
     let mut adapter = deployment.adapter().await;
 
     adapter
-        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 WHERE uid = ?")
+        .query_drop("CREATE CACHE FROM SELECT * FROM t1 WHERE uid = ?")
         .await
         .unwrap();
 
@@ -584,11 +584,11 @@ async fn create_view_after_worker_failure() {
 
     let mut adapter = deployment.adapter().await;
     adapter
-        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1;")
+        .query_drop("CREATE CACHE FROM SELECT * FROM t1;")
         .await
         .unwrap();
     adapter
-        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t2;")
+        .query_drop("CREATE CACHE FROM SELECT * FROM t2;")
         .await
         .unwrap();
 
@@ -613,12 +613,12 @@ async fn create_view_after_worker_failure() {
         .await
         .unwrap();
 
-    // Wait so that we trigger failure recovery behavior before CREATE CACHED QUERY.
+    // Wait so that we trigger failure recovery behavior before CREATE CACHE.
     sleep(Duration::from_secs(5)).await;
 
     // This currently fails as the leader crashes, so we cannot reach quorum.
     adapter
-        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 WHERE uid = ?;")
+        .query_drop("CREATE CACHE FROM SELECT * FROM t1 WHERE uid = ?;")
         .await
         .unwrap();
 
@@ -745,7 +745,7 @@ async fn upquery_to_failed_reader_domain() {
 
     let mut adapter = deployment.adapter().await;
     adapter
-        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 WHERE uid = ?")
+        .query_drop("CREATE CACHE FROM SELECT * FROM t1 WHERE uid = ?")
         .await
         .unwrap();
 
@@ -791,7 +791,7 @@ async fn upquery_through_failed_domain() {
 
     let mut adapter = deployment.adapter().await;
     adapter
-        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 WHERE uid = ?")
+        .query_drop("CREATE CACHE FROM SELECT * FROM t1 WHERE uid = ?")
         .await
         .unwrap();
 
@@ -835,7 +835,7 @@ async fn update_propagation_through_failed_domain() {
 
     let mut adapter = deployment.adapter().await;
     adapter
-        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 WHERE uid = ?")
+        .query_drop("CREATE CACHE FROM SELECT * FROM t1 WHERE uid = ?")
         .await
         .unwrap();
 
@@ -1004,7 +1004,7 @@ async fn view_survives_restart() {
         .await
         .unwrap();
     adapter
-        .query_drop(r"CREATE CACHED QUERY test AS SELECT * FROM t1 WHERE uid = ?")
+        .query_drop(r"CREATE CACHE test FROM SELECT * FROM t1 WHERE uid = ?")
         .await
         .unwrap();
 
@@ -1082,7 +1082,7 @@ async fn writes_survive_restarts() {
 
     let mut adapter = deployment.adapter().await;
     adapter
-        .query_drop(r"CREATE CACHED QUERY AS SELECT * FROM t1 where uid = 1;")
+        .query_drop(r"CREATE CACHE FROM SELECT * FROM t1 where uid = 1;")
         .await
         .unwrap();
 

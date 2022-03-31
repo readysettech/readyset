@@ -730,7 +730,7 @@ impl SqlIncorporator {
             | SqlQuery::Use(_)
             | SqlQuery::Show(_)
             | SqlQuery::Explain(_)
-            | SqlQuery::DropCachedQuery(_) => (),
+            | SqlQuery::DropCache(_) => (),
             // other kinds of queries *do* require their referred tables to exist!
             ref q @ SqlQuery::CompoundSelect(_)
             | ref q @ SqlQuery::Select(_)
@@ -741,7 +741,7 @@ impl SqlIncorporator {
             | ref q @ SqlQuery::AlterTable(_)
             | ref q @ SqlQuery::RenameTable(_)
             | ref q @ SqlQuery::Insert(_)
-            | ref q @ SqlQuery::CreateCachedQuery(_) => {
+            | ref q @ SqlQuery::CreateCache(_) => {
                 for t in &q.referred_tables() {
                     if !self.view_schemas.contains_key(&t.name) {
                         return Err(ReadySetError::TableNotFound(t.name.to_string()));
