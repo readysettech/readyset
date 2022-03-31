@@ -116,6 +116,7 @@ CFN_STACK_PARAMS=(
   "ParameterKey=ReadySetServerNodes,ParameterValue=3"
   "ParameterKey=ReadySetServerInstanceType,ParameterValue=c5.large"
   "ParameterKey=SSMParameterKmsKeyArn,ParameterValue=arn:aws:kms:us-east-2:069491470376:key/6de170fc-5105-4b97-a069-ca72296fdd59"
+  'ParameterKey=ReadySetServerExtraEnvironment,ParameterValue="EXPERIMENTAL_PAGINATE_SUPPORT=true,EXPERIMENTAL_TOPK_SUPPORT=true"'
 )
 
 # ------------- [ Main ]--------------------------------- #
