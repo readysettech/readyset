@@ -1,7 +1,8 @@
 ---
 QueryBenchmark:
   query:
-    query: irl/irl_query3.sql
+    query:
+      file: irl/irl_query3.sql
     query_spec_file: irl/irl_query3_zipf.spec
     query_spec: ~
   target_qps: 5000

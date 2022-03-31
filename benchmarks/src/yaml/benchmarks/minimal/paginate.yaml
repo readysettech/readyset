@@ -1,7 +1,8 @@
 ---
 CacheHitBenchmark:
   query:
-    query: minimal/paginate.sql
+    query:
+      file: minimal/paginate.sql
     query_spec_file: ~
     query_spec: group 100;constant 0
   data_generator:

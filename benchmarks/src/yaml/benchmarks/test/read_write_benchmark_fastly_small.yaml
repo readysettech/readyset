@@ -1,7 +1,8 @@
 ---
 ReadWriteBenchmark:
   read_query:
-    query: fastly/fastly_read_query.sql
+    query:
+      file: fastly/fastly_read_query.sql
     query_spec_file: fastly/fastly_read_query.spec
     query_spec: ~
   target_read_qps: 10

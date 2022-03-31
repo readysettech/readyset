@@ -1,7 +1,8 @@
 ---
 QueryBenchmark:
   query:
-    query: minimal/range_query.sql
+    query:
+      file: minimal/range_query.sql
     query_spec_file: ~
     query_spec: ~
   target_qps: ~

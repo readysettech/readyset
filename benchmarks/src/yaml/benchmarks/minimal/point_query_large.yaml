@@ -1,7 +1,8 @@
 ---
 QueryBenchmark:
   query:
-    query: minimal/point_query_large.sql
+    query:
+      file: minimal/point_query_large.sql
     query_spec_file: ~
     query_spec: ~
   target_qps: ~

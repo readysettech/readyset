@@ -1,7 +1,8 @@
 ---
 QueryBenchmark:
   query:
-    query: minimal/sum.sql
+    query:
+      file: minimal/sum.sql
     query_spec_file: ~
     query_spec: ~
   target_qps: ~

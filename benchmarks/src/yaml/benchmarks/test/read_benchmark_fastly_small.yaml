@@ -1,7 +1,8 @@
 ---
 QueryBenchmark:
   query:
-    query: fastly/fastly_read_query.sql
+    query:
+      file: fastly/fastly_read_query.sql
     query_spec_file: fastly/fastly_read_query.spec
     query_spec: ~
   target_qps: 1000

@@ -1,7 +1,8 @@
 ---
 QueryBenchmark:
   query:
-    query: minimal/join.sql
+    query:
+      file: minimal/join.sql
     query_spec_file: ~
     query_spec: ~
   target_qps: ~

@@ -1,7 +1,8 @@
 ---
 CacheHitBenchmark:
   query:
-    query: fastly/fastly_read_query.sql
+    query:
+      file: fastly/fastly_read_query.sql
     query_spec_file: ~
     query_spec: ~
   data_generator:

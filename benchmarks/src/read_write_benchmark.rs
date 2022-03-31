@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -18,7 +18,7 @@ use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters,
 use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
-use crate::utils::query::ArbitraryQueryParameters;
+use crate::utils::query::{ArbitraryQueryParameters, QuerySpec};
 use crate::utils::us_to_ms;
 use crate::{benchmark_counter, benchmark_histogram};
 
@@ -107,7 +107,7 @@ impl BenchmarkControl for ReadWriteBenchmark {
             // clap does not support flattening with prefix/suffix so we need to
             // do this manually so it does not clash.
             update_query: ArbitraryQueryParameters::new(
-                self.update_query.clone(),
+                QuerySpec::File(self.update_query.clone().try_into().unwrap()),
                 self.update_query_spec_file.clone(),
                 self.update_query_spec.clone(),
             ),

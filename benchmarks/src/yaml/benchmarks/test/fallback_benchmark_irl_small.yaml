@@ -1,6 +1,7 @@
 FallbackBenchmark:
   query:
-    query: irl/irl_query3.sql
+    query:
+      file: irl/irl_query3.sql
     query_spec_file: ~
     query_spec: ~
   target_qps: ~

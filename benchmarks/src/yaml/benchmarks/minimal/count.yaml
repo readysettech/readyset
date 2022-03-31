@@ -1,7 +1,8 @@
 ---
 QueryBenchmark:
   query:
-    query: minimal/count.sql
+    query:
+      file: minimal/count.sql
     query_spec_file: ~
     query_spec: ~
   target_qps: ~

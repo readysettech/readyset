@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
@@ -20,7 +21,7 @@ use mysql_async::prelude::Queryable;
 use mysql_async::{Statement, Value};
 use nom_sql::SqlType;
 use query_generator::{ColumnGenerator, DistributionAnnotation};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::utils::path::benchmark_path;
 
@@ -30,11 +31,85 @@ use crate::utils::path::benchmark_path;
 /// generate misses.
 const MAX_RANDOM_GENERATIONS: u32 = 100;
 
+/// A wrapper around a PathBuf that eagerly caches the query when constructed
+#[derive(Clone)]
+pub struct QueryFile {
+    path: PathBuf,
+    query: String,
+}
+
+impl Serialize for QueryFile {
+    fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        self.path.serialize(ser)
+    }
+}
+
+impl<'de> Deserialize<'de> for QueryFile {
+    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let path = PathBuf::deserialize(de)?;
+        Self::try_from(path).map_err(D::Error::custom)
+    }
+}
+
+impl TryFrom<PathBuf> for QueryFile {
+    type Error = anyhow::Error;
+    fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
+        let query = fs::read_to_string(&benchmark_path(&path)?)
+            .map_err(|e| anyhow!("Could not load query from file: {}", e))?;
+        Ok(Self { path, query })
+    }
+}
+
+impl FromStr for QueryFile {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        PathBuf::from(s).try_into()
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub enum QuerySpec {
+    /// A path to a file containing the query that we are benchmarking
+    #[serde(rename = "file")]
+    File(QueryFile),
+    /// A plain-text query
+    #[serde(rename = "query")]
+    Query(String),
+}
+
+impl Default for QuerySpec {
+    fn default() -> Self {
+        Self::Query(String::default())
+    }
+}
+
+impl FromStr for QuerySpec {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // TODO(mc):  Once Postgres is better supported by benchmarks, try parsing it both ways
+        match nom_sql::parse_query(nom_sql::Dialect::MySQL, s) {
+            Ok(_) => Ok(Self::Query(s.to_owned())),
+            Err(_) => Ok(Self::File(QueryFile::from_str(s).map_err(|e| anyhow!("Could not parse '{}' as a query; attempted to load a file at that path, but failed:  {}", s, e))?)),
+        }
+    }
+}
+
+impl QuerySpec {
+    pub fn query(&self) -> &str {
+        match self {
+            QuerySpec::File(file) => &file.query,
+            QuerySpec::Query(query) => query,
+        }
+    }
+}
+
 #[derive(Parser, Clone, Default, Serialize, Deserialize)]
 pub struct ArbitraryQueryParameters {
-    /// A path to the query that we are benchmarking.
+    /// A path to the query that we are benchmarking, or a string containing the query that we are
+    /// benchmarking.
     #[clap(long)]
-    query: PathBuf,
+    query: QuerySpec,
 
     /// A annotation spec for each of the parameters in query. See
     /// `DistributionAnnotations` for the format of the file.
@@ -51,7 +126,7 @@ pub struct ArbitraryQueryParameters {
 
 impl ArbitraryQueryParameters {
     pub fn new(
-        query: PathBuf,
+        query: QuerySpec,
         query_spec_file: Option<PathBuf>,
         query_spec: Option<String>,
     ) -> Self {
@@ -75,21 +150,24 @@ impl ArbitraryQueryParameters {
         } else {
             None
         };
-        let query = fs::read_to_string(&benchmark_path(&self.query)?).unwrap();
-        let stmt = conn.prep(query.clone()).await?;
+        let query = self.query.query();
+        let stmt = conn.prep(query.to_owned()).await?;
 
         Ok(match spec {
-            None => PreparedStatement::new(query, stmt),
-            Some(s) => PreparedStatement::new_with_annotation(query, stmt, s),
+            None => PreparedStatement::new(query.to_owned(), stmt),
+            Some(s) => PreparedStatement::new_with_annotation(query.to_owned(), stmt, s),
         })
     }
 
     pub fn labels(&self) -> HashMap<String, String> {
         let mut labels = HashMap::new();
-        labels.insert(
-            "query_file".to_string(),
-            self.query.to_string_lossy().to_string(),
-        );
+        match &self.query {
+            QuerySpec::File(f) => labels.insert(
+                "query_file".to_string(),
+                f.path.to_string_lossy().to_string(),
+            ),
+            QuerySpec::Query(s) => labels.insert("query".to_string(), s.to_owned()),
+        };
         if let Some(query_spec_file) = self.query_spec_file.as_ref() {
             labels.insert(
                 "query_spec_file".to_string(),
@@ -106,9 +184,8 @@ impl ArbitraryQueryParameters {
         // Remove any query q if it is exists before migration.
         let _ = self.unmigrate(conn).await;
 
-        // TODO(justin): Cache this so we don't have to read from file each time.
-        let query = fs::read_to_string(&benchmark_path(&self.query)?).unwrap();
-        let stmt = "CREATE CACHE q FROM ".to_string() + &query;
+        let query = self.query.query();
+        let stmt = "CREATE CACHE q FROM ".to_string() + query;
         conn.query_drop(stmt).await?;
         Ok(())
     }
