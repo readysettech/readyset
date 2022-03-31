@@ -39,7 +39,7 @@ maplit = "1.0.2"
 paste = "1.0.5"
 proptest = "1.0.0"
 serial_test = "0.5.1"
-test-strategy = "0.1.2"
+test-strategy = "0.2.0"
 
 [features]
 vertical_tests = []

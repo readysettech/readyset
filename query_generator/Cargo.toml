@@ -24,7 +24,7 @@ strum_macros = "0.23"
 thiserror = "1.0.26"
 launchpad = { path = "../launchpad" }
 proptest = "1.0.0"
-test-strategy = "0.1.1"
+test-strategy = "0.2.0"
 rust_decimal = { version = "1.16" }
 eui48 = { version = "1.1", default-features = false }
 uuid = "0.8"

@@ -35,7 +35,7 @@ serde_json = "1.0"
 serde_regex = "1.1.0"
 serde_with = "1.11.0"
 serde_yaml = "0.8.23"
-test-strategy = "0.1.2"
+test-strategy = "0.2.0"
 tokio = { version = "1.15", features = ["fs", "macros", "rt", "rt-multi-thread", "io-util"] }
 
 [target.x86_64-unknown-linux-musl.dependencies]
