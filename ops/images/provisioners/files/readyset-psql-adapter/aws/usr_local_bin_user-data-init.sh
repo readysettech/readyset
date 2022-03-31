@@ -30,6 +30,7 @@ AUTHORITY_ADDRESS=${AUTHORITY_ADDRESS:-127.0.0.1:8500}
 ALLOWED_USERNAME=${USERNAME}
 ALLOWED_PASSWORD=${PASSWORD}
 LOG_LEVEL=${LOG_LEVEL:-info}
+$(echo "${EXTRA_ENV:-}" | tr ',' '\n')
 EOF
 chmod 600 /etc/default/readyset-psql-adapter
 

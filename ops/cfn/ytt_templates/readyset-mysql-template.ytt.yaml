@@ -39,6 +39,8 @@ Metadata:
           - ReadySetMemoryLimitGB
           - ReadySetDeploymentName
           - ReadySetLogLevel
+          - ReadySetAdapterExtraEnvironment
+          - ReadySetServerExtraEnvironment
       - Label:
           default: DB Configuration
         Parameters:
@@ -131,6 +133,16 @@ Parameters:
     Description: A log level directive as defined by tracing env-filter.
     Type: String
     Default: info
+
+  ReadySetAdapterExtraEnvironment:
+    Description: Extra environment variables to pass to the ReadySet Adapter process, separated by commas
+    Type: String
+    Default: ''
+
+  ReadySetServerExtraEnvironment:
+    Description: Extra environment variables to pass to the ReadySet Server process, separated by commas
+    Type: String
+    Default: ''
 
   KeyPairName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instances.
@@ -298,6 +310,7 @@ Resources:
             export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
             export DEPLOYMENT="${ReadySetDeploymentName}"
             export LOG_LEVEL="${ReadySetLogLevel}"
+            export EXTRA_ENV="${ReadySetAdapterExtraEnvironment}"
             # Connection Parameters
             export SSM_PATH_DB_PASSWORD=${SSMPathRDSDatabasePassword}
             export USERNAME=${DatabaseAdapterUsername}
@@ -513,6 +526,7 @@ Resources:
             export AUTO_GROW_VOLUME="${ReadySetServerAutoGrowVolume}"
             export MAX_VOLUME_SIZE_GB="${ReadySetServerMaxVolumeSizeGB}"
             export LOG_LEVEL="${ReadySetLogLevel}"
+            export EXTRA_ENV="${ReadySetServerExtraEnvironment}"
             # Connection Parameters
             export SSM_PATH_DB_PASSWORD=${SSMPathRDSDatabasePassword}
             export USERNAME=${DatabaseAdapterUsername}

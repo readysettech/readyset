@@ -35,6 +35,7 @@ NORIA_SHARDS=${NORIA_SHARDS}
 REPLICATION_URL=${REPLICATION_URL}
 AUTHORITY_ADDRESS=${AUTHORITY_ADDRESS:-127.0.0.1:8500}
 LOG_LEVEL=${LOG_LEVEL:-info}
+$(echo "${EXTRA_ENV:-}" | tr ',' '\n')
 EOF
 chmod 600 /etc/default/readyset-server
 

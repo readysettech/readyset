@@ -61,6 +61,8 @@ Metadata:
           - ReadySetMonitorInstanceType
           - ReadySetMemoryLimitGB
           - ReadySetDeploymentName
+          - ReadySetAdapterExtraEnvironment
+          - ReadySetServerExtraEnvironment
       - Label:
           Default: Feature Toggles
         Parameters:
@@ -179,6 +181,16 @@ Parameters:
     MinLength: 1
     AllowedPattern: ^[^/ ]+$
     ConstraintDescription: Must be non-empty and cannot contain slashes ("/") or spaces
+
+  ReadySetAdapterExtraEnvironment:
+    Description: Extra environment variables to pass to the ReadySet Adapter process, separated by commas
+    Type: String
+    Default: ""
+
+  ReadySetServerExtraEnvironment:
+    Description: Extra environment variables to pass to the ReadySet Server process, separated by commas
+    Type: String
+    Default: ""
 
   ReadySetServerInitialVolumeSizeGB:
     Description: Initial volume size, in gigabytes, to provision for Server instances. This should match the EBS volume size of the RDS instance.
@@ -352,6 +364,8 @@ Resources:
         ReadySetMonitorInstanceType: !Ref ReadySetMonitorInstanceType
         ReadySetMemoryLimitGB: !Ref ReadySetMemoryLimitGB
         ReadySetDeploymentName: !Ref ReadySetDeploymentName
+        ReadySetAdapterExtraEnvironment: !Ref ReadySetAdapterExtraEnvironment
+        ReadySetServerExtraEnvironment: !Ref ReadySetServerExtraEnvironment
         # Networking Inputs
         ReadySetServerSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetServerSecurityGroupID
         ReadySetAdapterSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetAdapterSecurityGroupID
@@ -389,6 +403,8 @@ Resources:
         ReadySetMonitorInstanceType: !Ref ReadySetMonitorInstanceType
         ReadySetMemoryLimitGB: !Ref ReadySetMemoryLimitGB
         ReadySetDeploymentName: !Ref ReadySetDeploymentName
+        ReadySetAdapterExtraEnvironment: !Ref ReadySetAdapterExtraEnvironment
+        ReadySetServerExtraEnvironment: !Ref ReadySetServerExtraEnvironment
         # Networking Inputs
         ReadySetServerSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetServerSecurityGroupID
         ReadySetAdapterSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetAdapterSecurityGroupID
