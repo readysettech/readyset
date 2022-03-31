@@ -42,7 +42,6 @@ pub use self::use_statement::UseStatement;
 
 pub mod parser;
 
-#[macro_use]
 mod dialect;
 #[macro_use]
 mod macros;
