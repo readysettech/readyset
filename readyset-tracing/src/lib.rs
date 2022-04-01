@@ -125,6 +125,7 @@ use std::str::FromStr;
 use clap::Parser;
 use opentelemetry::runtime;
 use opentelemetry::sdk::trace::Tracer;
+pub use readyset_tracing_proc_macros::{instrument_child, instrument_remote, instrument_root};
 use tracing::{warn, Subscriber};
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::filter::{Filtered, ParseError, Targets};

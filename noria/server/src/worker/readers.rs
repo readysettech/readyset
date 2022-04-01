@@ -23,6 +23,7 @@ use noria::metrics::recorded;
 use noria::{KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyStats, Tagged, ViewQuery};
 use noria_errors::internal_err;
 use pin_project::pin_project;
+use readyset_tracing::instrument_remote;
 use readyset_tracing::presampled::instrument_if_enabled;
 use readyset_tracing::propagation::Instrumented;
 use serde::ser::Serializer;
@@ -350,31 +351,6 @@ impl ReadRequestHandler {
             v: ReadReply::Keys(keys),
         }))
     }
-
-    fn _call(
-        &mut self,
-        m: Tagged<ReadQuery>,
-    ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ReadySetError>> + Send
-    {
-        let tag = m.tag;
-        match m.v {
-            ReadQuery::Normal { target, query } => {
-                let future = self.handle_normal_read_query(tag, target, query);
-                let span = readyset_tracing::child_span!(INFO, "normal_read_query");
-                ReadResponseFuture::Normal(instrument_if_enabled(future, span))
-            }
-            ReadQuery::Size { target } => {
-                let future = self.handle_size_query(tag, target);
-                let span = readyset_tracing::child_span!(INFO, "size_query");
-                ReadResponseFuture::Size(instrument_if_enabled(future, span))
-            }
-            ReadQuery::Keys { target } => {
-                let future = self.handle_keys_query(tag, target);
-                let span = readyset_tracing::child_span!(INFO, "keys_query");
-                ReadResponseFuture::Keys(instrument_if_enabled(future, span))
-            }
-        }
-    }
 }
 
 #[pin_project(project = ReadResponseFutureProj)]
@@ -415,10 +391,27 @@ impl Service<Instrumented<Tagged<ReadQuery>>> for ReadRequestHandler {
         Poll::Ready(Ok(()))
     }
 
+    #[instrument_remote(level = "info")]
     #[inline]
-    fn call(&mut self, m: Instrumented<Tagged<ReadQuery>>) -> Self::Future {
-        let (span, m) = readyset_tracing::remote_span!(m, INFO, "read_request");
-        instrument_if_enabled(self._call(m), span)
+    fn call(&mut self, #[instrumented] m: Tagged<ReadQuery>) -> Self::Future {
+        let tag = m.tag;
+        match m.v {
+            ReadQuery::Normal { target, query } => {
+                let future = self.handle_normal_read_query(tag, target, query);
+                let span = readyset_tracing::child_span!(INFO, "normal_read_query");
+                ReadResponseFuture::Normal(instrument_if_enabled(future, span))
+            }
+            ReadQuery::Size { target } => {
+                let future = self.handle_size_query(tag, target);
+                let span = readyset_tracing::child_span!(INFO, "size_query");
+                ReadResponseFuture::Size(instrument_if_enabled(future, span))
+            }
+            ReadQuery::Keys { target } => {
+                let future = self.handle_keys_query(tag, target);
+                let span = readyset_tracing::child_span!(INFO, "keys_query");
+                ReadResponseFuture::Keys(instrument_if_enabled(future, span))
+            }
+        }
     }
 }
 
