@@ -5298,6 +5298,7 @@ dependencies = [
  "opentelemetry-jaeger",
  "parking_lot 0.12.0",
  "rand 0.8.5",
+ "readyset-tracing-proc-macros",
  "serde",
  "thiserror",
  "tokio",
@@ -5308,6 +5309,17 @@ dependencies = [
  "tracing-futures",
  "tracing-opentelemetry",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "readyset-tracing-proc-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "readyset-tracing",
+ "syn",
+ "tracing",
 ]
 
 [[package]]

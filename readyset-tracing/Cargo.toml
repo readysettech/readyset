@@ -21,9 +21,9 @@ tracing = "0.1.32"
 tracing-futures = { version = "0.2.5", features = ["std-future"] }
 tracing-opentelemetry = "0.17.2"
 tracing-subscriber = { version = "0.3.9", features = ["env-filter", "json"] }
+readyset-tracing-proc-macros = { path = "proc-macros" }
 
 [dev-dependencies]
 anyhow = "1.0.53"
 tokio = { version = "1.16.1", features = ["rt-multi-thread", "macros"] }
 tracing-attributes = "0.1.20"
-

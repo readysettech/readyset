@@ -91,7 +91,7 @@ use noria_client_metrics::{
 use noria_data::DataType;
 use noria_errors::ReadySetError::{self, PreparedStatementMissing};
 use noria_errors::{internal, internal_err, unsupported, ReadySetResult};
-use readyset_tracing::presampled::instrument_if_enabled;
+use readyset_tracing::instrument_root;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, instrument, trace, warn};
@@ -615,16 +615,8 @@ where
 
     /// Executes query on the upstream database, for when it cannot be parsed or executed by noria.
     /// Returns the query result, or an error if fallback is not configured
+    #[instrument_root(level = "info", fields(%query))]
     pub async fn query_fallback(
-        &mut self,
-        query: &str,
-        event: &mut QueryExecutionEvent,
-    ) -> Result<QueryResult<'static, DB>, DB::Error> {
-        let span = readyset_tracing::root_span!(INFO, "query_fallback", query);
-        instrument_if_enabled(self._query_fallback(query, event), span).await
-    }
-
-    async fn _query_fallback(
         &mut self,
         query: &str,
         event: &mut QueryExecutionEvent,
@@ -880,13 +872,8 @@ where
     /// Prepares `query` to be executed later using the reader/writer belonging
     /// to the calling `Backend` struct and adds the prepared query
     /// to the calling struct's map of prepared queries with a unique id.
-    #[inline]
+    #[instrument_root(level = "info", fields(%query))]
     pub async fn prepare(&mut self, query: &str) -> Result<&PrepareResult<DB>, DB::Error> {
-        let span = readyset_tracing::root_span!(INFO, "prepare", query);
-        instrument_if_enabled(self._prepare(query), span).await
-    }
-
-    async fn _prepare(&mut self, query: &str) -> Result<&PrepareResult<DB>, DB::Error> {
         self.last_query = None;
         let mut query_event = QueryExecutionEvent::new(EventType::Prepare);
 
@@ -1108,17 +1095,9 @@ where
     /// A [`QueryExecutionEvent`], is used to track metrics and behavior scoped to the
     /// execute operation.
     // TODO(andrew, justin): add RYW support for executing prepared queries
+    #[instrument_root(level = "info", fields(id))]
     #[inline]
     pub async fn execute(
-        &mut self,
-        id: u32,
-        params: &[DataType],
-    ) -> Result<QueryResult<'_, DB>, DB::Error> {
-        let span = readyset_tracing::root_span!(INFO, "execute", id);
-        instrument_if_enabled(self._execute(id, params), span).await
-    }
-
-    async fn _execute(
         &mut self,
         id: u32,
         params: &[DataType],
@@ -1535,13 +1514,9 @@ where
     }
 
     /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
+    #[instrument_root(level = "info", fields(%query))]
     #[inline]
     pub async fn query(&mut self, query: &str) -> Result<QueryResult<'_, DB>, DB::Error> {
-        let span = readyset_tracing::root_span!(INFO, "query", query);
-        instrument_if_enabled(self._query(query), span).await
-    }
-
-    async fn _query(&mut self, query: &str) -> Result<QueryResult<'_, DB>, DB::Error> {
         let mut event = QueryExecutionEvent::new(EventType::Query);
         let query_log_sender = self.query_log_sender.clone();
         let slowlog = self.slowlog;

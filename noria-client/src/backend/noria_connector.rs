@@ -22,7 +22,7 @@ use noria::{
 use noria_data::DataType;
 use noria_errors::ReadySetError::PreparedStatementMissing;
 use noria_errors::{internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err};
-use readyset_tracing::presampled::instrument_if_enabled;
+use readyset_tracing::instrument_child;
 use tracing::{error, info, instrument, trace};
 use vec1::vec1;
 
@@ -1229,25 +1229,10 @@ impl NoriaConnector {
         })
     }
 
+    #[instrument_child(level = "info", fields(%query, create_if_not_exist))]
     pub(crate) async fn handle_select(
         &mut self,
         // TODO(mc):  Take a reference here; requires getting rewrite::process_query() to Cow
-        query: nom_sql::SelectStatement,
-        ticket: Option<Timestamp>,
-        create_if_not_exist: bool,
-        event: &mut noria_client_metrics::QueryExecutionEvent,
-    ) -> ReadySetResult<QueryResult<'_>> {
-        let span =
-            readyset_tracing::child_span!(INFO, "handle_select", ?query, create_if_not_exist);
-        instrument_if_enabled(
-            self._handle_select(query, ticket, create_if_not_exist, event),
-            span,
-        )
-        .await
-    }
-
-    async fn _handle_select(
-        &mut self,
         mut query: nom_sql::SelectStatement,
         ticket: Option<Timestamp>,
         create_if_not_exist: bool,

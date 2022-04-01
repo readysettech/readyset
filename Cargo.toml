@@ -50,6 +50,7 @@ members = [
     "test_utils",
     "installer",
     "readyset-tracing",
+    "readyset-tracing/proc-macros",
 ]
 resolver = "2"
 

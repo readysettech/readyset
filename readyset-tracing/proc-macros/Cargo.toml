@@ -1,0 +1,17 @@
+[package]
+name = "readyset-tracing-proc-macros"
+version = "0.1.0"
+publish = false
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+syn = { default_features = false, version = "1", features = ["full", "parsing", "printing", "proc-macro", "extra-traits", "clone-impls"] }
+quote = "1"
+
+[dev-dependencies]
+tracing = "0.1"
+readyset-tracing = { path = "../" }
