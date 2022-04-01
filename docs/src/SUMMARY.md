@@ -31,6 +31,8 @@
 - [Noria Server](./server.md)
 - [Monitoring](./monitoring.md)
   - [Adding Metrics](./adding_metrics.md)
+- [API Documentation](./api_documentation.md)
+  - [Adapter](./adapter_endpoints.md)
 - [Testing](./testing.md)
   - [Clustertest](./clustertest.md)
   - [Buildkite](./buildkite.md)
