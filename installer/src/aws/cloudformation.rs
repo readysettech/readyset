@@ -419,7 +419,13 @@ pub(crate) async fn deploy_stack(
             "Creating CloudFormation stack {}",
             style(stack_name).bold()
         ));
-        operation.send().await?;
+        let r = operation.send().await;
+        if let Err(SdkError::ServiceError { err: e, .. }) = &r {
+            if e.is_insufficient_capabilities_exception() {
+                println!("{}", style(format!("The provided AWS profile does not have permissions to either create CloudFormation stacks, or to create all the resources that the new CloudFormation stack we are trying to deploy needs to create. Please either use an AWS profile that has the correct permissions, or add the correct permissions to the current profile, and try again.\n    Error: {}", &e)).bold());
+            }
+        }
+        r?;
         create_pb.finish_with_message(format!(
             "{}Created CloudFormation stack {}",
             *GREEN_CHECK,
