@@ -27,7 +27,7 @@ async fn query_regional_routing_test() {
 
     deployment
         .leader_handle()
-        .install_recipe(
+        .extend_recipe(
             "
       CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
       QUERY q:
@@ -159,7 +159,7 @@ async fn query_failure_recovery_with_volume_id() {
 
     deployment
         .leader_handle()
-        .install_recipe(
+        .extend_recipe(
             "
       CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
       QUERY q:
@@ -232,7 +232,7 @@ async fn balance_base_table_domains() {
 
     deployment
         .leader_handle()
-        .install_recipe(
+        .extend_recipe(
             "
         CREATE TABLE t1 (id INT PRIMARY KEY);
         CREATE TABLE t2 (id INT PRIMARY KEY);",

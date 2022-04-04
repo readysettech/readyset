@@ -33,7 +33,7 @@ async fn main() {
     builder.set_persistence(persistence_params);
 
     let mut blender = builder.start_local().await.unwrap();
-    blender.install_recipe(sql).await.unwrap();
+    blender.extend_recipe(sql).await.unwrap();
     println!("{}", blender.graphviz().await.unwrap());
 
     // Get mutators and getter.

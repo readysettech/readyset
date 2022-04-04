@@ -92,7 +92,7 @@ impl Backend {
 
         info!("Ignored {} blacklisted queries", blacklisted);
 
-        match self.g.install_recipe(&rs).await {
+        match self.g.extend_recipe(&rs).await {
             Ok(ar) => {
                 info!("{} expressions added", ar.expressions_added);
                 info!("{} expressions removed", ar.expressions_removed);

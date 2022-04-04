@@ -271,7 +271,7 @@ async fn reader_replication() {
         .unwrap()
         .clone();
 
-    w1.install_recipe(
+    w1.extend_recipe(
         "
       CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
       QUERY q:

@@ -270,7 +270,7 @@ impl BenchmarkApplication {
         ";
 
         println!("Initializing noria tables and queries.");
-        self.g.install_recipe(noria_sql_string).await.unwrap();
+        self.g.extend_recipe(noria_sql_string).await.unwrap();
 
         println!("Attempting to drop all mysql tables in case they already exist.");
         self.mysql

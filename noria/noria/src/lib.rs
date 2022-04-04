@@ -40,7 +40,7 @@
 //!     let mut db = ControllerHandle::new(zk_auth).await;
 //!
 //!     // if this is the first time we interact with Noria, we must give it the schema
-//!     db.install_recipe(
+//!     db.extend_recipe(
 //!         "
 //!         CREATE TABLE Article (aid int, title varchar(255), url text, PRIMARY KEY(aid));
 //!         CREATE TABLE Vote (aid int, uid int);

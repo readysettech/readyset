@@ -61,7 +61,7 @@ ___
 ### Request thread
 The request thread handles controller requests destined for the leader and authortity updates from the Authority thread.
 If the controller is currently acting as the leader of the system, it handles controller requests and authority updates
-that apply to leaders such as: `AuthorityUpdate::NewWorker`, or `/install_recipe` requests to update the dataflow graph.
+that apply to leaders such as: `AuthorityUpdate::NewWorker`, or `/extend_recipe` requests to update the dataflow graph.
 
 <details>
   <summary> Request thread operations</summary>

@@ -28,7 +28,7 @@ async fn main() {
     );
 
     let mut srv = ControllerHandle::new(zk_auth).await;
-    srv.install_recipe(sql).await.unwrap();
+    srv.extend_recipe(sql).await.unwrap();
     let g = srv.graphviz().await.unwrap();
     println!("{}", g);
 

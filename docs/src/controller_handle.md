@@ -40,7 +40,7 @@ handle types for base tables and views.
 
 Per-client load balancing between connections.
 
-`install_recipe` overwrites schema, `extend_recipe` doesn't assuming no overlapping names
+`extend_recipe` install new queries and schemas.
 
 `src/lib.rs` has a lot of constants set for benchmarking, would prob be changed for production, and would probably not be constants (dynamically set instead). 
 

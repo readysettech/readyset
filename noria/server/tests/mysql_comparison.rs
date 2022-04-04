@@ -271,7 +271,7 @@ async fn check_query(
         .collect();
 
     let mut g = Builder::default().start_local().await.unwrap();
-    g.install_recipe(&queries.join("\n")).await.unwrap();
+    g.extend_recipe(&queries.join("\n")).await.unwrap();
 
     for (table_name, table) in tables.iter() {
         let mut mutator = g.table(table_name).await.unwrap();

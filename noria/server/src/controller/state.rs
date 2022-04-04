@@ -1333,32 +1333,6 @@ impl DataflowState {
         }
     }
 
-    pub(super) async fn install_recipe(
-        &mut self,
-        r_txt_spec: RecipeSpec<'_>,
-    ) -> Result<ActivationResult, ReadySetError> {
-        let r_txt = r_txt_spec.recipe;
-
-        let mut remove_all = self.recipe.remove_all();
-        match ChangeList::from_str(r_txt) {
-            Ok(cl) => {
-                remove_all.extend(cl);
-                match self.apply_recipe(remove_all, false).await {
-                    Ok(x) => {
-                        self.schema_replication_offset =
-                            r_txt_spec.replication_offset.as_deref().cloned();
-                        Ok(x)
-                    }
-                    Err(e) => Err(e),
-                }
-            }
-            Err(error) => {
-                error!(%error, "failed to parse recipe");
-                internal!("failed to parse recipe: {}", error);
-            }
-        }
-    }
-
     pub(super) async fn remove_query(&mut self, query_name: &str) -> ReadySetResult<()> {
         let changelist = match self.recipe.remove_query(query_name) {
             None => return Ok(()),

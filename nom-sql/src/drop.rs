@@ -90,6 +90,7 @@ pub fn drop_cached_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], D
         let (i, _) = tag_no_case("cache")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, name) = dialect.identifier()(i)?;
+        let (i, _) = statement_terminator(i)?;
         Ok((i, DropCacheStatement { name }))
     }
 }

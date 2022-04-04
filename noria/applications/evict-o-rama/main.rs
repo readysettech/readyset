@@ -41,7 +41,7 @@ async fn main() {
     //builder.disable_partial();
 
     let mut blender = builder.start_local().await.unwrap();
-    blender.install_recipe(sql).await.unwrap();
+    blender.extend_recipe(sql).await.unwrap();
 
     // Get mutators and getter.
     let mut article = blender.table("Article").await.unwrap();
