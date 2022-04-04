@@ -14,7 +14,7 @@ pub use self::common::{
 };
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 pub use self::create::{
-    CacheInner, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
+    creation, CacheInner, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
     SelectSpecification,
 };
 pub use self::delete::DeleteStatement;
@@ -29,7 +29,7 @@ pub use self::join::{JoinConstraint, JoinOperator, JoinRightSide};
 pub use self::order::{OrderClause, OrderType};
 pub use self::parser::*;
 pub use self::select::{
-    CommonTableExpression, GroupByClause, JoinClause, LimitClause, SelectStatement,
+    selection, CommonTableExpression, GroupByClause, JoinClause, LimitClause, SelectStatement,
 };
 pub use self::set::{
     PostgresParameterScope, PostgresParameterValue, SetPostgresParameter,
