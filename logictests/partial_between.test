@@ -89,3 +89,19 @@ select x from t2 where x between ? and ?
 ? = 2
 ? = 1
 ----
+
+# fill a hole that "splits" a later range
+query I nosort
+select x from t2 where x between 20 and 20;
+----
+
+# Now insert something above that hole...
+statement ok
+insert into t2 (x, y) values (21, 21);
+
+# Now do a query that is split by the range (which turns into two simultaneous
+# upqueries)
+query I nosort
+select x from t2 where x between 15 and 25
+----
+21
