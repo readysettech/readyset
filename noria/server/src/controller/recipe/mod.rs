@@ -266,6 +266,21 @@ impl Recipe {
                                 }
                             }
                         }
+                        SqlQuery::DropCache(dcs) => match self.aliases.get(dcs.name.as_str()) {
+                            Some(remove_qid) => {
+                                to_remove.push(*remove_qid);
+                            }
+                            None => {
+                                error!(
+                                    "Tried to drop query {}, but query doesn't exist.",
+                                    dcs.name
+                                );
+                                internal!(
+                                    "Tried to drop query {}, but query doesn't exist.",
+                                    dcs.name
+                                );
+                            }
+                        },
                         _ => to_remove.push(hash_query(&expr.query)),
                     }
                 }

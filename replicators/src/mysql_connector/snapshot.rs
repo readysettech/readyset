@@ -284,8 +284,8 @@ impl MySqlReplicator {
     /// * `noria`: The target Noria deployment
     /// * `replication_offsets`: The set of replication offsets for already-snapshotted tables and
     ///   the schema
-    /// * `install_recipe`: Replicate and install the recipe (`CREATE TABLE` ...; `CREATE VIEW`
-    ///   ...;) in addition to the rows
+    /// * `extend_recipe`: Replicate and install the recipe (`CREATE TABLE` ...; `CREATE VIEW` ...;)
+    ///   in addition to the rows
     pub async fn snapshot_to_noria(
         mut self,
         noria: &mut noria::ControllerHandle,

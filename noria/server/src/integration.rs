@@ -736,7 +736,7 @@ async fn it_works_deletion() {
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_row() {
     let mut g = start_simple("delete_row").await;
-    g.install_recipe(
+    g.extend_recipe(
         "
         CREATE TABLE t1 (x int, y int, z int);
         VIEW all_rows: SELECT * FROM t1;
@@ -779,7 +779,7 @@ async fn it_works_with_sql_recipe() {
         CREATE TABLE Car (id int, brand varchar(255), PRIMARY KEY(id));
         QUERY CountCars: SELECT COUNT(*) FROM Car WHERE brand = ?;
     ";
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
 
     let mut mutator = g.table("Car").await.unwrap();
     let mut getter = g.view("CountCars").await.unwrap();
@@ -823,7 +823,7 @@ async fn it_works_with_vote() {
                     ON (Article.id = VoteCount.article_id) WHERE Article.id = ?;
     ";
 
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
     let mut article = g.table("Article").await.unwrap();
     let mut vote = g.table("Vote").await.unwrap();
     let mut awvc = g.view("ArticleWithVoteCount").await.unwrap();
@@ -864,7 +864,7 @@ async fn it_works_with_identical_queries() {
         QUERY aq2: SELECT Article.* FROM Article WHERE Article.aid = ?;
     ";
 
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
     let mut article = g.table("Article").await.unwrap();
     let mut aq1 = g.view("aq1").await.unwrap();
     let mut aq2 = g.view("aq2").await.unwrap();
@@ -898,7 +898,7 @@ async fn it_works_with_double_query_through() {
             WHERE J.aid = ?;
     ";
 
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
     let mut a = g.table("A").await.unwrap();
     let mut b = g.table("B").await.unwrap();
     let mut getter = g.view("ReadJoin").await.unwrap();
@@ -942,7 +942,7 @@ async fn it_works_with_duplicate_subquery() {
             WHERE J2.aid = ?;
     ";
 
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
     let mut a = g.table("A").await.unwrap();
     let mut b = g.table("B").await.unwrap();
     let mut getter = g.view("ReadJoin2").await.unwrap();
@@ -972,7 +972,7 @@ async fn it_works_with_reads_before_writes() {
             WHERE Article.aid = Vote.aid AND Article.aid = ?;
     ";
 
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
     let mut article = g.table("Article").await.unwrap();
     let mut vote = g.table("Vote").await.unwrap();
     let mut awvc = g.view("ArticleVote").await.unwrap();
@@ -1004,7 +1004,7 @@ async fn forced_shuffle_despite_same_shard() {
         QUERY CarPrice: SELECT cid, price FROM Car \
             JOIN Price ON Car.pid = Price.pid WHERE cid = ?;
     ";
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
 
     let mut car_mutator = g.table("Car").await.unwrap();
     let mut price_mutator = g.table("Price").await.unwrap();
@@ -1040,7 +1040,7 @@ async fn double_shuffle() {
         QUERY CarPrice: SELECT cid, price FROM Car \
             JOIN Price ON Car.pid = Price.pid WHERE cid = ?;
     ";
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
 
     let mut car_mutator = g.table("Car").await.unwrap();
     let mut price_mutator = g.table("Price").await.unwrap();
@@ -1075,7 +1075,7 @@ async fn it_works_with_arithmetic_aliases() {
         ModPrice: SELECT pid, cent_price / 100 AS price FROM Price;
         QUERY AltPrice: SELECT pid, price FROM ModPrice WHERE pid = ?;
     ";
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
 
     let mut price_mutator = g.table("Price").await.unwrap();
     let mut getter = g.view("AltPrice").await.unwrap();
@@ -1121,7 +1121,7 @@ async fn it_recovers_persisted_bases() {
             CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
             QUERY CarPrice: SELECT price FROM Car WHERE id = ?;
         ";
-            g.install_recipe(sql).await.unwrap();
+            g.extend_recipe(sql).await.unwrap();
 
             let mut mutator = g.table("Car").await.unwrap();
 
@@ -1194,7 +1194,7 @@ async fn it_recovers_persisted_bases_with_volume_id() {
             CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
             QUERY CarPrice: SELECT price FROM Car WHERE id = ?;
         ";
-            g.install_recipe(sql).await.unwrap();
+            g.extend_recipe(sql).await.unwrap();
 
             let mut mutator = g.table("Car").await.unwrap();
 
@@ -1263,7 +1263,7 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
             CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
             QUERY CarPrice: SELECT price FROM Car WHERE id = ?;
         ";
-            g.install_recipe(sql).await.unwrap();
+            g.extend_recipe(sql).await.unwrap();
 
             let mut mutator = g.table("Car").await.unwrap();
 
@@ -1362,7 +1362,7 @@ async fn view_connection_churn() {
     builder.set_persistence(get_persistence_params("connection_churn"));
     let mut g = builder.start(authority.clone()).await.unwrap();
 
-    g.install_recipe(
+    g.extend_recipe(
         "
         CREATE TABLE A (id int, PRIMARY KEY(id));
         QUERY AID: SELECT id FROM A WHERE id = ?;
@@ -1415,7 +1415,7 @@ async fn table_connection_churn() {
     builder.set_persistence(get_persistence_params("connection_churn"));
     let mut g = builder.start(authority.clone()).await.unwrap();
 
-    g.install_recipe("CREATE TABLE A (id int, PRIMARY KEY(id));")
+    g.extend_recipe("CREATE TABLE A (id int, PRIMARY KEY(id));")
         .await
         .unwrap();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -1488,7 +1488,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
             QUERY BID: SELECT id FROM B WHERE id = ?;
             QUERY CID: SELECT id FROM C WHERE id = ?;
         ";
-            g.install_recipe(sql).await.unwrap();
+            g.extend_recipe(sql).await.unwrap();
             for (i, table) in tables.iter().enumerate() {
                 let mut mutator = g.table(table).await.unwrap();
                 mutator.insert(vec![i.into()]).await.unwrap();
@@ -1558,7 +1558,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
             QUERY BID: SELECT id FROM B WHERE id = ?;
             QUERY CID: SELECT id FROM C WHERE id = ?;
         ";
-            g.install_recipe(sql).await.unwrap();
+            g.extend_recipe(sql).await.unwrap();
             for (i, table) in tables.iter().enumerate() {
                 let mut mutator = g.table(table).await.unwrap();
                 mutator.insert(vec![i.into()]).await.unwrap();
@@ -1628,7 +1628,7 @@ async fn it_works_with_multiple_arithmetic_expressions() {
     let sql = "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
                QUERY CarPrice: SELECT 10 * 10, 2 * price, 10 * price, FROM Car WHERE id = ?;
                ";
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
 
     let mut mutator = g.table("Car").await.unwrap();
     let mut getter = g.view("CarPrice").await.unwrap();
@@ -1659,7 +1659,7 @@ async fn it_works_with_join_arithmetic() {
                   JOIN Sales ON Price.price_id = Sales.price_id \
                   WHERE car_id = ?;
     ";
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
 
     let mut car_mutator = g.table("Car").await.unwrap();
     let mut price_mutator = g.table("Price").await.unwrap();
@@ -1704,7 +1704,7 @@ async fn it_works_with_function_arithmetic() {
         CREATE TABLE Bread (id int, price int, PRIMARY KEY(id));
         QUERY Price: SELECT 2 * MAX(price) FROM Bread;
     ";
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
 
     let mut mutator = g.table("Bread").await.unwrap();
     let mut getter = g.view("Price").await.unwrap();
@@ -2413,7 +2413,7 @@ async fn cascading_replays_with_sharding() {
 #[tokio::test(flavor = "multi_thread")]
 async fn replay_multiple_keys_then_write() {
     let mut g = start_simple("replay_multiple_keys_then_write").await;
-    g.install_recipe(
+    g.extend_recipe(
         "
         CREATE TABLE t (id INTEGER PRIMARY KEY, value INTEGER);
         QUERY q: SELECT id, value FROM t WHERE id = ?;",
@@ -2515,7 +2515,7 @@ async fn full_aggregation_with_bogokey() {
 #[tokio::test(flavor = "multi_thread")]
 async fn pkey_then_full_table_with_bogokey() {
     let mut g = start_simple_unsharded("pkey_then_full_table_with_bogokey").await;
-    g.install_recipe("CREATE TABLE posts (id int, title text)")
+    g.extend_recipe("CREATE TABLE posts (id int, title text)")
         .await
         .unwrap();
     g.extend_recipe("QUERY by_id: SELECT id, title FROM posts WHERE id = ?")
@@ -3199,7 +3199,7 @@ async fn recipe_activates_and_migrates() {
                   QUERY qb: SELECT a, c FROM b WHERE a = 42;";
 
     let mut g = start_simple("recipe_activates_and_migrates").await;
-    g.install_recipe(r_txt).await.unwrap();
+    g.extend_recipe(r_txt).await.unwrap();
     // one base node
     assert_eq!(g.inputs().await.unwrap().len(), 1);
 
@@ -3217,7 +3217,7 @@ async fn recipe_activates_and_migrates_with_join() {
     let r1_txt = "QUERY q: SELECT y, s FROM a, b WHERE a.x = b.r;";
 
     let mut g = start_simple("recipe_activates_and_migrates_with_join").await;
-    g.install_recipe(r_txt).await.unwrap();
+    g.extend_recipe(r_txt).await.unwrap();
 
     // two base nodes
     assert_eq!(g.inputs().await.unwrap().len(), 2);
@@ -3431,11 +3431,13 @@ async fn remove_query() {
                  QUERY qa: SELECT a FROM b;\n
                  QUERY qb: SELECT a, c FROM b WHERE a = 42;";
 
-    let r2_txt = "CREATE TABLE b (a int, c text, x text);\n
-                  QUERY qa: SELECT a FROM b;";
+    let r2_txt = "
+        DROP CACHE qb;
+        CREATE TABLE b (a int, c text, x text);
+        QUERY qa: SELECT a FROM b;";
 
     let mut g = start_simple("remove_query").await;
-    g.install_recipe(r_txt).await.unwrap();
+    g.extend_recipe(r_txt).await.unwrap();
     assert_eq!(g.inputs().await.unwrap().len(), 1);
     assert_eq!(g.outputs().await.unwrap().len(), 2);
 
@@ -3463,7 +3465,7 @@ async fn remove_query() {
     assert_eq!(qb.lookup(&[0.into()], true).await.unwrap().len(), 1);
 
     // Remove qb and check that the graph still functions as expected.
-    g.install_recipe(r2_txt).await.unwrap();
+    g.extend_recipe(r2_txt).await.unwrap();
     assert_eq!(g.inputs().await.unwrap().len(), 1);
     assert_eq!(g.outputs().await.unwrap().len(), 1);
     assert!(g.view("qb").await.is_err());
@@ -3515,7 +3517,7 @@ macro_rules! get {
 #[tokio::test(flavor = "multi_thread")]
 async fn albums() {
     let mut g = start_simple_unsharded("albums").await;
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE friend (usera int, userb int);
                  CREATE TABLE album (a_id text, u_id int, public tinyint(1));
                  CREATE TABLE photo (p_id text, album text);",
@@ -3610,7 +3612,7 @@ async fn union_basic() {
     // Add multiples of 2 to 'twos' and multiples of 3 to 'threes'.
 
     let mut g = start_simple("union_basic").await;
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE twos (id INTEGER PRIMARY KEY);
          CREATE TABLE threes (id INTEGER PRIMARY KEY);
          VIEW twos_union_threes: (SELECT id FROM twos) UNION (SELECT id FROM threes);
@@ -3655,7 +3657,7 @@ async fn union_all_basic() {
     // Add multiples of 2 to 'twos' and multiples of 3 to 'threes'.
 
     let mut g = start_simple("union_all_basic").await;
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE twos (id INTEGER PRIMARY KEY);
          CREATE TABLE threes (id INTEGER PRIMARY KEY);
          VIEW twos_union_threes: (SELECT id FROM twos) UNION ALL (SELECT id FROM threes);
@@ -3701,7 +3703,7 @@ async fn union_all_basic() {
 #[tokio::test(flavor = "multi_thread")]
 async fn between() {
     let mut g = start_simple("between_query").await;
-    g.install_recipe("CREATE TABLE things (bigness INT);")
+    g.extend_recipe("CREATE TABLE things (bigness INT);")
         .await
         .unwrap();
 
@@ -3729,7 +3731,7 @@ async fn between() {
 async fn between_parametrized() {
     let mut g = start_simple("between_parametrized").await;
 
-    g.install_recipe("CREATE TABLE things (bigness INT);")
+    g.extend_recipe("CREATE TABLE things (bigness INT);")
         .await
         .unwrap();
 
@@ -3772,7 +3774,7 @@ async fn between_parametrized() {
 async fn not_between() {
     let mut g = start_simple_unsharded("things").await;
     println!("Installing recipes");
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE things (bigness INT);
 
          QUERY not_between:
@@ -3807,7 +3809,7 @@ async fn not_between() {
 #[tokio::test(flavor = "multi_thread")]
 async fn topk_updates() {
     let mut g = start_simple("things").await;
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE posts (id INTEGER PRIMARY KEY, number INTEGER);
 
          QUERY top_posts:
@@ -3854,7 +3856,7 @@ async fn topk_updates() {
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_pagination() {
     let mut g = start_simple_unsharded("simple_pagination").await;
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE t (x, y);
          QUERY q: SELECT x, y FROM t WHERE y = $1 ORDER BY x ASC LIMIT 3 OFFSET $2;",
     )
@@ -3956,7 +3958,7 @@ async fn correct_nested_view_schema() {
     b.disable_partial();
     b.set_sharding(None);
     let mut g = b.start_local().await.unwrap();
-    g.install_recipe(r_txt).await.unwrap();
+    g.extend_recipe(r_txt).await.unwrap();
 
     let q = g.view("swvc").await.unwrap();
 
@@ -3983,7 +3985,7 @@ async fn join_column_projection() {
     let mut g = start_simple("join_column_projection").await;
 
     // NOTE u_id causes panic in stories_authors_explicit; stories_authors_tables_star also paics
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE stories (s_id int, author_id int, s_name text, content text);
          CREATE TABLE users (u_id int, u_name text, email text);
          VIEW stories_authors_explicit: SELECT s_id, author_id, s_name, content, u_id, u_name, email
@@ -4050,7 +4052,7 @@ async fn join_column_projection() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_join_across_shards() {
     let mut g = start_simple("test_join_across_shards").await;
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE votes (story int, user int);
          CREATE TABLE recs (story int, other int);
          VIEW all_user_recs: SELECT votes.user as u, recs.other as s
@@ -4104,7 +4106,7 @@ async fn test_join_across_shards() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_join_across_shards_with_param() {
     let mut g = start_simple("test_join_across_shards_with_param").await;
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE votes (story int, user int);
          CREATE TABLE recs (story int, other int);
          VIEW user_recs: SELECT votes.user as u, recs.other as s
@@ -4149,7 +4151,7 @@ async fn test_join_across_shards_with_param() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_join_with_reused_column_name() {
     let mut g = start_simple("test_join_with_reused_column_name").await;
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE votes (story int, user int);
          CREATE TABLE recs (story int, other int);
          VIEW all_user_recs: SELECT votes.user as user, recs.other as story
@@ -4199,7 +4201,7 @@ async fn test_join_with_reused_column_name() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_join_with_reused_column_name_with_param() {
     let mut g = start_simple("test_join_with_reused_column_name").await;
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE votes (story int, user int);
          CREATE TABLE recs (story int, other int);
          VIEW user_recs: SELECT votes.user as user, recs.other as story
@@ -4240,7 +4242,7 @@ async fn test_join_with_reused_column_name_with_param() {
 #[ignore] // ENG-411
 async fn self_join_basic() {
     let mut g = start_simple("self_join_basic").await;
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE votes (story int, user int);
          VIEW like_minded: SELECT v1.user, v2.user AS agreer \
              FROM votes v1 \
@@ -4300,7 +4302,7 @@ async fn self_join_basic() {
 #[tokio::test(flavor = "multi_thread")]
 async fn self_join_param() {
     let mut g = start_simple("self_join_param").await;
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE users (id int, friend int);
          QUERY fof: SELECT u1.id AS user, u2.friend AS fof \
              FROM users u1 \
@@ -4532,7 +4534,7 @@ async fn range_upquery_after_point_queries() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_reuse_aliases() {
     let mut g = start_simple("query_reuse_aliases").await;
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE t1 (a INT, b INT);
          QUERY q1: SELECT * FROM t1 WHERE a != 1;
          QUERY q2: SELECT * FROM t1 WHERE a != 1;",
@@ -4566,7 +4568,7 @@ async fn query_reuse_aliases() {
 #[tokio::test(flavor = "multi_thread")]
 async fn same_table_columns_inequal() {
     let mut g = start_simple("same_table_columns_inequal").await;
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE t1 (a INT, b INT);
          QUERY q: SELECT * FROM t1 WHERE t1.a != t1.b;",
     )
@@ -4603,7 +4605,7 @@ async fn view_reuse_aliases() {
     let mut g = start_simple("view_reuse_aliases").await;
 
     // NOTE q1 causes panic
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE t1 (a INT, b INT);
          VIEW v1: SELECT * FROM t1 WHERE a != 1;
          VIEW v2: SELECT * FROM t1 WHERE a != 1;
@@ -4691,7 +4693,7 @@ async fn post_read_ilike() {
 async fn cast_projection() {
     let mut g = start_simple("cast").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE users (id int, created_at timestamp);
          QUERY user: SELECT id, CAST(created_at AS date) AS created_day FROM users WHERE id = ?;",
     )
@@ -4727,7 +4729,7 @@ async fn cast_projection() {
 async fn aggregate_expression() {
     let mut g = start_simple_unsharded("aggregate_expression").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE t (string_num text);
          QUERY q: SELECT max(cast(t.string_num as int)) as max_num from t;",
     )
@@ -4755,7 +4757,7 @@ async fn aggregate_expression() {
 async fn aggregate_missing_columns() {
     let mut g = start_simple_unsharded("aggregate_missing_columns").await;
 
-    g.install_recipe("CREATE TABLE t (id INT);").await.unwrap();
+    g.extend_recipe("CREATE TABLE t (id INT);").await.unwrap();
 
     let res = g.extend_recipe("QUERY q: SELECT max(idd) FROM t").await;
     assert!(res.is_err());
@@ -4766,7 +4768,7 @@ async fn aggregate_missing_columns() {
 async fn post_join_filter() {
     let mut g = start_simple("post_join_filter").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE t1 (id int, val_1 int);
          CREATE TABLE t2 (id int, val_2 int);
          QUERY q:
@@ -4820,7 +4822,7 @@ async fn post_join_filter() {
 async fn duplicate_column_names() {
     let mut g = start_simple("duplicate_column_names").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE t1 (id int, val int);
          CREATE TABLE t2 (id int, val int);
          QUERY q:
@@ -4871,7 +4873,7 @@ async fn duplicate_column_names() {
 async fn filter_on_expression() {
     let mut g = start_simple("filter_on_expression").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE users (id int, birthday date);
          VIEW friday_babies: SELECT id FROM users WHERE dayofweek(birthday) = 6;",
     )
@@ -4904,7 +4906,7 @@ async fn filter_on_expression() {
 #[tokio::test(flavor = "multi_thread")]
 async fn compound_join_key() {
     let mut g = start_simple("compound_join_key").await;
-    g.install_recipe(
+    g.extend_recipe(
         "
       CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
       CREATE TABLE t2 (id_1 int, id_2 int, val_2 int);
@@ -4994,7 +4996,7 @@ async fn compound_join_key() {
 async fn left_join_null() {
     let mut g = start_simple("left_join_null").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE jim (id int, a int);
          CREATE TABLE bob (id int);
          VIEW funky: SELECT * FROM jim LEFT JOIN bob ON jim.id = bob.id WHERE bob.id IS NULL;",
@@ -5079,7 +5081,7 @@ async fn test_view_includes_replicas() {
         .unwrap()
         .clone();
 
-    w1.install_recipe(
+    w1.extend_recipe(
         "
       CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
       QUERY q:
@@ -5147,7 +5149,7 @@ async fn overlapping_indices() {
     let mut g = start_simple("overlapping_indices").await;
 
     // this creates an aggregation operator indexing on [0, 1], and then a TopK child on [1]
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (id int, a int, b int);
          VIEW overlapping: SELECT SUM(a) as s, id FROM test WHERE b = ? GROUP BY id ORDER BY id LIMIT 2;",
     )
@@ -5188,7 +5190,7 @@ async fn overlapping_indices() {
 async fn aggregate_after_filter_non_equality() {
     let mut g = start_simple("aggregate_after_filter_non_equality").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (number int, value int);
          VIEW filteragg: SELECT sum(value) AS s FROM test WHERE number > 2;",
     )
@@ -5225,7 +5227,7 @@ async fn aggregate_after_filter_non_equality() {
 async fn join_simple_cte() {
     let mut g = start_simple("join_simple_cte").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE t1 (id int, value int);
          CREATE TABLE t2 (value int, name text);
          VIEW join_simple_cte:
@@ -5269,7 +5271,7 @@ async fn join_simple_cte() {
 async fn multiple_aggregate_sum() {
     let mut g = start_simple_unsharded("multiple_aggregate").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (number int, value1 int, value2 int);
          VIEW multiagg: SELECT sum(value1) AS s1, sum(value2) as s2 FROM test GROUP BY number;",
     )
@@ -5328,7 +5330,7 @@ async fn multiple_aggregate_sum() {
 async fn multiple_aggregate_same_col() {
     let mut g = start_simple_unsharded("multiple_aggregate_same_col").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (number int, value int);
          VIEW multiaggsamecol: SELECT sum(value) AS s, avg(value) AS a FROM test GROUP BY number;",
     )
@@ -5367,7 +5369,7 @@ async fn multiple_aggregate_same_col() {
 async fn multiple_aggregate_sum_sharded() {
     let mut g = start_simple("multiple_aggregate_sharded").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (number int, value1 int, value2 int);
          VIEW multiaggsharded: SELECT sum(value1) AS s1, sum(value2) as s2 FROM test GROUP BY number;",
     )
@@ -5426,7 +5428,7 @@ async fn multiple_aggregate_sum_sharded() {
 async fn multiple_aggregate_same_col_sharded() {
     let mut g = start_simple("multiple_aggregate_same_col_sharded").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (number int, value int);
          VIEW multiaggsamecolsharded: SELECT sum(value) AS s, avg(value) AS a FROM test GROUP BY number;",
     )
@@ -5466,7 +5468,7 @@ async fn multiple_aggregate_same_col_sharded() {
 async fn multiple_aggregate_over_two() {
     let mut g = start_simple_unsharded("multiple_aggregate_over_two").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (number int, value int);
          VIEW multiaggovertwo: SELECT sum(value) AS s, avg(value) AS a, count(value) AS c, max(value) as m FROM test GROUP BY number;",
     )
@@ -5514,7 +5516,7 @@ async fn multiple_aggregate_over_two() {
 async fn multiple_aggregate_over_two_sharded() {
     let mut g = start_simple("multiple_aggregate_over_two_sharded").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (number int, value int);
          VIEW multiaggovertwosharded: SELECT sum(value) AS s, avg(value) AS a, count(value) AS c, max(value) as m FROM test GROUP BY number;",
     )
@@ -5561,7 +5563,7 @@ async fn multiple_aggregate_over_two_sharded() {
 async fn multiple_aggregate_with_expressions() {
     let mut g = start_simple_unsharded("multiple_aggregate_with_expressions").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (number int, value int);
          VIEW multiaggwexpressions: SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;",
     )
@@ -5601,7 +5603,7 @@ async fn multiple_aggregate_with_expressions() {
 async fn multiple_aggregate_with_expressions_sharded() {
     let mut g = start_simple("multiple_aggregate_with_expressions_sharded").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (number int, value int);
          VIEW multiaggwexpressionssharded: SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;",
     )
@@ -5641,7 +5643,7 @@ async fn multiple_aggregate_with_expressions_sharded() {
 async fn multiple_aggregate_reuse() {
     let mut g = start_simple_unsharded("multiple_aggregate_reuse").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (number int, value int);
          VIEW multiaggfirstquery: SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;",
     )
@@ -5706,7 +5708,7 @@ async fn reuse_subquery_alias_name() {
     let mut g = start_simple("reuse_subquery_alias_name").await;
 
     // Install two views, 'q1' and 'q2', each using the same subquery alias name 't2_data'.
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE t1 (id int, value int);
          CREATE TABLE t2 (value int, name text, bio text);
          VIEW q1:
@@ -5730,7 +5732,7 @@ async fn reuse_subquery_alias_name() {
 async fn col_beginning_with_literal() {
     let mut g = start_simple("col_beginning_with_literal").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE t1 (id INT, null_hypothesis INT);
          VIEW q1: SELECT null_hypothesis FROM t1;",
     )
@@ -5744,7 +5746,7 @@ async fn col_beginning_with_literal() {
 async fn round_int_to_int() {
     let mut g = start_simple_unsharded("round_int_to_int").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int);
          VIEW roundinttoint: SELECT round(value, -3) as r FROM test;",
     )
@@ -5774,7 +5776,7 @@ async fn round_int_to_int() {
 async fn round_float_to_float() {
     let mut g = start_simple_unsharded("round_float_to_float").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value double);
          VIEW roundfloattofloat: SELECT round(value, 2) as r FROM test;",
     )
@@ -5804,7 +5806,7 @@ async fn round_float_to_float() {
 async fn round_float_to_int() {
     let mut g = start_simple_unsharded("round_float_to_int").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value double);
          VIEW roundfloattoint: SELECT round(value, 0) as r FROM test;",
     )
@@ -5837,7 +5839,7 @@ async fn round_float_to_int() {
 async fn round_with_precision_float() {
     let mut g = start_simple_unsharded("round_with_precision_float").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value double);
          VIEW roundwithprecisionfloat: SELECT round(value, -1.0) as r FROM test;",
     )
@@ -5867,7 +5869,7 @@ async fn round_with_precision_float() {
 async fn round_bigint_to_bigint() {
     let mut g = start_simple_unsharded("round_bigint_to_bigint").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value bigint);
          VIEW roundbiginttobigint: SELECT round(value, -3) as r FROM test;",
     )
@@ -5897,7 +5899,7 @@ async fn round_bigint_to_bigint() {
 async fn round_unsignedint_to_unsignedint() {
     let mut g = start_simple_unsharded("round_unsignedint_to_unsignedint").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int unsigned);
          VIEW roundunsignedtounsigned: SELECT round(value, -3) as r FROM test;",
     )
@@ -5927,7 +5929,7 @@ async fn round_unsignedint_to_unsignedint() {
 async fn round_unsignedbigint_to_unsignedbitint() {
     let mut g = start_simple_unsharded("round_unsignedbigint_to_unsignedbitint").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value bigint unsigned);
          VIEW roundunsignedbiginttounsignedbigint: SELECT round(value, -3) as r FROM test;",
     )
@@ -5957,7 +5959,7 @@ async fn round_unsignedbigint_to_unsignedbitint() {
 async fn round_with_no_precision() {
     let mut g = start_simple_unsharded("round_with_no_precision").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value bigint unsigned);
          VIEW roundwithnoprecision: SELECT round(value) as r FROM test;",
     )
@@ -5987,7 +5989,7 @@ async fn round_with_no_precision() {
 async fn distinct_select_works() {
     let mut g = start_simple_unsharded("distinct_select_works").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int);
          VIEW distinctselect: SELECT DISTINCT value as v FROM test;",
     )
@@ -6024,7 +6026,7 @@ async fn distinct_select_works() {
 async fn partial_distinct() {
     let mut g = start_simple("partial_distinct").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int, k int);
          VIEW distinctselect: SELECT DISTINCT value FROM test WHERE k = ?;",
     )
@@ -6069,7 +6071,7 @@ async fn partial_distinct() {
 async fn partial_distinct_multi() {
     let mut g = start_simple("partial_distinct_multi").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int, number int, k int);
          VIEW distinctselectmulti: SELECT DISTINCT value, SUM(number) as s FROM test WHERE k = ?;",
     )
@@ -6127,7 +6129,7 @@ async fn partial_distinct_multi() {
 async fn distinct_select_works_sharded() {
     let mut g = start_simple("distinct_select_works_sharded").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int);
          VIEW distinctselectsharded: SELECT DISTINCT value as v FROM test;",
     )
@@ -6164,7 +6166,7 @@ async fn distinct_select_works_sharded() {
 async fn distinct_select_multi_col() {
     let mut g = start_simple_unsharded("distinct_select_multi_col").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int, number int);
          VIEW distinctselectmulticol: SELECT DISTINCT value as v, number as n FROM test;",
     )
@@ -6202,7 +6204,7 @@ async fn distinct_select_multi_col() {
 async fn distinct_select_multi_col_sharded() {
     let mut g = start_simple("distinct_select_multi_col_sharded").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int, number int);
          VIEW distinctselectmulticolsharded: SELECT DISTINCT value as v, number as n FROM test;",
     )
@@ -6240,7 +6242,7 @@ async fn distinct_select_multi_col_sharded() {
 async fn distinct_select_with_builtin() {
     let mut g = start_simple_unsharded("distinct_select_with_builtin").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int, number int);
          VIEW distinctselectwithbuiltin: SELECT DISTINCT value as v, number as n, round(value) as r FROM test;",
     )
@@ -6284,7 +6286,7 @@ async fn distinct_select_with_builtin() {
 async fn distinct_select_with_builtin_sharded() {
     let mut g = start_simple("distinct_select_with_builtin_sharded").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int, number int);
          VIEW distinctselectwithbuiltinsharded: SELECT DISTINCT value as v, number as n, round(value) as r FROM test;",
     )
@@ -6339,7 +6341,7 @@ async fn distinct_select_with_join() {
                     ON (test.id = test2.test_id);
     ";
 
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
     let mut test = g.table("test").await.unwrap();
     let mut test2 = g.table("test2").await.unwrap();
     let mut q = g.view("distinctselectwithjoin").await.unwrap();
@@ -6388,7 +6390,7 @@ async fn distinct_select_with_join_sharded() {
                     ON (test.id = test2.test_id);
     ";
 
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
     let mut test = g.table("test").await.unwrap();
     let mut test2 = g.table("test2").await.unwrap();
     let mut q = g.view("distinctselectwithjoinsharded").await.unwrap();
@@ -6426,7 +6428,7 @@ async fn distinct_select_with_join_sharded() {
 async fn distinct_select_with_agg() {
     let mut g = start_simple_unsharded("distinct_select_with_agg").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int, number int);
          VIEW distinctselectwithagg: SELECT DISTINCT avg(number) as a FROM test GROUP BY value;",
     )
@@ -6463,7 +6465,7 @@ async fn distinct_select_with_agg() {
 async fn distinct_select_with_agg_sharded() {
     let mut g = start_simple("distinct_select_with_agg_sharded").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int, number int);
          VIEW distinctselectwithaggsharded: SELECT DISTINCT avg(number) as a FROM test GROUP BY value;",
     )
@@ -6500,7 +6502,7 @@ async fn distinct_select_with_agg_sharded() {
 async fn distinct_select_with_multi_agg() {
     let mut g = start_simple_unsharded("distinct_select_with_multi_agg").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int, number int);
          VIEW distinctselectwithmultiagg: SELECT DISTINCT avg(number) as a, count(number) as c FROM test GROUP BY value;",
     )
@@ -6537,7 +6539,7 @@ async fn distinct_select_with_multi_agg() {
 async fn distinct_select_with_multi_agg_sharded() {
     let mut g = start_simple("distinct_select_with_multi_agg_sharded").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int, number int);
          VIEW distinctselectwithmultiaggsharded: SELECT DISTINCT avg(number) as a, count(number) as c FROM test GROUP BY value;",
     )
@@ -6576,7 +6578,7 @@ async fn distinct_select_with_multi_agg_sharded() {
 async fn distinct_select_with_distinct_agg() {
     let mut g = start_simple_unsharded("distinct_select_with_distinct_agg").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int, number int);
          VIEW distinctselectwithdistinctagg: SELECT DISTINCT count(DISTINCT number) as c FROM test GROUP BY value;",
     )
@@ -6615,7 +6617,7 @@ async fn distinct_select_with_distinct_agg() {
 async fn distinct_select_with_distinct_agg_sharded() {
     let mut g = start_simple("distinct_select_with_distinct_agg_sharded").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int, number int);
          VIEW distinctselectwithdistinctaggsharded: SELECT DISTINCT count(DISTINCT number) as c FROM test GROUP BY value;",
     )
@@ -6676,7 +6678,7 @@ async fn assign_nonreader_domains_to_nonreader_workers() {
 
     let query = "CREATE TABLE test (id integer, name text);\
         QUERY testquery: SELECT * FROM test;";
-    let result = w1.install_recipe(query).await;
+    let result = w1.extend_recipe(query).await;
 
     assert!(matches!(
         result,
@@ -6701,7 +6703,7 @@ async fn assign_nonreader_domains_to_nonreader_workers() {
 
     sleep().await;
 
-    let result = w1.install_recipe(query).await;
+    let result = w1.extend_recipe(query).await;
     println!("{:?}", result);
     assert!(matches!(result, Ok(_)));
 }
@@ -6710,7 +6712,7 @@ async fn assign_nonreader_domains_to_nonreader_workers() {
 async fn join_straddled_columns() {
     let mut g = start_simple("join_straddled_columns").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE a (a1 int, a2 int);
          CREATE TABLE b (b1 int, b2 int);
          QUERY straddle: SELECT * FROM a INNER JOIN b ON a.a2 = b.b1 WHERE a.a1 = ? AND b.b2 = ?;",
@@ -6757,7 +6759,7 @@ async fn straddled_join_range_query() {
     readyset_tracing::init_test_logging();
     let mut g = start_simple("straddled_join_range_query").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE a (a1 int, a2 int);
          CREATE TABLE b (b1 int, b2 int);
          QUERY straddle: SELECT * FROM a INNER JOIN b ON a.a2 = b.b1 WHERE a.a1 > ? AND b.b2 > ?;",
@@ -6819,7 +6821,7 @@ async fn overlapping_range_queries() {
     readyset_tracing::init_test_logging();
     let mut g = start_simple("straddled_join_range_query").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE t (x int);
          QUERY q: SELECT x FROM t WHERE x >= ?",
     )
@@ -6887,7 +6889,7 @@ async fn overlapping_remapped_range_queries() {
     readyset_tracing::init_test_logging();
     let mut g = start_simple("overlapping_remapped_range_queries").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE a (a1 int, a2 int);
          CREATE TABLE b (b1 int, b2 int);
          QUERY q: SELECT * FROM a INNER JOIN b ON a.a2 = b.b1 WHERE a.a1 > ? AND b.b2 > ?;",
@@ -6963,7 +6965,7 @@ async fn range_query_through_union() {
     readyset_tracing::init_test_logging();
     let mut g = start_simple("range_query_through_union").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE t (a int, b int);
          QUERY q: SELECT a, b FROM t WHERE (a = 1 OR a = 2) AND b > ?",
     )
@@ -7023,7 +7025,7 @@ async fn mixed_inclusive_range_and_equality() {
             .unwrap()
     };
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE t (x INT, y INT, z INT, w INT);
          QUERY q:
          SELECT x, y, z, w FROM t
@@ -7143,7 +7145,7 @@ async fn replicate_to_unavailable_worker() {
         .await
         .unwrap();
 
-    w1.install_recipe(
+    w1.extend_recipe(
         "CREATE TABLE test (id INT, name TEXT);
          VIEW q1: SELECT * FROM test;",
     )
@@ -7204,7 +7206,7 @@ async fn replicate_to_unavailable_worker() {
 async fn group_by_agg_col_count() {
     let mut g = start_simple("group_by_agg_col_count").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int, number int);
          VIEW groupbyaggcolcount: SELECT count(value) as c FROM test GROUP BY value;",
     )
@@ -7245,7 +7247,7 @@ async fn group_by_agg_col_count() {
 async fn group_by_agg_col_avg() {
     let mut g = start_simple("group_by_agg_col_avg").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int, number int);
          VIEW groupbyaggcolavg: SELECT avg(value) as a FROM test GROUP BY value;",
     )
@@ -7286,7 +7288,7 @@ async fn group_by_agg_col_avg() {
 async fn group_by_agg_col_sum() {
     let mut g = start_simple("group_by_agg_col_sum").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int, number int);
          VIEW groupbyaggcolsum: SELECT sum(value) as s FROM test GROUP BY value;",
     )
@@ -7327,7 +7329,7 @@ async fn group_by_agg_col_sum() {
 async fn group_by_agg_col_multi() {
     let mut g = start_simple("group_by_agg_col_multi").await;
 
-    g.install_recipe(
+    g.extend_recipe(
         "CREATE TABLE test (value int, number int);
          VIEW groupbyaggcolmulti: SELECT count(value) as c, avg(number) as a FROM test GROUP BY value;",
     )
@@ -7380,7 +7382,7 @@ async fn group_by_agg_col_with_join() {
                     GROUP BY number;
     ";
 
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
     let mut test = g.table("test").await.unwrap();
     let mut test2 = g.table("test2").await.unwrap();
     let mut q = g.view("groupbyaggcolwithjoin").await.unwrap();
@@ -7428,7 +7430,7 @@ async fn count_emit_zero() {
         QUERY countemitzerowithcolumn: SELECT id, COUNT(*) AS c FROM test;
         QUERY countemitzerowithotheraggregations: SELECT COUNT(*) AS c, SUM(id) AS s, MIN(id) AS m FROM test;
     ";
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
 
     // With no data in the table, we should get no results with a GROUP BY
     let mut q = g.view("countemitzero").await.unwrap();
@@ -7542,7 +7544,7 @@ async fn count_emit_zero() {
 #[tokio::test(flavor = "multi_thread")]
 async fn partial_join_on_one_parent() {
     let mut g = start_simple("partial_join_on_one_parent").await;
-    g.install_recipe(
+    g.extend_recipe(
         "
         CREATE TABLE t1 (jk INT, val INT);
         CREATE TABLE t2 (jk INT, pk INT PRIMARY KEY);
@@ -7591,7 +7593,7 @@ async fn aggressive_eviction_impl() {
     )
     .await;
 
-    g.install_recipe(
+    g.extend_recipe(
         r"
         CREATE TABLE `articles` (
             `id` int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -7687,7 +7689,7 @@ rusty_fork_test! {
 async fn partial_ingress_above_full_reader() {
     readyset_tracing::init_test_logging();
     let mut g = start_simple("partial_ingress_above_full_reader").await;
-    g.install_recipe("CREATE TABLE t1 (a INT, b INT);")
+    g.extend_recipe("CREATE TABLE t1 (a INT, b INT);")
         .await
         .unwrap();
     g.extend_recipe("CREATE TABLE t2 (c int, d int);")
@@ -7748,7 +7750,7 @@ async fn reroutes_recursively() {
         QUERY q2: SELECT t1.a, t1.b, q1.c, q1.d FROM t1 INNER JOIN q1 on t1.a = q1.c WHERE t1.b = ?;
         QUERY q3: SELECT t4.g, t4.h, q2.a, q2.b FROM t4 INNER JOIN q2 on t4.g = q2.a WHERE t4.g = ?;
         ";
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
 
     let sql2 = "
         QUERY q4: SELECT t4.g, t4.h, q2.a, q2.b FROM t4 INNER JOIN q2 on t4.g = q2.a;
@@ -7782,7 +7784,7 @@ async fn reroutes_two_children_at_once() {
         create table t1 (a int, b int);
         create table t2 (c int, d int);
         ";
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
     let sql1 = "
         QUERY q1: SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c WHERE t1.b = ?;
         ";
@@ -7895,7 +7897,7 @@ async fn reroutes_dependent_children() {
         create table t1 (a int, b int);
         create table t2 (c int, d int);
         ";
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
     let sql1 = "
         QUERY q1: SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c WHERE t1.b = ?;
         ";
@@ -7952,7 +7954,7 @@ async fn reroutes_count() {
             create table votes (user INT, id INT);
             query q1: select count(user) from votes where id = ? group by id;
             ";
-    g.install_recipe(sql).await.unwrap();
+    g.extend_recipe(sql).await.unwrap();
     let sql2 = "
             query q2: select count(user) from votes group by id;";
     g.extend_recipe(sql2).await.unwrap();
@@ -7988,7 +7990,7 @@ async fn multi_diamond_union() {
         # base tables
         CREATE TABLE table_1 (column_1 INT);
     ";
-    g.install_recipe(create_table).await.unwrap();
+    g.extend_recipe(create_table).await.unwrap();
 
     let mut table_1 = g.table("table_1").await.unwrap();
 
@@ -8035,7 +8037,7 @@ async fn forbid_full_materialization() {
             .await
             .unwrap()
     };
-    g.install_recipe("CREATE TABLE t (col INT)").await.unwrap();
+    g.extend_recipe("CREATE TABLE t (col INT)").await.unwrap();
     let res = g.extend_recipe("QUERY q: SELECT * FROM t").await;
     assert!(res.is_err());
     let err = res.err().unwrap();
@@ -8045,9 +8047,9 @@ async fn forbid_full_materialization() {
     assert!(err.caused_by_unsupported());
 }
 
-// This test replicates the `install_recipe` path used when we need to resnapshot. The
+// This test replicates the `extend_recipe` path used when we need to resnapshot. The
 // snapshotted DDL may vary slightly from the DDL propagated through the replicator but
-// should not cause the install_recipe to fail.
+// should not cause the extend_recipe to fail.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn overwrite_with_changed_recipe() {
@@ -8061,10 +8063,10 @@ async fn overwrite_with_changed_recipe() {
             .await
             .unwrap()
     };
-    g.install_recipe("CREATE TABLE t (col INT)").await.unwrap();
+    g.extend_recipe("CREATE TABLE t (col INT)").await.unwrap();
     g.extend_recipe("QUERY q: SELECT * FROM t").await.unwrap();
     let res = g
-        .install_recipe("CREATE TABLE t (col INT COMMENT 'hi')")
+        .extend_recipe("CREATE TABLE t (col INT COMMENT 'hi')")
         .await;
     assert!(res.is_ok());
 }
@@ -8100,7 +8102,7 @@ async fn it_recovers_fully_materialized() {
                 CREATE VIEW tv AS SELECT x, COUNT(*) FROM t GROUP BY x;
                 SELECT * FROM tv;
             ";
-            g.install_recipe(sql).await.unwrap();
+            g.extend_recipe(sql).await.unwrap();
 
             let mut mutator = g.table("t").await.unwrap();
 
@@ -8181,7 +8183,7 @@ async fn simple_drop_tables() {
         CREATE TABLE table_2 (column_2 INT);
         QUERY t1: SELECT * FROM table_1;
     ";
-    g.install_recipe(create_table).await.unwrap();
+    g.extend_recipe(create_table).await.unwrap();
     assert!(g.table("table_1").await.is_ok());
     assert!(g.table("table_2").await.is_ok());
     assert!(g.view("t1").await.is_ok());
@@ -8212,7 +8214,7 @@ async fn join_drop_tables() {
         CREATE TABLE table_3 (column_1 INT, column_2 INT);
         QUERY t1: SELECT table_1.column_1, table_3.column_1 FROM table_1 JOIN table_3 ON table_1.column_2 = table_3.column_2;
     ";
-    g.install_recipe(create_table).await.unwrap();
+    g.extend_recipe(create_table).await.unwrap();
     assert!(g.table("table_1").await.is_ok());
     assert!(g.table("table_2").await.is_ok());
     assert!(g.table("table_3").await.is_ok());
@@ -8243,7 +8245,7 @@ async fn simple_drop_tables_with_data() {
         CREATE TABLE table_2 (column_2 INT);
         QUERY t1: SELECT * FROM table_1;
     ";
-    g.install_recipe(create_table).await.unwrap();
+    g.extend_recipe(create_table).await.unwrap();
 
     let mut table_1 = g.table("table_1").await.unwrap();
     table_1.insert(vec![11.into()]).await.unwrap();
@@ -8296,7 +8298,7 @@ async fn simple_drop_tables_with_persisted_data() {
         CREATE TABLE table_2 (column_2 INT);
         QUERY t1: SELECT * FROM table_1;
     ";
-    g.install_recipe(create_table).await.unwrap();
+    g.extend_recipe(create_table).await.unwrap();
 
     assert!(path.exists());
 
@@ -8353,7 +8355,7 @@ async fn create_and_drop_table() {
         CREATE TABLE table_1 (column_1 INT);
         CREATE TABLE table_4 (column_4 INT);
     ";
-    g.install_recipe(create_table).await.unwrap();
+    g.extend_recipe(create_table).await.unwrap();
 
     assert!(g.table("table_1").await.is_ok());
     assert!(g.table("table_2").await.is_err());
@@ -8383,7 +8385,7 @@ async fn simple_dry_run_unsupported() {
         CREATE TABLE table_1 (column_1 INT);
         QUERY t1: SELECT * FROM table_1;
     ";
-    g.install_recipe(query).await.unwrap();
+    g.extend_recipe(query).await.unwrap();
 
     assert!(g.table("table_1").await.is_ok());
     assert!(g.view("t1").await.is_ok());

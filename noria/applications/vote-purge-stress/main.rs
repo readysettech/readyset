@@ -73,7 +73,7 @@ async fn main() {
     let mut g = builder.start_local().await.unwrap();
     {
         g.ready().await.unwrap();
-        g.install_recipe(RECIPE).await.unwrap();
+        g.extend_recipe(RECIPE).await.unwrap();
 
         let mut a = g.table("Article").await.unwrap();
         let mut v = g.table("Vote").await.unwrap();

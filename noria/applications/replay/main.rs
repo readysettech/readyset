@@ -284,9 +284,9 @@ async fn main() {
         clear_zookeeper(zk_address);
         let mut g = build_graph(authority.clone(), persistence.clone()).await;
         if use_secondary {
-            g.install_recipe(SECONDARY_RECIPE).await.unwrap();
+            g.extend_recipe(SECONDARY_RECIPE).await.unwrap();
         } else {
-            g.install_recipe(RECIPE).await.unwrap();
+            g.extend_recipe(RECIPE).await.unwrap();
         }
 
         if verbose {

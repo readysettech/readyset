@@ -604,21 +604,6 @@ impl ControllerHandle {
         self.rpc("extend_recipe", request, self.migration_timeout)
     }
 
-    /// Replace the existing recipe with this one.
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn install_recipe(
-        &mut self,
-        new_recipe: &str,
-    ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
-        let request = RecipeSpec {
-            recipe: new_recipe,
-            ..Default::default()
-        };
-
-        self.rpc("install_recipe", request, self.migration_timeout)
-    }
-
     /// Remove all nodes related to the query with the given name
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.

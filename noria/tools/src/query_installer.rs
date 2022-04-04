@@ -19,7 +19,7 @@ struct QueryInstaller {
     #[clap(short, long, env("NORIA_DEPLOYMENT"))]
     deployment: String,
 
-    /// Name of the view to use in the install_recipe statement.
+    /// Name of the view to use in the extend_recipe statement.
     #[clap(short, long)]
     query: String,
 }
@@ -50,7 +50,7 @@ impl QueryInstaller {
         );
 
         println!("Waiting for noria");
-        handle.install_recipe(&test_sql_string).await.unwrap();
+        handle.extend_recipe(&test_sql_string).await.unwrap();
         let mut getter = handle.view(self.query).await.unwrap();
         let results = getter.lookup(&[0.into()], true).await.unwrap();
         println!("Results: {:?}", results);

@@ -410,20 +410,6 @@ impl Leader {
                 })?;
                 return_serialized!(ret);
             }
-            (Method::POST, "/install_recipe") => {
-                let body: RecipeSpec = bincode::deserialize(&body)?;
-                if body.require_leader_ready() {
-                    require_leader_ready()?;
-                }
-                let ret = futures::executor::block_on(async move {
-                    let mut writer = self.dataflow_state_handle.write().await;
-                    check_quorum!(writer.as_ref());
-                    let r = writer.as_mut().install_recipe(body).await?;
-                    self.dataflow_state_handle.commit(writer, authority).await?;
-                    Ok(r)
-                })?;
-                return_serialized!(ret);
-            }
             (Method::POST, "/remove_query") => {
                 require_leader_ready()?;
                 let query_name = bincode::deserialize(&body)?;
@@ -638,7 +624,6 @@ pub(super) fn request_type(req: &ControllerRequest) -> ControllerRequestType {
         (&Method::GET, "/flush_partial")
         | (&Method::GET | &Method::POST, "/controller_uri")
         | (&Method::POST, "/extend_recipe")
-        | (&Method::POST, "/install_recipe")
         | (&Method::POST, "/remove_query")
         | (&Method::POST, "/set_replication_offset")
         | (&Method::POST, "/replicate_readers")
