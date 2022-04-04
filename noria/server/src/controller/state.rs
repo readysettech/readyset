@@ -38,7 +38,7 @@ use noria::debug::info::{DomainKey, GraphInfo};
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
 use noria::internal::MaterializationStatus;
 use noria::metrics::recorded;
-use noria::recipe::changelist::ChangeList;
+use noria::recipe::changelist::{Change, ChangeList};
 use noria::recipe::ExtendRecipeSpec;
 use noria::replication::{ReplicationOffset, ReplicationOffsets};
 use noria::{
@@ -252,9 +252,9 @@ impl DataflowState {
                     // Alias should always resolve to an id and id should always resolve to an
                     // expression. However, this mapping will not catch bugs that break this
                     // assumption
-                    let id = self.recipe.id_from_alias(&name);
-                    let expr = id.and_then(|id| self.recipe.expression(id));
-                    expr.map(|e| (name, e))
+                    let name = self.recipe.resolve_alias(&name)?;
+                    let query = self.recipe.expression_by_alias(name)?;
+                    Some((name.clone(), query))
                 } else {
                     None
                 }
@@ -324,10 +324,7 @@ impl DataflowState {
             }
         };
 
-        let name = match self.recipe.resolve_alias(&name) {
-            None => &name,
-            Some(alias) => alias,
-        };
+        let name = self.recipe.resolve_alias(&name).unwrap_or(&name);
 
         let readers = self.find_readers_for(node, name, &view_req.filter);
         if readers.is_empty() {
@@ -1290,7 +1287,6 @@ impl DataflowState {
                     }
                 }
 
-                new.remove_leaf_aliases(&nodes_to_remove);
                 self.remove_nodes(&nodes_to_remove).await?;
                 self.recipe = new;
             }
@@ -1331,9 +1327,16 @@ impl DataflowState {
     }
 
     pub(super) async fn remove_query(&mut self, query_name: &str) -> ReadySetResult<()> {
-        let changelist = match self.recipe.remove_query(query_name) {
+        let name = match self.recipe.resolve_alias(query_name) {
             None => return Ok(()),
-            Some(changelist) => changelist,
+            Some(name) => name,
+        };
+
+        let changelist = ChangeList {
+            changes: vec![Change::Drop {
+                name: name.clone(),
+                if_exists: false,
+            }],
         };
 
         if let Err(error) = self.apply_recipe(changelist, false).await {

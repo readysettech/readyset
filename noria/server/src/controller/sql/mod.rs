@@ -180,13 +180,6 @@ impl SqlIncorporator {
         self.leaf_addresses.values().any(|nn| *nn == ni)
     }
 
-    pub(super) fn get_leaf_name(&self, ni: NodeIndex) -> Option<&SqlIdentifier> {
-        self.leaf_addresses
-            .iter()
-            .find(|(_, idx)| **idx == ni)
-            .map(|(name, _)| name)
-    }
-
     fn consider_query_graph(
         &mut self,
         query_name: &str,
@@ -603,7 +596,10 @@ impl SqlIncorporator {
                 query_name
             ))
         })?;
-        let mir = &self.mir_queries[&(qg_hash)];
+        let mir = match self.mir_queries.get(&qg_hash) {
+            None => return Ok(None),
+            Some(mir) => mir,
+        };
 
         // TODO(malte): implement this
         self.mir_converter.remove_query(query_name, mir)?;
@@ -650,6 +646,7 @@ impl SqlIncorporator {
                 .iter()
                 .any(|root| roots.contains(&root.borrow().name))
         });
+
         self.mir_converter.remove_base(name, &mir)
     }
 

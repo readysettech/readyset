@@ -227,7 +227,7 @@ pub(crate) const VIEW_POOL_SIZE: usize = 16;
 /// batch less work, which means lower overall efficiency.
 pub(crate) const PENDING_LIMIT: usize = 8192;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use nom_sql::SqlType;
 use petgraph::graph::NodeIndex;
@@ -373,7 +373,7 @@ pub struct ActivationResult {
     /// Map of query names to `NodeIndex` handles for reads/writes.
     pub new_nodes: HashMap<SqlIdentifier, NodeIndex>,
     /// List of leaf nodes that were removed.
-    pub removed_leaves: Vec<NodeIndex>,
+    pub removed_leaves: HashSet<NodeIndex>,
     /// Number of expressions the recipe added compared to the prior recipe.
     pub expressions_added: usize,
     /// Number of expressions the recipe removed compared to the prior recipe.
