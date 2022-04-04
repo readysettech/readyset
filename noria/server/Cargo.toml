@@ -92,6 +92,7 @@ launchpad = { path = "../../launchpad" }
 replicators = { path = "../../replicators" }
 readyset-tracing = { path = "../../readyset-tracing" }
 noria-sql-passes = { path = "sql-passes" }
+derive_more = "0.99"
 
 [dev-dependencies]
 test_utils = { path = "../../test_utils" }
@@ -107,6 +108,7 @@ assert_approx_eq = "1.1.0"
 criterion = "0.3"
 include_dir = "0.6.2"
 rusty-fork = "0.3.0"
+test-strategy = "0.2.0"
 
 [[bin]]
 name = "noria-zk"
