@@ -37,6 +37,7 @@
   - [Proptest](./proptest.md)
   - [Failure Injection](./failure_injection.md)
 - [Dataflow](./dataflow.md)
+  - [Pagination](./dataflow/pagination.md)
   - [Replay Paths](./dataflow/replay_paths.md)
 
 # AWS Resources
