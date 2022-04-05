@@ -281,6 +281,21 @@ steps:
         login: true
         retries: 3
 
+  - label: ":docker: Build readyset-adapter release image"
+    key: readyset-adapter-release-image
+    depends_on:
+      - block-docker-release
+      - build-builder-base-image
+    command:
+      - RELEASE=true .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-adapter readyset-adapter .
+      - docker tag 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-adapter:release-${BUILDKITE_COMMIT} readyset-adapter:release-${BUILDKITE_COMMIT}
+      - docker save readyset-adapter:release-${BUILDKITE_COMMIT} | gzip > readyset-adapter-release-${BUILDKITE_COMMIT}.tar.gz
+      - buildkite-agent artifact upload readyset-adapter-release-${BUILDKITE_COMMIT}.tar.gz
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
   - label: ":docker: Build metrics-aggregator release image"
     key: metrics-aggregator-release-image
     depends_on:

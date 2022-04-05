@@ -58,6 +58,17 @@ steps:
         login: true
         retries: 3
 
+  - label: ":docker: Build readyset-adapter debug image"
+    key: readyset-adapter-image
+    depends_on:
+      - build-builder-base-image
+    command: >-
+      .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-adapter readyset-adapter .
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
   - label: ":docker: Build metrics-aggregator debug image"
     key: metrics-aggregator-image
     depends_on:

@@ -1,0 +1,57 @@
+ARG READYSET_RUST_UBUNTU2004_BUILDER_BASE_TAG=latest
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-rust-ubuntu2004-builder-base:${READYSET_RUST_UBUNTU2004_BUILDER_BASE_TAG} as builder
+
+ENV CARGO_INCREMENTAL=0
+
+ARG CACHEPOT_BUCKET
+ARG CACHEPOT_REGION
+
+ARG release
+
+WORKDIR /tmp
+COPY . readyset
+
+WORKDIR /tmp/readyset
+
+# Build psql adapter
+RUN set -eux; \
+    cargo --locked build ${release:+--release} --bin noria-psql; \
+    if [ -z "${release+x}" ]; then strip target/debug/noria-psql; else strip target/release/noria-psql; fi
+
+# Build mysql adapter
+RUN set -eux; \
+    cargo --locked build ${release:+--release} --bin noria-mysql; \
+    if [ -z "${release+x}" ]; then strip target/debug/noria-mysql; else strip target/release/noria-mysql; fi
+
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/ubuntu:20.04
+
+RUN set -eux; \
+    apt-get update;\
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libssl-dev \
+        ca-certificates=20210119~20.04.2 \
+        curl=7.68.0-1ubuntu2.7 \
+        mariadb-client-10.3=1:10.3.34-0ubuntu0.20.04.1; \
+    rm -rf /var/lib/apt/lists/*
+
+ARG USERNAME=readyset
+ARG USER_UID=1000
+ARG USER_GID=$USER_UID
+
+# Setup group and user, and sudo access
+RUN groupadd --gid $USER_GID $USERNAME \
+    && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME \
+    && apt-get update \
+    && apt-get install -y sudo \
+    && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME \
+    && chmod 0440 /etc/sudoers.d/$USERNAME
+
+USER $USERNAME
+
+COPY --from=builder --chown=$USER_UID:USER_GID /tmp/readyset/target/*/noria-psql /usr/local/bin/readyset-psql
+COPY --from=builder --chown=$USER_UID:USER_GID /tmp/readyset/target/*/noria-mysql /usr/local/bin/readyset-mysql
+COPY --from=builder --chown=$USER_UID:USER_GID /tmp/readyset/docker/entrypoints/readyset-adapter.sh /usr/local/bin/docker-entrypoint.sh
+
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/readyset-psql /usr/local/bin/readyset-psql
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
