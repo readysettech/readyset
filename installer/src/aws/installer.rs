@@ -1052,6 +1052,45 @@ impl<'a> AwsInstaller<'a> {
         Ok(())
     }
 
+    /// Retrieves public subnets for the given VPC id. If none exist, HashSet returned will be
+    /// empty.
+    async fn retrieve_public_subnets(&mut self, vpc_id: &str) -> Result<HashSet<String>> {
+        let route_tables = self
+            .ec2_client()
+            .await?
+            .describe_route_tables()
+            .filters(filter("vpc-id", vpc_id))
+            .send()
+            .await?
+            .route_tables
+            .unwrap_or_default();
+        Ok(route_tables
+            .into_iter()
+            .filter_map(|route_table| {
+                let public = route_table
+                    .routes()
+                    .unwrap_or_default()
+                    .iter()
+                    // A public subnet is defined as a subnet that has a route table whereby any
+                    // route directs to an internet gateway. An internet gateway id is always
+                    // prefixed by igw.
+                    .any(|r| r.gateway_id().unwrap_or_default().starts_with("igw"));
+                if public {
+                    let subnets: Vec<String> = route_table
+                        .associations
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter_map(|a| a.subnet_id)
+                        .collect();
+                    Some(subnets)
+                } else {
+                    None
+                }
+            })
+            .flatten()
+            .collect())
+    }
+
     async fn validate_vpc(&mut self, mut vpc_id: String) -> Result<()> {
         // First, check that the VPC actually exists
         let vpcs = self
@@ -1165,24 +1204,71 @@ impl<'a> AwsInstaller<'a> {
                 .push(subnet)
         }
 
-        // Iterate through AZs, getting one subnet per AZ.
-        let mut existing_subnet_ids: Vec<String> = vec![];
-        for (az, subnets) in &subnets_by_az {
-            if subnets.is_empty() {
-                // No subnets in this az, let's try the next one.
-                continue;
+        let public_subnets = self.retrieve_public_subnets(&vpc_id).await?;
+        // Detects a common setup where each availability zone has exactly one private and one
+        // public subnet.
+        let uses_pub_private_design = |subnets_by_az: &HashMap<String, Vec<&Subnet>>| -> bool {
+            for subnets in subnets_by_az.values() {
+                if subnets.len() != 2 {
+                    return false;
+                }
+                let first_is_pub =
+                    public_subnets.contains(subnets[0].subnet_id().unwrap_or_default());
+                let second_is_pub =
+                    public_subnets.contains(subnets[1].subnet_id().unwrap_or_default());
+                if first_is_pub == second_is_pub {
+                    return false;
+                }
             }
-            let subnet_ids: Vec<&str> = subnets.iter().map(|s| s.subnet_id().unwrap()).collect();
-            if subnet_ids.len() > 1 {
-                println!("Found more than one subnet in availability zone {}", az);
-
-                let idx = select()
+            true
+        };
+        let mut existing_subnet_ids: Vec<String> = vec![];
+        if uses_pub_private_design(&subnets_by_az) {
+            println!("Found one private and one public sunet in each availability zone.");
+            let use_pub = matches!(
+                select()
                     .with_prompt("Which subnet would you like to use?")
-                    .items(&subnet_ids)
-                    .interact()?;
-                existing_subnet_ids.push(subnet_ids[idx].to_string())
-            } else {
-                existing_subnet_ids.push(subnet_ids.first().unwrap().to_string());
+                    .items(&["Public", "Private"])
+                    .interact()?,
+                0
+            );
+            let mut out: Vec<String> = subnets_by_az
+                .values()
+                .map(|subnets| {
+                    subnets
+                        .iter()
+                        .filter_map(|s| {
+                            let s_id = s.subnet_id().unwrap_or_default();
+                            let is_pub = public_subnets.contains(s_id);
+                            if use_pub == is_pub {
+                                Some(s_id.to_owned())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                })
+                .collect();
+            existing_subnet_ids.append(&mut out);
+        } else {
+            // Iterate through AZs, getting one subnet per AZ.
+            for (az, subnets) in &subnets_by_az {
+                if subnets.is_empty() {
+                    // No subnets in this az, let's try the next one.
+                    continue;
+                }
+                let subnet_ids: Vec<&str> =
+                    subnets.iter().map(|s| s.subnet_id().unwrap()).collect();
+                if subnet_ids.len() > 1 {
+                    println!("Found more than one subnet in availability zone {}", az);
+                    let idx = select()
+                        .with_prompt("Which subnet would you like to use?")
+                        .items(&subnet_ids)
+                        .interact()?;
+                    existing_subnet_ids.push(subnet_ids[idx].to_string())
+                } else {
+                    existing_subnet_ids.push(subnet_ids.first().unwrap().to_string());
+                }
             }
         }
 
