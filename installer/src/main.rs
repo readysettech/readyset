@@ -302,7 +302,18 @@ impl Installer {
         }
 
         if self.cfn_deployment()?.database_credentials.is_some() {
-            success!("Using previously-configured database credentials");
+            if matches!(
+                select()
+                    .with_prompt("Use existing database credentials, or enter new ones?")
+                    .items(&["Existing credentials", "Enter new password"])
+                    .interact()?,
+                0
+            ) {
+                success!("Using previously-configured database credentials");
+            } else {
+                self.prompt_for_database_credentials().await?;
+                self.save().await?;
+            }
         } else {
             self.prompt_for_database_credentials().await?;
             self.save().await?;
