@@ -190,7 +190,6 @@ skip = [
 skip-tree = [
     { name = "rusty-fork", version = "0.3.0" },
     { name = "zookeeper", version = "0.6.1" },
-    { name = "prettytable-rs", version = "0.8.0" },
     { name = "handlebars", version = "4.1" },
     { name = "fail", version = "0.5.0" },
     { name = "rust_decimal", version = "1.17.0" },
@@ -215,9 +214,7 @@ unknown-git = "warn"
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
-allow-git = [
-    "https://github.com/jmgilman/rustify"
-]
+allow-git = []
 
 [sources.allow-org]
 # 1 or more github.com organizations to allow git sources for
