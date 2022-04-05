@@ -110,7 +110,11 @@ struct Opts {
     memory: usize,
 
     /// Frequency at which to check the state size against the memory limit (in seconds)
-    #[clap(long = "memory-check-every", default_value = "1")]
+    #[clap(
+        long = "memory-check-every",
+        default_value = "1",
+        env = "MEMORY_CHECK_EVERY"
+    )]
     memory_check_freq: u64,
 
     /// The strategy to use when memory is freed from reader nodes
