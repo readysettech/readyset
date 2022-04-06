@@ -125,7 +125,7 @@ impl DeploymentParameters {
 }
 
 /// Indicates whether increasing or decreasing is the more desirable property for a metric
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum MetricGoal {
     Increasing,
     Decreasing,
