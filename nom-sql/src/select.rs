@@ -11,8 +11,8 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
-    as_alias, field_definition_expr, field_list, literal, schema_table_reference,
-    statement_terminator, table_list, ws_sep_comma, FieldDefinitionExpression,
+    as_alias, field_definition_expr, field_list, literal, schema_table_reference, table_list,
+    terminated_with_statement_terminator, ws_sep_comma, FieldDefinitionExpression,
 };
 use crate::expression::expression;
 use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
@@ -321,7 +321,7 @@ pub fn where_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expres
 
 // Parse rule for a SQL selection query.
 pub fn selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SelectStatement> {
-    move |i| terminated(nested_selection(dialect), statement_terminator)(i)
+    move |i| terminated_with_statement_terminator(nested_selection(dialect))(i)
 }
 
 /// The semantics of SQL natively represent the FROM clause of a query as a fully nested AST of join

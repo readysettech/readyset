@@ -1,9 +1,10 @@
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt::{self, Display};
+use std::future;
 
 use futures::stream::FuturesUnordered;
-use futures::{pin_mut, StreamExt};
+use futures::{pin_mut, StreamExt, TryFutureExt};
 use nom_sql::{parse_key_specification_string, Dialect, TableKey};
 use noria::ReadySetResult;
 use noria_data::DataType;
@@ -346,9 +347,10 @@ impl<'a> PostgresReplicator<'a> {
             };
 
             debug!(%create_table, "Extending recipe");
-            match self
-                .noria
-                .extend_recipe_no_leader_ready(&create_table.to_string())
+            match future::ready(create_table.to_string().try_into())
+                .and_then(|changelist| async {
+                    self.noria.extend_recipe_no_leader_ready(changelist).await
+                })
                 .await
             {
                 Ok(_) => tables.push(create_table),
@@ -370,9 +372,12 @@ impl<'a> PostgresReplicator<'a> {
                 }
             };
 
-            debug!(%view, "Extending recipe");
-            if let Err(err) = self.noria.extend_recipe_no_leader_ready(&view).await {
-                error!(%view, %err, "Error extending CREATE VIEW, view will not be used")
+            if let Err(err) = self
+                .noria
+                .extend_recipe_no_leader_ready(view.try_into()?)
+                .await
+            {
+                error!(%create_view, %err, "Error extending CREATE VIEW, view will not be used")
             }
         }
 

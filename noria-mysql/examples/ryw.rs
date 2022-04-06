@@ -67,7 +67,9 @@ async fn main() {
                 SELECT * FROM employees;
         ";
 
-    ch.extend_recipe(test_sql_string).await.unwrap();
+    ch.extend_recipe(test_sql_string.parse().unwrap())
+        .await
+        .unwrap();
     println!("Current Ticket: {:?}", b.ticket());
 
     // Make some writes to underlying DB (could also make writes via mysql shell)

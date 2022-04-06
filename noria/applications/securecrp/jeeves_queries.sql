@@ -1,4 +1,4 @@
-QUERY PaperList: SELECT Paper.*, Paper.title AS latest_version_title
+CREATE CACHE PaperList FROM SELECT Paper.*, Paper.title AS latest_version_title
            FROM Paper
            JOIN (SELECT *
                  FROM PaperVersion

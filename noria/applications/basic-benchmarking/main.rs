@@ -263,14 +263,17 @@ impl BenchmarkApplication {
                 PRIMARY KEY (id)
             );
 
-            QUERY select_employee: SELECT * FROM employees WHERE emp_no=?;
-            QUERY employee_dept: SELECT * FROM dept_emp WHERE emp_no=?;
-            QUERY employee_dept_manager: SELECT * FROM dept_manager WHERE emp_no=?;
-            QUERY employee_salary_history: SELECT * FROM salaries WHERE emp_no=?;
+            CREATE CACHE select_employee FROM SELECT * FROM employees WHERE emp_no=?;
+            CREATE CACHE employee_dept FROM SELECT * FROM dept_emp WHERE emp_no=?;
+            CREATE CACHE employee_dept_manager FROM SELECT * FROM dept_manager WHERE emp_no=?;
+            CREATE CACHE employee_salary_history FROM SELECT * FROM salaries WHERE emp_no=?;
         ";
 
         println!("Initializing noria tables and queries.");
-        self.g.extend_recipe(noria_sql_string).await.unwrap();
+        self.g
+            .extend_recipe(noria_sql_string.parse().unwrap())
+            .await
+            .unwrap();
 
         println!("Attempting to drop all mysql tables in case they already exist.");
         self.mysql

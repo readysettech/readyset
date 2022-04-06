@@ -15,7 +15,7 @@ async fn main() {
                VoteCount: SELECT Vote.aid, COUNT(DISTINCT uid) AS votes \
                             FROM Vote GROUP BY Vote.aid;
                # queryable materialized view
-               QUERY ArticleWithVoteCount: \
+               CREATE CACHE ArticleWithVoteCount FROM \
                             SELECT Article.aid, title, url, VoteCount.votes AS votes \
                             FROM Article, VoteCount \
                             WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
@@ -33,7 +33,7 @@ async fn main() {
     builder.set_persistence(persistence_params);
 
     let mut blender = builder.start_local().await.unwrap();
-    blender.extend_recipe(sql).await.unwrap();
+    blender.extend_recipe(sql.parse().unwrap()).await.unwrap();
     println!("{}", blender.graphviz().await.unwrap());
 
     // Get mutators and getter.

@@ -274,9 +274,11 @@ async fn reader_replication() {
     w1.extend_recipe(
         "
       CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
-      QUERY q:
+      CREATE CACHE q FROM
         SELECT *
-        FROM t1;",
+        FROM t1;"
+            .parse()
+            .unwrap(),
     )
     .await
     .unwrap();

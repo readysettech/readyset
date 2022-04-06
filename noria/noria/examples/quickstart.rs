@@ -13,10 +13,10 @@ async fn main() {
                CREATE TABLE Vote (aid int, uid int);
 
                # internal view, for shorthand below
-               VoteCount: SELECT Vote.aid, COUNT(DISTINCT uid) AS votes \
+               CREATE VIEW VoteCount AS SELECT Vote.aid, COUNT(DISTINCT uid) AS votes \
                             FROM Vote GROUP BY Vote.aid;
                # queryable materialized view
-               QUERY ArticleWithVoteCount: \
+               CREATE CACHE ArticleWithVoteCount FROM \
                             SELECT Article.aid, title, url, VoteCount.votes AS votes \
                             FROM Article, VoteCount \
                             WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
@@ -28,7 +28,7 @@ async fn main() {
     );
 
     let mut srv = ControllerHandle::new(zk_auth).await;
-    srv.extend_recipe(sql).await.unwrap();
+    srv.extend_recipe(sql.parse().unwrap()).await.unwrap();
     let g = srv.graphviz().await.unwrap();
     println!("{}", g);
 

@@ -13,6 +13,7 @@ use nom_sql::{
 };
 use noria::consistency::Timestamp;
 use noria::internal::LocalNodeIndex;
+use noria::recipe::changelist::{Change, ChangeList};
 use noria::results::Results;
 use noria::{
     ColumnSchema, ControllerHandle, KeyColumnIdx, KeyComparison, ReadQuery, ReadySetError,
@@ -877,13 +878,19 @@ impl NoriaConnector {
 
     /// Calls the `extend_recipe` endpoint on Noria with the given
     /// query.
-    // TODO(fran): (optional, open to discussion), we should use custom structs that have
+    // TODO(fran): Instead of serialize using `Display`, we should implement `Serialize`
+    //   and `Deserialize` for each table operation struct, and send that instead; otherwise
+    //   we are always recalculating the same stuff.
+    //   Additionally (optional, open to discussion), we should use custom structs that have
     //   already purged the data into a structure more useful to use, instead of using nom-sql
     //   structs directly as domain objects.
-    pub(crate) async fn handle_table_operation(
+    pub(crate) async fn handle_table_operation<C>(
         &mut self,
-        q: &SqlQuery,
-    ) -> ReadySetResult<QueryResult<'_>> {
+        changelist: C,
+    ) -> ReadySetResult<QueryResult<'_>>
+    where
+        C: Into<ChangeList>,
+    {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Noria ever time. On the other hand, CREATE TABLE is rare...
         noria_await!(
@@ -892,7 +899,7 @@ impl NoriaConnector {
                 .get_mut()
                 .await?
                 .noria
-                .extend_parsed_recipe(None, q.clone())
+                .extend_recipe(changelist.into())
         )?;
         Ok(QueryResult::Empty)
     }
@@ -921,20 +928,22 @@ impl NoriaConnector {
         name: Option<&str>,
         statement: &nom_sql::SelectStatement,
     ) -> ReadySetResult<()> {
-        let name = name.map_or_else(|| utils::generate_query_name(statement), |n| n.to_string());
+        let name: SqlIdentifier = name
+            .map(|s| s.into())
+            .unwrap_or_else(|| utils::generate_query_name(statement).into());
+        let changelist = ChangeList {
+            changes: vec![Change::create_cache(name.clone(), statement.clone())],
+        };
+
         noria_await!(
             self.inner.get_mut().await?,
-            self.inner
-                .get_mut()
-                .await?
-                .noria
-                .extend_parsed_recipe(Some(name.clone()), SqlQuery::Select(statement.to_owned()))
+            self.inner.get_mut().await?.noria.extend_recipe(changelist)
         )?;
 
         // If the query is already in there with a different name, we don't need to make a new name
         // for it, as *lookups* only need one of the names for the query, and when we drop it we'll
         // be hitting noria anyway
-        self.view_cache.register_statement(&name, statement);
+        self.view_cache.register_statement(name.as_ref(), statement);
 
         Ok(())
     }
@@ -957,13 +966,13 @@ impl NoriaConnector {
                         info!(query = %q, name = %qname, "adding ad-hoc query");
                     }
 
+                    let changelist = ChangeList {
+                        changes: vec![Change::create_cache(qname.clone(), q.clone())],
+                    };
+
                     if let Err(e) = noria_await!(
                         self.inner.get_mut().await?,
-                        self.inner
-                            .get_mut()
-                            .await?
-                            .noria
-                            .extend_parsed_recipe(Some(qname.clone()), SqlQuery::Select(q.clone()))
+                        self.inner.get_mut().await?.noria.extend_recipe(changelist)
                     ) {
                         error!(error = %e, "add query failed");
                         return Err(e);
@@ -1444,13 +1453,13 @@ impl NoriaConnector {
 
         info!(%q.definition, %q.name, "view::create");
 
+        let changelist = ChangeList {
+            changes: vec![Change::CreateView(q.clone())],
+        };
+
         noria_await!(
             self.inner.get_mut().await?,
-            self.inner
-                .get_mut()
-                .await?
-                .noria
-                .extend_parsed_recipe(Some(q.name.to_string()), SqlQuery::CreateView(q.clone()))
+            self.inner.get_mut().await?.noria.extend_recipe(changelist)
         )?;
         Ok(QueryResult::Empty)
     }

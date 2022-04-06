@@ -28,7 +28,6 @@
 //! # use noria::*;
 //! # use noria::consensus::Authority;
 //! # use noria_data::DataType;
-//! # use std::convert::TryInto;
 //!
 //! #[tokio::main]
 //! async fn main() {
@@ -44,7 +43,9 @@
 //!         "
 //!         CREATE TABLE Article (aid int, title varchar(255), url text, PRIMARY KEY(aid));
 //!         CREATE TABLE Vote (aid int, uid int);
-//!     ",
+//!     "
+//!         .parse()
+//!         .unwrap(),
 //!     )
 //!     .await
 //!     .unwrap();
@@ -75,10 +76,12 @@
 //!         VoteCount: \
 //!           SELECT Vote.aid, COUNT(uid) AS votes \
 //!           FROM Vote GROUP BY Vote.aid;
-//!         QUERY ArticleWithVoteCount: \
+//!         CREATE CACHE ArticleWithVoteCount FROM \
 //!           SELECT Article.aid, title, url, VoteCount.votes AS votes \
 //!           FROM Article LEFT JOIN VoteCount ON (Article.aid = VoteCount.aid) \
-//!           WHERE Article.aid = ?;",
+//!           WHERE Article.aid = ?;"
+//!             .parse()
+//!             .unwrap(),
 //!     )
 //!     .await
 //!     .unwrap();
@@ -226,7 +229,7 @@ pub(crate) const PENDING_LIMIT: usize = 8192;
 
 use std::collections::HashMap;
 
-use nom_sql::{SqlQuery, SqlType};
+use nom_sql::SqlType;
 use petgraph::graph::NodeIndex;
 use readyset_tracing::propagation::Instrumented;
 use replication::ReplicationOffset;
@@ -240,6 +243,7 @@ mod table;
 mod view;
 use std::convert::TryFrom;
 use std::default::Default;
+pub mod recipe;
 pub mod replication;
 
 #[doc(hidden)]
@@ -252,7 +256,6 @@ pub mod consensus;
 pub mod internal;
 
 // for the row! macro
-use std::borrow::Cow;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -393,29 +396,6 @@ pub struct ReaderReplicationResult {
     pub new_readers: HashMap<SqlIdentifier, HashMap<DomainIndex, Vec<NodeIndex>>>,
 }
 
-/// Represents a request to install or extend a recipe
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct RecipeSpec<'a> {
-    /// The recipe string
-    pub recipe: &'a str,
-    /// Optional replication offset if recipe is installed from replication or binlog
-    pub replication_offset: Option<Cow<'a, ReplicationOffset>>,
-    /// Parameter that indicates if the leader is required to be ready before handling
-    /// this RecipeSpec.
-    /// Defaults to true.
-    require_leader_ready: bool,
-}
-
-/// A struct used for bincode (de)serialization of a recipe addition. This is used for the
-/// extend_parsed_recipe rpc
-#[derive(Serialize, Deserialize)]
-pub struct ParsedRecipeSpec {
-    /// The name of the ingredient to add
-    pub name: Option<String>,
-    /// The ingredient to add
-    pub query: SqlQuery,
-}
-
 /// Filters that can be used to filter the type of
 /// view returned.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -436,24 +416,6 @@ pub struct ViewRequest {
     pub name: SqlIdentifier,
     /// Filter to be applied when searching for a view.
     pub filter: Option<ViewFilter>,
-}
-
-impl<'a> RecipeSpec<'a> {
-    /// Translates the internal require_leader_ready field into a simple boolean by defaulting
-    /// anything other then Some(false) to true.
-    pub fn require_leader_ready(&self) -> bool {
-        self.require_leader_ready
-    }
-}
-
-impl<'a> Default for RecipeSpec<'a> {
-    fn default() -> Self {
-        RecipeSpec {
-            recipe: Default::default(),
-            replication_offset: None,
-            require_leader_ready: true,
-        }
-    }
 }
 
 #[doc(hidden)]

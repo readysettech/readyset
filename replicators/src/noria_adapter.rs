@@ -1,11 +1,12 @@
 use std::collections::{hash_map, HashMap, HashSet};
 use std::convert::TryInto;
+use std::future;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use futures::FutureExt;
+use futures::{FutureExt, TryFutureExt};
 use launchpad::select;
 use metrics::{counter, histogram};
 use noria::consensus::Authority;
@@ -364,9 +365,12 @@ impl NoriaAdapter {
         ddl: String,
         pos: ReplicationOffset,
     ) -> ReadySetResult<()> {
-        match self
-            .noria
-            .extend_recipe_with_offset(&ddl, &pos, false)
+        match future::ready(ddl.try_into())
+            .and_then(|changelist| async {
+                self.noria
+                    .extend_recipe_with_offset(changelist, &pos, false)
+                    .await
+            })
             .await
         {
             // ReadySet likely entered an invalid state, fail the replicator.

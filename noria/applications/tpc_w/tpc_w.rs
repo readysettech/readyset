@@ -78,7 +78,9 @@ async fn make(
         s
     };
 
-    g.extend_recipe(&recipe).await.unwrap();
+    g.extend_recipe(recipe.clone().parse().unwrap())
+        .await
+        .unwrap();
 
     // XXX(malte): fix reuse configuration passthrough
     /*match Recipe::from_str(&s, Some(recipe_log.clone())) {
@@ -116,7 +118,10 @@ impl Backend {
         new_recipe.push_str(query);
 
         let start = time::Instant::now();
-        self.g.extend_recipe(&new_recipe).await.unwrap();
+        self.g
+            .extend_recipe(new_recipe.clone().parse().unwrap())
+            .await
+            .unwrap();
 
         let dur = start.elapsed().as_secs_f64();
         println!("Migrate query {}: ({:.2} sec)", query_name, dur,);

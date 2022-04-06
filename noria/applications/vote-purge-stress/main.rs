@@ -16,10 +16,10 @@ CREATE TABLE Vote (article_id int, user int);
 CREATE VIEW VoteCount AS \
   SELECT Vote.article_id, COUNT(user) AS votes FROM Vote GROUP BY Vote.article_id;
 
-QUERY ArticleWithVoteCount: SELECT Article.id, title, VoteCount.votes AS votes \
-            FROM Article \
-            LEFT JOIN VoteCount \
-            ON (Article.id = VoteCount.article_id) WHERE Article.id = ?;";
+CREATE CACHE ArticleWithVoteCount FROM SELECT Article.id, title, VoteCount.votes AS votes \
+           FROM Article \
+           LEFT JOIN VoteCount \
+           ON (Article.id = VoteCount.article_id) WHERE Article.id = ?;";
 
 #[tokio::main]
 #[allow(clippy::unwrap_used)]
@@ -73,7 +73,7 @@ async fn main() {
     let mut g = builder.start_local().await.unwrap();
     {
         g.ready().await.unwrap();
-        g.extend_recipe(RECIPE).await.unwrap();
+        g.extend_recipe(RECIPE.parse().unwrap()).await.unwrap();
 
         let mut a = g.table("Article").await.unwrap();
         let mut v = g.table("Vote").await.unwrap();

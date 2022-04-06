@@ -18,7 +18,7 @@ async fn main() {
                # read queries
                VoteCount: SELECT Vote.aid, COUNT(uid) AS votes \
                             FROM Vote GROUP BY Vote.aid;
-               QUERY ArticleWithVoteCount: \
+               CREATE CACHE ArticleWithVoteCount FROM \
                             SELECT Article.aid, title, url, VoteCount.votes AS votes \
                             FROM Article LEFT JOIN VoteCount \
                                          ON (Article.aid = VoteCount.aid) \
@@ -41,7 +41,7 @@ async fn main() {
     //builder.disable_partial();
 
     let mut blender = builder.start_local().await.unwrap();
-    blender.extend_recipe(sql).await.unwrap();
+    blender.extend_recipe(sql.parse().unwrap()).await.unwrap();
 
     // Get mutators and getter.
     let mut article = blender.table("Article").await.unwrap();
