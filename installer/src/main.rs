@@ -14,7 +14,8 @@ use aws_types::region::Region;
 use aws_types::{Credentials, SdkConfig};
 use clap::Parser;
 use deployment::{
-    DatabaseCredentials, Deployment, DeploymentData, DockerComposeDeployment, TemplateType,
+    DatabaseCredentials, Deployment, DeploymentData, DockerComposeDeployment, MigrationMode,
+    TemplateType,
 };
 use directories::ProjectDirs;
 use ec2::model::{AttributeBooleanValue, KeyType, Subnet, VpcAttributeName};
@@ -186,7 +187,7 @@ impl Installer {
         println!("{}", style(dest_text).bold());
 
         if confirm()
-            .with_prompt("Deploy with docker-compose now?")
+            .with_prompt("Proceed with docker-compose deployment now?")
             .interact()?
         {
             let status = Command::new("docker-compose")
@@ -203,7 +204,7 @@ impl Installer {
                 compose.adapter_port,
                 &compose.mysql_db_name,
             ) {
-                println!("ReadySet should be available in a few seconds.");
+                println!("ReadySet should be available within a few seconds.");
                 let conn_cmd = format!("To connect to ReadySet using the mysql client, run the following command:\n\n    $ mysql -h127.0.0.1 -uroot -p{} -P{} --database={}", db_pass, port, db_name);
                 println!("{}", style(conn_cmd).bold());
             } else {
@@ -216,10 +217,11 @@ impl Installer {
 
     /// Exists so if any step fails we save before returning error.
     fn _compose_user_input(&mut self) -> Result<()> {
+        let deployment_name = self.deployment.name().to_owned();
         self.compose_deployment()?
-            .set_db_name()?
+            .set_db_name(deployment_name)?
             .set_db_password()?
-            .set_migration_mode()?
+            .set_migration_mode(MigrationMode::Explicit)?
             .set_adapter_port()?;
         Ok(())
     }

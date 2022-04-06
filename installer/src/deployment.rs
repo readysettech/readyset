@@ -289,11 +289,12 @@ impl DockerComposeDeployment {
         }
     }
 
-    pub fn set_db_name(&mut self) -> Result<&mut DockerComposeDeployment> {
+    /// Sets the underlying database name to the supplied name String.
+    pub fn set_db_name(&mut self, name: String) -> Result<&mut DockerComposeDeployment> {
         if self.mysql_db_name.is_some() {
             return Ok(self);
         }
-        self.mysql_db_name = Some(input().with_prompt("Database name").interact_text()?);
+        self.mysql_db_name = Some(name);
         Ok(self)
     }
 
@@ -303,38 +304,21 @@ impl DockerComposeDeployment {
         }
         self.mysql_db_root_pass = Some(
             password()
-                .with_prompt("Database password")
+                .with_prompt("Deployment password")
                 .with_confirmation("Confirm password", "Passwords mismatching")
                 .interact()?,
         );
         Ok(self)
     }
 
-    pub fn set_migration_mode(&mut self) -> Result<&mut DockerComposeDeployment> {
+    pub fn set_migration_mode(
+        &mut self,
+        mode: MigrationMode,
+    ) -> Result<&mut DockerComposeDeployment> {
         if self.migration_mode.is_some() {
             return Ok(self);
         }
-        println!("Now we need to select a migration mode.\n");
-        println!("There are two ways in which we can manage migrations. If you choose the async option, then a background process will automatically determine which of your queries can be supported, and automatically send all supported queries to ReadySet.\n");
-        println!("If you would prefer more explicit way of managing which queries you would like to be handled by ReadySet, you can choose the explicit migration mode instead. With the explicit migration mode, you need to manually migrate each query, by connecting to ReadySet and issuing a CREATE CACHE command\n");
-        println!("Here is an example of a CREATE CACHE command for a simple select statement:\nCREATE CACHE FROM select * from table1\n");
-        let migration_modes = &["Async", "Explicit"];
-        match select()
-            .with_prompt("Preferred migration mode")
-            .items(migration_modes)
-            .default(1)
-            .interact()?
-        {
-            0 => {
-                self.migration_mode = Some(MigrationMode::Async);
-            }
-            1 => {
-                self.migration_mode = Some(MigrationMode::Explicit);
-            }
-            _ => {
-                panic!("Not a valid option for preferred migration mode");
-            }
-        }
+        self.migration_mode = Some(mode);
         Ok(self)
     }
 
@@ -343,7 +327,12 @@ impl DockerComposeDeployment {
             return Ok(self);
         }
         println!("Which port should ReadySet listen on?");
-        self.adapter_port = Some(input().with_prompt("ReadySet port").interact_text()?);
+        self.adapter_port = Some(
+            input()
+                .with_prompt("ReadySet port")
+                .default(3307)
+                .interact_text()?,
+        );
         Ok(self)
     }
 }
@@ -397,10 +386,12 @@ impl Deployment {
 }
 
 fn prompt_for_and_create_deployment() -> Result<Deployment> {
-    let deployment_name: String = input().with_prompt("Deployment name").interact_text()?;
+    let deployment_name: String = input()
+        .with_prompt("ReadySet deployment name")
+        .interact_text()?;
     match select()
-        .with_prompt("Where would you like to deploy ReadySet?")
-        .items(&["Docker-Compose", "AWS Cloudformation"])
+        .with_prompt("How would you like to deploy ReadySet?")
+        .items(&["[local] Docker-Compose", "[remote] AWS Cloudformation"])
         .interact()?
     {
         0 => Ok(DockerComposeDeployment::new_deployment(deployment_name)),

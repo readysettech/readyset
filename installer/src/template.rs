@@ -29,7 +29,7 @@ pub fn generate_base_template() -> Compose {
         services.set_service_img("consul", consul_img());
         services.set_service_img("mysql", mysql_img());
         services.set_service_img("readyset-server", server_img());
-        services.set_service_img("db", mysql_adapter_img());
+        services.set_service_img("readyset-adapter", mysql_adapter_img());
     }
     template
 }
@@ -70,7 +70,7 @@ mod tests {
                 get_service_img(map, "consul"),
                 get_service_img(map, "mysql"),
                 get_service_img(map, "readyset-server"),
-                get_service_img(map, "db"),
+                get_service_img(map, "readyset-adapter"),
             ),
             _ => panic!("No services found"),
         };

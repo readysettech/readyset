@@ -52,13 +52,13 @@ services:
       timeout: 2s
       retries: 5
       start_period: 5s
-  db:
+  readyset-adapter:
     expose:
-      - 3306
+      - 3307
     environment:
       AUTHORITY_ADDRESS: consul:8500
       AUTHORITY: "consul"
-      LISTEN_ADDRESS: 0.0.0.0:3306
+      LISTEN_ADDRESS: 0.0.0.0:3307
       NORIA_DEPLOYMENT: noria
       UPSTREAM_DB_URL: mysql://root:noria@mysql/noria
       PROMETHEUS_METRICS: 1
@@ -69,7 +69,7 @@ services:
       - mysql
       - consul
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1", "--port=3306", "-uroot", "-pnoria"]
+      test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1", "--port=3307", "-uroot", "-pnoria"]
       interval: 10s
       timeout: 10s
       retries: 2

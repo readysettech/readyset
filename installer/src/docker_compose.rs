@@ -53,7 +53,7 @@ impl Compose {
     pub fn fill_deployment(&mut self, deployment: &str) {
         if let Some(ref mut services) = self.services {
             services.set_service_env_var("readyset-server", "NORIA_DEPLOYMENT", deployment);
-            services.set_service_env_var("db", "NORIA_DEPLOYMENT", deployment);
+            services.set_service_env_var("readyset-adapter", "NORIA_DEPLOYMENT", deployment);
         }
     }
 
@@ -63,12 +63,12 @@ impl Compose {
             services.set_service_env_var("mysql", "MYSQL_DATABASE", db_name);
             services.set_service_env_var("mysql", "MYSQL_ROOT_PASSWORD", pass);
 
-            services.set_service_env_var("db", "ALLOWED_USERNAME", "root");
-            services.set_service_env_var("db", "ALLOWED_PASSWORD", pass);
+            services.set_service_env_var("readyset-adapter", "ALLOWED_USERNAME", "root");
+            services.set_service_env_var("readyset-adapter", "ALLOWED_PASSWORD", pass);
 
             let url = format!("mysql://root:{}@mysql/{}", pass, db_name);
             services.set_service_env_var("readyset-server", "REPLICATION_URL", &url);
-            services.set_service_env_var("db", "UPSTREAM_DB_URL", &url);
+            services.set_service_env_var("readyset-adapter", "UPSTREAM_DB_URL", &url);
         }
     }
 
@@ -76,9 +76,9 @@ impl Compose {
     pub fn fill_adapter_port(&mut self, port: u16) {
         if let Some(ref mut services) = self.services {
             let addr = format!("0.0.0.0:{}", port);
-            services.set_service_env_var("db", "LISTEN_ADDRESS", &addr);
+            services.set_service_env_var("readyset-adapter", "LISTEN_ADDRESS", &addr);
 
-            if let Some(Some(ref mut service)) = services.0.get_mut("db") {
+            if let Some(Some(ref mut service)) = services.0.get_mut("readyset-adapter") {
                 let ports = format!("{}:{}", port, port);
                 if let Some(ref mut list) = service.ports {
                     list.push(ports);
@@ -94,10 +94,10 @@ impl Compose {
         if let Some(ref mut services) = self.services {
             match mode {
                 MigrationMode::Async => {
-                    services.set_service_env_var("db", "ASYNC_MIGRATIONS", "1");
+                    services.set_service_env_var("readyset-adapter", "ASYNC_MIGRATIONS", "1");
                 }
                 MigrationMode::Explicit => {
-                    services.set_service_env_var("db", "EXPLICIT_MIGRATIONS", "1");
+                    services.set_service_env_var("readyset-adapter", "EXPLICIT_MIGRATIONS", "1");
                 }
             }
         }
