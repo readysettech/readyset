@@ -1213,6 +1213,17 @@ pub fn statement_terminator(i: &[u8]) -> IResult<&[u8], ()> {
     Ok((remaining_input, ()))
 }
 
+/// Parser combinator that applies the given parser,
+/// and then tries to match for a statement terminator.
+pub fn terminated_with_statement_terminator<F, O>(
+    parser: F,
+) -> impl FnOnce(&[u8]) -> IResult<&[u8], O>
+where
+    F: Fn(&[u8]) -> IResult<&[u8], O>,
+{
+    move |i| terminated(parser, statement_terminator)(i)
+}
+
 // Parse rule for AS-based aliases for SQL entities.
 pub fn as_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlIdentifier> {
     move |i| {

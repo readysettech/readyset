@@ -16,7 +16,6 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::SocketAddr;
 use std::ops::Deref;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 use std::{cell, time};
@@ -39,10 +38,12 @@ use noria::debug::info::{DomainKey, GraphInfo};
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
 use noria::internal::MaterializationStatus;
 use noria::metrics::recorded;
+use noria::recipe::changelist::ChangeList;
+use noria::recipe::ExtendRecipeSpec;
 use noria::replication::{ReplicationOffset, ReplicationOffsets};
 use noria::{
-    ActivationResult, ParsedRecipeSpec, ReaderReplicationResult, ReaderReplicationSpec,
-    ReadySetError, ReadySetResult, ViewFilter, ViewRequest, ViewSchema,
+    ActivationResult, ReaderReplicationResult, ReaderReplicationSpec, ReadySetError,
+    ReadySetResult, ViewFilter, ViewRequest, ViewSchema,
 };
 use noria_errors::{bad_request_err, internal, internal_err, invariant, invariant_eq, NodeType};
 use petgraph::visit::Bfs;
@@ -56,7 +57,6 @@ use crate::controller::domain_handle::DomainHandle;
 use crate::controller::migrate::materialization::Materializations;
 use crate::controller::migrate::scheduling::Scheduler;
 use crate::controller::migrate::{routing, DomainMigrationPlan, Migration};
-use crate::controller::recipe::changelist::ChangeList;
 use crate::controller::recipe::{Recipe, Schema};
 use crate::controller::{
     schema, ControllerState, DomainPlacementRestriction, NodeRestrictionKey, Worker,
@@ -65,7 +65,6 @@ use crate::controller::{
 use crate::coordination::{DomainDescriptor, RunDomainResponse};
 use crate::internal::LocalNodeIndex;
 use crate::worker::WorkerRequestKind;
-use crate::RecipeSpec;
 
 /// Number of concurrent requests to make when making multiple simultaneous requests to domains (eg
 /// for replication offsets)
@@ -255,7 +254,7 @@ impl DataflowState {
                     // assumption
                     let id = self.recipe.id_from_alias(&name);
                     let expr = id.and_then(|id| self.recipe.expression(id));
-                    expr.map(|e| (name, e.clone()))
+                    expr.map(|e| (name, e))
                 } else {
                     None
                 }
@@ -1305,12 +1304,12 @@ impl DataflowState {
 
     pub(super) async fn extend_recipe(
         &mut self,
-        add_txt_spec: RecipeSpec<'_>,
+        recipe_spec: ExtendRecipeSpec<'_>,
         dry_run: bool,
     ) -> Result<ActivationResult, ReadySetError> {
         // Drop recipes from the replicator that we have already processed.
         if let (Some(new), Some(current)) = (
-            &add_txt_spec.replication_offset,
+            &recipe_spec.replication_offset,
             &self.schema_replication_offset,
         ) {
             if current >= new {
@@ -1319,11 +1318,9 @@ impl DataflowState {
             }
         }
 
-        let changelist = ChangeList::from_str(add_txt_spec.recipe)?;
-
-        match self.apply_recipe(changelist, dry_run).await {
+        match self.apply_recipe(recipe_spec.changes, dry_run).await {
             Ok(x) => {
-                if let Some(offset) = &add_txt_spec.replication_offset {
+                if let Some(offset) = &recipe_spec.replication_offset {
                     offset.try_max_into(&mut self.schema_replication_offset)?
                 }
 
@@ -1331,17 +1328,6 @@ impl DataflowState {
             }
             Err(e) => Err(e),
         }
-    }
-
-    /// Extend recipe bincode generates the changelist from a serialized ParsedRecipeSpec. It does
-    /// not support extending the recipe from a replicator
-    pub(super) async fn extend_parsed_recipe(
-        &mut self,
-        recipe_spec: ParsedRecipeSpec,
-    ) -> Result<ActivationResult, ReadySetError> {
-        let changelist = ChangeList::from(recipe_spec);
-
-        self.apply_recipe(changelist, false).await
     }
 
     pub(super) async fn remove_query(&mut self, query_name: &str) -> ReadySetResult<()> {

@@ -16,7 +16,7 @@ use crate::common::{
     column_identifier_no_alias, if_not_exists, schema_table_reference, statement_terminator,
     ws_sep_comma, IndexType, ReferentialAction, TableKey,
 };
-use crate::compound_select::{compound_selection, CompoundSelectStatement};
+use crate::compound_select::{nested_compound_selection, CompoundSelectStatement};
 use crate::create_table_options::{table_options, CreateTableOption};
 use crate::expression::expression;
 use crate::order::{order_type, OrderType};
@@ -681,7 +681,10 @@ pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Creat
             tag_no_case("as"),
             whitespace1,
             alt((
-                map(compound_selection(dialect), SelectSpecification::Compound),
+                map(
+                    nested_compound_selection(dialect),
+                    SelectSpecification::Compound,
+                ),
                 map(nested_selection(dialect), SelectSpecification::Simple),
             )),
             statement_terminator,

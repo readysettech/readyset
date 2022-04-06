@@ -1,9 +1,7 @@
 use std::{fmt, str};
 
 use nom::bytes::complete::tag_no_case;
-use nom::character::complete::anychar;
 use nom::combinator::opt;
-use nom::multi::many0;
 use nom::sequence::{delimited, tuple};
 use nom::IResult;
 use serde::{Deserialize, Serialize};
@@ -38,7 +36,7 @@ impl fmt::Display for DropTableStatement {
 
 pub fn drop_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DropTableStatement> {
     move |i| {
-        let (remaining_input, (_, _, _, opt_if_exists, _, tables, _, _, _, _, _)) = tuple((
+        let (remaining_input, (_, _, _, opt_if_exists, _, tables, _, _, _, _)) = tuple((
             tag_no_case("drop"),
             whitespace1,
             tag_no_case("table"),
@@ -58,7 +56,6 @@ pub fn drop_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DropTabl
                 whitespace0,
             )),
             opt(delimited(whitespace0, tag_no_case("cascade"), whitespace0)),
-            opt(many0(anychar)),
             statement_terminator,
         ))(i)?;
 

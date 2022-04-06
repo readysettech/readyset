@@ -3697,6 +3697,7 @@ dependencies = [
  "mysql-time",
  "mysql_async",
  "mysql_common",
+ "nom 7.1.0",
  "nom-sql",
  "noria-data",
  "noria-errors",

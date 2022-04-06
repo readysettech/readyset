@@ -3,21 +3,21 @@ use std::convert::TryInto;
 use std::str;
 use std::vec::Vec;
 
-use changelist::ChangeList;
-use nom_sql::{CreateTableStatement, Dialect, SqlIdentifier, SqlQuery};
+use nom_sql::{
+    CacheInner, CreateTableStatement, CreateViewStatement, Dialect, SelectStatement, SqlIdentifier,
+    SqlQuery,
+};
+use noria::recipe::changelist::{Change, ChangeList};
 use noria::ActivationResult;
 use noria_errors::{internal, ReadySetError};
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use super::sql;
-use crate::controller::recipe::changelist::{Change, SqlExpression};
 use crate::controller::sql::SqlIncorporator;
 use crate::controller::Migration;
 use crate::{ReadySetResult, ReuseConfigType};
-
-pub(crate) mod changelist;
 
 /// The canonical SQL dialect used for central Noria server recipes. All direct clients of
 /// noria-server must use this dialect for their SQL recipes, and all adapters and client libraries
@@ -26,13 +26,38 @@ pub const CANONICAL_DIALECT: Dialect = Dialect::MySQL;
 
 type QueryID = u128;
 
+/// A single SQL expression stored in a Recipe.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum RecipeExpression {
+    /// Expression that represents a `CREATE TABLE` statement.
+    Table(CreateTableStatement),
+    /// Expression that represents a `CREATE VIEW` statement.
+    View(CreateViewStatement),
+    /// Expression that represents a `CREATE CACHE` statement.
+    Cache {
+        name: SqlIdentifier,
+        statement: SelectStatement,
+    },
+}
+
+impl RecipeExpression {
+    pub(crate) fn name(&self) -> &SqlIdentifier {
+        match self {
+            RecipeExpression::Table(stmt) => &stmt.table.name,
+            RecipeExpression::View(cvs) => &cvs.name,
+            RecipeExpression::Cache { name, .. } => name,
+        }
+    }
+}
+
 /// Represents a Soup recipe.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 // crate viz for tests
 pub(crate) struct Recipe {
     /// SQL queries represented in the recipe..
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
-    expressions: HashMap<QueryID, SqlExpression>,
+    expressions: HashMap<QueryID, RecipeExpression>,
     /// Addition order for the recipe expressions
     expression_order: Vec<QueryID>,
     /// Aliases assigned to read query and CreateTable expressions. Each alias maps
@@ -76,8 +101,12 @@ impl Recipe {
     }
 
     /// Get the SqlQuery associated with a query ID
-    pub(crate) fn expression(&self, id: &QueryID) -> Option<&SqlQuery> {
-        self.expressions.get(id).map(|expr| &expr.query)
+    pub(crate) fn expression(&self, id: &QueryID) -> Option<SqlQuery> {
+        self.expressions.get(id).map(|expr| match expr {
+            RecipeExpression::Table(cts) => SqlQuery::CreateTable(cts.clone()),
+            RecipeExpression::View(cvs) => SqlQuery::CreateView(cvs.clone()),
+            RecipeExpression::Cache { statement, .. } => SqlQuery::Select(statement.clone()),
+        })
     }
 
     /// Creates a blank recipe. This is useful for bootstrapping, e.g., in interactive
@@ -136,7 +165,7 @@ impl Recipe {
     pub(in crate::controller) fn resolve_alias(&self, alias: &str) -> Option<&SqlIdentifier> {
         self.aliases
             .get(alias)
-            .map(|qid| self.expressions[qid].name.as_ref().unwrap())
+            .map(|qid| self.expressions[qid].name())
     }
 
     /// Obtains the `NodeIndex` for the node corresponding to a named query or a write type.
@@ -192,101 +221,108 @@ impl Recipe {
         };
 
         let mut to_remove = Vec::new();
-        for change in changelist.changes {
+        for change in changelist {
             match change {
-                Change::Add(expr) => {
-                    let qid = hash_query(&expr.query);
-                    if let Some(cur) = self.expressions.get(&qid) {
-                        if cur.is_leaf {
-                            // The recipe already contains this select, so just alias it if
-                            // possible, or ignore if not
-                            if let Some(ref name) = expr.name {
-                                info!("Aliasing query {name} as existing query {qid}");
-                                if *self.aliases.entry(name.clone()).or_insert(qid) != qid {
-                                    return Err(ReadySetError::RecipeInvariantViolated(format!(
-                                        "Query name exists but existing query is different: {name}"
-                                    )));
-                                }
-                            }
-                            // We are re-adding a query that was already there
-                            to_remove.retain(|remove_qid| *remove_qid != qid);
-                            continue;
-                        }
-                    }
-
-                    // add the query
-                    let qfp = self.inc.add_parsed_query(
-                        expr.query.clone(),
-                        expr.name.clone(),
-                        expr.is_leaf,
-                        mig,
-                    )?;
-
-                    // If the user provided us with a query name, use that.
-                    // If not, use the name internally used by the QFP.
-                    let query_name = expr
-                        .name
-                        .as_ref()
-                        .cloned()
-                        .unwrap_or_else(|| qfp.name.clone());
-
-                    if let Some(ref name) = expr.name {
-                        self.aliases.insert(name.clone(), qid);
-                    }
-
-                    if self.expressions.insert(qid, expr).is_some() {
-                        // We are re-adding a query that was already there.
+                Change::CreateTable(cts) => {
+                    let query = SqlQuery::CreateTable(cts.clone());
+                    let name = cts.table.name.clone();
+                    let qid = hash_query(&query);
+                    let qfp =
+                        self.inc
+                            .add_parsed_query(query.clone(), Some(name.clone()), false, mig)?;
+                    self.aliases.insert(name.clone(), qid);
+                    if self
+                        .expressions
+                        .insert(qid, RecipeExpression::Table(cts))
+                        .is_some()
+                    {
+                        // We are re-adding a table that already existed, so
+                        // remove the query from the list of queries to be removed.
                         to_remove.retain(|remove_qid| *remove_qid != qid);
                     }
                     self.expression_order.push(qid);
-
-                    result.new_nodes.insert(query_name, qfp.query_leaf);
-                    result.expressions_added += 1;
+                    result.new_nodes.insert(name, qfp.query_leaf);
                 }
-                Change::Remove(expr) => {
-                    match expr.query {
-                        SqlQuery::DropTable(dts) => {
-                            for table in dts.tables {
-                                // As far as I know, we can't name CREATE TABLE statements, which
-                                // are being assigned the table name
-                                // as query name (based on the MIR code I've seen).
-                                match self.aliases.get(table.name.as_str()) {
-                                    Some(remove_qid) => {
-                                        to_remove.push(*remove_qid);
-                                    }
-                                    None => {
-                                        if !dts.if_exists {
-                                            error!("Tried to drop table {} without IF EXISTS, but table doesn't exist.", table.name);
-                                            internal!(
-                                                "Tried to drop table {} without IF EXISTS, but table doesn't exist.",
-                                                table.name
-                                            );
-                                        }
-                                    }
-                                }
-                            }
+                Change::CreateView(cvs) => {
+                    let query = SqlQuery::CreateView(cvs.clone());
+                    let name = cvs.name.clone();
+                    let qid = hash_query(&query);
+                    if self.alias_if_exists(qid, Some(&name), &mut to_remove)? {
+                        continue;
+                    }
+
+                    // add the query
+                    let qfp = self
+                        .inc
+                        .add_parsed_query(query, Some(name.clone()), true, mig)?;
+                    self.aliases.insert(name.clone(), qid);
+                    if self
+                        .expressions
+                        .insert(qid, RecipeExpression::View(cvs))
+                        .is_some()
+                    {
+                        // We are re-adding a view that already existed, so
+                        // remove the query from the list of queries to be removed.
+                        to_remove.retain(|remove_qid| *remove_qid != qid);
+                    }
+                    self.expression_order.push(qid);
+                    result.new_nodes.insert(name, qfp.query_leaf);
+                }
+                Change::CreateCache(ccqs) => {
+                    let select = match &ccqs.inner {
+                        CacheInner::Statement(box stmt) => stmt.clone(),
+                        CacheInner::Id(id) => {
+                            error!("attempted to issue CREATE CACHE with an id: {}", id);
+                            internal!("CREATE CACHE should've had its ID resolved by the adapter");
                         }
-                        SqlQuery::DropCache(dcs) => match self.aliases.get(dcs.name.as_str()) {
-                            Some(remove_qid) => {
-                                to_remove.push(*remove_qid);
-                            }
-                            None => {
-                                error!(
-                                    "Tried to drop query {}, but query doesn't exist.",
-                                    dcs.name
-                                );
-                                internal!(
-                                    "Tried to drop query {}, but query doesn't exist.",
-                                    dcs.name
-                                );
-                            }
-                        },
-                        _ => to_remove.push(hash_query(&expr.query)),
+                    };
+                    let query = SqlQuery::Select(select.clone());
+                    let name = ccqs.name;
+                    let qid = hash_query(&query);
+                    if self.alias_if_exists(qid, name.as_ref(), &mut to_remove)? {
+                        continue;
+                    }
+
+                    // add the query
+                    let qfp = self.inc.add_parsed_query(query, name.clone(), true, mig)?;
+                    // If the user provided us with a query name, use that.
+                    // If not, use the name internally used by the QFP.
+                    let query_name = name.as_ref().cloned().unwrap_or_else(|| qfp.name.clone());
+
+                    if let Some(name) = name {
+                        self.aliases.insert(name, qid);
+                    }
+                    if self
+                        .expressions
+                        .insert(
+                            qid,
+                            RecipeExpression::Cache {
+                                name: query_name.clone(),
+                                statement: select,
+                            },
+                        )
+                        .is_some()
+                    {
+                        // We are re-adding a cached query that already existed, so
+                        // remove the query from the list of queries to be removed.
+                        to_remove.retain(|remove_qid| *remove_qid != qid);
+                    }
+                    self.expression_order.push(qid);
+                    result.new_nodes.insert(query_name, qfp.query_leaf);
+                }
+                Change::Drop { name, if_exists } => {
+                    info!(%name, %if_exists, "Dropping table/query/view");
+                    if let Some(remove_qid) = self.aliases.get(name.as_str()) {
+                        to_remove.push(*remove_qid);
+                    } else if !if_exists {
+                        error!("Tried to drop query {}, but query doesn't exist.", name);
+                        internal!("Tried to drop query {}, but query doesn't exist.", name);
                     }
                 }
             }
         }
 
+        result.expressions_added = result.new_nodes.len();
         result.expressions_removed = to_remove.len();
         result.removed_leaves = to_remove
             .iter()
@@ -294,29 +330,29 @@ impl Recipe {
                 self.expression_order.retain(|i| *i != *qid);
                 self.aliases.retain(|_, i| *i != *qid);
                 let expr = self.expressions.remove(qid).unwrap();
-                Ok(match expr.query {
-                    SqlQuery::CreateTable(ref ctq) => {
+                Ok(match expr {
+                    RecipeExpression::Table(ref cts) => {
                         // a base may have many dependent queries, including ones that also lost
                         // nodes; the code handling `removed_leaves` therefore needs to take care
                         // not to remove bases while they still have children, or to try removing
                         // them twice.
-                        self.inc.remove_base(&ctq.table.name)?;
-                        match self.node_addr_for(&ctq.table.name) {
+                        self.inc.remove_base(&cts.table.name)?;
+                        match self.node_addr_for(&cts.table.name) {
                             Ok(ni) => Some(ni),
                             Err(e) => {
                                 error!(
                                     err = %e,
-                                    name = %ctq.table.name,
+                                    name = %cts.table.name,
                                     "failed to remove base whose address could not be resolved",
                                 );
                                 internal!(
                                     "failed to remove base {} whose address could not be resolved",
-                                    ctq.table.name
+                                    cts.table.name
                                 );
                             }
                         }
                     }
-                    _ => self.inc.remove_query(expr.name.as_ref().unwrap())?,
+                    e => self.inc.remove_query(e.name())?,
                 })
             })
             // FIXME(eta): error handling impl overhead
@@ -331,23 +367,40 @@ impl Recipe {
         Ok(result)
     }
 
-    /// Returns the query expressions in the recipe.
-    // crate viz for tests
-    pub(crate) fn expressions(&self) -> Vec<(Option<&SqlIdentifier>, &SqlQuery)> {
-        self.expressions
-            .values()
-            .map(|expr| (expr.name.as_ref(), &expr.query))
-            .collect()
-    }
-
-    /// Creates a [`ChangeList`] specifying the removal
-    /// of all queries in the recipe.
-    pub(super) fn remove_all(&self) -> ChangeList {
-        let mut changes = Vec::new();
-        for expr in self.expressions.values() {
-            changes.push(Change::Remove(expr.clone()));
+    /// Helper method that adds the given alias (`name`) to the [`RecipeExpression`] with
+    /// the given [`QueryID`].
+    /// If the [`RecipeExpression`] was present, we also remove the [`QueryID`] from the list
+    /// of queries marked for removal.
+    ///
+    /// This function returns:
+    /// - `Ok(true)` if the [`RecipeExpression`] was already present
+    /// and the new alias was added successfully.
+    /// - `Ok(false)` if the [`RecipeExpression`] was not present.
+    /// - `Err(ReadySetError::RecipeInvariantViolated(_))` if the alias was already taken by
+    /// another (different) [`RecipeExpression`].
+    fn alias_if_exists(
+        &mut self,
+        qid: QueryID,
+        name: Option<&SqlIdentifier>,
+        to_remove: &mut Vec<QueryID>,
+    ) -> ReadySetResult<bool> {
+        if let Some(cur) = self.expressions.get(&qid) {
+            // The recipe already contains this query/view, so just alias it if
+            // possible, or ignore if not
+            if let Some(name) = name {
+                info!(%name, existing_query = %qid, "Aliasing query/view");
+                if *self.aliases.entry(name.clone()).or_insert(qid) != qid {
+                    return Err(ReadySetError::RecipeInvariantViolated(format!(
+                        "Query name exists but existing query is different: {name}"
+                    )));
+                }
+            }
+            // We are re-adding a query/view that already existed, so
+            // remove the query from the list of queries to be removed.
+            to_remove.retain(|remove_qid| *remove_qid != qid);
+            return Ok(true);
         }
-        ChangeList { changes }
+        Ok(false)
     }
 
     pub(crate) fn remove_leaf_aliases(&mut self, nodes: &[NodeIndex]) {
@@ -368,25 +421,14 @@ impl Recipe {
 
     /// Remove the expression with the given alias, `qname`, from the recipe.
     pub(super) fn remove_query(&mut self, qname: &str) -> Option<ChangeList> {
-        let alias = match self.aliases.remove(qname) {
-            None => {
-                warn!(%qname, "Query not found in expressions");
-                return None;
-            }
-            Some(alias) => alias,
-        };
-
-        // Check that this is indeed the last alias remaining
-        if self.aliases.iter().any(|(_, qid)| *qid == alias) {
-            info!("Removing alias {qname} for query {alias}");
+        if !self.aliases.contains_key(qname) {
             return None;
         }
-
-        self.expressions
-            .get(&alias)
-            .cloned()
-            .map(|expr| ChangeList {
-                changes: vec![Change::Remove(expr)],
-            })
+        Some(ChangeList {
+            changes: vec![Change::Drop {
+                name: qname.into(),
+                if_exists: false,
+            }],
+        })
     }
 }

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::future;
 use hyper::client::HttpConnector;
-use nom_sql::{SqlIdentifier, SqlQuery};
+use nom_sql::SqlIdentifier;
 use noria_errors::{
     internal, internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult,
 };
@@ -25,13 +25,15 @@ use crate::consensus::{Authority, AuthorityControl};
 use crate::debug::info::GraphInfo;
 use crate::debug::stats;
 use crate::metrics::MetricsDump;
+use crate::recipe::changelist::ChangeList;
+use crate::recipe::ExtendRecipeSpec;
 use crate::replication::ReplicationOffsets;
 use crate::status::ReadySetStatus;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::{
-    ActivationResult, ParsedRecipeSpec, ReaderReplicationResult, ReaderReplicationSpec, RecipeSpec,
-    ReplicationOffset, ViewFilter, ViewRequest,
+    ActivationResult, ReaderReplicationResult, ReaderReplicationSpec, ReplicationOffset,
+    ViewFilter, ViewRequest,
 };
 
 mod rpc;
@@ -500,10 +502,12 @@ impl ControllerHandle {
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn dry_run(
         &mut self,
-        name: Option<String>,
-        query: SqlQuery,
+        changes: ChangeList,
     ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
-        let request = ParsedRecipeSpec { name, query };
+        let request = ExtendRecipeSpec {
+            changes,
+            ..Default::default()
+        };
 
         self.rpc("dry_run", request, self.migration_timeout)
     }
@@ -513,27 +517,14 @@ impl ControllerHandle {
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn extend_recipe(
         &mut self,
-        recipe_addition: &str,
+        changes: ChangeList,
     ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
-        let request = RecipeSpec {
-            recipe: recipe_addition,
+        let request = ExtendRecipeSpec {
+            changes,
             ..Default::default()
         };
 
         self.rpc("extend_recipe", request, self.migration_timeout)
-    }
-
-    /// Extend the existing recipe with a single query. The query will be deserialized at noria
-    /// server and not parsed.
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn extend_parsed_recipe(
-        &mut self,
-        name: Option<String>,
-        query: SqlQuery,
-    ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
-        let request = ParsedRecipeSpec { name, query };
-        self.rpc("extend_parsed_recipe", request, self.migration_timeout)
     }
 
     /// Extend the existing recipe with the given set of queries and don't require leader ready.
@@ -541,10 +532,10 @@ impl ControllerHandle {
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn extend_recipe_no_leader_ready(
         &mut self,
-        recipe_addition: &str,
+        changes: ChangeList,
     ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
-        let request = RecipeSpec {
-            recipe: recipe_addition,
+        let request = ExtendRecipeSpec {
+            changes,
             require_leader_ready: false,
             ..Default::default()
         };
@@ -557,12 +548,12 @@ impl ControllerHandle {
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn extend_recipe_with_offset(
         &mut self,
-        recipe_addition: &str,
+        changes: ChangeList,
         replication_offset: &ReplicationOffset,
         require_leader_ready: bool,
     ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
-        let request = RecipeSpec {
-            recipe: recipe_addition,
+        let request = ExtendRecipeSpec {
+            changes,
             replication_offset: Some(Cow::Borrowed(replication_offset)),
             require_leader_ready,
         };

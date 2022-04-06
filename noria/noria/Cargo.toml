@@ -21,6 +21,7 @@ maintenance = { status = "experimental" }
 anyhow = "1.0"
 thiserror = "1.0.26"
 hyper = { version = "0.14.10", features = [ "stream", "client", "http2" ] }
+nom = "7.1"
 nom-sql = { path = "../../nom-sql" }
 serde = { version = "1.0.8", features = ["rc", "derive"] }
 serde_json = { version = "1.0.2", features = ["arbitrary_precision"] }

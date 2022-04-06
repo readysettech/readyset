@@ -23,7 +23,7 @@ impl ExtendRecipeWritePropagation {
         handle.ready().await.unwrap();
         let q = "QUERY w : SELECT * FROM articles WHERE id = ?;";
 
-        handle.extend_recipe(q).await?;
+        handle.extend_recipe(q.parse().unwrap()).await?;
 
         Ok(())
     }

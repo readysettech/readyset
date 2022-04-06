@@ -150,6 +150,7 @@ where
 }
 
 /// Parse a SQL query from a string
+// TODO(fran): Make this function return a ReadySetResult.
 pub fn parse_query<T>(dialect: Dialect, input: T) -> Result<SqlQuery, &'static str>
 where
     T: AsRef<str>,

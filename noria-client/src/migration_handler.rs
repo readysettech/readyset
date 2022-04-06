@@ -9,7 +9,8 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use metrics::counter;
-use nom_sql::{SelectStatement, SqlQuery};
+use nom_sql::SelectStatement;
+use noria::recipe::changelist::{Change, ChangeList};
 use noria::{ControllerHandle, ReadySetResult};
 use noria_client_metrics::recorded;
 use tokio::select;
@@ -232,10 +233,10 @@ where
             return;
         }
         let qname = utils::generate_query_name(stmt);
-        match controller
-            .dry_run(Some(qname), SqlQuery::Select(stmt.clone()))
-            .await
-        {
+        let changelist = ChangeList {
+            changes: vec![Change::create_cache(qname, stmt.clone())],
+        };
+        match controller.dry_run(changelist).await {
             Ok(_) => {
                 self.start_time.remove(stmt);
                 self.query_status_cache

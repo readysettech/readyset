@@ -1058,30 +1058,9 @@ async fn handle_controller_request(
 
 #[cfg(test)]
 mod tests {
-    use std::error::Error;
-
     use noria::replication::ReplicationOffset;
 
-    use super::*;
     use crate::integration_utils::start_simple;
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn extend_recipe_parse_failure() {
-        let mut noria = start_simple("extend_recipe_parse_failure").await;
-        let res = noria.extend_recipe("Invalid SQL").await;
-        assert!(res.is_err());
-        let err = res.err().unwrap();
-        let source: &ReadySetError = err
-            .source()
-            .and_then(|e| e.downcast_ref::<Box<ReadySetError>>())
-            .unwrap()
-            .as_ref();
-        assert!(
-            matches!(*source, ReadySetError::UnparseableQuery { .. }),
-            "source = {:?}",
-            source
-        );
-    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn remove_query() {
@@ -1089,7 +1068,9 @@ mod tests {
         noria
             .extend_recipe(
                 "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);
-                QUERY test_query: SELECT * FROM users;",
+                                CREATE CACHE test_query FROM SELECT * FROM users;"
+                    .parse()
+                    .unwrap(),
             )
             .await
             .unwrap();
@@ -1120,7 +1101,9 @@ mod tests {
             .extend_recipe(
                 "CREATE TABLE t1 (id int);
                      CREATE TABLE t2 (id int);
-                     CREATE TABLE t3 (id int);",
+                     CREATE TABLE t3 (id int);"
+                    .parse()
+                    .unwrap(),
             )
             .await
             .unwrap();

@@ -1,6 +1,7 @@
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt::{self, Display};
+use std::future;
 
 use futures::future::TryFutureExt;
 use futures::stream::FuturesUnordered;
@@ -131,7 +132,12 @@ impl MySqlReplicator {
         for table in &tables {
             let create_table = create_for_table(&mut tx, table, TableKind::BaseTable).await?;
             debug!(%create_table, "Extending recipe");
-            if let Err(err) = noria.extend_recipe_no_leader_ready(&create_table).await {
+            if let Err(err) = future::ready(create_table.try_into())
+                .and_then(|changelist| async {
+                    noria.extend_recipe_no_leader_ready(changelist).await
+                })
+                .await
+            {
                 self.tables.as_mut().unwrap().retain(|t| t != table); // Prevent the table from being snapshotted as well
                 error!(%err, "Error extending CREATE TABLE, table will not be used");
             }
@@ -142,7 +148,12 @@ impl MySqlReplicator {
             let create_view = create_for_table(&mut tx, &view, TableKind::View).await?;
             debug!(%create_view, "Extending recipe");
 
-            if let Err(err) = noria.extend_recipe_no_leader_ready(&create_view).await {
+            if let Err(err) = future::ready(create_view.try_into())
+                .and_then(|changelist| async {
+                    noria.extend_recipe_no_leader_ready(changelist).await
+                })
+                .await
+            {
                 error!(%view, %err, "Error extending CREATE VIEW, view will not be used");
             }
         }

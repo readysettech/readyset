@@ -51,7 +51,7 @@ impl SnapshotBenchmark {
             if let Some(queries) = &self.queries {
                 let queries_sql = std::fs::read_to_string(queries)?;
                 let start = Instant::now();
-                noria.extend_recipe(&queries_sql).await?;
+                noria.extend_recipe(queries_sql.parse().unwrap()).await?;
                 println!("Migration time:    {} s", start.elapsed().as_secs());
                 println!("Disk space used:   {:.2} MiB", tables_size_metric_mib());
             }

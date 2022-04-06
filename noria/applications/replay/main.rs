@@ -22,21 +22,21 @@ const SKEWED_KEY: i64 = 0;
 
 const RECIPE: &str = "
 CREATE TABLE TableRow (id int, c1 int, c2 int, c3 int, c4 int, c5 int, c6 int, c7 int, c8 int, c9 int, PRIMARY KEY(id));
-QUERY ReadRow: SELECT * FROM TableRow WHERE id = ?;
+CREATE CACHE ReadRow FROM SELECT * FROM TableRow WHERE id = ?;
 ";
 
 const SECONDARY_RECIPE: &str = "
 CREATE TABLE TableRow (id int, c1 int, c2 int, c3 int, c4 int, c5 int, c6 int, c7 int, c8 int, c9 int, PRIMARY KEY(id));
-QUERY ReadRow: SELECT * FROM TableRow WHERE id = ?;
-QUERY query_c1: SELECT * FROM TableRow WHERE c1 = ?;
-QUERY query_c2: SELECT * FROM TableRow WHERE c2 = ?;
-QUERY query_c3: SELECT * FROM TableRow WHERE c3 = ?;
-QUERY query_c4: SELECT * FROM TableRow WHERE c4 = ?;
-QUERY query_c5: SELECT * FROM TableRow WHERE c5 = ?;
-QUERY query_c6: SELECT * FROM TableRow WHERE c6 = ?;
-QUERY query_c7: SELECT * FROM TableRow WHERE c7 = ?;
-QUERY query_c8: SELECT * FROM TableRow WHERE c8 = ?;
-QUERY query_c9: SELECT * FROM TableRow WHERE c9 = ?;
+CREATE CACHE ReadRow FROM SELECT * FROM TableRow WHERE id = ?;
+CREATE CACHE query_c1 FROM SELECT * FROM TableRow WHERE c1 = ?;
+CREATE CACHE query_c2 FROM SELECT * FROM TableRow WHERE c2 = ?;
+CREATE CACHE query_c3 FROM SELECT * FROM TableRow WHERE c3 = ?;
+CREATE CACHE query_c4 FROM SELECT * FROM TableRow WHERE c4 = ?;
+CREATE CACHE query_c5 FROM SELECT * FROM TableRow WHERE c5 = ?;
+CREATE CACHE query_c6 FROM SELECT * FROM TableRow WHERE c6 = ?;
+CREATE CACHE query_c7 FROM SELECT * FROM TableRow WHERE c7 = ?;
+CREATE CACHE query_c8 FROM SELECT * FROM TableRow WHERE c8 = ?;
+CREATE CACHE query_c9 FROM SELECT * FROM TableRow WHERE c9 = ?;
 ";
 
 async fn build_graph(authority: Arc<Authority>, persistence: PersistenceParameters) -> Handle {
@@ -284,9 +284,11 @@ async fn main() {
         clear_zookeeper(zk_address);
         let mut g = build_graph(authority.clone(), persistence.clone()).await;
         if use_secondary {
-            g.extend_recipe(SECONDARY_RECIPE).await.unwrap();
+            g.extend_recipe(SECONDARY_RECIPE.parse().unwrap())
+                .await
+                .unwrap();
         } else {
-            g.extend_recipe(RECIPE).await.unwrap();
+            g.extend_recipe(RECIPE.parse().unwrap()).await.unwrap();
         }
 
         if verbose {

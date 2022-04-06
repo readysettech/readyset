@@ -1,4 +1,4 @@
-QUERY posts: select * from Post where p_cid=?;
+CREATE CACHE posts FROM select * from Post where p_cid=?;
 -- public_posts: select * from Post WHERE Post.p_private=0 and p_cid=?;
 -- private_posts: select * from Post WHERE Post.p_private=1 and p_cid=?;
 -- tas: select * from Role WHERE r_role = 1 and r_cid=?;

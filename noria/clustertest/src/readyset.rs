@@ -30,9 +30,11 @@ async fn query_regional_routing_test() {
         .extend_recipe(
             "
       CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
-      QUERY q:
+      CREATE CACHE q FROM 
         SELECT *
-        FROM t1;",
+        FROM t1;"
+                .parse()
+                .unwrap(),
         )
         .await
         .unwrap();
@@ -162,9 +164,11 @@ async fn query_failure_recovery_with_volume_id() {
         .extend_recipe(
             "
       CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
-      QUERY q:
+      CREATE CACHE q FROM 
         SELECT *
-        FROM t1;",
+        FROM t1;"
+                .parse()
+                .unwrap(),
         )
         .await
         .unwrap();
@@ -235,7 +239,9 @@ async fn balance_base_table_domains() {
         .extend_recipe(
             "
         CREATE TABLE t1 (id INT PRIMARY KEY);
-        CREATE TABLE t2 (id INT PRIMARY KEY);",
+        CREATE TABLE t2 (id INT PRIMARY KEY);"
+                .parse()
+                .unwrap(),
         )
         .await
         .unwrap();
