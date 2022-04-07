@@ -3,7 +3,7 @@ name = "noria-mysql"
 publish = false
 version = "0.4.0"
 authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
-edition = "2018"
+edition = "2021"
 build = "src/build.rs"
 
 [target.'cfg(not(target_env="msvc"))'.dependencies]

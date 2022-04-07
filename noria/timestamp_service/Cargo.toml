@@ -2,7 +2,7 @@
 name = "timestamp_service"
 version = "0.7.0"
 publish = false
-edition = "2018"
+edition = "2021"
 authors = ["ReadySet"]
 
 [dependencies]

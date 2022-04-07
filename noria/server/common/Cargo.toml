@@ -1,7 +1,7 @@
 [package]
 name = "noria-common"
 version = "0.7.0"
-edition = "2018"
+edition = "2021"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 license = "MIT OR Apache-2.0"
 

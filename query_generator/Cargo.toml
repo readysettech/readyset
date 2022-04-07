@@ -3,7 +3,7 @@ name = "query_generator"
 publish = false
 version = "0.1.0"
 authors = ["Griffin Smith <root@gws.fyi>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 anyhow = "1.0.38"

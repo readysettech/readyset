@@ -2,7 +2,7 @@
 name = "noria-applications"
 version = "0.6.0"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
-edition = '2018'
+edition = '2021'
 publish = false
 
 [dependencies]

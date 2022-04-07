@@ -2,7 +2,7 @@
 name = "unbounded-interval-tree"
 version = "0.2.3"
 authors = ["Jonathan Guillotte-Blouin <jonathan.guillotte.blouin@gmail.com>"]
-edition = "2018"
+edition = "2021"
 license = "MIT"
 description = "An interval tree working with inclusive/exclusive bounds, as well as unbounded intervals. Provides helpers to fetch overlapping intervals, and difference of intervals."
 

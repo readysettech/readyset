@@ -3,7 +3,7 @@ name = "reader_map"
 version = "0.1.0"
 publish = false
 authors = ["Readyset"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 smallvec = "1.0.0"
