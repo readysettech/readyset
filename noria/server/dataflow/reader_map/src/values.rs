@@ -420,7 +420,7 @@ mod tests {
             v.0.push(Aliased::from(i), &hasher);
         }
 
-        for i in values.clone() {
+        for i in values {
             assert!(v.contains(&i));
         }
         assert!(v.is_short());

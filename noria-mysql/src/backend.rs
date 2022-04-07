@@ -128,7 +128,7 @@ async fn write_meta_table<W: AsyncWrite + Unpin>(
         writer.write_col(var.value)?;
     }
     writer.end_row()?;
-    Ok(writer.finish().await?)
+    writer.finish().await
 }
 
 /// Writes a Vec of [`MetaVariable`] as a table with two columns, where each row represents one

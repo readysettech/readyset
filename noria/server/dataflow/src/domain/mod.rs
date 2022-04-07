@@ -3421,8 +3421,7 @@ impl Domain {
                         }
                     };
 
-                    let mut keys = Vec::from(keys);
-                    walk_path(&path.path[..], &mut keys, *tag, shard, nodes, ex)?;
+                    walk_path(&path.path[..], keys, *tag, shard, nodes, ex)?;
 
                     if let TriggerEndpoint::Local(_) = path.trigger {
                         #[allow(clippy::indexing_slicing)] // tag came from replay_paths
@@ -3444,13 +3443,13 @@ impl Domain {
                         }
 
                         #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
-                        state[target.node].evict_keys(*tag, &keys[..]);
+                        state[target.node].evict_keys(*tag, keys);
                         #[allow(clippy::unwrap_used)]
                         // we can only evict from partial replay paths, so we must have a partial
                         // key
                         trigger_downstream_evictions(
                             target.partial_index.as_ref().unwrap(),
-                            &keys[..],
+                            keys,
                             target.node,
                             ex,
                             not_ready,
@@ -3467,7 +3466,7 @@ impl Domain {
 
         fn walk_path(
             path: &[ReplayPathSegment],
-            keys: &mut Vec<KeyComparison>,
+            keys: &[KeyComparison],
             tag: Tag,
             shard: Option<usize>,
             nodes: &DomainNodes,
@@ -3618,7 +3617,7 @@ impl Domain {
             }
             Packet::EvictKeys {
                 link: Link { dst, .. },
-                mut keys,
+                keys,
                 tag,
             } => {
                 let (trigger, path) = if let Some(rp) = self.replay_paths.get(tag) {
@@ -3634,7 +3633,7 @@ impl Domain {
                     .ok_or_else(|| ReadySetError::NoSuchNode(dst.id()))?;
                 #[allow(clippy::indexing_slicing)]
                 // i is definitely in bounds, since it came from a call to position
-                walk_path(&path[i..], &mut keys, tag, self.shard, &self.nodes, ex)?;
+                walk_path(&path[i..], &keys, tag, self.shard, &self.nodes, ex)?;
 
                 match trigger {
                     TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) => {

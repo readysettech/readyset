@@ -210,7 +210,7 @@ async fn test_metrics_client() {
     assert!(get_external_requests_count(metrics_dump) > count);
 
     // Reset the metrics and verify the metrics actually reset.
-    assert!(!client.reset_metrics().await.is_err());
+    assert!(client.reset_metrics().await.is_ok());
     let metrics = client.get_metrics().await.unwrap();
     let metrics_dump = &metrics[0].metrics;
     assert!(get_external_requests_count(metrics_dump) < second_count);

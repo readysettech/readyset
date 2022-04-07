@@ -129,7 +129,6 @@
 //! continue to issue ad-hoc MySQL queries through existing MySQL client libraries.
 #![feature(
     type_alias_impl_trait,
-    total_cmp,
     stmt_expr_attributes,
     bound_map,
     bound_as_ref,

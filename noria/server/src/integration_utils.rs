@@ -146,7 +146,7 @@ pub fn register_metric_recorder() {
 pub async fn initialize_metrics(handle: &mut Handle) -> MetricsClient {
     let mut metrics_client = MetricsClient::new(handle.c.clone().unwrap()).unwrap();
     let res = metrics_client.reset_metrics().await;
-    assert!(!res.is_err());
+    assert!(res.is_ok());
 
     metrics_client
 }

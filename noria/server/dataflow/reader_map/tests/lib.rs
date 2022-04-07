@@ -1016,8 +1016,8 @@ fn eviction_generational() {
     let to_evict = w.evict_keys(0.34).collect::<Vec<_>>();
     assert_eq!(to_evict.len(), 2);
 
-    assert!(to_evict.iter().find(|(k, _)| **k == 'y').is_some());
-    assert!(to_evict.iter().find(|(k, _)| **k == 'z').is_some());
+    assert!(to_evict.iter().any(|(k, _)| **k == 'y'));
+    assert!(to_evict.iter().any(|(k, _)| **k == 'z'));
 
     w.insert(y.0, y);
     w.insert(z.0, z);
@@ -1029,9 +1029,9 @@ fn eviction_generational() {
     let to_evict = w.evict_keys(0.5).collect::<Vec<_>>();
     assert_eq!(to_evict.len(), 3);
 
-    assert!(to_evict.iter().find(|(k, _)| **k == 'a').is_some());
-    assert!(to_evict.iter().find(|(k, _)| **k == 'b').is_some());
-    assert!(to_evict.iter().find(|(k, _)| **k == 'c').is_some());
+    assert!(to_evict.iter().any(|(k, _)| **k == 'a'));
+    assert!(to_evict.iter().any(|(k, _)| **k == 'b'));
+    assert!(to_evict.iter().any(|(k, _)| **k == 'c'));
 }
 
 #[test]

@@ -197,7 +197,7 @@ impl FromQueryLog {
             Ok(parsed) => Ok(parsed),
             Err(e) => {
                 if let Some(f) = self.unparsable_query_log_file.as_mut() {
-                    f.write(format!("{}\n\n", query.as_ref()).as_bytes())
+                    f.write_all(format!("{}\n\n", query.as_ref()).as_bytes())
                         .await?;
                 }
                 Err(anyhow!(e))
@@ -269,7 +269,7 @@ impl FromQueryLog {
                 };
                 if let Some(record) = record {
                     output
-                        .write(format!("{}\n", record).as_bytes())
+                        .write_all(format!("{}\n", record).as_bytes())
                         .await
                         .unwrap();
                 }

@@ -1,5 +1,3 @@
-#![feature(total_cmp)]
-
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::hash::{Hash, Hasher};

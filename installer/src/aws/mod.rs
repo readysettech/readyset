@@ -118,7 +118,7 @@ pub(crate) async fn db_instance_parameter_group(
     rds_client: &rds::Client,
     db_instance: &DbInstance,
 ) -> Result<DbParameterGroup> {
-    Ok(rds_client
+    rds_client
         .describe_db_parameter_groups()
         .db_parameter_group_name(
             db_instance
@@ -146,7 +146,7 @@ pub(crate) async fn db_instance_parameter_group(
                 "Could not find existing db parameter group for RDS database {}",
                 db_instance.db_instance_identifier().unwrap()
             )
-        })?)
+        })
 }
 
 pub(crate) async fn reboot_rds_db_instance(rds_client: &rds::Client, db_id: &str) -> Result<()> {
