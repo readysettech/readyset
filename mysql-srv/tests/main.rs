@@ -108,8 +108,8 @@ where
         }
     }
 
-    fn password_for_username(&self, username: &[u8]) -> Option<Vec<u8>> {
-        if username == b"user" {
+    fn password_for_username(&self, username: &str) -> Option<Vec<u8>> {
+        if username == "user" {
             Some(b"password".to_vec())
         } else {
             None

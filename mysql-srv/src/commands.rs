@@ -1,6 +1,7 @@
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take, take_until};
-use nom::combinator::{map, opt, rest};
+use nom::combinator::{map, map_res, opt, rest};
+use nom::error::FromExternalError;
 use nom::number::complete::{le_i16, le_i24, le_i64, le_u16, le_u32, le_u8};
 use nom::sequence::preceded;
 use nom::IResult;
@@ -12,10 +13,10 @@ pub struct ClientHandshake<'a> {
     pub capabilities: CapabilityFlags,
     pub maxps: u32,
     pub charset: u16,
-    pub username: &'a [u8],
+    pub username: &'a str,
     pub password: &'a [u8],
-    pub database: Option<&'a [u8]>,
-    pub auth_plugin_name: Option<&'a [u8]>,
+    pub database: Option<&'a str>,
+    pub auth_plugin_name: Option<&'a str>,
 }
 
 /// Parse a "length-encoded integer" as specified by the [mysql binary protocol documentation][docs]
@@ -35,8 +36,18 @@ fn lenenc_int(i: &[u8]) -> IResult<&[u8], i64> {
     }
 }
 
-fn null_terminated_string(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    let (i, res) = take_until(&b"\0"[..])(i)?;
+fn parse_bytes_to_string(i: &[u8]) -> Result<&str, nom::Err<nom::error::Error<&[u8]>>> {
+    std::str::from_utf8(i).map_err(|e| {
+        nom::Err::Error(nom::error::Error::from_external_error(
+            i,
+            nom::error::ErrorKind::Verify,
+            e,
+        ))
+    })
+}
+
+fn null_terminated_string(i: &[u8]) -> IResult<&[u8], &str> {
+    let (i, res) = map_res(take_until(&b"\0"[..]), parse_bytes_to_string)(i)?;
     let (i, _) = take(1u8)(i)?;
     Ok((i, res))
 }
@@ -56,7 +67,7 @@ pub fn client_handshake(i: &[u8]) -> IResult<&[u8], ClientHandshake<'_>> {
             let (i, auth_token_length) = le_u8(i)?;
             take(auth_token_length)(i)?
         } else {
-            null_terminated_string(i)?
+            map(null_terminated_string, |s| s.as_bytes())(i)?
         };
 
     let (i, database) = if capabilities.contains(CapabilityFlags::CLIENT_CONNECT_WITH_DB) {
@@ -195,7 +206,7 @@ mod tests {
             .capabilities
             .contains(CapabilityFlags::CLIENT_DEPRECATE_EOF));
         assert_eq!(handshake.charset, UTF8_GENERAL_CI);
-        assert_eq!(handshake.username, &b"jon"[..]);
+        assert_eq!(handshake.username, "jon");
         assert_eq!(handshake.maxps, 16777216);
     }
 

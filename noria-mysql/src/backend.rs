@@ -665,12 +665,8 @@ where
         Ok(res?)
     }
 
-    fn password_for_username(&self, username: &[u8]) -> Option<Vec<u8>> {
-        String::from_utf8(username.to_vec())
-            .ok()
-            .and_then(|un| self.users.get(&un))
-            .cloned()
-            .map(String::into_bytes)
+    fn password_for_username(&self, username: &str) -> Option<Vec<u8>> {
+        self.users.get(username).cloned().map(String::into_bytes)
     }
 
     fn require_authentication(&self) -> bool {
