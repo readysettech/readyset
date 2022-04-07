@@ -3435,6 +3435,7 @@ dependencies = [
  "time 0.3.6",
  "tokio",
  "tokio-postgres",
+ "tracing",
 ]
 
 [[package]]

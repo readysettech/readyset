@@ -15,6 +15,9 @@ use crate::error::MsqlSrvError;
 
 pub type AuthData = [u8; 20];
 
+/// The name of the (currently only) supported auth plugin
+pub const AUTH_PLUGIN_NAME: &str = "mysql_native_password";
+
 /// Bytewise-XOR b1 with b2 in-place
 fn xor_slice_mut<const N: usize>(b1: &mut [u8; N], b2: &[u8; N]) {
     b1.iter_mut().zip(b2.iter()).for_each(|(x, y)| *x ^= y);
