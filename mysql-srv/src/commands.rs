@@ -1,35 +1,86 @@
+use nom::branch::alt;
+use nom::bytes::complete::{tag, take, take_until};
+use nom::combinator::{map, opt, rest};
+use nom::number::complete::{le_i16, le_i24, le_i64, le_u16, le_u32, le_u8};
+use nom::sequence::preceded;
+use nom::IResult;
+
 use crate::myc::constants::{CapabilityFlags, Command as CommandByte};
 
 #[derive(Debug)]
 pub struct ClientHandshake<'a> {
     pub capabilities: CapabilityFlags,
     pub maxps: u32,
-    pub collation: u16,
+    pub charset: u16,
     pub username: &'a [u8],
     pub password: &'a [u8],
+    pub database: Option<&'a [u8]>,
+    pub auth_plugin_name: Option<&'a [u8]>,
 }
 
-pub fn client_handshake(i: &[u8]) -> nom::IResult<&[u8], ClientHandshake<'_>> {
-    let (i, cap) = nom::number::complete::le_u32(i)?;
-    let (i, maxps) = nom::number::complete::le_u32(i)?;
-    let (i, collation) = nom::bytes::complete::take(1u8)(i)?;
-    let (i, _) = nom::bytes::complete::take(23u8)(i)?;
-    let (i, username) = nom::bytes::complete::take_until(&b"\0"[..])(i)?;
-    let (i, _) = nom::bytes::complete::take(1u8)(i)?;
-    let (i, auth_token_length) = nom::number::complete::le_u8(i)?;
-    let (i, password) = nom::bytes::complete::take(auth_token_length)(i)?;
+/// Parse a "length-encoded integer" as specified by the [mysql binary protocol documentation][docs]
+///
+/// [docs]: https://dev.mysql.com/doc/internals/en/integer.html#length-encoded-integer
+fn lenenc_int(i: &[u8]) -> IResult<&[u8], i64> {
+    let (i, first_byte) = le_u8(i)?;
+    match first_byte {
+        b @ 0x00..=0xfb => Ok((i, b.into())),
+        0xfc => le_i16(i).map(|(i, n)| (i, n.into())),
+        0xfd => le_i24(i).map(|(i, n)| (i, n.into())),
+        0xfe => le_i64(i),
+        0xff => Err(nom::Err::Error(nom::error::Error::new(
+            i,
+            nom::error::ErrorKind::Tag,
+        ))),
+    }
+}
 
-    // bytes::complete::take is guaranteed to fill collation on Ok()
-    #[allow(clippy::indexing_slicing)]
-    let collation = u16::from(collation[0]);
+fn null_terminated_string(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    let (i, res) = take_until(&b"\0"[..])(i)?;
+    let (i, _) = take(1u8)(i)?;
+    Ok((i, res))
+}
+
+/// <https://dev.mysql.com/doc/internals/en/connection-phase-packets.html#packet-Protocol::HandshakeResponse41>
+pub fn client_handshake(i: &[u8]) -> IResult<&[u8], ClientHandshake<'_>> {
+    let (i, capabilities) = map(le_u32, CapabilityFlags::from_bits_truncate)(i)?;
+    let (i, maxps) = le_u32(i)?;
+    let (i, charset) = le_u8(i)?;
+    let (i, _) = take(23u8)(i)?;
+    let (i, username) = null_terminated_string(i)?;
+    let (i, password) =
+        if capabilities.contains(CapabilityFlags::CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA) {
+            let (i, auth_token_length) = lenenc_int(i)?;
+            take(auth_token_length as usize)(i)?
+        } else if capabilities.contains(CapabilityFlags::CLIENT_SECURE_CONNECTION) {
+            let (i, auth_token_length) = le_u8(i)?;
+            take(auth_token_length)(i)?
+        } else {
+            null_terminated_string(i)?
+        };
+
+    let (i, database) = if capabilities.contains(CapabilityFlags::CLIENT_CONNECT_WITH_DB) {
+        map(null_terminated_string, Some)(i)?
+    } else {
+        (i, None)
+    };
+
+    let (i, auth_plugin_name) = if capabilities.contains(CapabilityFlags::CLIENT_PLUGIN_AUTH) {
+        opt(null_terminated_string)(i)?
+    } else {
+        (i, None)
+    };
+
     Ok((
         i,
         ClientHandshake {
-            capabilities: CapabilityFlags::from_bits_truncate(cap),
+            capabilities,
             maxps,
-            collation,
+            charset: charset.into(),
             username,
             password,
+            database,
+            auth_plugin_name,
         },
     ))
 }
@@ -55,16 +106,16 @@ pub enum Command<'a> {
     Quit,
 }
 
-pub fn execute(i: &[u8]) -> nom::IResult<&[u8], Command<'_>> {
-    let (i, stmt) = nom::number::complete::le_u32(i)?;
-    let (i, _flags) = nom::bytes::complete::take(1u8)(i)?;
-    let (i, _iterations) = nom::number::complete::le_u32(i)?;
+pub fn execute(i: &[u8]) -> IResult<&[u8], Command<'_>> {
+    let (i, stmt) = le_u32(i)?;
+    let (i, _flags) = take(1u8)(i)?;
+    let (i, _iterations) = le_u32(i)?;
     Ok((&[], Command::Execute { stmt, params: i }))
 }
 
-pub fn send_long_data(i: &[u8]) -> nom::IResult<&[u8], Command<'_>> {
-    let (i, stmt) = nom::number::complete::le_u32(i)?;
-    let (i, param) = nom::number::complete::le_u16(i)?;
+pub fn send_long_data(i: &[u8]) -> IResult<&[u8], Command<'_>> {
+    let (i, stmt) = le_u32(i)?;
+    let (i, param) = le_u16(i)?;
     Ok((
         &[],
         Command::SendLongData {
@@ -75,11 +126,8 @@ pub fn send_long_data(i: &[u8]) -> nom::IResult<&[u8], Command<'_>> {
     ))
 }
 
-pub fn parse(i: &[u8]) -> nom::IResult<&[u8], Command<'_>> {
-    use nom::bytes::complete::tag;
-    use nom::combinator::{map, rest};
-    use nom::sequence::preceded;
-    nom::branch::alt((
+pub fn parse(i: &[u8]) -> IResult<&[u8], Command<'_>> {
+    alt((
         map(
             preceded(tag(&[CommandByte::COM_QUERY as u8]), rest),
             Command::Query,
@@ -97,10 +145,7 @@ pub fn parse(i: &[u8]) -> nom::IResult<&[u8], Command<'_>> {
             Command::Prepare,
         ),
         map(
-            preceded(
-                tag(&[CommandByte::COM_STMT_RESET as u8]),
-                nom::number::complete::le_u32,
-            ),
+            preceded(tag(&[CommandByte::COM_STMT_RESET as u8]), le_u32),
             Command::ResetStmtData,
         ),
         preceded(tag(&[CommandByte::COM_STMT_EXECUTE as u8]), execute),
@@ -109,10 +154,7 @@ pub fn parse(i: &[u8]) -> nom::IResult<&[u8], Command<'_>> {
             send_long_data,
         ),
         map(
-            preceded(
-                tag(&[CommandByte::COM_STMT_CLOSE as u8]),
-                nom::number::complete::le_u32,
-            ),
+            preceded(tag(&[CommandByte::COM_STMT_CLOSE as u8]), le_u32),
             Command::Close,
         ),
         map(tag(&[CommandByte::COM_QUIT as u8]), |_| Command::Quit),
@@ -152,7 +194,7 @@ mod tests {
         assert!(!handshake
             .capabilities
             .contains(CapabilityFlags::CLIENT_DEPRECATE_EOF));
-        assert_eq!(handshake.collation, UTF8_GENERAL_CI);
+        assert_eq!(handshake.charset, UTF8_GENERAL_CI);
         assert_eq!(handshake.username, &b"jon"[..]);
         assert_eq!(handshake.maxps, 16777216);
     }
