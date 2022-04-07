@@ -94,7 +94,7 @@
 //!         }
 //!     }
 //!
-//!     fn password_for_username(&self, _username: &[u8]) -> Option<Vec<u8>> {
+//!     fn password_for_username(&self, _username: &str) -> Option<Vec<u8>> {
 //!         Some(b"password".to_vec())
 //!     }
 //! }
@@ -253,7 +253,7 @@ pub trait MysqlShim<W: AsyncWrite + Unpin + Send> {
     /// Retrieve the password for the user with the given username, if any.
     ///
     /// If the user doesn't exist, return [`None`].
-    fn password_for_username(&self, username: &[u8]) -> Option<Vec<u8>>;
+    fn password_for_username(&self, username: &str) -> Option<Vec<u8>>;
 
     /// Return false if password checking should be skipped entirely
     fn require_authentication(&self) -> bool {
@@ -398,11 +398,7 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
         } else {
             writers::write_err(
                 ErrorKind::ER_ACCESS_DENIED_ERROR,
-                format!(
-                    "Access denied for user {}",
-                    String::from_utf8_lossy(handshake.username)
-                )
-                .as_bytes(),
+                format!("Access denied for user {}", handshake.username).as_bytes(),
                 &mut self.writer,
             )
             .await?;
