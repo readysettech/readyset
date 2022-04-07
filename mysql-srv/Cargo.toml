@@ -15,7 +15,7 @@ categories = ["api-bindings", "network-programming", "database-implementations"]
 [dependencies]
 nom = "7.1"
 mysql_async = "0.29"
-mysql_common = "0.28.0"
+mysql_common = { version = "0.28.0", features = ["chrono"] }
 byteorder = "1"
 chrono = "0.4"
 time = "0.3"
