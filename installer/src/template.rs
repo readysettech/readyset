@@ -1,9 +1,10 @@
 use std::include_str;
 
 use crate::constants::{
-    CONSUL_POSTFIX, IMG_PREFIX, MYSQL_POSTFIX, READYSET_MYSQL_POSTFIX, READYSET_SERVER_POSTFIX,
-    READYSET_TAG,
+    CONSUL_POSTFIX, IMG_PREFIX, MYSQL_POSTFIX, POSTGRES_POSTFIX, READYSET_MYSQL_POSTFIX,
+    READYSET_POSTGRES_POSTFIX, READYSET_SERVER_POSTFIX, READYSET_TAG,
 };
+use crate::deployment::Engine;
 use crate::docker_compose::Compose;
 
 fn consul_img() -> String {
@@ -14,6 +15,10 @@ fn mysql_img() -> String {
     format!("{}{}", IMG_PREFIX, MYSQL_POSTFIX)
 }
 
+fn postgres_img() -> String {
+    format!("{}{}", IMG_PREFIX, POSTGRES_POSTFIX)
+}
+
 fn server_img() -> String {
     format!("{}{}:{}", IMG_PREFIX, READYSET_SERVER_POSTFIX, READYSET_TAG)
 }
@@ -22,14 +27,40 @@ fn mysql_adapter_img() -> String {
     format!("{}{}:{}", IMG_PREFIX, READYSET_MYSQL_POSTFIX, READYSET_TAG)
 }
 
-pub fn generate_base_template() -> Compose {
-    let base_yml = include_str!("../base_template.yml");
+fn postgres_adapter_img() -> String {
+    format!(
+        "{}{}:{}",
+        IMG_PREFIX, READYSET_POSTGRES_POSTFIX, READYSET_TAG
+    )
+}
+
+pub(crate) fn generate_base_template(db_type: &Engine) -> Compose {
+    match db_type {
+        Engine::MySQL => generate_base_mysql_template(),
+        Engine::PostgreSQL => generate_base_postgres_template(),
+    }
+}
+
+fn generate_base_mysql_template() -> Compose {
+    let base_yml = include_str!("../base_mysql_template.yml");
     let mut template: Compose = serde_yaml::from_str::<Compose>(base_yml).unwrap();
     if let Some(ref mut services) = template.services {
         services.set_service_img("consul", consul_img());
         services.set_service_img("mysql", mysql_img());
         services.set_service_img("readyset-server", server_img());
         services.set_service_img("readyset-adapter", mysql_adapter_img());
+    }
+    template
+}
+
+fn generate_base_postgres_template() -> Compose {
+    let base_yml = include_str!("../base_pg_template.yml");
+    let mut template: Compose = serde_yaml::from_str::<Compose>(base_yml).unwrap();
+    if let Some(ref mut services) = template.services {
+        services.set_service_img("consul", consul_img());
+        services.set_service_img("postgres", postgres_img());
+        services.set_service_img("readyset-server", server_img());
+        services.set_service_img("readyset-adapter", postgres_adapter_img());
     }
     template
 }
@@ -63,7 +94,7 @@ mod tests {
         let want_server = server_img();
         let want_adapter = mysql_adapter_img();
 
-        let mut compose = generate_base_template();
+        let mut compose = generate_base_template(&Engine::MySQL);
 
         let (got_consul, got_mysql, got_server, got_adapter) = match compose.services {
             Some(Services(ref mut map)) => (

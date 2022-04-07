@@ -7,11 +7,17 @@ pub const CONSUL_POSTFIX: &str = "/mirror/consul";
 /// The postfix for our internally mirrored mysql 8.0 image.
 pub const MYSQL_POSTFIX: &str = "/mirror/mysql:8.0";
 
+/// The postfix for our internally mirrored postgres 13 image.
+pub const POSTGRES_POSTFIX: &str = "/mirror/postgres:13";
+
 /// The postfix for our hosted readyset-server image.
 pub const READYSET_SERVER_POSTFIX: &str = "/readyset-server";
 
 /// The postfix for our hosted readyset-mysql adapter image.
 pub const READYSET_MYSQL_POSTFIX: &str = "/readyset-mysql";
+
+/// The postfix for our hosted readyset-psql adapter image.
+pub const READYSET_POSTGRES_POSTFIX: &str = "/readyset-psql";
 
 /// The current release tag for our readyset-server and readyset-mysql images.
 pub const READYSET_TAG: &str = "release-eb53b0bd611d8205c96e4afea52ada38945f2565";

@@ -119,6 +119,20 @@ impl Engine {
         Ok(ENGINES[idx])
     }
 
+    pub(crate) fn root_conn_string(
+        &self,
+        db_pass: &str,
+        host: &str,
+        port: u16,
+        db_name: &str,
+    ) -> String {
+        let suffix = format!("{}@{}:{}/{}", db_pass, host, port, db_name);
+        match self {
+            Engine::MySQL => format!("mysql://root:{}", suffix),
+            Engine::PostgreSQL => format!("postgresql://postgres:{}", suffix),
+        }
+    }
+
     pub(crate) fn from_aws_engine<S>(name: S) -> Result<Self>
     where
         S: AsRef<str>,
@@ -160,6 +174,7 @@ pub(crate) struct DatabaseCredentials {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct Deployment {
     pub(crate) name: String,
+    pub(crate) db_type: Engine,
 
     pub(crate) inner: DeploymentData,
 }
@@ -246,12 +261,13 @@ pub enum TemplateType {
 
 impl CloudformationDeployment {
     /// Create a new Deployment with the given name
-    pub fn new_deployment<S>(name: S) -> Deployment
+    pub(crate) fn new_deployment<S>(name: S, db_type: Engine) -> Deployment
     where
         S: Into<String>,
     {
         Deployment {
             name: name.into(),
+            db_type,
             inner: DeploymentData::Cloudformation(Box::new(CloudformationDeployment {
                 ..Default::default()
             })),
@@ -277,12 +293,13 @@ impl CloudformationDeployment {
 
 impl DockerComposeDeployment {
     /// Create a new Deployment with the given name
-    pub fn new_deployment<S>(name: S) -> Deployment
+    pub(crate) fn new_deployment<S>(name: S, db_type: Engine) -> Deployment
     where
         S: Into<String>,
     {
         Deployment {
             name: name.into(),
+            db_type,
             inner: DeploymentData::Compose(DockerComposeDeployment {
                 ..Default::default()
             }),
@@ -322,7 +339,10 @@ impl DockerComposeDeployment {
         Ok(self)
     }
 
-    pub fn set_adapter_port(&mut self) -> Result<&mut DockerComposeDeployment> {
+    pub(crate) fn set_adapter_port(
+        &mut self,
+        db_type: Engine,
+    ) -> Result<&mut DockerComposeDeployment> {
         if self.adapter_port.is_some() {
             return Ok(self);
         }
@@ -330,7 +350,10 @@ impl DockerComposeDeployment {
         self.adapter_port = Some(
             input()
                 .with_prompt("ReadySet port")
-                .default(3307)
+                .default(match db_type {
+                    Engine::MySQL => 3307,
+                    Engine::PostgreSQL => 5433,
+                })
                 .interact_text()?,
         );
         Ok(self)
@@ -386,6 +409,8 @@ impl Deployment {
 }
 
 fn prompt_for_and_create_deployment() -> Result<Deployment> {
+    let db_type = Engine::select("ReadySet can be communicated with using either MySQL or Postgres protocols. Which would you prefer to use?")?;
+
     let deployment_name: String = input()
         .with_prompt("ReadySet deployment name")
         .interact_text()?;
@@ -394,8 +419,14 @@ fn prompt_for_and_create_deployment() -> Result<Deployment> {
         .items(&["[local] Docker-Compose", "[remote] AWS Cloudformation"])
         .interact()?
     {
-        0 => Ok(DockerComposeDeployment::new_deployment(deployment_name)),
-        1 => Ok(CloudformationDeployment::new_deployment(deployment_name)),
+        0 => Ok(DockerComposeDeployment::new_deployment(
+            deployment_name,
+            db_type,
+        )),
+        1 => Ok(CloudformationDeployment::new_deployment(
+            deployment_name,
+            db_type,
+        )),
         _ => bail!("Must choose a destination to deploy ReadySet to"),
     }
 }
@@ -487,7 +518,7 @@ mod tests {
     #[tokio::test]
     async fn save_and_load() {
         let state_dir = TempDir::new().unwrap();
-        let deployment = CloudformationDeployment::new_deployment("save_and_load");
+        let deployment = CloudformationDeployment::new_deployment("save_and_load", Engine::MySQL);
         deployment
             .save_to_directory(state_dir.path())
             .await
@@ -503,7 +534,7 @@ mod tests {
         let state_dir = TempDir::new().unwrap();
         assert!(Deployment::list(state_dir.path()).await.unwrap().is_empty());
 
-        CloudformationDeployment::new_deployment("list_deployments_1")
+        CloudformationDeployment::new_deployment("list_deployments_1", Engine::MySQL)
             .save_to_directory(state_dir.path())
             .await
             .unwrap();
@@ -512,7 +543,7 @@ mod tests {
             vec!["list_deployments_1"]
         );
 
-        CloudformationDeployment::new_deployment("list_deployments_2")
+        CloudformationDeployment::new_deployment("list_deployments_2", Engine::MySQL)
             .save_to_directory(state_dir.path())
             .await
             .unwrap();
@@ -533,7 +564,8 @@ mod tests {
     fn cloudformation_template_url_fallback() {
         env::set_var("READYSET_CFN_PREFIX", "");
         let expected = format!("https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/{}/readyset/templates/readyset-authority-consul-template.yaml", FALLBACK_VERSION);
-        let deployment = CloudformationDeployment::new_deployment("cloudformation_template_url");
+        let deployment =
+            CloudformationDeployment::new_deployment("cloudformation_template_url", Engine::MySQL);
         let actual = if let DeploymentData::Cloudformation(cfn) = deployment.inner {
             cfn.cloudformation_template_url(TemplateType::Consul)
         } else {
@@ -549,7 +581,8 @@ mod tests {
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890",
         ); // valid hash characters
         let expected = format!("https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/{}/readyset/templates/readyset-authority-consul-template.yaml", FALLBACK_VERSION);
-        let deployment = CloudformationDeployment::new_deployment("cloudformation_template_url");
+        let deployment =
+            CloudformationDeployment::new_deployment("cloudformation_template_url", Engine::MySQL);
         let actual = if let DeploymentData::Cloudformation(cfn) = deployment.inner {
             cfn.cloudformation_template_url(TemplateType::Consul)
         } else {

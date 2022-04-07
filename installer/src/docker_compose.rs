@@ -5,7 +5,7 @@ use derive_builder::*;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 
-use crate::deployment::{Deployment, DeploymentData, MigrationMode};
+use crate::deployment::{Deployment, DeploymentData, Engine, MigrationMode};
 use crate::template::generate_base_template;
 
 #[skip_serializing_none]
@@ -35,9 +35,9 @@ impl TryFrom<&Deployment> for Compose {
             &compose.migration_mode,
         ) {
             (Some(db_name), Some(db_pass), Some(adapter_port), Some(migration_mode)) => {
-                let mut default = generate_base_template();
+                let mut default = generate_base_template(&value.db_type);
                 default.fill_deployment(name);
-                default.fill_credentials(db_name, db_pass);
+                default.fill_credentials(&value.db_type, db_name, db_pass);
                 default.fill_adapter_port(*adapter_port);
                 default.fill_migration_mode(migration_mode);
                 Ok(default)
@@ -58,15 +58,24 @@ impl Compose {
     }
 
     /// Fills database name, root password, and replication urls for mysql upstream database.
-    pub fn fill_credentials(&mut self, db_name: &str, pass: &str) {
+    pub(crate) fn fill_credentials(&mut self, db_type: &Engine, db_name: &str, pass: &str) {
         if let Some(ref mut services) = self.services {
-            services.set_service_env_var("mysql", "MYSQL_DATABASE", db_name);
-            services.set_service_env_var("mysql", "MYSQL_ROOT_PASSWORD", pass);
+            let url = match db_type {
+                Engine::MySQL => {
+                    services.set_service_env_var("mysql", "MYSQL_DATABASE", db_name);
+                    services.set_service_env_var("mysql", "MYSQL_ROOT_PASSWORD", pass);
+                    format!("mysql://root:{}@mysql/{}", pass, db_name)
+                }
+                Engine::PostgreSQL => {
+                    services.set_service_env_var("postgres", "POSTGRES_DB", db_name);
+                    services.set_service_env_var("postgres", "POSTGRES_PASSWORD", pass);
+                    format!("postgresql://postgres:{}@postgres/{}", pass, db_name)
+                }
+            };
 
             services.set_service_env_var("readyset-adapter", "ALLOWED_USERNAME", "root");
             services.set_service_env_var("readyset-adapter", "ALLOWED_PASSWORD", pass);
 
-            let url = format!("mysql://root:{}@mysql/{}", pass, db_name);
             services.set_service_env_var("readyset-server", "REPLICATION_URL", &url);
             services.set_service_env_var("readyset-adapter", "UPSTREAM_DB_URL", &url);
         }

@@ -9,21 +9,25 @@ services:
       timeout: 2s
       retries: 5
       start_period: 5s
-  mysql:
+  postgres:
     expose:
-      - 3306
+      - 5432
     environment:
-      MYSQL_DATABASE: noria
-      MYSQL_ROOT_PASSWORD: noria
+      POSTGRES_PASSWORD: noria
+      POSTGRES_DB: noria
     depends_on:
       consul:
         condition: service_healthy
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
     healthcheck:
-      test: "mysqladmin ping -h127.0.0.1 --port=3306 -uroot -pnoria"
-      start_period: 10s
+      test: ["CMD", "pg_isready", "-h127.0.0.1", "--port=5432"]
+      start_period: 5s
       interval: 10s
-      timeout: 2s
-      retries: 5
+      timeout: 10s
+      retries: 2
   readyset-server:
     expose:
       - "32768-60999"
@@ -39,10 +43,10 @@ services:
       FORBID_FULL_MATERIALIZATION: 1
       DB_DIR: /state
     links:
-      - mysql
+      - postgres
       - consul
     depends_on:
-      mysql:
+      postgres:
         condition: service_healthy
     volumes:
       - readyset-server-state:/state
@@ -54,23 +58,26 @@ services:
       start_period: 5s
   readyset-adapter:
     expose:
-      - 3307
+      - 5433
     environment:
       AUTHORITY_ADDRESS: consul:8500
       AUTHORITY: "consul"
-      LISTEN_ADDRESS: 0.0.0.0:3307
+      LISTEN_ADDRESS: 0.0.0.0:5433
       NORIA_DEPLOYMENT: noria
-      UPSTREAM_DB_URL: mysql://root:noria@mysql/noria
+      UPSTREAM_DB_URL: postgresql://postgres:noria@postgres/noria
       PROMETHEUS_METRICS: 1
       QUERY_LOG: 1
       QUERY_LOG_AD_HOC: 1
     links:
       - readyset-server
-      - mysql
+      - postgres
       - consul
+    depends_on:
+      readyset-server:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1", "--port=3307", "-uroot", "-pnoria"]
+      test: ["CMD", "pg_isready", "-h127.0.0.1", "--port=5433"]
+      start_period: 5s
       interval: 10s
       timeout: 10s
       retries: 2
-      start_period: 5s

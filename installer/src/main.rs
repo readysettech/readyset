@@ -198,6 +198,7 @@ impl Installer {
                 bail!("Command exited with {}", status);
             }
 
+            let db_type = self.deployment.db_type;
             let compose = &self.compose_deployment()?;
             if let (Some(db_pass), Some(port), Some(db_name)) = (
                 &compose.mysql_db_root_pass,
@@ -205,7 +206,16 @@ impl Installer {
                 &compose.mysql_db_name,
             ) {
                 println!("ReadySet should be available within a few seconds.");
-                let conn_cmd = format!("To connect to ReadySet using the mysql client, run the following command:\n\n    $ mysql -h127.0.0.1 -uroot -p{} -P{} --database={}", db_pass, port, db_name);
+                let conn_string = db_type.root_conn_string(db_pass, "127.0.0.1", port, db_name);
+                let conn_cmd = match db_type {
+                    Engine::MySQL => {
+                        format!("To connect to ReadySet using the mysql client, run the following command:\n\n    $ mysql -h127.0.0.1 -uroot -p{} -P{} --database={}\n\nTo connect to ReadySet using an application, use the following connection string:\n\n    {}", db_pass, port, db_name, conn_string)
+                    }
+                    Engine::PostgreSQL => {
+                        format!("To connect to ReadySet using the postgres client, run the following command:\n\n    $ psql {}", conn_string)
+                    }
+                };
+
                 println!("{}", style(conn_cmd).bold());
             } else {
                 bail!("Missing one of mysql database name, mysql root password, or ReadySet deployment port");
@@ -218,11 +228,12 @@ impl Installer {
     /// Exists so if any step fails we save before returning error.
     fn _compose_user_input(&mut self) -> Result<()> {
         let deployment_name = self.deployment.name().to_owned();
+        let db_type = self.deployment.db_type;
         self.compose_deployment()?
             .set_db_name(deployment_name)?
             .set_db_password()?
             .set_migration_mode(MigrationMode::Explicit)?
-            .set_adapter_port()?;
+            .set_adapter_port(db_type)?;
         Ok(())
     }
 
@@ -1835,7 +1846,7 @@ impl Installer {
         }
         .map::<Result<_>, _>(Ok)
         .unwrap_or_else(|| {
-            let engine = Engine::select("Select a database engine:")?;
+            let engine = self.deployment.db_type;
 
             let db_name = input()
                 .with_prompt("Enter a name for the database:")
