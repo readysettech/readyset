@@ -824,11 +824,9 @@ impl Table {
     }
 
     async fn quick_n_dirty_with_timeout(&mut self, r: TableRequest) -> ReadySetResult<()> {
-        Ok(
-            tokio::time::timeout(self.request_timeout, self.quick_n_dirty(r))
-                .await
-                .map_err(|_| internal_err("Timeout during table request"))??,
-        )
+        tokio::time::timeout(self.request_timeout, self.quick_n_dirty(r))
+            .await
+            .map_err(|_| internal_err("Timeout during table request"))?
     }
 
     /// Insert a single row of data into this base table.

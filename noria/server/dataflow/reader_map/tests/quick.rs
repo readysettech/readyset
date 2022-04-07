@@ -62,7 +62,7 @@ fn insert_empty(insert: Vec<u8>, remove: Vec<u8>) -> bool {
     w.publish();
     let elements = &set(&insert) - &set(&remove);
     r.len() == elements.len()
-        && r.enter().iter().map(|r| r.keys()).flatten().count() == elements.len()
+        && r.enter().iter().flat_map(|r| r.keys()).count() == elements.len()
         && elements.iter().all(|k| r.get(k).is_some())
 }
 
@@ -143,7 +143,7 @@ where
     S: BuildHasher,
 {
     assert_eq!(a.len(), b.len());
-    for key in a.enter().iter().map(|r| r.keys()).flatten() {
+    for key in a.enter().iter().flat_map(|r| r.keys()) {
         assert!(b.contains_key(key), "b does not contain {:?}", key);
     }
     for key in b.keys() {

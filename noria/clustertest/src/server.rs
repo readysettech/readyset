@@ -15,7 +15,7 @@ impl ProcessHandle {
         Ok(())
     }
 
-    pub fn is_alive(&mut self) -> bool {
+    pub fn check_alive(&mut self) -> bool {
         self.process.try_wait().unwrap().is_none()
     }
 }

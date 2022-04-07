@@ -453,7 +453,7 @@ mod tests {
         );
 
         assert_eq!(
-            DataType::Float(0.68742189).coerce_to(&SqlType::UnsignedTinyint(None)),
+            DataType::Float(0.687_421_9).coerce_to(&SqlType::UnsignedTinyint(None)),
             Ok(DataType::UnsignedInt(1))
         );
 

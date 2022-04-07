@@ -2129,7 +2129,7 @@ mod tests {
             // Make sure we removed the row for every CF
             match state.lookup(&[i], &KeyType::Single(&first[i])) {
                 LookupResult::Some(RecordResult::Owned(rows)) => {
-                    assert!(rows.len() >= 1);
+                    assert!(!rows.is_empty());
                     assert!(rows.iter().all(|row| row[i] == first[i] && row != &first));
                 }
                 _ => unreachable!(),

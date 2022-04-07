@@ -131,7 +131,7 @@ impl TopK {
         &'topk self,
         out: &mut Vec<Record>,
         current: &mut BinaryHeap<CurrentRecord<'topk, 'state>>,
-        current_group_key: &mut Vec<DataType>,
+        current_group_key: &[DataType],
         original_group_len: usize,
         state: &'state StateMap,
         nodes: &DomainNodes,
@@ -176,7 +176,7 @@ impl TopK {
                         lookup = Some(Lookup {
                             on: *self.src,
                             cols: self.group_by.clone(),
-                            key: current_group_key.clone().try_into().expect("Empty group"),
+                            key: current_group_key.to_vec().try_into().expect("Empty group"),
                         })
                     }
                 }
@@ -298,7 +298,7 @@ impl Ingredient for TopK {
                     if let Some(lookup) = self.post_group(
                         &mut out,
                         &mut current,
-                        &mut current_group_key,
+                        &current_group_key,
                         original_group_len,
                         state,
                         nodes,
@@ -408,7 +408,7 @@ impl Ingredient for TopK {
             if let Some(lookup) = self.post_group(
                 &mut out,
                 &mut current,
-                &mut current_group_key,
+                &current_group_key,
                 original_group_len,
                 state,
                 nodes,

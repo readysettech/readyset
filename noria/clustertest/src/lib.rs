@@ -699,12 +699,12 @@ pub struct ServerHandle {
 }
 
 impl ServerHandle {
-    pub fn is_alive(&mut self) -> bool {
-        self.process.is_alive()
+    pub fn check_alive(&mut self) -> bool {
+        self.process.check_alive()
     }
 
     pub async fn set_failpoint(&mut self, name: &str, action: &str) {
-        if !self.is_alive() {
+        if !self.check_alive() {
             return;
         }
 
@@ -807,7 +807,7 @@ impl DeploymentHandle {
     pub fn expected_workers(&mut self) -> HashSet<Url> {
         let mut alive = HashSet::new();
         for s in self.server_handles().values_mut() {
-            if s.is_alive() {
+            if s.check_alive() {
                 alive.insert(s.addr.clone());
             }
         }
@@ -1122,7 +1122,7 @@ mod tests {
             .start()
             .await;
         assert!(
-            !deployment.is_err(),
+            deployment.is_ok(),
             "Error starting deployment: {}",
             deployment.err().unwrap()
         );
@@ -1139,7 +1139,7 @@ mod tests {
 
         let res = deployment.teardown().await;
         assert!(
-            !res.is_err(),
+            res.is_ok(),
             "Error tearing down deployment: {}",
             res.err().unwrap()
         );

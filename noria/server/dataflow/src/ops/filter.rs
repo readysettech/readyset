@@ -157,9 +157,7 @@ mod tests {
     fn it_forwards_constant_expr() {
         let mut g = setup(false, Some(Expression::Literal(1.into())));
 
-        let mut left: Vec<DataType>;
-
-        left = vec![1.into(), "a".try_into().unwrap()];
+        let mut left: Vec<DataType> = vec![1.into(), "a".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
         left = vec![1.into(), "b".try_into().unwrap()];
@@ -173,9 +171,7 @@ mod tests {
     fn it_forwards() {
         let mut g = setup(false, None);
 
-        let mut left: Vec<DataType>;
-
-        left = vec![1.into(), "a".try_into().unwrap()];
+        let mut left: Vec<DataType> = vec![1.into(), "a".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
         left = vec![1.into(), "b".try_into().unwrap()];
@@ -204,9 +200,7 @@ mod tests {
             }),
         );
 
-        let mut left: Vec<DataType>;
-
-        left = vec![1.into(), "a".try_into().unwrap()];
+        let mut left: Vec<DataType> = vec![1.into(), "a".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
         left = vec![1.into(), "b".try_into().unwrap()];
@@ -272,10 +266,8 @@ mod tests {
             }),
         );
 
-        let mut left: Vec<DataType>;
-
         // both conditions match (2 <= 2, "b" != "a")
-        left = vec![2.into(), "b".try_into().unwrap()];
+        let mut left: Vec<DataType> = vec![2.into(), "b".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
         // second condition fails ("a" != "a")
@@ -302,8 +294,7 @@ mod tests {
             }),
         );
 
-        let mut left: Vec<DataType>;
-        left = vec![2.into(), 2.into()];
+        let mut left: Vec<DataType> = vec![2.into(), 2.into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
         left = vec![2.into(), "b".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left, false), Records::default());

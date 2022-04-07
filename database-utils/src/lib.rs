@@ -188,7 +188,7 @@ where
     V: TryFrom<mysql::Value>,
     <V as TryFrom<mysql::Value>>::Error: std::error::Error,
 {
-    Ok(results
+    results
         .map(|mut r| {
             (0..r.columns().len())
                 .map(|c| {
@@ -199,14 +199,14 @@ where
         })
         .await?
         .into_iter()
-        .collect::<Result<Vec<Vec<V>>, _>>()?)
+        .collect::<Result<Vec<Vec<V>>, _>>()
 }
 
 async fn convert_pgsql_results<V>(results: pgsql::RowStream) -> Result<Vec<Vec<V>>, pgsql::Error>
 where
     for<'a> V: pgsql::types::FromSql<'a>,
 {
-    Ok(results
+    results
         .map(|r| {
             let r = r?;
             (0..r.len())
@@ -214,7 +214,7 @@ where
                 .collect::<Result<Vec<_>, _>>()
         })
         .try_collect()
-        .await?)
+        .await
 }
 
 impl DatabaseConnection {

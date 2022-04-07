@@ -803,7 +803,7 @@ mod tests {
         let mysql_time3 = MysqlTime::new(duration3);
 
         assert!(mysql_time1 < mysql_time2);
-        assert!(!(mysql_time1 >= mysql_time2));
+        assert!(mysql_time1 < mysql_time2);
 
         assert!(mysql_time2 < mysql_time3);
         assert!(mysql_time1 < mysql_time3)
