@@ -2,7 +2,7 @@
 name = "nom-sql"
 version = "0.0.11"
 authors = ["Malte Schwarzkopf <malte@csail.mit.edu>", "ReadySet Technology, inc."]
-edition = "2018"
+edition = "2021"
 publish = false
 
 documentation = "https://docs.readyset.io/nom_sql/index.html"

@@ -2,7 +2,7 @@
 name = "noria-psql"
 publish = false
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
 build = "src/build.rs"
 
 [target.'cfg(not(target_env="msvc"))'.dependencies]

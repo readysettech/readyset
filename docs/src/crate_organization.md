@@ -38,7 +38,7 @@ you ensure a few things:
 name = "readyset-logging"
 version = "0.1.0"
 publish = false
-edition = "2018"
+edition = "2021"
 ```
 
 If you do not intend to release the crate publicly, set `publish = false` in the

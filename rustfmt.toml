@@ -1,4 +1,4 @@
-edition = "2018"
+edition = "2021"
 imports_granularity = "Module"
 group_imports = "StdExternalCrate"
 wrap_comments = true

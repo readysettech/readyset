@@ -1568,14 +1568,18 @@ impl DataflowStateHandle {
         };
         authority
             .update_controller_state(
-                |state: Option<ControllerState>| match state {
-                    None => {
-                        eprintln!("There's no controller state to update");
-                        Err(())
-                    }
-                    Some(mut state) => {
-                        state.dataflow_state = persistable_ds.state.clone();
-                        Ok(state)
+                |state: Option<ControllerState>| {
+                    let _ = &persistable_ds; // capture the whole value, so the closure implements
+                                             // Send
+                    match state {
+                        None => {
+                            eprintln!("There's no controller state to update");
+                            Err(())
+                        }
+                        Some(mut state) => {
+                            state.dataflow_state = persistable_ds.state.clone();
+                            Ok(state)
+                        }
                     }
                 },
                 |state: &mut ControllerState| {

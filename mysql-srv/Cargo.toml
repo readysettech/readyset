@@ -2,7 +2,7 @@
 name = "mysql-srv"
 publish = false
 version = "0.8.8"
-edition = "2018"
+edition = "2021"
 
 description = "Bindings for emulating a MySQL/MariaDB server"
 readme = "README.md"

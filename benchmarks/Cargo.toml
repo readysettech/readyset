@@ -3,7 +3,7 @@ name = "benchmarks"
 version = "0.1.0"
 publish = false
 authors = ["justin@readyset.io"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 tokio = { version = "1.15", features = ["macros", "rt-multi-thread", "signal"] }

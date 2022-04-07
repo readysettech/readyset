@@ -2,7 +2,7 @@
 name = "mysql-test"
 version = "0.1.0"
 authors = ["Mike Cronce <mc@planetscale.com>", "Peter Farr <peter@prismaphonic.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 mysql_async = "0.29"

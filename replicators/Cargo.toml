@@ -3,7 +3,7 @@ name = "replicators"
 version = "0.1.0"
 publish = false
 authors = ["Vlad Krasnov <vlad@readyset.io>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 anyhow = "1.0"

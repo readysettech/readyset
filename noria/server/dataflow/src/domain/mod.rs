@@ -1725,7 +1725,6 @@ impl Domain {
                             // process all records in state to completion within domain
                             // and then forward on tx (if there is one)
                             while let Some((i, chunk)) = iter.next() {
-                                use std::iter::FromIterator;
                                 let chunk = Records::from_iter(chunk.map(&fix));
                                 let len = chunk.len();
                                 let last = iter.peek().is_none();

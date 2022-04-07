@@ -3,7 +3,7 @@ name = "failpoint-proc-macros"
 version = "0.1.0"
 publish = false
 authors = ["justin@readyset.io"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 syn = {version="1.0.57",features=["full","fold"]}

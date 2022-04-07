@@ -2,7 +2,7 @@
 name = "buildkite-pipeline"
 version = "0.1.0"
 publish = false
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 derive_more = "0.99.16"
