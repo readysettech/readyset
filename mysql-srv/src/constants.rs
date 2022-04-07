@@ -53,6 +53,8 @@ pub const CAN_HANDLE_EXPIRED_PASSWORDS: u32 = 0x00400000;
 pub const SESSION_TRACK: u32 = 0x00800000;
 /// Can send OK after a Text Resultset.
 pub const DEPRECATE_EOF: u32 = 0x01000000;
+/// Client supports plugin authentication
+pub const CLIENT_PLUGIN_AUTH: u32 = 0x00080000;
 
 pub const SSL_VERIFY_SERVER_CERT: u32 = 0x40000000;
 pub const REMEMBER_OPTIONS: u32 = 0x80000000;

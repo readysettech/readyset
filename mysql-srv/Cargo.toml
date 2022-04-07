@@ -25,6 +25,7 @@ tokio = { version = "1.15", features = ["io-util", "net", "macros", "rt-multi-th
 thiserror = "1.0.26"
 sha-1 = "0.9.6"
 mysql-time = { path = "../mysql-time" }
+tracing = "0.1.32"
 
 [dev-dependencies]
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }

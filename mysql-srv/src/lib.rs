@@ -150,13 +150,15 @@ use std::collections::HashMap;
 use std::io;
 
 use async_trait::async_trait;
-use authentication::{generate_auth_data, hash_password};
-use constants::{PROTOCOL_41, RESERVED, SECURE_CONNECTION};
+use constants::{CLIENT_PLUGIN_AUTH, PROTOCOL_41, RESERVED, SECURE_CONNECTION};
 use error::{other_error, OtherErrorKind};
+use mysql_common::constants::CapabilityFlags;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net;
+use tracing::debug;
 use writers::write_err;
 
+use crate::authentication::{generate_auth_data, hash_password, AUTH_PLUGIN_NAME};
 pub use crate::myc::constants::{ColumnFlags, ColumnType, StatusFlags};
 pub use crate::writers::prepare_column_definitions;
 
@@ -309,7 +311,7 @@ struct StatementData {
     params: u16,
 }
 
-const CAPABILITIES: u32 = PROTOCOL_41 | SECURE_CONNECTION | RESERVED;
+const CAPABILITIES: u32 = PROTOCOL_41 | SECURE_CONNECTION | RESERVED | CLIENT_PLUGIN_AUTH;
 
 impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
     MysqlIntermediary<B, R, W>
@@ -334,22 +336,24 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
         let auth_data =
             generate_auth_data().map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
 
-        let mut init_packet =
-            Vec::with_capacity(1 + 16 + 4 + 8 + 1 + 2 + 1 + 2 + 2 + 1 + 6 + 4 + 12 + 1);
+        let mut init_packet = Vec::with_capacity(
+            1 + 16 + 4 + 8 + 1 + 2 + 1 + 2 + 2 + 1 + 6 + 4 + 12 + 1 + AUTH_PLUGIN_NAME.len() + 1,
+        );
         init_packet.extend_from_slice(&[10]); // protocol 10
         init_packet.extend_from_slice(CURRENT_VERSION);
         init_packet.extend_from_slice(&[0x08, 0x00, 0x00, 0x00]); // TODO: connection ID
         init_packet.extend_from_slice(&auth_data[..8]);
-        init_packet.extend_from_slice(b"\0");
-        init_packet.extend_from_slice(&CAPABILITIES.to_le_bytes()[..2]); // just 4.1 proto
+        init_packet.push(0);
+        init_packet.extend_from_slice(&CAPABILITIES.to_le_bytes()[..2]);
         init_packet.extend_from_slice(&[0x21]); // UTF8_GENERAL_CI
         init_packet.extend_from_slice(&[0x00, 0x00]); // status flags
-        init_packet.extend_from_slice(&CAPABILITIES.to_le_bytes()[2..]); //extended capabilities
-        init_packet.extend_from_slice(&[0x00]); //no plugins
-        init_packet.extend_from_slice(&[0x00; 6][..]); // filler
-        init_packet.extend_from_slice(&[0x00; 4][..]); // filler
+        init_packet.extend_from_slice(&CAPABILITIES.to_le_bytes()[2..]);
+        init_packet.extend_from_slice(&[auth_data.len() as u8]);
+        init_packet.extend_from_slice(&[0x00; 10][..]); // filler
         init_packet.extend_from_slice(&auth_data[8..]);
-        init_packet.extend_from_slice(&b"\0"[..]);
+        init_packet.push(0);
+        init_packet.extend_from_slice(AUTH_PLUGIN_NAME.as_bytes());
+        init_packet.push(0);
 
         self.writer.write_packet(&init_packet).await?;
         self.writer.flush().await?;
@@ -385,20 +389,73 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
 
         self.writer.set_seq(seq + 1);
 
+        let username = handshake.username.to_owned();
+        let password = handshake.password.to_vec();
+        let client_auth_plugin = handshake.auth_plugin_name.map(|s| s.to_owned());
+
+        let handshake_password = if client_auth_plugin.iter().any(|apn| apn != AUTH_PLUGIN_NAME) {
+            // Authentication mismatch - try to switch auth plugins
+
+            if !handshake
+                .capabilities
+                .contains(CapabilityFlags::CLIENT_SECURE_CONNECTION)
+            {
+                debug!("Client does not support SECURE_CONNECTION, returning authentication error");
+                writers::write_err(
+                    ErrorKind::ER_NOT_SUPPORTED_AUTH_MODE,
+                    b"Client does not support authentication protocol requested by server; \
+                      consider upgrading MySQL client",
+                    &mut self.writer,
+                )
+                .await?;
+                return Ok(false);
+            }
+
+            debug!(
+                ?client_auth_plugin,
+                "Client offered incorrect authentication plugin, sending switch request",
+            );
+
+            let mut auth_switch_request_packet =
+                Vec::with_capacity(1 + AUTH_PLUGIN_NAME.len() + 1 + auth_data.len() + 1);
+            auth_switch_request_packet.push(0xfe);
+            auth_switch_request_packet.extend_from_slice(AUTH_PLUGIN_NAME.as_bytes());
+            auth_switch_request_packet.push(0);
+            auth_switch_request_packet.extend_from_slice(&auth_data);
+            auth_switch_request_packet.push(0);
+            self.writer
+                .write_packet(&auth_switch_request_packet)
+                .await?;
+            self.writer.flush().await?;
+
+            let (seq, auth_switch_response) = self.reader.next().await?.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "peer terminated connection",
+                )
+            })?;
+            self.writer.set_seq(seq + 1);
+
+            auth_switch_response.to_vec()
+        } else {
+            password
+        };
+
         let auth_success = !self.shim.require_authentication()
             || self
                 .shim
-                .password_for_username(handshake.username)
+                .password_for_username(&username)
                 .map_or(false, |password| {
-                    hash_password(&password, &auth_data) == handshake.password
+                    hash_password(&password, &auth_data) == handshake_password.as_slice()
                 });
 
         if auth_success {
             writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty()).await?;
         } else {
+            debug!(%username, ?client_auth_plugin, "Received incorrect password");
             writers::write_err(
                 ErrorKind::ER_ACCESS_DENIED_ERROR,
-                format!("Access denied for user {}", handshake.username).as_bytes(),
+                format!("Access denied for user {}", username).as_bytes(),
                 &mut self.writer,
             )
             .await?;
