@@ -116,5 +116,5 @@ resource "vercel_dns" "installer" {
   domain  = "readyset.io"
   name    = "launch"
   type    = "CNAME"
-  value   = trimsuffix(aws_cloudfront_distribution.installer.domain_name, ".")
+  value   = "${aws_cloudfront_distribution.installer.domain_name}."
 }

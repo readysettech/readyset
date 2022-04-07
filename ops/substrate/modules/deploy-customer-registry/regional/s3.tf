@@ -8,8 +8,6 @@ locals {
   readysettech_cfn_public_objects_arn = "${local.readysettech_cfn_public_bucket_arn}/*"
 }
 
-data "aws_region" "current" {}
-
 data "aws_iam_policy_document" "readysettech-customer-artifacts" {
   statement {
     sid    = "AllowDeployCustomerArtifactsWrite"
@@ -85,7 +83,7 @@ resource "aws_s3_bucket_public_access_block" "readysettech-customer-artifacts" {
   bucket = aws_s3_bucket.readysettech-customer-artifacts.bucket
 
   block_public_acls       = true
-  block_public_policy     = true
+  block_public_policy     = false
   ignore_public_acls      = true
   restrict_public_buckets = true
 }
@@ -124,6 +122,7 @@ data "aws_iam_policy_document" "readysettech-cfn-public" {
       "s3:GetObject", "s3:GetObjectVersion"
     ]
     resources = [
+      "${local.readysettech_cfn_public_bucket_arn}",
       "${local.readysettech_cfn_public_objects_arn}"
     ]
   }
