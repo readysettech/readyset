@@ -20,4 +20,4 @@ pub const READYSET_MYSQL_POSTFIX: &str = "/readyset-mysql";
 pub const READYSET_POSTGRES_POSTFIX: &str = "/readyset-psql";
 
 /// The current release tag for our readyset-server and readyset-mysql images.
-pub const READYSET_TAG: &str = "release-eb53b0bd611d8205c96e4afea52ada38945f2565";
+pub const READYSET_TAG: &str = "release-b58f0ba68d44c06ca3e8c2905dab35743442c6db";
