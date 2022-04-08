@@ -1,0 +1,34 @@
+[sources.node-exporter]
+type = "prometheus_scrape"
+endpoints = [ "http://node-exporter:9100/metrics" ]
+scrape_interval_secs = 2
+
+[sources.prometheus-adapter]
+type = "prometheus_scrape"
+endpoints = [ "http://readyset-adapter:6034/prometheus" ]
+scrape_interval_secs = 2
+
+[sources.prometheus-server]
+type = "prometheus_scrape"
+endpoints = [ "http://readyset-server:6033/prometheus" ]
+scrape_interval_secs = 2
+
+[transforms.metrics]
+type = "remap"
+inputs = ["node-exporter", "prometheus-server", "prometheus-adapter"]
+source = '''
+  .tags.deployment = "localdeploy"
+  .tags.job = "readyset-server"
+  .tags.instance = "localhost:9000"
+'''
+
+# Print parsed logs to stdout
+[sinks.print]
+type = "console"
+inputs = ["in", "metrics"]
+encoding.codec = "text"
+
+[sinks.prometheus]
+type = "prometheus_exporter"
+inputs = ["metrics"]
+address = "0.0.0.0:9092"

@@ -1,0 +1,15 @@
+[sources.in]
+type = "stdin"
+
+[transforms.metadata]
+type = "remap"
+inputs = ["in"]
+source = """
+.hostname = get_hostname!()
+"""
+
+[sinks.out]
+inputs = ["metadata"]
+type = "vector"
+address = "127.0.0.1:8383"
+version = "1"

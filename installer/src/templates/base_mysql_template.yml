@@ -77,3 +77,31 @@ services:
       timeout: 10s
       retries: 2
       start_period: 5s
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "9090"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s 
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - 9090:9090
+  pushgateway:
+    image: prom/pushgateway
+  grafana:
+    image: grafana/grafana:8.0.6
+    volumes:
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/config/grafana.ini:/etc/grafana/grafana.ini
+    ports:
+      - 4000:4000
+  vector:
+    image: timberio/vector:0.16.1-debian
+    volumes:
+      - ./vector/aggregator.toml:/etc/vector/vector.toml

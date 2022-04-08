@@ -42,7 +42,7 @@ pub(crate) fn generate_base_template(db_type: &Engine) -> Compose {
 }
 
 fn generate_base_mysql_template() -> Compose {
-    let base_yml = include_str!("../base_mysql_template.yml");
+    let base_yml = include_str!("./templates/base_mysql_template.yml");
     let mut template: Compose = serde_yaml::from_str::<Compose>(base_yml).unwrap();
     if let Some(ref mut services) = template.services {
         services.set_service_img("consul", consul_img());
@@ -54,7 +54,7 @@ fn generate_base_mysql_template() -> Compose {
 }
 
 fn generate_base_postgres_template() -> Compose {
-    let base_yml = include_str!("../base_pg_template.yml");
+    let base_yml = include_str!("./templates/base_pg_template.yml");
     let mut template: Compose = serde_yaml::from_str::<Compose>(base_yml).unwrap();
     if let Some(ref mut services) = template.services {
         services.set_service_img("consul", consul_img());

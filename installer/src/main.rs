@@ -162,6 +162,114 @@ impl Installer {
         }
     }
 
+    pub async fn write_config_file<P>(&mut self, base_yml: &str, destination_path: P) -> Result<()>
+    where
+        P: AsRef<Path>,
+    {
+        let absolute_path = self
+            .options
+            .state_directory()?
+            .join(destination_path.as_ref());
+        tokio::fs::create_dir_all(&absolute_path.parent().unwrap()).await?;
+
+        let mut file = File::create(&absolute_path).await?;
+        file.write_all(base_yml.as_bytes()).await?;
+
+        Ok(())
+    }
+
+    pub async fn create_prometheus_configs(&mut self) -> Result<()> {
+        self.write_config_file(
+            include_str!("./templates/base_prometheus.yml"),
+            "compose/prometheus/prometheus.yml",
+        )
+        .await
+    }
+    pub async fn create_grafana_configs(&mut self) -> Result<()> {
+        let datasources_yml = include_str!("./templates/grafana_datasources.yml");
+
+        self.write_config_file(
+            include_str!("./templates/grafana_config.ini"),
+            "compose/grafana/config/grafana.ini",
+        )
+        .await?;
+        self.write_config_file(
+            include_str!("./templates/grafana_dashboards.yml"),
+            "compose/grafana/provisioning/dashboards/default.yaml",
+        )
+        .await?;
+
+        let grafana_provisioning_datasources_dir = self
+            .options
+            .state_directory()?
+            .join("compose")
+            .join("grafana")
+            .join("provisioning")
+            .join("datasources");
+        tokio::fs::create_dir_all(&grafana_provisioning_datasources_dir).await?;
+
+        let datasources_provisioning_path =
+            grafana_provisioning_datasources_dir.join("default.yaml");
+        let mut file = File::create(&datasources_provisioning_path).await?;
+
+        // replace database credentials to configure datasource correctly
+        let datasources_yml = &datasources_yml.replace("$db-name", self.deployment.name());
+
+        let adapter_port = self
+            .compose_deployment()?
+            .adapter_port
+            .as_ref()
+            .unwrap()
+            .to_string();
+        let datasources_yml = &datasources_yml.replace("$adapter-port", &adapter_port);
+
+        let db_pass = self
+            .compose_deployment()?
+            .mysql_db_root_pass
+            .as_ref()
+            .unwrap();
+        let datasources_yml = &datasources_yml.replace("$password", db_pass);
+
+        file.write_all(datasources_yml.as_bytes()).await?;
+
+        Ok(())
+    }
+
+    pub async fn create_grafana_dashboards(&mut self) -> Result<()> {
+        self.write_config_file(
+            include_str!("./templates/grafana_connected.json"),
+            "compose/grafana/dashboards/connected.json",
+        )
+        .await?;
+        self.write_config_file(
+            include_str!("./templates/grafana_overview.json"),
+            "compose/grafana/dashboards/query_overview.json",
+        )
+        .await?;
+        self.write_config_file(
+            include_str!("./templates/grafana_specific.json"),
+            "compose/grafana/dashboards/query_specific.json",
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn create_vector_configs(&mut self) -> Result<()> {
+        self.write_config_file(
+            include_str!("./templates/vector_aggregator.toml"),
+            "compose/vector/aggregator.toml",
+        )
+        .await?;
+        self.write_config_file(
+            include_str!("./templates/vector_agent.toml"),
+            "compose/vector/agent.toml",
+        )
+        .await?;
+
+        Ok(())
+    }
+
     /// Run the install process for deploying locally using docker-compose, picking up where the
     /// user left off if necessary.
     pub async fn run_compose(&mut self) -> Result<()> {
@@ -185,6 +293,12 @@ impl Installer {
             &path_str
         );
         println!("{}", style(dest_text).bold());
+
+        self.create_prometheus_configs().await?;
+        println!("done with prometheus");
+        self.create_vector_configs().await?;
+        self.create_grafana_configs().await?;
+        self.create_grafana_dashboards().await?;
 
         if confirm()
             .with_prompt("Proceed with docker-compose deployment now?")
