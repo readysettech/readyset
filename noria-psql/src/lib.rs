@@ -12,3 +12,4 @@ pub use crate::backend::Backend;
 pub use crate::error::Error;
 pub use crate::query_handler::PostgreSqlQueryHandler;
 pub use crate::upstream::PostgreSqlUpstream;
+pub use crate::value::Value;

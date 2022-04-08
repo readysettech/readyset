@@ -4121,6 +4121,7 @@ dependencies = [
  "bit-vec",
  "chrono",
  "clap 3.0.4",
+ "criterion",
  "eui48",
  "futures",
  "itertools",
