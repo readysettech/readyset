@@ -10,7 +10,7 @@ use itertools::Itertools;
 use launchpad::redacted::Sensitive;
 use nom_sql::{
     self, BinaryOperator, ColumnConstraint, DeleteStatement, InsertStatement, Literal,
-    SelectStatement, SqlIdentifier, SqlQuery, UpdateStatement,
+    SelectStatement, SqlIdentifier, SqlQuery, SqlType, UpdateStatement,
 };
 use noria::consistency::Timestamp;
 use noria::internal::LocalNodeIndex;
@@ -21,6 +21,7 @@ use noria::{
     ReadySetResult, SchemaType, Table, TableOperation, View, ViewPlaceholder, ViewQuery,
     ViewSchema,
 };
+use noria_data::noria_type::Type;
 use noria_data::DataType;
 use noria_errors::ReadySetError::PreparedStatementMissing;
 use noria_errors::{internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err};
@@ -1512,7 +1513,8 @@ fn build_view_query(
                 .iter()
                 .position(|x| x.spec.column.name == col.name)
                 .ok_or_else(|| ReadySetError::NoSuchColumn(col.name.to_string()))?;
-            let value = key[idx].coerce_to(key_types.remove(idx))?;
+            let key_type = key_types.remove(idx);
+            let value = key[idx].coerce_to(key_type)?;
             if !key.is_empty() {
                 // the LIKE/ILIKE isn't our only key, add the rest back to `keys`
                 raw_keys.push(key);
@@ -1520,10 +1522,18 @@ fn build_view_query(
 
             filter_op_idx = Some(idx);
 
+            // LIKE/ILIKE resolve to bool
             Ok(DataflowExpression::Op {
-                left: Box::new(DataflowExpression::Column(column)),
+                left: Box::new(DataflowExpression::Column {
+                    index: column,
+                    ty: key_type.clone().into(),
+                }),
                 op: *op,
-                right: Box::new(DataflowExpression::Literal(value)),
+                right: Box::new(DataflowExpression::Literal {
+                    val: value,
+                    ty: key_type.clone().into(),
+                }),
+                ty: Type::Sql(SqlType::Bool),
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -1572,9 +1582,16 @@ fn build_view_query(
                             let value = key[*idx - 1].coerce_to(key_type)?;
 
                             let make_op = |op| DataflowExpression::Op {
-                                left: Box::new(DataflowExpression::Column(*key_column_idx)),
+                                left: Box::new(DataflowExpression::Column {
+                                    index: *key_column_idx,
+                                    ty: (*key_type).clone().into(),
+                                }),
                                 op,
-                                right: Box::new(DataflowExpression::Literal(value.clone())),
+                                right: Box::new(DataflowExpression::Literal {
+                                    val: value.clone(),
+                                    ty: (*key_type).clone().into(),
+                                }),
+                                ty: Type::Sql(SqlType::Bool), // TODO: infer type
                             };
 
                             if let Some((lower_bound, upper_bound)) = &mut bounds {
@@ -1679,6 +1696,7 @@ fn build_view_query(
                 left: Box::new(expr1),
                 op: BinaryOperator::And,
                 right: Box::new(expr2),
+                ty: Type::Sql(SqlType::Bool), // AND is a boolean operator
             }),
         timestamp: ticket,
     })
@@ -1939,9 +1957,16 @@ mod tests {
             assert_eq!(
                 query.filter,
                 Some(DataflowExpression::Op {
-                    left: Box::new(DataflowExpression::Column(1)),
+                    left: Box::new(DataflowExpression::Column {
+                        index: 1,
+                        ty: Type::Sql(SqlType::Text)
+                    }),
                     op: BinaryOperator::ILike,
-                    right: Box::new(DataflowExpression::Literal(DataType::from("%a%")))
+                    right: Box::new(DataflowExpression::Literal {
+                        val: DataType::from("%a%"),
+                        ty: Type::Sql(SqlType::Text)
+                    }),
+                    ty: Type::Sql(SqlType::Bool),
                 })
             );
         }
@@ -2015,9 +2040,16 @@ mod tests {
             assert_eq!(
                 query.filter,
                 Some(DataflowExpression::Op {
-                    left: Box::new(DataflowExpression::Column(0)),
+                    left: Box::new(DataflowExpression::Column {
+                        index: 0,
+                        ty: Type::Sql(SqlType::Int(None))
+                    }),
                     op: BinaryOperator::Greater,
-                    right: Box::new(DataflowExpression::Literal(1.into()))
+                    right: Box::new(DataflowExpression::Literal {
+                        val: 1.into(),
+                        ty: Type::Sql(SqlType::Int(None))
+                    }),
+                    ty: Type::Sql(SqlType::Bool),
                 })
             );
             assert_eq!(
@@ -2047,9 +2079,16 @@ mod tests {
             assert_eq!(
                 query.filter,
                 Some(DataflowExpression::Op {
-                    left: Box::new(DataflowExpression::Column(1)),
+                    left: Box::new(DataflowExpression::Column {
+                        index: 1,
+                        ty: Type::Sql(SqlType::Text)
+                    }),
                     op: BinaryOperator::Greater,
-                    right: Box::new(DataflowExpression::Literal("a".into()))
+                    right: Box::new(DataflowExpression::Literal {
+                        val: "a".into(),
+                        ty: Type::Sql(SqlType::Text)
+                    }),
+                    ty: Type::Sql(SqlType::Bool)
                 })
             );
 

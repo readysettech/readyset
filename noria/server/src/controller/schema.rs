@@ -1,9 +1,7 @@
-use dataflow::ops;
 use dataflow::prelude::*;
 use nom_sql::{Column, ColumnSpecification, SqlType};
 use noria::{ColumnBase, ColumnSchema};
-use ops::NodeOperator;
-use tracing::{error, trace};
+use tracing::trace;
 
 use super::keys::provenance_of;
 use super::recipe::{Recipe, Schema};
@@ -16,94 +14,24 @@ type Path<'a> = &'a [(
 fn type_for_internal_column(
     node: &dataflow::node::Node,
     column_index: usize,
-    next_node_on_path: NodeIndex,
-    recipe: &Recipe,
-    graph: &Graph,
 ) -> ReadySetResult<Option<SqlType>> {
-    // column originates at internal view: literal, aggregation output
-    match *(node.as_internal().ok_or(ReadySetError::NonInternalNode)?) {
-        NodeOperator::Project(ref o) => o.column_type(column_index, |parent_col| {
-            Ok(column_schema(graph, next_node_on_path, recipe, parent_col)?
-                .map(ColumnSchema::take_type))
-        }),
-        NodeOperator::Aggregation(ref grouped_op) => {
-            // computed column is always emitted last
-            if column_index == node.columns().len() - 1 {
-                if let Some(res) = grouped_op.output_col_type() {
-                    Ok(Some(res))
-                } else {
-                    // if none, output column type is same as over column type
-                    // use type of the "over" column
-                    Ok(
-                        column_schema(graph, next_node_on_path, recipe, grouped_op.over_column())?
-                            .map(ColumnSchema::take_type),
-                    )
-                }
-            } else {
-                Ok(
-                    column_schema(graph, next_node_on_path, recipe, column_index)?
-                        .map(ColumnSchema::take_type),
-                )
-            }
-        }
-        NodeOperator::Extremum(ref o) => {
-            // use type of the "over" column
-            if column_index == node.columns().len() - 1 {
-                Ok(
-                    column_schema(graph, next_node_on_path, recipe, o.over_column())?
-                        .map(ColumnSchema::take_type),
-                )
-            } else {
-                Ok(
-                    column_schema(graph, next_node_on_path, recipe, column_index)?
-                        .map(ColumnSchema::take_type),
-                )
-            }
-        }
-        NodeOperator::Concat(_) => {
-            // group_concat always outputs a string as the last column
-            if column_index == node.columns().len() - 1 {
-                Ok(Some(SqlType::Text))
-            } else {
-                Ok(
-                    column_schema(graph, next_node_on_path, recipe, column_index)?
-                        .map(ColumnSchema::take_type),
-                )
-            }
-        }
-        NodeOperator::Join(_) => {
-            // join doesn't "generate" columns, but they may come from one of the other
-            // ancestors; so keep iterating to try the other paths
-            Ok(None)
-        }
-        NodeOperator::Paginate(_) => {
-            if column_index == node.columns().len() - 1 {
-                Ok(Some(SqlType::Bigint(None)))
-            } else {
-                Ok(
-                    column_schema(graph, next_node_on_path, recipe, column_index)?
-                        .map(ColumnSchema::take_type),
-                )
-            }
-        }
-        NodeOperator::Latest(_)
-        | NodeOperator::Union(_)
-        | NodeOperator::Identity(_)
-        | NodeOperator::Filter(_)
-        | NodeOperator::TopK(_) => {
-            Ok(
-                column_schema(graph, next_node_on_path, recipe, column_index)?
-                    .map(ColumnSchema::take_type),
-            )
-        }
-    }
+    // TODO: Replace Option<SqlType> with Type
+    Ok(node
+        .columns()
+        .get(column_index)
+        .ok_or_else(|| {
+            internal_err(format!(
+                "Invalid index into node's columns, node={:?}, index={}",
+                node.global_addr(),
+                column_index
+            ))
+        })?
+        .ty()
+        .clone()
+        .into())
 }
 
-fn trace_column_type_on_path(
-    path: Path,
-    graph: &Graph,
-    recipe: &Recipe,
-) -> ReadySetResult<Option<SqlType>> {
+fn trace_column_type_on_path(path: Path, graph: &Graph) -> ReadySetResult<Option<SqlType>> {
     // column originates at last element of the path whose second element is not None
     if let Some(pos) = path.iter().rposition(|e| e.1.iter().any(Option::is_some)) {
         let (ni, cols) = &path[pos];
@@ -114,32 +42,7 @@ fn trace_column_type_on_path(
 
         let source_node = &graph[*ni];
         let source_column_index = cols[0].unwrap();
-
-        if source_node.is_base() {
-            let base = source_node.name();
-            if let Some(schema) = recipe.schema_for(base) {
-                // projected base table column
-                match schema {
-                    Schema::Table(ref s) => {
-                        Ok(Some(s.fields[source_column_index].sql_type.clone()))
-                    }
-                    _ => internal!("Base node {:?} has non-Table schema: {:?}", ni, schema),
-                }
-            } else {
-                error!(table_name = %base, "no schema for base table");
-                Ok(None)
-            }
-        } else {
-            let parent_node_index = path[pos + 1].0;
-
-            type_for_internal_column(
-                source_node,
-                source_column_index,
-                parent_node_index,
-                recipe,
-                graph,
-            )
-        }
+        type_for_internal_column(source_node, source_column_index)
     } else {
         Ok(None)
     }
@@ -187,7 +90,7 @@ pub(super) fn column_schema(
     let mut col_base = None;
     for ref p in paths {
         trace!("considering path {:?}", p);
-        if let t @ Some(_) = trace_column_type_on_path(p, graph, recipe)? {
+        if let t @ Some(_) = trace_column_type_on_path(p, graph)? {
             col_type = t;
             col_base = get_base_for_column(p, graph, recipe)?;
         }

@@ -35,6 +35,7 @@ use noria::internal::LocalNodeIndex;
 use noria::{
     KeyComparison, LookupResult, Modification, SchemaType, ViewPlaceholder, ViewQuery, ViewRequest,
 };
+use noria_data::noria_type::Type;
 use noria_data::DataType;
 use noria_errors::ReadySetError::{MigrationPlanFailed, RpcFailed, SelectQueryCreationFailed};
 use rusty_fork::rusty_fork_test;
@@ -4805,9 +4806,16 @@ async fn post_read_ilike() {
             key_comparisons: vec![KeyComparison::from_range(&(..))],
             block: true,
             filter: Some(DataflowExpression::Op {
-                left: Box::new(DataflowExpression::Column(0)),
+                left: Box::new(DataflowExpression::Column {
+                    index: 0,
+                    ty: Type::Sql(SqlType::Text),
+                }),
                 op: BinaryOperator::ILike,
-                right: Box::new(DataflowExpression::Literal("%a%".into())),
+                right: Box::new(DataflowExpression::Literal {
+                    val: "%a%".into(),
+                    ty: Type::Sql(SqlType::Text),
+                }),
+                ty: Type::Sql(SqlType::Bool),
             }),
             timestamp: None,
         })

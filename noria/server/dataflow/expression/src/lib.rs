@@ -1,4 +1,5 @@
 mod like;
+pub mod utils;
 
 use std::borrow::Borrow;
 use std::convert::TryFrom;
@@ -11,6 +12,7 @@ use chrono_tz::Tz;
 use maths::int::integer_rnd;
 use mysql_time::MysqlTime;
 use nom_sql::{BinaryOperator, SqlType};
+use noria_data::noria_type::Type;
 use noria_data::DataType;
 use noria_errors::{ReadySetError, ReadySetResult};
 use rust_decimal::prelude::ToPrimitive;
@@ -37,57 +39,141 @@ pub enum BuiltinFunction {
 }
 
 impl BuiltinFunction {
-    pub fn from_name_and_args<A>(name: &str, args: A) -> Result<Self, ReadySetError>
+    pub fn from_name_and_args<A>(name: &str, args: A) -> Result<(Self, Type), ReadySetError>
     where
         A: IntoIterator<Item = Expression>,
     {
+        fn type_for_round(expr: &Expression, precision: &Expression) -> Type {
+            match precision {
+                // Precision should always be coercable to a DataType::Int.
+                Expression::Literal {
+                    val: DataType::Int(p),
+                    ..
+                } => {
+                    if *p < 0 {
+                        // Precision is negative, which means that we will be returning a
+                        // rounded Int.
+                        Type::Sql(SqlType::Int(None))
+                    } else {
+                        // Precision is positive so we will continue to return a Real.
+                        expr.ty().clone()
+                    }
+                }
+                Expression::Literal {
+                    val: DataType::UnsignedInt(_),
+                    ..
+                } => {
+                    // Precision is positive so we will continue to return a Real.
+                    expr.ty().clone()
+                }
+                Expression::Literal {
+                    val: DataType::Double(f),
+                    ..
+                } => {
+                    if f.is_sign_negative() {
+                        // Precision is negative, which means that we will be returning a
+                        // rounded Int.
+                        Type::Sql(SqlType::Int(None))
+                    } else {
+                        // Precision is positive so we will continue to return a Real.
+                        expr.ty().clone()
+                    }
+                }
+                Expression::Literal {
+                    val: DataType::Float(f),
+                    ..
+                } => {
+                    if f.is_sign_negative() {
+                        // Precision is negative, which means that we will be returning a
+                        // rounded Int.
+                        Type::Sql(SqlType::Int(None))
+                    } else {
+                        // Precision is positive so we will continue to return a Real.
+                        expr.ty().clone()
+                    }
+                }
+                _ => expr.ty().clone(),
+            }
+        }
+
         let mut args = args.into_iter();
         match name {
             "convert_tz" => {
                 let arity_error = || ReadySetError::ArityError("convert_tz".to_owned());
-                Ok(Self::ConvertTZ(
-                    Box::new(args.next().ok_or_else(arity_error)?),
-                    Box::new(args.next().ok_or_else(arity_error)?),
-                    Box::new(args.next().ok_or_else(arity_error)?),
+                // Type is inferred from input argument
+                let input = Box::new(args.next().ok_or_else(arity_error)?);
+                let ty = input.ty().clone();
+                Ok((
+                    Self::ConvertTZ(
+                        input,
+                        Box::new(args.next().ok_or_else(arity_error)?),
+                        Box::new(args.next().ok_or_else(arity_error)?),
+                    ),
+                    ty,
                 ))
             }
             "dayofweek" => {
                 let arity_error = || ReadySetError::ArityError("dayofweek".to_owned());
-                Ok(Self::DayOfWeek(Box::new(
-                    args.next().ok_or_else(arity_error)?,
-                )))
+                Ok((
+                    Self::DayOfWeek(Box::new(args.next().ok_or_else(arity_error)?)),
+                    Type::Sql(SqlType::Int(None)), // Day of week is always an int
+                ))
             }
             "ifnull" => {
                 let arity_error = || ReadySetError::ArityError("ifnull".to_owned());
-                Ok(Self::IfNull(
-                    Box::new(args.next().ok_or_else(arity_error)?),
-                    Box::new(args.next().ok_or_else(arity_error)?),
-                ))
+                let expr = Box::new(args.next().ok_or_else(arity_error)?);
+                let val = Box::new(args.next().ok_or_else(arity_error)?);
+                // Type is inferred from the value provided
+                let ty = val.ty().clone();
+                Ok((Self::IfNull(expr, val), ty))
             }
             "month" => {
                 let arity_error = || ReadySetError::ArityError("month".to_owned());
-                Ok(Self::Month(Box::new(args.next().ok_or_else(arity_error)?)))
+                Ok((
+                    Self::Month(Box::new(args.next().ok_or_else(arity_error)?)),
+                    Type::Sql(SqlType::Int(None)), // Month is always an int
+                ))
             }
             "timediff" => {
                 let arity_error = || ReadySetError::ArityError("timediff".to_owned());
-                Ok(Self::Timediff(
-                    Box::new(args.next().ok_or_else(arity_error)?),
-                    Box::new(args.next().ok_or_else(arity_error)?),
+                Ok((
+                    Self::Timediff(
+                        Box::new(args.next().ok_or_else(arity_error)?),
+                        Box::new(args.next().ok_or_else(arity_error)?),
+                    ),
+                    Type::Sql(SqlType::Time), // type is always time
                 ))
             }
             "addtime" => {
                 let arity_error = || ReadySetError::ArityError("addtime".to_owned());
-                Ok(Self::Addtime(
-                    Box::new(args.next().ok_or_else(arity_error)?),
-                    Box::new(args.next().ok_or_else(arity_error)?),
+                let base_time = Box::new(args.next().ok_or_else(arity_error)?);
+                let ty = base_time.ty().clone();
+                Ok((
+                    Self::Addtime(base_time, Box::new(args.next().ok_or_else(arity_error)?)),
+                    ty,
                 ))
             }
             "round" => {
                 let arity_error = || ReadySetError::ArityError("round".to_owned());
-                Ok(Self::Round(
-                    Box::new(args.next().ok_or_else(arity_error)?),
-                    Box::new(args.next().unwrap_or(Expression::Literal(DataType::Int(0)))),
-                ))
+                let expr = Box::new(args.next().ok_or_else(arity_error)?);
+                let prec = Box::new(args.next().unwrap_or(Expression::Literal {
+                    val: DataType::Int(0),
+                    ty: Type::Sql(SqlType::Int(None)),
+                }));
+                let expr_type = expr.ty().clone();
+                let ty = match *expr {
+                    Expression::Literal {
+                        val: DataType::Float(_),
+                        ..
+                    } => type_for_round(&*expr, &*prec),
+                    Expression::Literal {
+                        val: DataType::Double(_),
+                        ..
+                    } => type_for_round(&*expr, &*prec),
+                    // For all other numeric types, the type does not change
+                    _ => expr_type,
+                };
+                Ok((Self::Round(expr, prec), ty))
             }
             _ => Err(ReadySetError::NoSuchFunction(name.to_owned())),
         }
@@ -141,27 +227,47 @@ impl fmt::Display for BuiltinFunction {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Expression {
     /// A reference to a column, by index, in the parent node
-    Column(usize),
+    Column {
+        index: usize,
+        ty: Type,
+    },
 
     /// A literal DataType value
-    Literal(DataType),
+    Literal {
+        val: DataType,
+        ty: Type,
+    },
 
     /// A binary operation
     Op {
         op: BinaryOperator,
         left: Box<Expression>,
         right: Box<Expression>,
+        ty: Type,
     },
 
     /// CAST(expr AS type)
-    Cast(Box<Expression>, SqlType),
+    Cast {
+        /// The `Expression` to cast
+        expr: Box<Expression>,
+        /// The `SqlType` that we're attempting to cast to. This is provided
+        /// when `Expression::Cast` is created.
+        to_type: SqlType,
+        /// The `Type` of the resulting cast. For now, this should be `Type::Sql(to_type)`
+        /// TODO: This field may not be necessary
+        ty: Type,
+    },
 
-    Call(BuiltinFunction),
+    Call {
+        func: BuiltinFunction,
+        ty: Type,
+    },
 
     CaseWhen {
         condition: Box<Expression>,
         then_expr: Box<Expression>,
         else_expr: Box<Expression>,
+        ty: Type,
     },
 }
 
@@ -170,15 +276,18 @@ impl fmt::Display for Expression {
         use Expression::*;
 
         match self {
-            Column(u) => write!(f, "{}", u),
-            Literal(l) => write!(f, "(lit: {})", l),
-            Op { op, left, right } => write!(f, "({} {} {})", left, op, right),
-            Cast(expr, ty) => write!(f, "cast({} as {})", expr, ty),
-            Call(func) => write!(f, "{}", func),
+            Column { index, .. } => write!(f, "{}", index),
+            Literal { val, .. } => write!(f, "(lit: {})", val),
+            Op {
+                op, left, right, ..
+            } => write!(f, "({} {} {})", left, op, right),
+            Cast { expr, to_type, .. } => write!(f, "cast({} as {})", expr, to_type),
+            Call { func, .. } => write!(f, "{}", func),
             CaseWhen {
                 condition,
                 then_expr,
                 else_expr,
+                ..
             } => write!(
                 f,
                 "case when {} then {} else {}",
@@ -224,13 +333,16 @@ impl Expression {
     {
         use Expression::*;
 
+        // TODO: Enforce type coercion
         match self {
-            Column(c) => record
-                .get(*c)
+            Column { index, .. } => record
+                .get(*index)
                 .map(|dt| dt.borrow().clone())
-                .ok_or(ReadySetError::ProjectExpressionInvalidColumnIndex(*c)),
-            Literal(dt) => Ok(dt.clone()),
-            Op { op, left, right } => {
+                .ok_or(ReadySetError::ProjectExpressionInvalidColumnIndex(*index)),
+            Literal { val, .. } => Ok(val.clone()),
+            Op {
+                op, left, right, ..
+            } => {
                 use BinaryOperator::*;
 
                 let left = left.eval(record)?;
@@ -284,8 +396,11 @@ impl Expression {
                     NotILike => like!(CaseInsensitive, true),
                 }
             }
-            Cast(expr, ty) => Ok(expr.eval(record)?.coerce_to(ty)?),
-            Call(func) => match func {
+            Cast { expr, to_type, .. } => {
+                let res = expr.eval(record)?;
+                Ok(res.coerce_to(to_type)?)
+            }
+            Call { func, .. } => match func {
                 BuiltinFunction::ConvertTZ(arg1, arg2, arg3) => {
                     let param1 = arg1.eval(record)?;
                     let param2 = arg2.eval(record)?;
@@ -443,6 +558,7 @@ impl Expression {
                 condition,
                 then_expr,
                 else_expr,
+                ..
             } => {
                 if condition.eval(record)?.is_truthy() {
                     then_expr.eval(record)
@@ -453,79 +569,14 @@ impl Expression {
         }
     }
 
-    pub fn sql_type(
-        &self,
-        parent_column_type: impl Fn(usize) -> ReadySetResult<Option<SqlType>>,
-    ) -> ReadySetResult<Option<SqlType>> {
-        macro_rules! round {
-            ($e1:expr, $prec:expr, $sql_type:expr) => {
-                match $prec {
-                    // Precision should always be coercable to a DataType::Int.
-                    Expression::Literal(DataType::Int(p)) => {
-                        if p < 0 {
-                            // Precision is negative, which means that we will be returning a
-                            // rounded Int.
-                            Ok(Some(SqlType::Int(None)))
-                        } else {
-                            // Precision is positive so we will continue to return a Real.
-                            Ok(Some($sql_type))
-                        }
-                    }
-                    Expression::Literal(DataType::UnsignedInt(_)) => {
-                        // Precision is positive so we will continue to return a Real.
-                        Ok(Some($sql_type))
-                    }
-                    Expression::Literal(DataType::Double(f)) => {
-                        if f.is_sign_negative() {
-                            // Precision is negative, which means that we will be returning a
-                            // rounded Int.
-                            Ok(Some(SqlType::Int(None)))
-                        } else {
-                            // Precision is positive so we will continue to return a Real.
-                            Ok(Some($sql_type))
-                        }
-                    }
-                    Expression::Literal(DataType::Float(f)) => {
-                        if f.is_sign_negative() {
-                            // Precision is negative, which means that we will be returning a
-                            // rounded Int.
-                            Ok(Some(SqlType::Int(None)))
-                        } else {
-                            // Precision is positive so we will continue to return a Real.
-                            Ok(Some($sql_type))
-                        }
-                    }
-                    _ => $e1.sql_type(parent_column_type),
-                }
-            };
-        }
-        // TODO(grfn): Throughout this whole function we basically just assume everything
-        // typechecks, which isn't great - but when we actually have a typechecker it'll be
-        // attaching types to expressions ahead of time so this is just a stop-gap for now
+    pub fn ty(&self) -> &Type {
         match self {
-            Expression::Column(c) => parent_column_type(*c),
-            Expression::Literal(l) => Ok(l.sql_type()),
-            Expression::Op { left, .. } => left.sql_type(parent_column_type),
-            Expression::Cast(_, typ) => Ok(Some(typ.clone())),
-            Expression::Call(f) => match f {
-                BuiltinFunction::ConvertTZ(input, _, _) => input.sql_type(parent_column_type),
-                BuiltinFunction::DayOfWeek(_) => Ok(Some(SqlType::Int(None))),
-                BuiltinFunction::IfNull(_, y) => y.sql_type(parent_column_type),
-                BuiltinFunction::Month(_) => Ok(Some(SqlType::Int(None))),
-                BuiltinFunction::Timediff(_, _) => Ok(Some(SqlType::Time)),
-                BuiltinFunction::Addtime(e1, _) => e1.sql_type(parent_column_type),
-                BuiltinFunction::Round(e1, prec) => match **e1 {
-                    Expression::Literal(DataType::Float(_)) => round!(e1, **prec, SqlType::Float),
-                    Expression::Literal(DataType::Double(_)) => round!(e1, **prec, SqlType::Real),
-                    // For all other numeric types we always return the same type as they are.
-                    Expression::Literal(DataType::UnsignedInt(_)) => {
-                        Ok(Some(SqlType::UnsignedInt(None)))
-                    }
-                    Expression::Literal(DataType::Int(_)) => Ok(Some(SqlType::Int(None))),
-                    _ => e1.sql_type(parent_column_type),
-                },
-            },
-            Expression::CaseWhen { then_expr, .. } => then_expr.sql_type(parent_column_type),
+            Expression::Column { ty, .. }
+            | Expression::Literal { ty, .. }
+            | Expression::Op { ty, .. }
+            | Expression::Call { ty, .. }
+            | Expression::CaseWhen { ty, .. }
+            | Expression::Cast { ty, .. } => ty,
         }
     }
 }
@@ -601,10 +652,11 @@ mod tests {
     use Expression::*;
 
     use super::*;
+    use crate::utils::{make_call, make_column, make_literal};
 
     #[test]
     fn eval_column() {
-        let expr = Column(1);
+        let expr = make_column(1);
         assert_eq!(
             expr.eval(&[DataType::from(1), "two".try_into().unwrap()])
                 .unwrap(),
@@ -614,7 +666,7 @@ mod tests {
 
     #[test]
     fn eval_literal() {
-        let expr = Literal(1.into());
+        let expr = make_literal(1.into());
         assert_eq!(
             expr.eval(&[DataType::from(1), "two".try_into().unwrap()])
                 .unwrap(),
@@ -625,13 +677,15 @@ mod tests {
     #[test]
     fn eval_add() {
         let expr = Op {
-            left: Box::new(Column(0)),
+            left: Box::new(make_column(0)),
             right: Box::new(Op {
-                left: Box::new(Column(1)),
-                right: Box::new(Literal(3.into())),
+                left: Box::new(make_column(1)),
+                right: Box::new(make_literal(3.into())),
                 op: BinaryOperator::Add,
+                ty: Type::Unknown,
             }),
             op: BinaryOperator::Add,
+            ty: Type::Unknown,
         };
         assert_eq!(
             expr.eval(&[DataType::from(1), DataType::from(2)]).unwrap(),
@@ -651,9 +705,10 @@ mod tests {
         macro_rules! assert_op {
             ($binary_op:expr, $value:expr, $expected:expr) => {
                 let expr = Op {
-                    left: Box::new(Column(0)),
-                    right: Box::new(Literal($value)),
+                    left: Box::new(make_column(0)),
+                    right: Box::new(make_literal($value)),
                     op: $binary_op,
+                    ty: Type::Unknown,
                 };
                 assert_eq!(
                     expr.eval::<DataType>(&[dt.into()]).unwrap(),
@@ -675,7 +730,11 @@ mod tests {
 
     #[test]
     fn eval_cast() {
-        let expr = Cast(Box::new(Column(0)), SqlType::Int(None));
+        let expr = Cast {
+            expr: Box::new(make_column(0)),
+            to_type: SqlType::Int(None),
+            ty: Type::Sql(SqlType::Int(None)),
+        };
         assert_eq!(
             expr.eval::<DataType>(&["1".try_into().unwrap(), "2".try_into().unwrap()])
                 .unwrap(),
@@ -685,10 +744,10 @@ mod tests {
 
     #[test]
     fn eval_call_convert_tz() {
-        let expr = Call(BuiltinFunction::ConvertTZ(
-            Box::new(Column(0)),
-            Box::new(Column(1)),
-            Box::new(Column(2)),
+        let expr = make_call(BuiltinFunction::ConvertTZ(
+            Box::new(make_column(0)),
+            Box::new(make_column(1)),
+            Box::new(make_column(2)),
         ));
         let datetime = NaiveDateTime::new(
             NaiveDate::from_ymd(2003, 10, 12),
@@ -761,7 +820,7 @@ mod tests {
 
     #[test]
     fn eval_call_day_of_week() {
-        let expr = Call(BuiltinFunction::DayOfWeek(Box::new(Column(0))));
+        let expr = make_call(BuiltinFunction::DayOfWeek(Box::new(make_column(0))));
         let expected = DataType::Int(2);
 
         let date = NaiveDate::from_ymd(2021, 3, 22); // Monday
@@ -787,9 +846,9 @@ mod tests {
 
     #[test]
     fn eval_call_if_null() {
-        let expr = Call(BuiltinFunction::IfNull(
-            Box::new(Column(0)),
-            Box::new(Column(1)),
+        let expr = make_call(BuiltinFunction::IfNull(
+            Box::new(make_column(0)),
+            Box::new(make_column(1)),
         ));
         let value = DataType::Int(2);
 
@@ -802,22 +861,22 @@ mod tests {
             value
         );
 
-        let expr2 = Call(BuiltinFunction::IfNull(
-            Box::new(Literal(DataType::None)),
-            Box::new(Column(0)),
+        let expr2 = make_call(BuiltinFunction::IfNull(
+            Box::new(make_literal(DataType::None)),
+            Box::new(make_column(0)),
         ));
         assert_eq!(expr2.eval::<DataType>(&[2.into()]).unwrap(), value);
 
-        let expr3 = Call(BuiltinFunction::IfNull(
-            Box::new(Column(0)),
-            Box::new(Literal(DataType::Int(2))),
+        let expr3 = make_call(BuiltinFunction::IfNull(
+            Box::new(make_column(0)),
+            Box::new(make_literal(DataType::Int(2))),
         ));
         assert_eq!(expr3.eval(&[DataType::None]).unwrap(), value);
     }
 
     #[test]
     fn eval_call_month() {
-        let expr = Call(BuiltinFunction::Month(Box::new(Column(0))));
+        let expr = make_call(BuiltinFunction::Month(Box::new(make_column(0))));
         let datetime = NaiveDateTime::new(
             NaiveDate::from_ymd(2003, 10, 12),
             NaiveTime::from_hms(5, 13, 33),
@@ -850,9 +909,9 @@ mod tests {
 
     #[test]
     fn eval_call_timediff() {
-        let expr = Call(BuiltinFunction::Timediff(
-            Box::new(Column(0)),
-            Box::new(Column(1)),
+        let expr = make_call(BuiltinFunction::Timediff(
+            Box::new(make_column(0)),
+            Box::new(make_column(1)),
         ));
         let param1 = NaiveDateTime::new(
             NaiveDate::from_ymd(2003, 10, 12),
@@ -976,9 +1035,9 @@ mod tests {
 
     #[test]
     fn eval_call_addtime() {
-        let expr = Call(BuiltinFunction::Addtime(
-            Box::new(Column(0)),
-            Box::new(Column(1)),
+        let expr = make_call(BuiltinFunction::Addtime(
+            Box::new(make_column(0)),
+            Box::new(make_column(1)),
         ));
         let param1 = NaiveDateTime::new(
             NaiveDate::from_ymd(2003, 10, 12),
@@ -1119,9 +1178,9 @@ mod tests {
 
     #[test]
     fn eval_call_round() {
-        let expr = Call(BuiltinFunction::Round(
-            Box::new(Column(0)),
-            Box::new(Column(1)),
+        let expr = make_call(BuiltinFunction::Round(
+            Box::new(make_column(0)),
+            Box::new(make_column(1)),
         ));
         let number: f64 = 4.12345;
         let precision = 3;
@@ -1141,9 +1200,9 @@ mod tests {
 
     #[test]
     fn eval_call_round_with_negative_precision() {
-        let expr = Call(BuiltinFunction::Round(
-            Box::new(Column(0)),
-            Box::new(Column(1)),
+        let expr = make_call(BuiltinFunction::Round(
+            Box::new(make_column(0)),
+            Box::new(make_column(1)),
         ));
         let number: f64 = 52.12345;
         let precision = -1;
@@ -1162,9 +1221,9 @@ mod tests {
 
     #[test]
     fn eval_call_round_with_float_precision() {
-        let expr = Call(BuiltinFunction::Round(
-            Box::new(Column(0)),
-            Box::new(Column(1)),
+        let expr = make_call(BuiltinFunction::Round(
+            Box::new(make_column(0)),
+            Box::new(make_column(1)),
         ));
         let number: f32 = 52.12345;
         let precision = -1.0_f64;
@@ -1191,9 +1250,9 @@ mod tests {
     // 1 row in set, 2 warnings (0.00 sec)
     #[test]
     fn eval_call_round_with_banana() {
-        let expr = Call(BuiltinFunction::Round(
-            Box::new(Column(0)),
-            Box::new(Column(1)),
+        let expr = make_call(BuiltinFunction::Round(
+            Box::new(make_column(0)),
+            Box::new(make_column(1)),
         ));
         let number: f32 = 52.12345;
         let precision = "banana";
@@ -1212,7 +1271,7 @@ mod tests {
 
     #[test]
     fn month_null() {
-        let expr = Call(BuiltinFunction::Month(Box::new(Column(0))));
+        let expr = make_call(BuiltinFunction::Month(Box::new(make_column(0))));
         assert_eq!(
             expr.eval::<DataType>(&[DataType::None]).unwrap(),
             DataType::None
@@ -1223,9 +1282,10 @@ mod tests {
     fn value_truthiness() {
         assert_eq!(
             Expression::Op {
-                left: Box::new(Expression::Literal(1.into())),
+                left: Box::new(make_literal(1.into())),
                 op: BinaryOperator::And,
-                right: Box::new(Expression::Literal(3.into())),
+                right: Box::new(make_literal(3.into())),
+                ty: Type::Unknown,
             }
             .eval::<DataType>(&[])
             .unwrap(),
@@ -1234,9 +1294,10 @@ mod tests {
 
         assert_eq!(
             Expression::Op {
-                left: Box::new(Expression::Literal(1.into())),
+                left: Box::new(make_literal(1.into())),
                 op: BinaryOperator::And,
-                right: Box::new(Expression::Literal(0.into())),
+                right: Box::new(make_literal(0.into())),
+                ty: Type::Unknown,
             }
             .eval::<DataType>(&[])
             .unwrap(),
@@ -1248,12 +1309,14 @@ mod tests {
     fn eval_case_when() {
         let expr = Expression::CaseWhen {
             condition: Box::new(Op {
-                left: Box::new(Expression::Column(0)),
+                left: Box::new(make_column(0)),
                 op: BinaryOperator::Equal,
-                right: Box::new(Expression::Literal(1.into())),
+                right: Box::new(make_literal(1.into())),
+                ty: Type::Unknown,
             }),
-            then_expr: Box::new(Expression::Literal("yes".try_into().unwrap())),
-            else_expr: Box::new(Expression::Literal("no".try_into().unwrap())),
+            then_expr: Box::new(make_literal("yes".try_into().unwrap())),
+            else_expr: Box::new(make_literal("no".try_into().unwrap())),
+            ty: Type::Unknown,
         };
 
         assert_eq!(
@@ -1270,9 +1333,10 @@ mod tests {
     #[test]
     fn like_expr() {
         let expr = Expression::Op {
-            left: Box::new(Expression::Literal("foo".into())),
+            left: Box::new(make_literal("foo".into())),
             op: BinaryOperator::Like,
-            right: Box::new(Expression::Literal("f%".into())),
+            right: Box::new(make_literal("f%".into())),
+            ty: Type::Unknown,
         };
         let res = expr.eval::<DataType>(&[]).unwrap();
         assert!(res.is_truthy());

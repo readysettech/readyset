@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 
 use dataflow_expression::Expression;
-use nom_sql::SqlType;
 use noria_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
 use tracing::error;
@@ -44,43 +43,6 @@ impl Project {
             src: src.into(),
             cols: 0,
             us: None,
-        }
-    }
-
-    /// Returns a guess as to the [`SqlType`] of the given column index as emitted by this project
-    /// node, potentially using `parent_column_type` to look up types of columns in the immediate
-    /// parent node.
-    ///
-    /// If the column always returns a `NULL` value (eg if it's a literal column with the value
-    /// NULL), then the return value will be `Ok(None)`.
-    pub fn column_type(
-        &self,
-        column_index: usize,
-        parent_column_type: impl Fn(usize) -> ReadySetResult<Option<SqlType>>,
-    ) -> ReadySetResult<Option<SqlType>> {
-        if let Some(parent_col) = self.emit.as_ref().and_then(|emit| emit.get(column_index)) {
-            // Emitted column
-            parent_column_type(*parent_col)
-        } else if let Some(expr) = self
-            .expressions
-            .as_ref()
-            // expressions go after all the emitted columns
-            .and_then(|exprs| exprs.get(column_index - self.emit.as_ref().map_or(0, |e| e.len())))
-        {
-            // Expression
-            expr.sql_type(parent_column_type)
-        } else if let Some(literal) = self.additional.as_ref().and_then(|lits| {
-            lits.get(
-                column_index
-                // literals go after both the emitted columns and the expressions
-                    - self.emit.as_ref().map_or(0, |e| e.len())
-                    - self.expressions.as_ref().map_or(0, |e| e.len()),
-            )
-        }) {
-            // Literal
-            Ok(literal.sql_type())
-        } else {
-            internal!("Column index out of bounds")
         }
     }
 }
@@ -294,8 +256,10 @@ impl Ingredient for Project {
 mod tests {
     use std::convert::TryFrom;
 
+    use dataflow_expression::utils::{make_int_column, make_literal};
     use dataflow_state::MaterializedNodeState;
-    use nom_sql::BinaryOperator;
+    use nom_sql::{BinaryOperator, SqlType};
+    use noria_data::noria_type::Type;
     use Expression::{Column, Literal, Op};
 
     use super::*;
@@ -344,9 +308,10 @@ mod tests {
 
     fn setup_column_arithmetic(op: BinaryOperator) -> ops::test::MockGraph {
         let expression = Expression::Op {
-            left: Box::new(Expression::Column(0)),
-            right: Box::new(Column(1)),
+            left: Box::new(make_int_column(0)),
+            right: Box::new(make_int_column(1)),
             op,
+            ty: Type::Sql(SqlType::Int(None)),
         };
 
         setup_arithmetic(expression)
@@ -486,9 +451,10 @@ mod tests {
     fn it_forwards_arithmetic_w_literals() {
         let number: DataType = 40.into();
         let expression = Expression::Op {
-            left: Box::new(Column(0)),
-            right: Box::new(Literal(number)),
+            left: Box::new(make_int_column(0)),
+            right: Box::new(make_literal(number)),
             op: BinaryOperator::Multiply,
+            ty: Type::Sql(SqlType::Int(None)),
         };
 
         let mut p = setup_arithmetic(expression);
@@ -504,9 +470,10 @@ mod tests {
         let a: DataType = 80.into();
         let b: DataType = 40.into();
         let expression = Expression::Op {
-            left: Box::new(Literal(a)),
-            right: Box::new(Literal(b)),
+            left: Box::new(make_literal(a)),
+            right: Box::new(make_literal(b)),
             op: BinaryOperator::Divide,
+            ty: Type::Sql(SqlType::Int(None)),
         };
 
         let mut p = setup_arithmetic(expression);
@@ -631,9 +598,10 @@ mod tests {
     fn it_queries_through_w_arithmetic_and_literals() {
         let additional = Some(vec![DataType::Int(42)]);
         let expressions = Some(vec![Expression::Op {
-            left: Box::new(Column(0)),
-            right: Box::new(Column(1)),
+            left: Box::new(make_int_column(0)),
+            right: Box::new(make_int_column(1)),
             op: BinaryOperator::Add,
+            ty: Type::Sql(SqlType::Int(None)),
         }]);
 
         let state = MaterializedNodeState::Memory(MemoryState::default());
@@ -646,9 +614,10 @@ mod tests {
     fn it_queries_through_w_arithmetic_and_literals_persistent() {
         let additional = Some(vec![DataType::Int(42)]);
         let expressions = Some(vec![Expression::Op {
-            left: Box::new(Column(0)),
-            right: Box::new(Column(1)),
+            left: Box::new(make_int_column(0)),
+            right: Box::new(make_int_column(1)),
             op: BinaryOperator::Add,
+            ty: Type::Sql(SqlType::Int(None)),
         }]);
 
         let state = MaterializedNodeState::Persistent(PersistentState::new(
@@ -667,11 +636,13 @@ mod tests {
         let expression = Op {
             op: BinaryOperator::Multiply,
             left: Box::new(Op {
-                left: Box::new(Column(0)),
-                right: Box::new(Column(1)),
+                left: Box::new(make_int_column(0)),
+                right: Box::new(make_int_column(1)),
                 op: BinaryOperator::Add,
+                ty: Type::Sql(SqlType::Int(None)),
             }),
-            right: Box::new(Literal(DataType::Int(2))),
+            right: Box::new(make_literal(DataType::Int(2))),
+            ty: Type::Sql(SqlType::Int(None)),
         };
 
         let state = MaterializedNodeState::Persistent(PersistentState::new(

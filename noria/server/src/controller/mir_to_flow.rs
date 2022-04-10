@@ -29,6 +29,7 @@ use nom_sql::{
 };
 use noria::internal::{Index, IndexType};
 use noria::ViewPlaceholder;
+use noria_data::noria_type::Type;
 use noria_errors::{
     internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,
 };
@@ -581,9 +582,9 @@ fn make_filter_node(
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
-    let filter_conditions = lower_expression(&parent, conditions)?;
     #[allow(clippy::indexing_slicing)] // just got the address
     let mut parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
+    let filter_conditions = lower_expression(&parent, conditions, &parent_cols)?;
 
     set_names(&column_names(columns), &mut parent_cols)?;
 
@@ -1014,67 +1015,117 @@ fn make_latest_node(
 ///   x != z AND ...`
 /// - Replacing NEG with (expr * -1)
 /// - Replacing NOT with (expr != 1)
-fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<DataflowExpression> {
+/// - Inferring the type of each node in the expression AST.
+fn lower_expression(
+    parent: &MirNodeRef,
+    expr: Expression,
+    parent_cols: &[DataflowColumn],
+) -> ReadySetResult<DataflowExpression> {
     match expr {
         Expression::Call(FunctionExpression::Call {
             name: fname,
             arguments,
-        }) => Ok(DataflowExpression::Call(
-            BuiltinFunction::from_name_and_args(
-                &fname,
-                arguments
-                    .into_iter()
-                    .map(|arg| lower_expression(parent, arg))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )?,
-        )),
+        }) => {
+            let args = arguments
+                .into_iter()
+                .map(|arg| lower_expression(parent, arg, parent_cols))
+                .collect::<Result<Vec<_>, _>>()?;
+            let (func, ty) = BuiltinFunction::from_name_and_args(&fname, args)?;
+            Ok(DataflowExpression::Call { func, ty })
+        }
         Expression::Call(call) => internal!(
             "Unexpected (aggregate?) call node in project expression: {:?}",
             Sensitive(&call)
         ),
-        Expression::Literal(lit) => Ok(DataflowExpression::Literal(lit.try_into()?)),
-        Expression::Column(nom_sql::Column { name, table, .. }) => Ok(DataflowExpression::Column(
-            parent
+        Expression::Literal(lit) => {
+            let val: DataType = lit.try_into()?;
+            // TODO: Infer type from SQL
+            let ty = val.sql_type().into();
+
+            Ok(DataflowExpression::Literal { val, ty })
+        }
+        Expression::Column(nom_sql::Column { name, table, .. }) => {
+            let index = parent
                 .borrow()
-                .column_id_for_column(&Column::new(table.as_deref(), &name))?,
-        )),
-        Expression::BinaryOp { lhs, op, rhs } => Ok(DataflowExpression::Op {
-            op,
-            left: Box::new(lower_expression(parent, *lhs)?),
-            right: Box::new(lower_expression(parent, *rhs)?),
-        }),
+                .column_id_for_column(&Column::new(table.as_deref(), &name))?;
+            let ty = parent_cols
+                .get(index)
+                .ok_or_else(|| {
+                    internal_err(format!(
+                        "Index exceeds length of parent cols, idx={}",
+                        index
+                    ))
+                })?
+                .ty()
+                .clone();
+            Ok(DataflowExpression::Column { index, ty })
+        }
+        Expression::BinaryOp { lhs, op, rhs } => {
+            // TODO: Consider rhs and op when inferring type
+            let left = Box::new(lower_expression(parent, *lhs, parent_cols)?);
+            let ty = left.ty().clone();
+            Ok(DataflowExpression::Op {
+                op,
+                left,
+                right: Box::new(lower_expression(parent, *rhs, parent_cols)?),
+                ty,
+            })
+        }
         Expression::UnaryOp {
             op: UnaryOperator::Neg,
             rhs,
-        } => Ok(DataflowExpression::Op {
-            op: BinaryOperator::Multiply,
-            left: Box::new(lower_expression(parent, *rhs)?),
-            right: Box::new(DataflowExpression::Literal(DataType::Int(-1))),
-        }),
+        } => {
+            let left = Box::new(lower_expression(parent, *rhs, parent_cols)?);
+            // TODO: Negation may change type to signed
+            let ty = left.ty().clone();
+            Ok(DataflowExpression::Op {
+                op: BinaryOperator::Multiply,
+                left,
+                right: Box::new(DataflowExpression::Literal {
+                    val: DataType::Int(-1),
+                    ty: Type::Sql(SqlType::Int(None)),
+                }),
+                ty,
+            })
+        }
         Expression::UnaryOp {
             op: UnaryOperator::Not,
             rhs,
         } => Ok(DataflowExpression::Op {
             op: BinaryOperator::NotEqual,
-            left: Box::new(lower_expression(parent, *rhs)?),
-            right: Box::new(DataflowExpression::Literal(DataType::Int(1))),
+            left: Box::new(lower_expression(parent, *rhs, parent_cols)?),
+            right: Box::new(DataflowExpression::Literal {
+                val: DataType::Int(1),
+                ty: Type::Sql(SqlType::Int(None)),
+            }),
+            ty: Type::Sql(SqlType::Bool), // type of NE is always bool
         }),
-        Expression::Cast { expr, ty, .. } => Ok(DataflowExpression::Cast(
-            Box::new(lower_expression(parent, *expr)?),
-            ty,
-        )),
+        Expression::Cast { expr, ty, .. } => Ok(DataflowExpression::Cast {
+            expr: Box::new(lower_expression(parent, *expr, parent_cols)?),
+            to_type: ty.clone(),
+            ty: ty.into(),
+        }),
         Expression::CaseWhen {
             condition,
             then_expr,
             else_expr,
-        } => Ok(DataflowExpression::CaseWhen {
-            condition: Box::new(lower_expression(parent, *condition)?),
-            then_expr: Box::new(lower_expression(parent, *then_expr)?),
-            else_expr: match else_expr {
-                Some(else_expr) => Box::new(lower_expression(parent, *else_expr)?),
-                None => Box::new(DataflowExpression::Literal(DataType::None)),
-            },
-        }),
+        } => {
+            let then_expr = Box::new(lower_expression(parent, *then_expr, parent_cols)?);
+            let ty = then_expr.ty().clone();
+            Ok(DataflowExpression::CaseWhen {
+                // TODO: Do case arm types have to match? See if type is inferred at runtime
+                condition: Box::new(lower_expression(parent, *condition, parent_cols)?),
+                then_expr,
+                else_expr: match else_expr {
+                    Some(else_expr) => Box::new(lower_expression(parent, *else_expr, parent_cols)?),
+                    None => Box::new(DataflowExpression::Literal {
+                        val: DataType::None,
+                        ty: Type::Unknown,
+                    }),
+                },
+                ty,
+            })
+        }
         Expression::In {
             lhs,
             rhs: InValue::List(exprs),
@@ -1088,12 +1139,13 @@ fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<Dat
                     (BinaryOperator::Equal, BinaryOperator::Or)
                 };
 
-                let lhs = lower_expression(parent, *lhs)?;
+                let lhs = lower_expression(parent, *lhs, parent_cols)?;
                 let make_comparison = |rhs| -> ReadySetResult<_> {
                     Ok(DataflowExpression::Op {
                         left: Box::new(lhs.clone()),
                         op: comparison_op,
-                        right: Box::new(lower_expression(parent, rhs)?),
+                        right: Box::new(lower_expression(parent, rhs, parent_cols)?),
+                        ty: Type::Sql(SqlType::Bool), // type of =/!= is always bool
                     })
                 };
 
@@ -1102,14 +1154,21 @@ fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<Dat
                         left: Box::new(acc),
                         op: logical_op,
                         right: Box::new(make_comparison(rhs)?),
+                        ty: Type::Sql(SqlType::Bool), // type of =/!= is always bool
                     })
                 })
             } else if negated {
                 // x IN () is always false
-                Ok(DataflowExpression::Literal(DataType::None))
+                Ok(DataflowExpression::Literal {
+                    val: DataType::None,
+                    ty: Type::Sql(SqlType::Bool),
+                })
             } else {
                 // x NOT IN () is always false
-                Ok(DataflowExpression::Literal(DataType::from(1)))
+                Ok(DataflowExpression::Literal {
+                    val: DataType::from(1),
+                    ty: Type::Sql(SqlType::Bool),
+                })
             }
         }
         Expression::Exists(_) => unsupported!("EXISTS not currently supported"),
@@ -1166,22 +1225,8 @@ fn make_project_node(
 
     let projected_expressions: Vec<DataflowExpression> = expressions
         .iter()
-        .map(|(_, e)| lower_expression(&parent, e.clone()))
+        .map(|(_, e)| lower_expression(&parent, e.clone(), parent_cols))
         .collect::<Result<Vec<_>, _>>()?;
-
-    let col_type = |idx: usize| -> ReadySetResult<Option<SqlType>> {
-        Ok(parent_cols
-            .get(idx)
-            .ok_or_else(|| {
-                internal_err(format!(
-                    "Expression referenced invalid index in parent, idx={}",
-                    idx
-                ))
-            })?
-            .ty()
-            .clone()
-            .into())
-    };
 
     let col_names = source_columns
         .iter()
@@ -1190,11 +1235,11 @@ fn make_project_node(
 
     let projected_expression_types = projected_expressions
         .iter()
-        .map(|e| e.sql_type(col_type))
-        .collect::<ReadySetResult<Vec<_>>>()?;
+        .map(|e| e.ty().clone())
+        .collect::<Vec<_>>();
     let literal_types = literal_values
         .iter()
-        .map(|l| l.sql_type())
+        .map(|l| l.sql_type().into())
         .collect::<Vec<_>>();
 
     cols.extend(
@@ -1202,7 +1247,7 @@ fn make_project_node(
             .iter()
             .chain(literal_types.iter())
             .zip(col_names)
-            .map(|(ty, n)| DataflowColumn::new(n, ty.clone().into(), Some(name.into()))),
+            .map(|(ty, n)| DataflowColumn::new(n, ty.clone(), Some(name.into()))),
     );
 
     // Check here since we did not check in `set_names()`
