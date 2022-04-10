@@ -131,6 +131,11 @@ impl Ingredient for Filter {
 
 #[cfg(test)]
 mod tests {
+    use dataflow_expression::utils::{column_with_type, make_literal};
+    use nom_sql::SqlType;
+    use noria_data::noria_type::Type;
+    use Expression::Op;
+
     use super::*;
     use crate::ops;
 
@@ -142,10 +147,11 @@ mod tests {
             &["x", "y"],
             Filter::new(
                 s.as_global(),
-                filters.unwrap_or_else(|| Expression::Op {
-                    left: Box::new(Expression::Column(1)),
+                filters.unwrap_or_else(|| Op {
+                    left: Box::new(column_with_type(1, Type::Sql(SqlType::Text))),
                     op: BinaryOperator::Equal,
-                    right: Box::new(Expression::Literal("a".try_into().unwrap())),
+                    right: Box::new(make_literal(DataType::from("a"))),
+                    ty: Type::Sql(SqlType::Bool),
                 }),
             ),
             materialized,
@@ -155,7 +161,7 @@ mod tests {
 
     #[test]
     fn it_forwards_constant_expr() {
-        let mut g = setup(false, Some(Expression::Literal(1.into())));
+        let mut g = setup(false, Some(make_literal(DataType::from(1))));
 
         let mut left: Vec<DataType> = vec![1.into(), "a".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
@@ -185,18 +191,21 @@ mod tests {
     fn it_forwards_mfilter() {
         let mut g = setup(
             false,
-            Some(Expression::Op {
-                left: Box::new(Expression::Op {
-                    left: Box::new(Expression::Column(0)),
+            Some(Op {
+                left: Box::new(Op {
+                    left: Box::new(column_with_type(0, Type::Sql(SqlType::Int(None)))),
                     op: BinaryOperator::Equal,
-                    right: Box::new(Expression::Literal(1.into())),
+                    right: Box::new(make_literal(DataType::from(1))),
+                    ty: Type::Sql(SqlType::Bool),
                 }),
                 op: BinaryOperator::And,
-                right: Box::new(Expression::Op {
-                    left: Box::new(Expression::Column(1)),
+                right: Box::new(Op {
+                    left: Box::new(column_with_type(1, Type::Sql(SqlType::Text))),
                     op: BinaryOperator::Equal,
-                    right: Box::new(Expression::Literal("a".try_into().unwrap())),
+                    right: Box::new(make_literal(DataType::from("a"))),
+                    ty: Type::Sql(SqlType::Bool),
                 }),
+                ty: Type::Sql(SqlType::Bool),
             }),
         );
 
@@ -251,18 +260,21 @@ mod tests {
     fn it_works_with_inequalities() {
         let mut g = setup(
             false,
-            Some(Expression::Op {
-                left: Box::new(Expression::Op {
-                    left: Box::new(Expression::Column(0)),
+            Some(Op {
+                left: Box::new(Op {
+                    left: Box::new(column_with_type(0, Type::Sql(SqlType::Int(None)))),
                     op: BinaryOperator::LessOrEqual,
-                    right: Box::new(Expression::Literal(2.into())),
+                    right: Box::new(make_literal(DataType::from(2))),
+                    ty: Type::Sql(SqlType::Bool),
                 }),
                 op: BinaryOperator::And,
-                right: Box::new(Expression::Op {
-                    left: Box::new(Expression::Column(1)),
+                right: Box::new(Op {
+                    left: Box::new(column_with_type(1, Type::Sql(SqlType::Text))),
                     op: BinaryOperator::NotEqual,
-                    right: Box::new(Expression::Literal("a".try_into().unwrap())),
+                    right: Box::new(make_literal(DataType::from("a"))),
+                    ty: Type::Sql(SqlType::Bool),
                 }),
+                ty: Type::Sql(SqlType::Bool),
             }),
         );
 
@@ -287,10 +299,11 @@ mod tests {
     fn it_works_with_columns() {
         let mut g = setup(
             false,
-            Some(Expression::Op {
-                left: Box::new(Expression::Column(0)),
+            Some(Op {
+                left: Box::new(column_with_type(0, Type::Sql(SqlType::Text))),
                 op: BinaryOperator::Equal,
-                right: Box::new(Expression::Column(1)),
+                right: Box::new(column_with_type(1, Type::Sql(SqlType::Text))),
+                ty: Type::Sql(SqlType::Bool),
             }),
         );
 

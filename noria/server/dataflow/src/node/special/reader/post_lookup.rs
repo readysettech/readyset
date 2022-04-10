@@ -335,19 +335,25 @@ where
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     mod post_lookup {
-        use nom_sql::BinaryOperator;
+        use dataflow_expression::utils::{make_int_column, make_literal};
+        use nom_sql::{BinaryOperator, SqlType};
+        use noria_data::noria_type::Type;
+        //use Expression::utils::{make_int_column, make_literal};
+        use Expression::Op;
 
         use super::*;
 
         #[test]
         fn not_equal_filter() {
             let filter = Expression::Op {
-                left: Box::new(Expression::Column(0)),
+                left: Box::new(make_int_column(0)),
                 op: BinaryOperator::NotEqual,
-                right: Box::new(Expression::Literal(1.into())),
+                right: Box::new(make_literal(DataType::from(1))),
+                ty: Type::Sql(SqlType::Bool),
             };
             let records: Vec<Box<[DataType]>> = vec![
                 vec![1.into(), 2.into()].into_boxed_slice(),
@@ -488,10 +494,11 @@ mod tests {
                 ..Default::default()
             };
 
-            let filter = Expression::Op {
-                left: Box::new(Expression::Column(0)),
+            let filter = Op {
+                left: Box::new(make_int_column(0)),
                 op: BinaryOperator::NotEqual,
-                right: Box::new(Expression::Literal(1.into())),
+                right: Box::new(make_literal(DataType::from(1))),
+                ty: Type::Sql(SqlType::Bool),
             };
 
             let result = post_lookup.process(records.iter(), &Some(filter)).unwrap();
@@ -523,10 +530,11 @@ mod tests {
 
             // MIN(c1) WHERE c1 != 3 GROUP BY c0 ORDER BY c0 ASC LIMIT 1
 
-            let filter = Expression::Op {
-                left: Box::new(Expression::Column(1)),
+            let filter = Op {
+                left: Box::new(make_int_column(1)),
                 op: BinaryOperator::NotEqual,
-                right: Box::new(Expression::Literal(3.into())),
+                right: Box::new(make_literal(DataType::from(3))),
+                ty: Type::Sql(SqlType::Bool),
             };
 
             let post_lookup = PostLookup {
