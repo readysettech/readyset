@@ -8,6 +8,9 @@ use dialoguer::{Confirm, Input, Password, Select};
 use indicatif::{ProgressBar, ProgressStyle};
 use lazy_static::lazy_static;
 
+/// Width to wrap all console output to
+pub(crate) const OUTPUT_WIDTH: usize = 80;
+
 lazy_static! {
     pub(crate) static ref DIALOG_THEME: ColorfulTheme = ColorfulTheme::default();
     pub(crate) static ref SPINNER_STYLE: ProgressStyle = ProgressStyle::default_spinner()
@@ -37,6 +40,17 @@ pub(crate) fn password() -> Password<'static> {
 
 pub(crate) fn select() -> Select<'static> {
     Select::with_theme(&*DIALOG_THEME)
+}
+
+/// Redefines the stdlib's println macro to wrap all output text to a consistent width
+macro_rules! println {
+    () => { std::println!(); };
+    ($($format_arg:tt)+) => {{
+        std::println!(
+            "{}",
+            textwrap::fill(&format!($($format_arg)*), crate::console::OUTPUT_WIDTH)
+        );
+    }}
 }
 
 macro_rules! success {
