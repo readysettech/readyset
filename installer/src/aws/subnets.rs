@@ -199,7 +199,7 @@ mod tests {
         }
     }
 
-    #[proptest]
+    #[proptest(cases = 5)]
     fn subnet_cidrs_returns_valid_subnets(
         vpc_cidr: ArbitraryIpv4Net,
         #[strategy(1usize..=8)] needed_total_subnets: usize,
