@@ -512,6 +512,14 @@ where
             let r = readers.clone();
             let auth_address = options.authority_address.clone();
             builder.set_replicator_url(options.upstream_db_url.as_ref().unwrap().0.clone());
+            let persistence_params = noria_server::PersistenceParameters::new(
+                noria_server::DurabilityMode::Permanent,
+                Some(deployment.clone()),
+                6,
+                None,
+            );
+            builder.set_persistence(persistence_params);
+
             let server_handle = rt.block_on(async move {
                 let authority = Arc::new(authority.to_authority(&auth_address, &deployment).await);
 
