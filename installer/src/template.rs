@@ -34,15 +34,20 @@ fn postgres_adapter_img() -> String {
     )
 }
 
-pub(crate) fn generate_base_template(db_type: &Engine) -> Compose {
+pub(crate) fn generate_base_template(db_type: &Engine, standalone: bool) -> Compose {
     match db_type {
-        Engine::MySQL => generate_base_mysql_template(),
-        Engine::PostgreSQL => generate_base_postgres_template(),
+        Engine::MySQL => generate_base_mysql_template(standalone),
+        Engine::PostgreSQL => generate_base_postgres_template(standalone),
     }
 }
 
-fn generate_base_mysql_template() -> Compose {
-    let base_yml = include_str!("./templates/base_mysql_template.yml");
+fn generate_base_mysql_template(standalone: bool) -> Compose {
+    let base_yml = if standalone {
+        include_str!("./templates/base_mysql_standalone_template.yml")
+    } else {
+        include_str!("./templates/base_mysql_template.yml")
+    };
+
     let mut template: Compose = serde_yaml::from_str::<Compose>(base_yml).unwrap();
     if let Some(ref mut services) = template.services {
         services.set_service_img("consul", consul_img());
@@ -53,13 +58,21 @@ fn generate_base_mysql_template() -> Compose {
     template
 }
 
-fn generate_base_postgres_template() -> Compose {
-    let base_yml = include_str!("./templates/base_pg_template.yml");
+fn generate_base_postgres_template(standalone: bool) -> Compose {
+    let base_yml = if standalone {
+        include_str!("./templates/base_pg_standalone_template.yml")
+    } else {
+        include_str!("./templates/base_pg_template.yml")
+    };
+
     let mut template: Compose = serde_yaml::from_str::<Compose>(base_yml).unwrap();
     if let Some(ref mut services) = template.services {
         services.set_service_img("consul", consul_img());
         services.set_service_img("postgres", postgres_img());
         services.set_service_img("readyset-server", server_img());
+        if !standalone {
+            services.set_service_img("readyset-server", server_img());
+        }
         services.set_service_img("readyset-adapter", postgres_adapter_img());
     }
     template
@@ -94,7 +107,7 @@ mod tests {
         let want_server = server_img();
         let want_adapter = mysql_adapter_img();
 
-        let mut compose = generate_base_template(&Engine::MySQL);
+        let mut compose = generate_base_template(&Engine::MySQL, false);
 
         let (got_consul, got_mysql, got_server, got_adapter) = match compose.services {
             Some(Services(ref mut map)) => (

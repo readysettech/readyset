@@ -1,0 +1,85 @@
+version: "3.8"
+volumes:
+  readyset-server-state:
+services:
+  consul:
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "8500"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+  postgres:
+    expose:
+      - 5432
+    environment:
+      POSTGRES_PASSWORD: noria
+      POSTGRES_DB: noria
+    depends_on:
+      consul:
+        condition: service_healthy
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h127.0.0.1", "--port=5432"]
+      start_period: 5s
+      interval: 10s
+      timeout: 10s
+      retries: 2
+  readyset-adapter:
+    expose:
+      - 5433
+    environment:
+      AUTHORITY_ADDRESS: consul:8500
+      AUTHORITY: "consul"
+      LISTEN_ADDRESS: 0.0.0.0:5433
+      NORIA_DEPLOYMENT: noria
+      UPSTREAM_DB_URL: postgresql://postgres:noria@postgres/noria
+      PROMETHEUS_METRICS: 1
+      QUERY_LOG: 1
+      QUERY_LOG_AD_HOC: 1
+    links:
+      - readyset-server
+      - postgres
+      - consul
+    volumes:
+      - readyset-server-state:/state
+    depends_on:
+      readyset-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h127.0.0.1", "--port=5433"]
+      start_period: 5s
+      interval: 10s
+      timeout: 10s
+      retries: 2
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "9090"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - 9090:9090
+  pushgateway:
+    image: prom/pushgateway
+  grafana:
+    image: grafana/grafana:8.0.6
+    volumes:
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/config/grafana.ini:/etc/grafana/grafana.ini
+    ports:
+      - 4000:4000
+  vector:
+    image: timberio/vector:0.16.1-debian
+    volumes:
+      - ./vector/aggregator.toml:/etc/vector/vector.toml

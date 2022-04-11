@@ -8,6 +8,10 @@ use serde_with::skip_serializing_none;
 use crate::deployment::{Deployment, DeploymentData, Engine, MigrationMode};
 use crate::template::generate_base_template;
 
+/// `READYSET_STANDALONE_MODE` should be true when using the docker-compose to spin up a
+/// deployment with an adapter/server combined.
+const READYSET_STANDALONE_MODE: bool = true;
+
 #[skip_serializing_none]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -35,9 +39,14 @@ impl TryFrom<&Deployment> for Compose {
             &compose.migration_mode,
         ) {
             (Some(db_name), Some(db_pass), Some(adapter_port), Some(migration_mode)) => {
-                let mut default = generate_base_template(&value.db_type);
-                default.fill_deployment(name);
-                default.fill_credentials(&value.db_type, db_name, db_pass);
+                let mut default = generate_base_template(&value.db_type, READYSET_STANDALONE_MODE);
+                default.fill_deployment(name, READYSET_STANDALONE_MODE);
+                default.fill_credentials(
+                    &value.db_type,
+                    db_name,
+                    db_pass,
+                    READYSET_STANDALONE_MODE,
+                );
                 default.fill_adapter_port(*adapter_port);
                 default.fill_migration_mode(migration_mode);
                 Ok(default)
@@ -50,15 +59,23 @@ impl TryFrom<&Deployment> for Compose {
 }
 
 impl Compose {
-    pub fn fill_deployment(&mut self, deployment: &str) {
+    pub fn fill_deployment(&mut self, deployment: &str, standalone: bool) {
         if let Some(ref mut services) = self.services {
-            services.set_service_env_var("readyset-server", "NORIA_DEPLOYMENT", deployment);
+            if !standalone {
+                services.set_service_env_var("readyset-server", "NORIA_DEPLOYMENT", deployment);
+            }
             services.set_service_env_var("readyset-adapter", "NORIA_DEPLOYMENT", deployment);
         }
     }
 
     /// Fills database name, root password, and replication urls for mysql upstream database.
-    pub(crate) fn fill_credentials(&mut self, db_type: &Engine, db_name: &str, pass: &str) {
+    pub(crate) fn fill_credentials(
+        &mut self,
+        db_type: &Engine,
+        db_name: &str,
+        pass: &str,
+        standalone: bool,
+    ) {
         if let Some(ref mut services) = self.services {
             let url = match db_type {
                 Engine::MySQL => {
@@ -76,7 +93,9 @@ impl Compose {
             services.set_service_env_var("readyset-adapter", "ALLOWED_USERNAME", "root");
             services.set_service_env_var("readyset-adapter", "ALLOWED_PASSWORD", pass);
 
-            services.set_service_env_var("readyset-server", "REPLICATION_URL", &url);
+            if !standalone {
+                services.set_service_env_var("readyset-server", "REPLICATION_URL", &url);
+            }
             services.set_service_env_var("readyset-adapter", "UPSTREAM_DB_URL", &url);
         }
     }
