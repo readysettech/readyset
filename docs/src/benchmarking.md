@@ -48,6 +48,43 @@ There are several ways to specify the benchmark to be execute:
    <path_to_yaml>`. See `//benchmarks/src/yaml/benchmarks` for
    example benchmark files. 
 
+### Automatic Regression Analysis
+
+Benchmark results can be stored for later comparison, potentially
+detecting performance regressions. The following three arguments
+will need to be provided to enable regression analysis.
+
+ * `--report-target <URI>`: Specifies a storage location for benchmark results. Can be either a URI
+                            pointing to a file (in the form `file:/path/to/file`) or a postgres
+                            connection URI (in the form `postgresql://user:password@host/)
+ * `--report-mode <MODE>`: Determines whether data will only be validated against a prior run
+                           (`validate-only`) or both validates and stores the new results for later
+                           comparison (`store-and-validate`).
+ * `--report-profile <PROFILE>`: Specifies the name to store the report under. The profile name is
+                                 combined with the template's name to uniquely identify the scenario.
+
+Example:
+```
+cargo run --bin benchmarks --
+    --benchmark $BENCH_YAML
+    --target-conn-str $READYSET_CONN
+    --setup-conn-str $MYSQL_CONN
+    --report-target "file:/tmp/results.json"
+    --report-mode store-and-validate
+    --report-profile test1
+```
+Where $BENCH_YAML is the path to a yaml benchmark file defining the
+benchmark (there's several preexisting ones under the benchmarks
+directory). $READYSET_CONN is the connection string for ReadySet,
+likewise $MYSQL_CONN is for the upstream database.
+
+For the final three arguments, `--report-target` is setting the storage
+file (`/tmp/results.json`), `--report-mode` specifies that the results
+will be stored, along with retrieving old values (if they exist) to
+perform a comparison against. `--report-profile` is used to disambiguiate
+multiple runs with varying configurations (be careful with this when
+modifying the CI benchmarking pipelines).
+
 ### Additional Arguments 
  * `--skip-setup`: Run a benhmark without performing setup. Setup will fail if the MySQL database
                    already includes any of the tables.
