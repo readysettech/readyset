@@ -960,6 +960,7 @@ impl Installer {
         } else {
             // enter password directly
             let password = password().with_prompt("Database Password").interact()?;
+            println!("We'll save that password to a new AWS SSM parameter.");
             let parameter_name = input()
                 .with_prompt("SSM Parameter path to create")
                 .validate_with(|input: &String| validate_ssm_parameter_name(input))
