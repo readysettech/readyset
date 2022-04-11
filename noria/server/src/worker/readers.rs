@@ -156,6 +156,18 @@ impl ServerReadReplyBatch {
             _ => false,
         }
     }
+
+    /// Return this [`ServerReadReplyBatch`] as its unserialized Vec<Vec<DataType>> if it is
+    /// [`Unserialized`], otherwise, consume the object and return None.
+    ///
+    /// This should only be used in cases when we expect the result to be [`Unserialized`].
+    pub fn into_unserialized(self) -> Option<Vec<Vec<DataType>>> {
+        if let ServerReadReplyBatch::Unserialized(d) = self {
+            Some(d)
+        } else {
+            None
+        }
+    }
 }
 
 /// Ensures all variants are fungible - a [`ServerReadReplyBatch::Unserialized`] serializes
@@ -181,7 +193,7 @@ impl serde::Serialize for ServerReadReplyBatch {
     }
 }
 
-type Ack =
+pub type Ack =
     tokio::sync::oneshot::Sender<Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>>;
 
 /// Creates a handler that can be used to perform read queries against a set of
@@ -197,7 +209,7 @@ pub struct ReadRequestHandler {
 
 impl ReadRequestHandler {
     /// Creates a new request handler that can be used to query Readers.
-    fn new(
+    pub fn new(
         readers: Readers,
         wait: tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
         upquery_timeout: Duration,
@@ -211,11 +223,13 @@ impl ReadRequestHandler {
         }
     }
 
-    fn handle_normal_read_query(
+    /// Always returns `ServerReadReplyBatch::Unserialized` if `raw_result` is passed.
+    pub fn handle_normal_read_query(
         &mut self,
         tag: u32,
         target: (NodeIndex, SqlIdentifier, usize),
         query: ViewQuery,
+        raw_result: bool,
     ) -> impl Future<Output = Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>> + Send
     {
         let ViewQuery {
@@ -281,7 +295,7 @@ impl ReadRequestHandler {
                 }
 
                 use dataflow::LookupError::*;
-                match do_lookup(reader, &key, &filter, true) {
+                match do_lookup(reader, &key, &filter, !raw_result) {
                     Ok(rs) => {
                         if consistency_miss {
                             ret.push(ServerReadReplyBatch::Empty);
@@ -431,6 +445,7 @@ impl ReadRequestHandler {
                             filter,
                             timestamp,
                             upquery_timeout: self.upquery_timeout,
+                            raw_result,
                         },
                         tx,
                     ));
@@ -531,7 +546,7 @@ impl Service<Instrumented<Tagged<ReadQuery>>> for ReadRequestHandler {
         let tag = m.tag;
         match m.v {
             ReadQuery::Normal { target, query } => {
-                let future = self.handle_normal_read_query(tag, target, query);
+                let future = self.handle_normal_read_query(tag, target, query, false);
                 let span = readyset_tracing::child_span!(INFO, "normal_read_query");
                 ReadResponseFuture::Normal(instrument_if_enabled(future, span))
             }
@@ -688,7 +703,7 @@ fn has_sufficient_timestamp(reader: &SingleReadHandle, timestamp: &Option<Timest
 /// Issues a blocking read against a reader. This can be repeatedly polled via `check` for
 /// completion.
 #[pin_project]
-struct BlockingRead {
+pub struct BlockingRead {
     tag: u32,
     target: (NodeIndex, SqlIdentifier, usize),
     // results for keys we have already read
@@ -704,6 +719,7 @@ struct BlockingRead {
     warned: bool,
     timestamp: Option<Timestamp>,
     upquery_timeout: Duration,
+    raw_result: bool,
 }
 
 impl std::fmt::Debug for BlockingRead {
@@ -724,7 +740,9 @@ impl std::fmt::Debug for BlockingRead {
 
 impl BlockingRead {
     /// Check if we have the results for this blocking read.
-    fn check(&mut self) -> Poll<Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>> {
+    pub fn check(
+        &mut self,
+    ) -> Poll<Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>> {
         READERS.with(|readers_cache| {
             let mut readers_cache = readers_cache.borrow_mut();
             let s = &self.truth;
@@ -761,7 +779,7 @@ impl BlockingRead {
                         &self.filter,
                         // Serialize the results, avoiding a clone, unless we already have read
                         // some records for this batch
-                        !read[read_i].is_empty(),
+                        !read[read_i].is_empty() && !self.raw_result,
                     ) {
                         Ok(rs) => {
                             read[read_i].try_extend(rs)?;

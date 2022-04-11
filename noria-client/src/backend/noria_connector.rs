@@ -23,7 +23,7 @@ use noria::{
 use noria_data::DataType;
 use noria_errors::ReadySetError::PreparedStatementMissing;
 use noria_errors::{internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err};
-use noria_server::worker::local_readers::ReadRequestHandler;
+use noria_server::worker::readers::ReadRequestHandler;
 use readyset_tracing::instrument_child;
 use tracing::{error, info, instrument, trace};
 use vec1::vec1;
@@ -1708,12 +1708,19 @@ async fn do_read<'a>(
         // View API.
         let tag = request.tag;
         if let ReadQuery::Normal { target, query } = request.v {
-            let result = rh.handle_normal_read_query(tag, target, query).await;
+            // Issue a normal read query returning the raw unserialized results.
+            let result = rh.handle_normal_read_query(tag, target, query, true).await;
             result?
                 .v
                 .into_normal()
                 .ok_or_else(|| internal_err("Unexpected response type from reader service"))?
-                .map(|z| z.map_results(|rows, _| Results::new(rows.into(), getter.column_slice())))?
+                .map(|z| {
+                    z.map_results(|rows, _| {
+                        // `rows` is Unserialized as we pass `raw_result` = true.
+                        #[allow(clippy::unwrap_used)]
+                        Results::new(rows.into_unserialized().unwrap(), getter.column_slice())
+                    })
+                })?
                 .into_results()
                 .ok_or(ReadySetError::ReaderMissingKey)?
         } else {
