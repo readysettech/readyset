@@ -35,7 +35,6 @@ use crate::coordination::{DomainDescriptor, RunDomainResponse};
 use crate::worker::replica::WrappedDomainRequest;
 use crate::ReadySetResult;
 
-pub mod local_readers;
 /// Request handlers and utilities for reading from the ReadHandle of a
 /// left-right map associated with a reader node.
 pub mod readers;
