@@ -40,5 +40,11 @@ textwrap = "0.14"
 [target.x86_64-unknown-linux-musl.dependencies]
 openssl = { version = "*", features = ["vendored"] }
 
+[target.x86_64-apple-darwin.dependencies]
+openssl = { version = "*", features = ["vendored"] }
+
+[target.aarch64-apple-darwin.dependencies]
+openssl = { version = "*", features = ["vendored"] }
+
 [dev-dependencies]
 tempfile = "3.2"
