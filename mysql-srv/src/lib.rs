@@ -393,7 +393,7 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
         let password = handshake.password.to_vec();
         let client_auth_plugin = handshake.auth_plugin_name.map(|s| s.to_owned());
 
-        let handshake_password = if client_auth_plugin.iter().any(|apn| apn != AUTH_PLUGIN_NAME) {
+        let handshake_password = if client_auth_plugin.iter().all(|apn| apn != AUTH_PLUGIN_NAME) {
             // Authentication mismatch - try to switch auth plugins
 
             if !handshake
@@ -450,6 +450,7 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                 });
 
         if auth_success {
+            debug!(%username, "Successfully authenticated client");
             writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty()).await?;
         } else {
             debug!(%username, ?client_auth_plugin, "Received incorrect password");
@@ -558,6 +559,7 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                     writers::write_column_definitions(cols, &mut self.writer, true).await?;
                 }
                 Command::Init(schema) => {
+                    debug!(schema = %String::from_utf8_lossy(schema), "Handling COM_INIT_DB");
                     let w = InitWriter {
                         writer: &mut self.writer,
                     };
