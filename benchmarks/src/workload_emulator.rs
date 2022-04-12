@@ -256,9 +256,17 @@ impl WorkloadEmulator {
         ) in from.into_iter().enumerate()
         {
             if migrate {
-                let _ = conn
-                    .query_drop(format!("CREATE CACHE {i} FROM {spec}"))
-                    .await;
+                let stmt = match &spec {
+                    SqlQuery::Select(stmt) => stmt.clone(),
+                    _ => panic!("Can only migrate SELECT statments"),
+                };
+
+                let create_cache_query = nom_sql::CreateCacheStatement {
+                    name: None,
+                    inner: nom_sql::CacheInner::Statement(Box::new(stmt)),
+                };
+
+                let _ = conn.query_drop(create_cache_query.to_string()).await;
             }
 
             let cols = params

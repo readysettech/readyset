@@ -184,9 +184,17 @@ impl ArbitraryQueryParameters {
         // Remove any query q if it is exists before migration.
         let _ = self.unmigrate(conn).await;
 
-        let query = self.query.query();
-        let stmt = "CREATE CACHE q FROM ".to_string() + query;
-        conn.query_drop(stmt).await?;
+        let stmt = match nom_sql::parse_query(nom_sql::Dialect::MySQL, self.query.query()) {
+            Ok(nom_sql::SqlQuery::Select(stmt)) => stmt,
+            _ => panic!("Can only migrate SELECT statements"),
+        };
+
+        let create_cache_query = nom_sql::CreateCacheStatement {
+            name: Some("q".into()),
+            inner: nom_sql::CacheInner::Statement(Box::new(stmt)),
+        };
+
+        conn.query_drop(create_cache_query.to_string()).await?;
         Ok(())
     }
 
