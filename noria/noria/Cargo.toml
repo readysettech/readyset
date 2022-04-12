@@ -92,7 +92,6 @@ dataflow_expression = { path = "../server/dataflow/expression" }
 readyset-tracing = { path = "../../readyset-tracing" }
 
 [dev-dependencies]
-assert_approx_eq = "1.1.0"
 serial_test = "0.5.1"
 
 [lib]

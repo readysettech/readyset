@@ -855,7 +855,6 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
- "mysql",
  "mysql_async",
  "nom 7.1.0",
  "nom-sql",
@@ -863,7 +862,6 @@ dependencies = [
  "noria-client",
  "noria-client-test-helpers",
  "noria-data",
- "noria-logictest",
  "noria-mysql",
  "noria-server",
  "num-integer",
@@ -1302,7 +1300,6 @@ dependencies = [
  "noria-client",
  "noria-client-metrics",
  "noria-data",
- "noria-mysql",
  "port_scanner",
  "rand 0.8.5",
  "serde",
@@ -1317,9 +1314,7 @@ name = "clustertest-macros"
 version = "0.1.0"
 dependencies = [
  "quote",
- "serial_test",
  "syn",
- "tokio",
 ]
 
 [[package]]
@@ -1709,7 +1704,6 @@ dependencies = [
  "nom-sql",
  "noria-data",
  "noria-errors",
- "pretty_assertions",
  "proptest",
  "regex",
  "rust_decimal",
@@ -2088,7 +2082,6 @@ dependencies = [
 name = "failpoint-macros"
 version = "0.1.0"
 dependencies = [
- "fail",
  "failpoint-proc-macros",
 ]
 
@@ -2096,7 +2089,6 @@ dependencies = [
 name = "failpoint-proc-macros"
 version = "0.1.0"
 dependencies = [
- "fail",
  "quote",
  "syn",
 ]
@@ -3450,7 +3442,6 @@ dependencies = [
  "proptest",
  "regex",
  "serde",
- "serde_test",
  "test-strategy",
  "thiserror",
 ]
@@ -3680,7 +3671,6 @@ version = "0.7.0"
 dependencies = [
  "ahash",
  "anyhow",
- "assert_approx_eq",
  "async-bincode",
  "async-trait",
  "backoff",
@@ -3904,7 +3894,6 @@ name = "noria-data"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "assert_approx_eq",
  "bincode",
  "bit-vec",
  "bytes 1.1.0",
@@ -3964,7 +3953,6 @@ dependencies = [
  "notify",
  "partial_map",
  "petgraph",
- "pretty_assertions",
  "proptest",
  "rand 0.7.3",
  "reader_map",
@@ -4030,7 +4018,6 @@ dependencies = [
  "maplit",
  "maths",
  "md5",
- "mysql",
  "mysql-srv",
  "mysql-time",
  "mysql_async",
@@ -4150,7 +4137,6 @@ dependencies = [
  "tracing",
  "tracing-futures",
  "uuid",
- "zookeeper",
 ]
 
 [[package]]
@@ -4242,7 +4228,6 @@ dependencies = [
  "itertools",
  "maplit",
  "nom-sql",
- "noria-data",
  "noria-errors",
  "tracing",
 ]
@@ -5257,7 +5242,6 @@ dependencies = [
  "clap 3.0.4",
  "console",
  "derive_builder 0.11.1",
- "derive_more",
  "dialoguer",
  "directories",
  "futures",
@@ -5274,7 +5258,6 @@ dependencies = [
  "rusoto_credential",
  "serde",
  "serde_json",
- "serde_regex",
  "serde_with",
  "serde_yaml",
  "tempfile",
@@ -5305,7 +5288,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap 3.0.4",
- "futures",
  "once_cell",
  "opentelemetry",
  "opentelemetry-jaeger",
@@ -5315,11 +5297,8 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio",
- "tower-layer",
- "tower-service",
  "tracing",
  "tracing-attributes",
- "tracing-futures",
  "tracing-opentelemetry",
  "tracing-subscriber",
 ]
@@ -5777,25 +5756,6 @@ checksum = "d0ffa0837f2dfa6fb90868c2b5468cad482e175f7dad97e7421951e663f2b527"
 dependencies = [
  "itoa 0.4.8",
  "ryu",
- "serde",
-]
-
-[[package]]
-name = "serde_regex"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8136f1a4ea815d7eac4101cfd0b16dc0cb5e1fe1b8609dfd728058656b7badf"
-dependencies = [
- "regex",
- "serde",
-]
-
-[[package]]
-name = "serde_test"
-version = "1.0.130"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d82178225dbdeae2d5d190e8649287db6a3a32c6d24da22ae3146325aa353e4c"
-dependencies = [
  "serde",
 ]
 

@@ -42,7 +42,6 @@ proptest = "1.0.0"
 serial_test = "0.5.1"
 test-strategy = "0.2.0"
 tokio = { version = "1.15", features = ["full"] }
-zookeeper = "0.6"
 launchpad = { path = "../launchpad" }
 noria-client-test-helpers = { path = "../noria-client/test-helpers", features = ["postgres"] }
 criterion = { version = "0.3.5", features = ["async_tokio"] }

@@ -34,7 +34,6 @@ noria-errors = { path = "../errors" }
 mysql-time = { path = "../../mysql-time" }
 
 [dev-dependencies]
-assert_approx_eq = "1.1.0"
 derive_more = "0.99.11"
 bincode = "1.3.3"
 criterion = { version = "0.3", features=['real_blackbox', 'async_tokio']}

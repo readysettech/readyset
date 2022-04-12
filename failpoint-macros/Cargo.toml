@@ -6,5 +6,4 @@ authors = ["justin@readyset.io"]
 edition = "2021"
 
 [dependencies]
-fail = "0.5.0"
 failpoint-proc-macros = { path = "./proc-macros" }
