@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use cfn::model::Parameter as CfnParameter;
 use console::style;
-use ec2::model::{Filter, VpcAttributeName};
+use ec2::model::{Filter, InstanceType, VpcAttributeName};
 use futures::stream::{self, FuturesUnordered};
 use futures::TryStreamExt;
 use lazy_static::lazy_static;
@@ -13,6 +13,10 @@ use crate::console::{spinner, GREEN_CHECK};
 
 pub(crate) mod cloudformation;
 pub(crate) mod subnets;
+
+/// Service quota code for "Maximum number of vCPUs assigned to the Running On-Demand Standard (A,
+/// C, D, H, I, M, R, T, Z) instances."
+pub(crate) const STANDARD_VCPU_SERVICE_QUOTA_CODE: &str = "L-1216C47A";
 
 pub(crate) fn filter<K, V>(key: K, value: V) -> Filter
 where
@@ -218,6 +222,29 @@ pub(crate) fn validate_ssm_parameter_name(input: &str) -> Result<(), &'static st
     }
 
     Ok(())
+}
+
+pub(crate) async fn vcpus_for_instance_type(
+    ec2_client: &ec2::Client,
+    instance_type: InstanceType,
+) -> Result<i32> {
+    ec2_client
+        .describe_instance_types()
+        .instance_types(instance_type.clone())
+        .send()
+        .await?
+        .instance_types
+        .unwrap_or_default()
+        .first()
+        .ok_or_else(|| anyhow!("Instance type `{}` not found", instance_type.as_str()))?
+        .v_cpu_info()
+        .and_then(|vcpus| vcpus.default_v_cpus())
+        .ok_or_else(|| {
+            anyhow!(
+                "VCPU info not found for instance type `{}`",
+                instance_type.as_str()
+            )
+        })
 }
 
 #[cfg(test)]

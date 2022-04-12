@@ -7,7 +7,7 @@ use std::{env, iter};
 use ::console::{style, Emoji};
 use anyhow::{anyhow, bail, Result};
 use aws::cloudformation::Template;
-use aws::vpc_attribute;
+use aws::{vcpus_for_instance_type, vpc_attribute, STANDARD_VCPU_SERVICE_QUOTA_CODE};
 use aws_types::credentials::future::ProvideCredentials as ProvideCredentialsFut;
 use aws_types::credentials::{CredentialsError, ProvideCredentials};
 use aws_types::region::Region;
@@ -18,7 +18,7 @@ use deployment::{
     TemplateType,
 };
 use directories::ProjectDirs;
-use ec2::model::{AttributeBooleanValue, KeyType, Subnet, VpcAttributeName};
+use ec2::model::{AttributeBooleanValue, InstanceType, KeyType, Subnet, VpcAttributeName};
 use futures::stream::{FuturesUnordered, TryStreamExt};
 use indicatif::MultiProgress;
 use ipnet::Ipv4Net;
@@ -738,6 +738,8 @@ impl Installer {
             }
         }
 
+        self.confirm_quotas(&stack_config).await?;
+
         let cfn_client = self.cfn_client().await?;
         let stack = deploy_stack(
             cfn_client,
@@ -759,6 +761,52 @@ impl Installer {
             .filter_map(|output| Some((output.output_key?, output.output_value?)))
             .collect();
         self.cfn_deployment()?.readyset_stack_outputs = Some(outputs);
+
+        Ok(())
+    }
+
+    async fn confirm_quotas(&mut self, stack_config: &StackConfig) -> Result<()> {
+        let parameter_value = |param| {
+            stack_config
+                .parameter_value(param)
+                .ok_or_else(|| anyhow!("Parameter `{}` missing", param))
+        };
+        let adapter_instance_type =
+            parameter_value("ReadySetAdapterInstanceType")?.parse::<InstanceType>()?;
+        let server_instance_type =
+            parameter_value("ReadySetServerInstanceType")?.parse::<InstanceType>()?;
+        let monitor_instance_type =
+            parameter_value("ReadySetMonitorInstanceType")?.parse::<InstanceType>()?;
+        let adapter_nodes = parameter_value("ReadySetAdapterNodes")?.parse::<i32>()?;
+        let server_nodes = parameter_value("ReadySetServerNodes")?.parse::<i32>()?;
+
+        let ec2_client = self.ec2_client().await?;
+
+        let total_needed_vcpus =
+            (vcpus_for_instance_type(ec2_client, adapter_instance_type).await? * adapter_nodes)
+                + (vcpus_for_instance_type(ec2_client, server_instance_type).await? * server_nodes)
+                + vcpus_for_instance_type(ec2_client, monitor_instance_type).await?;
+
+        let service_quotas_console_url = format!(
+            "https://{}.console.aws.amazon.com/servicequotas/home/services/ec2/quotas/{}",
+            self.aws_config()
+                .await?
+                .region()
+                .ok_or_else(|| anyhow!("No region configured"))?,
+            STANDARD_VCPU_SERVICE_QUOTA_CODE
+        );
+
+        println!(
+            "The configuration you have selected for your ReadySet cluster requires at least {} \
+             standard vCPUs. Ensure you have sufficient service quotas by logging into the AWS \
+             console at {} before continuing.",
+            total_needed_vcpus,
+            style(service_quotas_console_url).bold()
+        );
+
+        if !confirm().with_prompt("Continue?").interact()? {
+            bail!("Exiting as requested");
+        }
 
         Ok(())
     }
