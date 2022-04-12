@@ -25,5 +25,4 @@ noria-errors = { path = "../../../errors" }
 
 [dev-dependencies]
 test-strategy = "0.2.0"
-pretty_assertions = "0.7.2"
 proptest = "1.0.0"

@@ -70,9 +70,6 @@ partial_map = { path = "partial_map" }
 failpoint-macros = { path = "../../../failpoint-macros" }
 dataflow_state = { path = "state" }
 
-[dev-dependencies]
-pretty_assertions = "0.7.2"
-
 [features]
 bench = ["criterion"]
 failure_injection = ["fail/failpoints"]

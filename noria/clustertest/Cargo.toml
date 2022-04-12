@@ -23,16 +23,15 @@ bincode = "1.3.3"
 nom-sql = { path = "../../nom-sql" }
 noria = { path = "../noria" }
 noria-data = { path = "../data" }
-noria-client = { path = "../../noria-client" }
-noria-client-metrics = { path = "../../noria-client/metrics" }
-noria-mysql = { path = "../../noria-mysql" }
-test_utils = { path = "../../test_utils" }
-clustertest-macros = { path = "./macros" }
 launchpad = { path = "../../launchpad" }
 
 [dev-dependencies]
 serial_test = "0.5.1"
 criterion = { version = "0.3", features=['real_blackbox', 'async_tokio']}
+noria-client = { path = "../../noria-client" }
+noria-client-metrics = { path = "../../noria-client/metrics" }
+test_utils = { path = "../../test_utils" }
+clustertest-macros = { path = "./macros" }
 
 [[bench]]
 name = "clustering"

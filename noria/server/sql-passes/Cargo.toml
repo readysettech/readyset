@@ -12,5 +12,4 @@ tracing = { version = "0.1" }
 
 # Local dependencies
 nom-sql = { path = "../../../nom-sql" }
-noria-data = { path = "../../data" }
 noria-errors = { path = "../../errors" }
