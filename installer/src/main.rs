@@ -1,3 +1,5 @@
+#![feature(box_patterns)]
+
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
@@ -55,7 +57,7 @@ use crate::aws::{
 use crate::console::{confirm, input, password, prompt_to_continue, select, spinner, GREEN_CHECK};
 pub use crate::deployment::CloudformationDeployment;
 use crate::deployment::{
-    CreateNew, DatabasePasswordParameter, Engine, Existing, MaybeExisting, RdsDb,
+    CreateNew, DatabasePasswordParameter, DeploymentStatus, Engine, Existing, MaybeExisting, RdsDb,
 };
 
 /// List of regions where we deploy AMIs.
@@ -156,6 +158,12 @@ impl Installer {
 
     /// Run the install process, picking up where the user left off if necessary.
     pub async fn run(&mut self) -> Result<()> {
+        if self.deployment.is_complete() {
+            println!("This deployment is already complete!");
+            self.deployment.print_connection_information()?;
+            return Ok(());
+        }
+
         match self.deployment.inner {
             DeploymentData::Cloudformation(_) => self.run_cfn().await,
             DeploymentData::Compose(_) => self.run_compose().await,
@@ -346,28 +354,11 @@ impl Installer {
                 bail!("Command exited with {}", status);
             }
 
-            let db_type = self.deployment.db_type;
-            let compose = &self.compose_deployment()?;
-            if let (Some(db_pass), Some(port), Some(db_name)) = (
-                &compose.mysql_db_root_pass,
-                compose.adapter_port,
-                &compose.mysql_db_name,
-            ) {
-                println!("ReadySet should be available within a few seconds.");
-                let conn_string = db_type.root_conn_string(db_pass, "127.0.0.1", port, db_name);
-                let conn_cmd = match db_type {
-                    Engine::MySQL => {
-                        format!("To connect to ReadySet using the mysql client, run the following command:\n\n    $ mysql -h127.0.0.1 -uroot -p{} -P{} --database={}\n\nTo connect to ReadySet using an application, use the following connection string:\n\n    {}", db_pass, port, db_name, conn_string)
-                    }
-                    Engine::PostgreSQL => {
-                        format!("To connect to ReadySet using the postgres client, run the following command:\n\n    $ psql {}", conn_string)
-                    }
-                };
+            self.deployment.status = DeploymentStatus::Complete;
+            self.save().await?;
 
-                println!("{}", style(conn_cmd).bold());
-            } else {
-                bail!("Missing one of mysql database name, mysql root password, or ReadySet deployment port");
-            }
+            println!("ReadySet should be available in a few seconds.");
+            self.deployment.print_connection_information()?;
         }
 
         Ok(())
@@ -526,22 +517,15 @@ impl Installer {
 
         self.connect_db().await?;
 
-        let outputs = if let Some(outputs) = &self.cfn_deployment()?.readyset_stack_outputs {
-            outputs
-        } else {
+        if self.cfn_deployment()?.readyset_stack_outputs.is_none() {
             self.deploy_readyset_cluster().await?;
-            self.save().await?;
-            self.cfn_deployment()?
-                .readyset_stack_outputs
-                .as_ref()
-                .unwrap()
-        };
+        }
+
+        self.deployment.status = DeploymentStatus::Complete;
+        self.save().await?;
 
         success!("ReadySet cluster deployed successfully!");
-        println!(
-            "URL to connect to ReadySet: {}",
-            style(&outputs["ReadySetAdapterNLBDNSName"]).bold()
-        );
+        self.deployment.print_connection_information()?;
 
         Ok(())
     }

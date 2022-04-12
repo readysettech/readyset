@@ -170,13 +170,28 @@ pub(crate) struct DatabaseCredentials {
     pub(crate) password: DatabasePasswordParameter,
 }
 
+/// The status of a deployment
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub enum DeploymentStatus {
+    /// The deployment is in-progress
+    InProgress,
+    /// The deployment has been completed, meaning the ReadySet cluster is running.
+    Complete,
+}
+
+impl Default for DeploymentStatus {
+    fn default() -> Self {
+        Self::InProgress
+    }
+}
+
 /// A (potentially partially-completed) deployment of a readyset cluster.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct Deployment {
     pub(crate) name: String,
     pub(crate) db_type: Engine,
-
     pub(crate) inner: DeploymentData,
+    pub(crate) status: DeploymentStatus,
 }
 
 /// Represents the different ways in which we may choose to deploy ReadySet.
@@ -271,6 +286,7 @@ impl CloudformationDeployment {
             inner: DeploymentData::Cloudformation(Box::new(CloudformationDeployment {
                 ..Default::default()
             })),
+            status: DeploymentStatus::InProgress,
         }
     }
 
@@ -303,6 +319,7 @@ impl DockerComposeDeployment {
             inner: DeploymentData::Compose(DockerComposeDeployment {
                 ..Default::default()
             }),
+            status: DeploymentStatus::InProgress,
         }
     }
 
@@ -366,6 +383,13 @@ impl Deployment {
         &self.name
     }
 
+    /// Returns `true` if this deployment is [complete]
+    ///
+    /// [complete]: DeploymentStatus::Complete
+    pub fn is_complete(&self) -> bool {
+        self.status == DeploymentStatus::Complete
+    }
+
     /// Save this deployment to the path in the given state directory
     pub async fn save_to_directory<P>(&self, dir: P) -> Result<()>
     where
@@ -405,6 +429,49 @@ impl Deployment {
             }
         }
         Ok(res)
+    }
+
+    pub(crate) fn print_connection_information(&self) -> Result<()> {
+        match &self.inner {
+            DeploymentData::Cloudformation(box CloudformationDeployment {
+                readyset_stack_outputs: Some(outputs),
+                ..
+            }) => {
+                println!(
+                    "Use the following URL to connect to your ReadySet cluster:\n\n    {}",
+                    style(&outputs["ReadySetAdapterNLBDNSName"]).bold()
+                );
+            }
+            DeploymentData::Compose(DockerComposeDeployment {
+                mysql_db_name: Some(db_name),
+                mysql_db_root_pass: Some(db_pass),
+                adapter_port: Some(db_port),
+                ..
+            }) => {
+                let conn_string =
+                    self.db_type
+                        .root_conn_string(db_pass, "127.0.0.1", *db_port, db_name);
+                let conn_cmd = match self.db_type {
+                    Engine::MySQL => {
+                        format!(
+                            "To connect to ReadySet using the mysql client, run the following command:\n\n    $ mysql -h127.0.0.1 -uroot -p{} -P{} --database={}\n\nTo connect to ReadySet using an application, use the following connection string:\n\n    {}",
+                            db_pass, db_port, db_name, conn_string
+                        )
+                    }
+                    Engine::PostgreSQL => {
+                        format!(
+                            "To connect to ReadySet using the postgres client, run the following command:\n\n    $ psql {}",
+                            conn_string
+                        )
+                    }
+                };
+
+                println!("{}", style(conn_cmd).bold());
+            }
+            _ => bail!("Deployment missing required fields"),
+        }
+
+        Ok(())
     }
 }
 
