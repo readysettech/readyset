@@ -10,12 +10,12 @@
 - [Dev Tools & Troubleshooting](./dev.md)
 - [Running and configuring ReadySet](./running-readyset.md)
 - [Testing your code](./dev-testing.md)
-- [Benchmarking your code](./benchmarking.md)
 - [Debugging your code](./debugging.md)
 - [Developer Environment](./dev-env.md)
 
 # Benchmarking
-
+- [Macro Benchmarking](./macro_benchmarking.md)
+- [Micro Benchmarking](./micro_benchmarking.md)
 - [Benchmarking Code in CI](./benchmarking/ci_execution_mysql.md)
   - [Building a Test DB for CI Benchmarking](./benchmarking/data_generation.md)
 

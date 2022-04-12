@@ -1,6 +1,9 @@
-# Benchmarking your code
+# Macro Benchmarks
 
-## Macrobenchmarks
+If micro benchmarks are the unit tests of the benchmarking world, macro
+benchmarks are the integration tests. Our macro benchmarks spin up
+anywhere from single processes to the entire readyset stack, with the
+goal of giving us overall/high-level views of ReadySet's performance.
 
 `//benchmarks` let you run macro-benchmarks for ReadySet performance. These include:
   * Executing any arbitrary query at a specific queries-per-second with a specific access pattern.
@@ -8,10 +11,10 @@
   * Performing many migrations against the leader.
   * Churning connections.
 
-Benchmarks are all executed as subcommands on the `benchmarks` binary.
+Macro benchmarks are all executed as subcommands on the `benchmarks` binary.
 The complete set of benchmarks can be seen with `cargo run --bin benchmarks -- --help`.
 
-### Specifying a ReadySet deployment
+## Specifying a ReadySet deployment
 
 Benchmarks are run against any deployment that is compatible with MySQL,
 for ReadySet that is done by running a MySQL adapter. A deployment is
@@ -40,7 +43,7 @@ These can be specified in several ways:
 > See [Running ReadySet](./running-readyset.md) for more information on
 > how to run a local ReadySet deployment.
 
-### Specifying a benchmark to execute
+## Specifying a benchmark to execute
 There are several ways to specify the benchmark to be execute:
  * Through using a subcommand and its arguments. `cargo run --bin
    benchmarks -- <deployment parameters> <benchmark> <benchmark args>`
@@ -48,7 +51,7 @@ There are several ways to specify the benchmark to be execute:
    <path_to_yaml>`. See `//benchmarks/src/yaml/benchmarks` for
    example benchmark files. 
 
-### Automatic Regression Analysis
+## Automatic Regression Analysis
 
 Benchmark results can be stored for later comparison, potentially
 detecting performance regressions. The following three arguments
@@ -85,21 +88,21 @@ perform a comparison against. `--report-profile` is used to disambiguiate
 multiple runs with varying configurations (be careful with this when
 modifying the CI benchmarking pipelines).
 
-### Additional Arguments 
+## Additional Arguments 
  * `--skip-setup`: Run a benhmark without performing setup. Setup will fail if the MySQL database
                    already includes any of the tables.
  * `--iterations <N>`: Run a benchmark N times and calculate aggregates over the benchmark results.
                        Not supported by all benchmarks.
 
 <!-- TODO(justin): Add more useful examples -->
-### Example commands
+## Example commands
 ```
 # From the root of the ReadySet repo.
 cargo run --bin benchmarks -- --iterations 10 --benchmark benchmarks/src/yaml/benchmarks/read_benchmark_irl_small.yaml \
     --deployment benchmarks/src/yaml/deployments/local.yaml
 ```
 
-### Writing new benchmarks specifications
+## Writing new benchmarks specifications
 Each benchmark may specify a unique set of parameters. Run `cargo run --bin benchmarks -- <benchmark> --help`
 for the set of benchmark parameters.
 
@@ -116,7 +119,7 @@ of executing it.
 
 [`DistributionAnnotation`]: http://docs/rustdoc/query_generator/struct.DistributionAnnotation.html
 
-### Data Generation
+## Data Generation
 
 To perform data generation separate from a benchmark use the `data_generator` binary.
 
@@ -125,7 +128,7 @@ Sample usage:
 cargo run --bin data_generator -- --schema benchmarks/src/data/irl/irl_db_small.sql
 ```
 
-## Flamegraph
+# Flamegraph
 
 Flamegraphs visualize stack traces of profiles software. They visualize
 the output of a sampling profiler - CPU, memory, disk utilization. They
@@ -133,7 +136,7 @@ can be used to identify areas for performance improvement in our code,
 for example, providing an answer to the question: "where is most of my
 CPU time spent"?
 
-### Interpreting a flamegraph
+## Interpreting a flamegraph
 Flamegraphs show all of the call stacks measured, widened to the
 proportion of the stack samples that contained them. 
     
@@ -149,7 +152,7 @@ This is a subset of a flamegraph on `noria-server`, showing how a single
 read query is handled. We can see that the majority of the time is
 performed in serialization.
 
-### Collecting a CPU flamegraph with `cargo-flamegraph`.
+## Collecting a CPU flamegraph with `cargo-flamegraph`.
 
 [`cargo flamegraph`](https://github.com/flamegraph-rs/flamegraph) can be
 used  to easily profile our system. It generates a flamegraph as an
@@ -189,17 +192,3 @@ more information on usage.
 > make
 > export PERF=$(pwd)/perf
 > ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-<!-- TODO: Microbenchmark information. -->
