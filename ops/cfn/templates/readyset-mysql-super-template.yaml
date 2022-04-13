@@ -21,6 +21,7 @@ Metadata:
           - PrivateSubnet1CIDR
           - PrivateSubnet2CIDR
           - PrivateSubnet3CIDR
+          - AdditionalMonitoringCIDR1
       - Label:
           default: SSH Access Configuration
         Parameters:
@@ -134,7 +135,14 @@ Parameters:
   AdditionalAdapterCIDR:
     Description: Additional CIDR to allow access to the Adapters from.
     Type: String
-    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    Default: ""
+    AllowedPattern: ^|(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+
+  AdditionalMonitoringCIDR1:
+    Description: CIDR block for use with monitoring ingress
+    Type: String
+    Default: ""
+    AllowedPattern: ^|(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
 
   VPCCreateNATGateways:
     Description: Set to false when creating only private subnets or when running in airgapped mode.
@@ -310,8 +318,9 @@ Resources:
         VPCPrivateSubnetIds: !Join [',', [!GetAtt VPCStack.Outputs.PrivateSubnet1AID, !GetAtt VPCStack.Outputs.PrivateSubnet2AID, !GetAtt VPCStack.Outputs.PrivateSubnet3AID]]
         VPCID: !GetAtt VPCStack.Outputs.VPCID
         VPCCIDR: !Ref VPCCIDR
-        AdditionalAdapterCIDR: !Ref AdditionalAdapterCIDR
         BastionSecurityGroupID: !GetAtt BastionStack.Outputs.BastionSecurityGroupID
+        AdditionalAdapterCIDR: !Ref AdditionalAdapterCIDR
+        AdditionalMonitoringCIDR1: !Ref AdditionalMonitoringCIDR1
 
   # Consul Cluster
 

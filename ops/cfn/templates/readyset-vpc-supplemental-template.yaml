@@ -12,10 +12,17 @@ Parameters:
     Type: String
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
 
+  AdditionalMonitoringCIDR1:
+    Description: CIDR block for use with monitoring ingress
+    Type: String
+    Default: ""
+    AllowedPattern: ^|(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+
   AdditionalAdapterCIDR:
     Description: Additional CIDR to allow access to the Adapters from.
     Type: String
-    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    Default: ""
+    AllowedPattern: ^|(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
 
   VPCPrivateSubnetIds:
     Description: Comma-delimited list of private subnet IDs within the target VPC (e.g. subnet-1234,subnet-4567,subnet-8910).
@@ -37,6 +44,8 @@ Parameters:
 
 Conditions:
   CreateAdditionalAdapterCIDRRule: !Not [!Equals [!Ref AdditionalAdapterCIDR, ""]]
+
+  CreateAdditionalMonitoringCIDR1: !Not [!Equals [!Ref AdditionalMonitoringCIDR1, ""]]
 
   CreateVPCEndpoints: !Equals [!Ref VPCEndpointsEnabled, "true"]
 
@@ -145,6 +154,17 @@ Resources:
       Description: Allow inbound PostgreSQL queries for additional CIDR
     Condition: CreateAdditionalAdapterCIDRRule
 
+  ReadySetMonitorGrafanaCIDRIngressRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ReadySetAdapterSecurityGroup
+      IpProtocol: tcp
+      FromPort: 4000
+      ToPort: 4000
+      CidrIp: !Ref AdditionalMonitoringCIDR1
+      Description: Allow ingress to grafana from a VPN CIDR
+    Condition: CreateAdditionalMonitoringCIDR1
+
   ReadySetServerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -250,8 +270,8 @@ Resources:
           CidrIp: !Ref VPCCIDR
           Description: Allow connections to a prometheus scrape endpoint and server within the VPC.
         - IpProtocol: tcp
-          FromPort: 3000
-          ToPort: 3000
+          FromPort: 4000
+          ToPort: 4000
           CidrIp: !Ref VPCCIDR
           Description: Allow connections to the grafana server within the VPC.
         - IpProtocol: tcp
