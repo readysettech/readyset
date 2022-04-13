@@ -170,10 +170,40 @@ impl Installer {
             .options
             .state_directory()?
             .join(destination_path.as_ref());
+
         tokio::fs::create_dir_all(&absolute_path.parent().unwrap()).await?;
 
         let mut file = File::create(&absolute_path).await?;
         file.write_all(base_yml.as_bytes()).await?;
+
+        Ok(())
+    }
+
+    pub async fn check_docker_version_and_running(&mut self) -> Result<()> {
+        let version_output = Command::new("docker").args(["--version"]).output().await?;
+
+        if !version_output.status.success() {
+            bail!("Please install Docker before continuing.");
+        }
+
+        let running_output = Command::new("docker").args(["ps"]).output().await?;
+
+        if !running_output.status.success() {
+            bail!("Please start Docker before continuing.");
+        }
+
+        Ok(())
+    }
+
+    pub async fn check_docker_compose_version(&mut self) -> Result<()> {
+        let version_output = Command::new("docker-compose")
+            .args(["--version"])
+            .output()
+            .await?;
+
+        if !version_output.status.success() {
+            bail!("Please install docker-compose before continuing.");
+        }
 
         Ok(())
     }
@@ -185,6 +215,7 @@ impl Installer {
         )
         .await
     }
+
     pub async fn create_grafana_configs(&mut self) -> Result<()> {
         let datasources_yml = include_str!("./templates/grafana_datasources.yml");
 
@@ -276,6 +307,9 @@ impl Installer {
         let res = self._compose_user_input();
         self.save().await?;
         res?;
+
+        self.check_docker_version_and_running().await?;
+        self.check_docker_compose_version().await?;
 
         let compose = Compose::try_from(&self.deployment)?;
 
