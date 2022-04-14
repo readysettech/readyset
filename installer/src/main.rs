@@ -47,6 +47,7 @@ mod deployment;
 mod console;
 mod constants;
 mod docker_compose;
+mod tear_down;
 mod template;
 
 use crate::aws::cloudformation::{deploy_stack, StackConfig};
@@ -76,11 +77,27 @@ const VPC_CLOUDFORMATION_TEMPLATE_URL: &str =
 // TODO: Not needed right now but would be good to have in the future.
 // const READYSET_CLOUDFORMATION_S3_PREFIX: &str = readyset_cloudformation_s3_prefix!();
 
+/// Teaar down an existing deployment
+#[derive(Parser)]
+struct TearDown {
+    /// Name of the deployment to tear down. If not specified, will prompt from a list of existing
+    /// deployments
+    deployment_name: Option<String>,
+}
+
+#[derive(Parser)]
+enum Subcommand {
+    TearDown(TearDown),
+}
+
 /// Install and configure a ReadySet cluster in AWS
 #[derive(Parser)]
 struct Options {
     /// Directory to store state between runs. Defaults to `$XDG_STATE_HOME/readyset`.
     state_directory: Option<PathBuf>,
+
+    #[clap(subcommand)]
+    subcommand: Option<Subcommand>,
 }
 
 impl Options {
@@ -159,8 +176,25 @@ impl Installer {
     /// Run the install process, picking up where the user left off if necessary.
     pub async fn run(&mut self) -> Result<()> {
         if self.deployment.is_complete() {
-            println!("This deployment is already complete!");
+            println!("This deployment is already running");
             self.deployment.print_connection_information()?;
+
+            println!();
+            if confirm()
+                .with_prompt("Would you like to tear down this deployment?")
+                .interact()?
+            {
+                self.tear_down().await?;
+            }
+
+            return Ok(());
+        } else if self.deployment.is_tearing_down() {
+            println!(
+                "Continuing tear down of deployment {}",
+                style(&self.deployment.name).bold()
+            );
+            self.tear_down().await?;
+
             return Ok(());
         }
 
@@ -2269,6 +2303,23 @@ async fn main() -> Result<()> {
         .recursive(true)
         .create(options.state_directory()?)
         .await?;
+
+    if let Some(Subcommand::TearDown(tear_down)) = &options.subcommand {
+        let deployment = match &tear_down.deployment_name {
+            Some(deployment_name) => {
+                Deployment::load(options.state_directory()?, deployment_name).await?
+            }
+            None => {
+                println!("Which deployment would you like to tear down?");
+                deployment::prompt_for_existing_deployment(options.state_directory()?).await?
+            }
+        };
+
+        let mut installer = Installer::new(options, deployment);
+        installer.tear_down().await?;
+
+        return Ok(());
+    }
 
     let deployment = deployment::create_or_load_existing(options.state_directory()?).await?;
     let mut installer = Installer::new(options, deployment);

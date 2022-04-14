@@ -4,7 +4,7 @@ use std::ops::Deref;
 use std::path::Path;
 
 use ::console::style;
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 use tokio::fs::{read_dir, File};
@@ -177,6 +177,8 @@ pub enum DeploymentStatus {
     InProgress,
     /// The deployment has been completed, meaning the ReadySet cluster is running.
     Complete,
+    /// The deployment is in the process of being torn down
+    TearingDown,
 }
 
 impl Default for DeploymentStatus {
@@ -390,6 +392,13 @@ impl Deployment {
         self.status == DeploymentStatus::Complete
     }
 
+    /// Returns `true` if this deployment is [being torn down]
+    ///
+    /// [being torn down]: DeploymentStatus::TearingDown
+    pub(crate) fn is_tearing_down(&self) -> bool {
+        self.status == DeploymentStatus::TearingDown
+    }
+
     /// Save this deployment to the path in the given state directory
     pub async fn save_to_directory<P>(&self, dir: P) -> Result<()>
     where
@@ -517,6 +526,16 @@ where
     Ok(Some(
         Deployment::load(state_dir, deployments.remove(index)).await?,
     ))
+}
+
+pub(crate) async fn prompt_for_existing_deployment<P>(state_dir: P) -> Result<Deployment>
+where
+    P: AsRef<Path>,
+{
+    let deployments = Deployment::list(state_dir.as_ref()).await?;
+    select_deployment(state_dir, deployments)
+        .await?
+        .ok_or_else(|| anyhow!("No deployment selected"))
 }
 
 pub(crate) async fn create_or_load_existing<P>(state_dir: P) -> Result<Deployment>
