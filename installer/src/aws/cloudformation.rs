@@ -312,6 +312,17 @@ pub(crate) async fn stack_exists(cfn_client: &cfn::Client, stack_name: &str) -> 
     Ok(describe_stack(cfn_client, stack_name).await?.is_some())
 }
 
+fn status_is_unhealthy(status: &StackStatus) -> bool {
+    matches!(
+        status,
+        StackStatus::CreateFailed
+            | StackStatus::DeleteFailed
+            | StackStatus::RollbackComplete
+            | StackStatus::RollbackFailed
+            | StackStatus::UpdateFailed
+    )
+}
+
 pub(crate) async fn delete_stack(cfn_client: &cfn::Client, stack_name: &str) -> Result<()> {
     let delete_desc = format!("CloudFormation stack {}", style(stack_name).bold());
     let delete_pb = spinner().with_message(format!("Deleting {}", delete_desc));
@@ -324,6 +335,17 @@ pub(crate) async fn delete_stack(cfn_client: &cfn::Client, stack_name: &str) -> 
         match describe_stack(cfn_client, stack_name).await? {
             None => break,
             Some(stack) if stack.stack_status == Some(StackStatus::DeleteComplete) => break,
+            Some(Stack {
+                stack_status: Some(status),
+                ..
+            }) if status_is_unhealthy(&status) => {
+                delete_pb.abandon_with_message(format!(
+                    "{} Stack entered non-successful status {}",
+                    style(Emoji("❌ ", "X ")).red(),
+                    style(status.as_str()).red()
+                ));
+                bail!("Stack creation failed");
+            }
             Some(stack) => {
                 if let Some(status) = stack.stack_status() {
                     delete_pb.set_message(format!(
@@ -348,14 +370,8 @@ pub(crate) async fn deploy_stack(
 ) -> Result<Stack> {
     let do_create = if let Some(existing_stack) = describe_stack(cfn_client, stack_name).await? {
         let unhealthy = matches!(
-            existing_stack.stack_status,
-            Some(
-                StackStatus::CreateFailed
-                    | StackStatus::DeleteFailed
-                    | StackStatus::RollbackComplete
-                    | StackStatus::RollbackFailed
-                    | StackStatus::UpdateFailed
-            )
+            &existing_stack.stack_status,
+            Some(status) if status_is_unhealthy(status)
         );
         let status_desc = style(
             existing_stack
@@ -430,13 +446,7 @@ pub(crate) async fn deploy_stack(
                 ));
                 break Ok(stack);
             }
-            Some(
-                status @ (StackStatus::CreateFailed
-                | StackStatus::DeleteFailed
-                | StackStatus::RollbackComplete
-                | StackStatus::RollbackFailed
-                | StackStatus::UpdateFailed),
-            ) => {
+            Some(status) if status_is_unhealthy(&status) => {
                 ready_pb.abandon_with_message(format!(
                     "{} Stack entered non-successful status {}",
                     style(Emoji("❌ ", "X ")).red(),
