@@ -2,35 +2,87 @@
 # the "Orchestrator")
 
 locals {
-  installer_bucket_name = "readysettech-orchestrator-us-east-2"
-  domain_name           = "launch.readyset.io"
+  installer_bucket_name        = "readysettech-orchestrator-us-east-2"
+  installer_bucket_arn         = "arn:aws:s3:::${local.installer_bucket_name}"
+  installer_bucket_objects_arn = "${local.installer_bucket_arn}/*"
+  domain_name                  = "launch.readyset.io"
 }
 
 data "vercel_team" "readyset" {
   slug = "readyset"
 }
 
+data "aws_iam_policy_document" "readysettect-installer-policy" {
+  statement {
+    sid    = "PublicReadGetObject"
+    effect = "Allow"
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+    resources = [
+      local.installer_bucket_name,
+      local.installer_bucket_objects_arn
+    ]
+    actions = [
+      "s3:GetObject",
+      "s3:ListBucket"
+    ]
+  }
+  statement {
+    sid    = "AllowDeployInstallerWrite"
+    effect = "Allow"
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::888984949675:role/InstallerS3"]
+    }
+    resources = [
+      local.installer_bucket_name,
+      local.installer_bucket_objects_arn
+    ]
+    actions = [
+      "s3:GetObject",
+      "s3:GetObjectAcl",
+      "s3:PutObject",
+      "s3:PutObjectAcl",
+      "s3:ListBucket"
+    ]
+  }
+  statement {
+    sid    = "AllowDeployInstallerRead"
+    effect = "Allow"
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::069491470376:root", "arn:aws:iam::716876017850:root"]
+    }
+    resources = [
+      local.installer_bucket_name,
+      local.installer_bucket_objects_arn
+    ]
+    actions = [
+      "s3:GetObject",
+      "s3:ListBucket"
+    ]
+  }
+}
+
 resource "aws_s3_bucket" "installer" {
   bucket = local.installer_bucket_name
   acl    = "public-read"
-  policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [{
-      Sid       = "PublicReadGetObject"
-      Effect    = "Allow"
-      Principal = "*"
-      Action = [
-        "s3:GetObject"
-      ],
-      Resource = [
-        "arn:aws:s3:::${local.installer_bucket_name}/*"
-      ]
-    }]
-  })
-
+  tags = {
+    Name = local.installer_bucket_name
+  }
+  versioning {
+    enabled = true
+  }
   website {
     index_document = "readyset-orchestrator.sh"
   }
+}
+
+resource "aws_s3_bucket_policy" "installer-bucket-policy" {
+  bucket = aws_s3_bucket.installer.bucket
+  policy = data.aws_iam_policy_document.readysettect-installer-policy.json
 }
 
 resource "aws_acm_certificate" "installer" {

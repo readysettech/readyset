@@ -296,6 +296,27 @@ steps:
         login: true
         retries: 3
 
+  - label: ":docker: :s3: Upload docker saves to S3"
+    depends_on:
+      - readyset-mysql-release-image
+      - readyset-psql-release-image
+      - readyset-server-release-image
+    command:
+      - .buildkite/upload-installer-docker-images.sh
+    plugins:
+      - docker#v3.9.0:
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
+          propagate-environment: true
+          propagate-aws-auth-tokens: true
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+      - cultureamp/aws-assume-role#v0.2.0
+    env:
+      AWS_ASSUME_ROLE_ARN: arn:aws:iam::888984949675:role/InstallerS3
+    agents:
+      queue: ops
+
   - block: "Build, test, and upload internal :amazon-ec2: AMIs and :aws-cloudformation: CloudFormation templates"
     key: block-ami-cfn
     prompt: "Build AMIs and CloudFormation templates?"
