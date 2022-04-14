@@ -355,9 +355,10 @@ impl Installer {
 
         let compose = Compose::try_from(&self.deployment)?;
 
-        let compose_dir = self.options.state_directory()?.join("compose");
-        tokio::fs::create_dir_all(&compose_dir).await?;
-        let path = compose_dir.join(format!("{}.yml", self.deployment.name()));
+        let path = self
+            .deployment
+            .compose_path(self.options.state_directory()?);
+        tokio::fs::create_dir_all(&path.parent().unwrap()).await?;
         let path_str = path
             .to_str()
             .ok_or_else(|| anyhow!("Path does not contain valid unicode characters"))?;

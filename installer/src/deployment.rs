@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::ops::Deref;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use ::console::style;
 use anyhow::{anyhow, bail, Result};
@@ -521,6 +521,16 @@ impl Deployment {
 
     pub(crate) fn vpc_stack_name(&self) -> String {
         self.cloudformation_stack_name("vpc")
+    }
+
+    pub(crate) fn compose_path<P>(&self, state_dir: P) -> PathBuf
+    where
+        P: AsRef<Path>,
+    {
+        state_dir
+            .as_ref()
+            .join("compose")
+            .join(format!("{}.yml", self.name()))
     }
 }
 

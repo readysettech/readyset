@@ -1,4 +1,6 @@
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
+use tokio::fs::remove_file;
+use tokio::process::Command;
 
 use crate::aws::cloudformation::{delete_stack, stack_exists};
 use crate::console::confirm;
@@ -52,6 +54,29 @@ impl Installer {
     }
 
     async fn tear_down_compose(&self) -> Result<()> {
-        bail!("Tearing down docker-compose deployments is not currently supported");
+        if !confirm()
+            .with_prompt("Tear down docker-compose deployment?")
+            .interact()?
+        {
+            bail!("Exiting as requested");
+        }
+
+        let path = self
+            .deployment
+            .compose_path(self.options.state_directory()?);
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| anyhow!("Path does not contain valid unicode characters"))?;
+        let status = Command::new("docker-compose")
+            .args(["-f", path_str, "down", "-v", "--rmi", "all"])
+            .status()
+            .await?;
+        if !status.success() {
+            bail!("Command exited with {}", status);
+        }
+
+        remove_file(path).await?;
+
+        Ok(())
     }
 }
