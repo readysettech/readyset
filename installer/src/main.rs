@@ -627,7 +627,7 @@ impl Installer {
     }
 
     async fn deploy_readyset_cluster(&mut self) -> Result<()> {
-        let stack_name = format!("{}-readyset", self.deployment.name);
+        let stack_name = self.deployment.readyset_stack_name();
 
         let template_url = match self.cfn_deployment()?.rds_db.as_ref().unwrap().engine {
             Engine::MySQL => self
@@ -832,7 +832,7 @@ impl Installer {
     async fn deploy_rds_db(&mut self) -> Result<()> {
         println!("{}", style("About to deploy RDS database stack.").bold());
         prompt_to_continue()?;
-        let stack_name = format!("{}-rds", self.deployment.name);
+        let stack_name = self.deployment.rds_stack_name();
 
         let template_url = match self.cfn_deployment()?.rds_db.as_ref().unwrap().engine {
             Engine::MySQL => self
@@ -920,7 +920,7 @@ impl Installer {
     async fn deploy_consul_stack(&mut self) -> Result<()> {
         println!("About to deploy Consul stack");
         prompt_to_continue()?;
-        let stack_name = format!("{}-consul", self.deployment.name);
+        let stack_name = self.deployment.consul_stack_name();
         let template_url: String = self
             .cfn_deployment()?
             .cloudformation_template_url(TemplateType::Consul);
@@ -990,7 +990,7 @@ impl Installer {
                Monitoring (Prometheus), and one to be applied to your RDS DB instance"
         );
         prompt_to_continue()?;
-        let stack_name = format!("{}-vpc-supplemental", self.deployment.name);
+        let stack_name = self.deployment.vpc_supplemental_stack_name();
         let template_url = self
             .cfn_deployment()?
             .cloudformation_template_url(TemplateType::VpcSupplemental);
@@ -1065,7 +1065,7 @@ impl Installer {
         );
         prompt_to_continue()?;
 
-        let stack_name = format!("{}-vpc", self.deployment.name());
+        let stack_name = self.deployment.vpc_stack_name();
 
         let mut azs = self
             .ec2_client()

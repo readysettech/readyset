@@ -7,7 +7,7 @@ use ::console::style;
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
-use tokio::fs::{read_dir, File};
+use tokio::fs::{read_dir, remove_file, File};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 pub(crate) use MaybeExisting::{CreateNew, Existing};
 
@@ -440,6 +440,19 @@ impl Deployment {
         Ok(res)
     }
 
+    /// Remove all data about this deployment from the given state directory
+    pub async fn delete<P>(&self, state_dir: P) -> Result<()>
+    where
+        P: AsRef<Path>,
+    {
+        let path = state_dir.as_ref().join(self.name());
+        if path.exists() {
+            remove_file(path).await?;
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn print_connection_information(&self) -> Result<()> {
         match &self.inner {
             DeploymentData::Cloudformation(box CloudformationDeployment {
@@ -481,6 +494,33 @@ impl Deployment {
         }
 
         Ok(())
+    }
+
+    fn cloudformation_stack_name<P>(&self, stack: P) -> String
+    where
+        P: Display,
+    {
+        format!("{}-{}", self.name(), stack)
+    }
+
+    pub(crate) fn readyset_stack_name(&self) -> String {
+        self.cloudformation_stack_name("readyset")
+    }
+
+    pub(crate) fn rds_stack_name(&self) -> String {
+        self.cloudformation_stack_name("rds")
+    }
+
+    pub(crate) fn consul_stack_name(&self) -> String {
+        self.cloudformation_stack_name("consul")
+    }
+
+    pub(crate) fn vpc_supplemental_stack_name(&self) -> String {
+        self.cloudformation_stack_name("vpc-supplemental")
+    }
+
+    pub(crate) fn vpc_stack_name(&self) -> String {
+        self.cloudformation_stack_name("vpc")
     }
 }
 

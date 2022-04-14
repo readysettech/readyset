@@ -18,6 +18,9 @@ use tokio::time::sleep;
 use super::cfn_parameter;
 use crate::console::{confirm, input, password, spinner, GREEN_CHECK};
 
+/// How long to sleep in between repeated calls to the AWS API to avoid getting rate-limited
+const API_RATE_LIMIT_SLEEP_DURATION: Duration = Duration::from_millis(500);
+
 #[skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -305,6 +308,10 @@ pub(crate) async fn describe_stack(
     }
 }
 
+pub(crate) async fn stack_exists(cfn_client: &cfn::Client, stack_name: &str) -> Result<bool> {
+    Ok(describe_stack(cfn_client, stack_name).await?.is_some())
+}
+
 pub(crate) async fn delete_stack(cfn_client: &cfn::Client, stack_name: &str) -> Result<()> {
     let delete_desc = format!("CloudFormation stack {}", style(stack_name).bold());
     let delete_pb = spinner().with_message(format!("Deleting {}", delete_desc));
@@ -320,13 +327,14 @@ pub(crate) async fn delete_stack(cfn_client: &cfn::Client, stack_name: &str) -> 
             Some(stack) => {
                 if let Some(status) = stack.stack_status() {
                     delete_pb.set_message(format!(
-                        "{} (Current status: {})",
+                        "Deleting {} (Current status: {})",
                         delete_desc,
                         style(status.as_str()).blue()
                     ))
                 }
             }
         }
+        sleep(API_RATE_LIMIT_SLEEP_DURATION).await;
     }
     delete_pb.finish_with_message(format!("{}Deleted {}", *GREEN_CHECK, delete_desc));
 

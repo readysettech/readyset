@@ -58,7 +58,7 @@ macro_rules! success {
         println!(
             "\n{}{}\n",
             *crate::console::GREEN_CHECK,
-            style(format_args!($($format_args)*)).bold()
+            ::console::style(format_args!($($format_args)*)).bold()
         )
     };
 }
@@ -67,7 +67,7 @@ macro_rules! warning {
 	($($format_args:tt)*) => {
 	    println!(
             "{}{}",
-            style(::console::Emoji("⚠ ", "")).yellow(),
+            ::console::style(::console::Emoji("⚠ ", "")).yellow(),
             format_args!($($format_args)*)
         )
 	};
