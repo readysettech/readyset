@@ -11,7 +11,7 @@ steps:
     key: lint-commits
     branches: '!refs/heads/main'
     commands:
-    - ./scripts/commit_lint.sh
+      - ./scripts/commit_lint.sh
     agents:
       queue: t3a-small
 
@@ -173,21 +173,21 @@ steps:
             # --- END INTERNAL OPS STEPS --- #
 
             # --- START CLOUDFORMATION STEPS --- #
-            - label: ':docker: Build readyset-ops-cfn image'
+            - label: ":docker: Build readyset-ops-cfn image"
               include:
                 - "ops/cfn/**"
 
-            - label: ':aws-cloudformation: Lint with taskcat :cat:'
+            - label: ":aws-cloudformation: Lint with taskcat :cat:"
               include:
                 - "ops/cfn/**"
             # --- END CLOUDFORMATIOn STEPS --- #
 
             # --- START JS CLIENT STEPS --- #
-            - label: ':docker: Build prettier image'
+            - label: ":docker: Build prettier image"
               include:
                 - "js-client/**"
 
-            - label: ':prettier: Check prettier'
+            - label: ":prettier: Check prettier"
               include:
                 - "js-client/**"
 
@@ -195,19 +195,19 @@ steps:
               include:
                 - "js-client/**"
 
-            - label: ':nodejs: Test js-client'
+            - label: ":nodejs: Test js-client"
               include:
                 - "js-client/**"
             # --- END JS CLIENT STEPS --- #
-            - label: 'List frameworks'
+            - label: "List frameworks"
               include:
                 - "readyset-framework-testing/**"
 
-            - label: 'Generate framework pipeline'
+            - label: "Generate framework pipeline"
               include:
                 - "readyset-framework-testing/**"
 
-            - label: 'Test readyset deployment'
+            - label: "Test readyset deployment"
               include:
                 - "[!ops]*"
                 - Cargo.lock
@@ -312,6 +312,7 @@ steps:
         retries: 3
 
   - label: ":docker: :s3: Upload docker saves to S3"
+    key: upload-docker-s3
     depends_on:
       - readyset-mysql-release-image
       - readyset-psql-release-image
@@ -332,17 +333,65 @@ steps:
     agents:
       queue: ops
 
+  - label: ":tux: Build Linux ReadySet Installer Binaries"
+    key: build-linux-installer
+    depends_on:
+      - upload-docker-s3
+    commands:
+      - "echo +++ :computer: running build for Linux ReadySet Installer Binaries"
+      - if buildkite-agent meta-data exists release-name; then
+      -   export READYSET_CFN_PREFIX=$(buildkite-agent meta-data get release-name)
+      - else
+      -   export READYSET_CFN_PREFIX="alpha/${BUILDKITE_COMMIT}"
+      - fi
+      - .buildkite/build-linux-installer.sh
+    artifact_paths:
+      - target/x86_64-unknown-linux-musl/release/readyset-installer
+    plugins:
+      - docker#v3.9.0:
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-installer:${BUILDKITE_COMMIT}
+          volumes:
+            - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+            - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+            - CACHEPOT_REGION=us-east-2
+            - CARGO_INCREMENTAL=0
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ":apple: Build Apple ReadySet Installer Binaries"
+    key: build-apple-installer
+    agents:
+      queue: apple
+      apple: m1
+    env: 
+      PATH: /opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/administrator/.cargo/bin
+    depends_on:
+      - upload-docker-s3
+    commands:
+      - "echo +++ :computer: running build for Apple ReadySet Installer"
+      - if buildkite-agent meta-data exists release-name; then
+      -   export READYSET_CFN_PREFIX=$(buildkite-agent meta-data get release-name)
+      - else
+      -   export READYSET_CFN_PREFIX="alpha/${BUILDKITE_COMMIT}"
+      - fi
+      - .buildkite/build-apple-installer.sh
+    artifact_paths:
+      - target/x86_64-apple-darwin/release/readyset-installer
+      - target/aarch64-apple-darwin/release/readyset-installer
+
   - block: "Build, test, and upload internal :amazon-ec2: AMIs and :aws-cloudformation: CloudFormation templates"
     key: block-ami-cfn
     prompt: "Build AMIs and CloudFormation templates?"
 
-  - label: ':rust: Build ReadySet release binaries'
+  - label: ":rust: Build ReadySet release binaries"
     key: build-binaries
     depends_on:
       - block-ami-cfn
       - build-image
     commands:
-      - 'echo +++ :rust: Running cargo build'
+      - "echo +++ :rust: Running cargo build"
       - RUSTFLAGS='-D warnings' cargo build --release --bin noria-server --bin noria-mysql --bin noria-psql --bin ensure-ebs-volume --bin metrics-aggregator --bin basic_validation_test
       - strip target/release/noria-server target/release/noria-mysql target/release/noria-psql target/release/ensure-ebs-volume target/release/metrics-aggregator target/release/basic_validation_test
     artifact_paths:
@@ -354,9 +403,9 @@ steps:
       - target/release/basic_validation_test
     plugins:
       - docker#v3.9.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
+          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}"
           volumes:
-            - 'cargo-registry:/usr/local/cargo/registry'
+            - "cargo-registry:/usr/local/cargo/registry"
           environment:
             - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
             - CACHEPOT_REGION=us-east-2
@@ -368,16 +417,16 @@ steps:
   - label: ":packer: Create ReadySet :amazon-ec2: AMIs with release binaries"
     key: packer-build
     depends_on:
-    - build-binaries
+      - build-binaries
     commands:
       - cd /workdir/ops/images
       - mkdir binaries
-      - 'echo +++ :buildkite: Downloading binary artifacts'
+      - "echo +++ :buildkite: Downloading binary artifacts"
       - buildkite-agent artifact download target/release/* binaries/
       - packer init .
-      - 'echo +++ :packer: Running packer build'
+      - "echo +++ :packer: Running packer build"
       - packer build -only=amazon-ebs.readyset-* .
-      - 'echo +++ :buildkite: Uploading manifest artifact'
+      - "echo +++ :buildkite: Uploading manifest artifact"
       - buildkite-agent artifact upload packer-manifest.json
     plugins:
       - docker#v3.9.0:
@@ -393,7 +442,7 @@ steps:
   - label: ":python: :yaml: Build CloudFormation templates with updated :amazon-ec2: AMI references"
     key: packer-cfn-template-ytt
     depends_on:
-    - packer-build
+      - packer-build
     commands:
       - buildkite-agent artifact download packer-manifest.json --step packer-build ./ops/image-deploy
       - cd ops/cfn/templates
@@ -411,7 +460,7 @@ steps:
   - label: ":rain_cloud: Format and Lint CloudFormation templates"
     key: packer-cfn-template-lint
     depends_on:
-    - packer-cfn-template-ytt
+      - packer-cfn-template-ytt
     commands:
       - cd ops/cfn
       - mkdir ./rendered_templates
@@ -430,7 +479,7 @@ steps:
   - label: ":aws: Upload CloudFormation templates for internal use"
     key: packer-cfn-template-copy
     depends_on:
-    - packer-cfn-template-lint
+      - packer-cfn-template-lint
     commands:
       - export TEMPLATE_ARTIFACT_STEP_NAME=packer-cfn-template-ytt
       - export S3_BUCKET=readysettech-cfn-internal-us-east-2
@@ -484,7 +533,7 @@ steps:
   - block: "Deploy :amazon-ec2: AMIs and :aws-cloudformation: CloudFormation alpha release"
     key: block-public-alpha
     prompt: "Copy AMIs and CloudFormation templates to public visibility?"
-    branches: '!refs/heads/main'
+    branches: "!refs/heads/main"
 
   - block: "Deploy :amazon-ec2: AMIs and :aws-cloudformation: CloudFormation release"
     key: block-public-release
@@ -493,33 +542,33 @@ steps:
       - key: release-name
         required: true
         text: Release Name (This name WILL be seen by customers)
-    branches: 'refs/heads/main'
+    branches: "refs/heads/main"
 
   - label: ":packer: Run copy production images to deploy account"
     key: packer-deploy-external
     depends_on:
-    - block-public-alpha
-    - block-public-release
-    - packer-build
+      - block-public-alpha
+      - block-public-release
+      - packer-build
     commands:
-    - cd /workdir/ops/image-deploy
-    - buildkite-agent artifact download packer-manifest.json .
-    - mv packer-manifest.json source-packer-manifest.json
-    - packer init .
-    - ./run-with-manifest-as-env.sh source-packer-manifest.json packer build -only=amazon-ebs.readyset-* .
-    - buildkite-agent artifact upload packer-manifest.json
+      - cd /workdir/ops/image-deploy
+      - buildkite-agent artifact download packer-manifest.json .
+      - mv packer-manifest.json source-packer-manifest.json
+      - packer init .
+      - ./run-with-manifest-as-env.sh source-packer-manifest.json packer build -only=amazon-ebs.readyset-* .
+      - buildkite-agent artifact upload packer-manifest.json
     plugins:
-    - docker#v3.9.0:
-        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
-        propagate-environment: true
-        propagate-aws-auth-tokens: true
-        environment:
-          - PACKER_CREATE_AMI=true
-          - PACKER_PRODUCTION=true
-    - ecr#v2.5.0:
-        login: true
-        retries: 3
-    - cultureamp/aws-assume-role#v0.2.0
+      - docker#v3.9.0:
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
+          propagate-environment: true
+          propagate-aws-auth-tokens: true
+          environment:
+            - PACKER_CREATE_AMI=true
+            - PACKER_PRODUCTION=true
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+      - cultureamp/aws-assume-role#v0.2.0
     env:
       AWS_ASSUME_ROLE_ARN: arn:aws:iam::888984949675:role/Packer
     agents:
@@ -585,33 +634,3 @@ steps:
       AWS_ASSUME_ROLE_ARN: arn:aws:iam::305232526136:role/DeployCustomerArtifactsWrite
     agents:
       queue: ops
-
-
-  - label: ':computer: Build ReadySet Installer'
-    key: build-installer
-    depends_on:
-      - packer-deploy-external
-    commands:
-      - 'echo +++ :computer: running build for ReadySet Installer'
-      - rustup target add x86_64-unknown-linux-musl
-      - if buildkite-agent meta-data exists release-name; then
-      -    export READYSET_CFN_PREFIX=$(buildkite-agent meta-data get release-name)
-      - else
-      -    export READYSET_CFN_PREFIX="alpha/${BUILDKITE_COMMIT}"
-      - fi
-      - RUSTFLAGS='-D warnings' cargo build --release --bin readyset-installer --target x86_64-unknown-linux-musl
-      - strip target/x86_64-unknown-linux-musl/release/readyset-installer
-    artifact_paths:
-      - target/x86_64-unknown-linux-musl/release/readyset-installer
-    plugins:
-      - docker#v3.9.0:
-          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-installer:${BUILDKITE_COMMIT}
-          volumes:
-            - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-            - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
-            - CACHEPOT_REGION=us-east-2
-            - CARGO_INCREMENTAL=0
-      - ecr#v2.5.0:
-          login: true
-          retries: 3

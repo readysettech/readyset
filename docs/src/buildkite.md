@@ -39,3 +39,10 @@ directory of the monorepo:
 ```
 $ make docker-tests
 ```
+
+## MacOS Installer Build
+The build process for our MacOS installer is run through a buildkite agent in a special 'apple' queue.
+
+As of writing, this is currently handled through a MacStadium instance:
+ 1. Go to https://portal.macstadium.com/login
+ 2. Use the credentials in our shared 1Password vault to log in
