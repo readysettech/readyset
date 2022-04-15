@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::future;
 use hyper::client::HttpConnector;
-use nom_sql::SqlIdentifier;
+use nom_sql::{SqlIdentifier, SqlQuery};
 use noria_errors::{
     internal, internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult,
 };
@@ -30,7 +30,7 @@ use crate::status::ReadySetStatus;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::{
-    ActivationResult, ReaderReplicationResult, ReaderReplicationSpec, RecipeSpec,
+    ActivationResult, ParsedRecipeSpec, ReaderReplicationResult, ReaderReplicationSpec, RecipeSpec,
     ReplicationOffset, ViewFilter, ViewRequest,
 };
 
@@ -500,12 +500,10 @@ impl ControllerHandle {
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn dry_run(
         &mut self,
-        recipe_addition: &str,
+        name: Option<String>,
+        query: SqlQuery,
     ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
-        let request = RecipeSpec {
-            recipe: recipe_addition,
-            ..Default::default()
-        };
+        let request = ParsedRecipeSpec { name, query };
 
         self.rpc("dry_run", request, self.migration_timeout)
     }
@@ -523,6 +521,19 @@ impl ControllerHandle {
         };
 
         self.rpc("extend_recipe", request, self.migration_timeout)
+    }
+
+    /// Extend the existing recipe with a single query. The query will be deserialized at noria
+    /// server and not parsed.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn extend_parsed_recipe(
+        &mut self,
+        name: Option<String>,
+        query: SqlQuery,
+    ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
+        let request = ParsedRecipeSpec { name, query };
+        self.rpc("extend_parsed_recipe", request, self.migration_timeout)
     }
 
     /// Extend the existing recipe with the given set of queries and don't require leader ready.

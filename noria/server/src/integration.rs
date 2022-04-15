@@ -8366,14 +8366,14 @@ async fn create_and_drop_table() {
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_dry_run() {
     let mut g = start_simple("simple_dry_run").await;
-    let query = "
-        # base tables
-        CREATE TABLE table_1 (column_1 INT);
-        QUERY t1: SELECT * FROM table_1;
-    ";
-    let res = g.dry_run(query).await;
+    let create_table = "CREATE TABLE table_1 (column_1 INT);";
+    let query = "SELECT * FROM table_1;";
+    let name = "t1".to_string();
+    let query = nom_sql::parse_query(nom_sql::Dialect::MySQL, query).unwrap();
+    g.extend_recipe(create_table).await.unwrap();
+    let res = g.dry_run(Some(name), query).await;
     assert!(res.is_ok());
-    assert!(g.table("table_1").await.is_err());
+    assert!(g.table("table_1").await.is_ok());
     assert!(g.view("t1").await.is_err());
 }
 
@@ -8391,7 +8391,8 @@ async fn simple_dry_run_unsupported() {
     assert!(g.view("t1").await.is_ok());
 
     let unsupported_query = "ALTER TABLE table_1 ADD COLUMN column_2 INT";
-    let res = g.dry_run(unsupported_query).await;
+    let query = nom_sql::parse_query(nom_sql::Dialect::MySQL, unsupported_query).unwrap();
+    let res = g.dry_run(None, query).await;
     assert!(matches!(
         res,
         Err(RpcFailed {

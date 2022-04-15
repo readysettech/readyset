@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use metrics::counter;
-use nom_sql::SelectStatement;
+use nom_sql::{SelectStatement, SqlQuery};
 use noria::{ControllerHandle, ReadySetResult};
 use noria_client_metrics::recorded;
 use tokio::select;
@@ -233,7 +233,7 @@ where
         }
         let qname = utils::generate_query_name(stmt);
         match controller
-            .dry_run(&format!("QUERY {}: {}", qname, &stmt))
+            .dry_run(Some(qname), SqlQuery::Select(stmt.clone()))
             .await
         {
             Ok(_) => {

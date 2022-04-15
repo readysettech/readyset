@@ -1720,8 +1720,8 @@ where
                     // TODO(andrew, justin): how are these types of writes handled w.r.t RYW?
                     // CREATE VIEW will still trigger migrations with explicit-migrations enabled
                     SqlQuery::CreateView(stmt) => handle_ddl!(handle_create_view(stmt)),
-                    SqlQuery::CreateTable(stmt) => handle_ddl!(handle_table_operation(stmt)),
-                    SqlQuery::DropTable(stmt) => handle_ddl!(handle_table_operation(stmt)),
+                    SqlQuery::CreateTable(_) => handle_ddl!(handle_table_operation(parsed_query)),
+                    SqlQuery::DropTable(_) => handle_ddl!(handle_table_operation(parsed_query)),
                     SqlQuery::AlterTable(_) | SqlQuery::RenameTable(_) => {
                         unsupported!("{} not yet supported", parsed_query.query_type());
                     }
@@ -1768,8 +1768,10 @@ where
                 let res = match parsed_query {
                     // CREATE VIEW will still trigger migrations with epxlicit-migrations enabled
                     SqlQuery::CreateView(q) => self.noria.handle_create_view(q).await,
-                    SqlQuery::CreateTable(q) => self.noria.handle_table_operation(q).await,
-                    SqlQuery::DropTable(q) => self.noria.handle_table_operation(q).await,
+                    SqlQuery::CreateTable(_) => {
+                        self.noria.handle_table_operation(parsed_query).await
+                    }
+                    SqlQuery::DropTable(_) => self.noria.handle_table_operation(parsed_query).await,
                     SqlQuery::Select(q) => {
                         let res = self
                             .noria

@@ -18,6 +18,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use nom_sql::{SqlIdentifier, SqlQuery};
+use noria::ParsedRecipeSpec;
 use noria_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
@@ -279,6 +280,24 @@ impl FromStr for ChangeList {
             )?;
 
         Ok(ChangeList { changes })
+    }
+}
+
+impl From<ParsedRecipeSpec> for ChangeList {
+    fn from(r: ParsedRecipeSpec) -> Self {
+        // Create a leaf for Select, CompoundSelect and CreateView statements. CreateCache
+        // statements should already be converted to Select statements at this point.
+        let is_leaf = matches!(
+            r.query,
+            SqlQuery::Select(_) | SqlQuery::CompoundSelect(_) | SqlQuery::CreateView(_)
+        );
+        Self {
+            changes: vec![Change::Add(SqlExpression {
+                name: r.name.map(|n| n.into()),
+                query: r.query,
+                is_leaf,
+            })],
+        }
     }
 }
 
