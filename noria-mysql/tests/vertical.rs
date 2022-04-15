@@ -11,6 +11,18 @@
 //! ```notrust
 //! cargo test -p noria-mysql --features vertical_tests --test vertical
 //! ```
+//!
+//! This test suite will connect to a local mysql database, which can be set up with all the correct
+//! configuration using the `docker-compose.yml` and `docker-compose.override.example.yml` in the
+//! root of the repository. To run that mysql database, run:
+//!
+//! ```notrust
+//! $ cp docker-compose.override.example.yml docker-compose.yml
+//! $ docker-compose up -d mysql
+//! ```
+//!
+//! Note that this test suite requires the *exact* configuration specified in that docker-compose
+//! configuration, including the port, username, and password.
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
