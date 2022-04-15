@@ -779,7 +779,7 @@ impl BlockingRead {
                         &self.filter,
                         // Serialize the results, avoiding a clone, unless we already have read
                         // some records for this batch
-                        !read[read_i].is_empty() && !self.raw_result,
+                        read[read_i].is_empty() && !self.raw_result,
                     ) {
                         Ok(rs) => {
                             read[read_i].try_extend(rs)?;
