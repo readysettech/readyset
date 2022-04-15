@@ -623,10 +623,10 @@ pub(crate) async fn listen(
                             // client went away
                         }
                     } else {
-                        error!(error = ?e, "client transport error");
+                        error!(error = %e, "client transport error");
                     }
                 }
-                e => error!(error = ?e, "reader service error"),
+                e => error!(error = %e, "reader service error"),
             }
         }));
     }
