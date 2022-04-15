@@ -41,8 +41,8 @@ use noria::internal::MaterializationStatus;
 use noria::metrics::recorded;
 use noria::replication::{ReplicationOffset, ReplicationOffsets};
 use noria::{
-    ActivationResult, ReaderReplicationResult, ReaderReplicationSpec, ReadySetError,
-    ReadySetResult, ViewFilter, ViewRequest, ViewSchema,
+    ActivationResult, ParsedRecipeSpec, ReaderReplicationResult, ReaderReplicationSpec,
+    ReadySetError, ReadySetResult, ViewFilter, ViewRequest, ViewSchema,
 };
 use noria_errors::{bad_request_err, internal, internal_err, invariant, invariant_eq, NodeType};
 use petgraph::visit::Bfs;
@@ -1331,6 +1331,17 @@ impl DataflowState {
             }
             Err(e) => Err(e),
         }
+    }
+
+    /// Extend recipe bincode generates the changelist from a serialized ParsedRecipeSpec. It does
+    /// not support extending the recipe from a replicator
+    pub(super) async fn extend_parsed_recipe(
+        &mut self,
+        recipe_spec: ParsedRecipeSpec,
+    ) -> Result<ActivationResult, ReadySetError> {
+        let changelist = ChangeList::from(recipe_spec);
+
+        self.apply_recipe(changelist, false).await
     }
 
     pub(super) async fn remove_query(&mut self, query_name: &str) -> ReadySetResult<()> {

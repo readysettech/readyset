@@ -226,7 +226,7 @@ pub(crate) const PENDING_LIMIT: usize = 8192;
 
 use std::collections::HashMap;
 
-use nom_sql::SqlType;
+use nom_sql::{SqlQuery, SqlType};
 use petgraph::graph::NodeIndex;
 use readyset_tracing::propagation::Instrumented;
 use replication::ReplicationOffset;
@@ -404,6 +404,16 @@ pub struct RecipeSpec<'a> {
     /// this RecipeSpec.
     /// Defaults to true.
     require_leader_ready: bool,
+}
+
+/// A struct used for bincode (de)serialization of a recipe addition. This is used for the
+/// extend_parsed_recipe rpc
+#[derive(Serialize, Deserialize)]
+pub struct ParsedRecipeSpec {
+    /// The name of the ingredient to add
+    pub name: Option<String>,
+    /// The ingredient to add
+    pub query: SqlQuery,
 }
 
 /// Filters that can be used to filter the type of

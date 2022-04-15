@@ -16,7 +16,7 @@ use hyper::Method;
 use noria::consensus::Authority;
 use noria::replication::ReplicationOffset;
 use noria::status::{ReadySetStatus, SnapshotStatus};
-use noria::{RecipeSpec, WorkerDescriptor};
+use noria::{ParsedRecipeSpec, RecipeSpec, WorkerDescriptor};
 use noria_errors::{ReadySetError, ReadySetResult};
 use reqwest::Url;
 use tokio::sync::mpsc::UnboundedSender;
@@ -364,17 +364,15 @@ impl Leader {
                     return_serialized!(status);
                 }
                 (&Method::POST, "/dry_run") => {
-                    let body: RecipeSpec = bincode::deserialize(&body)?;
-                    if body.require_leader_ready() {
-                        require_leader_ready()?;
-                    }
+                    let body: ParsedRecipeSpec = bincode::deserialize(&body)?;
+                    require_leader_ready()?;
                     let ret = futures::executor::block_on(async move {
                         let mut state_copy: DataflowState = {
                             let reader = self.dataflow_state_handle.read().await;
                             check_quorum!(reader);
                             reader.clone()
                         };
-                        state_copy.extend_recipe(body, true).await
+                        state_copy.extend_parsed_recipe(body).await
                     })?;
                     return_serialized!(ret);
                 }
@@ -409,6 +407,18 @@ impl Leader {
                     Ok(r)
                 })?;
                 return_serialized!(ret);
+            }
+            (Method::POST, "/extend_parsed_recipe") => {
+                let body: ParsedRecipeSpec = bincode::deserialize(&body)?;
+                require_leader_ready()?;
+                let ret = futures::executor::block_on(async move {
+                    let mut writer = self.dataflow_state_handle.write().await;
+                    check_quorum!(writer.as_ref());
+                    let r = writer.as_mut().extend_parsed_recipe(body).await?;
+                    self.dataflow_state_handle.commit(writer, authority).await?;
+                    Ok(r)
+                })?;
+                return_serialized!(ret)
             }
             (Method::POST, "/remove_query") => {
                 require_leader_ready()?;
@@ -624,6 +634,7 @@ pub(super) fn request_type(req: &ControllerRequest) -> ControllerRequestType {
         (&Method::GET, "/flush_partial")
         | (&Method::GET | &Method::POST, "/controller_uri")
         | (&Method::POST, "/extend_recipe")
+        | (&Method::POST, "/extend_parsed_recipe")
         | (&Method::POST, "/remove_query")
         | (&Method::POST, "/set_replication_offset")
         | (&Method::POST, "/replicate_readers")
