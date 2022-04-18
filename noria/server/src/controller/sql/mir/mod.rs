@@ -46,7 +46,6 @@ lazy_static! {
 
 fn sanitize_leaf_column(c: &mut Column, view_name: SqlIdentifier) {
     c.table = Some(view_name);
-    c.function = None;
     c.aliases = vec![];
 }
 
@@ -67,7 +66,6 @@ fn value_columns_needed_for_predicates(
                 Column {
                     name: ec.name.clone(),
                     table: ec.table.clone(),
-                    function: None,
                     aliases: vec![],
                 },
                 oc.clone(),
@@ -76,7 +74,6 @@ fn value_columns_needed_for_predicates(
                 Column {
                     name: lc.name.clone(),
                     table: lc.table.clone(),
-                    function: None,
                     aliases: vec![],
                 },
                 oc.clone(),
@@ -1200,7 +1197,6 @@ impl SqlToMirConverter {
         columns.push(Column {
             name: "__distinct_count".into(),
             table: None,
-            function: None,
             aliases: vec![],
         });
 
@@ -1262,7 +1258,6 @@ impl SqlToMirConverter {
             combined_columns.push(Column {
                 table: None,
                 name: PAGE_NUMBER_COL.clone(),
-                function: None,
                 aliases: Vec::new(),
             });
         }

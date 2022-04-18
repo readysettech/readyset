@@ -687,30 +687,25 @@ mod tests {
             let c1 = Column {
                 table: Some("table".into()),
                 name: "c1".into(),
-                function: None,
                 aliases: vec![],
             };
             let c2 = Column {
                 table: Some("table".into()),
                 name: "c2".into(),
-                function: None,
                 aliases: vec![],
             };
             let c3 = Column {
                 table: Some("table".into()),
                 name: "c3".into(),
-                function: None,
                 aliases: vec![],
             };
 
             let child_column = Column {
                 table: Some("table".into()),
                 name: "child".into(),
-                function: None,
                 aliases: vec![Column {
                     table: Some("table".into()),
                     name: "c3".into(),
-                    function: None,
                     aliases: vec![],
                 }],
             };
@@ -752,18 +747,15 @@ mod tests {
             let c1 = Column {
                 table: Some("table".into()),
                 name: "c1".into(),
-                function: None,
                 aliases: vec![],
             };
 
             let child_column = Column {
                 table: Some("table".into()),
                 name: "c1".into(),
-                function: None,
                 aliases: vec![Column {
                     table: Some("table".into()),
                     name: "other_name".into(),
-                    function: None,
                     aliases: vec![],
                 }],
             };
