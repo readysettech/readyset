@@ -520,7 +520,10 @@ pub enum TableKey {
         columns: Vec<Column>,
         index_type: Option<IndexType>,
     },
-    FulltextKey(Option<SqlIdentifier>, Vec<Column>),
+    FulltextKey {
+        name: Option<SqlIdentifier>,
+        columns: Vec<Column>,
+    },
     Key {
         name: SqlIdentifier,
         columns: Vec<Column>,
@@ -583,7 +586,7 @@ impl fmt::Display for TableKey {
                 }
                 Ok(())
             }
-            TableKey::FulltextKey(name, columns) => {
+            TableKey::FulltextKey { name, columns } => {
                 write!(f, "FULLTEXT KEY ")?;
                 if let Some(ref name) = *name {
                     write!(f, "`{}` ", name)?;

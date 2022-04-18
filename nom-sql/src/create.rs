@@ -223,8 +223,20 @@ fn full_text_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey>
         ))(i)?;
 
         match name {
-            Some(name) => Ok((remaining_input, TableKey::FulltextKey(Some(name), columns))),
-            None => Ok((remaining_input, TableKey::FulltextKey(None, columns))),
+            Some(name) => Ok((
+                remaining_input,
+                TableKey::FulltextKey {
+                    name: Some(name),
+                    columns,
+                },
+            )),
+            None => Ok((
+                remaining_input,
+                TableKey::FulltextKey {
+                    name: None,
+                    columns,
+                },
+            )),
         }
     }
 }
@@ -547,9 +559,10 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
                             columns: attach_names(columns),
                             index_type,
                         },
-                        TableKey::FulltextKey(name, columns) => {
-                            TableKey::FulltextKey(name, attach_names(columns))
-                        }
+                        TableKey::FulltextKey { name, columns } => TableKey::FulltextKey {
+                            name,
+                            columns: attach_names(columns),
+                        },
                         TableKey::Key {
                             name,
                             columns,
@@ -1552,10 +1565,10 @@ mod tests {
                         ),
                     ],
                     keys: Some(vec![
-                        TableKey::FulltextKey(
-                            Some("index_comments_on_comment".into()),
-                            vec![Column::from("comments.comment")]
-                        ),
+                        TableKey::FulltextKey {
+                            name: Some("index_comments_on_comment".into()),
+                            columns: vec![Column::from("comments.comment")]
+                        },
                         TableKey::Key {
                             name: "confidence_idx".into(),
                             columns: vec![Column::from("comments.confidence")],
@@ -1961,10 +1974,10 @@ mod tests {
                         ),
                     ],
                     keys: Some(vec![
-                        TableKey::FulltextKey(
-                            Some("index_comments_on_comment".into()),
-                            vec![Column::from("comments.comment")]
-                        ),
+                        TableKey::FulltextKey {
+                            name: Some("index_comments_on_comment".into()),
+                            columns: vec![Column::from("comments.comment")]
+                        },
                         TableKey::Key {
                             name: "confidence_idx".into(),
                             columns: vec![Column::from("comments.confidence")],
