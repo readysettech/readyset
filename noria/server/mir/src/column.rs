@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::mem;
 
-use nom_sql::{self, FunctionExpression, SqlIdentifier};
+use nom_sql::{self, SqlIdentifier};
 use serde::{Deserialize, Serialize};
 
 // FIXME: this is _not_ okay! malte knows about it
@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 pub struct Column {
     pub table: Option<SqlIdentifier>,
     pub name: SqlIdentifier,
-    pub function: Option<Box<FunctionExpression>>,
     pub aliases: Vec<Column>,
 }
 
@@ -19,7 +18,6 @@ impl Column {
         Column {
             table: table.map(Into::into),
             name: name.into(),
-            function: None,
             aliases: vec![],
         }
     }
@@ -31,7 +29,6 @@ impl Column {
         Self {
             table: None,
             name: name.into(),
-            function: None,
             aliases: vec![],
         }
     }
@@ -47,7 +44,6 @@ impl Column {
             name,
             table: self.table.clone(),
             aliases: vec![],
-            function: self.function.clone(),
         });
         self
     }
@@ -59,7 +55,6 @@ impl From<nom_sql::Column> for Column {
             table: c.table.map(Into::into),
             aliases: vec![],
             name: c.name,
-            function: None,
         }
     }
 }
@@ -70,7 +65,6 @@ impl<'a> From<&'a nom_sql::Column> for Column {
             table: c.table.as_deref().map(Into::into),
             aliases: vec![],
             name: c.name.clone(),
-            function: None,
         }
     }
 }
@@ -82,13 +76,11 @@ impl<'a> From<&'a str> for Column {
             None => Column {
                 table: None,
                 name: c.into(),
-                function: None,
                 aliases: vec![],
             },
             Some(i) => Column {
                 name: c[i + 1..].into(),
                 table: Some(c[0..i].into()),
-                function: None,
                 aliases: vec![],
             },
         }
@@ -152,7 +144,6 @@ mod tests {
             Column {
                 table: Some("t".into()),
                 name: "col".into(),
-                function: None,
                 aliases: vec![],
             }
         );
@@ -164,7 +155,6 @@ mod tests {
         let ac = Column {
             table: Some("t".into()),
             name: "al".into(),
-            function: None,
             aliases: vec![c.clone()],
         };
 
