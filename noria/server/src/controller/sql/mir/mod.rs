@@ -6,7 +6,6 @@ use ::serde::{Deserialize, Serialize};
 use common::IndexType;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::union;
-use itertools::Itertools;
 use lazy_static::lazy_static;
 use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};
@@ -53,7 +52,7 @@ fn value_columns_needed_for_predicates(
     value_columns: &[OutputColumn],
     predicates: &[Expression],
 ) -> Vec<(Column, OutputColumn)> {
-    let pred_columns: HashSet<Column> = predicates
+    let pred_columns: Vec<Column> = predicates
         .iter()
         .flat_map(|p| p.referred_columns())
         .map(|col| col.clone().into())
@@ -1093,18 +1092,30 @@ impl SqlToMirConverter {
         name: &SqlIdentifier,
         aggregates: &[MirNodeRef; 2],
     ) -> ReadySetResult<MirNodeRef> {
-        let fields = aggregates
+        let mut columns = aggregates
             .iter()
             .flat_map(|node| node.borrow().columns().to_owned())
-            .unique()
-            .collect::<Vec<Column>>();
+            .collect::<Vec<_>>();
+        // Crappy quadratic column deduplication, because we don't have Hash or Ord for Column due
+        // to aliases affecting equality
+        let mut i = columns.len() - 1;
+        while i > 0 {
+            let col = &columns[i];
+            if columns[..i].contains(col) || columns[(i + 1)..].contains(col) {
+                columns.remove(i);
+            } else if i == 0 {
+                break;
+            } else {
+                i -= 1;
+            }
+        }
 
         let inner = MirNodeInner::JoinAggregates;
         trace!(?inner, "Added join node");
         Ok(MirNode::new(
             name.clone(),
             self.schema_version,
-            fields,
+            columns,
             inner,
             aggregates.iter().map(MirNodeRef::downgrade).collect(),
             vec![],
@@ -1487,15 +1498,15 @@ impl SqlToMirConverter {
     fn predicates_above_group_by<'a>(
         &self,
         name: &SqlIdentifier,
-        column_to_predicates: &HashMap<Column, Vec<&'a Expression>>,
-        over_col: Column,
+        column_to_predicates: &HashMap<nom_sql::Column, Vec<&'a Expression>>,
+        over_col: &nom_sql::Column,
         parent: MirNodeRef,
         created_predicates: &mut Vec<&'a Expression>,
     ) -> ReadySetResult<Vec<MirNodeRef>> {
         let mut predicates_above_group_by_nodes = Vec::new();
         let mut prev_node = parent;
 
-        let ces = column_to_predicates.get(&over_col).unwrap();
+        let ces = column_to_predicates.get(over_col).unwrap();
         for ce in ces {
             // If we have two aggregates over the same column, we will skip this step for the
             // second aggregate
@@ -1682,7 +1693,8 @@ impl SqlToMirConverter {
 
             // 3. Get columns used by each predicate. This will be used to check
             // if we need to reorder predicates before group_by nodes.
-            let mut column_to_predicates: HashMap<Column, Vec<&Expression>> = HashMap::new();
+            let mut column_to_predicates: HashMap<nom_sql::Column, Vec<&Expression>> =
+                HashMap::new();
 
             for rel in &sorted_rels {
                 let qgn = qg.relations.get(*rel).ok_or_else(|| {
@@ -1691,7 +1703,7 @@ impl SqlToMirConverter {
                 for pred in qgn.predicates.iter().chain(&qg.global_predicates) {
                     for col in pred.referred_columns() {
                         column_to_predicates
-                            .entry(col.into())
+                            .entry(col.clone())
                             .or_default()
                             .push(pred);
                     }

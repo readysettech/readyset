@@ -790,11 +790,6 @@ fn make_join_aggregates_node(
 
     let column_names = column_names(columns);
 
-    // Build up maps from each parents columns to those columns indices. Necessary for building up
-    // Vec<JoinSource> below.
-    let left_map = node_columns_to_idx_map(left.clone());
-    let right_map = node_columns_to_idx_map(right.clone());
-
     // We gather up all of the columns from each respective parent. If a column is in both parents,
     // then we know it was a group_by column and create a JoinSource::B type with the indices from
     // both parents. Otherwise if the column is exclusively in the left parent (such as the
@@ -807,10 +802,10 @@ fn make_join_aggregates_node(
         .iter()
         .enumerate()
         .map(|(i, c)| {
-            if let Some(j) = right_map.get(c) {
+            if let Ok(j) = right.borrow().column_id_for_column(c) {
                 // If the column was found in both, it's a group_by column and gets added as
                 // JoinSource::B.
-                JoinSource::B(i, *j)
+                JoinSource::B(i, j)
             } else {
                 // Column exclusively in left parent, so gets added as JoinSource::L.
                 JoinSource::L(i)
@@ -825,7 +820,7 @@ fn make_join_aggregates_node(
                 .filter_map(|(i, c)| {
                     // If column is in left, don't do anything it's already been added.
                     // If it's in right, add it with right index.
-                    if left_map.contains_key(c) {
+                    if left.borrow().column_id_for_column(c).is_ok() {
                         None
                     } else {
                         // Column exclusively in right parent, so gets added as JoinSource::R.
@@ -844,17 +839,6 @@ fn make_join_aggregates_node(
     let n = mig.add_ingredient(String::from(name), column_names.as_slice(), j);
 
     Ok(FlowNode::New(n))
-}
-
-// Builds up a map from the nodes columns, to the indices those columns exist at in the nodes
-// columns list.
-fn node_columns_to_idx_map(node: MirNodeRef) -> HashMap<Column, usize> {
-    node.borrow()
-        .columns
-        .iter()
-        .enumerate()
-        .map(|(i, c)| (c.clone(), i))
-        .collect()
 }
 
 fn make_latest_node(
