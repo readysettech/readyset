@@ -127,7 +127,7 @@ fn mir_node_to_flow_parts(
                     make_grouped_node(
                         &name,
                         parent,
-                        mir_node.columns.as_slice(),
+                        &mir_node.columns(),
                         on,
                         group_by,
                         GroupedNodeType::Aggregation(kind.clone()),
@@ -166,7 +166,7 @@ fn mir_node_to_flow_parts(
                     make_grouped_node(
                         &name,
                         parent,
-                        mir_node.columns.as_slice(),
+                        &mir_node.columns(),
                         on,
                         group_by,
                         GroupedNodeType::Extremum(kind.clone()),
@@ -177,19 +177,13 @@ fn mir_node_to_flow_parts(
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     #[allow(clippy::unwrap_used)] // checked by above invariant
                     let parent = mir_node.first_ancestor().unwrap();
-                    make_filter_node(
-                        &name,
-                        parent,
-                        mir_node.columns.as_slice(),
-                        conditions.clone(),
-                        mig,
-                    )?
+                    make_filter_node(&name, parent, &mir_node.columns(), conditions.clone(), mig)?
                 }
                 MirNodeInner::Identity => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     #[allow(clippy::unwrap_used)] // checked by above invariant
                     let parent = mir_node.first_ancestor().unwrap();
-                    make_identity_node(&name, parent, mir_node.columns.as_slice(), mig)?
+                    make_identity_node(&name, parent, &mir_node.columns(), mig)?
                 }
                 MirNodeInner::Join {
                     ref on_left,
@@ -205,7 +199,7 @@ fn mir_node_to_flow_parts(
                         &name,
                         left,
                         right,
-                        mir_node.columns.as_slice(),
+                        &mir_node.columns(),
                         on_left,
                         on_right,
                         project,
@@ -219,7 +213,7 @@ fn mir_node_to_flow_parts(
                     let left = mir_node.ancestors[0].upgrade().unwrap();
                     #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
                     let right = mir_node.ancestors[1].upgrade().unwrap();
-                    make_join_aggregates_node(&name, left, right, mir_node.columns.as_slice(), mig)?
+                    make_join_aggregates_node(&name, left, right, &mir_node.columns(), mig)?
                 }
                 MirNodeInner::DependentJoin { .. } => {
                     // See the docstring for MirNodeInner::DependentJoin
@@ -229,7 +223,7 @@ fn mir_node_to_flow_parts(
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     #[allow(clippy::unwrap_used)] // checked by above invariant
                     let parent = mir_node.first_ancestor().unwrap();
-                    make_latest_node(&name, parent, mir_node.columns.as_slice(), group_by, mig)?
+                    make_latest_node(&name, parent, &mir_node.columns(), group_by, mig)?
                 }
                 MirNodeInner::Leaf {
                     ref keys,
@@ -278,7 +272,7 @@ fn mir_node_to_flow_parts(
                         &name,
                         left,
                         right,
-                        mir_node.columns.as_slice(),
+                        &mir_node.columns(),
                         on_left,
                         on_right,
                         project,
@@ -297,7 +291,7 @@ fn mir_node_to_flow_parts(
                     make_project_node(
                         &name,
                         parent,
-                        mir_node.columns.as_slice(),
+                        &mir_node.columns(),
                         emit,
                         expressions,
                         literals,
@@ -325,7 +319,7 @@ fn mir_node_to_flow_parts(
                     #[allow(clippy::unwrap_used)]
                     make_union_node(
                         &name,
-                        mir_node.columns.as_slice(),
+                        &mir_node.columns(),
                         emit,
                         &mir_node
                             .ancestors()
@@ -340,7 +334,7 @@ fn mir_node_to_flow_parts(
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     #[allow(clippy::unwrap_used)] // checked by above invariant
                     let parent = mir_node.first_ancestor().unwrap();
-                    make_distinct_node(&name, parent, mir_node.columns.as_slice(), group_by, mig)?
+                    make_distinct_node(&name, parent, &mir_node.columns(), group_by, mig)?
                 }
                 MirNodeInner::Paginate {
                     ref order,
@@ -359,7 +353,7 @@ fn mir_node_to_flow_parts(
                     make_paginate_or_topk_node(
                         &name,
                         parent,
-                        mir_node.columns.as_slice(),
+                        &mir_node.columns(),
                         order,
                         group_by,
                         limit,
@@ -643,10 +637,10 @@ fn make_join_node(
     let (projected_cols_left, rest): (Vec<Column>, Vec<Column>) = proj_cols
         .iter()
         .cloned()
-        .partition(|c| left.borrow().columns.contains(c));
+        .partition(|c| left.borrow().columns().contains(c));
     let (projected_cols_right, rest): (Vec<Column>, Vec<Column>) = rest
         .into_iter()
-        .partition(|c| right.borrow().columns.contains(c));
+        .partition(|c| right.borrow().columns().contains(c));
     invariant!(
         rest.is_empty(),
         "could not resolve output columns projected from join: {:?}",
@@ -673,27 +667,27 @@ fn make_join_node(
         .map(|(l, r)| -> ReadySetResult<_> {
             let left_join_col_id = left
                 .borrow()
-                .columns
+                .columns()
                 .iter()
                 .position(|lc| lc == l)
                 .ok_or_else(|| {
                     internal_err(format!(
                         "missing left-side join column {:#?} in {:#?}",
                         on_left.first(),
-                        left.borrow().columns
+                        left.borrow().columns()
                     ))
                 })?;
 
             let right_join_col_id = right
                 .borrow()
-                .columns
+                .columns()
                 .iter()
                 .position(|rc| rc == r)
                 .ok_or_else(|| {
                     internal_err(format!(
                         "missing right-side join column {:#?} in {:#?}",
                         on_right.first(),
-                        right.borrow().columns
+                        right.borrow().columns()
                     ))
                 })?;
 
@@ -705,7 +699,7 @@ fn make_join_node(
     let mut from_right = 0;
     let mut join_config: Vec<_> = left
         .borrow()
-        .columns
+        .columns()
         .iter()
         .enumerate()
         .filter_map(|(i, c)| {
@@ -722,7 +716,7 @@ fn make_join_node(
         .chain(
             right
                 .borrow()
-                .columns
+                .columns()
                 .iter()
                 .enumerate()
                 .filter_map(|(i, c)| {
@@ -753,7 +747,7 @@ fn make_join_node(
                 &format!("{}_cross_join_bogokey", node.borrow().name()),
                 node.clone(),
                 &node_columns,
-                node.borrow().columns(),
+                &node.borrow().columns(),
                 &[],
                 &[("cross_join_bogokey".into(), DataType::from(0))],
                 mig,
@@ -798,7 +792,7 @@ fn make_join_aggregates_node(
     // parent as JoinSource::R with the right parent index for each given unique column.
     let join_config = left
         .borrow()
-        .columns
+        .columns()
         .iter()
         .enumerate()
         .map(|(i, c)| {
@@ -814,7 +808,7 @@ fn make_join_aggregates_node(
         .chain(
             right
                 .borrow()
-                .columns
+                .columns()
                 .iter()
                 .enumerate()
                 .filter_map(|(i, c)| {

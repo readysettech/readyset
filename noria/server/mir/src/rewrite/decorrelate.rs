@@ -128,7 +128,7 @@ fn push_dependent_filter(
                 .borrow()
                 .columns()
                 .to_vec();
-            descendant.borrow_mut().columns = columns;
+            descendant.borrow_mut().set_columns(columns);
         }
     }
 

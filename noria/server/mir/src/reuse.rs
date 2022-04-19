@@ -1,7 +1,6 @@
 use tracing::trace;
 
 use crate::column::Column;
-use crate::node::node_inner::MirNodeInner;
 use crate::node::MirNode;
 use crate::query::MirQuery;
 use crate::MirNodeRef;
@@ -31,9 +30,7 @@ pub fn rewind_until_columns_found(leaf: MirNodeRef, columns: &[Column]) -> Optio
 
 #[allow(clippy::cognitive_complexity)]
 pub fn merge_mir_for_queries(new_query: &MirQuery, old_query: &MirQuery) -> (MirQuery, usize) {
-    use std::cell::RefCell;
     use std::collections::{HashMap, HashSet, VecDeque};
-    use std::rc::Rc;
 
     let mut trace_nodes = VecDeque::new();
     for old_base in &old_query.roots {
@@ -61,25 +58,7 @@ pub fn merge_mir_for_queries(new_query: &MirQuery, old_query: &MirQuery) -> (Mir
         trace!("found reuseable node {:?} for {:?}, continuing", old, new);
         assert!(!reuse.contains_key(&new_id));
 
-        let reuse_node;
-        {
-            let o_ref = old.clone();
-            let o = old.borrow();
-            // Note that we manually build the `MirNode` here, rather than calling `MirNode::new()`
-            // because `new()` automatically registers the node as a child with its ancestors. We
-            // don't want to do this here because we later re-write the ancestors' child that this
-            // node replaces to point to this node.
-            reuse_node = Rc::new(RefCell::new(MirNode {
-                name: o.name.clone(),
-                from_version: o.from_version,
-                columns: o.columns.clone(),
-                inner: MirNodeInner::Reuse { node: o_ref },
-                ancestors: o.ancestors.clone(),
-                children: o.children.clone(),
-                flow_node: None,
-            }));
-        }
-        reuse.insert(new_id.clone(), reuse_node);
+        reuse.insert(new_id.clone(), MirNode::new_reuse(old.clone()));
 
         // look for matching old node children for each of the new node's children.
         // If any are found, we can continue exploring that path, as the new query contains one
