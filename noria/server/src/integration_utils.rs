@@ -1,4 +1,5 @@
 use std::env;
+use std::fmt::Display;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -6,6 +7,7 @@ use dataflow::{DurabilityMode, PersistenceParameters};
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::metrics::client::MetricsClient;
 use noria::metrics::{DumpedMetric, DumpedMetricValue, MetricsDump};
+use noria_errors::{ReadySetError, ReadySetResult};
 
 use crate::metrics::{
     get_global_recorder, install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,
@@ -161,6 +163,43 @@ pub fn get_counter(metric: &str, metrics_dump: &MetricsDump) -> f64 {
         v
     } else {
         panic!("{} is not a counter", metric);
+    }
+}
+
+pub fn assert_table_not_found<T, S>(err: ReadySetResult<T>, table_name: S)
+where
+    S: Into<String> + Display,
+{
+    let table_name: String = table_name.into();
+    match err {
+        Err(ReadySetError::TableNotFound(name))
+        | Err(ReadySetError::RpcFailed {
+            source: box ReadySetError::TableNotFound(name),
+            ..
+        }) => assert_eq!(*name, table_name),
+        _ => panic!("Expected table not found error for table {}", table_name),
+    }
+}
+
+pub fn assert_view_not_found<T, S>(err: ReadySetResult<T>, view_name: S)
+where
+    S: Into<String> + Display,
+{
+    let view_name: String = view_name.into();
+    match err {
+        Err(ReadySetError::ViewNotFound(name))
+        | Err(ReadySetError::ViewNotFoundInWorkers { name, .. })
+        | Err(ReadySetError::RpcFailed {
+            source: box ReadySetError::ViewNotFound(name),
+            ..
+        })
+        | Err(ReadySetError::RpcFailed {
+            source: box ReadySetError::ViewNotFoundInWorkers { name, .. },
+            ..
+        }) => {
+            assert_eq!(*name, view_name)
+        }
+        _ => panic!("Expected view not found error for view {}", view_name),
     }
 }
 

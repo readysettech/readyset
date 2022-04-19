@@ -16,7 +16,9 @@ use nom_sql::{
     Table,
 };
 use noria::internal::IndexType;
-use noria_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
+use noria_errors::{
+    internal, internal_err, invalid_err, unsupported, ReadySetError, ReadySetResult,
+};
 use noria_sql_passes::alias_removal::TableAliasRewrite;
 use noria_sql_passes::{
     contains_aggregate, AliasRemoval, CountStarRewrite, DetectProblematicSelfJoins,
@@ -75,8 +77,10 @@ pub(crate) struct SqlIncorporator {
     mir_converter: SqlToMirConverter,
     leaf_addresses: HashMap<SqlIdentifier, NodeIndex>,
 
+    /// Stores VIEWs and CACHE queries.
     named_queries: HashMap<SqlIdentifier, u64>,
     query_graphs: HashMap<u64, QueryGraph>,
+    /// Stores CREATE TABLE statements.
     base_mir_queries: HashMap<SqlIdentifier, MirQuery>,
     mir_queries: HashMap<u64, MirQuery>,
     num_queries: usize,
@@ -629,7 +633,9 @@ impl SqlIncorporator {
         }
     }
 
-    pub(super) fn remove_base(&mut self, name: &SqlIdentifier) -> ReadySetResult<()> {
+    /// Removes the base table with the given `name`, and all the MIR queries
+    /// that depend on it.
+    pub(super) fn remove_base(&mut self, name: &SqlIdentifier) -> ReadySetResult<NodeIndex> {
         debug!(%name, "Removing base from SqlIncorporator");
         if self.base_schemas.remove(name).is_none() {
             warn!(
@@ -641,7 +647,7 @@ impl SqlIncorporator {
         let mir = self
             .base_mir_queries
             .remove(name)
-            .ok_or_else(|| internal_err(format!("tried to remove unknown base {}", name)))?;
+            .ok_or_else(|| invalid_err(format!("tried to remove unknown base {}", name)))?;
         let roots = mir
             .roots
             .iter()
@@ -654,7 +660,11 @@ impl SqlIncorporator {
                 .any(|root| roots.contains(&root.borrow().name))
         });
 
-        self.mir_converter.remove_base(name, &mir)
+        self.mir_converter.remove_base(name, &mir)?;
+
+        self.leaf_addresses
+            .remove(name)
+            .ok_or_else(|| invalid_err(format!("tried to remove unknown base {}", name)))
     }
 
     fn register_query(

@@ -361,8 +361,7 @@ impl Recipe {
                 // nodes; the code handling `removed_leaves` therefore needs to take care
                 // not to remove bases while they still have children, or to try removing
                 // them twice.
-                self.inc.remove_base(name)?;
-                match self.node_addr_for(name) {
+                match self.inc.remove_base(name) {
                     Ok(ni) => ni,
                     Err(e) => {
                         error!(
