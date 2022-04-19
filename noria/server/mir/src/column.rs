@@ -5,8 +5,7 @@ use nom_sql::{self, SqlIdentifier};
 use serde::{Deserialize, Serialize};
 
 // FIXME: this is _not_ okay! malte knows about it
-#[allow(clippy::derive_hash_xor_eq)]
-#[derive(Clone, Debug, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Column {
     pub table: Option<SqlIdentifier>,
     pub name: SqlIdentifier,

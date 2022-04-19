@@ -23,7 +23,7 @@ pub(super) fn make_predicates_above_grouped<'a>(
     qg: &QueryGraph,
     node_for_rel: &HashMap<&SqlIdentifier, MirNodeRef>,
     node_count: usize,
-    column_to_predicates: &HashMap<Column, Vec<&'a Expression>>,
+    column_to_predicates: &HashMap<nom_sql::Column, Vec<&'a Expression>>,
     prev_node: &mut Option<MirNodeRef>,
 ) -> ReadySetResult<(Vec<&'a Expression>, Vec<MirNodeRef>)> {
     let mut created_predicates = Vec::new();
@@ -36,9 +36,8 @@ pub(super) fn make_predicates_above_grouped<'a>(
                 .table
                 .as_ref()
                 .ok_or_else(|| ReadySetError::NoSuchColumn(over_col.name.to_string()))?;
-            let col = Column::from(over_col.clone());
 
-            if column_to_predicates.contains_key(&col) {
+            if column_to_predicates.contains_key(over_col) {
                 let parent = match *prev_node {
                     Some(ref p) => p.clone(),
                     None => node_for_rel[over_table].clone(),
@@ -47,7 +46,7 @@ pub(super) fn make_predicates_above_grouped<'a>(
                 let new_mpns = mir_converter.predicates_above_group_by(
                     &format!("{}_n{}", name, node_count).into(),
                     column_to_predicates,
-                    col,
+                    over_col,
                     parent,
                     &mut created_predicates,
                 )?;
