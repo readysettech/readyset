@@ -41,14 +41,10 @@ services:
       QUERY_LOG: 1
       QUERY_LOG_AD_HOC: 1
     links:
-      - readyset-server
       - postgres
       - consul
     volumes:
       - readyset-server-state:/state
-    depends_on:
-      readyset-server:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "pg_isready", "-h127.0.0.1", "--port=5433"]
       start_period: 5s
