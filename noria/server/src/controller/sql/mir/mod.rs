@@ -847,8 +847,6 @@ impl SqlToMirConverter {
         };
 
         Ok(match function {
-            // TODO: support more types of filter expressions
-            // CH: https://app.clubhouse.io/readysettech/story/193
             Sum {
                 expr: box Expression::Column(col),
                 distinct,
