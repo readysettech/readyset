@@ -95,7 +95,7 @@ pub(super) fn make_expressions_above_grouped(
         let node = mir_converter.make_project_node(
             &format!("{}_n{}", name, node_count).into(),
             prev_node.clone().unwrap(),
-            cols.iter().collect(),
+            cols,
             exprs.clone(),
             vec![],
             false,
@@ -214,7 +214,6 @@ pub(super) fn make_grouped(
                 // TODO(grfn) this double-collect is really gross- make_projection_helper takes
                 // a Vec<&mir::Column> but we have a Vec<&nom_sql::Column> and there's no way to
                 // make the former from the latter without doing some upsetting allocations
-                let fn_cols = fn_cols.iter().collect();
                 let proj = mir_converter.make_projection_helper(&proj_name, parent_node, fn_cols);
 
                 agg_nodes.push(proj.clone());
@@ -233,7 +232,7 @@ pub(super) fn make_grouped(
             &name,
             Column::named(alias.clone()),
             function.clone(),
-            group_cols.iter().collect(),
+            group_cols,
             parent_node.clone(),
             projected_exprs,
         )?;
