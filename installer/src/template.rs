@@ -1,33 +1,21 @@
 use std::include_str;
 
 use crate::constants::{
-    CONSUL_POSTFIX, IMG_PREFIX, MYSQL_POSTFIX, POSTGRES_POSTFIX, READYSET_MYSQL_POSTFIX,
+    CONSUL_TAG, IMG_PREFIX, MYSQL_TAG, POSTGRES_TAG, READYSET_MYSQL_POSTFIX,
     READYSET_POSTGRES_POSTFIX, READYSET_SERVER_POSTFIX, READYSET_TAG,
 };
 use crate::deployment::Engine;
 use crate::docker_compose::Compose;
 
-fn consul_img() -> String {
-    format!("{}{}", IMG_PREFIX, CONSUL_POSTFIX)
-}
-
-fn mysql_img() -> String {
-    format!("{}{}", IMG_PREFIX, MYSQL_POSTFIX)
-}
-
-fn postgres_img() -> String {
-    format!("{}{}", IMG_PREFIX, POSTGRES_POSTFIX)
-}
-
-fn server_img() -> String {
+pub fn server_img() -> String {
     format!("{}{}:{}", IMG_PREFIX, READYSET_SERVER_POSTFIX, READYSET_TAG)
 }
 
-fn mysql_adapter_img() -> String {
+pub fn mysql_adapter_img() -> String {
     format!("{}{}:{}", IMG_PREFIX, READYSET_MYSQL_POSTFIX, READYSET_TAG)
 }
 
-fn postgres_adapter_img() -> String {
+pub fn postgres_adapter_img() -> String {
     format!(
         "{}{}:{}",
         IMG_PREFIX, READYSET_POSTGRES_POSTFIX, READYSET_TAG
@@ -50,8 +38,8 @@ fn generate_base_mysql_template(standalone: bool) -> Compose {
 
     let mut template: Compose = serde_yaml::from_str::<Compose>(base_yml).unwrap();
     if let Some(ref mut services) = template.services {
-        services.set_service_img("consul", consul_img());
-        services.set_service_img("mysql", mysql_img());
+        services.set_service_img("consul", CONSUL_TAG.to_owned());
+        services.set_service_img("mysql", MYSQL_TAG.to_owned());
         services.set_service_img("readyset-server", server_img());
         services.set_service_img("readyset-adapter", mysql_adapter_img());
     }
@@ -67,8 +55,8 @@ fn generate_base_postgres_template(standalone: bool) -> Compose {
 
     let mut template: Compose = serde_yaml::from_str::<Compose>(base_yml).unwrap();
     if let Some(ref mut services) = template.services {
-        services.set_service_img("consul", consul_img());
-        services.set_service_img("postgres", postgres_img());
+        services.set_service_img("consul", CONSUL_TAG.to_owned());
+        services.set_service_img("postgres", POSTGRES_TAG.to_owned());
         services.set_service_img("readyset-server", server_img());
         if !standalone {
             services.set_service_img("readyset-server", server_img());
@@ -102,8 +90,8 @@ mod tests {
 
     #[test]
     fn images_match() {
-        let want_consul = consul_img();
-        let want_mysql = mysql_img();
+        let want_consul = CONSUL_TAG.to_owned();
+        let want_mysql = MYSQL_TAG.to_owned();
         let want_server = server_img();
         let want_adapter = mysql_adapter_img();
 

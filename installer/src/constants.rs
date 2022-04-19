@@ -1,14 +1,14 @@
 /// The image prefix for of all our internally held images.
 pub const IMG_PREFIX: &str = "305232526136.dkr.ecr.us-east-2.amazonaws.com";
 
-/// The postfix for our internally mirrored consul image.
-pub const CONSUL_POSTFIX: &str = "/mirror/consul";
+/// The image tag for the consul container
+pub const CONSUL_TAG: &str = "consul";
 
-/// The postfix for our internally mirrored mysql 8.0 image.
-pub const MYSQL_POSTFIX: &str = "/mirror/mysql:8.0";
+/// The image tag for the mysql container
+pub const MYSQL_TAG: &str = "mysql:8.0";
 
-/// The postfix for our internally mirrored postgres 13 image.
-pub const POSTGRES_POSTFIX: &str = "/mirror/postgres:13";
+/// The image tag for the postgres container
+pub const POSTGRES_TAG: &str = "postgres:13";
 
 /// The postfix for our hosted readyset-server image.
 pub const READYSET_SERVER_POSTFIX: &str = "/readyset-server";
@@ -20,4 +20,18 @@ pub const READYSET_MYSQL_POSTFIX: &str = "/readyset-mysql";
 pub const READYSET_POSTGRES_POSTFIX: &str = "/readyset-psql";
 
 /// The current release tag for our readyset-server and readyset-mysql images.
-pub const READYSET_TAG: &str = "release-b58f0ba68d44c06ca3e8c2905dab35743442c6db";
+pub const READYSET_TAG: &str = "release-dfe71ca7318b85776269e24b15db02f6c8f1e1d4";
+
+// TODO: TEMPORARY CONSTANTS. SHOULD BE REMOVED WHEN WE HAVE AN ARTIFACT REGISTRY.
+
+/// Readyset self hosted container images prefix.
+pub const READYSET_URL_PREFIX: &str = "https://launch.readyset.io/docker-images/latest/";
+
+/// Server image location minus release and tar.gz ending.
+pub const READYSET_SERVER_FILE_PREFIX: &str = "readyset-server";
+
+/// readyset-mysql adapter image location minus release and tar.gz ending.
+pub const READYSET_MYSQL_ADAPTER_FILE_PREFIX: &str = "readyset-mysql";
+
+/// readyset-PSQL adapter image location minus release and tar.gz ending.
+pub const READYSET_PSQL_ADAPTER_FILE_PREFIX: &str = "readyset-psql";

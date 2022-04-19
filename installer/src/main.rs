@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::{env, iter};
 
 use ::console::{style, Emoji};
@@ -15,6 +16,10 @@ use aws_types::credentials::{CredentialsError, ProvideCredentials};
 use aws_types::region::Region;
 use aws_types::{Credentials, SdkConfig};
 use clap::Parser;
+use constants::{
+    READYSET_MYSQL_ADAPTER_FILE_PREFIX, READYSET_PSQL_ADAPTER_FILE_PREFIX,
+    READYSET_SERVER_FILE_PREFIX, READYSET_TAG, READYSET_URL_PREFIX,
+};
 use deployment::{
     DatabaseCredentials, Deployment, DeploymentData, DockerComposeDeployment, MigrationMode,
     TemplateType,
@@ -33,6 +38,7 @@ use rusoto_credential::ProfileProvider;
 use ssm::model::{ParameterStringFilter, ParameterType};
 use tokio::fs::{DirBuilder, File, OpenOptions};
 use tokio::io::AsyncWriteExt;
+use tokio::join;
 use tokio::process::Command;
 use {
     aws_sdk_cloudformation as cfn, aws_sdk_ec2 as ec2, aws_sdk_kms as kms, aws_sdk_rds as rds,
@@ -60,6 +66,7 @@ pub use crate::deployment::CloudformationDeployment;
 use crate::deployment::{
     CreateNew, DatabasePasswordParameter, DeploymentStatus, Engine, Existing, MaybeExisting, RdsDb,
 };
+use crate::template::{mysql_adapter_img, postgres_adapter_img, server_img};
 
 /// List of regions where we deploy AMIs.
 ///
@@ -343,6 +350,60 @@ impl Installer {
         Ok(())
     }
 
+    /// Downloads necessary docker images needed for local deployment.
+    pub async fn download_and_load_docker_images(&mut self, engine: Engine) -> Result<()> {
+        let download_spinner =
+            spinner().with_message(format!("{}", style("Downloading docker images").bold()));
+        let server_fut = reqwest::get(readyset_server_url());
+        let adapter_fut = match engine {
+            Engine::MySQL => reqwest::get(readyset_mysql_adapter_url()),
+            Engine::PostgreSQL => reqwest::get(readyset_psql_adapter_url()),
+        };
+        // TODO(peter): Consider chunking these downloads, as they may be large.
+        let (server_res, adapter_res) = join!(server_fut, adapter_fut);
+        let server_contents = server_res?.bytes().await?;
+        let adapter_contents = adapter_res?.bytes().await?;
+        download_spinner.finish_with_message(format!(
+            "{}",
+            style("Finished downloading docker images").bold()
+        ));
+
+        let (saved_adapter_img_name, new_adapter_img_name) = match engine {
+            Engine::MySQL => (
+                format!("readyset-mysql:{}", READYSET_TAG),
+                mysql_adapter_img(),
+            ),
+            Engine::PostgreSQL => (
+                format!("readyset-psql:{}", READYSET_TAG),
+                postgres_adapter_img(),
+            ),
+        };
+
+        let load_spinner =
+            spinner().with_message(format!("{}", style("Loading docker images").bold()));
+
+        load_and_tag(
+            server_contents.as_ref(),
+            &format!("readyset-server:{}", READYSET_TAG),
+            &server_img(),
+        )
+        .await?;
+
+        load_and_tag(
+            adapter_contents.as_ref(),
+            &saved_adapter_img_name,
+            &new_adapter_img_name,
+        )
+        .await?;
+
+        load_spinner.finish_with_message(format!(
+            "{}",
+            style("Finished loading docker images").bold()
+        ));
+
+        Ok(())
+    }
+
     /// Run the install process for deploying locally using docker-compose, picking up where the
     /// user left off if necessary.
     pub async fn run_compose(&mut self) -> Result<()> {
@@ -352,6 +413,13 @@ impl Installer {
 
         self.check_docker_version_and_running().await?;
         self.check_docker_compose_version().await?;
+
+        if confirm()
+            .with_prompt("Would you like to download and load docker containers necessary for locally deploying ReadySet?")
+            .interact()?
+        {
+            self.download_and_load_docker_images(self.deployment.db_type).await?;
+        }
 
         let compose = Compose::try_from(&self.deployment)?;
 
@@ -2294,6 +2362,66 @@ impl Installer {
             .aws_region
             .insert(REGIONS[idx].to_owned()))
     }
+}
+
+// TODO(peter): Consider switching over to bollard over shelling out to docker directly.
+/// Loads the docker image and re-tags it based on the provided pre and post tags.
+async fn load_and_tag(container: &[u8], old_name: &str, new_name: &str) -> Result<()> {
+    let mut process = Command::new("docker")
+        .args(["load"])
+        .stdin(Stdio::piped())
+        .spawn()?;
+
+    let mut stdin = process.stdin.take().unwrap();
+    stdin.write_all(container).await?;
+    drop(stdin);
+
+    let out = process.wait().await?;
+
+    if !out.success() {
+        bail!("Failed to load docker image {}", old_name);
+    }
+
+    let out = Command::new("docker")
+        .args(["tag", old_name, new_name])
+        .output()
+        .await?;
+
+    if !out.status.success() {
+        bail!("Failed to retag {}", old_name);
+    }
+
+    Ok(())
+}
+
+fn readyset_server_file() -> String {
+    format!("{}-{}.tar.gz", READYSET_SERVER_FILE_PREFIX, READYSET_TAG)
+}
+
+fn readyset_mysql_adapter_file() -> String {
+    format!(
+        "{}-{}.tar.gz",
+        READYSET_MYSQL_ADAPTER_FILE_PREFIX, READYSET_TAG
+    )
+}
+
+fn readyset_psql_adapter_file() -> String {
+    format!(
+        "{}-{}.tar.gz",
+        READYSET_PSQL_ADAPTER_FILE_PREFIX, READYSET_TAG
+    )
+}
+
+fn readyset_server_url() -> String {
+    format!("{}{}", READYSET_URL_PREFIX, readyset_server_file(),)
+}
+
+fn readyset_mysql_adapter_url() -> String {
+    format!("{}{}", READYSET_URL_PREFIX, readyset_mysql_adapter_file(),)
+}
+
+fn readyset_psql_adapter_url() -> String {
+    format!("{}{}", READYSET_URL_PREFIX, readyset_psql_adapter_file(),)
 }
 
 #[tokio::main]
