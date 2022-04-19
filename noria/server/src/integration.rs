@@ -8303,9 +8303,9 @@ async fn simple_drop_tables() {
 
     sleep().await;
 
-    assert!(g.table("table_1").await.is_err());
-    assert!(g.table("table_2").await.is_err());
-    assert!(g.view("t1").await.is_err());
+    assert_table_not_found(g.table("table_1").await, "table_1");
+    assert_table_not_found(g.table("table_2").await, "table_2");
+    assert_view_not_found(g.view("t1").await, "t1");
 
     let create_new_table = "CREATE TABLE table_3 (column_3 INT);";
     g.extend_recipe(create_new_table.parse().unwrap())
@@ -8338,10 +8338,10 @@ async fn join_drop_tables() {
 
     sleep().await;
 
-    assert!(g.table("table_1").await.is_err());
-    assert!(g.table("table_2").await.is_err());
+    assert_table_not_found(g.table("table_1").await, "table_1");
+    assert_table_not_found(g.table("table_2").await, "table_2");
     assert!(g.table("table_3").await.is_ok());
-    assert!(g.view("t1").await.is_err());
+    assert_view_not_found(g.view("t1").await, "t1");
 
     let create_new_table = "CREATE TABLE table_1 (column_1 INT);";
     g.extend_recipe(create_new_table.parse().unwrap())
@@ -8376,16 +8376,16 @@ async fn simple_drop_tables_with_data() {
 
     let drop_table = "DROP TABLE table_1, table_2;";
     g.extend_recipe(drop_table.parse().unwrap()).await.unwrap();
-    assert!(g.table("table_1").await.is_err());
-    assert!(g.table("table_2").await.is_err());
-    assert!(g.view("t1").await.is_err());
+    assert_table_not_found(g.table("table_1").await, "table_1");
+    assert_table_not_found(g.table("table_2").await, "table_2");
+    assert_view_not_found(g.view("t1").await, "t1");
 
     let recreate_table = "CREATE TABLE table_1 (column_1 INT);";
     g.extend_recipe(recreate_table.parse().unwrap())
         .await
         .unwrap();
     assert!(g.table("table_1").await.is_ok());
-    assert!(g.view("t1").await.is_err());
+    assert_view_not_found(g.view("t1").await, "t1");
 
     let recreate_query = "CREATE CACHE t2 FROM SELECT * FROM table_1";
     g.extend_recipe(recreate_query.parse().unwrap())
@@ -8444,9 +8444,9 @@ async fn simple_drop_tables_with_persisted_data() {
 
     let drop_table = "DROP TABLE table_1, table_2;";
     g.extend_recipe(drop_table.parse().unwrap()).await.unwrap();
-    assert!(g.table("table_1").await.is_err());
-    assert!(g.table("table_2").await.is_err());
-    assert!(g.view("t1").await.is_err());
+    assert_table_not_found(g.table("table_1").await, "table_1");
+    assert_table_not_found(g.table("table_2").await, "table_2");
+    assert_view_not_found(g.view("t1").await, "t1");
 
     assert!(!table_1_path.exists());
     assert!(!table_2_path.exists());
@@ -8456,7 +8456,7 @@ async fn simple_drop_tables_with_persisted_data() {
         .await
         .unwrap();
     assert!(g.table("table_1").await.is_ok());
-    assert!(g.view("t1").await.is_err());
+    assert_view_not_found(g.view("t1").await, "t1");
 
     let recreate_query = "CREATE CACHE t2 FROM SELECT * FROM table_1";
     g.extend_recipe(recreate_query.parse().unwrap())
@@ -8487,7 +8487,7 @@ async fn create_and_drop_table() {
         .unwrap();
 
     assert!(g.table("table_1").await.is_ok());
-    assert!(g.table("table_2").await.is_err());
+    assert_table_not_found(g.table("table_2").await, "table_2");
     assert!(g.table("table_3").await.is_ok());
     assert!(g.table("table_4").await.is_ok());
 }
