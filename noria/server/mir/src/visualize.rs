@@ -101,7 +101,7 @@ impl GraphViz for MirNode {
             f,
             "{} | {}",
             self.inner.to_graphviz(),
-            self.columns
+            self.columns()
                 .iter()
                 .map(|c| match c.table {
                     None => c.name.to_string(),

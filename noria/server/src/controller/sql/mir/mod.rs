@@ -366,7 +366,7 @@ impl SqlToMirConverter {
                 vec![],
             )
         } else {
-            final_node.borrow_mut().columns = sanitized_columns;
+            final_node.borrow_mut().set_columns(sanitized_columns);
             final_node
         };
 
@@ -1092,7 +1092,7 @@ impl SqlToMirConverter {
     ) -> ReadySetResult<MirNodeRef> {
         let mut columns = aggregates
             .iter()
-            .flat_map(|node| node.borrow().columns().to_owned())
+            .flat_map(|node| node.borrow().columns())
             .collect::<Vec<_>>();
         // Crappy quadratic column deduplication, because we don't have Hash or Ord for Column due
         // to aliases affecting equality

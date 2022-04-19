@@ -29,7 +29,7 @@ pub enum GroupedNodeType {
 pub struct MirNode {
     pub name: SqlIdentifier,
     pub from_version: usize,
-    pub columns: Vec<Column>,
+    columns: Vec<Column>,
     pub inner: MirNodeInner,
     #[serde(skip)]
     pub ancestors: Vec<MirNodeWeakRef>,
@@ -65,6 +65,25 @@ impl MirNode {
         }
 
         rc_mn
+    }
+
+    /// Build a new MIR node that is a reuse of the given MIR node
+    pub fn new_reuse(node: MirNodeRef) -> MirNodeRef {
+        // Note that we manually build the `MirNode` here, rather than calling `MirNode::new()`
+        // because `new()` automatically registers the node as a child with its ancestors. We
+        // don't want to do this here because we later re-write the ancestors' child that this
+        // node replaces to point to this node.
+        let n = node.borrow();
+        let node = node.clone();
+        Rc::new(RefCell::new(MirNode {
+            inner: MirNodeInner::Reuse { node },
+            flow_node: None,
+            name: n.name.clone(),
+            from_version: n.from_version,
+            columns: n.columns().to_vec(),
+            ancestors: n.ancestors.clone(),
+            children: n.children.clone(),
+        }))
     }
 
     /// Adapts an existing `Base`-type MIR Node with the specified column additions and removals.
@@ -318,8 +337,17 @@ impl MirNode {
         self.children.as_slice()
     }
 
-    pub fn columns(&self) -> &[Column] {
-        self.columns.as_slice()
+    /// Returns the list of columns in the output of this node
+    pub fn columns(&self) -> Vec<Column> {
+        self.columns.clone()
+    }
+
+    /// Set the columns for this MIR node
+    ///
+    /// TODO(grfn): this should be removed once columns are being fully derived from
+    /// [`MirNodeInner`]
+    pub fn set_columns(&mut self, columns: Vec<Column>) {
+        self.columns = columns
     }
 
     /// Finds the source of a child column within the node.
@@ -428,7 +456,7 @@ impl MirNode {
                 let parent = self.first_ancestor().unwrap();
                 // need all parent columns
                 for c in parent.borrow().columns() {
-                    if !columns.contains(c) {
+                    if !columns.contains(&c) {
                         columns.push(c.clone());
                     }
                 }

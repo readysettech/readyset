@@ -90,7 +90,7 @@ pub(super) fn make_expressions_above_grouped(
         .collect();
 
     if !exprs.is_empty() {
-        let cols = prev_node.as_ref().unwrap().borrow().columns.to_vec();
+        let cols = prev_node.as_ref().unwrap().borrow().columns().to_vec();
 
         let node = mir_converter.make_project_node(
             &format!("{}_n{}", name, node_count).into(),
