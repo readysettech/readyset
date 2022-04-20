@@ -377,7 +377,10 @@ impl<'a> PostgresReplicator<'a> {
                 .extend_recipe_no_leader_ready(view.try_into()?)
                 .await
             {
-                error!(%create_view, %err, "Error extending CREATE VIEW, view will not be used")
+                #[cfg(feature = "display_literals")]
+                error!(%create_view, %err, "Error extending CREATE VIEW, view will not be used");
+                #[cfg(not(feature = "display_literals"))]
+                error!(%err, "Error extending CREATE VIEW, view will not be used");
             }
         }
 

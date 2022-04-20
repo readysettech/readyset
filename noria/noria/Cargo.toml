@@ -101,3 +101,6 @@ name = "noria"
 
 [[example]]
 name = "quickstart"
+
+[features]
+display_literals = []

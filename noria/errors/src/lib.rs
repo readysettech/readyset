@@ -68,7 +68,11 @@ pub enum ReadySetError {
 
     /// The adapter will return this error on any set statement that is not
     /// explicitly allowed.
-    #[error("Set statement disallowed: {statement}")]
+    #[cfg_attr(
+        feature = "display_literals",
+        error("Set statement disallowed: {statement}")
+    )]
+    #[cfg_attr(not(feature = "display_literals"), error("Set statement disallowed"))]
     SetDisallowed {
         /// The set statement passed to the mysql adapter
         statement: String,
@@ -111,7 +115,14 @@ pub enum ReadySetError {
     },
 
     /// Failures during recipe creation which may indicate Noria is in an invalid state.
-    #[error("Unable to create recipe from received DDL: {0}")]
+    #[cfg_attr(
+        feature = "display_literals",
+        error("Unable to create recipe from received DDL: {0}")
+    )]
+    #[cfg_attr(
+        not(feature = "display_literals"),
+        error("Unable to create recipe from received DDL")
+    )]
     RecipeInvariantViolated(String),
 
     /// A domain couldn't be booted on the remote worker.
@@ -193,9 +204,19 @@ pub enum ReadySetError {
     /// determined by) GROUP BY columns.
     ///
     /// cf <https://dev.mysql.com/doc/refman/8.0/en/sql-mode.html#sqlmode_only_full_group_by>
-    #[error(
-        "Expression `{expression}` appears in {position} but is not functionally dependent on \
+    #[cfg_attr(
+        feature = "display_literals",
+        error(
+            "Expression `{expression}` appears in {position} but is not functionally dependent on \
              columns in the GROUP BY clause"
+        )
+    )]
+    #[cfg_attr(
+        not(feature = "display_literals"),
+        error(
+            "Expression appears in {position} but is not functionally dependent on columns in \
+            the GROUP BY clause"
+        )
     )]
     ExpressionNotInGroupBy {
         /// A string representation (via [`.to_string()`](ToString::to_string)) of the expression
@@ -277,7 +298,8 @@ pub enum ReadySetError {
     /// The query provided by the user could not be parsed by `nom-sql`.
     ///
     /// TODO(eta): extend nom-sql to be able to provide more granular parse failure information.
-    #[error("Query failed to parse: {query}")]
+    #[cfg_attr(feature = "display_literals", error("Query failed to parse: {query}"))]
+    #[cfg_attr(not(feature = "display_literals"), error("Query failed to parse"))]
     UnparseableQuery {
         /// The SQL of the query.
         query: String,
@@ -334,7 +356,14 @@ pub enum ReadySetError {
     ProjectExpressionInvalidColumnIndex(usize),
 
     /// Error in built-in function of expression projection
-    #[error("Error in project expression built-in function: {function}: {message}")]
+    #[cfg_attr(
+        feature = "display_literals",
+        error("Error in project expression built-in function: {function}: {message}")
+    )]
+    #[cfg_attr(
+        not(feature = "display_literals"),
+        error("Error in project expression built-in function: {message}")
+    )]
     ProjectExpressionBuiltInFunctionError {
         /// The built-in function the error occured in.
         function: String,
@@ -343,7 +372,14 @@ pub enum ReadySetError {
     },
 
     /// Error parsing a string into a NativeDateTime.
-    #[error("Error parsing a NativeDateTime from the string: {0}")]
+    #[cfg_attr(
+        feature = "display_literals",
+        error("Error parsing a NaiveDateTime from the string: {0}")
+    )]
+    #[cfg_attr(
+        not(feature = "display_literals"),
+        error("Error parsing a NaiveDateTime from string")
+    )]
     NaiveDateTimeParseError(String),
 
     /// Primary key is not on a primitive field.

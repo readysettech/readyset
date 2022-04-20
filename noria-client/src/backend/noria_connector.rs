@@ -961,9 +961,15 @@ impl NoriaConnector {
                 // add the query to Noria
                 if create_if_not_exist {
                     if prepared {
+                        #[cfg(feature = "display_literals")]
                         info!(query = %q, name = %qname, "adding parameterized query");
+                        #[cfg(not(feature = "display_literals"))]
+                        info!(name = %qname, "adding parameterized query");
                     } else {
+                        #[cfg(feature = "display_literals")]
                         info!(query = %q, name = %qname, "adding ad-hoc query");
+                        #[cfg(not(feature = "display_literals"))]
+                        info!(name = %qname, "adding ad-hoc query");
                     }
 
                     let changelist = ChangeList {
@@ -1255,7 +1261,7 @@ impl NoriaConnector {
         })
     }
 
-    #[instrument_child(level = "info", fields(%query, create_if_not_exist))]
+    #[instrument_child(level = "info", fields(create_if_not_exist))]
     pub(crate) async fn handle_select(
         &mut self,
         // TODO(mc):  Take a reference here; requires getting rewrite::process_query() to Cow
@@ -1302,7 +1308,7 @@ impl NoriaConnector {
         res
     }
 
-    #[instrument(level = "info", skip(self))]
+    #[instrument(level = "info", skip(self, statement))]
     pub(crate) async fn prepare_select(
         &mut self,
         mut statement: nom_sql::SelectStatement,
@@ -1379,7 +1385,7 @@ impl NoriaConnector {
         })
     }
 
-    #[instrument(level = "debug", skip(self))]
+    #[instrument(level = "debug", skip(self, params, event))]
     pub(crate) async fn execute_prepared_select(
         &mut self,
         q_id: u32,
@@ -1451,7 +1457,10 @@ impl NoriaConnector {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Noria every time. On the other hand, CREATE VIEW is rare...
 
+        #[cfg(feature = "display_literals")]
         info!(%q.definition, %q.name, "view::create");
+        #[cfg(not(feature = "display_literals"))]
+        info!(%q.name, "view::create");
 
         let changelist = ChangeList {
             changes: vec![Change::CreateView(q.clone())],

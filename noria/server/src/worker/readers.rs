@@ -26,9 +26,7 @@ use noria::metrics::recorded;
 use noria::{KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyStats, Tagged, ViewQuery};
 use noria_errors::internal_err;
 use pin_project::pin_project;
-use readyset_tracing::instrument_remote;
 use readyset_tracing::presampled::instrument_if_enabled;
-use readyset_tracing::propagation::Instrumented;
 use serde::ser::Serializer;
 use serde::Serialize;
 use stream_cancel::Valve;
@@ -36,7 +34,7 @@ use tokio::task_local;
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_tower::multiplex::server;
 use tower::Service;
-use tracing::{error, warn};
+use tracing::{error, instrument, warn};
 
 /// Retry reads every this often.
 const RETRY_TIMEOUT: Duration = Duration::from_micros(100);
@@ -531,7 +529,7 @@ where
     }
 }
 
-impl Service<Instrumented<Tagged<ReadQuery>>> for ReadRequestHandler {
+impl Service<Tagged<ReadQuery>> for ReadRequestHandler {
     type Response = Tagged<ReadReply<ServerReadReplyBatch>>;
     type Error = ReadySetError;
     type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
@@ -540,9 +538,9 @@ impl Service<Instrumented<Tagged<ReadQuery>>> for ReadRequestHandler {
         Poll::Ready(Ok(()))
     }
 
-    #[instrument_remote(level = "info")]
+    #[instrument(level = "info", skip_all)]
     #[inline]
-    fn call(&mut self, #[instrumented] m: Tagged<ReadQuery>) -> Self::Future {
+    fn call(&mut self, m: Tagged<ReadQuery>) -> Self::Future {
         let tag = m.tag;
         match m.v {
             ReadQuery::Normal { target, query } => {

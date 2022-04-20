@@ -64,27 +64,29 @@ impl FromStr for ChangeList {
         // We separate the queries first, so that we can parse them one by
         // one and get a correct error message when an individual query fails to be
         // parsed.
+
+        macro_rules! mk_error {
+            ($str:expr) => {
+                Err(ReadySetError::UnparseableQuery {
+                    query: $str.to_string(),
+                })
+            };
+        }
+
         let queries = match parse::separate_queries(value) {
             Result::Err(nom::Err::Error(e)) => {
-                return Err(ReadySetError::UnparseableQuery {
-                    query: e.input.to_string(),
-                });
+                return mk_error!(e.input);
             }
             Result::Err(nom::Err::Failure(e)) => {
-                return Err(ReadySetError::UnparseableQuery {
-                    query: e.input.to_string(),
-                });
+                return mk_error!(e.input);
             }
             Result::Err(_) => {
-                return Err(ReadySetError::UnparseableQuery {
-                    query: value.to_string(),
-                });
+                return mk_error!(value);
             }
             Result::Ok((remainder, parsed)) => {
                 if !remainder.is_empty() {
-                    return Err(ReadySetError::UnparseableQuery {
-                        query: remainder.to_string(),
-                    });
+                    #[cfg(feature = "display_literals")]
+                    return mk_error!(remainder);
                 }
                 parsed
             }
@@ -92,20 +94,12 @@ impl FromStr for ChangeList {
         let changes = queries.into_iter().fold(
             Ok(Vec::new()),
             |acc: ReadySetResult<Vec<Change>>, query| match parse::query_expr(query) {
-                Result::Err(nom::Err::Error(e)) => Err(ReadySetError::UnparseableQuery {
-                    query: e.input.to_string(),
-                }),
-                Result::Err(nom::Err::Failure(e)) => Err(ReadySetError::UnparseableQuery {
-                    query: e.input.to_string(),
-                }),
-                Result::Err(_) => Err(ReadySetError::UnparseableQuery {
-                    query: value.to_string(),
-                }),
+                Result::Err(nom::Err::Error(e)) => mk_error!(e.input),
+                Result::Err(nom::Err::Failure(e)) => mk_error!(e.input),
+                Result::Err(_) => mk_error!(value),
                 Result::Ok((remainder, parsed)) => {
                     if !remainder.is_empty() {
-                        return Err(ReadySetError::UnparseableQuery {
-                            query: remainder.to_string(),
-                        });
+                        return mk_error!(remainder);
                     }
                     acc.and_then(|mut changes| {
                         match parsed {
