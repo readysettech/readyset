@@ -590,6 +590,21 @@ mod tests {
         }
 
         #[test]
+        fn set_names() {
+            let res = test_parse!(set(Dialect::PostgreSQL), b"SET NAMES 'UTF8'");
+            let roundtripped = res.to_string();
+            assert_eq!(roundtripped, "SET NAMES 'UTF8'");
+
+            assert_eq!(
+                res,
+                SetStatement::Names(SetNames {
+                    charset: "UTF8".to_string(),
+                    collation: None
+                })
+            );
+        }
+
+        #[test]
         fn set_default() {
             let res1 = test_parse!(set(Dialect::PostgreSQL), b"SET SESSION timezone TO DEFAULT");
             let res2 = test_parse!(set(Dialect::PostgreSQL), b"SET SESSION timezone = DEFAULT");
