@@ -36,7 +36,7 @@ pub use self::select::{
     selection, CommonTableExpression, GroupByClause, JoinClause, LimitClause, SelectStatement,
 };
 pub use self::set::{
-    PostgresParameterScope, PostgresParameterValue, SetPostgresParameter,
+    PostgresParameterScope, PostgresParameterValue, SetNames, SetPostgresParameter,
     SetPostgresParameterValue, SetStatement, Variable, VariableScope,
 };
 pub use self::show::ShowStatement;

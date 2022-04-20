@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use lazy_static::lazy_static;
 use nom_sql::{
-    PostgresParameterValue, SetPostgresParameter, SetPostgresParameterValue, SetStatement, SqlQuery,
+    PostgresParameterValue, SetNames, SetPostgresParameter, SetPostgresParameterValue,
+    SetStatement, SqlQuery,
 };
 use noria::results::Results;
 use noria::ReadySetResult;
@@ -65,6 +66,7 @@ impl QueryHandler for PostgreSqlQueryHandler {
                     false
                 }
             }
+            SetStatement::Names(SetNames { charset, .. }) => charset.to_lowercase() == "utf8",
             _ => false,
         }
     }
