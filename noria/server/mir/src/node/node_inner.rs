@@ -125,6 +125,12 @@ pub enum MirNodeInner {
     Reuse {
         node: MirNodeRef,
     },
+    /// Alias all columns in the query to change their table
+    ///
+    /// This node will not be converted into a dataflow node when lowering MIR to dataflow.
+    AliasTable {
+        table: SqlIdentifier,
+    },
     /// leaf (reader) node, keys
     Leaf {
         /// Keys is a tuple of the key column, and if the column was derived from a SQL
@@ -415,6 +421,10 @@ impl MirNodeInner {
                 } => emit == our_emit && our_duplicate_mode == duplicate_mode,
                 _ => false,
             },
+            MirNodeInner::AliasTable { .. } => matches!(
+                other,
+                MirNodeInner::AliasTable { .. } | MirNodeInner::Identity
+            ),
             _ => unimplemented!(),
         }
     }
@@ -639,6 +649,9 @@ impl Debug for MirNodeInner {
                     .join(&format!(" {} ", symbol));
 
                 write!(f, "{}", cols)
+            }
+            MirNodeInner::AliasTable { ref table } => {
+                write!(f, "AliasTable [{}]", table)
             }
         }
     }

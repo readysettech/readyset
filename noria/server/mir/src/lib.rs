@@ -19,7 +19,7 @@ pub mod visualize;
 pub type MirNodeRef = Rc<RefCell<node::MirNode>>;
 pub type MirNodeWeakRef = Weak<RefCell<node::MirNode>>;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum FlowNode {
     New(NodeIndex),
     Existing(NodeIndex),

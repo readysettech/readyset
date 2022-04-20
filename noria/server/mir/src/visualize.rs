@@ -386,6 +386,9 @@ impl GraphViz for MirNodeInner {
 
                 write!(f, "{}", cols)
             }
+            MirNodeInner::AliasTable { ref table } => {
+                write!(f, "AliasTable [{}]", table)
+            }
         }
     }
 }

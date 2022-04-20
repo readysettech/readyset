@@ -78,7 +78,8 @@ fn push_dependent_filter(
         | MirNodeInner::Filter { .. }
         | MirNodeInner::Join { .. }
         | MirNodeInner::LeftJoin { .. }
-        | MirNodeInner::DependentJoin { .. } => true,
+        | MirNodeInner::DependentJoin { .. }
+        | MirNodeInner::AliasTable { .. } => true,
         MirNodeInner::Aggregation { .. } | MirNodeInner::Extremum { .. } => {
             for col in dependency.non_dependent_columns() {
                 child_ref.add_column(col.clone())?;
