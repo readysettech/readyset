@@ -58,3 +58,4 @@ path = "src/lib.rs"
 [features]
 ryw = []
 schema-check = []
+display_literals = ["noria-errors/display_literals", "noria/display_literals"]

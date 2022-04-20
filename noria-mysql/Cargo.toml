@@ -43,6 +43,7 @@ test-strategy = "0.2.0"
 
 [features]
 vertical_tests = []
+display_literals = ["noria/display_literals", "noria-errors/display_literals", "noria-client/display_literals"]
 
 [[example]]
 name = "basic_demo"

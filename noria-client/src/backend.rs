@@ -614,7 +614,7 @@ where
 
     /// Executes query on the upstream database, for when it cannot be parsed or executed by noria.
     /// Returns the query result, or an error if fallback is not configured
-    #[instrument_root(level = "info", fields(%query))]
+    #[instrument_root(level = "info")]
     pub async fn query_fallback(
         &mut self,
         query: &str,
@@ -692,7 +692,10 @@ where
                             if self.fail_invalidated_queries {
                                 internal!("Query comparison failed to validate: {}", e);
                             }
+                            #[cfg(feature = "display_literals")]
                             warn!(error = %e, query = %select_meta.stmt, "Query compare failed");
+                            #[cfg(not(feature = "display_literals"))]
+                            warn!(error = %e, "Query compare failed");
                             state = MigrationState::Unsupported;
                         }
                     }
@@ -776,7 +779,10 @@ where
     fn plan_prepare_select(&mut self, stmt: nom_sql::SelectStatement) -> PrepareMeta {
         let mut rewritten = stmt.clone();
         if rewrite::process_query(&mut rewritten).is_err() {
+            #[cfg(feature = "display_literals")]
             warn!(statement = %stmt, "This statement could not be rewritten by ReadySet");
+            #[cfg(not(feature = "display_literals"))]
+            warn!("This statement could not be rewritten by ReadySet");
             PrepareMeta::FailedToRewrite
         } else {
             // For select statements we will always try to check with noria if it already migrated,
@@ -807,6 +813,10 @@ where
             Ok(pq) => pq,
             Err(_) => {
                 warn!(query = %query, "ReadySet failed to parse query");
+                #[cfg(feature = "display_literals")]
+                warn!(query = %query, "ReadySet failed to parse query");
+                #[cfg(not(feature = "display_literals"))]
+                warn!("ReadySet failed to parse query");
                 return PrepareMeta::FailedToParse;
             }
         };
@@ -832,7 +842,10 @@ where
             | SqlQuery::CreateCache(..)
             | SqlQuery::DropCache(..)
             | SqlQuery::Explain(_) => {
+                #[cfg(feature = "display_literals")]
                 warn!(statement = %parsed_query, "Statement cannot be prepared by ReadySet");
+                #[cfg(not(feature = "display_literals"))]
+                warn!("Statement cannot be prepared by ReadySet");
                 PrepareMeta::Unimplemented
             }
         }
@@ -876,7 +889,7 @@ where
     /// Prepares `query` to be executed later using the reader/writer belonging
     /// to the calling `Backend` struct and adds the prepared query
     /// to the calling struct's map of prepared queries with a unique id.
-    #[instrument_root(level = "info", fields(%query))]
+    #[instrument_root(level = "info")]
     pub async fn prepare(&mut self, query: &str) -> Result<&PrepareResult<DB>, DB::Error> {
         self.last_query = None;
         let mut query_event = QueryExecutionEvent::new(EventType::Prepare);
@@ -1258,13 +1271,13 @@ where
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         // If we have another query with the same name, drop that query first
         if let Some(name) = name {
+            #[cfg(feature = "display_literals")]
             if let Some(stmt) = self.noria.select_statement_from_name(name) {
-                warn!(
-                    "Dropping query previously cached as {}, stmt={}",
-                    name, stmt
-                );
+                warn!("Dropping query previously cached as {name}, stmt={stmt}");
                 self.drop_cached_query(name).await?;
             }
+            #[cfg(not(feature = "display_literals"))]
+            warn!("Dropping query previously cached as {name}");
         }
         // Now migrate the new query
         rewrite::process_query(&mut stmt)?;
@@ -1520,7 +1533,7 @@ where
     }
 
     /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
-    #[instrument_root(level = "info", fields(%query))]
+    #[instrument_root(level = "info")]
     #[inline]
     pub async fn query(&mut self, query: &str) -> Result<QueryResult<'_, DB>, DB::Error> {
         let mut event = QueryExecutionEvent::new(EventType::Query);
@@ -1608,9 +1621,15 @@ where
                     Ok(parsed_query) => Ok(entry.insert(parsed_query).clone()),
                     Err(_) => {
                         // error is useless anyway
+                        #[cfg(feature = "display_literals")]
                         error!(%query, "query can't be parsed: \"{}\"", query);
+                        #[cfg(not(feature = "display_literals"))]
+                        error!("query can't be parsed");
                         Err(ReadySetError::UnparseableQuery {
+                            #[cfg(feature = "display_literals")]
                             query: query.to_string(),
+                            #[cfg(not(feature = "display_literals"))]
+                            query: String::new(),
                         })
                     }
                 }
@@ -1618,7 +1637,7 @@ where
         }
     }
 
-    #[instrument(level = "trace", name = "query", skip(self, event))]
+    #[instrument(level = "trace", name = "query", skip_all)]
     async fn query_adhoc_non_select(
         &mut self,
         query: &str,
@@ -1632,7 +1651,10 @@ where
         // Disallowed set statements always produce an error
         if let SqlQuery::Set(s) = parsed_query {
             if !self.is_allowed_set_statement(s) {
+                #[cfg(feature = "display_literals")]
                 warn!(%s, "received unsupported SET statement");
+                #[cfg(not(feature = "display_literals"))]
+                warn!("received unsupported SET statement");
                 let e = ReadySetError::SetDisallowed {
                     statement: parsed_query.to_string(),
                 };
@@ -1840,8 +1862,13 @@ fn log_query(
         && (event.upstream_duration.unwrap_or_default() > SLOW_DURATION
             || event.noria_duration.unwrap_or_default() > SLOW_DURATION)
     {
+        #[cfg(feature = "display_literals")]
         if let Some(query) = &event.query {
             warn!(query = %query, noria_time = ?event.noria_duration, upstream_time = ?event.upstream_duration, "slow query");
+        }
+        #[cfg(not(feature = "display_literals"))]
+        if event.query.is_some() {
+            warn!(noria_time = ?event.noria_duration, upstream_time = ?event.upstream_duration, "slow query");
         }
     }
 

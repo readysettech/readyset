@@ -824,6 +824,23 @@ impl SqlToMirConverter {
         use dataflow::ops::grouped::extremum::Extremum;
         use nom_sql::FunctionExpression::*;
 
+        #[cfg(feature = "display_literals")]
+        macro_rules! mk_error {
+            ($expression:expr) => {
+                internal_err(format!(
+                    "projected_exprs does not contain {:?}",
+                    $expression
+                ))
+            };
+        }
+
+        #[cfg(not(feature = "display_literals"))]
+        macro_rules! mk_error {
+            ($expression:expr) => {
+                internal_err(format!("projected_exprs does not contain given expression"))
+            };
+        }
+
         let mut out_nodes = Vec::new();
 
         let mknode = |over: Column, t: GroupedNodeType, distinct: bool| {
@@ -857,9 +874,12 @@ impl SqlToMirConverter {
             ),
             Sum { expr, distinct } => mknode(
                 // TODO(celine): replace with ParentRef
-                Column::named(projected_exprs.get(&expr).cloned().ok_or_else(|| {
-                    internal_err(format!("projected_exprs does not contain {:?}", expr))
-                })?),
+                Column::named(
+                    projected_exprs
+                        .get(&expr)
+                        .cloned()
+                        .ok_or_else(|| mk_error!(expr))?,
+                ),
                 GroupedNodeType::Aggregation(Aggregation::Sum),
                 distinct,
             ),
@@ -881,9 +901,12 @@ impl SqlToMirConverter {
                 count_nulls,
             } => mknode(
                 // TODO(celine): replace with ParentRef
-                Column::named(projected_exprs.get(expr).cloned().ok_or_else(|| {
-                    internal_err(format!("projected_exprs does not contain {:?}", expr))
-                })?),
+                Column::named(
+                    projected_exprs
+                        .get(expr)
+                        .cloned()
+                        .ok_or_else(|| mk_error!(expr))?,
+                ),
                 GroupedNodeType::Aggregation(Aggregation::Count { count_nulls }),
                 distinct,
             ),
@@ -897,9 +920,12 @@ impl SqlToMirConverter {
             ),
             Avg { ref expr, distinct } => mknode(
                 // TODO(celine): replace with ParentRef
-                Column::named(projected_exprs.get(expr).cloned().ok_or_else(|| {
-                    internal_err(format!("projected_exprs does not contain {:?}", expr))
-                })?),
+                Column::named(
+                    projected_exprs
+                        .get(expr)
+                        .cloned()
+                        .ok_or_else(|| mk_error!(expr))?,
+                ),
                 GroupedNodeType::Aggregation(Aggregation::Avg),
                 distinct,
             ),
@@ -912,9 +938,12 @@ impl SqlToMirConverter {
             ),
             Max(ref expr) => mknode(
                 // TODO(celine): replace with ParentRef
-                Column::named(projected_exprs.get(expr).cloned().ok_or_else(|| {
-                    internal_err(format!("projected_exprs does not contain {:?}", expr))
-                })?),
+                Column::named(
+                    projected_exprs
+                        .get(expr)
+                        .cloned()
+                        .ok_or_else(|| mk_error!(expr))?,
+                ),
                 GroupedNodeType::Extremum(Extremum::Max),
                 false,
             ),
@@ -925,9 +954,12 @@ impl SqlToMirConverter {
             ),
             Min(ref expr) => mknode(
                 // TODO(celine): replace with ParentRef
-                Column::named(projected_exprs.get(expr).cloned().ok_or_else(|| {
-                    internal_err(format!("projected_exprs does not contain {:?}", expr))
-                })?),
+                Column::named(
+                    projected_exprs
+                        .get(expr)
+                        .cloned()
+                        .ok_or_else(|| mk_error!(expr))?,
+                ),
                 GroupedNodeType::Extremum(Extremum::Min),
                 false,
             ),
@@ -939,7 +971,12 @@ impl SqlToMirConverter {
                 GroupedNodeType::Aggregation(Aggregation::GroupConcat { separator }),
                 false,
             ),
-            _ => internal!("not an aggregate: {:?}", function),
+            _ => {
+                #[cfg(feature = "dislay_literals")]
+                internal!("not an aggregate: {:?}", function);
+                #[cfg(not(feature = "display_literals"))]
+                internal!("expected aggregate");
+            }
         })
     }
 

@@ -40,3 +40,6 @@ noria-data = { path = "../noria/data" }
 [dev-dependencies]
 noria-server = { path = "../noria/server" }
 serial_test = "0.5.1"
+
+[features]
+display_literals = []

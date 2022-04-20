@@ -1034,7 +1034,10 @@ impl Service<ViewQuery> for View {
 
     fn call(&mut self, mut query: ViewQuery) -> Self::Future {
         let ni = self.node;
+        #[cfg(feature = "display_literals")]
         let span = readyset_tracing::child_span!(INFO, "view-request", ?query.key_comparisons, node = self.node.index());
+        #[cfg(not(feature = "display_literals"))]
+        let span = readyset_tracing::child_span!(INFO, "view-request", node = self.node.index());
 
         let columns = Arc::clone(&self.columns);
         if self.shards.len() == 1 {

@@ -334,7 +334,10 @@ impl Base {
                         LookupResult::Some(rows) if rows.is_empty() => None,
                         LookupResult::Some(rows) if rows.len() == 1 => rows.into_iter().next(),
                         LookupResult::Some(rows) => {
-                            internal!("key {:?} not unique; n={}", key, rows.len())
+                            #[cfg(feature = "display_literals")]
+                            internal!("key {:?} not unique; num_rows={}", key, rows.len());
+                            #[cfg(not(feature = "display_literals"))]
+                            internal!("key not unique; num_rows={}", rows.len());
                         }
                     },
                 }
