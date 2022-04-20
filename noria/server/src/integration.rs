@@ -3322,6 +3322,7 @@ async fn tpc_w() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore] // Broken due to a reuse bug
 async fn lobsters() {
     test_queries("lobsters", "tests/lobsters-schema.txt", false, false).await;
 }

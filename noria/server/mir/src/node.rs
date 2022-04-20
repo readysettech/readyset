@@ -153,7 +153,7 @@ impl MirNode {
         let mn = MirNode {
             name: node.borrow().name.clone(),
             from_version: v,
-            columns: node.borrow().columns.clone(),
+            columns: node.borrow().columns(),
             inner: MirNodeInner::Reuse { node: rcn },
             ancestors: vec![],
             children: vec![],
@@ -329,6 +329,14 @@ impl MirNode {
         self.ancestors().first()?.upgrade()
     }
 
+    /// Returns a reference to this MIR node's parent, if it only has a *single* parent
+    pub fn parent(&self) -> Option<MirNodeRef> {
+        if self.ancestors().len() != 1 {
+            return None;
+        }
+        self.first_ancestor()
+    }
+
     pub fn ancestors(&self) -> &[MirNodeWeakRef] {
         self.ancestors.as_slice()
     }
@@ -338,8 +346,24 @@ impl MirNode {
     }
 
     /// Returns the list of columns in the output of this node
+    ///
+    /// Currently this implementation is split between different MIR node types - some use the
+    /// `columns` argument passed to [`MirNode::new`], while some derive the columns based on the
+    /// columns of the node's parent. In the future, all node types will derive their columns from
+    /// their parents.
     pub fn columns(&self) -> Vec<Column> {
-        self.columns.clone()
+        if let MirNodeInner::AliasTable { table } = &self.inner {
+            self.columns
+                .iter()
+                .map(|c| Column {
+                    table: Some(table.clone()),
+                    name: c.name.clone(),
+                    aliases: vec![],
+                })
+                .collect()
+        } else {
+            self.columns.clone()
+        }
     }
 
     /// Set the columns for this MIR node
@@ -439,18 +463,17 @@ impl MirNode {
     }
 
     pub fn referenced_columns(&self) -> Vec<Column> {
-        // all projected columns
-        let mut columns = self.columns.clone();
-
-        // + any parent columns referenced internally by the operator
         match self.inner {
             MirNodeInner::Aggregation { ref on, .. } | MirNodeInner::Extremum { ref on, .. } => {
+                let mut columns = self.columns.clone();
                 // need the "over" column
                 if !columns.contains(on) {
                     columns.push(on.clone());
                 }
+                columns
             }
             MirNodeInner::Filter { .. } => {
+                let mut columns = self.columns.clone();
                 // Parents are guarenteed to exist.
                 #[allow(clippy::unwrap_used)]
                 let parent = self.first_ancestor().unwrap();
@@ -460,12 +483,14 @@ impl MirNode {
                         columns.push(c.clone());
                     }
                 }
+                columns
             }
             MirNodeInner::Project {
                 ref emit,
                 ref expressions,
                 ..
             } => {
+                let mut columns = vec![];
                 for c in emit {
                     if !columns.contains(c) {
                         columns.push(c.clone());
@@ -478,10 +503,10 @@ impl MirNode {
                         }
                     }
                 }
+                columns
             }
-            _ => (),
+            _ => self.columns.clone(),
         }
-        columns
     }
 
     pub fn versioned_name(&self) -> String {
@@ -509,7 +534,7 @@ impl MirNode {
             inner: self.inner.clone(),
             ancestors: Default::default(),
             children: Default::default(),
-            flow_node: self.flow_node.clone(),
+            flow_node: self.flow_node,
         }
     }
 
@@ -667,6 +692,59 @@ impl Debug for MirNode {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    mod columns {
+        use super::*;
+
+        #[test]
+        fn alias_table() {
+            let node = MirNode::new(
+                "alias_table".into(),
+                1,
+                vec![Column::named("a"), Column::new(Some("t"), "b")],
+                MirNodeInner::AliasTable { table: "at".into() },
+                vec![],
+                vec![],
+            );
+
+            let cols = node.borrow().columns();
+
+            assert_eq!(
+                cols,
+                vec![Column::new(Some("at"), "a"), Column::new(Some("at"), "b")]
+            )
+        }
+    }
+
+    mod referenced_columns {
+        use nom_sql::{Expression, Literal};
+
+        use super::*;
+
+        #[test]
+        fn project_doesnt_include_literal_and_expr_names() {
+            let node = MirNode::new(
+                "project".into(),
+                0,
+                vec![
+                    Column::new(Some("base"), "project"),
+                    Column::named("expr"),
+                    Column::named("literal"),
+                ],
+                MirNodeInner::Project {
+                    emit: vec![Column::new(Some("base"), "project")],
+                    expressions: vec![("expr".into(), Expression::Literal(Literal::from(0)))],
+                    literals: vec![("literal".into(), 0.into())],
+                },
+                vec![],
+                vec![],
+            );
+            let referenced = node.borrow().referenced_columns();
+            assert_eq!(referenced, vec![Column::new(Some("base"), "project")])
+        }
+    }
+
     mod find_source_for_child_column {
         use nom_sql::{ColumnSpecification, SqlType};
 

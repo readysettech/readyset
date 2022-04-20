@@ -98,7 +98,6 @@ pub(super) fn make_expressions_above_grouped(
             cols,
             exprs.clone(),
             vec![],
-            false,
         );
         *prev_node = Some(node);
         exprs.into_iter().map(|(e, n)| (n, e)).collect()

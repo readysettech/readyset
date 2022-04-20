@@ -112,7 +112,7 @@ fn mir_node_to_flow_parts(
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
     let name = mir_node.name.clone();
-    Ok(match mir_node.flow_node {
+    match mir_node.flow_node {
         None => {
             #[allow(clippy::let_and_return)]
             let flow_node = match mir_node.inner {
@@ -254,7 +254,7 @@ fn mir_node_to_flow_parts(
                         internal_err("parent of a Leaf mirnodeinner had no flow_node")
                     })? {
                         FlowNode::New(na) => FlowNode::Existing(na),
-                        ref n @ FlowNode::Existing(..) => n.clone(),
+                        n @ FlowNode::Existing(..) => n,
                     };
                     node
                 }
@@ -361,6 +361,10 @@ fn mir_node_to_flow_parts(
                         mig,
                     )?
                 }
+                MirNodeInner::AliasTable { .. } => mir_node
+                    .parent()
+                    .and_then(|n| n.borrow().flow_node)
+                    .ok_or_else(|| internal_err("MirNodeInner::AliasTable must have a parent"))?,
             };
 
             // any new flow nodes have been instantiated by now, so we replace them with
@@ -368,12 +372,12 @@ fn mir_node_to_flow_parts(
             // layers of the new nodes.
             mir_node.flow_node = match flow_node {
                 FlowNode::New(na) => Some(FlowNode::Existing(na)),
-                ref n @ FlowNode::Existing(..) => Some(n.clone()),
+                n @ FlowNode::Existing(..) => Some(n),
             };
-            flow_node
+            Ok(flow_node)
         }
-        Some(ref flow_node) => flow_node.clone(),
-    })
+        Some(flow_node) => Ok(flow_node),
+    }
 }
 
 fn adapt_base_node(

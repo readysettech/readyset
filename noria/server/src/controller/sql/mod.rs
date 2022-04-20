@@ -372,16 +372,22 @@ impl SqlIncorporator {
                         // If parent does not introduce any new columns absent in its ancestors,
                         // traverse its ancestor chain to find an ancestor with the necessary
                         // parameter columns.
-                        let may_rewind = match parent.borrow().inner {
-                            MirNodeInner::Identity => true,
-                            MirNodeInner::Project {
-                                expressions: ref e,
-                                literals: ref l,
-                                ..
-                            } => e.is_empty() && l.is_empty(),
-                            _ => false,
-                        };
-                        let ancestor = if may_rewind {
+                        fn may_rewind(node: MirNodeRef) -> bool {
+                            match node.borrow().inner {
+                                MirNodeInner::Identity => true,
+                                MirNodeInner::AliasTable { .. } => {
+                                    may_rewind(node.borrow().parent().unwrap())
+                                }
+                                MirNodeInner::Project {
+                                    expressions: ref e,
+                                    literals: ref l,
+                                    ..
+                                } => e.is_empty() && l.is_empty(),
+                                _ => false,
+                            }
+                        }
+
+                        let ancestor = if may_rewind(parent.clone()) {
                             mir_reuse::rewind_until_columns_found(parent.clone(), &params)
                         } else {
                             None
@@ -1729,7 +1735,7 @@ mod tests {
                 None,
                 mig,
             );
-            assert!(res.is_ok());
+            assert!(res.is_ok(), "{}", res.err().unwrap());
             let qfp = res.unwrap();
             // Check projection
             let projection = get_node(&inc, mig, &qfp.name);
