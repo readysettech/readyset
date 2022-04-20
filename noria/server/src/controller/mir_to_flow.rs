@@ -120,6 +120,7 @@ fn mir_node_to_flow_parts(
                     ref on,
                     ref group_by,
                     ref kind,
+                    ..
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     #[allow(clippy::unwrap_used)] // checked by above invariant
@@ -159,6 +160,7 @@ fn mir_node_to_flow_parts(
                     ref on,
                     ref group_by,
                     ref kind,
+                    ..
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     #[allow(clippy::unwrap_used)] // checked by above invariant

@@ -88,6 +88,7 @@ pub async fn build_custom(
     reader_only: bool,
     eviction: Option<(usize, Duration)>,
 ) -> Handle {
+    readyset_tracing::init_test_logging();
     let mut builder = Builder::for_tests();
     builder.set_sharding(sharding);
     builder.set_persistence(get_persistence_params(prefix));

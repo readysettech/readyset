@@ -206,9 +206,8 @@ impl SqlToMirConverter {
             MirNode::new(
                 format!("{}_reproject", name).into(),
                 self.schema_version,
-                columns.clone(),
                 MirNodeInner::Project {
-                    emit: columns.clone(),
+                    emit: columns,
                     literals: vec![],
                     expressions: vec![],
                 },
@@ -220,7 +219,6 @@ impl SqlToMirConverter {
             MirNode::new(
                 format!("{}_id", name).into(),
                 self.schema_version,
-                columns.clone(),
                 MirNodeInner::Identity,
                 vec![MirNodeRef::downgrade(&parent)],
                 vec![],
@@ -233,7 +231,7 @@ impl SqlToMirConverter {
             .enumerate()
             .map(|(i, c)| {
                 (
-                    c.clone(),
+                    c.clone().aliased_as_table(name.clone()),
                     ViewPlaceholder::OneToOne(i + 1 /* placeholders are 1-based */),
                 )
             })
@@ -241,18 +239,15 @@ impl SqlToMirConverter {
         let alias_table = MirNode::new(
             format!("{}_alias_table", name).into(),
             self.schema_version,
-            columns,
             MirNodeInner::AliasTable {
                 table: name.clone(),
             },
             vec![MirNodeRef::downgrade(&n)],
             vec![],
         );
-        let columns = alias_table.borrow().columns();
         let new_leaf = MirNode::new(
             name.clone(),
             self.schema_version,
-            columns,
             MirNodeInner::leaf(params, index_type),
             vec![MirNodeRef::downgrade(&alias_table)],
             vec![],
@@ -298,9 +293,6 @@ impl SqlToMirConverter {
             .entry(node_id)
             .or_insert_with(|| final_node.clone());
 
-        // we use these columns for intermediate nodes
-        let columns = final_node.borrow().columns();
-
         if let Some(limit) = limit {
             let (limit, offset) = extract_limit_offset(limit)?;
             let make_topk = offset.is_none();
@@ -316,11 +308,12 @@ impl SqlToMirConverter {
             };
 
             // Either a topk or paginate node
+            let group_by = final_node.borrow().columns();
             let paginate_node = self
                 .make_paginate_node(
                     &paginate_name,
                     final_node,
-                    columns.clone(),
+                    group_by,
                     &order.as_ref().map(|o| {
                         o.order_by
                             .iter()
@@ -347,7 +340,6 @@ impl SqlToMirConverter {
                 name.clone()
             },
             self.schema_version,
-            columns,
             MirNodeInner::AliasTable {
                 table: name.clone(),
             },
@@ -356,12 +348,10 @@ impl SqlToMirConverter {
         );
 
         // TODO: Initialize leaf with ordering?
-        let columns = alias_table.borrow().columns();
         let leaf_node = if has_leaf {
             MirNode::new(
                 name.clone(),
                 self.schema_version,
-                columns,
                 MirNodeInner::leaf(
                     vec![],
                     // TODO: is this right?
@@ -661,15 +651,12 @@ impl SqlToMirConverter {
         let (primary_key, unique_keys) = match keys {
             None => (None, vec![].into()),
             Some(keys) => {
-                let primary_key = keys
-                    .iter()
-                    .filter_map(|k| match k {
-                        TableKey::PrimaryKey { columns, .. } => {
-                            Some(columns.iter().map(Column::from).collect::<Box<[Column]>>())
-                        }
-                        _ => None,
-                    })
-                    .next();
+                let primary_key = keys.iter().find_map(|k| match k {
+                    TableKey::PrimaryKey { columns, .. } => {
+                        Some(columns.iter().map(Column::from).collect::<Box<[Column]>>())
+                    }
+                    _ => None,
+                });
 
                 let unique_keys = keys.iter().filter_map(|k| match k {
                     TableKey::UniqueKey { columns, .. } => {
@@ -689,7 +676,6 @@ impl SqlToMirConverter {
         Ok(MirNode::new(
             name.clone(),
             self.schema_version,
-            cols.iter().map(|cs| Column::from(&cs.column)).collect(),
             MirNodeInner::Base {
                 column_specs: cols.iter().map(|cs| (cs.clone(), None)).collect(),
                 primary_key,
@@ -763,7 +749,6 @@ impl SqlToMirConverter {
         Ok(MirNode::new(
             name.clone(),
             self.schema_version,
-            emit.first().unwrap().clone(),
             MirNodeInner::Union {
                 emit,
                 duplicate_mode,
@@ -787,7 +772,6 @@ impl SqlToMirConverter {
         Ok(MirNode::new(
             name.clone(),
             self.schema_version,
-            columns,
             MirNodeInner::Union {
                 emit,
                 duplicate_mode,
@@ -803,12 +787,10 @@ impl SqlToMirConverter {
         parent: MirNodeRef,
         conditions: Expression,
     ) -> MirNodeRef {
-        let fields = parent.borrow().columns().to_vec();
         trace!(%name, %conditions, "Added filter node");
         MirNode::new(
             name.clone(),
             self.schema_version,
-            fields,
             MirNodeInner::Filter { conditions },
             vec![MirNodeRef::downgrade(&parent)],
             vec![],
@@ -986,38 +968,32 @@ impl SqlToMirConverter {
     fn make_grouped_node(
         &self,
         name: &SqlIdentifier,
-        computed_col: Column,
-        (parent_node, over_col): (MirNodeRef, Column),
+        output_column: Column,
+        (parent_node, on): (MirNodeRef, Column),
         group_by: Vec<Column>,
         node_type: GroupedNodeType,
     ) -> MirNodeRef {
-        // The aggregate node's set of output columns is the group columns plus the function
-        // column
-        let mut combined_columns = group_by.clone();
-        combined_columns.push(computed_col);
-
-        // make the new operator
         match node_type {
-            GroupedNodeType::Aggregation(agg) => MirNode::new(
+            GroupedNodeType::Aggregation(kind) => MirNode::new(
                 name.clone(),
                 self.schema_version,
-                combined_columns,
                 MirNodeInner::Aggregation {
-                    on: over_col,
+                    on,
                     group_by,
-                    kind: agg,
+                    output_column,
+                    kind,
                 },
                 vec![MirNodeRef::downgrade(&parent_node)],
                 vec![],
             ),
-            GroupedNodeType::Extremum(extr) => MirNode::new(
+            GroupedNodeType::Extremum(kind) => MirNode::new(
                 name.clone(),
                 self.schema_version,
-                combined_columns,
                 MirNodeInner::Extremum {
-                    on: over_col,
+                    on,
                     group_by,
-                    kind: extr,
+                    output_column,
+                    kind,
                 },
                 vec![MirNodeRef::downgrade(&parent_node)],
                 vec![],
@@ -1039,7 +1015,7 @@ impl SqlToMirConverter {
         // automatic column pull-down to retrieve the remaining columns required.
         let projected_cols_left = left_node.borrow().columns().to_vec();
         let projected_cols_right = right_node.borrow().columns().to_vec();
-        let mut fields = projected_cols_left
+        let mut project = projected_cols_left
             .into_iter()
             .chain(projected_cols_right.into_iter())
             .collect::<Vec<Column>>();
@@ -1065,7 +1041,7 @@ impl SqlToMirConverter {
                 l_col.add_alias(&r_col);
                 // add the alias to all instances of `l_col` in `fields` (there might be more than
                 // one if `l_col` is explicitly projected multiple times)
-                fields = fields
+                project = project
                     .into_iter()
                     .filter_map(|mut f| {
                         if f == r_col {
@@ -1095,24 +1071,23 @@ impl SqlToMirConverter {
             JoinKind::Inner => MirNodeInner::Join {
                 on_left: left_join_columns,
                 on_right: right_join_columns,
-                project: fields.clone(),
+                project,
             },
             JoinKind::Left => MirNodeInner::LeftJoin {
                 on_left: left_join_columns,
                 on_right: right_join_columns,
-                project: fields.clone(),
+                project,
             },
             JoinKind::Dependent => MirNodeInner::DependentJoin {
                 on_left: left_join_columns,
                 on_right: right_join_columns,
-                project: fields.clone(),
+                project,
             },
         };
         trace!(?inner, "Added join node");
         Ok(MirNode::new(
             name.clone(),
             self.schema_version,
-            fields,
             inner,
             vec![
                 MirNodeRef::downgrade(&left_node),
@@ -1127,31 +1102,11 @@ impl SqlToMirConverter {
         name: &SqlIdentifier,
         aggregates: &[MirNodeRef; 2],
     ) -> ReadySetResult<MirNodeRef> {
-        let mut columns = aggregates
-            .iter()
-            .flat_map(|node| node.borrow().columns())
-            .collect::<Vec<_>>();
-        // Crappy quadratic column deduplication, because we don't have Hash or Ord for Column due
-        // to aliases affecting equality
-        let mut i = columns.len() - 1;
-        while i > 0 {
-            let col = &columns[i];
-            if columns[..i].contains(col) || columns[(i + 1)..].contains(col) {
-                columns.remove(i);
-            } else if i == 0 {
-                break;
-            } else {
-                i -= 1;
-            }
-        }
-
-        let inner = MirNodeInner::JoinAggregates;
-        trace!(?inner, "Added join node");
+        trace!("Added join aggregates node");
         Ok(MirNode::new(
             name.clone(),
             self.schema_version,
-            columns,
-            inner,
+            MirNodeInner::JoinAggregates,
             aggregates.iter().map(MirNodeRef::downgrade).collect(),
             vec![],
         ))
@@ -1180,22 +1135,9 @@ impl SqlToMirConverter {
         expressions: Vec<(SqlIdentifier, Expression)>,
         literals: Vec<(SqlIdentifier, DataType)>,
     ) -> MirNodeRef {
-        let fields = emit
-            .clone()
-            .into_iter()
-            .chain(
-                expressions
-                    .iter()
-                    .map(|&(ref n, _)| n.clone())
-                    .chain(literals.iter().map(|&(ref n, _)| n.clone()))
-                    .map(|n| Column::named(&n)),
-            )
-            .collect();
-
         MirNode::new(
             name.clone(),
             self.schema_version,
-            fields,
             MirNodeInner::Project {
                 emit,
                 literals,
@@ -1212,22 +1154,9 @@ impl SqlToMirConverter {
         parent: MirNodeRef,
         group_by: Vec<Column>,
     ) -> MirNodeRef {
-        let mut columns = group_by.clone();
-        // When Distinct gets converted to a Count flow node in mir_to_flow it will count the
-        // occurances up for us, and put that in a hidden column. Rather than store the count in a
-        // hidden column, we should be explicit and create that column now. It will be omitted in
-        // the final output due to absence in the projected columns list.
-        columns.push(Column {
-            name: "__distinct_count".into(),
-            table: None,
-            aliases: vec![],
-        });
-
-        // make the new operator and record its metadata
         MirNode::new(
             name.clone(),
             self.schema_version,
-            columns,
             MirNodeInner::Distinct { group_by },
             vec![MirNodeRef::downgrade(&parent)],
             vec![],
@@ -1248,8 +1177,6 @@ impl SqlToMirConverter {
         } else if !self.config.allow_paginate && !is_topk {
             unsupported!("Paginate is not supported");
         }
-
-        let mut combined_columns = parent.borrow().columns().to_vec();
 
         // Gather a list of expressions we need to evaluate before the paginate node
         let mut exprs_to_project = vec![];
@@ -1276,14 +1203,6 @@ impl SqlToMirConverter {
                 .collect()
         });
 
-        if !is_topk {
-            // Paginate nodes project the page number
-            combined_columns.push(Column {
-                table: None,
-                name: PAGE_NUMBER_COL.clone(),
-                aliases: Vec::new(),
-            });
-        }
         let mut nodes = vec![];
 
         // If we're ordering on non-column expressions, add an extra node to project those first
@@ -1308,7 +1227,6 @@ impl SqlToMirConverter {
             MirNode::new(
                 name.clone(),
                 self.schema_version,
-                combined_columns,
                 MirNodeInner::TopK {
                     order,
                     group_by,
@@ -1321,7 +1239,6 @@ impl SqlToMirConverter {
             MirNode::new(
                 name.clone(),
                 self.schema_version,
-                combined_columns,
                 MirNodeInner::Paginate {
                     order,
                     group_by,
@@ -2036,7 +1953,6 @@ impl SqlToMirConverter {
             );
             nodes_added.push(leaf_project_node.clone());
 
-            let columns = leaf_project_node.borrow().columns();
             let alias_table = MirNode::new(
                 if has_leaf {
                     format!("q_{:x}_n{}", qg.signature().hash, new_node_count).into()
@@ -2044,7 +1960,6 @@ impl SqlToMirConverter {
                     name.clone()
                 },
                 self.schema_version,
-                columns,
                 MirNodeInner::AliasTable {
                     table: name.clone(),
                 },
@@ -2058,18 +1973,22 @@ impl SqlToMirConverter {
                 // internal views (e.g., subqueries), this is not set.
 
                 let aggregates = if view_key.index_type != IndexType::HashMap {
-                    post_lookup_aggregates(qg, st)?
+                    post_lookup_aggregates(qg, st, name)?
                 } else {
                     None
                 };
 
-                let columns = alias_table.borrow().columns();
                 let leaf_node = MirNode::new(
                     name.clone(),
                     self.schema_version,
-                    columns,
                     MirNodeInner::Leaf {
-                        keys: view_key.columns,
+                        keys: view_key
+                            .columns
+                            .into_iter()
+                            .map(|(col, placeholder)| {
+                                (col.aliased_as_table(name.clone()), placeholder)
+                            })
+                            .collect(),
                         index_type: view_key.index_type,
                         order_by: st.order.as_ref().map(|order| {
                             order
@@ -2079,8 +1998,11 @@ impl SqlToMirConverter {
                                 .map(|(expr, ot)| {
                                     (
                                         match expr {
-                                            Expression::Column(col) => col.into(),
-                                            expr => Column::named(expr.to_string()),
+                                            Expression::Column(col) => {
+                                                Column::from(col).aliased_as_table(name.clone())
+                                            }
+                                            expr => Column::named(expr.to_string())
+                                                .aliased_as_table(name.clone()),
                                         },
                                         ot.unwrap_or(OrderType::OrderAscending),
                                     )
@@ -2101,16 +2023,16 @@ impl SqlToMirConverter {
                                             alias: Some(alias),
                                             ..
                                         } => {
-                                            Ok(Column::named(alias.clone()))
+                                            Ok(Column::named(alias.clone()).aliased_as_table(name.clone()))
                                         }
                                         FieldDefinitionExpression::Expression {
                                             expr: Expression::Column(c),
                                             ..
-                                        } => Ok(Column::from(c)),
+                                        } => Ok(Column::from(c).aliased_as_table(name.clone())),
                                         FieldDefinitionExpression::Expression {
                                             expr,
                                             ..
-                                        } => Ok(Column::named(expr.to_string())),
+                                        } => Ok(Column::named(expr.to_string()).aliased_as_table(name.clone())),
                                     }
                                 })
                                 .collect::<Result<Vec<_>, _>>()?;

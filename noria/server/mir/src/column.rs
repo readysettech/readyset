@@ -46,6 +46,34 @@ impl Column {
         });
         self
     }
+
+    /// Return a column that is the same as `self`, but has an additional alias with the same name
+    /// as `self`, but the provided table name.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use noria_mir::Column;
+    /// let column = Column::new(Some("table_a"), "col").aliased_as_table("table_b");
+    ///
+    /// // The original column is preserved...
+    /// assert_eq!(column, Column::new(Some("table_a"), "col"));
+    ///
+    /// // ...but an alias for the table is added
+    /// assert_eq!(column, Column::new(Some("table_b"), "col"));
+    /// ```
+    #[must_use]
+    pub fn aliased_as_table<T>(mut self, table: T) -> Self
+    where
+        T: Into<SqlIdentifier>,
+    {
+        self.aliases.push(Column {
+            table: Some(table.into()),
+            name: self.name.clone(),
+            aliases: vec![],
+        });
+        self
+    }
 }
 
 impl From<nom_sql::Column> for Column {

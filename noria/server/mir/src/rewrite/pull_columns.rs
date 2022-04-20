@@ -5,16 +5,11 @@ use crate::query::MirQuery;
 use crate::MirNodeRef;
 
 fn has_column(n: &MirNodeRef, column: &Column) -> bool {
-    if n.borrow().columns().contains(column) {
-        return true;
-    } else {
-        for a in n.borrow().ancestors().iter().map(|n| n.upgrade().unwrap()) {
-            if has_column(&a, column) {
-                return true;
-            }
-        }
-    }
-    false
+    let n = n.borrow();
+    n.columns().contains(column)
+        || n.ancestors()
+            .iter()
+            .any(|a| has_column(&a.upgrade().unwrap(), column))
 }
 
 pub(super) fn pull_columns_for(n: MirNodeRef) -> ReadySetResult<()> {
@@ -24,12 +19,12 @@ pub(super) fn pull_columns_for(n: MirNodeRef) -> ReadySetResult<()> {
         // a node needs all of the columns it projects into its output
         // however, it may also need *additional* columns to perform its functionality; consider,
         // e.g., a filter that filters on a column that it doesn't project
-        let needed_columns: Vec<Column> = mn
-            .borrow()
+        let node = mn.borrow();
+        let needed_columns: Vec<Column> = node
             .referenced_columns()
             .into_iter()
             .filter(|c| {
-                !mn.borrow()
+                !node
                     .ancestors()
                     .iter()
                     .map(|n| n.upgrade().unwrap())
@@ -38,18 +33,18 @@ pub(super) fn pull_columns_for(n: MirNodeRef) -> ReadySetResult<()> {
             .collect();
 
         let mut found: Vec<&Column> = Vec::new();
-        for ancestor in mn.borrow().ancestors().iter().map(|n| n.upgrade().unwrap()) {
-            if ancestor.borrow().ancestors().is_empty() {
+        for parent in node.ancestors().iter().map(|n| n.upgrade().unwrap()) {
+            if parent.borrow().ancestors().is_empty() {
                 // base, do nothing
                 continue;
             }
             for c in &needed_columns {
-                if !found.contains(&c) && has_column(&ancestor, c) {
-                    ancestor.borrow_mut().add_column(c.clone())?;
+                if !found.contains(&c) && has_column(&parent, c) {
+                    parent.borrow_mut().add_column(c.clone())?;
                     found.push(c);
                 }
             }
-            queue.push(ancestor.clone());
+            queue.push(parent.clone());
         }
     }
 
@@ -62,10 +57,12 @@ pub(super) fn pull_all_required_columns(q: &mut MirQuery) -> ReadySetResult<()> 
 
 #[cfg(test)]
 mod tests {
+    use common::IndexType;
     use dataflow::ops::grouped::aggregate::Aggregation;
     use nom_sql::{
         BinaryOperator, ColumnSpecification, Expression, FunctionExpression, Literal, SqlType,
     };
+    use noria::ViewPlaceholder;
 
     use super::*;
     use crate::node::node_inner::MirNodeInner;
@@ -76,7 +73,6 @@ mod tests {
         let base = MirNode::new(
             "base".into(),
             0,
-            vec!["a".into(), "b".into(), "c".into()],
             MirNodeInner::Base {
                 column_specs: vec![
                     (
@@ -119,10 +115,10 @@ mod tests {
         let grp = MirNode::new(
             "grp".into(),
             0,
-            vec!["agg".into()],
             MirNodeInner::Aggregation {
                 on: "b".into(),
                 group_by: vec![],
+                output_column: Column::named("agg"),
                 kind: Aggregation::Sum,
             },
             vec![MirNodeRef::downgrade(&base)],
@@ -139,7 +135,6 @@ mod tests {
         let fil = MirNode::new(
             "fil".into(),
             0,
-            vec!["a".into(), "agg".into()],
             MirNodeInner::Filter {
                 conditions: condition_expression_1.clone(),
             },
@@ -151,7 +146,6 @@ mod tests {
         let prj = MirNode::new(
             "prj".into(),
             0,
-            vec!["a".into(), "agg".into(), "c0".into()],
             MirNodeInner::Project {
                 emit: vec!["a".into(), "agg".into()],
                 expressions: vec![(
@@ -180,13 +174,13 @@ mod tests {
 
         assert_eq!(
             grp.borrow().columns(),
-            &[Column::from("c"), Column::from("a"), Column::from("agg")]
+            &[Column::from("a"), Column::from("c"), Column::from("agg")]
         );
 
         // The filter has to add the column in the same place as the aggregate
         assert_eq!(
             fil.borrow().columns(),
-            &[Column::from("c"), Column::from("a"), Column::from("agg")]
+            &[Column::from("a"), Column::from("c"), Column::from("agg")]
         );
 
         // The filter has to filter on the correct field
@@ -196,5 +190,98 @@ mod tests {
             }
             _ => unreachable!(),
         };
+    }
+
+    #[test]
+    fn unprojected_leaf_key() {
+        let base = MirNode::new(
+            "base".into(),
+            0,
+            MirNodeInner::Base {
+                column_specs: vec![
+                    (
+                        ColumnSpecification {
+                            column: nom_sql::Column::from("a"),
+                            sql_type: SqlType::Int(None),
+                            constraints: vec![],
+                            comment: None,
+                        },
+                        None,
+                    ),
+                    (
+                        ColumnSpecification {
+                            column: nom_sql::Column::from("b"),
+                            sql_type: SqlType::Int(None),
+                            constraints: vec![],
+                            comment: None,
+                        },
+                        None,
+                    ),
+                    (
+                        ColumnSpecification {
+                            column: nom_sql::Column::from("c"),
+                            sql_type: SqlType::Int(None),
+                            constraints: vec![],
+                            comment: None,
+                        },
+                        None,
+                    ),
+                ],
+                primary_key: Some([Column::from("a")].into()),
+                unique_keys: Default::default(),
+                adapted_over: None,
+            },
+            vec![],
+            vec![],
+        );
+
+        let prj = MirNode::new(
+            "prj".into(),
+            0,
+            MirNodeInner::Project {
+                emit: vec!["a".into()],
+                expressions: vec![],
+                literals: vec![],
+            },
+            vec![MirNodeRef::downgrade(&base)],
+            vec![],
+        );
+
+        let alias_table = MirNode::new(
+            "alias_table".into(),
+            0,
+            MirNodeInner::AliasTable {
+                table: "unprojected_leaf_key".into(),
+            },
+            vec![MirNodeRef::downgrade(&prj)],
+            vec![],
+        );
+
+        let leaf = MirNode::new(
+            "leaf".into(),
+            0,
+            MirNodeInner::leaf(
+                vec![(
+                    Column::named("b").aliased_as_table("unprojected_leaf_key"),
+                    ViewPlaceholder::OneToOne(1),
+                )],
+                IndexType::HashMap,
+            ),
+            vec![MirNodeRef::downgrade(&alias_table)],
+            vec![],
+        );
+
+        let mut query = MirQuery {
+            name: "unprojected_leaf_key".into(),
+            roots: vec![base],
+            leaf,
+        };
+
+        pull_all_required_columns(&mut query).unwrap();
+
+        assert_eq!(
+            prj.borrow().columns(),
+            vec![Column::named("a"), Column::named("b")]
+        );
     }
 }

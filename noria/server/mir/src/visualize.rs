@@ -128,6 +128,7 @@ impl GraphViz for MirNodeInner {
                 ref on,
                 ref group_by,
                 ref kind,
+                ..
             } => {
                 let op_string = match &*kind {
                     AggregationKind::Count { .. } => format!("\\|*\\|({})", print_col(on)),
@@ -171,6 +172,7 @@ impl GraphViz for MirNodeInner {
                 ref on,
                 ref group_by,
                 ref kind,
+                ..
             } => {
                 let op_string = match *kind {
                     ExtremumKind::Min => format!("min({})", print_col(on)),

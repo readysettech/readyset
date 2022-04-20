@@ -199,7 +199,6 @@ mod tests {
         let a = MirNode::new(
             "a".into(),
             0,
-            vec![Column::from("aa"), Column::from("ab")],
             MirNodeInner::Base {
                 column_specs: vec![cspec("aa"), cspec("ab")],
                 primary_key: Some([Column::from("aa")].into()),
@@ -212,7 +211,6 @@ mod tests {
         let b = MirNode::new(
             "b".into(),
             0,
-            vec![Column::from("ba"), Column::from("bb")],
             MirNodeInner::Base {
                 column_specs: vec![cspec("ba"), cspec("bb")],
                 primary_key: Some([Column::from("ba")].into()),
@@ -225,7 +223,6 @@ mod tests {
         let c = MirNode::new(
             "c".into(),
             0,
-            vec![Column::from("aa"), Column::from("ba")],
             MirNodeInner::Join {
                 on_left: vec![Column::from("ab")],
                 on_right: vec![Column::from("bb")],
@@ -237,7 +234,6 @@ mod tests {
         let d = MirNode::new(
             "d".into(),
             0,
-            vec![Column::from("aa"), Column::from("ba")],
             MirNodeInner::leaf(
                 vec![(Column::from("ba"), ViewPlaceholder::Generated)],
                 IndexType::HashMap,
@@ -283,7 +279,6 @@ mod tests {
         let e = MirNode::new(
             "e".into(),
             0,
-            vec![Column::from("aa")],
             MirNodeInner::Project {
                 emit: vec![Column::from("aa")],
                 expressions: vec![],

@@ -172,8 +172,107 @@ impl<'a> Iterator for ReferredColumnsIter<'a> {
     }
 }
 
+pub struct ReferredColumnsMut<'a> {
+    exprs_to_visit: Vec<&'a mut Expression>,
+    columns_to_visit: Vec<&'a mut Column>,
+}
+
+impl<'a> ReferredColumnsMut<'a> {
+    fn visit_expr(&mut self, expr: &'a mut Expression) -> Option<&'a mut Column> {
+        match expr {
+            Expression::Call(fexpr) => self.visit_function_expression(fexpr),
+            Expression::Literal(_) => None,
+            Expression::Column(col) => Some(col),
+            Expression::CaseWhen {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                self.exprs_to_visit.push(condition);
+                self.exprs_to_visit.push(then_expr);
+                if let Some(else_expr) = else_expr {
+                    self.visit_expr(else_expr)
+                } else {
+                    None
+                }
+            }
+            Expression::BinaryOp { lhs, rhs, .. } => {
+                self.exprs_to_visit.push(lhs);
+                self.visit_expr(rhs)
+            }
+            Expression::UnaryOp { rhs: expr, .. } | Expression::Cast { expr, .. } => {
+                self.visit_expr(expr)
+            }
+            Expression::Exists { .. } => None,
+            Expression::Between {
+                operand, min, max, ..
+            } => {
+                self.exprs_to_visit.push(operand);
+                self.exprs_to_visit.push(min);
+                self.visit_expr(max)
+            }
+            Expression::In { lhs, rhs, .. } => {
+                self.exprs_to_visit.push(lhs);
+                match rhs {
+                    InValue::Subquery(_) => None,
+                    InValue::List(exprs) => exprs.split_first_mut().and_then(|(expr, exprs)| {
+                        self.exprs_to_visit.extend(exprs);
+                        self.visit_expr(expr)
+                    }),
+                }
+            }
+            Expression::NestedSelect(_) => None,
+            Expression::Variable(_) => None,
+        }
+    }
+
+    fn visit_function_expression(
+        &mut self,
+        fexpr: &'a mut FunctionExpression,
+    ) -> Option<&'a mut Column> {
+        use FunctionExpression::*;
+
+        match fexpr {
+            Avg { expr, .. } => self.visit_expr(expr),
+            Count { expr, .. } => self.visit_expr(expr),
+            CountStar => None,
+            Sum { expr, .. } => self.visit_expr(expr),
+            Max(arg) => self.visit_expr(arg),
+            Min(arg) => self.visit_expr(arg),
+            GroupConcat { expr, .. } => self.visit_expr(expr),
+            Call { arguments, .. } => arguments.split_first_mut().and_then(|(first_arg, args)| {
+                self.exprs_to_visit.extend(args);
+                self.visit_expr(first_arg)
+            }),
+        }
+    }
+
+    fn finished(&self) -> bool {
+        self.exprs_to_visit.is_empty() && self.columns_to_visit.is_empty()
+    }
+}
+
+impl<'a> Iterator for ReferredColumnsMut<'a> {
+    type Item = &'a mut Column;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while !self.finished() {
+            let next = self
+                .exprs_to_visit
+                .pop()
+                .and_then(|expr| self.visit_expr(expr))
+                .or_else(|| self.columns_to_visit.pop());
+            if next.is_some() {
+                return next;
+            }
+        }
+        None
+    }
+}
+
 pub trait ReferredColumns {
     fn referred_columns(&self) -> ReferredColumnsIter;
+    fn referred_columns_mut(&mut self) -> ReferredColumnsMut<'_>;
 }
 
 impl ReferredColumns for Expression {
@@ -183,11 +282,28 @@ impl ReferredColumns for Expression {
             columns_to_visit: vec![],
         }
     }
+
+    fn referred_columns_mut(&mut self) -> ReferredColumnsMut {
+        ReferredColumnsMut {
+            exprs_to_visit: vec![self],
+            columns_to_visit: vec![],
+        }
+    }
 }
 
 impl ReferredColumns for FunctionExpression {
     fn referred_columns(&self) -> ReferredColumnsIter {
         let mut iter = ReferredColumnsIter {
+            exprs_to_visit: vec![],
+            columns_to_visit: vec![],
+        };
+        let initial_columns = iter.visit_function_expression(self);
+        iter.columns_to_visit.extend(initial_columns);
+        iter
+    }
+
+    fn referred_columns_mut(&mut self) -> ReferredColumnsMut {
+        let mut iter = ReferredColumnsMut {
             exprs_to_visit: vec![],
             columns_to_visit: vec![],
         };
