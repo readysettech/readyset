@@ -1,9 +1,9 @@
 use std::iter;
 
-use itertools::Either;
+use itertools::{Either, Itertools};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{BinaryOperator, Expression};
-use noria_errors::{unsupported, ReadySetResult};
+use noria_errors::{internal, unsupported, ReadySetResult};
 use tracing::{instrument, trace};
 
 use crate::node::{MirNode, MirNodeInner};
@@ -52,6 +52,29 @@ fn push_dependent_filter(
     let child = node.borrow().children().first().unwrap().clone();
     MirNode::remove(node.clone());
 
+    // If we're lifting past an AliasTable node, rewrite all columns referenced by the filter
+    // condition that should resolve in that AliasTable node to use the correct table name
+    if let MirNodeInner::AliasTable { table } = &child.borrow().inner {
+        match &mut node.borrow_mut().inner {
+            MirNodeInner::Filter { conditions } => {
+                for col in conditions.referred_columns_mut() {
+                    if dependency
+                        .non_dependent_columns()
+                        .contains(&Column::from(col.clone()))
+                    {
+                        col.table = Some(table.clone())
+                    }
+                }
+            }
+            _ => internal!("The node passed to push_dependent_filter must be a filter"),
+        }
+    }
+    if matches!(child.borrow().inner, MirNodeInner::AliasTable { .. }) {
+        for col in dependency.non_dependent_columns() {
+            child.borrow_mut().add_column(col.clone())?;
+        }
+    }
+
     let dependent_join_name = dependent_join.borrow().versioned_name();
     let mut child_ref = child.borrow_mut();
     let child_name = child_ref.versioned_name();
@@ -84,22 +107,6 @@ fn push_dependent_filter(
             for col in dependency.non_dependent_columns() {
                 child_ref.add_column(col.clone())?;
             }
-            for child_descendant in child_ref.topo_descendants() {
-                if !matches!(
-                    child_descendant.borrow().inner,
-                    // We'll update these below, outside this match block, since we need to drop
-                    // the child ref before we do it to avoid runtime borrow
-                    // errors (ugh RefCell!)
-                    MirNodeInner::Filter { .. }
-                        | MirNodeInner::TopK { .. }
-                        | MirNodeInner::Latest { .. }
-                        | MirNodeInner::Identity
-                ) {
-                    for col in dependency.non_dependent_columns() {
-                        child_descendant.borrow_mut().add_column(col.clone())?;
-                    }
-                }
-            }
             true
         }
         inner => unsupported!(
@@ -108,30 +115,6 @@ fn push_dependent_filter(
         ),
     };
     drop(child_ref);
-
-    for descendant in child.borrow().topo_descendants() {
-        if matches!(
-            descendant.borrow().inner,
-            MirNodeInner::Filter { .. }
-                | MirNodeInner::TopK { .. }
-                | MirNodeInner::Latest { .. }
-                | MirNodeInner::Identity
-        ) {
-            // These nodes all copy their parent's columns verbatim, so we have to update that here
-            // (ugh!)
-            let columns = descendant
-                .borrow()
-                .ancestors()
-                .first()
-                .unwrap()
-                .upgrade()
-                .unwrap()
-                .borrow()
-                .columns()
-                .to_vec();
-            descendant.borrow_mut().set_columns(columns);
-        }
-    }
 
     if should_insert {
         MirNode::splice_child_below(child, node);
@@ -368,7 +351,6 @@ mod tests {
         let t2 = MirNode::new(
             "t2".into(),
             0,
-            vec![Column::new(Some("t2"), "a")],
             MirNodeInner::Base {
                 column_specs: vec![(
                     ColumnSpecification {
@@ -392,7 +374,6 @@ mod tests {
         let t2_filter = MirNode::new(
             "t2_filter".into(),
             0,
-            vec![Column::new(Some("t2"), "a")],
             MirNodeInner::Filter {
                 conditions: Expression::BinaryOp {
                     lhs: Box::new(Expression::Column("t2.a".into())),
@@ -404,11 +385,21 @@ mod tests {
             vec![],
         );
 
+        // -> AliasTable
+        let t2_alias_table = MirNode::new(
+            "alias_table".into(),
+            0,
+            MirNodeInner::AliasTable {
+                table: "rhs".into(),
+            },
+            vec![Rc::downgrade(&t2_filter)],
+            vec![],
+        );
+
         // -> π[lit: 0, lit: 0]
         let group_proj = MirNode::new(
             "q_prj_hlpr".into(),
             0,
-            vec![Column::named("__count_val"), Column::named("__count_grp")],
             MirNodeInner::Project {
                 emit: vec![],
                 expressions: vec![],
@@ -417,7 +408,7 @@ mod tests {
                     ("__count_grp".into(), DataType::from(0u32)),
                 ],
             },
-            vec![Rc::downgrade(&t2_filter)],
+            vec![Rc::downgrade(&t2_alias_table)],
             vec![],
         );
         // -> [0, 0] for each row
@@ -426,14 +417,10 @@ mod tests {
         let exists_count = MirNode::new(
             "__exists_count".into(),
             0,
-            vec![
-                Column::named("__count_val"),
-                Column::named("__count_grp"),
-                Column::named("__exists_count"),
-            ],
             MirNodeInner::Aggregation {
                 on: Column::named("__count_val"),
                 group_by: vec![Column::named("__count_grp")],
+                output_column: Column::named("__exists_count"),
                 kind: Aggregation::Count { count_nulls: true },
             },
             vec![Rc::downgrade(&group_proj)],
@@ -445,11 +432,6 @@ mod tests {
         let gt_0_filter = MirNode::new(
             "count_gt_0".into(),
             0,
-            vec![
-                Column::named("__count_val"),
-                Column::named("__count_grp"),
-                Column::named("__exists_count"),
-            ],
             MirNodeInner::Filter {
                 conditions: Expression::BinaryOp {
                     lhs: Box::new(Expression::Column("__exists_count".into())),
@@ -464,11 +446,10 @@ mod tests {
         let t1 = MirNode::new(
             "t1".into(),
             0,
-            vec![Column::new(Some("t1"), "a")],
             MirNodeInner::Base {
                 column_specs: vec![(
                     ColumnSpecification {
-                        column: nom_sql::Column::from("a"),
+                        column: nom_sql::Column::from("t1.a"),
                         sql_type: SqlType::Int(None),
                         constraints: vec![],
                         comment: None,
@@ -488,7 +469,6 @@ mod tests {
         let left_literal_join_key_proj = MirNode::new(
             "t1_join_key".into(),
             0,
-            vec![Column::new(Some("t1"), "a")],
             MirNodeInner::Project {
                 emit: vec![Column::new(Some("t1"), "a")],
                 expressions: vec![],
@@ -499,20 +479,18 @@ mod tests {
         );
 
         // -> ⧑ on: l.__exists_join_key ≡ r.__count_grp
-        let join_columns = vec![
-            Column::new(Some("t1"), "a"),
-            Column::named("__exists_join_key"),
-            Column::named("__count_grp"),
-            Column::named("__exists_count"),
-        ];
         let exists_join = MirNode::new(
             "exists_join".into(),
             0,
-            join_columns.clone(),
             MirNodeInner::DependentJoin {
                 on_left: vec![Column::named("__exists_join_key")],
                 on_right: vec![Column::named("__count_grp")],
-                project: join_columns.clone(),
+                project: vec![
+                    Column::new(Some("t1"), "a"),
+                    Column::named("__exists_join_key"),
+                    Column::named("__count_grp"),
+                    Column::named("__exists_count"),
+                ],
             },
             vec![
                 Rc::downgrade(&left_literal_join_key_proj),
@@ -524,7 +502,6 @@ mod tests {
         let leaf = MirNode::new(
             "q".into(),
             0,
-            join_columns,
             MirNodeInner::leaf(vec![], IndexType::HashMap),
             vec![Rc::downgrade(&exists_join)],
             vec![],
@@ -552,7 +529,7 @@ mod tests {
                     .position(|col| col.name == "a" && col.table == Some("t1".into()));
                 let right_pos = on_right
                     .iter()
-                    .position(|col| col.name == "a" && col.table == Some("t2".into()));
+                    .position(|col| col.name == "a" && col.table == Some("rhs".into()));
 
                 assert!(left_pos.is_some());
                 assert!(right_pos.is_some());
@@ -566,7 +543,7 @@ mod tests {
         };
 
         assert_eq!(
-            group_proj
+            t2_alias_table
                 .borrow()
                 .ancestors()
                 .first()
@@ -579,7 +556,8 @@ mod tests {
             "t2_filter should be removed"
         );
 
-        assert!(pull_all_required_columns(&mut query).is_ok());
+        let pull_result = pull_all_required_columns(&mut query);
+        assert!(pull_result.is_ok(), "{}", pull_result.err().unwrap());
     }
 
     #[test]
@@ -595,7 +573,6 @@ mod tests {
         let t2 = MirNode::new(
             "t2".into(),
             0,
-            vec![Column::new(Some("t2"), "a")],
             MirNodeInner::Base {
                 column_specs: vec![
                     (
@@ -630,7 +607,6 @@ mod tests {
         let t2_filter = MirNode::new(
             "t2_filter".into(),
             0,
-            vec![Column::new(Some("t2"), "a")],
             MirNodeInner::Filter {
                 conditions: Expression::BinaryOp {
                     lhs: Box::new(Expression::Column("t2.a".into())),
@@ -646,10 +622,10 @@ mod tests {
         let t2_count = MirNode::new(
             "q_t2_count".into(),
             0,
-            vec![Column::new(Some("t2"), "b"), Column::named("COUNT(t2.b)")],
             MirNodeInner::Aggregation {
                 on: Column::new(Some("t2"), "b"),
                 group_by: vec![Column::new(Some("t2"), "b")],
+                output_column: Column::named("COUNT(t2.b)"),
                 kind: Aggregation::Count { count_nulls: false },
             },
             vec![Rc::downgrade(&t2_filter)],
@@ -660,7 +636,6 @@ mod tests {
         let t2_count_f1 = MirNode::new(
             "q_t2_count_f1".into(),
             0,
-            vec![Column::new(Some("t2"), "b"), Column::named("COUNT(t2.b)")],
             MirNodeInner::Filter {
                 conditions: Expression::BinaryOp {
                     lhs: Box::new(Expression::Column(nom_sql::Column {
@@ -679,7 +654,6 @@ mod tests {
         let t2_count_f2 = MirNode::new(
             "q_t2_count_f2".into(),
             0,
-            vec![Column::new(Some("t2"), "b"), Column::named("COUNT(t2.b)")],
             MirNodeInner::Filter {
                 conditions: Expression::BinaryOp {
                     lhs: Box::new(Expression::Column(nom_sql::Column {
@@ -698,7 +672,6 @@ mod tests {
         let group_proj = MirNode::new(
             "q_prj_hlpr".into(),
             0,
-            vec![Column::named("__count_val"), Column::named("__count_grp")],
             MirNodeInner::Project {
                 emit: vec![],
                 expressions: vec![],
@@ -716,14 +689,10 @@ mod tests {
         let exists_count = MirNode::new(
             "__exists_count".into(),
             0,
-            vec![
-                Column::named("__count_val"),
-                Column::named("__count_grp"),
-                Column::named("__exists_count"),
-            ],
             MirNodeInner::Aggregation {
                 on: Column::named("__count_val"),
                 group_by: vec![Column::named("__count_grp")],
+                output_column: Column::named("__exists_count"),
                 kind: Aggregation::Count { count_nulls: true },
             },
             vec![Rc::downgrade(&group_proj)],
@@ -735,11 +704,6 @@ mod tests {
         let gt_0_filter = MirNode::new(
             "count_gt_0".into(),
             0,
-            vec![
-                Column::named("__count_val"),
-                Column::named("__count_grp"),
-                Column::named("__exists_count"),
-            ],
             MirNodeInner::Filter {
                 conditions: Expression::BinaryOp {
                     lhs: Box::new(Expression::Column("__exists_count".into())),
@@ -754,11 +718,10 @@ mod tests {
         let t1 = MirNode::new(
             "t1".into(),
             0,
-            vec![Column::new(Some("t1"), "a")],
             MirNodeInner::Base {
                 column_specs: vec![(
                     ColumnSpecification {
-                        column: nom_sql::Column::from("a"),
+                        column: nom_sql::Column::from("t1.a"),
                         sql_type: SqlType::Int(None),
                         constraints: vec![],
                         comment: None,
@@ -778,7 +741,6 @@ mod tests {
         let left_literal_join_key_proj = MirNode::new(
             "t1_join_key".into(),
             0,
-            vec![Column::new(Some("t1"), "a")],
             MirNodeInner::Project {
                 emit: vec![Column::new(Some("t1"), "a")],
                 expressions: vec![],
@@ -789,20 +751,18 @@ mod tests {
         );
 
         // -> ⧑ on: l.__exists_join_key ≡ r.__count_grp
-        let join_columns = vec![
-            Column::new(Some("t1"), "a"),
-            Column::named("__exists_join_key"),
-            Column::named("__count_grp"),
-            Column::named("__exists_count"),
-        ];
         let exists_join = MirNode::new(
             "exists_join".into(),
             0,
-            join_columns.clone(),
             MirNodeInner::DependentJoin {
                 on_left: vec![Column::named("__exists_join_key")],
                 on_right: vec![Column::named("__count_grp")],
-                project: join_columns.clone(),
+                project: vec![
+                    Column::new(Some("t1"), "a"),
+                    Column::named("__exists_join_key"),
+                    Column::named("__count_grp"),
+                    Column::named("__exists_count"),
+                ],
             },
             vec![
                 Rc::downgrade(&left_literal_join_key_proj),
@@ -814,7 +774,6 @@ mod tests {
         let leaf = MirNode::new(
             "q".into(),
             0,
-            join_columns,
             MirNodeInner::leaf(vec![], IndexType::HashMap),
             vec![Rc::downgrade(&exists_join)],
             vec![],

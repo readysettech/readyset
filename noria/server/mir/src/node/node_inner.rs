@@ -20,6 +20,9 @@ pub enum MirNodeInner {
     Aggregation {
         on: Column,
         group_by: Vec<Column>,
+        /// The column name to use for the result of the aggregate, which will always be the last
+        /// column
+        output_column: Column,
         kind: Aggregation,
     },
     /// column specifications, unique-keys (non-compound), tx flag, adapted base
@@ -33,6 +36,8 @@ pub enum MirNodeInner {
     Extremum {
         on: Column,
         group_by: Vec<Column>,
+        /// The column name to use for the extreme value, which will always be the last column
+        output_column: Column,
         kind: Extremum,
     },
     /// filter conditions
@@ -92,8 +97,12 @@ pub enum MirNodeInner {
         expressions: Vec<(SqlIdentifier, Expression)>,
         literals: Vec<(SqlIdentifier, DataType)>,
     },
-    /// emit columns
     Union {
+        /// Columns to emit from each parent
+        ///
+        /// # Invariants
+        ///
+        /// * This will always have the same length as the number of parents
         emit: Vec<Vec<Column>>,
         duplicate_mode: union::DuplicateMode,
     },
@@ -171,53 +180,58 @@ impl MirNodeInner {
         format!("{:?}", self)
     }
 
-    pub(crate) fn insert_column(&mut self, c: Column) -> ReadySetResult<()> {
-        match *self {
-            MirNodeInner::Aggregation {
-                ref mut group_by, ..
-            } => {
+    /// Attempt to add the given column to the set of columns projected by this node.
+    ///
+    /// If this node is not a node that has control over the columns it projects (such as a filter
+    /// node), returns `Ok(false)`
+    pub(crate) fn add_column(&mut self, c: Column) -> ReadySetResult<bool> {
+        match self {
+            MirNodeInner::Aggregation { group_by, .. } => {
                 group_by.push(c);
+                Ok(true)
             }
-            MirNodeInner::Base { .. } => internal!("can't add columns to base nodes!"),
-            MirNodeInner::Extremum {
-                ref mut group_by, ..
-            } => {
+            MirNodeInner::Base { column_specs, .. } => {
+                if !column_specs.iter().any(|(cs, _)| c == cs.column) {
+                    internal!("can't add columns to base nodes!")
+                }
+                Ok(true)
+            }
+            MirNodeInner::Extremum { group_by, .. } => {
                 group_by.push(c);
+                Ok(true)
             }
-            MirNodeInner::Join {
-                ref mut project, ..
+            MirNodeInner::Join { project, .. }
+            | MirNodeInner::LeftJoin { project, .. }
+            | MirNodeInner::DependentJoin { project, .. } => {
+                if !project.contains(&c) {
+                    project.push(c);
+                }
+                Ok(true)
             }
-            | MirNodeInner::LeftJoin {
-                ref mut project, ..
-            } => {
-                project.push(c);
-            }
-            MirNodeInner::Project { ref mut emit, .. } => {
+            MirNodeInner::Project { emit, .. } => {
                 emit.push(c);
+                Ok(true)
             }
-            MirNodeInner::Union { ref mut emit, .. } => {
+            MirNodeInner::Union { emit, .. } => {
                 for e in emit.iter_mut() {
                     e.push(c.clone());
                 }
+                Ok(true)
             }
-            MirNodeInner::Distinct {
-                ref mut group_by, ..
-            } => {
+            MirNodeInner::Distinct { group_by, .. } => {
                 group_by.push(c);
+                Ok(true)
             }
-            MirNodeInner::Paginate {
-                ref mut group_by, ..
-            } => {
+            MirNodeInner::Paginate { group_by, .. } => {
                 group_by.push(c);
+                Ok(true)
             }
-            MirNodeInner::TopK {
-                ref mut group_by, ..
-            } => {
+            MirNodeInner::TopK { group_by, .. } => {
                 group_by.push(c);
+                Ok(true)
             }
-            _ => (),
+            _ => Ok(false),
         }
-        Ok(())
     }
 
     pub(crate) fn can_reuse_as(&self, other: &MirNodeInner) -> bool {
@@ -249,12 +263,14 @@ impl MirNodeInner {
                 on: ref our_on,
                 group_by: ref our_group_by,
                 kind: ref our_kind,
+                ..
             } => {
                 match *other {
                     MirNodeInner::Aggregation {
                         ref on,
                         ref group_by,
                         ref kind,
+                        ..
                     } => {
                         // TODO(malte): this is stricter than it needs to be, as it could cover
                         // COUNT-as-SUM-style relationships.
@@ -300,11 +316,13 @@ impl MirNodeInner {
                 on: ref our_on,
                 group_by: ref our_group_by,
                 kind: ref our_kind,
+                ..
             } => match *other {
                 MirNodeInner::Extremum {
                     ref on,
                     ref group_by,
                     ref kind,
+                    ..
                 } => our_on == on && our_group_by == group_by && our_kind == kind,
                 _ => false,
             },
@@ -444,6 +462,7 @@ impl Debug for MirNodeInner {
                 ref on,
                 ref group_by,
                 ref kind,
+                ..
             } => {
                 let op_string = match *kind {
                     Aggregation::Count { .. } => format!("|*|({})", on.name.as_str()),
@@ -485,6 +504,7 @@ impl Debug for MirNodeInner {
                 ref on,
                 ref group_by,
                 ref kind,
+                ..
             } => {
                 let op_string = match *kind {
                     Extremum::Min => format!("min({})", on.name.as_str()),

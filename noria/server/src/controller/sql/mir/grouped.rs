@@ -285,6 +285,7 @@ fn joinable_aggregate_nodes(agg_nodes: &[MirNodeRef]) -> Vec<MirNodeRef> {
 pub(super) fn post_lookup_aggregates(
     qg: &QueryGraph,
     stmt: &SelectStatement,
+    query_name: &SqlIdentifier,
 ) -> ReadySetResult<Option<PostLookupAggregates<Column>>> {
     if stmt.distinct {
         // DISTINCT is the equivalent of grouping by all projected columns but not actually doing
@@ -296,13 +297,13 @@ pub(super) fn post_lookup_aggregates(
                 .filter_map(|expr| match expr {
                     FieldDefinitionExpression::Expression {
                         alias: Some(alias), ..
-                    } => Some(Column::named(alias.clone())),
+                    } => Some(Column::named(alias.clone()).aliased_as_table(query_name.clone())),
                     FieldDefinitionExpression::Expression {
                         expr: Expression::Column(col),
                         ..
-                    } => Some(Column::from(col)),
+                    } => Some(Column::from(col).aliased_as_table(query_name.clone())),
                     FieldDefinitionExpression::Expression { expr, .. } => {
-                        Some(Column::named(expr.to_string()))
+                        Some(Column::named(expr.to_string()).aliased_as_table(query_name.clone()))
                     }
                     _ => None,
                 })
@@ -318,7 +319,7 @@ pub(super) fn post_lookup_aggregates(
     let mut aggregates = vec![];
     for (function, alias) in &qg.aggregates {
         aggregates.push(PostLookupAggregate {
-            column: Column::named(alias.clone()),
+            column: Column::named(alias.clone()).aliased_as_table(query_name.clone()),
             function: match function {
                 Avg { .. } => {
                     unsupported!("Average is not supported as a post-lookup aggregate")
@@ -337,7 +338,11 @@ pub(super) fn post_lookup_aggregates(
     }
 
     Ok(Some(PostLookupAggregates {
-        group_by: qg.group_by.iter().map(|c| c.into()).collect(),
+        group_by: qg
+            .group_by
+            .iter()
+            .map(|c| Column::from(c).aliased_as_table(query_name.clone()))
+            .collect(),
         aggregates,
     }))
 }

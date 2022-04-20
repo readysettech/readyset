@@ -6,6 +6,8 @@ use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
 pub use column::Column;
+use lazy_static::lazy_static;
+use nom_sql::SqlIdentifier;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 
@@ -30,4 +32,11 @@ impl FlowNode {
             FlowNode::New(na) | FlowNode::Existing(na) => na,
         }
     }
+}
+
+lazy_static! {
+    /// The column used by the [`Paginate`] node for its page number
+    ///
+    /// [`Paginate`]: node::node_inner::MirNodeInner::Paginate
+    pub static ref PAGE_NUMBER_COL: SqlIdentifier = "__page_number".into();
 }

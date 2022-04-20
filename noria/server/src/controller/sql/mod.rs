@@ -1398,7 +1398,7 @@ mod tests {
                 None,
                 mig,
             );
-            assert!(res.is_ok());
+            assert!(res.is_ok(), "{}", res.err().unwrap());
             // should have added two more nodes: one identity node and one reader node
             let qfp = res.unwrap();
             assert_eq!(mig.graph().node_count(), ncount + 2);
