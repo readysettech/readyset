@@ -203,6 +203,8 @@ fn default(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
             ),
             map(tag("''"), |_| Literal::String(String::from(""))),
             map(tag_no_case("null"), |_| Literal::Null),
+            map(tag_no_case("true"), |_| Literal::Boolean(true)),
+            map(tag_no_case("false"), |_| Literal::Boolean(false)),
             map(
                 terminated(tag_no_case("current_timestamp"), opt(tag("()"))),
                 |_| Literal::CurrentTimestamp,
@@ -359,6 +361,25 @@ mod tests {
             let cspec = column_specification(Dialect::MySQL)(input).unwrap().1;
             let res = cspec.to_string();
             assert_eq!(res, String::from_utf8(input.to_vec()).unwrap());
+        }
+
+        #[test]
+        fn default_booleans() {
+            let input = b"`c` bool DEFAULT FALSE";
+            let cspec = column_specification(Dialect::MySQL)(input).unwrap().1;
+            assert_eq!(cspec.constraints.len(), 1);
+            assert!(matches!(
+                cspec.constraints[0],
+                ColumnConstraint::DefaultValue(Literal::Boolean(false))
+            ));
+
+            let input = b"`c` bool DEFAULT true";
+            let cspec = column_specification(Dialect::MySQL)(input).unwrap().1;
+            assert_eq!(cspec.constraints.len(), 1);
+            assert!(matches!(
+                cspec.constraints[0],
+                ColumnConstraint::DefaultValue(Literal::Boolean(true))
+            ));
         }
     }
 
