@@ -2358,4 +2358,17 @@ PRIMARY KEY (`id`));";
         assert_eq!(res.table.name, "uploads");
         assert_eq!(res.fields.len(), 23);
     }
+
+    #[test]
+    fn solidus_spree_zones() {
+        let qstring = b"CREATE TABLE `spree_zones` (
+`id` int NOT NULL AUTO_INCREMENT PRIMARY KEY,
+`name` varchar(255), `description` varchar(255),
+`default_tax` tinyint(1) DEFAULT FALSE,
+`zone_members_count` int DEFAULT 0,
+`created_at` datetime(6), `updated_at` datetime(6)) ENGINE=InnoDB;";
+
+        let res = test_parse!(creation(Dialect::MySQL), qstring);
+        assert_eq!(res.table.name, "spree_zones");
+    }
 }
