@@ -1,0 +1,16 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Resources:
+  ReadysetVPCSupplementalStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      Parameters:
+        VPCID: "vpc-0c6cb42c8c969381e"
+        VPCCIDR: "10.1.0.0/21"
+        AdditionalAdapterCIDR: "10.10.0.0/16"
+        AdditionalMonitorCIDR1: "10.11.0.0/22"
+        VPCPrivateSubnetIds: "subnet-02b0d5f328b759cd8,subnet-0da46bb41d79196c2,subnet-00ddf8a64c29154a4"
+        BastionSecurityGroupID: "sg-037d774b0151048f9"
+      # Update this based upon release
+      # Release names have been irl-deployment-YYYY-MM-DD-NN
+      TemplateURL: "https://readysettech-cfn-public-us-east-2.s3.us-east-2.amazonaws.com/irl-deployment-2022-03-22-01/readyset/templates/readyset-vpc-supplemental-template.yaml"

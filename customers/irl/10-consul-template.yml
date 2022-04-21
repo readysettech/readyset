@@ -1,0 +1,21 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Resources:
+  ReadysetConsulStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      Parameters:
+        ConsulEc2RetryJoinTagKey: "ReadysetConsulNodeType"
+        ConsulInstanceType: "m6i.large"
+        ConsulEc2RetryJoinTagValue: "Server"
+        ConsulServerNodes: "3"
+        KeyPairName: "readyset"
+        PrivateSubnet1ID: "subnet-02b0d5f328b759cd8"
+        PrivateSubnet2ID: "subnet-0da46bb41d79196c2"
+        PrivateSubnet3ID: "subnet-00ddf8a64c29154a4"
+        # This needs to be pulled from VPC supplemental stack's outputs
+        # Especially if redeployed supplemental!
+        ConsulServerSecurityGroupID: "sg-01c60c34ff92ab24e"
+      # Update this based upon release
+      # Release names have been irl-deployment-YYYY-MM-DD-NN
+      TemplateURL: "https://readysettech-cfn-public-us-east-2.s3.us-east-2.amazonaws.com/<release name>/readyset/templates/readyset-authority-consul-template.yaml"

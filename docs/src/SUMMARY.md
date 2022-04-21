@@ -46,6 +46,10 @@
 
 - [EC2 Dev Machine](./ec2-dev-machine.md)
 
+# Customers
+
+- [IRL](./customers/irl.md)
+
 # Corporate Resources
 
 - [G Suite Calendar](./gsuite-calendar.md)
