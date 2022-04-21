@@ -4,6 +4,7 @@ use std::fmt::{self, Display};
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
 use dataflow::ops::union;
+use dataflow::post_lookup::PostLookupAggregateFunction;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -199,13 +200,69 @@ impl GraphViz for MirNodeInner {
                 write!(f, "⋈  | on: {}", jc)
             }
             MirNodeInner::JoinAggregates => write!(f, "AGG ⋈"),
-            MirNodeInner::Leaf { ref keys, .. } => {
+            MirNodeInner::Leaf {
+                ref keys,
+                index_type,
+                order_by,
+                limit,
+                returned_cols,
+                aggregates,
+                ..
+            } => {
                 let key_cols = keys
                     .iter()
                     .map(|k| print_col(&k.0))
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(f, "Leaf | ⚷: {}", key_cols)
+                write!(f, "Leaf | ⚷: {index_type:?}[{key_cols}]")?;
+
+                if let Some(order_by) = order_by {
+                    write!(
+                        f,
+                        "\\norder_by: {}",
+                        order_by
+                            .iter()
+                            .map(|(col, ot)| format!("{} {}", print_col(col), ot))
+                            .join(", ")
+                    )?;
+                }
+
+                if let Some(limit) = limit {
+                    write!(f, "\\nlimit: {limit}")?;
+                }
+
+                if let Some(returned_cols) = returned_cols {
+                    write!(
+                        f,
+                        "\\nreturn: {}",
+                        returned_cols.iter().map(print_col).join(", ")
+                    )?;
+                }
+
+                if let Some(aggregates) = aggregates {
+                    write!(
+                        f,
+                        "\\naggregates: {} γ: {}",
+                        aggregates
+                            .aggregates
+                            .iter()
+                            .map(|aggregate| format!(
+                                "{}({})",
+                                match aggregate.function {
+                                    PostLookupAggregateFunction::Sum => "Σ",
+                                    PostLookupAggregateFunction::Product => "Π",
+                                    PostLookupAggregateFunction::GroupConcat { .. } => "GC",
+                                    PostLookupAggregateFunction::Max => "Max",
+                                    PostLookupAggregateFunction::Min => "Min",
+                                },
+                                print_col(&aggregate.column)
+                            ))
+                            .join(", "),
+                        aggregates.group_by.iter().map(print_col).join(", ")
+                    )?;
+                }
+
+                Ok(())
             }
             MirNodeInner::LeftJoin {
                 ref on_left,
