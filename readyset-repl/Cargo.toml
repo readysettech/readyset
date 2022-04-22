@@ -1,0 +1,20 @@
+[package]
+name = "readyset-repl"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "3.0", features = ["derive", "wrap_help"] }
+console = "0.15.0"
+rustyline = "9.1"
+rustyline-derive = "0.6.0"
+tokio = { version = "1.17", features = ["rt", "macros"] }
+prettytable-rs = "0.8.0"
+textwrap = "0.14"
+nom = "7.1.1"
+
+database-utils = { path = "../database-utils" }
+noria-data = { path = "../noria/data" }
+noria-errors = { path = "../noria/errors" }

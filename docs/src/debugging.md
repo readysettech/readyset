@@ -4,6 +4,50 @@ There are a few standard Rust debugging tools, in addition to some
 ReadySet-specific internal debugging tools, that are valuable when tracking down
 issues with Noria.
 
+## ReadySet REPL
+
+Because the readyset adapter has different code paths for prepared statements
+and queries executed ad-hoc, it's often desirable to prepare and execute
+statements when testing. The official `mysql` and `psql` clients, however, don't
+directly support preparing and executing statements. There's a tool in the
+workspace called `readyset-repl` that can be used for this purpose, in addition
+to just as a regular database client for either PostgreSQL or MySQL. To run it,
+run the following command from the root of the repository:
+
+```
+$ cargo run --bin readyset-repl -- <database-url>
+```
+
+Where `<database-url>` is a URL for a database, starting with either `mysql://`
+or `postgresql://`. For example, the following is the URL to connect to the
+mysql database currently run by the `docker-compose.yml` in the root of the
+repository:
+
+```
+mysql://root:noria@127.1/test
+```
+
+Once you run the REPL binary, you'll be given a prompt to execute queries. The
+REPL also supports a `help` command for providing built-in help.
+
+To prepare a statement with the REPL, prefix the statement with `prepare `. That
+will output the ID of the prepared statement, which can be prefixed with
+`execute` along with a comma-separated list of parameters to execute the query.
+For example:
+
+```
+Welcome to the ReadySet REPL!
+
+Type `help` for help.
+
+[mysql://root@127.1/test] ❯ prepare select * from t1 where uid = ?;
+Prepared statement id: 0
+
+[mysql://root@127.1/test] ❯ execute 0 1;
+
+ 1 | 4
+```
+
 ## Graphviz
 
 Noria has the ability to emit a [graphviz][] representation of both the dataflow
