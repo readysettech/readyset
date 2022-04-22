@@ -31,7 +31,7 @@ use crate::replication::ReplicationOffsets;
 use crate::status::ReadySetStatus;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
-use crate::{ActivationResult, KeyCount, ReplicationOffset, ViewFilter, ViewRequest};
+use crate::{KeyCount, ReplicationOffset, ViewFilter, ViewRequest};
 
 mod rpc;
 
@@ -491,7 +491,7 @@ impl ControllerHandle {
     pub fn dry_run(
         &mut self,
         changes: ChangeList,
-    ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
+    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
         let request = ExtendRecipeSpec {
             changes,
             ..Default::default()
@@ -506,7 +506,7 @@ impl ControllerHandle {
     pub fn extend_recipe(
         &mut self,
         changes: ChangeList,
-    ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
+    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
         let request = ExtendRecipeSpec {
             changes,
             ..Default::default()
@@ -521,7 +521,7 @@ impl ControllerHandle {
     pub fn extend_recipe_no_leader_ready(
         &mut self,
         changes: ChangeList,
-    ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
+    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
         let request = ExtendRecipeSpec {
             changes,
             require_leader_ready: false,
@@ -539,7 +539,7 @@ impl ControllerHandle {
         changes: ChangeList,
         replication_offset: &ReplicationOffset,
         require_leader_ready: bool,
-    ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
+    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
         let request = ExtendRecipeSpec {
             changes,
             replication_offset: Some(Cow::Borrowed(replication_offset)),

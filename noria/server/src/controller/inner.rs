@@ -434,9 +434,9 @@ impl Leader {
                 let ret = futures::executor::block_on(async move {
                     let mut writer = self.dataflow_state_handle.write().await;
                     check_quorum!(writer.as_ref());
-                    let r = writer.as_mut().remove_all_queries().await?;
+                    writer.as_mut().remove_all_queries().await?;
                     self.dataflow_state_handle.commit(writer, authority).await?;
-                    Ok(r)
+                    Ok(())
                 })?;
                 return_serialized!(ret);
             }

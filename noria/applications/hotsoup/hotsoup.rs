@@ -92,12 +92,8 @@ impl Backend {
 
         info!("Ignored {} blacklisted queries", blacklisted);
 
-        match self.g.extend_recipe(rs.clone().parse().unwrap()).await {
-            Ok(ar) => {
-                info!("{} expressions added", ar.expressions_added);
-                info!("{} expressions removed", ar.expressions_removed);
-            }
-            Err(e) => return Err(format!("failed to activate recipe: {}", e)),
+        if let Err(e) = self.g.extend_recipe(rs.clone().parse().unwrap()).await {
+            return Err(format!("failed to activate recipe: {}", e));
         }
 
         self._r = rs;
