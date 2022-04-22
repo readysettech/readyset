@@ -1325,11 +1325,12 @@ where
         let data = queries
             .into_iter()
             .map(|DeniedQuery { id, query, status }| {
-                let s = if let MigrationState::DryRunSucceeded = status.migration_state {
-                    "yes".to_string()
-                } else {
-                    "pending".to_string()
-                };
+                let s = match status.migration_state {
+                    MigrationState::DryRunSucceeded | MigrationState::Successful => "yes",
+                    MigrationState::Pending => "pending",
+                    MigrationState::Unsupported => "unsupported",
+                }
+                .to_string();
                 vec![
                     DataType::from(id),
                     DataType::from(query.to_string()),
