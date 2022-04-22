@@ -713,7 +713,7 @@
           "metricColumn": "none",
           "queryType": "randomWalk",
           "rawQuery": true,
-          "rawSql": "SHOW CACHED QUERIES;",
+          "rawSql": "SHOW CACHES;",
           "refId": "A",
           "select": [
             [
