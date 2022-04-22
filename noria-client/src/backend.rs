@@ -703,6 +703,7 @@ where
             }
             Some(Err(e)) => {
                 if e.caused_by_view_not_found() {
+                    warn!(error = %e, "View not found during mirror_prepare()");
                     self.query_status_cache.update_query_migration_state(
                         &select_meta.rewritten,
                         MigrationState::Pending,
@@ -712,9 +713,13 @@ where
                         &select_meta.rewritten,
                         MigrationState::Unsupported,
                     );
+                } else {
+                    error!(
+                        error = %e,
+                        "Error received from noria during mirror_prepare()"
+                    );
                 }
                 event.set_noria_error(e);
-                error!(error = %e, query = %select_meta.stmt, "Error received from noria during mirror_prepare()");
             }
             None => {}
             _ => internal!("Can only return SELECT result or error"),
