@@ -60,6 +60,8 @@ Metadata:
           - ReadySetMonitorInstanceType
           - ReadySetMemoryLimitGB
           - ReadySetDeploymentName
+          - ReadySetEnableLogAggregation
+          - ReadySetEnableCloudwatch
       - Label:
           default: AWS Quick Start Configuration
         Parameters:
@@ -270,6 +272,16 @@ Parameters:
     Description: Path to SSM secure string parameter that contains the backend database password.
     Type: String
 
+  ReadySetEnableCloudwatch:
+    Description: Send logs and metrics directly to Cloudwatch
+    Type: String
+    Default: true
+
+  ReadySetEnableLogAggregation:
+    Description: Send logs and metrics to Prometheus
+    Type: String
+    Default: false
+
 Resources:
   # Base VPC to deploy resources into
 
@@ -412,6 +424,9 @@ Resources:
         DatabaseHostname: !GetAtt ReadySetRDSMySQLStack.Outputs.DatabaseHostname
         DatabaseAdapterUsername: !Ref DatabaseUsername
         DatabasePort: !GetAtt ReadySetRDSMySQLStack.Outputs.DatabasePort
+        # Logging
+        EnableAggregation: !Ref ReadySetEnableLogAggregation
+        EnableCloudwatch: !Ref ReadySetEnableCloudwatch
 
 Outputs:
   ReadySetMySQLVPCEndpointService:
