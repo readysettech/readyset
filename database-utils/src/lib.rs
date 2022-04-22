@@ -149,6 +149,36 @@ impl DatabaseURL {
         }
     }
 
+    /// Returns the user name for this database URL
+    pub fn user(&self) -> Option<&str> {
+        match self {
+            DatabaseURL::MySQL(opts) => opts.user(),
+            DatabaseURL::PostgreSQL(config) => config.get_user(),
+        }
+    }
+
+    /// Returns the host name for this database URL
+    ///
+    /// # Panics
+    ///
+    /// * Panics if the hostname in the URL is not valid UTF8
+    /// * Panics if a postgresql URL has no hostname set
+    pub fn host(&self) -> &str {
+        match self {
+            DatabaseURL::MySQL(opts) => opts.ip_or_hostname(),
+            DatabaseURL::PostgreSQL(config) => {
+                let host = config
+                    .get_hosts()
+                    .first()
+                    .expect("PostgreSQL URL has no hostname set");
+                match host {
+                    pgsql::config::Host::Tcp(tcp) => tcp.as_str(),
+                    pgsql::config::Host::Unix(p) => p.to_str().expect("Invalid UTF-8 in host"),
+                }
+            }
+        }
+    }
+
     /// Returns the underlying database nname.
     pub fn db_name(&self) -> Option<&str> {
         match self {
@@ -360,7 +390,7 @@ impl DatabaseConnection {
 /// An enum wrapper around various prepared statement types. Either a mysql_async prepared
 /// statement, a tokio_postgres prepared statement, or a plain query string that we would like to
 /// both prepare and execute.
-#[derive(From)]
+#[derive(From, Clone)]
 pub enum DatabaseStatement {
     /// A MySQL prepared statement returned from a prepare call in `mysql_async`.
     Mysql(mysql_async::Statement),

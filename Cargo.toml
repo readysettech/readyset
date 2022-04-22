@@ -41,6 +41,7 @@ members = [
     "test_utils",
     "readyset-tracing",
     "readyset-tracing/proc-macros",
+    "readyset-repl",
 ]
 resolver = "2"
 
