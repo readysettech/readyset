@@ -97,6 +97,18 @@ pub(super) fn rewrite_table_definition(
                     }
                 };
             }
+            AlterTableDefinition::RenameColumn { name, new_name } => {
+                match new_table.fields.iter_mut().find(|f| f.column.name == name) {
+                    None => {
+                        return Err(ReadySetError::InvalidQuery(
+                            alter_table_definition.to_string(),
+                        ))
+                    }
+                    Some(col) => {
+                        col.column.name = new_name.clone();
+                    }
+                };
+            }
         }
     }
     Ok(new_table)
@@ -310,5 +322,23 @@ mod tests {
             _ => panic!("expected DefaultValue"),
         }
         assert_eq!(column_spec.column.table, Some(new_table.table.name));
+    }
+
+    #[test]
+    fn rename_column() {
+        let original_table = create_table();
+        let alteration = nom_sql::alter_table_statement(Dialect::MySQL)(
+            "ALTER TABLE test RENAME COLUMN id new_id;".as_bytes(),
+        )
+        .unwrap()
+        .1;
+        assert!(!original_table
+            .fields
+            .iter()
+            .any(|f| f.column.name == "new_id"));
+        assert!(original_table.fields.iter().any(|f| f.column.name == "id"));
+        let new_table = rewrite_table_definition(&alteration, original_table).unwrap();
+        assert!(new_table.fields.iter().any(|f| f.column.name == "new_id"));
+        assert!(!new_table.fields.iter().any(|f| f.column.name == "id"));
     }
 }
