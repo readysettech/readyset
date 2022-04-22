@@ -69,6 +69,10 @@ pub enum AlterTableDefinition {
         name: SqlIdentifier,
         spec: ColumnSpecification,
     },
+    RenameColumn {
+        name: SqlIdentifier,
+        new_name: SqlIdentifier,
+    },
     // TODO(grfn): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#add%20table%20constraint%20definition
     // AddTableConstraint(..),
     // TODO(grfn): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#drop%20table%20constraint%20definition
@@ -96,6 +100,9 @@ impl fmt::Display for AlterTableDefinition {
             }
             AlterTableDefinition::ChangeColumn { name, spec } => {
                 write!(f, "CHANGE COLUMN `{}` {}", name, spec)
+            }
+            AlterTableDefinition::RenameColumn { name, new_name } => {
+                write!(f, "RENAME COLUMN `{}` `{}`", name, new_name)
             }
         }
     }
@@ -238,6 +245,21 @@ fn modify_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTabl
     }
 }
 
+fn rename_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
+    move |i| {
+        let (i, _) = tag_no_case("rename")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("column")(i)?;
+        let (i, _) = whitespace1(i)?;
+
+        let (i, name) = dialect.identifier()(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, new_name) = dialect.identifier()(i)?;
+
+        Ok((i, AlterTableDefinition::RenameColumn { name, new_name }))
+    }
+}
+
 fn alter_table_definition(
     dialect: Dialect,
 ) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
@@ -249,6 +271,7 @@ fn alter_table_definition(
             alter_column(dialect),
             change_column(dialect),
             modify_column(dialect),
+            rename_column(dialect),
         ))(i)
     }
 }
