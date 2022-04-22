@@ -228,12 +228,10 @@ pub(crate) const VIEW_POOL_SIZE: usize = 16;
 /// batch less work, which means lower overall efficiency.
 pub(crate) const PENDING_LIMIT: usize = 8192;
 
-use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display};
 use std::ops::AddAssign;
 
 use nom_sql::SqlType;
-use petgraph::graph::NodeIndex;
 use readyset_tracing::propagation::Instrumented;
 use replication::ReplicationOffset;
 use tokio_tower::multiplex;
@@ -278,7 +276,7 @@ use crate::internal::*;
 
 /// The prelude contains most of the types needed in everyday operation.
 pub mod prelude {
-    pub use super::{ActivationResult, ControllerHandle, Table, View};
+    pub use super::{ControllerHandle, Table, View};
 }
 
 /// Wrapper types for Noria query results.
@@ -369,19 +367,6 @@ pub mod builders {
 
 /// Types used when debugging Noria.
 pub mod debug;
-
-/// Represents the result of a recipe activation.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct ActivationResult {
-    /// Map of query names to `NodeIndex` handles for reads/writes.
-    pub new_nodes: HashMap<SqlIdentifier, NodeIndex>,
-    /// List of leaf nodes that were removed.
-    pub removed_leaves: HashSet<NodeIndex>,
-    /// Number of expressions the recipe added compared to the prior recipe.
-    pub expressions_added: usize,
-    /// Number of expressions the recipe removed compared to the prior recipe.
-    pub expressions_removed: usize,
-}
 
 /// Filters that can be used to filter the type of
 /// view returned.

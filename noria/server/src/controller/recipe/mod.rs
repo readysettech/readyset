@@ -1,4 +1,3 @@
-use std::collections::{HashMap, HashSet};
 use std::str;
 use std::vec::Vec;
 
@@ -6,7 +5,6 @@ use nom_sql::{
     CacheInner, CreateCacheStatement, CreateTableStatement, Dialect, SqlIdentifier, SqlQuery,
 };
 use noria::recipe::changelist::{Change, ChangeList};
-use noria::ActivationResult;
 use noria_errors::{
     internal, internal_err, invariant, invariant_eq, ReadySetError, ReadySetResult,
 };
@@ -172,14 +170,12 @@ impl Recipe {
         &mut self,
         mig: &mut Migration<'_>,
         changelist: ChangeList,
-    ) -> Result<ActivationResult, ReadySetError> {
+    ) -> ReadySetResult<()> {
         debug!(
             num_queries = self.registry.len(),
             named_queries = self.registry.num_aliases(),
         );
 
-        let mut added = HashMap::new();
-        let mut removed = HashSet::new();
         for change in changelist.changes {
             match change {
                 Change::CreateTable(cts) => {
@@ -189,8 +185,6 @@ impl Recipe {
                         .inc
                         .add_parsed_query(query, Some(name.clone()), false, mig)?;
                     self.registry.add_query(RecipeExpr::Table(cts))?;
-                    added.insert(name, qfp.query_leaf);
-                    removed.remove(&qfp.query_leaf);
                 }
                 Change::CreateView(cvs) => {
                     let query = SqlQuery::CreateView(cvs.clone());
@@ -206,8 +200,6 @@ impl Recipe {
                     let qfp = self
                         .inc
                         .add_parsed_query(query, Some(name.clone()), true, mig)?;
-                    added.insert(name, qfp.query_leaf);
-                    removed.remove(&qfp.query_leaf);
                 }
                 Change::CreateCache(ccqs) => {
                     let select = match &ccqs.inner {
@@ -232,8 +224,6 @@ impl Recipe {
                         let qfp =
                             self.inc
                                 .add_parsed_query(query, Some(name.clone()), true, mig)?;
-                        added.insert(name, qfp.query_leaf);
-                        removed.remove(&qfp.query_leaf);
                     } else {
                         // add the query
                         let qfp = self.inc.add_parsed_query(query, None, true, mig)?;
@@ -241,8 +231,6 @@ impl Recipe {
                             name: qfp.name.clone(),
                             statement: select,
                         })?;
-                        added.insert(qfp.name, qfp.query_leaf);
-                        removed.remove(&qfp.query_leaf);
                     };
                 }
                 // We process ALTER TABLE statements in the following way:
@@ -268,40 +256,24 @@ impl Recipe {
                         ),
                     };
                     let new_table = rewrite_table_definition(&ats, original_table.clone())?;
-                    let removed_node_indices = self.remove_expression(&ats.table.name, mig)?;
-                    match removed_node_indices {
-                        None => {
-                            error!(table = %ats.table.name,
+                    if self.remove_expression(&ats.table.name, mig)?.is_none() {
+                        error!(table = %ats.table.name,
                                 "attempted to issue ALTER TABLE, but table does not exist");
-                            internal!(
-                                "attempted to issue ALTER TABLE, but table {} does not exist",
-                                ats.table.name
-                            );
-                        }
-                        Some(removed_node_indices) => {
-                            for removed_node_index in removed_node_indices {
-                                added.retain(|_, v| *v != removed_node_index);
-                                removed.insert(removed_node_index);
-                            }
-                        }
-                    };
+                        internal!(
+                            "attempted to issue ALTER TABLE, but table {} does not exist",
+                            ats.table.name
+                        );
+                    }
                     let query = SqlQuery::CreateTable(new_table.clone());
                     let new_name = new_table.table.name.clone();
                     let qfp =
                         self.inc
                             .add_parsed_query(query, Some(new_name.clone()), false, mig)?;
                     self.registry.add_query(RecipeExpr::Table(new_table))?;
-                    added.insert(new_name, qfp.query_leaf);
-                    removed.remove(&qfp.query_leaf);
                 }
                 Change::Drop { name, if_exists } => {
                     let removed_indices = self.remove_expression(&name, mig)?;
-                    if let Some(removed_indices) = removed_indices {
-                        for removed_index in removed_indices {
-                            added.retain(|_, v| *v != removed_index);
-                            removed.insert(removed_index);
-                        }
-                    } else if !if_exists {
+                    if removed_indices.is_none() && !if_exists {
                         error!(table = %name, "attempted to DROP TABLE, but table does not exist");
                         internal!("attempted to DROP TABLE, but table {} does not exist", name);
                     }
@@ -313,15 +285,7 @@ impl Recipe {
         // queries get correctly tagged with version 0.
         self.inc.upgrade_version();
 
-        // TODO(fran): This is redundant. I'll make sure to remove it in the future.
-        let expressions_added = added.len();
-        let expressions_removed = removed.len();
-        Ok(ActivationResult {
-            new_nodes: added,
-            removed_leaves: removed,
-            expressions_added,
-            expressions_removed,
-        })
+        Ok(())
     }
 
     /// Helper method to reparent a recipe. This is needed for some of t

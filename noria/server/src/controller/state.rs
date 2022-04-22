@@ -40,9 +40,7 @@ use noria::metrics::recorded;
 use noria::recipe::changelist::{Change, ChangeList};
 use noria::recipe::ExtendRecipeSpec;
 use noria::replication::{ReplicationOffset, ReplicationOffsets};
-use noria::{
-    ActivationResult, KeyCount, ReadySetError, ReadySetResult, ViewFilter, ViewRequest, ViewSchema,
-};
+use noria::{KeyCount, ReadySetError, ReadySetResult, ViewFilter, ViewRequest, ViewSchema};
 use noria_errors::{internal, internal_err, invariant_eq, NodeType};
 use petgraph::visit::Bfs;
 use regex::Regex;
@@ -1121,7 +1119,7 @@ impl DataflowState {
         &mut self,
         changelist: ChangeList,
         dry_run: bool,
-    ) -> Result<ActivationResult, ReadySetError> {
+    ) -> Result<(), ReadySetError> {
         // I hate this, but there's no way around for now, as migrations
         // are super entangled with the recipe and the graph.
         let mut new = self.recipe.clone();
@@ -1144,7 +1142,7 @@ impl DataflowState {
         &mut self,
         recipe_spec: ExtendRecipeSpec<'_>,
         dry_run: bool,
-    ) -> Result<ActivationResult, ReadySetError> {
+    ) -> Result<(), ReadySetError> {
         // Drop recipes from the replicator that we have already processed.
         if let (Some(new), Some(current)) = (
             &recipe_spec.replication_offset,
@@ -1152,7 +1150,7 @@ impl DataflowState {
         ) {
             if current >= new {
                 // Return an empty ActivationResult as this is a no-op.
-                return Ok(ActivationResult::default());
+                return Ok(());
             }
         }
 
@@ -1189,7 +1187,7 @@ impl DataflowState {
         Ok(())
     }
 
-    pub(super) async fn remove_all_queries(&mut self) -> ReadySetResult<ActivationResult> {
+    pub(super) async fn remove_all_queries(&mut self) -> ReadySetResult<()> {
         let changes = self
             .recipe
             .cache_names()
