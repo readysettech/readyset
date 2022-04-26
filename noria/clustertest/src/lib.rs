@@ -1066,8 +1066,7 @@ fn start_mysql_adapter(
         .port(port)
         .metrics_port(metrics_port)
         .authority_addr(authority_addr)
-        .authority(authority)
-        .explain_last_statement();
+        .authority(authority);
 
     if let Some(interval) = async_migration_interval {
         builder = builder.async_migrations(interval);

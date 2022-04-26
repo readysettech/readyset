@@ -294,11 +294,6 @@ struct Verify {
     /// The authority to use. Possible values: zookeeper, consul, local.
     #[clap(long, env = "AUTHORITY", default_value = "local", possible_values = &["local", "consul", "zookeeper"])]
     authority: AuthorityType,
-
-    /// Provides support for the EXPLAIN LAST STATEMENT command, which returns metadata about the
-    /// last statement issued along the current connection.
-    #[clap(long, hide = true, env = "EXPLAIN_LAST_STATEMENT")]
-    explain_last_statement: bool,
 }
 
 #[derive(Default)]
@@ -505,7 +500,6 @@ impl From<&Verify> for RunOptions {
             upstream_database_url: verify.database_url().cloned(),
             replication_url: verify.replication_url.clone(),
             time: verify.time,
-            explain_last_statement: verify.explain_last_statement,
         }
     }
 }

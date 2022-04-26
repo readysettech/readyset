@@ -180,9 +180,4 @@ impl AdapterBuilder {
     pub fn fallback_recovery_seconds(self, secs: u64) -> Self {
         self.push_arg("--fallback-recovery-seconds", &secs.to_string())
     }
-
-    pub fn explain_last_statement(mut self) -> Self {
-        self.args.push("--explain-last-statement".to_string());
-        self
-    }
 }

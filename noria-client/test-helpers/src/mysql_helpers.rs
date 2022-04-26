@@ -98,9 +98,7 @@ impl Adapter for MySQLAdapter {
 // If `partial` is `false`, disables partial queries.
 pub async fn setup(partial: bool) -> (mysql_async::Opts, Handle) {
     crate::setup::<MySQLAdapter>(
-        BackendBuilder::new()
-            .require_authentication(false)
-            .explain_last_statement(true),
+        BackendBuilder::new().require_authentication(false),
         false,
         partial,
         true,
@@ -111,9 +109,7 @@ pub async fn setup(partial: bool) -> (mysql_async::Opts, Handle) {
 
 pub async fn setup_with_read_behavior(read_behavior: ReadBehavior) -> (mysql_async::Opts, Handle) {
     crate::setup::<MySQLAdapter>(
-        BackendBuilder::new()
-            .require_authentication(false)
-            .explain_last_statement(true),
+        BackendBuilder::new().require_authentication(false),
         false,
         true,
         true,
@@ -128,9 +124,7 @@ pub async fn query_cache_setup(
     migration_mode: MigrationMode,
 ) -> (mysql_async::Opts, Handle) {
     crate::setup_inner::<MySQLAdapter>(
-        BackendBuilder::new()
-            .require_authentication(false)
-            .explain_last_statement(true),
+        BackendBuilder::new().require_authentication(false),
         if fallback {
             Some(MySQLAdapter::url())
         } else {
