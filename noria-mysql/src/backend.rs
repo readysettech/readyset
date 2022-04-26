@@ -15,6 +15,7 @@ use noria_client::backend::noria_connector::MetaVariable;
 use noria_client::backend::{noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare};
 use noria_data::{DataType, DataTypeKind};
 use noria_errors::{internal, internal_err, ReadySetError};
+use streaming_iterator::StreamingIterator;
 use tokio::io::{self, AsyncWrite};
 use tracing::{error, trace};
 use upstream::StatementMeta;
@@ -356,10 +357,7 @@ where
         let is_cached = self.schema_cache.contains_key(&id);
 
         let res = match self.execute(id, &datatype_params).await {
-            Ok(QueryResult::Noria(noria_connector::QueryResult::Select {
-                data,
-                select_schema,
-            })) => {
+            Ok(QueryResult::Noria(noria_connector::QueryResult::Select { mut rows, schema })) => {
                 let CachedSchema {
                     mysql_schema,
                     column_map,
@@ -368,21 +366,16 @@ where
                     // Unwrap here is ok because we know the map contains that key
                     self.schema_cache.get(&id).unwrap()
                 } else {
-                    let mysql_schema = convert_columns!(select_schema.schema, results);
+                    let mysql_schema = convert_columns!(schema.schema, results);
                     let preencoded_schema = mysql_srv::prepare_column_definitions(&mysql_schema);
 
                     // Now append the right position too
                     let column_map = mysql_schema
                         .iter()
-                        .map(|c| {
-                            select_schema
-                                .columns
-                                .iter()
-                                .position(|f| c.column == f.as_str())
-                        })
+                        .map(|c| schema.columns.iter().position(|f| f == c.column.as_str()))
                         .collect::<Vec<_>>();
 
-                    drop(select_schema);
+                    drop(schema);
                     self.schema_cache.entry(id).or_insert(CachedSchema {
                         mysql_schema,
                         column_map,
@@ -393,11 +386,11 @@ where
                 let mut rw = results
                     .start_with_cache(mysql_schema, preencoded_schema.clone())
                     .await?;
-                for r in data.into_iter().flatten() {
+                while let Some(row) = rows.next() {
                     for (c, pos) in mysql_schema.iter().zip(column_map.iter()) {
                         match pos {
                             Some(coli) => {
-                                if let Err(e) = write_column(&mut rw, &r[*coli], c).await {
+                                if let Err(e) = write_column(&mut rw, &row[*coli], c).await {
                                     return handle_column_write_err(e, rw).await;
                                 };
                             }
@@ -550,6 +543,7 @@ where
 
         Ok(res?)
     }
+
     async fn on_close(&mut self, _: u32) {}
 
     async fn on_query(&mut self, query: &str, results: QueryResultWriter<'_, W>) -> io::Result<()> {
@@ -563,39 +557,29 @@ where
             })) => {
                 write_query_results(Ok((num_rows_inserted, first_inserted_id)), results, None).await
             }
-            Ok(QueryResult::Noria(noria_connector::QueryResult::Select {
-                data,
-                select_schema,
-            })) => {
-                let schema = convert_columns!(select_schema.schema, results);
-                let mut rw = results.start(&schema).await?;
-                for resultsets in data {
-                    for r in resultsets {
-                        for c in &schema {
-                            match select_schema
-                                .columns
-                                .iter()
-                                .position(|f| f.as_str() == c.column)
-                            {
-                                Some(coli) => {
-                                    if let Err(e) = write_column(&mut rw, &r[coli], c).await {
-                                        return handle_column_write_err(e, rw).await;
-                                    }
-                                }
-                                None => {
-                                    let e = Error::from(internal_err(format!(
-                                        "tried to emit column {:?} not in getter with schema {:?}",
-                                        c.column, select_schema.columns
-                                    )));
-                                    error!(err = %e);
-                                    return rw
-                                        .error(e.error_kind(), e.to_string().as_bytes())
-                                        .await;
+            Ok(QueryResult::Noria(noria_connector::QueryResult::Select { mut rows, schema })) => {
+                let mysql_schema = convert_columns!(schema.schema, results);
+                let columns = schema.columns;
+                let mut rw = results.start(&mysql_schema).await?;
+                while let Some(row) = rows.next() {
+                    for c in &mysql_schema {
+                        match columns.iter().position(|f| f.as_str() == c.column) {
+                            Some(coli) => {
+                                if let Err(e) = write_column(&mut rw, &row[coli], c).await {
+                                    return handle_column_write_err(e, rw).await;
                                 }
                             }
+                            None => {
+                                let e = Error::from(internal_err(format!(
+                                    "tried to emit column {:?} not in getter with schema {:?}",
+                                    c.column, columns
+                                )));
+                                error!(err = %e);
+                                return rw.error(e.error_kind(), e.to_string().as_bytes()).await;
+                            }
                         }
-                        rw.end_row()?;
                     }
+                    rw.end_row()?;
                 }
                 rw.finish().await
             }

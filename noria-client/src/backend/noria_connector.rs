@@ -15,7 +15,7 @@ use nom_sql::{
 use noria::consistency::Timestamp;
 use noria::internal::LocalNodeIndex;
 use noria::recipe::changelist::{Change, ChangeList};
-use noria::results::Results;
+use noria::results::{ResultIterator, Results};
 use noria::{
     ColumnSchema, ControllerHandle, KeyColumnIdx, KeyComparison, ReadQuery, ReadySetError,
     ReadySetResult, SchemaType, Table, TableOperation, View, ViewPlaceholder, ViewQuery,
@@ -68,7 +68,6 @@ impl fmt::Debug for PreparedStatement {
 /// created. When this is the case, this wrapper allows returning an error
 /// from any call that requires NoriaBackendInner through an error
 /// returned by `get_mut`.
-#[derive(Clone)]
 pub struct NoriaBackend {
     inner: Option<NoriaBackendInner>,
 }
@@ -86,16 +85,6 @@ pub struct NoriaBackendInner {
     noria: ControllerHandle,
     inputs: BTreeMap<String, Table>,
     outputs: BTreeMap<String, View>,
-}
-
-impl Clone for NoriaBackendInner {
-    fn clone(&self) -> Self {
-        Self {
-            noria: self.noria.clone(),
-            inputs: self.inputs.clone(),
-            outputs: self.outputs.clone(),
-        }
-    }
 }
 
 macro_rules! noria_await {
@@ -202,8 +191,8 @@ pub enum QueryResult<'a> {
         first_inserted_id: u64,
     },
     Select {
-        data: Vec<Results>,
-        select_schema: SelectSchema<'a>,
+        rows: ResultIterator,
+        schema: SelectSchema<'a>,
     },
     Update {
         num_rows_updated: u64,
@@ -221,15 +210,30 @@ pub enum QueryResult<'a> {
 }
 
 impl<'a> QueryResult<'a> {
+    pub fn from_owned(schema: SelectSchema<'a>, data: Vec<Results>) -> Self {
+        QueryResult::Select {
+            schema,
+            rows: ResultIterator::owned(data),
+        }
+    }
+
+    pub fn empty(schema: SelectSchema<'a>) -> Self {
+        QueryResult::Select {
+            schema,
+            rows: ResultIterator::owned(vec![]),
+        }
+    }
+
+    pub fn from_iter(schema: SelectSchema<'a>, rows: ResultIterator) -> Self {
+        QueryResult::Select { schema, rows }
+    }
+
     #[inline]
     pub fn into_owned(self) -> QueryResult<'static> {
         match self {
-            QueryResult::Select {
-                data,
-                select_schema,
-            } => QueryResult::Select {
-                data,
-                select_schema: select_schema.into_owned(),
+            QueryResult::Select { schema, rows } => QueryResult::Select {
+                schema: schema.into_owned(),
+                rows,
             },
             // Have to manually pass each variant to convince rustc that the
             // returned type is really owned
@@ -443,28 +447,11 @@ async fn short_circuit_empty_resultset(getter: &mut View) -> ReadySetResult<Quer
     let getter_schema = getter
         .schema()
         .ok_or_else(|| internal_err("No schema for view"))?;
-    Ok(QueryResult::Select {
-        data: vec![],
-        select_schema: SelectSchema {
-            use_bogo: false,
-            schema: Cow::Borrowed(getter_schema.schema(SchemaType::ReturnedSchema)),
-            columns: Cow::Borrowed(getter.columns()),
-        },
-    })
-}
-
-impl Clone for NoriaConnector {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            auto_increments: self.auto_increments.clone(),
-            view_cache: self.view_cache.clone(),
-            prepared_statement_cache: self.prepared_statement_cache.clone(),
-            failed_views: self.failed_views.clone(),
-            read_behavior: self.read_behavior,
-            read_request_handler: self.read_request_handler.clone(),
-        }
-    }
+    Ok(QueryResult::empty(SelectSchema {
+        use_bogo: false,
+        schema: Cow::Borrowed(getter_schema.schema(SchemaType::ReturnedSchema)),
+        columns: Cow::Borrowed(getter.columns()),
+    }))
 }
 
 impl NoriaConnector {
@@ -560,14 +547,10 @@ impl NoriaConnector {
                 vec![DataType::from(n), DataType::from(q.to_string())]
             })
             .collect::<Vec<_>>();
-        let data = vec![Results::new(
-            data,
-            Arc::new(["name".into(), "query".into()]),
-        )];
-        Ok(QueryResult::Select {
-            data,
+        Ok(QueryResult::from_owned(
             select_schema,
-        })
+            vec![Results::new(data)],
+        ))
     }
 
     // TODO(andrew): Allow client to map table names to NodeIndexes without having to query Noria
@@ -1762,58 +1745,40 @@ async fn do_read<'a>(
                 CallResult::Async(chan) => chan.await?,
             };
 
-            result
-                .v
-                .into_normal()
-                .ok_or_else(|| internal_err("Unexpected response type from reader service"))?
-                .map(|z| {
-                    z.map_results(|rows, stats| {
-                        // `rows` is Unserialized as we pass `raw_result` = true.
-                        #[allow(clippy::unwrap_used)]
-                        Results::with_stats(
-                            rows.into_unserialized().unwrap(),
-                            getter.column_slice(),
-                            stats.clone(),
-                        )
-                    })
-                })?
-                .into_results()
-                .ok_or(ReadySetError::ReaderMissingKey)?
+            ResultIterator::owned(
+                result
+                    .v
+                    .into_normal()
+                    .ok_or_else(|| internal_err("Unexpected response type from reader service"))?
+                    .map(|z| {
+                        z.map_results(|rows, stats| {
+                            // `rows` is Unserialized as we pass `raw_result` = true.
+                            #[allow(clippy::unwrap_used)]
+                            Results::with_stats(rows.into_unserialized().unwrap(), stats.clone())
+                        })
+                    })?
+                    .into_results()
+                    .ok_or(ReadySetError::ReaderMissingKey)?,
+            )
         } else {
-            getter
-                .raw_lookup(vq)
-                .await?
-                .into_results()
-                .ok_or(ReadySetError::ReaderMissingKey)?
+            getter.raw_lookup(vq).await?
         }
     } else {
-        getter
-            .raw_lookup(vq)
-            .await?
-            .into_results()
-            .ok_or(ReadySetError::ReaderMissingKey)?
+        getter.raw_lookup(vq).await?
     };
-    event.cache_misses = Some(
-        data.iter()
-            .map(|result| {
-                result
-                    .stats
-                    .as_ref()
-                    .map(|stats| stats.cache_misses)
-                    .unwrap_or(0)
-            })
-            .sum(),
-    );
+
+    event.cache_misses = data.total_stats().map(|s| s.cache_misses);
+
     trace!("select::complete");
 
-    Ok(QueryResult::Select {
-        data,
-        select_schema: SelectSchema {
+    Ok(QueryResult::from_iter(
+        SelectSchema {
             use_bogo,
             schema: Cow::Borrowed(getter.schema().unwrap().schema(SchemaType::ReturnedSchema)), /* Safe because we already unwrapped above */
             columns: Cow::Borrowed(getter.columns()),
         },
-    })
+        data,
+    ))
 }
 
 #[cfg(test)]

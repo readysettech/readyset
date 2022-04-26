@@ -2950,6 +2950,7 @@ dependencies = [
  "noria-mysql",
  "rust_decimal",
  "serde_json",
+ "streaming-iterator",
  "tokio",
 ]
 
@@ -3854,6 +3855,7 @@ dependencies = [
  "serial_test",
  "slab",
  "socket2",
+ "streaming-iterator",
  "test-strategy",
  "thiserror",
  "time 0.3.6",
@@ -4240,6 +4242,7 @@ dependencies = [
  "paste",
  "proptest",
  "serial_test",
+ "streaming-iterator",
  "test-strategy",
  "thiserror",
  "tikv-jemallocator",
@@ -4278,6 +4281,7 @@ dependencies = [
  "rust_decimal",
  "serde_json",
  "serial_test",
+ "streaming-iterator",
  "test-strategy",
  "thiserror",
  "tikv-jemallocator",
@@ -6267,6 +6271,12 @@ dependencies = [
  "pin-project",
  "tokio",
 ]
+
+[[package]]
+name = "streaming-iterator"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "303235c177994a476226b80d076bd333b7b560fb05bd242a10609d11b07f81f5"
 
 [[package]]
 name = "stringprep"

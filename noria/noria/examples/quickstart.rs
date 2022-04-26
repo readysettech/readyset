@@ -34,7 +34,7 @@ async fn main() {
 
     let mut awvc = srv.view("ArticleWithVoteCount").await.unwrap();
     println!("Creating article...");
-    let article = awvc.lookup(&[aid.into()], true).await.unwrap();
+    let article = awvc.lookup(&[aid.into()], true).await.unwrap().into_vec();
     if article.is_empty() {
         println!("Creating new article...");
         let title = "test title";

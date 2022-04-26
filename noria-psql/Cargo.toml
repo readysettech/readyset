@@ -34,6 +34,7 @@ eui48 = { version = "1.1", default-features = false }
 uuid = "0.8"
 serde_json = { version = "1", features = ["arbitrary_precision"] }
 bit-vec = { version = "0.6", features = ["serde"] }
+streaming-iterator = "0.1"
 
 [dev-dependencies]
 chrono = "0.4"

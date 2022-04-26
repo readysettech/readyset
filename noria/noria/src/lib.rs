@@ -90,7 +90,7 @@
 //!     let mut awvc = db.view("ArticleWithVoteCount").await.unwrap();
 //!     // looking up article 42 should yield the article we inserted with a vote count of 1
 //!     assert_eq!(
-//!         awvc.lookup(&[aid.into()], true).await.unwrap(),
+//!         awvc.lookup(&[aid.into()], true).await.unwrap().into_vec(),
 //!         vec![vec![
 //!             DataType::from(aid),
 //!             title.try_into().unwrap(),
@@ -135,7 +135,8 @@
     stmt_expr_attributes,
     bound_map,
     bound_as_ref,
-    box_into_inner
+    box_into_inner,
+    rustc_attrs
 )]
 #![deny(missing_docs, macro_use_extern_crate)]
 #![deny(unused_extern_crates)]
@@ -282,7 +283,7 @@ pub mod prelude {
 
 /// Wrapper types for Noria query results.
 pub mod results {
-    pub use super::view::results::{ResultRow, Results, Row};
+    pub use super::view::results::{ResultIterator, Results};
 }
 
 task_local! {

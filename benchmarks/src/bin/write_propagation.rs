@@ -208,7 +208,7 @@ impl Writer {
             timestamp: None,
         };
 
-        let res = view.raw_lookup(vq).await?.into_results().unwrap();
+        let res = view.raw_lookup(vq).await?.into_vec();
         assert_eq!(res.len(), 1);
         Ok(())
     }

@@ -1,17 +1,31 @@
-use std::fmt;
-use std::ops::Deref;
-use std::sync::Arc;
-
-use nom_sql::SqlIdentifier;
 use noria_data::DataType;
+use streaming_iterator::StreamingIterator;
 
 use crate::ReadReplyStats;
 
+/// This is similar to [`std::num::NonZeroUsize`] except the unused value is [`usize::MAX`], which
+/// means that it will be used as a [`None`] for a wrapping [`Option`]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+#[repr(transparent)]
+#[rustc_layout_scalar_valid_range_end(18_446_744_073_709_551_614)]
+struct NonMaxUsize(usize);
+
+impl NonMaxUsize {
+    fn advance(&mut self) {
+        // Safe, since it will simply turn into a None if gets to MAX
+        unsafe { self.0 += 1 };
+    }
+
+    fn zero() -> Self {
+        // Safe, since in valid range
+        unsafe { NonMaxUsize(0) }
+    }
+}
+
 /// A result set from a Noria query.
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Results {
     results: Vec<Vec<DataType>>,
-    columns: Arc<[SqlIdentifier]>,
     /// When present, contains stats related to the operation
     pub stats: Option<ReadReplyStats>,
 }
@@ -20,314 +34,169 @@ impl Results {
     // NOTE: should be pub(crate), but that triggers:
     // https://github.com/rust-lang/rust/issues/69785
     #[doc(hidden)]
-    pub fn new(results: Vec<Vec<DataType>>, columns: Arc<[SqlIdentifier]>) -> Self {
+    pub fn new(results: Vec<Vec<DataType>>) -> Self {
         Self {
             results,
-            columns,
             stats: None,
         }
     }
 
     #[doc(hidden)]
-    pub fn with_stats(
-        results: Vec<Vec<DataType>>,
-        columns: Arc<[SqlIdentifier]>,
-        stats: ReadReplyStats,
-    ) -> Self {
+    pub fn with_stats(results: Vec<Vec<DataType>>, stats: ReadReplyStats) -> Self {
         Self {
             results,
-            columns,
             stats: Some(stats),
         }
     }
 
-    /// Iterate over references to the returned rows.
-    pub fn iter(&self) -> ResultIter<'_> {
-        self.into_iter()
+    #[doc(hidden)]
+    pub fn into_data(self) -> Vec<Vec<DataType>> {
+        self.results
     }
 }
 
-impl From<Results> for Vec<Vec<DataType>> {
-    fn from(val: Results) -> Self {
-        val.results
+/// A ['StreamingIterator`] over rows of a noria select response
+#[derive(Debug)]
+pub enum ResultIterator {
+    /// Owned results returned from noria server
+    OwnedResults(OwnedResultIterator),
+}
+
+/// Iterator over owned results returned from noria server
+#[derive(Debug)]
+pub struct OwnedResultIterator {
+    // Encapsulated data
+    data: Vec<Results>,
+    // Current position in the data vector
+    set: Option<NonMaxUsize>,
+    row: Option<NonMaxUsize>,
+}
+
+impl ResultIterator {
+    /// Create from owned data
+    pub fn owned(data: Vec<Results>) -> Self {
+        ResultIterator::OwnedResults(OwnedResultIterator {
+            data,
+            set: None,
+            row: None,
+        })
     }
-}
 
-impl PartialEq<[Vec<DataType>]> for Results {
-    fn eq(&self, other: &[Vec<DataType>]) -> bool {
-        self.results == other
+    /// Convert into a vector of [`Results`]
+    pub fn into_results(self) -> Vec<Results> {
+        match self {
+            ResultIterator::OwnedResults(OwnedResultIterator { data, .. }) => data,
+        }
     }
-}
 
-impl PartialEq<Vec<Vec<DataType>>> for Results {
-    fn eq(&self, other: &Vec<Vec<DataType>>) -> bool {
-        &self.results == other
-    }
-}
-
-impl PartialEq<&'_ Vec<Vec<DataType>>> for Results {
-    fn eq(&self, other: &&Vec<Vec<DataType>>) -> bool {
-        &self.results == *other
-    }
-}
-
-/// A reference to a row in a result set.
-///
-/// You can access fields either by numerical index or by field index.
-/// If you want to also perform type conversion, use [`ResultRow::get`].
-#[derive(PartialEq, Eq)]
-pub struct ResultRow<'a> {
-    result: &'a [DataType],
-    columns: &'a [SqlIdentifier],
-}
-
-impl<'a> ResultRow<'a> {
-    fn new(row: &'a [DataType], columns: &'a [SqlIdentifier]) -> Self {
-        Self {
-            result: row,
-            columns,
+    /// Get aggregated stats for all results in the set
+    pub fn total_stats(&self) -> Option<ReadReplyStats> {
+        match self {
+            ResultIterator::OwnedResults(OwnedResultIterator { data, .. }) => data
+                .iter()
+                .map(|r| &r.stats)
+                .fold(None, |total, cur| match cur {
+                    Some(stats) => Some(ReadReplyStats {
+                        cache_misses: stats.cache_misses
+                            + total.map(|s| s.cache_misses).unwrap_or(0),
+                    }),
+                    None => total,
+                }),
         }
     }
 }
 
-impl std::ops::Index<usize> for ResultRow<'_> {
-    type Output = DataType;
-    fn index(&self, index: usize) -> &Self::Output {
-        self.result.get(index).unwrap()
+impl StreamingIterator for OwnedResultIterator {
+    type Item = [DataType];
+
+    #[inline(always)]
+    fn advance(&mut self) {
+        let set = self.set.get_or_insert(NonMaxUsize::zero());
+        let row = match self.row.as_mut() {
+            Some(row) => {
+                row.advance();
+                row
+            }
+            None => self.row.get_or_insert(NonMaxUsize::zero()),
+        };
+        while let Some(rows) = self.data.get(set.0) {
+            if rows.results.get(row.0).is_some() {
+                break;
+            }
+            set.advance();
+            *row = NonMaxUsize::zero();
+        }
+    }
+
+    #[inline(always)]
+    fn get(&self) -> Option<&Self::Item> {
+        self.set
+            .and_then(|set| {
+                self.row
+                    .and_then(|row| self.data.get(set.0).and_then(|s| s.results.get(row.0)))
+            })
+            .map(|v| v.as_slice())
     }
 }
 
-impl<'a> ResultRow<'a> {
-    /// Retrieve the field of the result by the given name.
-    ///
-    /// Returns `None` if the given field does not exist.
-    pub fn get(&self, field: &str) -> Option<&DataType> {
-        let index = self.columns.iter().position(|col| *col == field)?;
-        self.result.get(index)
+impl StreamingIterator for ResultIterator {
+    type Item = [DataType];
+
+    #[inline(always)]
+    fn advance(&mut self) {
+        match self {
+            ResultIterator::OwnedResults(i) => i.advance(),
+        }
+    }
+
+    #[inline(always)]
+    fn get(&self) -> Option<&Self::Item> {
+        match self {
+            ResultIterator::OwnedResults(i) => i.get(),
+        }
     }
 }
 
-impl PartialEq<[DataType]> for ResultRow<'_> {
-    fn eq(&self, other: &[DataType]) -> bool {
-        self.result == other
-    }
-}
+impl IntoIterator for ResultIterator {
+    type Item = Vec<DataType>;
+    type IntoIter = impl Iterator<Item = Vec<DataType>>;
 
-impl PartialEq<Vec<DataType>> for ResultRow<'_> {
-    fn eq(&self, other: &Vec<DataType>) -> bool {
-        self.result == other
-    }
-}
-
-impl PartialEq<&'_ Vec<DataType>> for ResultRow<'_> {
-    fn eq(&self, other: &&Vec<DataType>) -> bool {
-        &self.result == other
-    }
-}
-
-impl fmt::Debug for ResultRow<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.debug_map()
-            .entries(self.columns.iter().zip(self.result.iter()))
-            .finish()
-    }
-}
-
-impl fmt::Debug for Results {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.debug_list()
-            .entries(self.results.iter().map(|r| ResultRow {
-                result: r,
-                columns: &self.columns,
-            }))
-            .finish()
-    }
-}
-
-impl Deref for Results {
-    type Target = [Vec<DataType>];
-    fn deref(&self) -> &Self::Target {
-        &self.results
-    }
-}
-
-impl AsRef<[Vec<DataType>]> for Results {
-    fn as_ref(&self) -> &[Vec<DataType>] {
-        &self.results
-    }
-}
-
-pub struct ResultIter<'a> {
-    results: std::slice::Iter<'a, Vec<DataType>>,
-    columns: &'a [SqlIdentifier],
-}
-
-impl<'a> IntoIterator for &'a Results {
-    type Item = ResultRow<'a>;
-    type IntoIter = ResultIter<'a>;
+    /// Convert to an iterator over owned rows (rows are cloned)
     fn into_iter(self) -> Self::IntoIter {
-        ResultIter {
-            results: self.results.iter(),
-            columns: &self.columns,
-        }
+        self.map_deref(|i| i.to_vec())
     }
 }
 
-impl<'a> Iterator for ResultIter<'a> {
-    type Item = ResultRow<'a>;
-    fn next(&mut self) -> Option<Self::Item> {
-        Some(ResultRow::new(self.results.next()?, self.columns))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.results.size_hint()
+impl ResultIterator {
+    /// Collect the results into a vector (rows are cloned)
+    pub fn into_vec(self) -> Vec<Vec<DataType>> {
+        self.into_iter().collect()
     }
 }
 
-impl ExactSizeIterator for ResultIter<'_> {}
-impl DoubleEndedIterator for ResultIter<'_> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        Some(ResultRow::new(self.results.next_back()?, self.columns))
-    }
-
-    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
-        Some(ResultRow::new(self.results.nth_back(n)?, self.columns))
+impl From<ResultIterator> for Vec<Vec<DataType>> {
+    fn from(iter: ResultIterator) -> Self {
+        iter.into_vec()
     }
 }
 
-pub struct ResultIntoIter {
-    results: std::vec::IntoIter<Vec<DataType>>,
-    columns: Arc<[SqlIdentifier]>,
-}
+#[cfg(test)]
+mod test {
+    use super::NonMaxUsize;
 
-impl IntoIterator for Results {
-    type Item = Row;
-    type IntoIter = ResultIntoIter;
-    fn into_iter(self) -> Self::IntoIter {
-        ResultIntoIter {
-            results: self.results.into_iter(),
-            columns: self.columns,
-        }
-    }
-}
+    #[test]
+    fn test_usize_max() {
+        assert_eq!(
+            std::mem::size_of::<NonMaxUsize>(),
+            std::mem::size_of::<usize>()
+        );
+        assert_eq!(
+            std::mem::size_of::<Option<NonMaxUsize>>(),
+            std::mem::size_of::<usize>()
+        );
 
-impl Iterator for ResultIntoIter {
-    type Item = Row;
-    fn next(&mut self) -> Option<Self::Item> {
-        Some(Row::new(self.results.next()?, &self.columns))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.results.size_hint()
-    }
-}
-
-impl ExactSizeIterator for ResultIntoIter {}
-impl DoubleEndedIterator for ResultIntoIter {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        Some(Row::new(self.results.next_back()?, &self.columns))
-    }
-
-    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
-        Some(Row::new(self.results.nth_back(n)?, &self.columns))
-    }
-}
-
-/// A single row from a result set.
-///
-/// You can access fields either by numerical index or by field index.
-/// If you want to also perform type conversion, use [`Row::get`].
-#[derive(PartialEq, Eq)]
-pub struct Row {
-    row: Vec<DataType>,
-    columns: Arc<[SqlIdentifier]>,
-}
-
-impl Row {
-    fn new(row: Vec<DataType>, columns: &Arc<[SqlIdentifier]>) -> Self {
-        Self {
-            row,
-            columns: Arc::clone(columns),
-        }
-    }
-}
-
-impl From<Row> for Vec<DataType> {
-    fn from(val: Row) -> Vec<DataType> {
-        val.row
-    }
-}
-
-impl PartialEq<[DataType]> for Row {
-    fn eq(&self, other: &[DataType]) -> bool {
-        self.row == other
-    }
-}
-
-impl PartialEq<Vec<DataType>> for Row {
-    fn eq(&self, other: &Vec<DataType>) -> bool {
-        &self.row == other
-    }
-}
-
-impl PartialEq<&'_ Vec<DataType>> for Row {
-    fn eq(&self, other: &&Vec<DataType>) -> bool {
-        &self.row == *other
-    }
-}
-
-impl fmt::Debug for Row {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.debug_map()
-            .entries(self.columns.iter().zip(self.row.iter()))
-            .finish()
-    }
-}
-
-impl IntoIterator for Row {
-    type Item = DataType;
-    type IntoIter = std::vec::IntoIter<DataType>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.row.into_iter()
-    }
-}
-
-impl AsRef<[DataType]> for Row {
-    fn as_ref(&self) -> &[DataType] {
-        &self.row[..]
-    }
-}
-
-impl Deref for Row {
-    type Target = [DataType];
-    fn deref(&self) -> &Self::Target {
-        &self.row[..]
-    }
-}
-
-impl std::ops::Index<usize> for Row {
-    type Output = DataType;
-    fn index(&self, index: usize) -> &Self::Output {
-        self.row.get(index).unwrap()
-    }
-}
-
-impl Row {
-    /// Retrieve the field of the result by the given name.
-    ///
-    /// Returns `None` if the given field does not exist.
-    pub fn get(&self, field: &str) -> Option<&DataType> {
-        let index = self.columns.iter().position(|col| *col == field)?;
-        self.row.get(index)
-    }
-
-    /// Remove the value for the field of the result by the given name.
-    ///
-    /// Returns `None` if the given field does not exist.
-    pub fn take(&mut self, field: &str) -> Option<DataType> {
-        let index = self.columns.iter().position(|col| *col == field)?;
-        self.row
-            .get_mut(index)
-            .map(|r| std::mem::replace(r, DataType::None))
+        assert!(unsafe { Some(NonMaxUsize(usize::MAX)) }.is_none());
+        assert!(unsafe { Some(NonMaxUsize(usize::MAX - 1)) }.is_some());
+        assert!(unsafe { Some(NonMaxUsize(0)) }.is_some());
     }
 }

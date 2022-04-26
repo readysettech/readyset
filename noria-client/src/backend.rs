@@ -1425,18 +1425,10 @@ where
                 },
             )
             .collect::<Vec<_>>();
-        let data = vec![Results::new(
-            data,
-            Arc::new([
-                "query id".into(),
-                "proxied query".into(),
-                "readyset supported".into(),
-            ]),
-        )];
-        Ok(noria_connector::QueryResult::Select {
-            data,
+        Ok(noria_connector::QueryResult::from_owned(
             select_schema,
-        })
+            vec![Results::new(data)],
+        ))
     }
 
     async fn query_noria_extensions<'a>(

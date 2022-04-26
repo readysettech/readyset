@@ -1,9 +1,8 @@
 use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
-use std::sync::Arc;
 
 use nom_sql::{ColumnSpecification, SqlType};
-use noria::results::Results;
+use noria::results::{ResultIterator, Results};
 use noria::ColumnSchema;
 use noria_client::backend::{self as cl, noria_connector, SinglePrepareResult, UpstreamPrepare};
 use psql_srv as ps;
@@ -69,12 +68,9 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
             Noria(NoriaResult::Insert {
                 num_rows_inserted, ..
             }) => Ok(Insert(num_rows_inserted)),
-            Noria(NoriaResult::Select {
-                data,
-                select_schema,
-            }) => {
-                let select_schema = SelectSchema(select_schema);
-                let resultset = Resultset::try_new(data, &select_schema)?;
+            Noria(NoriaResult::Select { rows, schema }) => {
+                let select_schema = SelectSchema(schema);
+                let resultset = Resultset::try_new(rows, &select_schema)?;
                 Ok(Select {
                     schema: select_schema.try_into()?,
                     resultset,
@@ -103,17 +99,14 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                             })
                             .collect(),
                     ),
-                    columns: Cow::Owned(columns.clone()),
+                    columns: Cow::Owned(columns),
                 });
 
                 let resultset = Resultset::try_new(
-                    vec![Results::new(
-                        vec![vars
-                            .into_iter()
-                            .map(|v| noria_data::DataType::from(v.value))
-                            .collect()],
-                        columns.into_boxed_slice().into(),
-                    )],
+                    ResultIterator::owned(vec![Results::new(vec![vars
+                        .into_iter()
+                        .map(|v| noria_data::DataType::from(v.value))
+                        .collect()])]),
                     &select_schema,
                 )?;
                 Ok(Select {
@@ -154,10 +147,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                 }
 
                 let resultset = Resultset::try_new(
-                    vec![Results::new(
-                        rows,
-                        Arc::new(["name".into(), "value".into()]),
-                    )],
+                    ResultIterator::owned(vec![Results::new(rows)]),
                     &select_schema,
                 )?;
                 Ok(Select {

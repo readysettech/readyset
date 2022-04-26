@@ -1,4 +1,4 @@
-#![feature(box_patterns)]
+#![feature(box_patterns, type_alias_impl_trait)]
 
 mod backend;
 mod error;

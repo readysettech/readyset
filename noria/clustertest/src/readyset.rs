@@ -262,23 +262,15 @@ async fn replicated_readers() {
     assert_eq!(view_1.num_shards(), 1);
     assert_ne!(view_0.shard_addrs(), view_1.shard_addrs());
 
-    let view_0_key_1 = view_0
-        .lookup_first(&[1.into()], true)
-        .await
-        .unwrap()
-        .unwrap();
+    let view_0_key_1 = view_0.lookup(&[1.into()], true).await.unwrap();
     assert_eq!(
-        view_0_key_1,
+        view_0_key_1.into_vec()[0],
         vec![DataType::from(1), DataType::from(Decimal::from_i32(3))]
     );
 
-    let view_1_key_2 = view_1
-        .lookup_first(&[2.into()], true)
-        .await
-        .unwrap()
-        .unwrap();
+    let view_1_key_2 = view_1.lookup(&[2.into()], true).await.unwrap();
     assert_eq!(
-        view_1_key_2,
+        view_1_key_2.into_vec()[0],
         vec![DataType::from(2), DataType::from(Decimal::from_i32(7))]
     );
 
@@ -290,41 +282,25 @@ async fn replicated_readers() {
     .unwrap();
 
     eventually! {
-        let view_0_key_1 = view_0
-            .lookup_first(&[1.into()], true)
-            .await
-            .unwrap()
-            .unwrap();
-        view_0_key_1 == vec![DataType::from(1), DataType::from(Decimal::from_i32(6))]
+        let view_0_key_1 = view_0.lookup(&[1.into()], true).await.unwrap();
+        view_0_key_1.into_vec()[0] == vec![DataType::from(1), DataType::from(Decimal::from_i32(6))]
     }
 
-    let view_1_key_2 = view_1
-        .lookup_first(&[2.into()], true)
-        .await
-        .unwrap()
-        .unwrap();
+    let view_1_key_2 = view_1.lookup(&[2.into()], true).await.unwrap();
     assert_eq!(
-        view_1_key_2,
+        view_1_key_2.into_vec()[0],
         vec![DataType::from(2), DataType::from(Decimal::from_i32(9))]
     );
 
-    let view_0_key_2 = view_0
-        .lookup_first(&[2.into()], true)
-        .await
-        .unwrap()
-        .unwrap();
+    let view_0_key_2 = view_0.lookup(&[2.into()], true).await.unwrap();
     assert_eq!(
-        view_0_key_2,
+        view_0_key_2.into_vec()[0],
         vec![DataType::from(2), DataType::from(Decimal::from_i32(9))]
     );
 
-    let view_1_key_1 = view_1
-        .lookup_first(&[1.into()], true)
-        .await
-        .unwrap()
-        .unwrap();
+    let view_1_key_1 = view_1.lookup(&[1.into()], true).await.unwrap();
     assert_eq!(
-        view_1_key_1,
+        view_1_key_1.into_vec()[0],
         vec![DataType::from(1), DataType::from(Decimal::from_i32(6))]
     );
 }
@@ -375,33 +351,17 @@ async fn replicated_readers_with_unions() {
     assert_eq!(view_1.num_shards(), 1);
     assert_ne!(view_0.shard_addrs(), view_1.shard_addrs());
 
-    let view_0_key_1 = view_0
-        .lookup_first(&[1.into()], true)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(view_0_key_1, vec![DataType::from(4)]);
+    let view_0_key_1 = view_0.lookup(&[1.into()], true).await.unwrap();
+    assert_eq!(view_0_key_1.into_vec()[0], vec![DataType::from(4)]);
 
-    let view_1_key_2 = view_1
-        .lookup_first(&[2.into()], true)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(view_1_key_2, vec![DataType::from(2)]);
+    let view_1_key_2 = view_1.lookup(&[2.into()], true).await.unwrap();
+    assert_eq!(view_1_key_2.into_vec()[0], vec![DataType::from(2)]);
 
-    let view_1_key_1 = view_1
-        .lookup_first(&[1.into()], true)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(view_1_key_1, vec![DataType::from(4)]);
+    let view_1_key_1 = view_1.lookup(&[1.into()], true).await.unwrap();
+    assert_eq!(view_1_key_1.into_vec()[0], vec![DataType::from(4)]);
 
-    let view_0_key_2 = view_0
-        .lookup_first(&[2.into()], true)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(view_0_key_2, vec![DataType::from(2)]);
+    let view_0_key_2 = view_0.lookup(&[2.into()], true).await.unwrap();
+    assert_eq!(view_0_key_2.into_vec()[0], vec![DataType::from(2)]);
 }
 
 #[clustertest]

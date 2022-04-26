@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 use chrono::NaiveDateTime;
 use neon::prelude::*;
 use neon::types::JsDate;
-use noria::results::Results;
+use noria::results::ResultIterator;
 use noria::ColumnSchema;
 use noria_client::backend::{
     PrepareResult, QueryResult, SelectSchema, SinglePrepareResult, UpstreamPrepare,
@@ -11,6 +11,7 @@ use noria_client::backend::{
 use noria_data::DataType;
 use noria_mysql::{Error, MySqlUpstream};
 use rust_decimal::prelude::ToPrimitive;
+use streaming_iterator::StreamingIterator;
 
 use crate::utils;
 
@@ -144,7 +145,7 @@ where
 
 fn convert_data<'a, C>(
     cx: &mut C,
-    data: Vec<Results>,
+    mut rows: ResultIterator,
     select_schema: &SelectSchema,
 ) -> NeonResult<Handle<'a, JsArray>>
 where
@@ -152,21 +153,18 @@ where
 {
     let js_data = cx.empty_array();
     let col_names = &select_schema.columns;
-    for resultsets in data {
-        let mut row_num = 0;
-        for row_struct in resultsets {
-            let row_vec: Vec<_> = row_struct.into();
-            let js_current_row = cx.empty_object();
-            for (i, col_name) in col_names.iter().enumerate() {
-                if select_schema.use_bogo && *col_name == "bogokey" {
-                    continue;
-                }
-                let js_datum = convert_datum(cx, &row_vec[i])?;
-                utils::set_jsval_field(cx, &js_current_row, col_name, js_datum)?;
-                js_data.set(cx, row_num as u32, js_current_row)?;
+    let mut row_num = 0;
+    while let Some(row) = rows.next() {
+        let js_current_row = cx.empty_object();
+        for (i, col_name) in col_names.iter().enumerate() {
+            if select_schema.use_bogo && *col_name == "bogokey" {
+                continue;
             }
-            row_num += 1;
+            let js_datum = convert_datum(cx, &row[i])?;
+            utils::set_jsval_field(cx, &js_current_row, col_name, js_datum)?;
+            js_data.set(cx, row_num as u32, js_current_row)?;
         }
+        row_num += 1;
     }
     Ok(js_data)
 }
@@ -200,11 +198,8 @@ where
                 first_inserted_id as f64,
             )?;
         }
-        QueryResult::Noria(NoriaResult::Select {
-            data,
-            select_schema,
-        }) => {
-            let js_data = convert_data(cx, data, &select_schema)?;
+        QueryResult::Noria(NoriaResult::Select { rows, schema }) => {
+            let js_data = convert_data(cx, rows, &schema)?;
             utils::set_jsval_field(cx, &js_query_result, "data", js_data.upcast::<JsValue>())?;
             // TODO: convert select_schema?
         }

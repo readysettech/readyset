@@ -41,7 +41,7 @@ use vec1::Vec1;
 
 pub(crate) mod results;
 
-use self::results::{Results, Row};
+use self::results::{ResultIterator, Results};
 use crate::consistency::Timestamp;
 use crate::{ReaderAddress, Tagged, Tagger};
 
@@ -1017,7 +1017,6 @@ impl Service<ViewQuery> for View {
             node = self.node.index()
         );
 
-        let columns = Arc::clone(&self.columns);
         if self.shards.len() == 1 {
             let request = span.in_scope(|| {
                 Instrumented::from(Tagged::from(ReadQuery::Normal {
@@ -1047,11 +1046,7 @@ impl Service<ViewQuery> for View {
                                 })?
                                 .map(|l| {
                                     l.map_results(|rows, stats| {
-                                        Results::with_stats(
-                                            rows.into(),
-                                            Arc::clone(&columns),
-                                            stats.clone(),
-                                        )
+                                        Results::with_stats(rows.into(), stats.clone())
                                     })
                                 })
                         };
@@ -1134,11 +1129,7 @@ impl Service<ViewQuery> for View {
                                     }
                                     LookupResult::Results(u, stats) => {
                                         d.extend(u.into_iter().map(|rows| {
-                                            Results::with_stats(
-                                                rows.into(),
-                                                Arc::clone(&columns),
-                                                stats.clone(),
-                                            )
+                                            Results::with_stats(rows.into(), stats.clone())
                                         }));
                                     }
                                 }
@@ -1278,15 +1269,22 @@ impl View {
     /// The method will block if the results are not yet available only when `block` is `true`.
     /// If `block` is false, misses will be returned as empty results. Any requested keys that have
     /// missing state will be backfilled (asynchronously if `block` is `false`).
-    pub async fn raw_lookup(&mut self, query: ViewQuery) -> ReadySetResult<LookupResult<Results>> {
+    pub async fn raw_lookup(&mut self, query: ViewQuery) -> ReadySetResult<ResultIterator> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
-        self.call(query).await
+        match self.call(query).await? {
+            LookupResult::NonBlockingMiss => Err(ReadySetError::ReaderMissingKey),
+            LookupResult::Results(results, _) => Ok(ResultIterator::owned(results)),
+        }
     }
 
     /// Retrieve the query results for the given parameter value.
     ///
     /// The method will block if the results are not yet available only when `block` is `true`.
-    pub async fn lookup(&mut self, key: &[DataType], block: bool) -> ReadySetResult<Results> {
+    pub async fn lookup(
+        &mut self,
+        key: &[DataType],
+        block: bool,
+    ) -> ReadySetResult<ResultIterator> {
         self.lookup_ryw(key, block, None).await
     }
 
@@ -1299,20 +1297,8 @@ impl View {
         &mut self,
         key_comparisons: Vec<KeyComparison>,
         block: bool,
-    ) -> ReadySetResult<LookupResult<Results>> {
+    ) -> ReadySetResult<ResultIterator> {
         self.raw_lookup((key_comparisons, block, None).into()).await
-    }
-
-    /// Retrieve the first query result for the given parameter value.
-    ///
-    /// The method will block if the results are not yet available only when `block` is `true`.
-    pub async fn lookup_first(
-        &mut self,
-        key: &[DataType],
-        block: bool,
-    ) -> ReadySetResult<Option<Row>> {
-        // TODO: Optimized version of this function?
-        self.lookup_first_ryw(key, block, None).await
     }
 
     /// Retrieve the query results for the given parameter value.
@@ -1326,18 +1312,12 @@ impl View {
         key: &[DataType],
         block: bool,
         ticket: Option<Timestamp>,
-    ) -> ReadySetResult<Results> {
+    ) -> ReadySetResult<ResultIterator> {
         // TODO: Optimized version of this function?
         let key = Vec1::try_from_vec(key.into())
             .map_err(|_| view_err(self.node, ReadySetError::EmptyKey))?;
-        let rs = self
-            .multi_lookup_ryw(vec![KeyComparison::Equal(key)], block, ticket)
-            .await?;
-        rs.into_results()
-            .ok_or_else(|| internal_err("incorrect type returned for lookup"))?
-            .into_iter()
-            .next()
-            .ok_or_else(|| internal_err("no result found for key"))
+        self.multi_lookup_ryw(vec![KeyComparison::Equal(key)], block, ticket)
+            .await
     }
 
     /// Retrieve the query results for the given parameter values
@@ -1351,37 +1331,9 @@ impl View {
         key_comparisons: Vec<KeyComparison>,
         block: bool,
         ticket: Option<Timestamp>,
-    ) -> ReadySetResult<LookupResult<Results>> {
+    ) -> ReadySetResult<ResultIterator> {
         self.raw_lookup((key_comparisons, block, ticket).into())
             .await
-    }
-
-    /// Retrieve the first query result for the given parameter value.
-    ///
-    /// The method will block if the results are not yet available or do not have a timestamp
-    /// satisfying the `ticket ` requirement only when `block` is `true`.
-    /// If `block` is false, misses will be returned as empty results. Any requested keys that have
-    /// missing state will be backfilled (asynchronously if `block` is `false`).
-    pub async fn lookup_first_ryw(
-        &mut self,
-        key: &[DataType],
-        block: bool,
-        ticket: Option<Timestamp>,
-    ) -> ReadySetResult<Option<Row>> {
-        // TODO: Optimized version of this function?
-        let key = Vec1::try_from_vec(key.into())
-            .map_err(|_| view_err(self.node, ReadySetError::EmptyKey))?;
-        let rs = self
-            .multi_lookup_ryw(vec![KeyComparison::Equal(key)], block, ticket)
-            .await?;
-        Ok(rs
-            .into_results()
-            .ok_or_else(|| internal_err("incorrect type returned for lookup"))?
-            .into_iter()
-            .next()
-            .ok_or_else(|| internal_err("no result found for key"))?
-            .into_iter()
-            .next())
     }
 }
 
