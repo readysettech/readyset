@@ -24,6 +24,12 @@ pub(crate) struct ProcessedQueryParams {
     auto_parameters: Vec<(usize, Literal)>,
 }
 
+/// This rewrite pass accomplishes the following:
+/// - Remaps dollar sign placeholders so that they appear in order
+/// - Replaces literals with placeholders when they can be used as lookup indices in the noria
+///   dataflow representation of the query. Note that this pass may not replace all literals and is
+///   therefore cannot guarantee that the rewritten query is free of user PII.
+/// - Collapses 'WHERE <expr> IN ?, ... ?' to 'WHERE <expr> = ?'
 pub(crate) fn process_query(query: &mut SelectStatement) -> ReadySetResult<ProcessedQueryParams> {
     let reordered_placeholders = reorder_numbered_placeholders(query);
     let auto_parameters = auto_parametrize_query(query);
@@ -376,6 +382,7 @@ pub fn number_placeholders(query: &mut SelectStatement) -> ReadySetResult<()> {
     Ok(())
 }
 
+/// This pass replaces every instance of `Literal` in the AST with `Literal::String("<anonymized>")`
 struct AnonymizeLiteralsVisitor;
 impl<'ast> Visitor<'ast> for AnonymizeLiteralsVisitor {
     type Error = !;
@@ -385,6 +392,7 @@ impl<'ast> Visitor<'ast> for AnonymizeLiteralsVisitor {
     }
 }
 
+/// Replaces every instance of `Literal` in the AST with `Literal::String("<anonymized>")`
 pub fn anonymize_literals(query: &mut SelectStatement) {
     #[allow(clippy::unwrap_used)] // error is !, which can never be returned
     AnonymizeLiteralsVisitor
