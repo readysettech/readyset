@@ -975,7 +975,7 @@ impl SqlToMirConverter {
                 false,
             ),
             _ => {
-                #[cfg(feature = "dislay_literals")]
+                #[cfg(feature = "display_literals")]
                 internal!("not an aggregate: {:?}", function);
                 #[cfg(not(feature = "display_literals"))]
                 internal!("expected aggregate");
