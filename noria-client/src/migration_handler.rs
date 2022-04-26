@@ -30,7 +30,7 @@ pub struct MigrationHandler<DB> {
     controller: Option<ControllerHandle>,
 
     /// Connector used to issue prepares to the upstream db.
-    upstream: DB,
+    upstream: Option<DB>,
 
     /// The query status cache is polled on a regular interval to
     /// determine which queries require processing.
@@ -65,7 +65,7 @@ where
     #[allow(clippy::too_many_arguments)] // Only one over. Designing away that for a single over arg seems like over-engineering.
     pub fn new(
         noria: NoriaConnector,
-        upstream: DB,
+        upstream: Option<DB>,
         controller: Option<ControllerHandle>,
         query_status_cache: &'static QueryStatusCache,
         validate_queries: bool,
@@ -123,41 +123,42 @@ where
             self.start_time.insert(stmt.clone(), Instant::now());
         }
 
-        let upstream_result = if self.validate_queries {
-            let mut upstream_result = self.upstream.prepare(stmt.to_string()).await;
+        let upstream_result = match self.upstream {
+            Some(ref mut db) if self.validate_queries => {
+                let mut upstream_result = db.prepare(stmt.to_string()).await;
 
-            // If we returned an error indicating the connection was closed, we will try to
-            // reconnect. If that fails, we have an unrecoverable error and should wait until the
-            // next reconciliation pass.
-            match upstream_result {
-                Err(e) if e.is_fatal() => {
-                    if let Err(e) = self.upstream.reset().await {
-                        error!(
-                            error = %e,
-                            query = %Sensitive(&stmt),
-                            "MigrationHandler dropped conn to Upstream and failed to reconnnect",
-                        );
-                        return;
-                    } else {
-                        // Succeeded on reconnecting. Retry prepare.
-                        upstream_result = self.upstream.prepare(stmt.to_string()).await;
+                // If we returned an error indicating the connection was closed, we will try to
+                // reconnect. If that fails, we have an unrecoverable error and should wait until
+                // the next reconciliation pass.
+                match upstream_result {
+                    Err(e) if e.is_fatal() => {
+                        if let Err(e) = db.reset().await {
+                            error!(
+                                error = %e,
+                                query = %Sensitive(&stmt),
+                                "MigrationHandler dropped conn to Upstream and failed to reconnnect",
+                            );
+                            return;
+                        } else {
+                            // Succeeded on reconnecting. Retry prepare.
+                            upstream_result = db.prepare(stmt.to_string()).await;
+                        }
                     }
+                    _ => {}
+                };
+
+                if let Err(e) = upstream_result {
+                    error!(
+                        error = %e,
+                        query = %Sensitive(stmt),
+                        "Query failed to be prepared against upstream",
+                    );
+                    return;
                 }
-                _ => {}
-            };
 
-            if let Err(e) = upstream_result {
-                error!(
-                    error = %e,
-                    query = %Sensitive(stmt),
-                    "Query failed to be prepared against upstream",
-                );
-                return;
+                Some(upstream_result)
             }
-
-            Some(upstream_result)
-        } else {
-            None
+            _ => None,
         };
 
         // Check if we can successfully prepare against noria as well.

@@ -390,8 +390,7 @@ where
             Box::leak(Box::new(QueryStatusCache::with_style(migration_style)));
 
         if options.async_migrations || options.explicit_migrations {
-            #[allow(clippy::unwrap_used)] // async_migrations requires upstream_db_url
-            let upstream_db_url = options.upstream_db_url.as_ref().unwrap().0.clone();
+            let upstream_db_url = options.upstream_db_url.as_ref().map(|u| u.0.clone());
             let ch = ch.clone();
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
             let shutdown_recv = shutdown_sender.subscribe();
@@ -402,13 +401,18 @@ where
 
             let fut = async move {
                 let connection = span!(Level::INFO, "migration task upstream database connection");
-                let upstream = H::UpstreamDatabase::connect(upstream_db_url.clone())
-                    .instrument(
-                        connection
-                            .in_scope(|| span!(Level::INFO, "Connecting to upstream database")),
-                    )
-                    .await
-                    .unwrap();
+                let upstream =
+                    match upstream_db_url {
+                        Some(url) if !dry_run => Some(
+                            H::UpstreamDatabase::connect(url.clone())
+                                .instrument(connection.in_scope(|| {
+                                    span!(Level::INFO, "Connecting to upstream database")
+                                }))
+                                .await
+                                .unwrap(),
+                        ),
+                        _ => None,
+                    };
 
                 //TODO(DAN): allow compatibility with async and explicit migrations
                 let noria =
