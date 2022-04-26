@@ -117,7 +117,7 @@ async fn main() {
         let one = 1.into();
         let two = 2.into();
         assert_eq!(
-            r.lookup(&[one], true).await.unwrap(),
+            r.lookup(&[one], true).await.unwrap().into_vec(),
             vec![vec![
                 1.into(),
                 DataType::try_from("Hello world #1").unwrap(),
@@ -125,7 +125,7 @@ async fn main() {
             ]]
         );
         assert_eq!(
-            r.lookup(&[two], true).await.unwrap(),
+            r.lookup(&[two], true).await.unwrap().into_vec(),
             vec![vec![
                 2.into(),
                 DataType::try_from("Hello world #2").unwrap(),

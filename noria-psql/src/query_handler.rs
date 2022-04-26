@@ -1,13 +1,11 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use lazy_static::lazy_static;
 use nom_sql::{
     Literal, PostgresParameterValue, PostgresParameterValueInner, SetNames, SetPostgresParameter,
     SetPostgresParameterValue, SetStatement, SqlQuery,
 };
-use noria::results::Results;
 use noria::ReadySetResult;
 use noria_client::backend::noria_connector::QueryResult;
 use noria_client::backend::{noria_connector, SelectSchema};
@@ -363,14 +361,11 @@ impl QueryHandler for PostgreSqlQueryHandler {
     }
 
     fn default_response(_: &SqlQuery) -> ReadySetResult<QueryResult<'static>> {
-        Ok(noria_connector::QueryResult::Select {
-            data: vec![Results::new(vec![vec![]], Arc::new([]))],
-            select_schema: SelectSchema {
-                use_bogo: false,
-                schema: Cow::Owned(vec![]),
-                columns: Cow::Owned(vec![]),
-            },
-        })
+        Ok(noria_connector::QueryResult::empty(SelectSchema {
+            use_bogo: false,
+            schema: Cow::Owned(vec![]),
+            columns: Cow::Owned(vec![]),
+        }))
     }
 
     fn is_set_allowed(stmt: &SetStatement) -> bool {

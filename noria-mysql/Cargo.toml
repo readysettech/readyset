@@ -15,6 +15,7 @@ async-trait = "0.1.51"
 mysql-srv = { path = "../mysql-srv" }
 mysql_async = "0.29"
 lazy_static = "1.0"
+streaming-iterator = "0.1"
 
 noria = { path = "../noria/noria" }
 noria-errors = { path = "../noria/errors" }

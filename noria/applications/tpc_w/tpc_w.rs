@@ -167,7 +167,7 @@ impl Backend {
                 match g.lookup(&params[i..=i], true).await {
                     Err(_) => continue,
                     Ok(datas) => {
-                        if !datas.is_empty() {
+                        if !datas.into_vec().is_empty() {
                             ok += 1;
                         }
                     }

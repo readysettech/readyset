@@ -92,7 +92,7 @@ async fn it_works_basic() {
 
     // send a query to c
     assert_eq!(
-        cq.lookup(&[id.clone()], true).await.unwrap(),
+        cq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
         vec![vec![1.into(), 2.into()]]
     );
 
@@ -128,18 +128,22 @@ async fn it_works_basic() {
     sleep().await;
 
     // check that value was updated again
-    let res = cq.lookup(&[id.clone()], true).await.unwrap();
-    assert!(res.iter().any(|r| r == vec![id.clone(), 2.into()]));
-    assert!(res.iter().any(|r| r == vec![id.clone(), 4.into()]));
+    let res = cq.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    assert!(res.iter().any(|r| *r == vec![id.clone(), 2.into()]));
+    assert!(res.iter().any(|r| *r == vec![id.clone(), 4.into()]));
 
     // check that looking up columns by name works
-    assert!(res.iter().all(|r| get_col!(r, "a", i32) == 1));
-    assert!(res.iter().any(|r| get_col!(r, "b", i32) == 2));
-    assert!(res.iter().any(|r| get_col!(r, "b", i32) == 4));
+    assert!(res.iter().all(|r| get_col!(cq, r, "a", i32) == 1));
+    assert!(res.iter().any(|r| get_col!(cq, r, "b", i32) == 2));
+    assert!(res.iter().any(|r| get_col!(cq, r, "b", i32) == 4));
     // same with index
-    assert!(res.iter().all(|r| get_col!(r, "a", DataType) == id));
-    assert!(res.iter().any(|r| get_col!(r, "b", DataType) == 2.into()));
-    assert!(res.iter().any(|r| get_col!(r, "b", DataType) == 4.into()));
+    assert!(res.iter().all(|r| get_col!(cq, r, "a", DataType) == id));
+    assert!(res
+        .iter()
+        .any(|r| get_col!(cq, r, "b", DataType) == 2.into()));
+    assert!(res
+        .iter()
+        .any(|r| get_col!(cq, r, "b", DataType) == 4.into()));
 
     // This request does not hit the base table.
     let metrics = metrics_client.get_metrics().await.unwrap();
@@ -148,10 +152,11 @@ async fn it_works_basic() {
         get_counter(recorded::BASE_TABLE_LOOKUP_REQUESTS, metrics_dump),
         1.0
     );
-    assert_eq!(
+    // TODO(vlad): add a metric for embedded view cache hit instead
+    /*assert_eq!(
         get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_HIT),
         Some(DumpedMetricValue::Counter(1.0))
-    );
+    );*/
 
     assert!(matches!(
         get_metric!(
@@ -169,7 +174,7 @@ async fn it_works_basic() {
 
     // send a query to c
     assert_eq!(
-        cq.lookup(&[id.clone()], true).await.unwrap(),
+        cq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
         vec![vec![1.into(), 4.into()]]
     );
 

@@ -44,7 +44,13 @@ async fn main() {
     println!("Creating article...");
     let aid = 1;
     // Make sure the article exists:
-    if awvc.lookup(&[aid.into()], true).await.unwrap().is_empty() {
+    if awvc
+        .lookup(&[aid.into()], true)
+        .await
+        .unwrap()
+        .into_vec()
+        .is_empty()
+    {
         println!("Creating new article...");
         let title = "test title";
         let url = "http://pdos.csail.mit.edu";

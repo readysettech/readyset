@@ -2,8 +2,7 @@ use std::convert::TryFrom;
 use std::iter;
 use std::sync::Arc;
 
-use nom_sql::SqlIdentifier;
-use noria::results::Results;
+use noria::results::{ResultIterator, Results};
 use noria_data::DataType;
 use psql_srv as ps;
 use tokio_postgres::types::Type;
@@ -11,12 +10,12 @@ use tokio_postgres::types::Type;
 use crate::row::Row;
 use crate::schema::{type_to_pgsql, SelectSchema};
 
-/// A structure that contains a `Vec<Results>`, as provided by `QueryResult::NoriaSelect`, and
+/// A structure that contains a `ResultIterator`, as provided by `QueryResult::NoriaSelect`, and
 /// facilitates iteration over these results as `Row` values.
 pub struct Resultset {
     /// The query result data, comprising nested `Vec`s of rows that may come from separate Noria
     /// interface lookups performed by the backend.
-    results: Vec<Results>,
+    results: ResultIterator,
 
     /// The fields to project for each row. A `Results` returned by a Noria interface lookup may
     /// contain extraneous fields that should not be projected into the query result output. In
@@ -31,7 +30,7 @@ pub struct Resultset {
 }
 
 impl Resultset {
-    pub fn try_new(results: Vec<Results>, schema: &SelectSchema) -> Result<Self, ps::Error> {
+    pub fn try_new(results: ResultIterator, schema: &SelectSchema) -> Result<Self, ps::Error> {
         // Extract the indices of the schema's `schema` items within the schema's `columns` list.
         // Because the ordering of `columns` is the same as the ordering of fields within the rows
         // emitted by a `Results`, these indices also reference the fields within each row
@@ -72,25 +71,17 @@ impl Resultset {
 // An iterator over the rows contained within the `Resultset`.
 impl IntoIterator for Resultset {
     type Item = Row;
-    #[allow(clippy::type_complexity)]
-    type IntoIter = std::iter::Map<
-        std::iter::Zip<
-            std::iter::Flatten<std::vec::IntoIter<Results>>,
-            std::iter::Repeat<(Arc<Vec<usize>>, Arc<Vec<Type>>)>,
-        >,
-        fn((noria::results::Row, (Arc<Vec<usize>>, Arc<Vec<Type>>))) -> Row,
-    >;
+    type IntoIter = impl Iterator<Item = Row>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.results
             .into_iter()
-            .flatten()
             .zip(iter::repeat((
                 self.project_fields,
                 self.project_field_types,
             )))
             .map(|(values, (project_fields, project_field_types))| Row {
-                values: values.into(),
+                values,
                 project_fields,
                 project_field_types,
             })
@@ -120,10 +111,9 @@ impl TryFrom<Vec<tokio_postgres::Row>> for Resultset {
             }
             result_rows.push(result_row);
         }
-        let column_names: Vec<SqlIdentifier> = columns.iter().map(|c| c.name().into()).collect();
         let column_types: Vec<Type> = columns.iter().map(|c| c.type_().clone()).collect();
         Ok(Resultset {
-            results: vec![Results::new(result_rows, Arc::from(&column_names[..]))],
+            results: ResultIterator::owned(vec![Results::new(result_rows)]),
             project_fields: Arc::new((0_usize..columns.len()).collect()),
             project_field_types: Arc::new(column_types),
         })
@@ -169,18 +159,15 @@ mod tests {
             }]),
             columns: Cow::Owned(vec!["col1".into()]),
         });
-        let resultset = Resultset::try_new(results, &schema).unwrap();
-        assert_eq!(resultset.results, Vec::<Results>::new());
+        let resultset = Resultset::try_new(ResultIterator::owned(results), &schema).unwrap();
+        assert_eq!(resultset.results.into_vec(), Vec::<Vec<DataType>>::new());
         assert_eq!(resultset.project_fields, Arc::new(vec![0]));
         assert_eq!(resultset.project_field_types, Arc::new(vec![Type::INT8]));
     }
 
     #[test]
     fn iterate_resultset() {
-        let results = vec![Results::new(
-            vec![vec![DataType::Int(10)]],
-            Arc::new(["col1".into()]),
-        )];
+        let results = vec![Results::new(vec![vec![DataType::Int(10)]])];
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: false,
             schema: Cow::Owned(vec![ColumnSchema {
@@ -194,7 +181,7 @@ mod tests {
             }]),
             columns: Cow::Owned(vec!["col1".into()]),
         });
-        let resultset = Resultset::try_new(results, &schema).unwrap();
+        let resultset = Resultset::try_new(ResultIterator::owned(results), &schema).unwrap();
         assert_eq!(
             collect_resultset_values(resultset),
             vec![vec![ps::Value::Bigint(10)]]
@@ -204,12 +191,9 @@ mod tests {
     #[test]
     fn iterate_resultset_with_multiple_results() {
         let results = vec![
-            Results::new(vec![vec![DataType::Int(10)]], Arc::new(["col1".into()])),
-            Results::new(Vec::<Vec<DataType>>::new(), Arc::new(["col1".into()])),
-            Results::new(
-                vec![vec![DataType::Int(11)], vec![DataType::Int(12)]],
-                Arc::new(["col1".into()]),
-            ),
+            Results::new(vec![vec![DataType::Int(10)]]),
+            Results::new(Vec::<Vec<DataType>>::new()),
+            Results::new(vec![vec![DataType::Int(11)], vec![DataType::Int(12)]]),
         ];
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: false,
@@ -224,7 +208,7 @@ mod tests {
             }]),
             columns: Cow::Owned(vec!["col1".into()]),
         });
-        let resultset = Resultset::try_new(results, &schema).unwrap();
+        let resultset = Resultset::try_new(ResultIterator::owned(results), &schema).unwrap();
         assert_eq!(
             collect_resultset_values(resultset),
             vec![
@@ -267,8 +251,8 @@ mod tests {
                 "bogokey".into(),
             ]),
         });
-        let resultset = Resultset::try_new(results, &schema).unwrap();
-        assert_eq!(resultset.results, Vec::<Results>::new());
+        let resultset = Resultset::try_new(ResultIterator::owned(results), &schema).unwrap();
+        assert_eq!(resultset.results.into_vec(), Vec::<Vec<DataType>>::new());
         // The projected field indices of "col1" and "col2" within `columns` are 0 and 2. The
         // unprojected "col3" and "bogokey" fields are excluded.
         assert_eq!(resultset.project_fields, Arc::new(vec![0, 2]));
@@ -280,28 +264,20 @@ mod tests {
 
     #[test]
     fn iterate_resultset_with_unprojected_fields() {
-        let results = vec![Results::new(
+        let results = vec![Results::new(vec![
             vec![
-                vec![
-                    DataType::Int(10),
-                    DataType::Int(99),
-                    DataType::Text("abcdef".into()),
-                    DataType::Int(0),
-                ],
-                vec![
-                    DataType::Int(11),
-                    DataType::Int(99),
-                    DataType::Text("ghijkl".into()),
-                    DataType::Int(0),
-                ],
+                DataType::Int(10),
+                DataType::Int(99),
+                DataType::Text("abcdef".into()),
+                DataType::Int(0),
             ],
-            Arc::new([
-                "col1".into(),
-                "col3".into(),
-                "col2".into(),
-                "bogokey".into(),
-            ]),
-        )];
+            vec![
+                DataType::Int(11),
+                DataType::Int(99),
+                DataType::Text("ghijkl".into()),
+                DataType::Int(0),
+            ],
+        ])];
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: true,
             schema: Cow::Owned(vec![
@@ -331,7 +307,7 @@ mod tests {
                 "bogokey".into(),
             ]),
         });
-        let resultset = Resultset::try_new(results, &schema).unwrap();
+        let resultset = Resultset::try_new(ResultIterator::owned(results), &schema).unwrap();
         // Only the columns to be projected (col1 and col2) are included in the collected values.
         assert_eq!(
             collect_resultset_values(resultset),

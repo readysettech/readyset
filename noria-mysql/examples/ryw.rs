@@ -91,10 +91,9 @@ async fn main() {
     let res = b.query("select * from employees;").await;
 
     match res {
-        Ok(QueryResult::Noria(noria_connector::QueryResult::Select {
-            data,
-            select_schema: _,
-        })) => print!("{:#?}", data),
+        Ok(QueryResult::Noria(noria_connector::QueryResult::Select { rows, schema: _ })) => {
+            print!("{:#?}", rows)
+        }
         _ => print!("Select had an issue"),
     };
 }

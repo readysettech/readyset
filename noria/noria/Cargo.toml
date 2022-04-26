@@ -66,6 +66,7 @@ eui48 = { version = "1.1", default-features = false }
 uuid = { version = "0.8", features = ["v4"] }
 bit-vec = { version = "0.6", features = ["serde"] }
 triomphe = "0.1"
+streaming-iterator = "0.1"
 
 # consensus/
 zookeeper-async = "4.0.1"

@@ -271,7 +271,7 @@ impl TestHandle {
     async fn check_results_inner(&mut self, view_name: &str) -> ReadySetResult<Vec<Vec<DataType>>> {
         let mut getter = self.controller().await.view(view_name).await?;
         let results = getter.lookup(&[0.into()], true).await?;
-        let mut results = results.as_ref().to_owned();
+        let mut results = results.into_vec();
         results.sort(); // Simple `lookup` does not sort the results, so we just sort them ourselves
         Ok(results)
     }

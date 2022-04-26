@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::str::FromStr;
-use std::sync::Arc;
 
 use lazy_static::lazy_static;
 use nom_sql::{
@@ -11,7 +10,7 @@ use nom_sql::{
 use noria::results::Results;
 use noria::{ColumnSchema, ReadySetError};
 use noria_client::backend::noria_connector::QueryResult;
-use noria_client::backend::{noria_connector, SelectSchema};
+use noria_client::backend::SelectSchema;
 use noria_client::QueryHandler;
 use noria_data::DataType;
 use noria_errors::ReadySetResult;
@@ -841,7 +840,7 @@ impl QueryHandler for MySqlQueryHandler {
         // hardcoded value.
         // If `@@max_allowed_packet` was not present in the fields, we return an empty set
         // of rows.
-        let (data, schema) = match query {
+        match query {
             SqlQuery::Select(stmt)
                 if stmt.fields.iter().any(|field| {
                     matches!(field, FieldDefinitionExpr::Expr {
@@ -852,11 +851,7 @@ impl QueryHandler for MySqlQueryHandler {
             {
                 let field_name: SqlIdentifier =
                     format!("@@{}", MAX_ALLOWED_PACKET_VARIABLE_NAME).into();
-                (
-                    vec![Results::new(
-                        vec![vec![MAX_ALLOWED_PACKET_DEFAULT]],
-                        Arc::new([field_name.clone()]),
-                    )],
+                Ok(QueryResult::from_owned(
                     SelectSchema {
                         use_bogo: false,
                         schema: Cow::Owned(vec![ColumnSchema {
@@ -873,21 +868,15 @@ impl QueryHandler for MySqlQueryHandler {
                         }]),
                         columns: Cow::Owned(vec![field_name]),
                     },
-                )
+                    vec![Results::new(vec![vec![MAX_ALLOWED_PACKET_DEFAULT]])],
+                ))
             }
-            _ => (
-                vec![Results::new(vec![vec![]], Arc::new([]))],
-                SelectSchema {
-                    use_bogo: false,
-                    schema: Cow::Owned(vec![]),
-                    columns: Cow::Owned(vec![]),
-                },
-            ),
-        };
-        Ok(noria_connector::QueryResult::Select {
-            data,
-            select_schema: schema,
-        })
+            _ => Ok(QueryResult::empty(SelectSchema {
+                use_bogo: false,
+                schema: Cow::Owned(vec![]),
+                columns: Cow::Owned(vec![]),
+            })),
+        }
     }
 
     fn is_set_allowed(stmt: &nom_sql::SetStatement) -> bool {

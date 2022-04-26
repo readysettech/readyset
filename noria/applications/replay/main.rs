@@ -110,7 +110,7 @@ async fn perform_primary_reads(g: &mut Handle, hist: &mut Histogram<u64>, row_id
     for i in row_ids {
         let id: DataType = DataType::UnsignedInt(i as u64);
         let start = Instant::now();
-        let rs = getter.lookup(&[id], true).await.unwrap();
+        let rs = getter.lookup(&[id], true).await.unwrap().into_vec();
         let elapsed = start.elapsed();
         let us = elapsed.as_secs() * 1_000_000 + u64::from(elapsed.subsec_nanos()) / 1_000;
         assert_eq!(rs.len(), 1);
@@ -144,7 +144,7 @@ async fn perform_secondary_reads(
         let start = Instant::now();
         // Pick an arbitrary secondary index to use:
         let getter = &mut getters[i as usize % (indices - 1)];
-        let rs = getter.lookup(&[id], true).await.unwrap();
+        let rs = getter.lookup(&[id], true).await.unwrap().into_vec();
         let elapsed = start.elapsed();
         let us = elapsed.as_secs() * 1_000_000 + u64::from(elapsed.subsec_nanos()) / 1_000;
         if skewed {

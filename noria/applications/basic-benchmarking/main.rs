@@ -147,25 +147,25 @@ impl BenchmarkApplication {
                 .lookup(&[i.into()], true)
                 .await
                 .unwrap()
-                .iter()
+                .into_vec()
                 .len();
             noria_dept_emp_count += dept_emp_view
                 .lookup(&[i.into()], true)
                 .await
                 .unwrap()
-                .iter()
+                .into_vec()
                 .len();
             noria_manager_count += manager_view
                 .lookup(&[i.into()], true)
                 .await
                 .unwrap()
-                .iter()
+                .into_vec()
                 .len();
             noria_salary_count += salary_view
                 .lookup(&[i.into()], true)
                 .await
                 .unwrap()
-                .iter()
+                .into_vec()
                 .len();
         }
         let noria_warmup_dur = noria_warmup_start.elapsed().as_secs_f64();
