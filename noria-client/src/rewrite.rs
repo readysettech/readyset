@@ -18,7 +18,7 @@ use noria_errors::{unsupported, ReadySetError, ReadySetResult};
 /// user-provided parameters to [`ProcessedQueryParams::make_keys`] to make a list of lookup keys to
 /// pass to noria.
 #[derive(Debug, Clone)]
-pub(crate) struct ProcessedQueryParams {
+pub struct ProcessedQueryParams {
     reordered_placeholders: Option<Vec<usize>>,
     rewritten_in_conditions: Vec<RewrittenIn>,
     auto_parameters: Vec<(usize, Literal)>,
@@ -30,7 +30,7 @@ pub(crate) struct ProcessedQueryParams {
 ///   dataflow representation of the query. Note that this pass may not replace all literals and is
 ///   therefore cannot guarantee that the rewritten query is free of user PII.
 /// - Collapses 'WHERE <expr> IN ?, ... ?' to 'WHERE <expr> = ?'
-pub(crate) fn process_query(query: &mut SelectStatement) -> ReadySetResult<ProcessedQueryParams> {
+pub fn process_query(query: &mut SelectStatement) -> ReadySetResult<ProcessedQueryParams> {
     let reordered_placeholders = reorder_numbered_placeholders(query);
     let auto_parameters = auto_parametrize_query(query);
     let rewritten_in_conditions = collapse_where_in(query)?;
@@ -382,12 +382,15 @@ pub fn number_placeholders(query: &mut SelectStatement) -> ReadySetResult<()> {
     Ok(())
 }
 
-/// This pass replaces every instance of `Literal` in the AST with `Literal::String("<anonymized>")`
+/// This pass replaces every instance of `Literal`, except Placeholders, in the AST with
+/// `Literal::String("<anonymized>")`
 struct AnonymizeLiteralsVisitor;
 impl<'ast> Visitor<'ast> for AnonymizeLiteralsVisitor {
     type Error = !;
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
-        *literal = Literal::String("<anonymized>".to_owned());
+        if !matches!(literal, Literal::Placeholder(_)) {
+            *literal = Literal::String("<anonymized>".to_owned());
+        }
         Ok(())
     }
 }
@@ -920,6 +923,36 @@ mod tests {
             );
             anonymize_literals(&mut query);
             assert_eq!(query, expected);
+        }
+
+        #[test]
+        fn partially_rewritten() {
+            let mut query = parse_select_statement(
+                "SELECT id + 3 FROM users WHERE credit_card_number = \"look at this PII\"",
+            );
+            let expected = parse_select_statement(
+                "SELECT id + \"<anonymized>\" FROM users WHERE credit_card_number = $1",
+            );
+            process_query(&mut query).expect("Should be able to rewrite query");
+            anonymize_literals(&mut query);
+            assert_eq!(query, expected);
+        }
+
+        #[test]
+        fn fully_rewritten() {
+            let mut query = parse_select_statement(
+                "SELECT id FROM users WHERE credit_card_number = \"look at this PII\" AND id = 3",
+            );
+            let expected = parse_select_statement(
+                "SELECT id FROM users WHERE credit_card_number = $1 AND id = $2",
+            );
+            process_query(&mut query).expect("Should be able to rewrite query");
+            assert_eq!(query.to_string(), expected.to_string());
+            anonymize_literals(&mut query);
+            assert_eq!(
+                query, expected,
+                "Anonymization shouldn't have caused any changes"
+            );
         }
     }
 

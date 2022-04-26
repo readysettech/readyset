@@ -535,7 +535,17 @@ impl NoriaConnector {
         };
         let data = outputs
             .into_iter()
-            .map(|(n, q)| vec![DataType::from(n), DataType::from(q.to_string())])
+            .map(|(n, mut q)| {
+                match q {
+                    SqlQuery::Select(ref mut stmt) => rewrite::anonymize_literals(stmt),
+                    SqlQuery::CreateCache(nom_sql::CreateCacheStatement {
+                        name: _,
+                        inner: nom_sql::CacheInner::Statement(ref mut stmt),
+                    }) => rewrite::anonymize_literals(stmt),
+                    _ => {}
+                }
+                vec![DataType::from(n), DataType::from(q.to_string())]
+            })
             .collect::<Vec<_>>();
         let data = vec![Results::new(
             data,
