@@ -20,8 +20,8 @@ services:
         condition: service_healthy
     healthcheck:
       test: "mysqladmin ping -h127.0.0.1 --port=3306 -uroot -pnoria"
-      start_period: 10s
-      interval: 10s
+      start_period: 20s
+      interval: 20s
       timeout: 2s
       retries: 5
   readyset-server:

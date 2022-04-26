@@ -19,9 +19,9 @@ services:
       consul:
         condition: service_healthy
     healthcheck:
-      test: "mysqladmin ping -h127.0.0.1 --port=3306 -uroot -pnoria"
-      start_period: 10s
-      interval: 10s
+      test: "mysqladmin ping -h127.0.0.1 -P3306 -uroot -pnoria"
+      start_period: 20s
+      interval: 20s
       timeout: 2s
       retries: 5
   readyset-adapter:
@@ -43,7 +43,7 @@ services:
     volumes:
       - readyset-server-state:/state
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1", "--port=3307", "-uroot", "-pnoria"]
+      test: "mysqladmin ping -h127.0.0.1 -P3307 -uroot -pnoria"
       interval: 10s
       timeout: 10s
       retries: 2
@@ -57,7 +57,7 @@ services:
       interval: 10s
       timeout: 2s
       retries: 5
-      start_period: 5s 
+      start_period: 5s
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

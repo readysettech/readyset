@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use derive_builder::*;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
@@ -90,6 +90,7 @@ impl Compose {
                 }
             };
 
+            services.update_service_healthcheck_credentials("root", pass);
             services.set_service_env_var("readyset-adapter", "ALLOWED_USERNAME", "root");
             services.set_service_env_var("readyset-adapter", "ALLOWED_PASSWORD", pass);
 
@@ -242,6 +243,19 @@ impl Services {
                 let mut map = HashMap::new();
                 map.insert(key.to_string(), val.to_string());
                 service.environment = Some(map);
+            }
+        }
+    }
+
+    /// Overwrites the credentials for any healthchecks that requires credentials, such as
+    /// mysqladmin ping.
+    pub fn update_service_healthcheck_credentials(&mut self, user: &str, pass: &str) {
+        for service in self.0.values_mut().flatten() {
+            if let Some(ref mut healthcheck) = service.healthcheck {
+                if let Some(HealthcheckTest::MySqlPing(p)) = &mut healthcheck.test {
+                    p.user = Some(user.to_string());
+                    p.pass = Some(pass.to_string());
+                }
             }
         }
     }
@@ -408,8 +422,74 @@ pub struct Healthcheck {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum HealthcheckTest {
-    Single(String),
-    Multiple(Vec<String>),
+    MySqlPing(MySqlPing),
+    SingleCommand(String),
+    MultipleCommand(Vec<String>),
+}
+
+#[skip_serializing_none]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct MySqlPing {
+    host: Option<String>,
+    port: Option<String>,
+    user: Option<String>,
+    pass: Option<String>,
+}
+
+impl TryFrom<String> for MySqlPing {
+    type Error = anyhow::Error;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let mut result = MySqlPing::default();
+
+        if !value.contains("mysqladmin") {
+            bail!("Not a mysqladmin command");
+        }
+
+        for s in value.split(' ') {
+            match s {
+                "mysqladmin" | "ping" => {}
+                // Assumes that we use the shorthand of each flag -P, -h, etc.
+                f => {
+                    let flag = f.get(..2).ok_or_else(|| anyhow!("Invalid flag"))?;
+                    let value = f
+                        .get(2..)
+                        .ok_or_else(|| anyhow!("Invalid flag value"))?
+                        .to_string();
+
+                    match flag {
+                        "-h" => result.host = Some(value),
+                        "-P" => result.port = Some(value),
+                        "-u" => result.user = Some(value),
+                        "-p" => result.pass = Some(value),
+                        _ => bail!("Unsupported flag passed"),
+                    }
+                }
+            }
+        }
+
+        Ok(result)
+    }
+}
+
+impl From<MySqlPing> for String {
+    fn from(value: MySqlPing) -> String {
+        let mut command = vec!["mysqladmin".to_string(), "ping".to_string()];
+        if let Some(s) = value.host {
+            command.push(format!("-h{}", s));
+        }
+        if let Some(s) = value.port {
+            command.push(format!("-P{}", s));
+        }
+        if let Some(s) = value.user {
+            command.push(format!("-u{}", s));
+        }
+        if let Some(s) = value.pass {
+            command.push(format!("-p{}", s));
+        }
+
+        command.join(" ")
+    }
 }
 
 #[skip_serializing_none]
