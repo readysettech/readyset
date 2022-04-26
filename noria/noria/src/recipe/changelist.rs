@@ -85,7 +85,6 @@ impl FromStr for ChangeList {
             }
             Result::Ok((remainder, parsed)) => {
                 if !remainder.is_empty() {
-                    #[cfg(feature = "display_literals")]
                     return mk_error!(remainder);
                 }
                 parsed
