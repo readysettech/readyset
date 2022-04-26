@@ -897,7 +897,7 @@ fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<Dat
             "Unexpected (aggregate?) call node in project expression: {:?}",
             call
         ),
-        #[cfg(not(feature = "display_literal"))]
+        #[cfg(not(feature = "display_literals"))]
         Expression::Call(_) => {
             internal!("Unexpected (aggregate?) call node in project expression")
         }
