@@ -1325,19 +1325,26 @@ where
 
         let data = queries
             .into_iter()
-            .map(|DeniedQuery { id, query, status }| {
-                let s = match status.migration_state {
-                    MigrationState::DryRunSucceeded | MigrationState::Successful => "yes",
-                    MigrationState::Pending => "pending",
-                    MigrationState::Unsupported => "unsupported",
-                }
-                .to_string();
-                vec![
-                    DataType::from(id),
-                    DataType::from(query.to_string()),
-                    DataType::from(s),
-                ]
-            })
+            .map(
+                |DeniedQuery {
+                     id,
+                     mut query,
+                     status,
+                 }| {
+                    let s = match status.migration_state {
+                        MigrationState::DryRunSucceeded | MigrationState::Successful => "yes",
+                        MigrationState::Pending => "pending",
+                        MigrationState::Unsupported => "unsupported",
+                    }
+                    .to_string();
+                    rewrite::anonymize_literals(&mut query);
+                    vec![
+                        DataType::from(id),
+                        DataType::from(query.to_string()),
+                        DataType::from(s),
+                    ]
+                },
+            )
             .collect::<Vec<_>>();
         let data = vec![Results::new(
             data,
