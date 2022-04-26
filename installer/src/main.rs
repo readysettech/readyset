@@ -251,7 +251,7 @@ impl Installer {
             .await?;
 
         if !version_output.status.success() {
-            bail!("Please install docker-compose before continuing.");
+            bail!("Please install Docker Compose before continuing.");
         }
 
         Ok(())
@@ -353,7 +353,7 @@ impl Installer {
     /// Downloads necessary docker images needed for local deployment.
     pub async fn download_and_load_docker_images(&mut self, engine: Engine) -> Result<()> {
         let download_spinner =
-            spinner().with_message(format!("{}", style("Downloading docker images").bold()));
+            spinner().with_message(format!("{}", style("Downloading Docker images").bold()));
         let server_fut = reqwest::get(readyset_server_url());
         let adapter_fut = match engine {
             Engine::MySQL => reqwest::get(readyset_mysql_adapter_url()),
@@ -365,7 +365,7 @@ impl Installer {
         let adapter_contents = adapter_res?.bytes().await?;
         download_spinner.finish_with_message(format!(
             "{}",
-            style("Finished downloading docker images").bold()
+            style("Finished downloading Docker images").bold()
         ));
 
         let (saved_adapter_img_name, new_adapter_img_name) = match engine {
@@ -380,7 +380,7 @@ impl Installer {
         };
 
         let load_spinner =
-            spinner().with_message(format!("{}", style("Loading docker images").bold()));
+            spinner().with_message(format!("{}", style("Loading Docker images").bold()));
 
         load_and_tag(
             server_contents.as_ref(),
@@ -398,7 +398,7 @@ impl Installer {
 
         load_spinner.finish_with_message(format!(
             "{}",
-            style("Finished loading docker images").bold()
+            style("Finished loading Docker images").bold()
         ));
 
         Ok(())
@@ -407,19 +407,15 @@ impl Installer {
     /// Run the install process for deploying locally using docker-compose, picking up where the
     /// user left off if necessary.
     pub async fn run_compose(&mut self) -> Result<()> {
+        self.check_docker_version_and_running().await?;
+        self.check_docker_compose_version().await?;
+
         let res = self._compose_user_input();
         self.save().await?;
         res?;
 
-        self.check_docker_version_and_running().await?;
-        self.check_docker_compose_version().await?;
-
-        if confirm()
-            .with_prompt("Would you like to download and load docker containers necessary for locally deploying ReadySet?")
-            .interact()?
-        {
-            self.download_and_load_docker_images(self.deployment.db_type).await?;
-        }
+        self.download_and_load_docker_images(self.deployment.db_type)
+            .await?;
 
         let compose = Compose::try_from(&self.deployment)?;
 
@@ -433,36 +429,28 @@ impl Installer {
 
         let mut file = File::create(&path).await?;
         file.write_all(&serde_yaml::to_vec(&compose)?).await?;
-        let dest_text = format!(
-            "Your docker-compose file has been saved here: {}",
-            &path_str
-        );
+        let dest_text = format!("Docker Compose file was saved to {}", &path_str);
         println!("{}", style(dest_text).bold());
 
         self.create_prometheus_configs().await?;
-        println!("done with prometheus");
         self.create_vector_configs().await?;
         self.create_grafana_configs().await?;
         self.create_grafana_dashboards().await?;
 
-        if confirm()
-            .with_prompt("Proceed with docker-compose deployment now?")
-            .interact()?
-        {
-            let status = Command::new("docker-compose")
-                .args(["-f", path_str, "up", "-d"])
-                .status()
-                .await?;
-            if !status.success() {
-                bail!("Command exited with {}", status);
-            }
-
-            self.deployment.status = DeploymentStatus::Complete;
-            self.save().await?;
-
-            println!("ReadySet should be available in a few seconds.");
-            self.deployment.print_connection_information()?;
+        println!("Deploying with Docker Compose now");
+        let status = Command::new("docker-compose")
+            .args(["-f", path_str, "up", "-d"])
+            .status()
+            .await?;
+        if !status.success() {
+            bail!("Command exited with {}", status);
         }
+
+        self.deployment.status = DeploymentStatus::Complete;
+        self.save().await?;
+
+        println!("ReadySet should be available in a few seconds.");
+        self.deployment.print_connection_information()?;
 
         Ok(())
     }
@@ -500,7 +488,7 @@ impl Installer {
             DeploymentData::Compose(ref mut c) => Ok(c),
             _ => {
                 // This should be unreachable in practice.
-                bail!("Should not have run docker-compose functionality unless our deployment type was docker-compose.")
+                bail!("Should not have run Docker Compose functionality unless our deployment type was Docker Compose.")
             }
         }
     }
@@ -2379,7 +2367,7 @@ async fn load_and_tag(container: &[u8], old_name: &str, new_name: &str) -> Resul
     let out = process.wait().await?;
 
     if !out.success() {
-        bail!("Failed to load docker image {}", old_name);
+        bail!("Failed to load Docker image {}", old_name);
     }
 
     let out = Command::new("docker")
