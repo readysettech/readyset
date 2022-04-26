@@ -150,7 +150,6 @@ pub struct BackendBuilder {
     fail_invalidated_queries: bool,
     allow_unsupported_set: bool,
     migration_mode: MigrationMode,
-    explain_last_statement: bool,
     query_max_failure_seconds: u64,
     fallback_recovery_seconds: u64,
 }
@@ -171,7 +170,6 @@ impl Default for BackendBuilder {
             fail_invalidated_queries: false,
             allow_unsupported_set: false,
             migration_mode: MigrationMode::InRequestPath,
-            explain_last_statement: false,
             query_max_failure_seconds: (i64::MAX / 1000) as u64,
             fallback_recovery_seconds: 0,
         }
@@ -210,7 +208,6 @@ impl BackendBuilder {
             allow_unsupported_set: self.allow_unsupported_set,
             migration_mode: self.migration_mode,
             last_query: None,
-            explain_last_statement: self.explain_last_statement,
             query_max_failure_duration: Duration::new(self.query_max_failure_seconds, 0),
             fallback_recovery_duration: Duration::new(self.fallback_recovery_seconds, 0),
             _query_handler: PhantomData,
@@ -280,11 +277,6 @@ impl BackendBuilder {
 
     pub fn migration_mode(mut self, q: MigrationMode) -> Self {
         self.migration_mode = q;
-        self
-    }
-
-    pub fn explain_last_statement(mut self, enable: bool) -> Self {
-        self.explain_last_statement = enable;
         self
     }
 
@@ -402,9 +394,6 @@ where
     /// Information regarding the last query sent over this connection. If None, then no queries
     /// have been handled using this connection (Backend) yet.
     last_query: Option<QueryInfo>,
-
-    /// Whether the EXPLAIN LAST STATEMENT feature is enabled or not.
-    explain_last_statement: bool,
 
     /// The maximum duration that a query can continuously fail for before we enter into a recovery
     /// period.
@@ -1227,28 +1216,24 @@ where
 
     /// Generates response to the `EXPLAIN LAST STATEMENT` query
     fn explain_last_statement(&self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        if self.explain_last_statement {
-            let (destination, error) = self
-                .last_query
-                .as_ref()
-                .map(|info| {
-                    (
-                        info.destination.to_string(),
-                        match &info.noria_error {
-                            s if s.is_empty() => "ok".to_string(),
-                            s => s.clone(),
-                        },
-                    )
-                })
-                .unwrap_or_else(|| ("unknown".to_string(), "ok".to_string()));
+        let (destination, error) = self
+            .last_query
+            .as_ref()
+            .map(|info| {
+                (
+                    info.destination.to_string(),
+                    match &info.noria_error {
+                        s if s.is_empty() => "ok".to_string(),
+                        s => s.clone(),
+                    },
+                )
+            })
+            .unwrap_or_else(|| ("unknown".to_string(), "ok".to_string()));
 
-            Ok(noria_connector::QueryResult::Meta(vec![
-                ("Query_destination", destination).into(),
-                ("ReadySet_error", error).into(),
-            ]))
-        } else {
-            internal!("EXPLAIN LAST STATEMENT feature is not enabled")
-        }
+        Ok(noria_connector::QueryResult::Meta(vec![
+            ("Query_destination", destination).into(),
+            ("ReadySet_error", error).into(),
+        ]))
     }
 
     /// Forwards a `CREATE CACHE` request to noria

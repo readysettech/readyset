@@ -204,11 +204,6 @@ pub struct Options {
     #[clap(long, env = "OUTPUTS_POLLING_INTERVAL", default_value = "300")]
     outputs_polling_interval: u64,
 
-    /// Provides support for the EXPLAIN LAST STATEMENT command, which returns metadata about the
-    /// last statement issued along the current connection.
-    #[clap(long, hide = true, env = "EXPLAIN_LAST_STATEMENT")]
-    explain_last_statement: bool,
-
     /// The time to wait before canceling a migration request. Defaults to 30 minutes.
     #[clap(
         long,
@@ -565,7 +560,6 @@ where
                 .validate_queries(options.validate_queries, options.fail_invalidated_queries)
                 .allow_unsupported_set(options.allow_unsupported_set)
                 .migration_mode(migration_mode)
-                .explain_last_statement(options.explain_last_statement)
                 .query_max_failure_seconds(options.query_max_failure_seconds)
                 .fallback_recovery_seconds(options.fallback_recovery_seconds);
 

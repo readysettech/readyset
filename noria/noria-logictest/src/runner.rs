@@ -75,7 +75,6 @@ pub struct RunOptions {
     pub replication_url: Option<String>,
     pub enable_reuse: bool,
     pub time: bool,
-    pub explain_last_statement: bool,
 }
 
 impl Default for RunOptions {
@@ -86,7 +85,6 @@ impl Default for RunOptions {
             time: false,
             replication_url: None,
             database_type: DatabaseType::MySQL,
-            explain_last_statement: false,
         }
     }
 }
@@ -502,7 +500,6 @@ impl TestScript {
         authority: Arc<Authority>,
     ) -> (tokio::task::JoinHandle<()>, DatabaseURL) {
         let database_type = run_opts.database_type;
-        let explain_last_statement = run_opts.explain_last_statement;
         let replication_url = run_opts.replication_url.clone();
         let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
         let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
@@ -552,7 +549,6 @@ impl TestScript {
                     BackendBuilder::new()
                         .require_authentication(false)
                         .validate_queries(true, true)
-                        .explain_last_statement(explain_last_statement)
                         .build::<_, $handler>(noria, upstream, query_status_cache)
                 }};
             }
