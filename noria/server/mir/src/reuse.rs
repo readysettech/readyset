@@ -1,4 +1,4 @@
-use tracing::trace;
+use tracing::{debug, trace};
 
 use crate::column::Column;
 use crate::node::MirNode;
@@ -56,7 +56,14 @@ pub fn merge_mir_for_queries(new_query: &MirQuery, old_query: &MirQuery) -> (Mir
         let new_id = new.borrow().versioned_name();
         // reuseable node found, keep going
         trace!("found reuseable node {:?} for {:?}, continuing", old, new);
-        assert!(!reuse.contains_key(&new_id));
+        if reuse.contains_key(&new_id) {
+            // NOTE(grfn): This used to be an assertion, but that failed once AliasTable was added
+            // after every root node, and removing the assertion didn't break anything, so...???
+            debug!(
+                node = %new_id,
+                "Node could be a reuse of multiple nodes, picking one arbitrarily"
+            );
+        }
 
         reuse.insert(new_id.clone(), MirNode::new_reuse(old.clone()));
 

@@ -171,16 +171,24 @@ impl SqlToMirConverter {
         self.config = config;
     }
 
-    fn get_view(&self, view_name: &str) -> Result<MirNodeRef, ReadySetError> {
-        self.current
+    fn get_view(&self, view_name: &str) -> ReadySetResult<MirNodeRef> {
+        let v = self
+            .current
             .get(view_name)
-            .ok_or_else(|| ReadySetError::ViewNotFound(view_name.into()))
-            .and_then(
-                |v| match self.nodes.get(&(SqlIdentifier::from(view_name), *v)) {
-                    None => internal!("Inconsistency: view {} does not exist at v{}", view_name, v),
-                    Some(bmn) => Ok(MirNode::reuse(bmn.clone(), self.schema_version)),
-                },
-            )
+            .ok_or_else(|| ReadySetError::ViewNotFound(view_name.into()))?;
+        let node = self
+            .nodes
+            .get(&(SqlIdentifier::from(view_name), *v))
+            .ok_or_else(|| {
+                internal_err(format!(
+                    "Inconsistency: view {} does not exist at v{}",
+                    view_name, v
+                ))
+            })?;
+
+        let reuse_node = MirNode::reuse(node.clone(), self.schema_version);
+
+        Ok(reuse_node)
     }
 
     pub(super) fn add_leaf_below(
@@ -232,25 +240,16 @@ impl SqlToMirConverter {
             .enumerate()
             .map(|(i, c)| {
                 (
-                    c.clone().aliased_as_table(name.clone()),
+                    c.clone(),
                     ViewPlaceholder::OneToOne(i + 1 /* placeholders are 1-based */),
                 )
             })
             .collect();
-        let alias_table = MirNode::new(
-            format!("{}_alias_table", name).into(),
-            self.schema_version,
-            MirNodeInner::AliasTable {
-                table: name.clone(),
-            },
-            vec![MirNodeRef::downgrade(&n)],
-            vec![],
-        );
         let new_leaf = MirNode::new(
             name.clone(),
             self.schema_version,
             MirNodeInner::leaf(params, index_type),
-            vec![MirNodeRef::downgrade(&alias_table)],
+            vec![MirNodeRef::downgrade(&n)],
             vec![],
         );
 
@@ -1549,8 +1548,27 @@ impl SqlToMirConverter {
                         self.get_view(rel_name)?
                     };
 
-                base_nodes.push(base_for_rel.clone());
-                node_for_rel.insert(*rel_name, base_for_rel);
+                nodes_added.push(base_for_rel.clone());
+
+                let alias_table_node_name = format!(
+                    "q_{:x}_{}_alias_table_{}",
+                    qg.signature().hash,
+                    base_for_rel.borrow().name(),
+                    rel_name
+                )
+                .into();
+                let alias_table_node = MirNode::new(
+                    alias_table_node_name,
+                    self.schema_version,
+                    MirNodeInner::AliasTable {
+                        table: (*rel_name).clone(),
+                    },
+                    vec![MirNodeRef::downgrade(&base_for_rel)],
+                    vec![],
+                );
+
+                base_nodes.push(alias_table_node.clone());
+                node_for_rel.insert(*rel_name, alias_table_node);
             }
 
             let join_nodes = make_joins(
@@ -1927,14 +1945,13 @@ impl SqlToMirConverter {
                     self.make_distinct_node(&name, final_node.clone(), projected_columns.clone());
                 nodes_added.push(distinct_node.clone());
                 final_node = distinct_node;
-                new_node_count += 1;
             }
 
             let leaf_project_node = self.make_project_node(
                 &if has_leaf {
                     format!("q_{:x}_leaf_project", qg.signature().hash).into()
                 } else {
-                    format!("{}_leaf_project", name).into()
+                    name.into()
                 },
                 final_node,
                 projected_columns,
@@ -1942,21 +1959,6 @@ impl SqlToMirConverter {
                 projected_literals,
             );
             nodes_added.push(leaf_project_node.clone());
-
-            let alias_table = MirNode::new(
-                if has_leaf {
-                    format!("q_{:x}_n{}", qg.signature().hash, new_node_count).into()
-                } else {
-                    name.clone()
-                },
-                self.schema_version,
-                MirNodeInner::AliasTable {
-                    table: name.clone(),
-                },
-                vec![MirNodeRef::downgrade(&leaf_project_node)],
-                vec![],
-            );
-            nodes_added.push(alias_table.clone());
 
             if has_leaf {
                 // We are supposed to add a `Leaf` node keyed on the query parameters. For purely
@@ -1975,9 +1977,7 @@ impl SqlToMirConverter {
                         keys: view_key
                             .columns
                             .into_iter()
-                            .map(|(col, placeholder)| {
-                                (col.aliased_as_table(name.clone()), placeholder)
-                            })
+                            .map(|(col, placeholder)| (col, placeholder))
                             .collect(),
                         index_type: view_key.index_type,
                         order_by: st.order.as_ref().map(|order| {
@@ -1988,11 +1988,8 @@ impl SqlToMirConverter {
                                 .map(|(expr, ot)| {
                                     (
                                         match expr {
-                                            Expression::Column(col) => {
-                                                Column::from(col).aliased_as_table(name.clone())
-                                            }
-                                            expr => Column::named(expr.to_string())
-                                                .aliased_as_table(name.clone()),
+                                            Expression::Column(col) => Column::from(col),
+                                            expr => Column::named(expr.to_string()),
                                         },
                                         ot.unwrap_or(OrderType::OrderAscending),
                                     )
@@ -2013,16 +2010,16 @@ impl SqlToMirConverter {
                                             alias: Some(alias),
                                             ..
                                         } => {
-                                            Ok(Column::named(alias.clone()).aliased_as_table(name.clone()))
+                                            Ok(Column::named(alias.clone()))
                                         }
                                         FieldDefinitionExpression::Expression {
                                             expr: Expression::Column(c),
                                             ..
-                                        } => Ok(Column::from(c).aliased_as_table(name.clone())),
+                                        } => Ok(Column::from(c)),
                                         FieldDefinitionExpression::Expression {
                                             expr,
                                             ..
-                                        } => Ok(Column::named(expr.to_string()).aliased_as_table(name.clone())),
+                                        } => Ok(Column::named(expr.to_string())),
                                     }
                                 })
                                 .collect::<Result<Vec<_>, _>>()?;
@@ -2032,7 +2029,7 @@ impl SqlToMirConverter {
                         default_row: default_row_for_select(st),
                         aggregates,
                     },
-                    vec![MirNodeRef::downgrade(&alias_table)],
+                    vec![MirNodeRef::downgrade(&leaf_project_node)],
                     vec![],
                 );
                 nodes_added.push(leaf_node);

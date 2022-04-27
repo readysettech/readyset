@@ -1,0 +1,31 @@
+statement ok
+CREATE TABLE posts (id INT, title TEXT, author_id INT, PRIMARY KEY (id));
+
+statement ok
+CREATE TABLE users (id INT, name TEXT, PRIMARY KEY (id))
+
+statement ok
+insert into users (id, name) values (2, 'a');
+
+statement ok
+insert into posts (id, title, author_id) values (1, 'b', 2);
+
+statement ok
+create cache from
+SELECT posts.id, posts.title, users.name
+FROM posts
+JOIN users ON posts.author_id = users.id
+WHERE users.id = ?
+
+graphviz
+
+query ITT nosort
+SELECT posts.id, posts.title, users.name
+FROM posts
+JOIN users ON posts.author_id = users.id
+WHERE users.id = ?
+? = 2
+----
+1
+b
+a
