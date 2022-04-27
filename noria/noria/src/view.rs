@@ -17,6 +17,7 @@ use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::{StreamExt, TryStreamExt};
 use futures_util::{future, ready};
 use launchpad::intervals::{cmp_start_end, BoundPair};
+use launchpad::redacted::Sensitive;
 use nom_sql::{BinaryOperator, Column, ColumnSpecification, SqlIdentifier, SqlType};
 use noria_data::DataType;
 use noria_errors::{internal_err, rpc_err, view_err, ReadySetError, ReadySetResult};
@@ -1034,10 +1035,12 @@ impl Service<ViewQuery> for View {
 
     fn call(&mut self, mut query: ViewQuery) -> Self::Future {
         let ni = self.node;
-        #[cfg(feature = "display_literals")]
-        let span = readyset_tracing::child_span!(INFO, "view-request", ?query.key_comparisons, node = self.node.index());
-        #[cfg(not(feature = "display_literals"))]
-        let span = readyset_tracing::child_span!(INFO, "view-request", node = self.node.index());
+        let span = readyset_tracing::child_span!(
+            INFO,
+            "view-request",
+            key_comparisons = ?Sensitive(&query.key_comparisons),
+            node = self.node.index()
+        );
 
         let columns = Arc::clone(&self.columns);
         if self.shards.len() == 1 {

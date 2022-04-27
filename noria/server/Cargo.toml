@@ -24,7 +24,7 @@ generate_mysql_tests = ["default"]
 profiling = ["timekeeper/default"]
 bench = ["dataflow/bench"]
 failure_injection = ["fail/failpoints", "dataflow/failure_injection"]
-display_literals = ["replicators/display_literals", "noria-errors/display_literals", "noria/display_literals"]
+display_literals = ["launchpad/display_literals"]
 
 [target.'cfg(not(target_env="msvc"))'.dependencies]
 tikv-jemallocator = "0.4"

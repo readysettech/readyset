@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use launchpad::redacted::Sensitive;
 use metrics::counter;
 use nom_sql::SelectStatement;
 use noria::recipe::changelist::{Change, ChangeList};
@@ -131,15 +132,9 @@ where
             match upstream_result {
                 Err(e) if e.is_fatal() => {
                     if let Err(e) = self.upstream.reset().await {
-                        #[cfg(feature = "display_literals")]
                         error!(
                             error = %e,
-                            query = %stmt,
-                            "MigrationHandler dropped conn to Upstream and failed to reconnnect",
-                        );
-                        #[cfg(not(feature = "display_literals"))]
-                        error!(
-                            error = %e,
+                            query = %Sensitive(&stmt),
                             "MigrationHandler dropped conn to Upstream and failed to reconnnect",
                         );
                         return;
@@ -152,15 +147,9 @@ where
             };
 
             if let Err(e) = upstream_result {
-                #[cfg(feature = "display_literals")]
                 error!(
                     error = %e,
-                    query = %stmt,
-                    "Query failed to be prepared against upstream",
-                );
-                #[cfg(not(feature = "display_literals"))]
-                error!(
-                    error = %e,
+                    query = %Sensitive(stmt),
                     "Query failed to be prepared against upstream",
                 );
                 return;
@@ -189,10 +178,7 @@ where
                             .meta
                             .compare(schema, params)
                         {
-                            #[cfg(feature = "display_literals")]
-                            warn!(error = %e, query = %stmt, "Query compare failed");
-                            #[cfg(not(feature = "display_literals"))]
-                            warn!(error = %e, "Query compare failed");
+                            warn!(error = %e, query = %Sensitive(&stmt), "Query compare failed");
                             // TODO(justin): Fix setting migration state to unsupported with
                             // validate_queries.
                             /*self.query_status_cache
@@ -210,10 +196,7 @@ where
                     .update_query_migration_state(stmt, MigrationState::Successful);
             }
             Err(e) if e.caused_by_unsupported() => {
-                #[cfg(feature = "display_literals")]
-                error!(error = %e, query = %stmt, "Select query is unsupported in ReadySet");
-                #[cfg(not(feature = "display_literals"))]
-                error!(error = %e, "Select query is unsupported in ReadySet");
+                error!(error = %e, query = %Sensitive(&stmt), "Select query is unsupported in ReadySet");
 
                 self.start_time.remove(stmt);
                 self.query_status_cache
@@ -222,12 +205,8 @@ where
             // Errors that were not caused by unsupported may be transient, do nothing
             // so we may retry the migration on this query.
             Err(e) => {
-                #[cfg(feature = "display_literals")]
                 warn!(error = %e,
-                      query = %stmt,
-                      "Select query may have transiently failed");
-                #[cfg(not(feature = "display_literals"))]
-                warn!(error = %e,
+                      query = %Sensitive(&stmt),
                       "Select query may have transiently failed");
                 if Instant::now() - *self.start_time.get(stmt).unwrap() > self.max_retry {
                     // Query failed for long enough, it is unsupported.

@@ -16,6 +16,7 @@ use failpoint_macros::failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 pub use internal::DomainIndex;
+use launchpad::redacted::Sensitive;
 use launchpad::Indices;
 use noria::internal::Index;
 use noria::replication::ReplicationOffset;
@@ -552,23 +553,10 @@ impl Domain {
             .cloned()
             .unwrap_or_default();
 
-        #[cfg(feature = "display_literals")]
         invariant!(
             !tags.is_empty(),
             "no tag found to fill missing value {:?} in {}.{:?}{}",
-            miss_keys,
-            dst.0,
-            miss_index,
-            if dst.0 == target.0 {
-                "".to_owned()
-            } else {
-                format!(" (targeting {})", target.0)
-            }
-        );
-        #[cfg(not(feature = "display_literals"))]
-        invariant!(
-            !tags.is_empty(),
-            "no tag found to fill missing value in {}.{:?}{}",
+            Sensitive(&miss_keys),
             dst.0,
             miss_index,
             if dst.0 == target.0 {
@@ -3226,10 +3214,7 @@ impl Domain {
                     let replay = match waiting.redos.remove(&hole) {
                         Some(x) => x,
                         None => {
-                            #[cfg(feature = "display_literals")]
-                            internal!("got backfill for unnecessary hole {:?} via tag {:?} (destined for node {})", hole, tag, dst);
-                            #[cfg(not(feature = "display_literals"))]
-                            internal!("got backfill for unnecessary hole via tag {:?} (destined for node {})", tag, dst);
+                            internal!("got backfill for unnecessary hole {:?} via tag {:?} (destined for node {})", Sensitive(&hole), tag, dst);
                         }
                     };
 
@@ -3294,10 +3279,11 @@ impl Domain {
                 }
                 return Ok(());
             } else if for_keys.is_some() {
-                #[cfg(feature = "display_literals")]
-                internal!("got unexpected replay of {:?} for {:?}", for_keys, dst);
-                #[cfg(not(feature = "display_literals"))]
-                internal!("got unexpected replay of for {:?}", dst);
+                internal!(
+                    "got unexpected replay of {:?} for {:?}",
+                    Sensitive(&for_keys),
+                    dst
+                );
             } else {
                 // must be a full replay
                 // NOTE: node is now ready, in the sense that it shouldn't ignore all updates since

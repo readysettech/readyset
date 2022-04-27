@@ -4,6 +4,7 @@ use std::convert::TryFrom;
 
 use dataflow_state::SnapshotMode;
 use itertools::Itertools;
+use launchpad::redacted::Sensitive;
 use launchpad::Indices;
 use maplit::hashmap;
 use noria::replication::ReplicationOffset;
@@ -334,10 +335,11 @@ impl Base {
                         LookupResult::Some(rows) if rows.is_empty() => None,
                         LookupResult::Some(rows) if rows.len() == 1 => rows.into_iter().next(),
                         LookupResult::Some(rows) => {
-                            #[cfg(feature = "display_literals")]
-                            internal!("key {:?} not unique; num_rows={}", key, rows.len());
-                            #[cfg(not(feature = "display_literals"))]
-                            internal!("key not unique; num_rows={}", rows.len());
+                            internal!(
+                                "key {:?} not unique; num_rows={}",
+                                Sensitive(&key),
+                                rows.len()
+                            );
                         }
                     },
                 }

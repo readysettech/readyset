@@ -28,6 +28,7 @@ derive_more = "0.99.16"
 thiserror = "1.0.26"
 mysql_common = "0.28.0"
 itertools = "0.10"
+launchpad = { path = "../launchpad" }
 
 [dev-dependencies]
 noria-client-test-helpers = { path = "../noria-client/test-helpers", features = ["mysql"] }
@@ -43,7 +44,7 @@ test-strategy = "0.2.0"
 
 [features]
 vertical_tests = []
-display_literals = ["noria/display_literals", "noria-errors/display_literals", "noria-client/display_literals"]
+display_literals = ["launchpad/display_literals"]
 
 [[example]]
 name = "basic_demo"

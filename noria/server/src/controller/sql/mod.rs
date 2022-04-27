@@ -9,6 +9,7 @@ use ::mir::reuse::merge_mir_for_queries;
 use ::mir::visualize::GraphViz;
 use ::mir::{reuse as mir_reuse, Column, MirNodeRef};
 use ::serde::{Deserialize, Serialize};
+use launchpad::redacted::Sensitive;
 use nom_sql::analysis::ReferredTables;
 use nom_sql::{
     parser as sql_parser, BinaryOperator, CompoundSelectOperator, CompoundSelectStatement,
@@ -874,10 +875,7 @@ impl SqlIncorporator {
                     .0
             }
             SqlQuery::CreateTable(stmt) => self.add_base_via_mir(&query_name, stmt, mig)?,
-            #[cfg(feature = "display_literals")]
-            q => internal!("unhandled query type in recipe: {:?}", q),
-            #[cfg(not(feature = "display_literals"))]
-            _ => internal!("unhandled query type in recipe"),
+            q => internal!("unhandled query type in recipe: {:?}", Sensitive(&q)),
         };
 
         // record info about query
@@ -932,10 +930,7 @@ impl<'a> ToFlowParts for &'a str {
         match parsed_query {
             Ok(q) => inc.add_parsed_query(q, name, true, mig),
             Err(_) => Err(ReadySetError::UnparseableQuery {
-                #[cfg(feature = "display_literals")]
                 query: String::from(*self),
-                #[cfg(not(feature = "display_literals"))]
-                query: String::new(),
             }),
         }
     }

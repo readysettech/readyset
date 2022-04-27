@@ -7,6 +7,7 @@ use std::sync::{atomic, Arc, RwLock};
 
 use dataflow_expression::Expression as DataflowExpression;
 use itertools::Itertools;
+use launchpad::redacted::Sensitive;
 use nom_sql::{
     self, BinaryOperator, ColumnConstraint, DeleteStatement, InsertStatement, Literal,
     SelectStatement, SqlIdentifier, SqlQuery, UpdateStatement,
@@ -961,15 +962,9 @@ impl NoriaConnector {
                 // add the query to Noria
                 if create_if_not_exist {
                     if prepared {
-                        #[cfg(feature = "display_literals")]
-                        info!(query = %q, name = %qname, "adding parameterized query");
-                        #[cfg(not(feature = "display_literals"))]
-                        info!(name = %qname, "adding parameterized query");
+                        info!(query = %Sensitive(q), name = %qname, "adding parameterized query");
                     } else {
-                        #[cfg(feature = "display_literals")]
-                        info!(query = %q, name = %qname, "adding ad-hoc query");
-                        #[cfg(not(feature = "display_literals"))]
-                        info!(name = %qname, "adding ad-hoc query");
+                        info!(query = %Sensitive(q), name = %qname, "adding ad-hoc query");
                     }
 
                     let changelist = ChangeList {
@@ -1457,10 +1452,7 @@ impl NoriaConnector {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Noria every time. On the other hand, CREATE VIEW is rare...
 
-        #[cfg(feature = "display_literals")]
-        info!(%q.definition, %q.name, "view::create");
-        #[cfg(not(feature = "display_literals"))]
-        info!(%q.name, "view::create");
+        info!(view = %Sensitive(&q.definition), name = %q.name, "view::create");
 
         let changelist = ChangeList {
             changes: vec![Change::CreateView(q.clone())],

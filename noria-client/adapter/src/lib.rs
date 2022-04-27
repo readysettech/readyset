@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use clap::Parser;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
-use launchpad::redacted_string::RedactedString;
+use launchpad::redacted::RedactedString;
 use maplit::hashmap;
 use metrics::SharedString;
 use metrics_exporter_prometheus::PrometheusBuilder;
