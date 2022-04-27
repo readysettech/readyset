@@ -3,12 +3,15 @@ use futures::FutureExt;
 use launchpad::select;
 use noria::replication::ReplicationOffset;
 use noria::{ReadySetError, ReadySetResult, TableOperation};
+use noria_errors::invariant;
 use tokio_postgres as pgsql;
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 
+use super::ddl_replication::setup_ddl_replication;
 use super::wal_reader::{WalEvent, WalReader};
 use super::{PostgresPosition, PUBLICATION_NAME, REPLICATION_SLOT};
 use crate::noria_adapter::{Connector, ReplicationAction};
+use crate::postgres_connector::ddl_replication::DdlEvent;
 
 /// A connector that connects to a PostgreSQL server and starts reading WAL from the "noria"
 /// replication slot with the "noria" publication.
@@ -79,6 +82,8 @@ impl PostgresWalConnector {
     ) -> ReadySetResult<Self> {
         let connector = native_tls::TlsConnector::builder().build().unwrap(); // Never returns an error
         let connector = postgres_native_tls::MakeTlsConnector::new(connector);
+
+        setup_ddl_replication(config.clone(), connector.clone()).await?;
 
         config.dbname(dbname.as_ref()).set_replication_database();
 
@@ -162,12 +167,15 @@ impl PostgresWalConnector {
     }
 
     /// Requests the server to identify itself. Server replies with a result set of a single row,
-    /// containing four fields: systemid (text) - The unique system identifier identifying the
-    /// cluster. This can be used to check that the base                   backup used to
-    /// initialize the standby came from the same cluster. timeline (int4) - Current timeline
-    /// ID. Also useful to check that the standby is consistent with the master. xlogpos (text)
-    /// - Current WAL flush location. Useful to get a known location in the write-ahead log where
-    /// streaming can start. dbname (text) - Database connected to or null.
+    /// containing four fields:
+    ///
+    /// * `systemid` (text) - The unique system identifier identifying the cluster. This can be used
+    ///   to check that the base backup used to initialize the standby came from the same cluster.
+    /// * `timeline` (int4) - Current timeline ID. Also useful to check that the standby is
+    ///   consistent with the master.
+    /// * `xlogpos` (text) - Current WAL flush location. Useful to get a known location in the
+    ///   write-ahead log where streaming can start.
+    /// * dbname (text) - Database connected to or null.
     async fn identify_system(&mut self) -> ReadySetResult<ServerIdentity> {
         let row = self.one_row_query("IDENTIFY_SYSTEM", 4).await?;
         // We know we have 4 valid columns because `one_row_query` checks that, so can unwrap here
@@ -382,6 +390,8 @@ impl Connector for PostgresWalConnector {
                 None => self.next_event().await?,
             };
 
+            trace!(?event);
+
             // Check if next event is for another table, in which case we have to flush the events
             // accumulated for this table and store the next event in `peek`.
             match &event {
@@ -410,6 +420,17 @@ impl Connector for PostgresWalConnector {
             }
 
             cur_lsn = lsn.into();
+
+            // Check if this event is a write to the ddl replication log
+            if let Some(ddl_event) = DdlEvent::from_wal_event(&event)? {
+                invariant!(actions.is_empty());
+                return Ok((
+                    ReplicationAction::SchemaChange {
+                        ddl: ddl_event.to_ddl(),
+                    },
+                    cur_lsn.into(),
+                ));
+            }
 
             match event {
                 WalEvent::WantsKeepaliveResponse => {

@@ -1,4 +1,5 @@
 mod connector;
+mod ddl_replication;
 mod snapshot;
 mod wal;
 mod wal_reader;

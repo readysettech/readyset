@@ -5,10 +5,31 @@ use std::sync::Arc;
 use mysql_async::prelude::Queryable;
 use mysql_time::MysqlTime;
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
-use noria::{ControllerHandle, ReadySetResult};
+use noria::{ControllerHandle, ReadySetError, ReadySetResult};
 use noria_data::{DataType, TinyText};
 use noria_server::Builder;
 use replicators::NoriaAdapter;
+
+const MAX_ATTEMPTS: usize = 40;
+
+macro_rules! eventually {
+    ($expr: expr) => {{
+        let mut attempt = 0;
+        while !$expr.await {
+            if attempt > MAX_ATTEMPTS {
+                panic!(
+                    "{} did not become true after {} attempts",
+                    stringify!($expr),
+                    MAX_ATTEMPTS
+                );
+            } else {
+                attempt += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
+        }
+    }};
+}
+
 // Postgres does not accept MySQL escapes, so rename the table before the query
 const PGSQL_RENAME: (&str, &str) = ("`groups`", "groups");
 const CREATE_SCHEMA: &str = "
@@ -214,7 +235,6 @@ impl TestHandle {
         test_name: &str,
         test_results: &[&[DataType]],
     ) -> ReadySetResult<()> {
-        const MAX_ATTEMPTS: usize = 40;
         let mut attempt: usize = 0;
         loop {
             match self.check_results_inner(view_name).await {
@@ -638,4 +658,30 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
     ctx.stop().await;
     client.stop().await;
     Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn postgresql_ddl_replicate_drop_table() {
+    readyset_tracing::init_test_logging();
+    let mut client = DbConnection::connect(&pgsql_url()).await.unwrap();
+    client
+        .query("DROP TABLE IF EXISTS t1 CASCADE; CREATE TABLE t1 (id int);")
+        .await
+        .unwrap();
+    let mut ctx = TestHandle::start_noria(pgsql_url()).await.unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+    assert!(ctx.noria.table("t1").await.is_ok());
+
+    tracing::trace!("Dropping table");
+    client.query("DROP TABLE t1 CASCADE;").await.unwrap();
+
+    eventually!(async {
+        let res = ctx.noria.table("t1").await;
+        matches!(
+            res.err(),
+            Some(ReadySetError::RpcFailed { source, .. })
+                if matches!(&*source, ReadySetError::TableNotFound(table) if table == "t1")
+        )
+    });
 }
