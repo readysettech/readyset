@@ -74,6 +74,10 @@ impl Column {
         });
         self
     }
+
+    pub(crate) fn has_table(&self, table: &SqlIdentifier) -> bool {
+        self.table.iter().any(|t| t == table) || self.aliases.iter().any(|c| c.has_table(table))
+    }
 }
 
 impl From<nom_sql::Column> for Column {
