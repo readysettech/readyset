@@ -2,35 +2,34 @@
 
 use core::task::Context;
 use std::borrow::Cow;
-use std::cell::RefCell;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::HashMap;
 use std::future::Future;
-use std::pin::Pin;
 use std::task::Poll;
 use std::time::Duration;
 use std::{iter, mem, time};
 
 use async_bincode::AsyncBincodeStream;
 use dataflow::prelude::{DataType, *};
-use dataflow::{Expression as DataflowExpression, LookupError, Readers, SingleReadHandle};
+use dataflow::{
+    Expression as DataflowExpression, LookupError, ReaderMap, Readers, SingleReadHandle,
+};
 use derive_more::From;
 use failpoint_macros::set_failpoint;
-use futures_util::future;
-use futures_util::future::{Either, FutureExt, TryFutureExt};
+use futures_util::future::TryFutureExt;
 use futures_util::stream::{StreamExt, TryStreamExt};
 use launchpad::intervals;
-use nom_sql::SqlIdentifier;
 use noria::consistency::Timestamp;
 use noria::metrics::recorded;
-use noria::{KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyStats, Tagged, ViewQuery};
+use noria::{
+    KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyStats, ReaderAddress, Tagged,
+    ViewQuery,
+};
 use noria_errors::internal_err;
 use pin_project::pin_project;
-use readyset_tracing::presampled::instrument_if_enabled;
 use serde::ser::Serializer;
 use serde::Serialize;
 use stream_cancel::Valve;
-use tokio::task_local;
+use tokio::sync::oneshot;
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_tower::multiplex::server;
 use tower::Service;
@@ -43,13 +42,6 @@ const RETRY_TIMEOUT: Duration = Duration::from_micros(100);
 /// re-issue the replay request. To avoid the system falling over if replays are slow for a little
 /// while, waiting readers will use exponential backoff on this delay if they continue to miss.
 const TRIGGER_TIMEOUT_MS: u64 = 20;
-
-task_local! {
-    pub static READERS: RefCell<HashMap<
-        (NodeIndex, SqlIdentifier, usize),
-        SingleReadHandle,
-    >>;
-}
 
 /// An in-progress batch of records that are the result of the lookup of a single key within a read
 ///
@@ -191,18 +183,27 @@ impl serde::Serialize for ServerReadReplyBatch {
     }
 }
 
-pub type Ack =
-    tokio::sync::oneshot::Sender<Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>>;
+/// An Ack to resolve a blocking read.
+pub type Ack = oneshot::Sender<Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>>;
 
 /// Creates a handler that can be used to perform read queries against a set of
 /// Readers.
 #[derive(Clone)]
 pub struct ReadRequestHandler {
-    readers: Readers,
+    global_readers: Readers,
+    readers_cache: ReaderMap,
     wait: tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
     miss_ctr: metrics::Counter,
     hit_ctr: metrics::Counter,
     upquery_timeout: Duration,
+}
+
+/// Represents either a result that was resolved synchronously or one that has to await on a channel
+pub enum CallResult<F: Future<Output = ReadySetResult<Tagged<ReadReply<ServerReadReplyBatch>>>>> {
+    /// The call was resolved immediately
+    Immediate(ReadySetResult<Tagged<ReadReply<ServerReadReplyBatch>>>),
+    /// The call will be resolved by polling the provided future
+    Async(F),
 }
 
 impl ReadRequestHandler {
@@ -213,7 +214,8 @@ impl ReadRequestHandler {
         upquery_timeout: Duration,
     ) -> Self {
         Self {
-            readers,
+            global_readers: readers,
+            readers_cache: Default::default(),
             wait,
             miss_ctr: metrics::register_counter!(recorded::SERVER_VIEW_QUERY_MISS),
             hit_ctr: metrics::register_counter!(recorded::SERVER_VIEW_QUERY_HIT),
@@ -221,14 +223,15 @@ impl ReadRequestHandler {
         }
     }
 
-    /// Always returns `ServerReadReplyBatch::Unserialized` if `raw_result` is passed.
+    /// Always returns `ServerReadReplyBatch::Unserialized` if `raw_result` is passed. The response
+    /// is either an immediate response or a deffered response via a channel
     pub fn handle_normal_read_query(
         &mut self,
         tag: u32,
-        target: (NodeIndex, SqlIdentifier, usize),
+        target: ReaderAddress,
         query: ViewQuery,
         raw_result: bool,
-    ) -> impl Future<Output = Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>> + Send
+    ) -> CallResult<impl Future<Output = ReadySetResult<Tagged<ReadReply<ServerReadReplyBatch>>>>>
     {
         let ViewQuery {
             mut key_comparisons,
@@ -236,308 +239,244 @@ impl ReadRequestHandler {
             timestamp,
             filter,
         } = query;
-        let immediate = READERS.with(|readers_cache| {
-            macro_rules! reply_with_error {
-                ($e: expr) => {
-                    return Ok(Ok(Tagged {
-                        tag,
-                        v: ReadReply::Normal(Err($e)),
-                    }))
-                };
+
+        macro_rules! reply_with_ok {
+            ($e: expr) => {
+                return CallResult::Immediate(Ok(Tagged {
+                    tag,
+                    v: ReadReply::Normal(Ok($e)),
+                }))
+            };
+        }
+
+        macro_rules! reply_with_error {
+            ($e: expr) => {
+                return CallResult::Immediate(Ok(Tagged {
+                    tag,
+                    v: ReadReply::Normal(Err($e)),
+                }))
+            };
+        }
+
+        let reader = match self.readers_cache.entry(target.clone()) {
+            Occupied(v) => v.into_mut(),
+            Vacant(v) => {
+                let readers = self.global_readers.lock().unwrap();
+                match readers.get(&target) {
+                    None => reply_with_error!(ReadySetError::ReaderNotFound),
+                    Some(reader) => v.insert(reader.clone()),
+                }
             }
+        };
 
-            let mut readers_cache = readers_cache.borrow_mut();
-            let reader = match readers_cache.entry(target.clone()) {
-                Occupied(v) => v.into_mut(),
-                Vacant(v) => {
-                    let readers = self.readers.lock().unwrap();
+        let mut ret = Vec::with_capacity(key_comparisons.len());
+        let consistency_miss = !has_sufficient_timestamp(reader, &timestamp);
 
-                    v.insert(
-                        readers
-                            .get(&target)
-                            .ok_or(ReadySetError::ReaderNotFound)?
-                            .clone(),
-                    )
+        // A miss is either a RYW consistency miss or a key that is not materialized.
+        // In the case of a RYW consistency miss, all keys will be added to `missed_keys`
+        let mut miss_keys = Vec::new();
+
+        // To keep track of the index within the output vector that each entry in `missed_keys`
+        // corresponds to. This is needed when only a subset of the keys are missing due to not
+        // being materialized.
+        let mut miss_indices = Vec::new();
+
+        // A key needs to be replayed only in the case of a materialization miss.
+        // `keys_to_replay` is separate from `miss_keys` because `miss_keys` also
+        // includes consistency misses.
+        let mut keys_to_replay = Vec::new();
+
+        // First do non-blocking reads for all keys to see if we can return immediately.
+        // We execute this loop even if there is RYW miss, since we still want to trigger a
+        // partial replay if the key has been evicted. However, if there is RYW
+        // miss, a successful lookup is actually still a miss since the row is not
+        // sufficiently up to date.
+        let num_keys = key_comparisons.len();
+        for (i, key) in key_comparisons.drain(..).enumerate() {
+            use dataflow::LookupError::*;
+            match do_lookup(reader, &key, &filter, !raw_result) {
+                Ok(rs) => {
+                    if consistency_miss {
+                        ret.push(ServerReadReplyBatch::Empty);
+                    } else {
+                        // immediate hit!
+                        ret.push(rs);
+                    }
+                }
+                Err(NotReady) => reply_with_error!(ReadySetError::ViewNotYetAvailable),
+                Err(Destroyed) => reply_with_error!(ReadySetError::ViewDestroyed),
+                Err(Error(e)) => reply_with_error!(e),
+                Err(miss) => {
+                    let misses = miss.into_misses();
+
+                    // if we did a lookup of a range, it might be the case that part of the
+                    // range *didn't* miss - we still want the results
+                    // for the bits that didn't miss, so subtract the
+                    // misses from our original keys and do the lookups now
+                    // NOTE(grfn): The asymptotics here are bad, but we only ever do range
+                    // queries with one key at a time so it doesn't
+                    // matter - if that changes, we may want to
+                    // improve this somewhat, but for now it's actually *faster* to do this
+                    // linearly rather than trying to make a data
+                    // structure out of it
+                    if key.is_range() {
+                        let non_miss_ranges = misses.iter().fold(vec![key.clone()], |acc, miss| {
+                            acc.into_iter()
+                                .flat_map(|key| {
+                                    intervals::difference(&key, miss)
+                                        .map(|(l, u)| {
+                                            KeyComparison::Range((l.cloned(), u.cloned()))
+                                        })
+                                        .collect::<Vec<_>>()
+                                })
+                                .collect()
+                        });
+
+                        let mut records = vec![];
+                        for key in non_miss_ranges {
+                            match reader.try_find_range_and(&key, |r| {
+                                Ok(reader
+                                    .post_lookup
+                                    .process(r, &filter)?
+                                    .into_iter()
+                                    .map(|r| r.into_iter().map(Cow::into_owned).collect::<Vec<_>>())
+                                    .collect::<Vec<_>>())
+                            }) {
+                                Ok((rows, _)) => records.extend(rows.into_iter().flatten()),
+                                Err(LookupError::Error(e)) => reply_with_error!(e),
+                                Err(_) => {
+                                    reply_with_error!(internal_err("Reader didn't miss before"))
+                                }
+                            }
+                        }
+
+                        // Store the records *unserialized* in the result, so we can add the
+                        // results for the subranges that missed once their replays complete.
+                        ret.push(ServerReadReplyBatch::Unserialized(records))
+                    } else {
+                        ret.push(ServerReadReplyBatch::Empty);
+                    }
+
+                    for key in misses {
+                        // We do not push a lookup miss to `missing_keys` and `missing_indices`
+                        // here If there is a `consistency_miss` the
+                        // key will be pushed at the end of the loop
+                        // no matter if it is materialized or not.
+                        if !consistency_miss {
+                            miss_keys.push(key.clone());
+                            miss_indices.push(i as usize);
+                        }
+                        keys_to_replay.push(key);
+                    }
                 }
             };
 
-            let mut ret = Vec::with_capacity(key_comparisons.len());
-            let consistency_miss = !has_sufficient_timestamp(reader, &timestamp);
-
-            // A miss is either a RYW consistency miss or a key that is not materialized.
-            // In the case of a RYW consistency miss, all keys will be added to `missed_keys`
-            let mut miss_keys = Vec::new();
-
-            // To keep track of the index within the output vector that each entry in `missed_keys`
-            // corresponds to. This is needed when only a subset of the keys are missing due to not
-            // being materialized.
-            let mut miss_indices = Vec::new();
-
-            // A key needs to be replayed only in the case of a materialization miss.
-            // `keys_to_replay` is separate from `miss_keys` because `miss_keys` also
-            // includes consistency misses.
-            let mut keys_to_replay = Vec::new();
-
-            // Set to Some(err) if we encounter an error that should prevent us from trying to do
-            // any more reads (concretely, the map is not yet ready or has been destroyed)
-            let mut permanent_err = None;
-
-            // First do non-blocking reads for all keys to see if we can return immediately.
-            // We execute this loop even if there is RYW miss, since we still want to trigger a
-            // partial replay if the key has been evicted. However, if there is RYW
-            // miss, a successful lookup is actually still a miss since the row is not
-            // sufficiently up to date.
-            let num_keys = key_comparisons.len();
-            for (i, key) in key_comparisons.drain(..).enumerate() {
-                if permanent_err.is_some() {
-                    ret.push(ServerReadReplyBatch::Empty);
-                    continue;
-                }
-
-                use dataflow::LookupError::*;
-                match do_lookup(reader, &key, &filter, !raw_result) {
-                    Ok(rs) => {
-                        if consistency_miss {
-                            ret.push(ServerReadReplyBatch::Empty);
-                        } else {
-                            // immediate hit!
-                            ret.push(rs);
-                        }
-                    }
-                    Err(NotReady) => {
-                        permanent_err = Some(ReadySetError::ViewNotYetAvailable);
-                        ret.push(ServerReadReplyBatch::Empty);
-                    }
-                    Err(Destroyed) => {
-                        permanent_err = Some(ReadySetError::ViewDestroyed);
-                        ret.push(ServerReadReplyBatch::Empty);
-                    }
-                    Err(Error(e)) => reply_with_error!(e),
-                    Err(miss) => {
-                        let misses = miss.into_misses();
-
-                        // if we did a lookup of a range, it might be the case that part of the
-                        // range *didn't* miss - we still want the results
-                        // for the bits that didn't miss, so subtract the
-                        // misses from our original keys and do the lookups now
-                        // NOTE(grfn): The asymptotics here are bad, but we only ever do range
-                        // queries with one key at a time so it doesn't
-                        // matter - if that changes, we may want to
-                        // improve this somewhat, but for now it's actually *faster* to do this
-                        // linearly rather than trying to make a data
-                        // structure out of it
-                        if key.is_range() {
-                            let non_miss_ranges =
-                                misses.iter().fold(vec![key.clone()], |acc, miss| {
-                                    acc.into_iter()
-                                        .flat_map(|key| {
-                                            intervals::difference(&key, miss)
-                                                .map(|(l, u)| {
-                                                    KeyComparison::Range((l.cloned(), u.cloned()))
-                                                })
-                                                .collect::<Vec<_>>()
-                                        })
-                                        .collect()
-                                });
-
-                            let mut records = vec![];
-                            for key in non_miss_ranges {
-                                match reader.try_find_range_and(&key, |r| {
-                                    Ok(reader
-                                        .post_lookup
-                                        .process(r, &filter)?
-                                        .into_iter()
-                                        .map(|r| {
-                                            r.into_iter().map(Cow::into_owned).collect::<Vec<_>>()
-                                        })
-                                        .collect::<Vec<_>>())
-                                }) {
-                                    Ok((rows, _)) => records.extend(rows.into_iter().flatten()),
-                                    Err(LookupError::Error(e)) => reply_with_error!(e),
-                                    Err(_) => {
-                                        reply_with_error!(internal_err("Reader didn't miss before"))
-                                    }
-                                }
-                            }
-
-                            // Store the records *unserialized* in the result, so we can add the
-                            // results for the subranges that missed once their replays complete.
-                            ret.push(ServerReadReplyBatch::Unserialized(records))
-                        } else {
-                            ret.push(ServerReadReplyBatch::Empty);
-                        }
-
-                        for key in misses {
-                            // We do not push a lookup miss to `missing_keys` and `missing_indices`
-                            // here If there is a `consistency_miss` the
-                            // key will be pushed at the end of the loop
-                            // no matter if it is materialized or not.
-                            if !consistency_miss {
-                                miss_keys.push(key.clone());
-                                miss_indices.push(i as usize);
-                            }
-                            keys_to_replay.push(key);
-                        }
-                    }
-                };
-
-                // Every key is a missed key if there is a `consistency_miss` since the reader is
-                // not sufficiently up to date.
-                if consistency_miss {
-                    miss_keys.push(key);
-                    miss_indices.push(i as usize);
-                }
+            // Every key is a missed key if there is a `consistency_miss` since the reader is
+            // not sufficiently up to date.
+            if consistency_miss {
+                miss_keys.push(key);
+                miss_indices.push(i as usize);
             }
-            debug_assert_eq!(ret.len(), num_keys);
+        }
+        debug_assert_eq!(ret.len(), num_keys);
 
-            if let Some(err) = permanent_err {
-                return Ok(Ok(Tagged {
+        // Hit on all the keys and were RYW consistent
+        if !consistency_miss && miss_keys.is_empty() {
+            self.hit_ctr.increment(1);
+            reply_with_ok!(LookupResult::Results(ret, ReadReplyStats::default()));
+        }
+        self.miss_ctr.increment(1);
+
+        // Trigger backfills for all the keys we missed on, regardless of a consistency hit/miss
+        if !keys_to_replay.is_empty() {
+            reader.trigger(keys_to_replay.iter());
+        }
+
+        if !block {
+            reply_with_ok!(LookupResult::NonBlockingMiss);
+        } else {
+            let (tx, rx) = oneshot::channel();
+            let trigger = Duration::from_millis(TRIGGER_TIMEOUT_MS);
+            let now = time::Instant::now();
+
+            let r = self.wait.send((
+                BlockingRead {
                     tag,
-                    v: ReadReply::Normal(Err(err)),
-                }));
+                    target,
+                    pending_keys: miss_keys,
+                    pending_indices: miss_indices,
+                    read: ret,
+                    truth: self.global_readers.clone(),
+                    trigger_timeout: trigger,
+                    next_trigger: now,
+                    first: now,
+                    warned: false,
+                    filter,
+                    timestamp,
+                    upquery_timeout: self.upquery_timeout,
+                    raw_result,
+                },
+                tx,
+            ));
+
+            if r.is_err() {
+                // we're shutting down
+                return CallResult::Immediate(Err(ReadySetError::ServerShuttingDown));
             }
 
-            // Hit on all the keys and were RYW consistent
-            if !consistency_miss && miss_keys.is_empty() {
-                self.hit_ctr.increment(1);
-                return Ok(Ok(Tagged {
-                    tag,
-                    v: ReadReply::Normal(Ok(LookupResult::Results(ret, ReadReplyStats::default()))),
-                }));
-            }
-            self.miss_ctr.increment(1);
-
-            // Trigger backfills for all the keys we missed on, regardless of a consistency hit/miss
-            if !keys_to_replay.is_empty() {
-                reader.trigger(keys_to_replay.iter());
-            }
-
-            Ok(Err((miss_keys, ret, miss_indices)))
-        });
-
-        let immediate = match immediate {
-            Ok(v) => v,
-            Err(e) => return Either::Right(Either::Left(async move { Err(e) })),
-        };
-
-        match immediate {
-            Ok(reply) => Either::Left(future::ready(Ok(reply))),
-            Err((pending_keys, ret, pending_indices)) => {
-                if !block {
-                    Either::Left(future::ready(Ok(Tagged {
-                        tag,
-                        v: ReadReply::Normal(Ok(LookupResult::NonBlockingMiss)),
-                    })))
-                } else {
-                    let (tx, rx) = tokio::sync::oneshot::channel();
-                    let trigger = Duration::from_millis(TRIGGER_TIMEOUT_MS);
-                    let now = time::Instant::now();
-
-                    let r = self.wait.send((
-                        BlockingRead {
-                            tag,
-                            target,
-                            pending_keys,
-                            pending_indices,
-                            read: ret,
-                            truth: self.readers.clone(),
-                            trigger_timeout: trigger,
-                            next_trigger: now,
-                            first: now,
-                            warned: false,
-                            filter,
-                            timestamp,
-                            upquery_timeout: self.upquery_timeout,
-                            raw_result,
-                        },
-                        tx,
-                    ));
-                    if r.is_err() {
-                        // we're shutting down
-                        return Either::Left(future::ready(Err(ReadySetError::ServerShuttingDown)));
-                    }
-                    Either::Right(Either::Right(rx.map(|r| match r {
-                        Err(e) => Err(internal_err(e.to_string())),
-                        Ok(r) => r,
-                    })))
-                }
-            }
+            CallResult::Async(rx.map_ok_or_else(|e| Err(internal_err(e.to_string())), |o| o))
         }
     }
 
     fn handle_size_query(
         &mut self,
         tag: u32,
-        target: (NodeIndex, SqlIdentifier, usize),
-    ) -> impl Future<Output = Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>> + Send
-    {
-        let size = READERS.with(|readers_cache| {
-            let mut readers_cache = readers_cache.borrow_mut();
-            let reader = readers_cache.entry(target.clone()).or_insert_with(|| {
-                let readers = self.readers.lock().unwrap();
-                readers.get(&target).unwrap().clone()
-            });
+        target: ReaderAddress,
+    ) -> ReadySetResult<Tagged<ReadReply<ServerReadReplyBatch>>> {
+        let reader = match self.readers_cache.entry(target.clone()) {
+            Occupied(v) => v.into_mut(),
+            Vacant(v) => {
+                let readers = self.global_readers.lock().unwrap();
+                match readers.get(&target) {
+                    None => return Err(ReadySetError::ReaderNotFound),
+                    Some(reader) => v.insert(reader.clone()),
+                }
+            }
+        };
 
-            reader.len()
-        });
-
-        future::ready(Ok(Tagged {
+        Ok(Tagged {
             tag,
-            v: ReadReply::Size(size),
-        }))
+            v: ReadReply::Size(reader.len()),
+        })
     }
 
     fn handle_keys_query(
         &mut self,
         tag: u32,
-        target: (NodeIndex, SqlIdentifier, usize),
-    ) -> impl Future<Output = Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>> + Send
-    {
-        let keys = READERS.with(|readers_cache| {
-            let mut readers_cache = readers_cache.borrow_mut();
-            let read_handle = self.readers.lock().unwrap().get(&target).unwrap().clone();
-            readers_cache.entry(target).or_insert(read_handle).keys()
-        });
-        future::ready(Ok(Tagged {
+        target: ReaderAddress,
+    ) -> ReadySetResult<Tagged<ReadReply<ServerReadReplyBatch>>> {
+        let reader = match self.readers_cache.entry(target.clone()) {
+            Occupied(v) => v.into_mut(),
+            Vacant(v) => {
+                let readers = self.global_readers.lock().unwrap();
+                match readers.get(&target) {
+                    None => return Err(ReadySetError::ReaderNotFound),
+                    Some(reader) => v.insert(reader.clone()),
+                }
+            }
+        };
+
+        Ok(Tagged {
             tag,
-            v: ReadReply::Keys(keys),
-        }))
-    }
-}
-
-#[pin_project(project = ReadResponseFutureProj)]
-enum ReadResponseFuture<N, S, K>
-where
-    N: Future<Output = Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>> + Send,
-    S: Future<Output = Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>> + Send,
-    K: Future<Output = Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>> + Send,
-{
-    Normal(#[pin] N),
-    Size(#[pin] S),
-    Keys(#[pin] K),
-}
-
-impl<N, S, K> Future for ReadResponseFuture<N, S, K>
-where
-    N: Future<Output = Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>> + Send,
-    S: Future<Output = Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>> + Send,
-    K: Future<Output = Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>> + Send,
-{
-    type Output = Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>;
-    #[inline]
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.project() {
-            ReadResponseFutureProj::Normal(f) => f.poll(cx),
-            ReadResponseFutureProj::Size(f) => f.poll(cx),
-            ReadResponseFutureProj::Keys(f) => f.poll(cx),
-        }
+            v: ReadReply::Keys(reader.keys()),
+        })
     }
 }
 
 impl Service<Tagged<ReadQuery>> for ReadRequestHandler {
     type Response = Tagged<ReadReply<ServerReadReplyBatch>>;
     type Error = ReadySetError;
-    type Future = impl Future<Output = Result<Self::Response, Self::Error>> + Send;
+    type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -547,21 +486,28 @@ impl Service<Tagged<ReadQuery>> for ReadRequestHandler {
     #[inline]
     fn call(&mut self, m: Tagged<ReadQuery>) -> Self::Future {
         let tag = m.tag;
-        match m.v {
+        let res = match m.v {
             ReadQuery::Normal { target, query } => {
-                let future = self.handle_normal_read_query(tag, target, query, false);
                 let span = readyset_tracing::child_span!(INFO, "normal_read_query");
-                ReadResponseFuture::Normal(instrument_if_enabled(future, span))
+                let _g = span.enter();
+                self.handle_normal_read_query(tag, target, query, false)
             }
             ReadQuery::Size { target } => {
-                let future = self.handle_size_query(tag, target);
                 let span = readyset_tracing::child_span!(INFO, "size_query");
-                ReadResponseFuture::Size(instrument_if_enabled(future, span))
+                let _g = span.enter();
+                CallResult::Immediate(self.handle_size_query(tag, target))
             }
             ReadQuery::Keys { target } => {
-                let future = self.handle_keys_query(tag, target);
                 let span = readyset_tracing::child_span!(INFO, "keys_query");
-                ReadResponseFuture::Keys(instrument_if_enabled(future, span))
+                let _g = span.enter();
+                CallResult::Immediate(self.handle_keys_query(tag, target))
+            }
+        };
+
+        async {
+            match res {
+                CallResult::Immediate(immediate_response) => immediate_response,
+                CallResult::Async(async_reponse) => async_reponse.await,
             }
         }
     }
@@ -589,14 +535,15 @@ pub(crate) async fn listen(
         // and avoid hogging the executors with read retries
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
 
-        let retries = READERS.scope(Default::default(), async move {
+        let retries = async move {
             let upquery_hist = metrics::register_histogram!(recorded::SERVER_VIEW_UPQUERY_DURATION);
+            let mut reader_cache: ReaderMap = Default::default();
             while let Some((mut pending, ack)) = rx.recv().await {
                 // A blocking read always comes immediately after a miss, so no reason to retry it
                 // right away better to wait a bit
                 tokio::time::sleep(RETRY_TIMEOUT / 4).await;
                 loop {
-                    if let Poll::Ready(res) = pending.check() {
+                    if let Poll::Ready(res) = pending.check(&mut reader_cache) {
                         upquery_hist.record(pending.first.elapsed().as_micros() as f64);
                         let _ = ack.send(res);
                         break;
@@ -604,15 +551,13 @@ pub(crate) async fn listen(
                     tokio::time::sleep(RETRY_TIMEOUT).await;
                 }
             }
-        });
+        };
         tokio::spawn(retries);
 
         let r = ReadRequestHandler::new(readers, tx, upquery_timeout);
 
-        let server = READERS.scope(
-            Default::default(),
-            server::Server::new(AsyncBincodeStream::from(stream).for_async(), r),
-        );
+        let server = server::Server::new(AsyncBincodeStream::from(stream).for_async(), r);
+
         tokio::spawn(server.map_err(|e| {
             match e {
                 // server is shutting down -- no need to report this error
@@ -708,7 +653,7 @@ fn has_sufficient_timestamp(reader: &SingleReadHandle, timestamp: &Option<Timest
 #[pin_project]
 pub struct BlockingRead {
     tag: u32,
-    target: (NodeIndex, SqlIdentifier, usize),
+    target: ReaderAddress,
     // results for keys we have already read
     read: Vec<ServerReadReplyBatch>,
     // keys we have yet to read and their corresponding indices in the reader
@@ -745,105 +690,101 @@ impl BlockingRead {
     /// Check if we have the results for this blocking read.
     pub fn check(
         &mut self,
+        reader_cache: &mut ReaderMap,
     ) -> Poll<Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>> {
-        READERS.with(|readers_cache| {
-            let mut readers_cache = readers_cache.borrow_mut();
-            let s = &self.truth;
-            let target = &self.target;
-            let reader = readers_cache.entry(self.target.clone()).or_insert_with(|| {
-                let readers = s.lock().unwrap();
-                readers.get(target).unwrap().clone()
-            });
+        let s = &self.truth;
+        let target = &self.target;
+        let reader = reader_cache.entry(self.target.clone()).or_insert_with(|| {
+            let readers = s.lock().unwrap();
+            readers.get(target).unwrap().clone()
+        });
 
-            let now = time::Instant::now();
-            let read = &mut self.read;
-            let next_trigger = self.next_trigger;
+        let now = time::Instant::now();
+        let read = &mut self.read;
+        let next_trigger = self.next_trigger;
 
-            let consistency_miss = !has_sufficient_timestamp(reader, &self.timestamp);
+        let consistency_miss = !has_sufficient_timestamp(reader, &self.timestamp);
 
-            // If the map is sufficiently up to date to serve the query, we start looking up
-            // keys.
-            if !consistency_miss {
-                // here's the trick we're going to play:
-                // we're going to re-try the lookups starting with the _last_ key.
-                // if it hits, we move on to the second-to-last, and so on.
-                // the moment we miss again, we yield immediately, rather than continue.
-                // this avoids shuffling around self.pending_indices and self.pending_keys, and
-                // probably doesn't really cost us anything -- we couldn't return ready anyway!
-                while let Some(read_i) = self.pending_indices.pop() {
-                    let key = self
-                        .pending_keys
-                        .pop()
-                        .expect("pending.len() == keys.len()");
+        // If the map is sufficiently up to date to serve the query, we start looking up
+        // keys.
+        if !consistency_miss {
+            // here's the trick we're going to play:
+            // we're going to re-try the lookups starting with the _last_ key.
+            // if it hits, we move on to the second-to-last, and so on.
+            // the moment we miss again, we yield immediately, rather than continue.
+            // this avoids shuffling around self.pending_indices and self.pending_keys, and
+            // probably doesn't really cost us anything -- we couldn't return ready anyway!
+            while let Some(read_i) = self.pending_indices.pop() {
+                let key = self
+                    .pending_keys
+                    .pop()
+                    .expect("pending.len() == keys.len()");
 
-                    match do_lookup(
-                        reader,
-                        &key,
-                        &self.filter,
-                        // Serialize the results, avoiding a clone, unless we already have read
-                        // some records for this batch
-                        read[read_i].is_empty() && !self.raw_result,
-                    ) {
-                        Ok(rs) => {
-                            read[read_i].try_extend(rs)?;
-                        }
-                        Err(e) => {
-                            if e.is_miss() {
-                                // we still missed! restore key + pending
-                                self.pending_indices.push(read_i);
-                                self.pending_keys.push(key);
-                                break;
-                            } else {
-                                // map has been deleted, so server is shutting down
-                                self.pending_indices.clear();
-                                self.pending_keys.clear();
-                                return Err(ReadySetError::ServerShuttingDown);
-                            }
-                        }
+                match do_lookup(
+                    reader,
+                    &key,
+                    &self.filter,
+                    // Serialize the results, avoiding a clone, unless we already have read
+                    // some records for this batch
+                    read[read_i].is_empty() && !self.raw_result,
+                ) {
+                    Ok(rs) => {
+                        read[read_i].try_extend(rs)?;
                     }
-                }
-
-                if now > next_trigger && !self.pending_keys.is_empty() {
-                    // Retrigger all un-read keys. Its possible they could have been filled and then
-                    // evicted again without us reading it.
-                    if !reader.trigger(self.pending_keys.iter()) {
-                        // server is shutting down and won't do the backfill
-                        return Err(ReadySetError::ServerShuttingDown);
-                    }
-
-                    self.trigger_timeout =
-                        Duration::min(self.trigger_timeout * 2, self.upquery_timeout / 20);
-                    self.next_trigger = now + self.trigger_timeout;
-                }
-            }
-
-            // log that we are still waiting
-            if !self.pending_keys.is_empty() {
-                let waited = now - self.first;
-                if waited > Duration::from_secs(7) && !self.warned {
-                    warn!(
-                        "read has been stuck waiting on {} for {:?}",
-                        if self.pending_keys.len() < 8 {
-                            format!("{:?}", self.pending_keys)
+                    Err(e) => {
+                        if e.is_miss() {
+                            // we still missed! restore key + pending
+                            self.pending_indices.push(read_i);
+                            self.pending_keys.push(key);
+                            break;
                         } else {
-                            format!(
-                                "{:?} (and {} more keys)",
-                                &self.pending_keys[..8],
-                                self.pending_keys.len() - 8
-                            )
-                        },
-                        waited
-                    );
-                    self.warned = true;
-                }
-
-                if waited > self.upquery_timeout {
-                    return Err(ReadySetError::UpqueryTimeout);
+                            // map has been deleted, so server is shutting down
+                            self.pending_indices.clear();
+                            self.pending_keys.clear();
+                            return Poll::Ready(Err(ReadySetError::ServerShuttingDown));
+                        }
+                    }
                 }
             }
 
-            Ok(())
-        })?;
+            if now > next_trigger && !self.pending_keys.is_empty() {
+                // Retrigger all un-read keys. Its possible they could have been filled and then
+                // evicted again without us reading it.
+                if !reader.trigger(self.pending_keys.iter()) {
+                    // server is shutting down and won't do the backfill
+                    return Poll::Ready(Err(ReadySetError::ServerShuttingDown));
+                }
+
+                self.trigger_timeout =
+                    Duration::min(self.trigger_timeout * 2, self.upquery_timeout / 20);
+                self.next_trigger = now + self.trigger_timeout;
+            }
+        }
+
+        // log that we are still waiting
+        if !self.pending_keys.is_empty() {
+            let waited = now - self.first;
+            if waited > Duration::from_secs(7) && !self.warned {
+                warn!(
+                    "read has been stuck waiting on {} for {:?}",
+                    if self.pending_keys.len() < 8 {
+                        format!("{:?}", self.pending_keys)
+                    } else {
+                        format!(
+                            "{:?} (and {} more keys)",
+                            &self.pending_keys[..8],
+                            self.pending_keys.len() - 8
+                        )
+                    },
+                    waited
+                );
+                self.warned = true;
+            }
+
+            if waited > self.upquery_timeout {
+                return Poll::Ready(Err(ReadySetError::UpqueryTimeout));
+            }
+        }
 
         if self.pending_keys.is_empty() {
             Poll::Ready(Ok(Tagged {

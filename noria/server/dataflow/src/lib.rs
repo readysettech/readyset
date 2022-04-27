@@ -35,15 +35,21 @@ mod node_map;
 mod processing;
 
 use std::collections::HashMap;
+use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 
-use nom_sql::SqlIdentifier;
+use noria::ReaderAddress;
 use serde::{Deserialize, Serialize};
 
 pub use crate::backlog::{LookupError, SingleReadHandle};
-pub type Readers = Arc<
-    Mutex<HashMap<(petgraph::graph::NodeIndex, SqlIdentifier, usize), backlog::SingleReadHandle>>,
->;
+
+/// A [`ReaderMap`] maps a [`ReaderAddress`] to the [`SingleReadHandle`] to access the reader at
+/// that address.
+#[repr(transparent)]
+#[derive(Default, Clone)]
+pub struct ReaderMap(HashMap<ReaderAddress, SingleReadHandle>);
+pub type Readers = Arc<Mutex<ReaderMap>>;
+
 pub type DomainConfig = domain::Config;
 
 pub use dataflow_expression::{BuiltinFunction, Expression};
@@ -90,3 +96,19 @@ impl Default for EvictionKind {
 }
 
 pub use noria::shard_by;
+
+impl Deref for ReaderMap {
+    type Target = HashMap<ReaderAddress, SingleReadHandle>;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for ReaderMap {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}

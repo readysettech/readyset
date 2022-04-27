@@ -25,7 +25,7 @@ use noria_data::noria_type::Type;
 use noria_data::DataType;
 use noria_errors::ReadySetError::PreparedStatementMissing;
 use noria_errors::{internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err};
-use noria_server::worker::readers::ReadRequestHandler;
+use noria_server::worker::readers::{CallResult, ReadRequestHandler};
 use readyset_tracing::instrument_child;
 use tracing::{error, info, instrument, trace};
 use vec1::vec1;
@@ -396,7 +396,35 @@ pub struct NoriaConnector {
 
     /// A read request handler that may be used to service reads from readers
     /// on the same server.
-    read_request_handler: Option<ReadRequestHandler>,
+    read_request_handler: request_handler::LocalReadHandler,
+}
+
+mod request_handler {
+    use noria_server::worker::readers::ReadRequestHandler;
+
+    /// Since [`ReadRequestHandler`] contains some fields that aren't [`Sync`], this is a workaround
+    /// wrapper to make it safely [`Sync`], by ensuring that all accesses to the underlying
+    /// [`ReadRequestHandler`] are exclusive. This effectively makes sure that no references are
+    /// shared between threads ever. This is implemented in a submodule so that the private fields
+    /// are not accidentally accessed without an exclusive reference.
+    #[derive(Clone)]
+    #[repr(transparent)]
+    pub(super) struct LocalReadHandler(Option<ReadRequestHandler>);
+
+    impl LocalReadHandler {
+        pub(super) fn new(handler: Option<ReadRequestHandler>) -> Self {
+            LocalReadHandler(handler)
+        }
+
+        #[inline]
+        pub(super) fn as_mut(&mut self) -> Option<&mut ReadRequestHandler> {
+            self.0.as_mut()
+        }
+    }
+
+    /// SAFETY: since all accesses to the inner field are exclusive, no references are ever shared
+    /// between threads.
+    unsafe impl Sync for LocalReadHandler {}
 }
 
 /// The read behavior used when executing a read against Noria.
@@ -488,7 +516,7 @@ impl NoriaConnector {
             region,
             failed_views: HashSet::new(),
             read_behavior,
-            read_request_handler,
+            read_request_handler: request_handler::LocalReadHandler::new(read_request_handler),
         }
     }
 
@@ -1740,7 +1768,7 @@ async fn do_read<'a>(
 
     let data = if let Some(rh) = read_request_handler {
         let request = noria::Tagged::from(ReadQuery::Normal {
-            target: (*getter.node(), getter.name(), 0),
+            target: (*getter.node(), getter.name(), 0).into(),
             query: vq.clone(),
         });
 
@@ -1749,8 +1777,12 @@ async fn do_read<'a>(
         let tag = request.tag;
         if let ReadQuery::Normal { target, query } = request.v {
             // Issue a normal read query returning the raw unserialized results.
-            let result = rh.handle_normal_read_query(tag, target, query, true).await;
-            result?
+            let result = match rh.handle_normal_read_query(tag, target, query, true) {
+                CallResult::Immediate(result) => result?,
+                CallResult::Async(chan) => chan.await?,
+            };
+
+            result
                 .v
                 .into_normal()
                 .ok_or_else(|| internal_err("Unexpected response type from reader service"))?
