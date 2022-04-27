@@ -610,6 +610,25 @@ impl MirNode {
         self.topo_ancestors()
             .filter(|n| n.borrow().ancestors().is_empty())
     }
+
+    /// Returns true if this node can provide the given column, meaning either the node has the
+    /// column, or one of its ancestors does, and the column can be added to those ancestors to be
+    /// projected by this node
+    pub(crate) fn provides_column(&self, column: &Column) -> bool {
+        if let MirNodeInner::AliasTable { table } = &self.inner {
+            // Can't project a column through an alias_table node unless the column has the aliased
+            // table in one of its aliases
+            if !column.has_table(table) {
+                return false;
+            }
+        }
+
+        self.columns().contains(column)
+            || self
+                .ancestors()
+                .iter()
+                .any(|a| a.upgrade().unwrap().borrow().provides_column(column))
+    }
 }
 
 /// A [`Relationship`] that goes towards the [`children`][] of a node

@@ -4,14 +4,6 @@ use crate::column::Column;
 use crate::query::MirQuery;
 use crate::MirNodeRef;
 
-fn has_column(n: &MirNodeRef, column: &Column) -> bool {
-    let n = n.borrow();
-    n.columns().contains(column)
-        || n.ancestors()
-            .iter()
-            .any(|a| has_column(&a.upgrade().unwrap(), column))
-}
-
 pub(super) fn pull_columns_for(n: MirNodeRef) -> ReadySetResult<()> {
     let mut queue = vec![n];
 
@@ -39,7 +31,7 @@ pub(super) fn pull_columns_for(n: MirNodeRef) -> ReadySetResult<()> {
                 continue;
             }
             for c in &needed_columns {
-                if !found.contains(&c) && has_column(&parent, c) {
+                if !found.contains(&c) && parent.borrow().provides_column(c) {
                     parent.borrow_mut().add_column(c.clone())?;
                     found.push(c);
                 }
