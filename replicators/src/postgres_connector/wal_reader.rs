@@ -10,7 +10,7 @@ use noria_errors::unsupported;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use tokio_postgres as pgsql;
-use tracing::{error, trace};
+use tracing::{debug, error, trace};
 
 use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
 
@@ -81,6 +81,7 @@ impl WalReader {
                     continue;
                 }
             };
+            trace!(?record);
 
             match record {
                 WalRecord::Commit { .. } => return Ok((WalEvent::Commit, end)),
@@ -107,6 +108,11 @@ impl WalReader {
                             },
                             end,
                         ));
+                    } else {
+                        debug!(
+                            relation_id,
+                            "Ignoring WAL insert event for unknown relation"
+                        );
                     }
                 }
                 WalRecord::Update {
