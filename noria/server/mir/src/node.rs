@@ -493,11 +493,14 @@ impl MirNode {
         &self.name
     }
 
+    /// Returns a list of columns *referenced* by this node, ie the columns this node requires from
+    /// its parent.
     pub fn referenced_columns(&self) -> Vec<Column> {
         match &self.inner {
-            MirNodeInner::Aggregation { on, .. } | MirNodeInner::Extremum { on, .. } => {
-                let mut columns = self.columns();
-                // need the "over" column
+            MirNodeInner::Aggregation { on, group_by, .. }
+            | MirNodeInner::Extremum { on, group_by, .. } => {
+                // Aggregates need the group_by columns and the "over" column
+                let mut columns = group_by.clone();
                 if !columns.contains(on) {
                     columns.push(on.clone());
                 }
@@ -1110,6 +1113,7 @@ mod tests {
     }
 
     mod referenced_columns {
+        use dataflow::ops::grouped::aggregate::Aggregation;
         use nom_sql::{Expression, Literal};
 
         use super::*;
@@ -1129,6 +1133,32 @@ mod tests {
             );
             let referenced = node.borrow().referenced_columns();
             assert_eq!(referenced, vec![Column::new(Some("base"), "project")])
+        }
+
+        #[test]
+        fn aggregate() {
+            let node = MirNode::new(
+                "aggregate".into(),
+                0,
+                MirNodeInner::Aggregation {
+                    on: Column::named("on"),
+                    group_by: vec![Column::named("gb_a"), Column::named("gb_b")],
+                    output_column: Column::named("output"),
+                    kind: Aggregation::Count { count_nulls: true },
+                },
+                vec![],
+                vec![],
+            );
+            let mut referenced = node.borrow().referenced_columns();
+            referenced.sort_by(|a, b| a.name.cmp(&b.name));
+            assert_eq!(
+                referenced,
+                vec![
+                    Column::named("gb_a"),
+                    Column::named("gb_b"),
+                    Column::named("on"),
+                ]
+            );
         }
     }
 
