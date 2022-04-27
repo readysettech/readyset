@@ -49,3 +49,6 @@ criterion = { version = "0.3.5", features = ["async_tokio"] }
 [[bench]]
 name = "proxy"
 harness = false
+
+[features]
+display_literals = ["launchpad/display_literals"]

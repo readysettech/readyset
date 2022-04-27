@@ -23,3 +23,6 @@ bit-vec = { version = "0.6", features = ["serde"] }
 
 [dev-dependencies]
 test-strategy = "0.2.0"
+
+[features]
+display_literals = []

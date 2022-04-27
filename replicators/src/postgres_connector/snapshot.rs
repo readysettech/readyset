@@ -5,6 +5,7 @@ use std::future;
 
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
+use launchpad::redacted::Sensitive;
 use nom_sql::{parse_key_specification_string, Dialect, TableKey};
 use noria::ReadySetResult;
 use noria_data::DataType;
@@ -377,10 +378,7 @@ impl<'a> PostgresReplicator<'a> {
                 .extend_recipe_no_leader_ready(view.try_into()?)
                 .await
             {
-                #[cfg(feature = "display_literals")]
-                error!(%create_view, %err, "Error extending CREATE VIEW, view will not be used");
-                #[cfg(not(feature = "display_literals"))]
-                error!(%err, "Error extending CREATE VIEW, view will not be used");
+                error!(view = %Sensitive(&create_view), %err, "Error extending CREATE VIEW, view will not be used");
             }
         }
 

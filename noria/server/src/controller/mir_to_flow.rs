@@ -17,6 +17,7 @@ use dataflow::ops::latest::Latest;
 use dataflow::ops::project::Project;
 use dataflow::post_lookup::{PostLookup, PostLookupAggregates};
 use dataflow::{node, ops, BuiltinFunction, Expression as DataflowExpression};
+use launchpad::redacted::Sensitive;
 use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};
 use mir::query::{MirQuery, QueryFlowParts};
@@ -894,15 +895,10 @@ fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<Dat
                     .collect::<Result<Vec<_>, _>>()?,
             )?,
         )),
-        #[cfg(feature = "display_literals")]
         Expression::Call(call) => internal!(
             "Unexpected (aggregate?) call node in project expression: {:?}",
-            call
+            Sensitive(&call)
         ),
-        #[cfg(not(feature = "display_literals"))]
-        Expression::Call(_) => {
-            internal!("Unexpected (aggregate?) call node in project expression")
-        }
         Expression::Literal(lit) => Ok(DataflowExpression::Literal(lit.try_into()?)),
         Expression::Column(nom_sql::Column { name, table, .. }) => Ok(DataflowExpression::Column(
             parent

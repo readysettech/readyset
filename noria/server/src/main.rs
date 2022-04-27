@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::anyhow;
 use clap::{ArgEnum, Parser};
 use futures_util::future::{self, Either};
-use launchpad::redacted_string::RedactedString;
+use launchpad::redacted::RedactedString;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use noria::metrics::recorded;
 use noria_server::consensus::AuthorityType;

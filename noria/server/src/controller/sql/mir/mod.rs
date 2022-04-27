@@ -6,6 +6,7 @@ use ::serde::{Deserialize, Serialize};
 use common::IndexType;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::union;
+use launchpad::redacted::Sensitive;
 use lazy_static::lazy_static;
 use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};
@@ -809,20 +810,12 @@ impl SqlToMirConverter {
         use dataflow::ops::grouped::extremum::Extremum;
         use nom_sql::FunctionExpression::*;
 
-        #[cfg(feature = "display_literals")]
         macro_rules! mk_error {
             ($expression:expr) => {
                 internal_err(format!(
                     "projected_exprs does not contain {:?}",
-                    $expression
+                    Sensitive($expression)
                 ))
-            };
-        }
-
-        #[cfg(not(feature = "display_literals"))]
-        macro_rules! mk_error {
-            ($expression:expr) => {
-                internal_err(format!("projected_exprs does not contain given expression"))
             };
         }
 
@@ -863,7 +856,7 @@ impl SqlToMirConverter {
                     projected_exprs
                         .get(&expr)
                         .cloned()
-                        .ok_or_else(|| mk_error!(expr))?,
+                        .ok_or_else(|| mk_error!(&*expr))?,
                 ),
                 GroupedNodeType::Aggregation(Aggregation::Sum),
                 distinct,
@@ -890,7 +883,7 @@ impl SqlToMirConverter {
                     projected_exprs
                         .get(expr)
                         .cloned()
-                        .ok_or_else(|| mk_error!(expr))?,
+                        .ok_or_else(|| mk_error!(&*expr))?,
                 ),
                 GroupedNodeType::Aggregation(Aggregation::Count { count_nulls }),
                 distinct,
@@ -909,7 +902,7 @@ impl SqlToMirConverter {
                     projected_exprs
                         .get(expr)
                         .cloned()
-                        .ok_or_else(|| mk_error!(expr))?,
+                        .ok_or_else(|| mk_error!(&*expr))?,
                 ),
                 GroupedNodeType::Aggregation(Aggregation::Avg),
                 distinct,
@@ -927,7 +920,7 @@ impl SqlToMirConverter {
                     projected_exprs
                         .get(expr)
                         .cloned()
-                        .ok_or_else(|| mk_error!(expr))?,
+                        .ok_or_else(|| mk_error!(&*expr))?,
                 ),
                 GroupedNodeType::Extremum(Extremum::Max),
                 false,
@@ -943,7 +936,7 @@ impl SqlToMirConverter {
                     projected_exprs
                         .get(expr)
                         .cloned()
-                        .ok_or_else(|| mk_error!(expr))?,
+                        .ok_or_else(|| mk_error!(&*expr))?,
                 ),
                 GroupedNodeType::Extremum(Extremum::Min),
                 false,
@@ -957,10 +950,7 @@ impl SqlToMirConverter {
                 false,
             ),
             _ => {
-                #[cfg(feature = "display_literals")]
-                internal!("not an aggregate: {:?}", function);
-                #[cfg(not(feature = "display_literals"))]
-                internal!("expected aggregate");
+                internal!("not an aggregate: {:?}", Sensitive(&function));
             }
         })
     }

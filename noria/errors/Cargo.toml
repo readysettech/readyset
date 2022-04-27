@@ -18,6 +18,4 @@ bincode = "1.3.3"
 serde = { version = "1.0.8", features = ["rc", "derive"] }
 vec1 = { version = "1.6.0", features = ["serde"] }
 tikv-jemalloc-ctl = "0.4"
-
-[features]
-display_literals = []
+launchpad = {path = "../../launchpad" }

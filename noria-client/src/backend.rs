@@ -76,6 +76,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::future::{self, OptionFuture};
+use launchpad::redacted::Sensitive;
 use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
     CacheInner, CreateCacheStatement, DeleteStatement, Dialect, DropCacheStatement,
@@ -692,10 +693,7 @@ where
                             if self.fail_invalidated_queries {
                                 internal!("Query comparison failed to validate: {}", e);
                             }
-                            #[cfg(feature = "display_literals")]
-                            warn!(error = %e, query = %select_meta.stmt, "Query compare failed");
-                            #[cfg(not(feature = "display_literals"))]
-                            warn!(error = %e, "Query compare failed");
+                            warn!(error = %e, query = %Sensitive(&select_meta.stmt), "Query compare failed");
                             state = MigrationState::Unsupported;
                         }
                     }
@@ -779,10 +777,7 @@ where
     fn plan_prepare_select(&mut self, stmt: nom_sql::SelectStatement) -> PrepareMeta {
         let mut rewritten = stmt.clone();
         if rewrite::process_query(&mut rewritten).is_err() {
-            #[cfg(feature = "display_literals")]
-            warn!(statement = %stmt, "This statement could not be rewritten by ReadySet");
-            #[cfg(not(feature = "display_literals"))]
-            warn!("This statement could not be rewritten by ReadySet");
+            warn!(statement = %Sensitive(&stmt), "This statement could not be rewritten by ReadySet");
             PrepareMeta::FailedToRewrite
         } else {
             // For select statements we will always try to check with noria if it already migrated,
@@ -812,11 +807,7 @@ where
         let parsed_query = match self.parse_query(query) {
             Ok(pq) => pq,
             Err(_) => {
-                warn!(query = %query, "ReadySet failed to parse query");
-                #[cfg(feature = "display_literals")]
-                warn!(query = %query, "ReadySet failed to parse query");
-                #[cfg(not(feature = "display_literals"))]
-                warn!("ReadySet failed to parse query");
+                warn!(query = %Sensitive(&query), "ReadySet failed to parse query");
                 return PrepareMeta::FailedToParse;
             }
         };
@@ -842,10 +833,7 @@ where
             | SqlQuery::CreateCache(..)
             | SqlQuery::DropCache(..)
             | SqlQuery::Explain(_) => {
-                #[cfg(feature = "display_literals")]
-                warn!(statement = %parsed_query, "Statement cannot be prepared by ReadySet");
-                #[cfg(not(feature = "display_literals"))]
-                warn!("Statement cannot be prepared by ReadySet");
+                warn!(statement = %Sensitive(&parsed_query), "Statement cannot be prepared by ReadySet");
                 PrepareMeta::Unimplemented
             }
         }
@@ -1271,13 +1259,13 @@ where
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         // If we have another query with the same name, drop that query first
         if let Some(name) = name {
-            #[cfg(feature = "display_literals")]
             if let Some(stmt) = self.noria.select_statement_from_name(name) {
-                warn!("Dropping query previously cached as {name}, stmt={stmt}");
+                warn!(
+                    "Dropping query previously cached as {name}, stmt={}",
+                    Sensitive(&stmt)
+                );
                 self.drop_cached_query(name).await?;
             }
-            #[cfg(not(feature = "display_literals"))]
-            warn!("Dropping query previously cached as {name}");
         }
         // Now migrate the new query
         rewrite::process_query(&mut stmt)?;
@@ -1621,15 +1609,9 @@ where
                     Ok(parsed_query) => Ok(entry.insert(parsed_query).clone()),
                     Err(_) => {
                         // error is useless anyway
-                        #[cfg(feature = "display_literals")]
-                        error!(%query, "query can't be parsed: \"{}\"", query);
-                        #[cfg(not(feature = "display_literals"))]
-                        error!("query can't be parsed");
+                        error!("query can't be parsed: \"{}\"", Sensitive(&query));
                         Err(ReadySetError::UnparseableQuery {
-                            #[cfg(feature = "display_literals")]
                             query: query.to_string(),
-                            #[cfg(not(feature = "display_literals"))]
-                            query: String::new(),
                         })
                     }
                 }
@@ -1651,10 +1633,7 @@ where
         // Disallowed set statements always produce an error
         if let SqlQuery::Set(s) = parsed_query {
             if !self.is_allowed_set_statement(s) {
-                #[cfg(feature = "display_literals")]
                 warn!(%s, "received unsupported SET statement");
-                #[cfg(not(feature = "display_literals"))]
-                warn!("received unsupported SET statement");
                 let e = ReadySetError::SetDisallowed {
                     statement: parsed_query.to_string(),
                 };
@@ -1862,13 +1841,8 @@ fn log_query(
         && (event.upstream_duration.unwrap_or_default() > SLOW_DURATION
             || event.noria_duration.unwrap_or_default() > SLOW_DURATION)
     {
-        #[cfg(feature = "display_literals")]
         if let Some(query) = &event.query {
-            warn!(query = %query, noria_time = ?event.noria_duration, upstream_time = ?event.upstream_duration, "slow query");
-        }
-        #[cfg(not(feature = "display_literals"))]
-        if event.query.is_some() {
-            warn!(noria_time = ?event.noria_duration, upstream_time = ?event.upstream_duration, "slow query");
+            warn!(query = %Sensitive(&query), noria_time = ?event.noria_duration, upstream_time = ?event.upstream_duration, "slow query");
         }
     }
 

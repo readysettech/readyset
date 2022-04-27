@@ -4,6 +4,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use launchpad::redacted::Sensitive;
 use mysql_async::consts::StatusFlags;
 use mysql_srv::{
     Column, ColumnFlags, ColumnType, InitWriter, MsqlSrvError, MysqlShim, QueryResultWriter,
@@ -288,10 +289,7 @@ where
             Err(Error::Io(e))
             | Err(Error::MySql(mysql_async::Error::Io(mysql_async::IoError::Io(e))))
             | Err(Error::MsqlSrv(MsqlSrvError::IoError(e))) => {
-                #[cfg(feature = "display_literals")]
-                error!(err = %e, "encountered io error preparing query: {}", query);
-                #[cfg(not(feature = "display_literals"))]
-                error!(err = %e, "encountered io error preparing query");
+                error!(err = %e, "encountered io error preparing query: {}", Sensitive(&query));
                 // In the case that we encountered an io error, we should bubble it up so the
                 // connection can be closed. This is usually an unrecoverable error, and the client
                 // should re-initiate a connection with us so we can start with a fresh slate.
@@ -652,11 +650,8 @@ where
             Err(Error::Io(e))
             | Err(Error::MySql(mysql_async::Error::Io(mysql_async::IoError::Io(e))))
             | Err(Error::MsqlSrv(MsqlSrvError::IoError(e))) => {
-                #[cfg(feature = "display_literals")]
-                error!(err = %e, "encountered io error while attempting to execute query: {}", query);
+                error!(err = %e, "encountered io error while attempting to execute query: {}", Sensitive(&query));
 
-                #[cfg(not(feature = "display_literals"))]
-                error!(err = %e, "encountered io error while attempting to execute query");
                 // In the case that we encountered an io error, we should bubble it up so the
                 // connection can be closed. This is usually an unrecoverable error, and the client
                 // should re-initiate a connection with us so we can start with a fresh slate.
