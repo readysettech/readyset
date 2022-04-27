@@ -21,7 +21,7 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "iteration": 1648672133673,
+  "iteration": 1651093950912,
   "links": [],
   "panels": [
     {
@@ -321,7 +321,7 @@
         }
       ],
       "timeShift": null,
-      "title": "Proxied Queries",
+      "title": "Proxied Queries (Database)",
       "transformations": [
         {
           "id": "merge",
@@ -738,7 +738,7 @@
         }
       ],
       "timeShift": null,
-      "title": "ReadySet Queries",
+      "title": "Cached Queries (ReadySet)",
       "transformations": [
         {
           "id": "renameByRegex",
@@ -813,8 +813,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "solidus",
-          "value": "solidus"
+          "text": "localdeploy",
+          "value": "localdeploy"
         },
         "datasource": "DS_PROMETHEUS",
         "definition": "label_values(deployment)",
@@ -844,7 +844,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Query Overview",
+  "title": "Workload Overview",
   "uid": "38II-qb7z",
   "version": 1
 }

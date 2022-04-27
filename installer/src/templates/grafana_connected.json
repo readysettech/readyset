@@ -21,7 +21,7 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "iteration": 1648673119852,
+  "iteration": 1651095592880,
   "links": [],
   "panels": [
     {
@@ -668,8 +668,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "solidus",
-          "value": "solidus"
+          "text": "localdeploy",
+          "value": "localdeploy"
         },
         "datasource": "DS_PROMETHEUS",
         "definition": "label_values(deployment)",
@@ -699,7 +699,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Is Readyset Connected?",
+  "title": "ReadySet Status",
   "uid": "SLlJ0Wank",
   "version": 1
 }
