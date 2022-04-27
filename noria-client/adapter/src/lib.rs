@@ -33,7 +33,7 @@ use noria_client::rewrite::anonymize_literals;
 use noria_client::{Backend, BackendBuilder, QueryHandler, UpstreamDatabase};
 use noria_client_metrics::QueryExecutionEvent;
 use noria_dataflow::Readers;
-use noria_server::worker::readers::{Ack, BlockingRead, ReadRequestHandler, READERS};
+use noria_server::worker::readers::{Ack, BlockingRead, ReadRequestHandler};
 use noria_server::Builder;
 use stream_cancel::Valve;
 use tokio::net::UdpSocket;
@@ -636,70 +636,70 @@ where
                 // Create a thread that repeatedly polls BlockingRead's every `RETRY_TIMEOUT`.
                 // When the `BlockingRead` completes, tell the future to resolve with ack.
                 let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
-                let retries = READERS.scope(Default::default(), async move {
+                let retries = async move {
+                    let mut reader_cache = Default::default();
                     while let Some((mut pending, ack)) = rx.recv().await {
                         // A blocking read always comes immediately after a miss, so no reason to
                         // retry it right away better to wait a bit
                         tokio::time::sleep(RETRY_TIMEOUT / 4).await;
                         loop {
-                            if let Poll::Ready(res) = pending.check() {
+                            if let Poll::Ready(res) = pending.check(&mut reader_cache) {
                                 let _ = ack.send(res);
                                 break;
                             }
                             tokio::time::sleep(RETRY_TIMEOUT).await;
                         }
                     }
-                });
+                };
                 rt.handle().spawn(retries);
                 ReadRequestHandler::new(readers.clone(), tx, Duration::from_secs(5))
             });
 
             let query_status_cache = query_status_cache;
-            let fut = READERS
-                .scope(Default::default(), async move {
-                    let noria = NoriaConnector::new_with_local_reads(
-                        ch.clone(),
-                        auto_increments.clone(),
-                        query_cache.clone(),
-                        region.clone(),
-                        noria_read_behavior,
-                        r,
+            let fut = async move {
+                let noria = NoriaConnector::new_with_local_reads(
+                    ch.clone(),
+                    auto_increments.clone(),
+                    query_cache.clone(),
+                    region.clone(),
+                    noria_read_behavior,
+                    r,
+                )
+                .instrument(debug_span!("Building noria connector"))
+                .await;
+
+                let upstream_res = if let Some(upstream_db_url) = &upstream_db_url {
+                    timeout(
+                        UPSTREAM_CONNECTION_TIMEOUT,
+                        H::UpstreamDatabase::connect(upstream_db_url.0.clone()),
                     )
-                    .instrument(debug_span!("Building noria connector"))
-                    .await;
+                    .instrument(debug_span!("Connecting to upstream database"))
+                    .await
+                    .map_err(|_| "Connection timed out".to_owned())
+                    .and_then(|r| r.map_err(|e| e.to_string()))
+                    .map_err(|e| format!("Error connecting to upstream database: {}", e))
+                    .map(Some)
+                } else {
+                    Ok(None)
+                };
 
-                    let upstream_res = if let Some(upstream_db_url) = &upstream_db_url {
-                        timeout(
-                            UPSTREAM_CONNECTION_TIMEOUT,
-                            H::UpstreamDatabase::connect(upstream_db_url.0.clone()),
-                        )
-                        .instrument(debug_span!("Connecting to upstream database"))
-                        .await
-                        .map_err(|_| "Connection timed out".to_owned())
-                        .and_then(|r| r.map_err(|e| e.to_string()))
-                        .map_err(|e| format!("Error connecting to upstream database: {}", e))
-                        .map(Some)
-                    } else {
-                        Ok(None)
-                    };
-
-                    match upstream_res {
-                        Ok(upstream) => {
-                            let backend =
-                                backend_builder
-                                    .clone()
-                                    .build(noria, upstream, query_status_cache);
-                            connection_handler.process_connection(s, backend).await;
-                        }
-                        Err(error) => {
-                            error!(%error, "Error during initial connection establishment");
-                            connection_handler.immediate_error(s, error).await;
-                        }
+                match upstream_res {
+                    Ok(upstream) => {
+                        let backend =
+                            backend_builder
+                                .clone()
+                                .build(noria, upstream, query_status_cache);
+                        connection_handler.process_connection(s, backend).await;
                     }
+                    Err(error) => {
+                        error!(%error, "Error during initial connection establishment");
+                        connection_handler.immediate_error(s, error).await;
+                    }
+                }
 
-                    debug!("disconnected");
-                })
-                .instrument(connection);
+                debug!("disconnected");
+            }
+            .instrument(connection);
 
             rt.handle().spawn(fut);
         }

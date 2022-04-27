@@ -418,6 +418,24 @@ pub struct ViewRequest {
     pub filter: Option<ViewFilter>,
 }
 
+/// A [`ReaderAddress`] is a unique identifier of a reader, it consists of the reader node in the
+/// dataflow graph, the name of the reader and the shard index.
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ReaderAddress {
+    /// The index of the reader node in the dataflow graph
+    pub node: petgraph::graph::NodeIndex,
+    /// The name of the reader
+    pub name: SqlIdentifier,
+    /// The shard index
+    pub shard: usize,
+}
+
+impl From<(petgraph::graph::NodeIndex, SqlIdentifier, usize)> for ReaderAddress {
+    fn from((node, name, shard): (petgraph::graph::NodeIndex, SqlIdentifier, usize)) -> Self {
+        ReaderAddress { node, name, shard }
+    }
+}
+
 #[doc(hidden)]
 #[inline]
 pub fn shard_by(dt: &DataType, shards: usize) -> usize {

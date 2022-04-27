@@ -20,7 +20,7 @@ use launchpad::redacted::Sensitive;
 use launchpad::Indices;
 use noria::internal::Index;
 use noria::replication::ReplicationOffset;
-use noria::{channel, internal, KeyComparison, ReadySetError};
+use noria::{channel, internal, KeyComparison, ReaderAddress, ReadySetError};
 use noria_errors::{internal, internal_err, ReadySetResult};
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
@@ -1494,7 +1494,14 @@ impl Domain {
                             .readers
                             .lock()
                             .unwrap()
-                            .insert((gid, name.clone(), shard), r_part)
+                            .insert(
+                                ReaderAddress {
+                                    node: gid,
+                                    name: name.clone(),
+                                    shard,
+                                },
+                                r_part,
+                            )
                             .is_some()
                         {
                             warn!(?gid, %name, %shard, "Overwrote existing reader at worker");
@@ -1539,7 +1546,14 @@ impl Domain {
                             .readers
                             .lock()
                             .unwrap()
-                            .insert((gid, name, shard), r_part)
+                            .insert(
+                                ReaderAddress {
+                                    node: gid,
+                                    name,
+                                    shard,
+                                },
+                                r_part,
+                            )
                             .is_some()
                         {
                             warn!(?gid, ?shard, "Overwrote existing reader at worker");

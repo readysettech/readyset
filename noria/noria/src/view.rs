@@ -40,7 +40,7 @@ pub(crate) mod results;
 
 use self::results::{Results, Row};
 use crate::consistency::Timestamp;
-use crate::{Tagged, Tagger};
+use crate::{ReaderAddress, Tagged, Tagger};
 
 type Transport = AsyncBincodeStream<
     tokio::net::TcpStream,
@@ -722,21 +722,21 @@ pub enum ReadQuery {
     /// Read from a leaf view
     Normal {
         /// Where to read from
-        target: (NodeIndex, SqlIdentifier, usize),
+        target: ReaderAddress,
         /// View query to run
         query: ViewQuery,
     },
     /// Read the size of a leaf view
     Size {
         /// Where to read from
-        target: (NodeIndex, SqlIdentifier, usize),
+        target: ReaderAddress,
     },
     /// Read all keys from a leaf view (for debugging)
     /// TODO(alex): queries with this value are not totally implemented, and might not actually
     /// work
     Keys {
         /// Where to read from
-        target: (NodeIndex, SqlIdentifier, usize),
+        target: ReaderAddress,
     },
 }
 
@@ -1046,7 +1046,7 @@ impl Service<ViewQuery> for View {
         if self.shards.len() == 1 {
             let request = span.in_scope(|| {
                 Instrumented::from(Tagged::from(ReadQuery::Normal {
-                    target: (self.node, self.name.clone(), 0),
+                    target: (self.node, self.name.clone(), 0).into(),
                     query,
                 }))
             });
@@ -1120,7 +1120,7 @@ impl Service<ViewQuery> for View {
                     let _guard = tracing::Span::enter(&span);
 
                     let request = Instrumented::from(Tagged::from(ReadQuery::Normal {
-                        target: (node, name.clone(), shardi),
+                        target: (node, name.clone(), shardi).into(),
                         query: ViewQuery {
                             key_comparisons: shard_queries,
                             block: query.block,
@@ -1215,7 +1215,7 @@ impl View {
             .enumerate()
             .map(|(shardi, shard)| {
                 shard.call(Instrumented::from(Tagged::from(ReadQuery::Size {
-                    target: (node, name.clone(), shardi),
+                    target: (node, name.clone(), shardi).into(),
                 })))
             })
             .collect::<FuturesUnordered<_>>();
@@ -1256,7 +1256,7 @@ impl View {
             .enumerate()
             .map(|(shardi, shard)| {
                 shard.call(Instrumented::from(Tagged::from(ReadQuery::Keys {
-                    target: (node, name.clone(), shardi),
+                    target: (node, name.clone(), shardi).into(),
                 })))
             })
             .collect::<FuturesUnordered<_>>();
