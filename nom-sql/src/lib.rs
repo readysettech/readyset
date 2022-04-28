@@ -8,9 +8,7 @@ extern crate pretty_assertions;
 
 pub use sql_identifier::SqlIdentifier;
 
-pub use self::alter::{
-    alter_table_statement, AlterColumnOperation, AlterTableDefinition, AlterTableStatement,
-};
+pub use self::alter::{AlterColumnOperation, AlterTableDefinition, AlterTableStatement};
 pub use self::column::{Column, ColumnConstraint, ColumnSpecification};
 pub use self::common::{
     Double, FieldDefinitionExpression, Float, IndexType, ItemPlaceholder, Literal, SqlType,
@@ -18,7 +16,7 @@ pub use self::common::{
 };
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 pub use self::create::{
-    creation, CacheInner, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
+    CacheInner, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
     SelectSpecification,
 };
 pub use self::delete::DeleteStatement;
@@ -33,7 +31,7 @@ pub use self::join::{JoinConstraint, JoinOperator, JoinRightSide};
 pub use self::order::{OrderClause, OrderType};
 pub use self::parser::*;
 pub use self::select::{
-    selection, CommonTableExpression, GroupByClause, JoinClause, LimitClause, SelectStatement,
+    CommonTableExpression, GroupByClause, JoinClause, LimitClause, SelectStatement,
 };
 pub use self::set::{
     PostgresParameterScope, PostgresParameterValue, SetNames, SetPostgresParameter,
