@@ -121,26 +121,25 @@ mod tests {
     use super::*;
 
     fn create_table() -> CreateTableStatement {
-        nom_sql::creation(Dialect::MySQL)(
+        nom_sql::parse_create_table(
+            Dialect::MySQL,
             "CREATE TABLE test (
                 id INTEGER NOT NULL,
                 name TEXT NOT NULL,
                 PRIMARY KEY (id)
-            );"
-            .as_bytes(),
+            );",
         )
         .unwrap()
-        .1
     }
 
     #[test]
     fn add_column() {
         let original_table = create_table();
-        let alteration = nom_sql::alter_table_statement(Dialect::MySQL)(
-            "ALTER TABLE test ADD COLUMN age DOUBLE NOT NULL;".as_bytes(),
+        let alteration = nom_sql::parse_alter_table(
+            Dialect::MySQL,
+            "ALTER TABLE test ADD COLUMN age DOUBLE NOT NULL;",
         )
-        .unwrap()
-        .1;
+        .unwrap();
         assert!(original_table
             .fields
             .iter()
@@ -166,11 +165,11 @@ mod tests {
     #[test]
     fn add_key() {
         let original_table = create_table();
-        let alteration = nom_sql::alter_table_statement(Dialect::MySQL)(
-            "ALTER TABLE test ADD UNIQUE KEY new_key (id) USING hash;".as_bytes(),
+        let alteration = nom_sql::parse_alter_table(
+            Dialect::MySQL,
+            "ALTER TABLE test ADD UNIQUE KEY new_key (id) USING hash;",
         )
-        .unwrap()
-        .1;
+        .unwrap();
         assert!(original_table
             .keys
             .as_ref()
@@ -212,11 +211,11 @@ mod tests {
     #[test]
     fn change_column() {
         let original_table = create_table();
-        let alteration = nom_sql::alter_table_statement(Dialect::MySQL)(
-            "ALTER TABLE test CHANGE COLUMN id new_id TEXT;".as_bytes(),
+        let alteration = nom_sql::parse_alter_table(
+            Dialect::MySQL,
+            "ALTER TABLE test CHANGE COLUMN id new_id TEXT;",
         )
-        .unwrap()
-        .1;
+        .unwrap();
         assert!(original_table
             .fields
             .iter()
@@ -258,11 +257,9 @@ mod tests {
     #[test]
     fn drop_column() {
         let original_table = create_table();
-        let alteration = nom_sql::alter_table_statement(Dialect::MySQL)(
-            "ALTER TABLE test DROP COLUMN name;".as_bytes(),
-        )
-        .unwrap()
-        .1;
+        let alteration =
+            nom_sql::parse_alter_table(Dialect::MySQL, "ALTER TABLE test DROP COLUMN name;")
+                .unwrap();
         assert!(original_table
             .fields
             .iter()
@@ -283,11 +280,11 @@ mod tests {
     #[test]
     fn alter_column() {
         let original_table = create_table();
-        let alteration = nom_sql::alter_table_statement(Dialect::MySQL)(
-            "ALTER TABLE test ALTER COLUMN name SET DEFAULT 'default_name';".as_bytes(),
+        let alteration = nom_sql::parse_alter_table(
+            Dialect::MySQL,
+            "ALTER TABLE test ALTER COLUMN name SET DEFAULT 'default_name';",
         )
-        .unwrap()
-        .1;
+        .unwrap();
         let original_column_spec = original_table
             .fields
             .iter()
@@ -327,11 +324,9 @@ mod tests {
     #[test]
     fn rename_column() {
         let original_table = create_table();
-        let alteration = nom_sql::alter_table_statement(Dialect::MySQL)(
-            "ALTER TABLE test RENAME COLUMN id new_id;".as_bytes(),
-        )
-        .unwrap()
-        .1;
+        let alteration =
+            nom_sql::parse_alter_table(Dialect::MySQL, "ALTER TABLE test RENAME COLUMN id new_id;")
+                .unwrap();
         assert!(!original_table
             .fields
             .iter()

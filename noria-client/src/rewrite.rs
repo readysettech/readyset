@@ -605,16 +605,12 @@ fn splice_auto_parameters<'param, 'a, T: Clone>(
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, Dialect, SqlQuery};
+    use nom_sql::Dialect;
 
     use super::*;
 
     fn parse_select_statement(q: &str) -> SelectStatement {
-        let q = parse_query(Dialect::MySQL, q).unwrap();
-        match q {
-            SqlQuery::Select(stmt) => stmt,
-            _ => panic!(),
-        }
+        nom_sql::parse_select_statement(Dialect::MySQL, q).unwrap()
     }
 
     mod collapse_where {

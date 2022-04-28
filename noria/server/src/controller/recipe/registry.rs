@@ -247,9 +247,8 @@ mod tests {
         fn name() {
             let table_name: SqlIdentifier = "test_table".into();
             let create_table = RecipeExpression::Table(
-                nom_sql::creation(Dialect::MySQL)("CREATE TABLE test_table (col1 INT);".as_bytes())
-                    .unwrap()
-                    .1,
+                nom_sql::parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);")
+                    .unwrap(),
             );
 
             assert_eq!(create_table.name(), &table_name);
@@ -257,11 +256,11 @@ mod tests {
             let query_name: SqlIdentifier = "test_query".into();
             let cached_query = RecipeExpression::Cache {
                 name: query_name.clone(),
-                statement: nom_sql::selection(Dialect::MySQL)(
-                    "SELECT * FROM test_table;".as_bytes(),
+                statement: nom_sql::parse_select_statement(
+                    Dialect::MySQL,
+                    "SELECT * FROM test_table;",
                 )
-                .unwrap()
-                .1,
+                .unwrap(),
             };
 
             assert_eq!(cached_query.name(), &query_name);
@@ -271,9 +270,8 @@ mod tests {
                 name: view_name.clone(),
                 fields: vec![],
                 definition: Box::new(SelectSpecification::Simple(
-                    nom_sql::selection(Dialect::MySQL)("SELECT * FROM test_table;".as_bytes())
-                        .unwrap()
-                        .1,
+                    nom_sql::parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
+                        .unwrap(),
                 )),
             });
 
@@ -284,20 +282,19 @@ mod tests {
         fn table_references() {
             let table_name: SqlIdentifier = "test_table".into();
             let create_table = RecipeExpression::Table(
-                nom_sql::creation(Dialect::MySQL)("CREATE TABLE test_table (col1 INT);".as_bytes())
-                    .unwrap()
-                    .1,
+                nom_sql::parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);")
+                    .unwrap(),
             );
 
             assert!(create_table.table_references().is_empty());
 
             let cached_query = RecipeExpression::Cache {
                 name: "test_query".into(),
-                statement: nom_sql::selection(Dialect::MySQL)(
-                    "SELECT * FROM test_table;".as_bytes(),
+                statement: nom_sql::parse_select_statement(
+                    Dialect::MySQL,
+                    "SELECT * FROM test_table;",
                 )
-                .unwrap()
-                .1,
+                .unwrap(),
             };
 
             let cached_query_table_refs = cached_query.table_references();
@@ -308,9 +305,8 @@ mod tests {
                 name: "test_view".into(),
                 fields: vec![],
                 definition: Box::new(SelectSpecification::Simple(
-                    nom_sql::selection(Dialect::MySQL)("SELECT * FROM test_table;".as_bytes())
-                        .unwrap()
-                        .1,
+                    nom_sql::parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
+                        .unwrap(),
                 )),
             });
 
@@ -334,9 +330,8 @@ mod tests {
             let mut aliases = HashMap::new();
 
             let create_table = RecipeExpression::Table(
-                nom_sql::creation(Dialect::MySQL)("CREATE TABLE test_table (col1 INT);".as_bytes())
-                    .unwrap()
-                    .1,
+                nom_sql::parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);")
+                    .unwrap(),
             );
             let table_qid = create_table.calculate_hash();
             expressions.insert(table_qid, create_table);
@@ -345,11 +340,11 @@ mod tests {
             let query_name: SqlIdentifier = "test_query".into();
             let cached_query = RecipeExpression::Cache {
                 name: query_name.clone(),
-                statement: nom_sql::selection(Dialect::MySQL)(
-                    "SELECT * FROM test_table;".as_bytes(),
+                statement: nom_sql::parse_select_statement(
+                    Dialect::MySQL,
+                    "SELECT * FROM test_table;",
                 )
-                .unwrap()
-                .1,
+                .unwrap(),
             };
             let query_qid = cached_query.calculate_hash();
             expressions.insert(query_qid, cached_query);
@@ -361,11 +356,11 @@ mod tests {
                 name: view_name.clone(),
                 fields: vec![],
                 definition: Box::new(SelectSpecification::Simple(
-                    nom_sql::selection(Dialect::MySQL)(
-                        "SELECT DISTINCT * FROM test_table;".as_bytes(),
+                    nom_sql::parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT DISTINCT * FROM test_table;",
                     )
-                    .unwrap()
-                    .1,
+                    .unwrap(),
                 )),
             });
             let view_qid = view.calculate_hash();
@@ -399,11 +394,11 @@ mod tests {
             let query_name: SqlIdentifier = "test_query2".into();
             let cached_query = RecipeExpression::Cache {
                 name: query_name.clone(),
-                statement: nom_sql::selection(Dialect::MySQL)(
-                    "SELECT DISTINCT * FROM test_table;".as_bytes(),
+                statement: nom_sql::parse_select_statement(
+                    Dialect::MySQL,
+                    "SELECT DISTINCT * FROM test_table;",
                 )
-                .unwrap()
-                .1,
+                .unwrap(),
             };
             let num_expressions = registry.expressions.len();
             let num_dependencies = registry.dependencies.len();
@@ -425,9 +420,9 @@ mod tests {
         fn add_existing_cached_query() {
             let mut registry = create_registry();
             let query_name: SqlIdentifier = "test_query2".into();
-            let select = nom_sql::selection(Dialect::MySQL)("SELECT * FROM test_table;".as_bytes())
-                .unwrap()
-                .1;
+            let select =
+                nom_sql::parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
+                    .unwrap();
             let cached_query = RecipeExpression::Cache {
                 name: query_name.clone(),
                 statement: select.clone(),
@@ -465,11 +460,11 @@ mod tests {
                 name: view_name.clone(),
                 fields: vec![],
                 definition: Box::new(SelectSpecification::Simple(
-                    nom_sql::selection(Dialect::MySQL)(
-                        "SELECT DISTINCT * FROM test_table;".as_bytes(),
+                    nom_sql::parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT DISTINCT * FROM test_table;",
                     )
-                    .unwrap()
-                    .1,
+                    .unwrap(),
                 )),
             });
             let num_expressions = registry.expressions.len();
@@ -498,9 +493,9 @@ mod tests {
         #[ignore]
         fn add_existing_view() {
             let mut registry = create_registry();
-            let select = nom_sql::selection(Dialect::MySQL)("SELECT * FROM test_table;".as_bytes())
-                .unwrap()
-                .1;
+            let select =
+                nom_sql::parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
+                    .unwrap();
             let view_name: SqlIdentifier = "test_view2".into();
             let view = RecipeExpression::View(CreateViewStatement {
                 name: view_name.clone(),
@@ -542,11 +537,8 @@ mod tests {
             let mut registry = create_registry();
             let table_name: SqlIdentifier = "test_table2".into();
             let create_table = RecipeExpression::Table(
-                nom_sql::creation(Dialect::MySQL)(
-                    "CREATE TABLE test_table2 (col1 INT);".as_bytes(),
-                )
-                .unwrap()
-                .1,
+                nom_sql::parse_create_table(Dialect::MySQL, "CREATE TABLE test_table2 (col1 INT);")
+                    .unwrap(),
             );
             let num_expressions = registry.expressions.len();
             let num_dependencies = registry.dependencies.len();
@@ -570,9 +562,8 @@ mod tests {
             let mut registry = create_registry();
             let table_name: SqlIdentifier = "test_table".into();
             let create_table = RecipeExpression::Table(
-                nom_sql::creation(Dialect::MySQL)("CREATE TABLE test_table (col1 INT);".as_bytes())
-                    .unwrap()
-                    .1,
+                nom_sql::parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);")
+                    .unwrap(),
             );
             let num_expressions = registry.expressions.len();
             let num_dependencies = registry.dependencies.len();

@@ -158,6 +158,78 @@ where
     parse_query_bytes(dialect, input.as_ref().trim().as_bytes())
 }
 
+/// Parse a select statement from a byte slice
+pub fn parse_select_statement_bytes<T>(
+    dialect: Dialect,
+    input: T,
+) -> Result<SelectStatement, &'static str>
+where
+    T: AsRef<[u8]>,
+{
+    match selection(dialect)(input.as_ref()) {
+        Ok((remaining, o)) if remaining.is_empty() => Ok(o),
+        _ => Err("failed to parse query"),
+    }
+}
+
+/// Parse a select statement from a string
+pub fn parse_select_statement<T>(
+    dialect: Dialect,
+    input: T,
+) -> Result<SelectStatement, &'static str>
+where
+    T: AsRef<str>,
+{
+    parse_select_statement_bytes(dialect, input.as_ref().trim().as_bytes())
+}
+
+/// Parse a create table statement from a byte slice
+pub fn parse_create_table_bytes<T>(
+    dialect: Dialect,
+    input: T,
+) -> Result<CreateTableStatement, &'static str>
+where
+    T: AsRef<[u8]>,
+{
+    match creation(dialect)(input.as_ref()) {
+        Ok((remaining, o)) if remaining.is_empty() => Ok(o),
+        _ => Err("failed to parse query"),
+    }
+}
+
+/// Parse a create table statement from a string
+pub fn parse_create_table<T>(
+    dialect: Dialect,
+    input: T,
+) -> Result<CreateTableStatement, &'static str>
+where
+    T: AsRef<str>,
+{
+    parse_create_table_bytes(dialect, input.as_ref().trim().as_bytes())
+}
+
+/// Parse an alter table statement from a byte slice
+pub fn parse_alter_table_bytes<T>(
+    dialect: Dialect,
+    input: T,
+) -> Result<AlterTableStatement, &'static str>
+where
+    T: AsRef<[u8]>,
+{
+    match alter_table_statement(dialect)(input.as_ref()) {
+        Ok((remaining, o)) if remaining.is_empty() => Ok(o),
+        _ => Err("failed to parse query"),
+    }
+}
+
+/// Parse an alter table statement from a string
+pub fn parse_alter_table<T>(dialect: Dialect, input: T) -> Result<AlterTableStatement, &'static str>
+where
+    T: AsRef<str>,
+{
+    parse_alter_table_bytes(dialect, input.as_ref().trim().as_bytes())
+}
+
 /// Parse a specification for a table key or constraint from a byte slice
 pub fn parse_key_specification_bytes<T>(
     dialect: Dialect,
