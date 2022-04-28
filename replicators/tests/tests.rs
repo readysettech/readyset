@@ -2,6 +2,7 @@ use std::env;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use launchpad::eventually;
 use mysql_async::prelude::Queryable;
 use mysql_time::MysqlTime;
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
@@ -11,24 +12,6 @@ use noria_server::Builder;
 use replicators::NoriaAdapter;
 
 const MAX_ATTEMPTS: usize = 40;
-
-macro_rules! eventually {
-    ($expr: expr) => {{
-        let mut attempt = 0;
-        while !$expr.await {
-            if attempt > MAX_ATTEMPTS {
-                panic!(
-                    "{} did not become true after {} attempts",
-                    stringify!($expr),
-                    MAX_ATTEMPTS
-                );
-            } else {
-                attempt += 1;
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            }
-        }
-    }};
-}
 
 // Postgres does not accept MySQL escapes, so rename the table before the query
 const PGSQL_RENAME: (&str, &str) = ("`groups`", "groups");
@@ -676,12 +659,12 @@ async fn postgresql_ddl_replicate_drop_table() {
     tracing::trace!("Dropping table");
     client.query("DROP TABLE t1 CASCADE;").await.unwrap();
 
-    eventually!(async {
+    eventually! {
         let res = ctx.noria.table("t1").await;
         matches!(
             res.err(),
             Some(ReadySetError::RpcFailed { source, .. })
                 if matches!(&*source, ReadySetError::TableNotFound(table) if table == "t1")
         )
-    });
+    }
 }

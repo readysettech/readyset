@@ -37,3 +37,99 @@ where
             process::abort()
         })
 }
+
+/// Assert that the given async expression eventually yields `true`, after a configurable number of
+/// tries and sleeping a configurable amount between tries.
+///
+/// Defaults to 40 attempts, sleeping 500 milliseconds between attempts
+///
+/// # Examples
+///
+/// Using the default configuration:
+/// ```
+/// # use launchpad::eventually;
+/// # let mut rt = tokio::runtime::Runtime::new().unwrap();
+/// # rt.block_on(async move {
+/// let x = 1;
+/// eventually! {
+///   let fut = futures::future::ready(x);
+///   fut.await == 1
+/// }
+/// # })
+/// ```
+///
+/// Configuring the number of attempts:
+/// ```
+/// # use launchpad::eventually;
+/// # let mut rt = tokio::runtime::Runtime::new().unwrap();
+/// # rt.block_on(async move {
+/// let x = 1;
+/// eventually!(attempts: 5, {
+///   let fut = futures::future::ready(x);
+///   fut.await == 1
+/// })
+/// # })
+/// ```
+///
+/// Configuring the number of attempts and the sleep duration:
+/// ```
+/// use std::time::Duration;
+///
+/// # use launchpad::eventually;
+/// # let mut rt = tokio::runtime::Runtime::new().unwrap();
+/// # rt.block_on(async move {
+/// let x = 1;
+/// eventually!(attempts: 5, sleep: Duration::from_millis(100), {
+///   let fut = futures::future::ready(x);
+///   fut.await == 1
+/// })
+/// # })
+/// ```
+#[macro_export]
+macro_rules! eventually {
+    (attempts: $attempts: expr, { $($body: tt)* }) => {
+        eventually!(
+            attempts: $attempts,
+            sleep: std::time::Duration::from_millis(500),
+            { $($body)* }
+        )
+    };
+    (sleep: $sleep: expr, { $($body: tt)* }) => {
+        eventually!(
+            attempts: 40,
+            sleep: $sleep,
+            { $($body)* }
+        )
+    };
+    (sleep: $sleep: expr, attempts: $attempts: expr, { $($body: tt)* }) => {
+        eventually!(
+            attempts: $attempts,
+            sleep: $sleep,
+            { $($body)* }
+        )
+    };
+    (attempts: $attempts: expr, sleep: $sleep: expr, { $($body: tt)* }) => {{
+        let attempts = $attempts;
+        let sleep = $sleep;
+        let mut attempt = 0;
+        while !async { $($body)* }.await {
+            if attempt > attempts {
+                panic!(
+                    "{} did not become true after {} attempts",
+                    stringify!({ $($body)* }),
+                    attempts
+                );
+            } else {
+                attempt += 1;
+                tokio::time::sleep(sleep).await;
+            }
+        }
+    }};
+	($($body: tt)*) => {
+		eventually!(
+            attempts: 40,
+            sleep: std::time::Duration::from_millis(500),
+            { $($body)* }
+        )
+	};
+}
