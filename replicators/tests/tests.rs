@@ -10,6 +10,7 @@ use noria::{ControllerHandle, ReadySetError, ReadySetResult};
 use noria_data::{DataType, TinyText};
 use noria_server::Builder;
 use replicators::NoriaAdapter;
+use tracing::trace;
 
 const MAX_ATTEMPTS: usize = 40;
 
@@ -656,7 +657,7 @@ async fn postgresql_ddl_replicate_drop_table() {
     ctx.ready_notify.as_ref().unwrap().notified().await;
     assert!(ctx.noria.table("t1").await.is_ok());
 
-    tracing::trace!("Dropping table");
+    trace!("Dropping table");
     client.query("DROP TABLE t1 CASCADE;").await.unwrap();
 
     eventually! {
@@ -667,4 +668,22 @@ async fn postgresql_ddl_replicate_drop_table() {
                 if matches!(&*source, ReadySetError::TableNotFound(table) if table == "t1")
         )
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn postgresql_ddl_replicate_create_table() {
+    readyset_tracing::init_test_logging();
+    let mut client = DbConnection::connect(&pgsql_url()).await.unwrap();
+    client
+        .query("DROP TABLE IF EXISTS t2 CASCADE")
+        .await
+        .unwrap();
+    let mut ctx = TestHandle::start_noria(pgsql_url()).await.unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    trace!("Creating table");
+    client.query("CREATE TABLE t2 (id int);").await.unwrap();
+
+    eventually!(ctx.noria.table("t2").await.is_ok());
 }

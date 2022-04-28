@@ -3,7 +3,6 @@ use futures::FutureExt;
 use launchpad::select;
 use noria::replication::ReplicationOffset;
 use noria::{ReadySetError, ReadySetResult, TableOperation};
-use noria_errors::invariant;
 use tokio_postgres as pgsql;
 use tracing::{debug, error, trace};
 
@@ -419,18 +418,37 @@ impl Connector for PostgresWalConnector {
                 _ => {}
             }
 
-            cur_lsn = lsn.into();
-
             // Check if this event is a write to the ddl replication log
-            if let Some(ddl_event) = DdlEvent::from_wal_event(&event)? {
-                invariant!(actions.is_empty());
-                return Ok((
-                    ReplicationAction::SchemaChange {
-                        ddl: ddl_event.to_ddl(),
-                    },
-                    cur_lsn.into(),
-                ));
+            match DdlEvent::from_wal_event(&event) {
+                Ok(None) => {}
+                Ok(Some(ddl_event)) => {
+                    if actions.is_empty() {
+                        return Ok((
+                            ReplicationAction::SchemaChange {
+                                ddl: ddl_event.to_ddl(),
+                            },
+                            PostgresPosition::from(lsn).into(),
+                        ));
+                    } else {
+                        self.peek = Some((event, lsn));
+                        return Ok((
+                            ReplicationAction::TableAction {
+                                table: cur_table,
+                                actions,
+                                txid: None,
+                            },
+                            cur_lsn.into(),
+                        ));
+                    }
+                }
+                Err(ReadySetError::UnparseableQuery { .. }) => {
+                    error!("Error parsing DDL event, table or view will not be used");
+                    continue;
+                }
+                Err(e) => return Err(e),
             }
+
+            cur_lsn = lsn.into();
 
             match event {
                 WalEvent::WantsKeepaliveResponse => {
