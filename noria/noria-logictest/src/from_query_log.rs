@@ -109,6 +109,7 @@ fn is_ddl(query: &SqlQuery) -> bool {
         SqlQuery::CreateTable(_)
         | SqlQuery::CreateView(_)
         | SqlQuery::DropTable(_)
+        | SqlQuery::DropView(_)
         | SqlQuery::AlterTable(_)
         | SqlQuery::RenameTable(_)
         | SqlQuery::Use(_)

@@ -12,7 +12,10 @@ use crate::create::{
     CreateTableStatement, CreateViewStatement,
 };
 use crate::delete::{deletion, DeleteStatement};
-use crate::drop::{drop_cached_query, drop_table, DropCacheStatement, DropTableStatement};
+use crate::drop::{
+    drop_cached_query, drop_table, drop_view, DropCacheStatement, DropTableStatement,
+    DropViewStatement,
+};
 use crate::explain::{explain_statement, ExplainStatement};
 use crate::insert::{insertion, InsertStatement};
 use crate::rename::{rename_table, RenameTableStatement};
@@ -40,6 +43,7 @@ pub enum SqlQuery {
     Select(SelectStatement),
     Delete(DeleteStatement),
     DropTable(DropTableStatement),
+    DropView(DropViewStatement),
     Update(UpdateStatement),
     Set(SetStatement),
     StartTransaction(StartTransactionStatement),
@@ -62,6 +66,7 @@ impl fmt::Display for SqlQuery {
             SqlQuery::DropCache(ref drop) => write!(f, "{}", drop),
             SqlQuery::Delete(ref delete) => write!(f, "{}", delete),
             SqlQuery::DropTable(ref drop) => write!(f, "{}", drop),
+            SqlQuery::DropView(ref drop) => write!(f, "{}", drop),
             SqlQuery::Update(ref update) => write!(f, "{}", update),
             SqlQuery::Set(ref set) => write!(f, "{}", set),
             SqlQuery::AlterTable(ref alter) => write!(f, "{}", alter),
@@ -90,13 +95,14 @@ impl SqlQuery {
     pub fn query_type(&self) -> &'static str {
         match self {
             Self::Select(_) => "SELECT",
-            Self::Insert(_) => "INESRT",
+            Self::Insert(_) => "INSERT",
             Self::CreateTable(_) => "CREATE TABLE",
             Self::CreateView(_) => "CREATE VIEW",
             Self::CreateCache(_) => "CREATE CACHE",
             Self::DropCache(_) => "DROP CACHE",
             Self::Delete(_) => "DELETE",
             Self::DropTable(_) => "DROP TABLE",
+            Self::DropView(_) => "DROP VIEW",
             Self::Update(_) => "UPDATE",
             Self::Set(_) => "SET",
             Self::AlterTable(_) => "ALTER TABLE",
@@ -121,6 +127,7 @@ pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery>
             map(selection(dialect), SqlQuery::Select),
             map(deletion(dialect), SqlQuery::Delete),
             map(drop_table(dialect), SqlQuery::DropTable),
+            map(drop_view(dialect), SqlQuery::DropView),
             map(updating(dialect), SqlQuery::Update),
             map(set(dialect), SqlQuery::Set),
             map(view_creation(dialect), SqlQuery::CreateView),

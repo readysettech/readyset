@@ -45,6 +45,7 @@ impl ReferredTables for SqlQuery {
             SqlQuery::CreateView(_)
             | SqlQuery::Delete(_)
             | SqlQuery::DropTable(_)
+            | SqlQuery::DropView(_)
             | SqlQuery::Update(_)
             | SqlQuery::Set(_)
             | SqlQuery::StartTransaction(_)
