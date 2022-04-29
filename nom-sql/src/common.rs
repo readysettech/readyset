@@ -885,6 +885,22 @@ fn decimal_or_numeric(i: &[u8]) -> IResult<&[u8], SqlType> {
     }
 }
 
+fn opt_without_time_zone(i: &[u8]) -> IResult<&[u8], ()> {
+    map(
+        opt(preceded(
+            whitespace1,
+            tuple((
+                tag_no_case("without"),
+                whitespace1,
+                tag_no_case("time"),
+                whitespace1,
+                tag_no_case("zone"),
+            )),
+        )),
+        |_| (),
+    )(i)
+}
+
 fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
     move |i| {
         alt((
@@ -960,16 +976,7 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
                 tuple((
                     tag_no_case("timestamp"),
                     opt(preceded(whitespace0, delim_digit)),
-                    opt(preceded(
-                        whitespace1,
-                        tuple((
-                            tag_no_case("without"),
-                            whitespace1,
-                            tag_no_case("time"),
-                            whitespace1,
-                            tag_no_case("zone"),
-                        )),
-                    )),
+                    opt_without_time_zone,
                 )),
                 |_| SqlType::Timestamp,
             ),
@@ -1010,7 +1017,10 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
 
 fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
     alt((
-        map(tag_no_case("time"), |_| SqlType::Time),
+        map(
+            terminated(tag_no_case("time"), opt_without_time_zone),
+            |_| SqlType::Time,
+        ),
         decimal_or_numeric,
         map(
             tuple((tag_no_case("binary"), opt(delim_u16), whitespace0)),
@@ -2004,6 +2014,15 @@ mod tests {
                 b"character varying(20)"
             );
             assert_eq!(res, SqlType::Varchar(Some(20)));
+        }
+
+        #[test]
+        fn time_without_time_zone() {
+            let res = test_parse!(
+                type_identifier(Dialect::PostgreSQL),
+                b"time without time zone"
+            );
+            assert_eq!(res, SqlType::Time);
         }
     }
 }
