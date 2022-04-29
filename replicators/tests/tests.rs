@@ -741,3 +741,32 @@ async fn postgresql_ddl_replicate_create_view() {
 
     eventually!(ctx.noria.view("t2_view").await.is_ok());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+#[ignore = "noria doesn't support alter table yet"]
+async fn postgresql_ddl_replicate_alter_table() {
+    readyset_tracing::init_test_logging();
+    let mut client = DbConnection::connect(&pgsql_url()).await.unwrap();
+    client
+        .query(
+            "DROP TABLE IF EXISTS t2 CASCADE; CREATE TABLE t2 (id int);
+            ",
+        )
+        .await
+        .unwrap();
+    let mut ctx = TestHandle::start_noria(pgsql_url()).await.unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+    assert!(ctx.noria.table("t2").await.is_ok());
+
+    trace!("altering table");
+    client
+        .query("ALTER TABLE t2 ADD COLUMN val TEXT")
+        .await
+        .unwrap();
+
+    eventually! {
+        let table = ctx.noria.table("t2").await.unwrap();
+        table.columns().contains(&"val".into())
+    };
+}

@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS readyset.ddl_replication_log (
 
 ----
 
-CREATE OR REPLACE FUNCTION readyset.replicate_create_table()
+CREATE OR REPLACE FUNCTION readyset.replicate_create_or_alter_table()
 RETURNS event_trigger
 LANGUAGE plpgsql
 AS $$
@@ -20,7 +20,10 @@ BEGIN
     INSERT INTO readyset.ddl_replication_log
         (event_type, schema_name, object_name, statement)
     SELECT
-        'create_table',
+        CASE
+        WHEN object.command_tag = 'CREATE TABLE' THEN 'create_table'
+        WHEN object.command_tag = 'ALTER TABLE' THEN 'alter_table'
+        END,
         object.schema_name,
         replace(
             replace(object.object_identity, object.SCHEMA_NAME || '.', ''),
@@ -71,11 +74,11 @@ BEGIN
     WHERE object.object_type = 'table';
 END $$;
 
-DROP EVENT TRIGGER IF EXISTS readyset_replicate_create_table;
-CREATE EVENT TRIGGER readyset_replicate_create_table
+DROP EVENT TRIGGER IF EXISTS readyset_replicate_create_or_alter_table;
+CREATE EVENT TRIGGER readyset_replicate_create_or_alter_table
     ON ddl_command_end
-    WHEN TAG IN ('CREATE TABLE')
-    EXECUTE PROCEDURE readyset.replicate_create_table();
+    WHEN TAG IN ('CREATE TABLE', 'ALTER TABLE')
+    EXECUTE PROCEDURE readyset.replicate_create_or_alter_table();
 
 ----
 

@@ -119,7 +119,9 @@ impl<'a> DdlEvent<'a> {
 
     pub(crate) fn to_ddl(&self) -> String {
         match self.kind {
-            DdlEventKind::CreateTable | DdlEventKind::CreateView => self.statement.clone().unwrap(),
+            DdlEventKind::CreateTable | DdlEventKind::CreateView | DdlEventKind::AlterTable => {
+                self.statement.clone().unwrap()
+            }
             DdlEventKind::DropTable => DropTableStatement {
                 tables: vec![Table {
                     schema: Some(self.schema_name.into()),
@@ -138,9 +140,6 @@ impl<'a> DdlEvent<'a> {
                 if_exists: true,
             }
             .to_string(),
-            DdlEventKind::AlterTable => {
-                todo!()
-            }
         }
     }
 }
@@ -325,6 +324,56 @@ mod tests {
                 assert_eq!(stmt.table.name, "table");
             }
             _ => panic!("Unexpected query type: {:?}", ddl_parsed),
+        }
+    }
+
+    #[tokio::test]
+    async fn alter_table_has_create_table_statement() {
+        let client = setup("alter_table_has_create_table_statement").await;
+        client.simple_query("create table t (x int)").await.unwrap();
+        client
+            .simple_query("alter table t add column y int")
+            .await
+            .unwrap();
+        let ddl = client
+            .query_one(
+                "select *
+             from readyset.ddl_replication_log
+             where event_type = 'alter_table'
+             order by id desc
+             limit 1",
+                &[],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(ddl.get::<_, String>("event_type"), "alter_table");
+        assert_eq!(ddl.get::<_, String>("schema_name"), "public");
+        assert_eq!(ddl.get::<_, String>("object_name"), "t");
+        let statement = ddl.get::<_, String>("statement");
+        let statement_parsed = parse_query(Dialect::PostgreSQL, &statement).unwrap();
+        match statement_parsed {
+            SqlQuery::CreateTable(stmt) => {
+                assert_eq!(stmt.table.name, "t");
+                assert_eq!(
+                    stmt.fields,
+                    vec![
+                        ColumnSpecification {
+                            column: "t.x".into(),
+                            sql_type: SqlType::Int(None),
+                            constraints: vec![],
+                            comment: None
+                        },
+                        ColumnSpecification {
+                            column: "t.y".into(),
+                            sql_type: SqlType::Int(None),
+                            constraints: vec![],
+                            comment: None
+                        },
+                    ]
+                );
+            }
+            _ => panic!("Unexpected query type: {:?}", statement_parsed),
         }
     }
 
