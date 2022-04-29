@@ -817,6 +817,7 @@ where
             | SqlQuery::Show(..)
             | SqlQuery::CompoundSelect(..)
             | SqlQuery::DropTable(..)
+            | SqlQuery::DropView(..)
             | SqlQuery::AlterTable(..)
             | SqlQuery::RenameTable(..)
             | SqlQuery::CreateCache(..)
@@ -1730,7 +1731,7 @@ where
                     SqlQuery::AlterTable(stmt) => {
                         handle_ddl!(handle_table_operation(stmt.clone()))
                     }
-                    SqlQuery::RenameTable(_) => {
+                    SqlQuery::DropView(_) | SqlQuery::RenameTable(_) => {
                         unsupported!("{} not yet supported", parsed_query.query_type());
                     }
                     SqlQuery::Set(_) | SqlQuery::CompoundSelect(_) | SqlQuery::Show(_) => {

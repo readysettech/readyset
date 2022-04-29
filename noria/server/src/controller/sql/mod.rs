@@ -751,7 +751,8 @@ impl SqlIncorporator {
             | SqlQuery::Use(_)
             | SqlQuery::Show(_)
             | SqlQuery::Explain(_)
-            | SqlQuery::DropCache(_) => (),
+            | SqlQuery::DropCache(_)
+            | SqlQuery::DropView(_) => (),
             // other kinds of queries *do* require their referred tables to exist!
             ref q @ SqlQuery::CompoundSelect(_)
             | ref q @ SqlQuery::Select(_)
