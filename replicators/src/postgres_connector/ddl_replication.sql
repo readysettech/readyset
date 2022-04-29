@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS readyset.ddl_replication_log (
     "event_type" TEXT NOT NULL,
     "schema_name" TEXT,
     "object_name" TEXT NOT NULL,
-    "create_table_ddl" TEXT, -- Only set for event_type='create_table'
+    "statement" TEXT, -- Only set for event_types 'create_table' and 'create_view'
     "created_at" TIMESTAMP WITHOUT TIME ZONE DEFAULT now()
 );
 
@@ -18,7 +18,7 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
     INSERT INTO readyset.ddl_replication_log
-        (event_type, schema_name, object_name, create_table_ddl)
+        (event_type, schema_name, object_name, statement)
     SELECT
         'create_table',
         object.schema_name,
@@ -76,6 +76,34 @@ CREATE EVENT TRIGGER readyset_replicate_create_table
     ON ddl_command_end
     WHEN TAG IN ('CREATE TABLE')
     EXECUTE PROCEDURE readyset.replicate_create_table();
+
+----
+
+CREATE OR REPLACE FUNCTION readyset.replicate_create_view()
+RETURNS event_trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    INSERT INTO readyset.ddl_replication_log
+        (event_type, schema_name, object_name, statement)
+    SELECT
+        'create_view',
+        object.schema_name,
+        cls.relname,
+        format('CREATE VIEW "%s" AS %s', cls.relname, v.definition)
+    FROM pg_event_trigger_ddl_commands() object
+    JOIN pg_catalog.pg_class cls ON object.objid = cls.oid
+    JOIN pg_catalog.pg_views v
+         ON object.schema_name = v.schemaname
+         AND cls.relname = v.viewname
+    WHERE object.object_type = 'view';
+END $$;
+
+DROP event TRIGGER IF EXISTS readyset_replicate_create_view;
+CREATE EVENT TRIGGER readyset_replicate_create_view
+    ON ddl_command_end
+    WHEN TAG IN ('CREATE VIEW')
+    EXECUTE PROCEDURE readyset.replicate_create_view();
 
 ----
 

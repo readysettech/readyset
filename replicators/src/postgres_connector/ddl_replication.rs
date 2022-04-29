@@ -61,7 +61,7 @@ pub(crate) struct DdlEvent<'a> {
     kind: DdlEventKind,
     schema_name: &'a str,
     object_name: &'a str,
-    create_table_statement: Option<String>,
+    statement: Option<String>,
 }
 
 impl<'a> DdlEvent<'a> {
@@ -84,7 +84,7 @@ impl<'a> DdlEvent<'a> {
         //     "event_type" TEXT NOT NULL,
         //     "schema_name" TEXT,
         //     "object_name" TEXT NOT NULL,
-        //     "create_table_ddl" TEXT, -- Only set for event_type='create_table'
+        //     "statement" TEXT,
         //     "created_at" TIMESTAMP WITHOUT TIME ZONE DEFAULT now()
         // );
 
@@ -96,7 +96,7 @@ impl<'a> DdlEvent<'a> {
             .map_err(|_| internal_err("Invalid DDL event kind"))?;
         let schema_name = (&tuple[2]).try_into()?;
         let object_name = (&tuple[3]).try_into()?;
-        let create_table_statement = if kind == DdlEventKind::CreateTable {
+        let statement = if [DdlEventKind::CreateTable, DdlEventKind::CreateView].contains(&kind) {
             let query = <&str>::try_from(&tuple[4])?;
             Some(
                 parse_query(Dialect::PostgreSQL, query)
@@ -113,12 +113,13 @@ impl<'a> DdlEvent<'a> {
             kind,
             schema_name,
             object_name,
-            create_table_statement,
+            statement,
         }))
     }
 
     pub(crate) fn to_ddl(&self) -> String {
         match self.kind {
+            DdlEventKind::CreateTable | DdlEventKind::CreateView => self.statement.clone().unwrap(),
             DdlEventKind::DropTable => DropTableStatement {
                 tables: vec![Table {
                     schema: Some(self.schema_name.into()),
@@ -130,7 +131,6 @@ impl<'a> DdlEvent<'a> {
                 if_exists: true,
             }
             .to_string(),
-            DdlEventKind::CreateTable => self.create_table_statement.clone().unwrap(),
             DdlEventKind::DropView => DropViewStatement {
                 views: vec![self.object_name.into()],
                 // We might be getting a drop view event for a view we don't have, eg if the view
@@ -138,7 +138,7 @@ impl<'a> DdlEvent<'a> {
                 if_exists: true,
             }
             .to_string(),
-            DdlEventKind::AlterTable | DdlEventKind::CreateView => {
+            DdlEventKind::AlterTable => {
                 todo!()
             }
         }
@@ -152,7 +152,8 @@ mod tests {
     use std::time::Duration;
 
     use nom_sql::{
-        parse_query, ColumnConstraint, ColumnSpecification, Dialect, SqlQuery, SqlType, TableKey,
+        parse_query, ColumnConstraint, ColumnSpecification, CreateViewStatement, Dialect,
+        Expression, FieldDefinitionExpression, SelectSpecification, SqlQuery, SqlType, TableKey,
     };
     use pgsql::NoTls;
     use tokio::task::JoinHandle;
@@ -256,9 +257,9 @@ mod tests {
         assert_eq!(ddl.get::<_, String>("event_type"), "create_table");
         assert_eq!(ddl.get::<_, String>("schema_name"), "public");
         assert_eq!(ddl.get::<_, String>("object_name"), "t1");
-        let ddl = ddl.get::<_, String>("create_table_ddl");
-        let ddl_parsed = parse_query(Dialect::PostgreSQL, &ddl).unwrap();
-        match ddl_parsed {
+        let statement = ddl.get::<_, String>("statement");
+        let statement_parsed = parse_query(Dialect::PostgreSQL, &statement).unwrap();
+        match statement_parsed {
             SqlQuery::CreateTable(stmt) => {
                 assert_eq!(stmt.table.name, "t1");
                 assert_eq!(
@@ -293,7 +294,7 @@ mod tests {
                     ]
                 );
             }
-            _ => panic!("Unexpected query type: {:?}", ddl_parsed),
+            _ => panic!("Unexpected query type: {:?}", statement_parsed),
         }
     }
 
@@ -317,16 +318,64 @@ mod tests {
             .unwrap();
 
         assert_eq!(ddl.get::<_, String>("object_name"), "table");
-        let ddl_parsed = parse_query(
-            Dialect::PostgreSQL,
-            &ddl.get::<_, String>("create_table_ddl"),
-        )
-        .unwrap();
+        let ddl_parsed =
+            parse_query(Dialect::PostgreSQL, &ddl.get::<_, String>("statement")).unwrap();
         match ddl_parsed {
             SqlQuery::CreateTable(stmt) => {
                 assert_eq!(stmt.table.name, "table");
             }
             _ => panic!("Unexpected query type: {:?}", ddl_parsed),
+        }
+    }
+
+    #[tokio::test]
+    async fn create_view() {
+        let client = setup("create_view").await;
+        client
+            .simple_query("create table t (x int);")
+            .await
+            .unwrap();
+        client
+            .simple_query("create view v as select * from t;")
+            .await
+            .unwrap();
+        let ddl = client
+            .query_one(
+                "select *
+             from readyset.ddl_replication_log
+             where event_type = 'create_view'
+             order by id desc
+             limit 1",
+                &[],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(ddl.get::<_, String>("event_type"), "create_view");
+        assert_eq!(ddl.get::<_, String>("schema_name"), "public");
+        assert_eq!(ddl.get::<_, String>("object_name"), "v");
+        let statement = ddl.get::<_, String>("statement");
+        let statement_parsed = parse_query(Dialect::PostgreSQL, &statement).unwrap();
+        match statement_parsed {
+            SqlQuery::CreateView(CreateViewStatement {
+                name, definition, ..
+            }) => {
+                assert_eq!(name, "v");
+                match *definition {
+                    SelectSpecification::Simple(select_stmt) => {
+                        assert_eq!(
+                            select_stmt.fields,
+                            vec![FieldDefinitionExpression::Expression {
+                                expr: Expression::Column("t.x".into()),
+                                alias: None
+                            }]
+                        );
+                        assert_eq!(select_stmt.tables, vec!["t".into()]);
+                    }
+                    _ => panic!(),
+                }
+            }
+            _ => panic!("Unexpected query type {:?}", statement_parsed),
         }
     }
 }
