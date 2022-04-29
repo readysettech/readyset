@@ -60,9 +60,7 @@ fn main() -> anyhow::Result<()> {
         connection_handler: PsqlHandler,
         database_type: DatabaseType::Psql,
         dialect: Dialect::PostgreSQL,
-        // PostgreSQL has no replication of DDL, so we have to mirror any DDL changes between the
-        // upstream db and noria
-        mirror_ddl: true,
+        mirror_ddl: false,
     };
 
     adapter.run(options.adapter_options)
