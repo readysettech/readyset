@@ -8822,3 +8822,27 @@ async fn simple_alter_table_alter_column() {
         },
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn drop_view() {
+    let mut g = start_simple_unsharded("drop_view").await;
+
+    g.extend_recipe(
+        "CREATE TABLE t1 (id int);
+         CREATE VIEW t1_view AS SELECT * FROM t1;"
+            .parse()
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    assert!(g.view("t1_view").await.is_ok());
+
+    g.extend_recipe("DROP VIEW t1_view;".parse().unwrap())
+        .await
+        .unwrap();
+
+    let view_res = g.view("t1_view").await;
+    let err = view_res.unwrap_err();
+    assert_eq!(err, ReadySetError::ViewNotFound("t1_view".into()));
+}
