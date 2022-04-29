@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use nom_sql::{parse_query, Dialect, DropTableStatement, Table};
+use nom_sql::{parse_query, Dialect, DropTableStatement, DropViewStatement, Table};
 use noria_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use pgsql::tls::MakeTlsConnect;
 use tokio_postgres as pgsql;
@@ -131,7 +131,13 @@ impl<'a> DdlEvent<'a> {
             }
             .to_string(),
             DdlEventKind::CreateTable => self.create_table_statement.clone().unwrap(),
-            DdlEventKind::DropView => todo!(),
+            DdlEventKind::DropView => DropViewStatement {
+                views: vec![self.object_name.into()],
+                // We might be getting a drop view event for a view we don't have, eg if the view
+                // originally failed to parse
+                if_exists: true,
+            }
+            .to_string(),
             DdlEventKind::AlterTable | DdlEventKind::CreateView => {
                 todo!()
             }

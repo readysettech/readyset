@@ -687,3 +687,32 @@ async fn postgresql_ddl_replicate_create_table() {
 
     eventually!(ctx.noria.table("t2").await.is_ok());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn postgresql_ddl_replicate_drop_view() {
+    readyset_tracing::init_test_logging();
+    let mut client = DbConnection::connect(&pgsql_url()).await.unwrap();
+    client
+        .query(
+            "DROP TABLE IF EXISTS t2 CASCADE; CREATE TABLE t2 (id int);
+                DROP VIEW IF EXISTS t2_view; CREATE VIEW t2_view AS SELECT * FROM t2;",
+        )
+        .await
+        .unwrap();
+    let mut ctx = TestHandle::start_noria(pgsql_url()).await.unwrap();
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+    assert!(ctx.noria.table("t2").await.is_ok());
+    assert!(ctx.noria.view("t2_view").await.is_ok());
+
+    trace!("Dropping view");
+    client.query("DROP VIEW t2_view;").await.unwrap();
+
+    eventually! {
+        let res = ctx.noria.view("t2_view").await;
+        matches!(
+            res.err(),
+            Some(ReadySetError::ViewNotFound(view)) if view == "t2_view"
+        )
+    };
+}
