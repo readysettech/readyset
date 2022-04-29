@@ -1,3 +1,48 @@
+//! DDL streaming replication for PostgreSQL
+//!
+//! Postgresql's native streaming logical replication protocol doesn't support replicating schema
+//! changes. There's a [plugin][pglogical] that adds support for replicating DDL, but we want
+//! ReadySet to be deployable in situations where users might not be able to install arbitrary
+//! plugins (such as AWS RDS). The method we use to implement streaming replication of DDL for
+//! PostgreSQL under these constraints is to use [event triggers][], which allow registering
+//! arbitrary functions written in PL/PGSQL to be run on DDL change events, to write information
+//! about changes to DDL to a special [`ddl_replication_log` table][table]. Those events are then
+//! replicated as normal, and we [special-case them][handle] in the replication adapter to convert
+//! them to schema change events, which are then handled normally.
+//!
+//! The definition of the `ddl_replication_log` table, and the functions and event triggers which
+//! populate it, are located in `ddl_replication.sql`, in the same directory as this module - this
+//! file is executed on the database by the [`setup_ddl_replication`] function when first starting
+//! up the postgresql replicator.
+//!
+//! [pglogical]: https://github.com/2ndQuadrant/pglogical
+//! [event triggers]: https://www.postgresql.org/docs/current/event-triggers.html
+//! [table]: DDL_REPLICATION_LOG_TABLE
+//! [handle]: DdlEvent::from_wal_event
+//!
+//! # Specifics of different DDL events
+//!
+//! Due to details about how PostgreSQL exposes metadata about the schema of different objects,
+//! different DDL events are replicated in different ways:
+//!
+//! * `DROP TABLE` and `DROP VIEW` are replicated directly as rows in the `ddl_replication_log`
+//!   table, then [`DdlEvent::to_ddl`] constructs the statement directly by constructing an AST
+//!   in-place and converting that to a string. Since neither of these statements have any extra
+//!   information we have to convey, this is the simplest way to avoid having to do any SQL
+//!   [dialect] conversion
+//! * For `CREATE TABLE` and `CREATE VIEW`, the event trigger constructs a postgresql-dialect
+//!   statement *in PL/PGSQL*, which we then convert to the noria-native dialect by parsing it and
+//!   re-converting it to a string. This is necessary because the information provided to us by the
+//!   postgresql catalog (`pg_views.definition` for views, and numerous things for tables) has
+//!   information that's already formatted in the postgresql dialect, which we would have to convert
+//!   anyway.
+//! * Since the information available to an event trigger for an `ALTER TABLE` event is insufficient
+//!   to construct a full `ALTER TABLE` statement, `ALTER TABLE` events are replicated as a `CREATE
+//!   TABLE` statement - Noria will then know that a `CREATE TABLE` statement for a table that
+//!   already exists should be treated as an alter table.
+//!
+//! [dialect]: nom_sql::Dialect
+
 use std::str::FromStr;
 
 use nom_sql::{parse_query, Dialect, DropTableStatement, DropViewStatement, Table};
@@ -8,6 +53,7 @@ use tracing::debug;
 
 use super::wal_reader::WalEvent;
 
+/// The name of the table that DDL replication logs will be written to
 const DDL_REPLICATION_LOG_TABLE: &str = "ddl_replication_log";
 
 /// Setup everything in the database that's necessary for DDL replication.
@@ -117,6 +163,8 @@ impl<'a> DdlEvent<'a> {
         }))
     }
 
+    /// Convert this [`DdlEvent`] into a SQL DDL statement that can be sent to Noria directly (using
+    /// the Noria-native SQL dialect, not the postgresql dialect!)
     pub(crate) fn to_ddl(&self) -> String {
         match self.kind {
             DdlEventKind::CreateTable | DdlEventKind::CreateView | DdlEventKind::AlterTable => {
