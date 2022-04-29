@@ -1728,10 +1728,13 @@ where
                     SqlQuery::DropTable(stmt) => {
                         handle_ddl!(handle_table_operation(stmt.clone()))
                     }
+                    SqlQuery::DropView(stmt) => {
+                        handle_ddl!(handle_table_operation(stmt.clone()))
+                    }
                     SqlQuery::AlterTable(stmt) => {
                         handle_ddl!(handle_table_operation(stmt.clone()))
                     }
-                    SqlQuery::DropView(_) | SqlQuery::RenameTable(_) => {
+                    SqlQuery::RenameTable(_) => {
                         unsupported!("{} not yet supported", parsed_query.query_type());
                     }
                     SqlQuery::Set(_) | SqlQuery::CompoundSelect(_) | SqlQuery::Show(_) => {
@@ -1780,6 +1783,7 @@ where
                     SqlQuery::CreateTable(q) => self.noria.handle_table_operation(q.clone()).await,
                     SqlQuery::AlterTable(q) => self.noria.handle_table_operation(q.clone()).await,
                     SqlQuery::DropTable(q) => self.noria.handle_table_operation(q.clone()).await,
+                    SqlQuery::DropView(q) => self.noria.handle_table_operation(q.clone()).await,
                     SqlQuery::Select(q) => {
                         let res = self
                             .noria

@@ -35,7 +35,8 @@ use std::str::FromStr;
 
 use nom_sql::{
     AlterTableStatement, CacheInner, CreateCacheStatement, CreateTableStatement,
-    CreateViewStatement, DropTableStatement, SelectStatement, SqlIdentifier, SqlQuery,
+    CreateViewStatement, DropTableStatement, DropViewStatement, SelectStatement, SqlIdentifier,
+    SqlQuery,
 };
 use noria_errors::{unsupported, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -113,6 +114,12 @@ impl FromStr for ChangeList {
                                     if_exists,
                                 }))
                             }
+                            SqlQuery::DropView(dvs) => {
+                                changes.extend(dvs.views.into_iter().map(|name| Change::Drop {
+                                    name,
+                                    if_exists: dvs.if_exists,
+                                }))
+                            }
                             SqlQuery::DropCache(dcs) => changes.push(Change::Drop {
                                 name: dcs.name,
                                 if_exists: false,
@@ -142,10 +149,25 @@ impl From<DropTableStatement> for ChangeList {
         ChangeList {
             changes: dts
                 .tables
-                .iter()
+                .into_iter()
                 .map(|t| Change::Drop {
-                    name: t.name.clone(),
+                    name: t.name,
                     if_exists: dts.if_exists,
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<DropViewStatement> for ChangeList {
+    fn from(dvs: DropViewStatement) -> Self {
+        ChangeList {
+            changes: dvs
+                .views
+                .into_iter()
+                .map(|name| Change::Drop {
+                    name,
+                    if_exists: dvs.if_exists,
                 })
                 .collect(),
         }
