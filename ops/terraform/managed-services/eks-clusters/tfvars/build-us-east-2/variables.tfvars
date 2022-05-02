@@ -108,6 +108,15 @@ self_managed_node_group_configs = {
     instance_type        = "m5.large",
     bootstrap_extra_args = "--kubelet-extra-args '--node-labels=readyset.io/worker=benchmarks --register-with-taints benchmarks=true:NoSchedule --cluster-dns=169.254.20.10'"
   }
+  "build-k8s-readysets" = {
+    ami_id               = "ami-091dbe769bf1d5d72"
+    single_az            = "true"
+    min_size             = 0
+    max_size             = 5,
+    desired_size         = 2,
+    instance_type        = "c5.4xlarge",
+    bootstrap_extra_args = "--kubelet-extra-args '--node-labels=readyset.io/worker=readyset-clusters --register-with-taints readyset=true:NoSchedule --cluster-dns=169.254.20.10'"
+  }
 }
 
 # ExternalDNS
