@@ -18,7 +18,7 @@ const PAIRED_VERSION: Option<&str> = option_env!("READYSET_CFN_PREFIX");
 
 /// Used if there is no paired version specified.
 /// Hardcoded to the last public release template set.
-const FALLBACK_VERSION: &str = "release-2022-04-29";
+const FALLBACK_VERSION: &str = "release-2022-05-02";
 const S3_PREFIX: &str = "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/";
 const TEMPLATE_DIR: &str = "/readyset/templates/";
 

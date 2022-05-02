@@ -21,7 +21,7 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "iteration": 1651093950912,
+  "iteration": 1651530666860,
   "links": [],
   "panels": [
     {
@@ -164,7 +164,7 @@
                   {
                     "targetBlank": true,
                     "title": "Query specific dashboard",
-                    "url": "http://localhost:4000/d/jAoEkfF7z/specific-query?Deployment=${Deployment:queryparam}&var-queryfilter=${__value.raw}&__url_time_range"
+                    "url": "http://localhost:4000/d/query/specific-query?Deployment=${Deployment:queryparam}&var-queryfilter=${__value.raw}&__url_time_range"
                   }
                 ]
               }
@@ -224,8 +224,8 @@
         "showHeader": true,
         "sortBy": [
           {
-            "desc": false,
-            "displayName": "50p latency"
+            "desc": true,
+            "displayName": "99p latency"
           }
         ]
       },
@@ -236,7 +236,7 @@
           "exemplar": true,
           "expr": "sum by (query)\n(rate(query_log_execution_time_count{deployment=\"$deployment\",database_type=\"mysql\",query!=\"\", event_type=~\"query|execute\"}[$__range]))",
           "format": "table",
-          "hide": false,
+          "hide": true,
           "instant": true,
           "interval": "",
           "legendFormat": "",
@@ -428,40 +428,13 @@
           }
         },
         {
-          "id": "filterByValue",
-          "options": {
-            "filters": [
-              {
-                "config": {
-                  "id": "regex",
-                  "options": {
-                    "value": "(q_.+)"
-                  }
-                },
-                "fieldName": "Query ID"
-              },
-              {
-                "config": {
-                  "id": "greater",
-                  "options": {
-                    "value": 1
-                  }
-                },
-                "fieldName": "MySQL QPS"
-              }
-            ],
-            "match": "all",
-            "type": "include"
-          }
-        },
-        {
           "id": "sortBy",
           "options": {
             "fields": {},
             "sort": [
               {
                 "desc": true,
-                "field": "MySQL QPS"
+                "field": "99p latency"
               }
             ]
           }
@@ -845,6 +818,6 @@
   "timepicker": {},
   "timezone": "",
   "title": "Workload Overview",
-  "uid": "38II-qb7z",
+  "uid": "workload",
   "version": 1
 }
