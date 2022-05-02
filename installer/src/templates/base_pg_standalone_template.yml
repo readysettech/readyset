@@ -23,7 +23,7 @@ services:
       - "-c"
       - "wal_level=logical"
     healthcheck:
-      test: ["CMD", "pg_isready", "-h127.0.0.1", "--port=5432"]
+      test: ["CMD", "pg_isready", "-U", "postgres"]
       start_period: 5s
       interval: 20s
       timeout: 20s
@@ -40,6 +40,7 @@ services:
       PROMETHEUS_METRICS: 1
       QUERY_LOG: 1
       QUERY_LOG_AD_HOC: 1
+      NORIA_SERVER: 1
     links:
       - postgres
       - consul
