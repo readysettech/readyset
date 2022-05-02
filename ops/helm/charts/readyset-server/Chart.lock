@@ -1,0 +1,9 @@
+dependencies:
+- name: consul
+  repository: https://helm.releases.hashicorp.com/
+  version: 0.41.0
+- name: kube-prometheus-stack
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 34.10.0
+digest: sha256:b5b13f4bf2c625698ea1761f501de1ea76df6b7c10accc699fceb52a34ca5c78
+generated: "2022-04-19T11:29:33.863721-04:00"

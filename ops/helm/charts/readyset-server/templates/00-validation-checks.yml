@@ -1,0 +1,23 @@
+{{- $engine := .Values.readyset.common.config.engine -}}
+{{- $skipChecks := .Values.global.debugModeEnabled -}}
+{{- $skipChecksMsg := "\n\nSet global.debugModeEnabled to forcefully skip this error, although it's not generally advised unless you know what you're doing." -}}
+
+{{/* Is the database engine requested valid? */}}
+{{- if and (ne .Values.readyset.common.config.engine "mysql") (ne .Values.readyset.common.config.engine "psql") (eq $skipChecks false) }}
+  {{ fail (printf "\n\nError In Values File Entry:\n\treadyset.common.config.engine is invalid.\n\n Check values.yaml for available options. %s" $skipChecksMsg) }}
+{{ end }}
+
+{{/* Is the deployment name set? */}}
+{{- if and (eq .Values.readyset.common.config.deploymentName "") (not $skipChecks) }}
+  {{ fail (printf "\n\nError In Values File Entry:\n\treadyset.common.config.deploymentName: must be set to a non-blank string value.\n\nPlease provide a value in the chart and try again. %s" $skipChecksMsg) }}
+{{ end }}
+
+{{/* Is the CloudWatch log group name set? */}}
+{{- if and (eq .Values.readyset.common.config.cwLogGroupName "") (eq $skipChecks false) }}
+  {{ fail (printf "\n\nError In Values File Entry:\n\treadyset.common.config.cwLogGroupName: must be set to a non-blank string value\n\nPlease provide a value in the chart and try again. %s" $skipChecksMsg) }}
+{{ end }}
+
+{{/* Is quorum config equal to ReadySet server replicas in statefulset? */}}
+{{- if and (ne .Values.readyset.common.config.quorum .Values.readyset.server.deploymentConfig.replicas) (eq $skipChecks false) }}
+  {{ fail (printf "\n\nError In Values File Entry:\n\treadyset.common.config.quorum: value != readyset.server.deploymentConfig.replicas. These two parameters should have the same value under normal conditions. %s" $skipChecksMsg) }}
+{{ end }}

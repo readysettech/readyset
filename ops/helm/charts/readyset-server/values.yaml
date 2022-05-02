@@ -1,0 +1,4758 @@
+global:
+  # -- Specifies prefix for named resources, e.g. ${name}-server, ${name}-adapter, etc.
+  name: ""
+
+  # -- Names resources as ${release_name}-${component_name}.
+  nameOverride: ""
+
+  # -- Allows for complete control over naming prefix.
+  # Component names are suffixed to end of provided string.
+  fullnameOverride: ""
+
+  # -- Image pull secret to apply to all resources.
+  imagePullSecret: ""
+
+  # -- Pull policy to apply to all resources.
+  imagePullPolicy: "IfNotPresent"
+
+  # -- Toggles debug mode logging and more verbose install/upgrade output.
+  # Disables parameter checks (<fail "xxxxxxxx" errors)
+  debugModeEnabled: false
+
+# -- Consul Helm chart values using official HashiCorp chart.
+# Ref: https://www.consul.io/docs/k8s/helm
+# @default -- Truncated due to length.
+consul:
+
+  # -- Toggles provisioning of the official HashiCorp Consul Helm chart.
+  enabled: true
+
+  # -- Consul container image and tag.
+  image: "consul:1.11.4"
+
+  # -- Affinities to be applied to Consul server pods.
+  affinity: {}
+    # nodeAffinity:
+    #   requiredDuringSchedulingIgnoredDuringExecution:
+    #     nodeSelectorTerms:
+    #     - matchExpressions:
+    #       - key: company.io/worker
+    #         operator: In
+    #         values:
+    #         - statefulsets
+
+  # -- Consul chart's daemonset client. Disabled since ReadySet uses the sidecar pattern.
+  # Ref: https://www.consul.io/docs/k8s/helm#client
+  client:
+
+    # -- Disable Consul Agent daemonset since we're using sidecars instead.
+    enabled: false
+
+  # -- Consul chart's server configuration block.
+  # Ref: https://www.consul.io/docs/k8s/helm#server
+  # @default -- Truncated due to length.
+  server:
+
+    # -- Toggles provisioning of Consul Server.
+    # Ref: https://www.consul.io/docs/k8s/helm#server
+    enabled: true
+
+    # -- Storage size for Consul Server state storage devices.
+    storage: 200Gi
+
+    # -- Storage class for Consul Server state storage devices.
+    # Ref: https://kubernetes.io/docs/concepts/storage/storage-classes/
+    storageClass: gp2
+
+    # -- Resource requests and limits for Consul Server pods.
+    resources:
+      requests:
+        memory: '256Mi'
+        cpu: '250m'
+      limits:
+        memory: '512Mi'
+        cpu: '250m'
+
+    # -- Number of Consul Server replicas.
+    replicas: 3
+
+    # -- Number of Consul servers to expect before considering the cluster ready.
+    bootstrapExpect: 3
+
+  # -- Consul Connect sidecar injection configuration settings.
+  # Ref: https://www.consul.io/docs/k8s/helm#connectinject
+  connectInject:
+    # -- Toggles Consul Connect sidecar injection. Not currently used by ReadySet.
+    enabled: false
+
+readyset:
+  common:
+    # -- Shared/common configuration block for ReadySet applications.
+    # @default -- Truncated due to length.
+    config:
+
+      # -- Name of the ReadySet deployment. Should be unique within the context
+      # of the chosen Consul cluster to avoid key collisions.
+      deploymentName: "webapp-15"
+
+      # -- Number of ReadySet server nodes in the cluster. Should match number
+      # of server replicas in deploymentConfig.replicas
+      quorum: 1
+
+      # -- Number of data shards in the cluster. Not advised to be changed
+      # unless you know what you are doing.
+      shards: 0
+
+      # -- Maximum memory (in bytes) each ReadySet server can consume. Unlimited
+      # by default, as indicated by a value of 0.
+      memoryLimitBytes: 0
+
+      # -- Required to route view requests to specific regions.
+      region: "us-east-2"
+
+      # -- The region where the ReadySet controller is hosted.
+      primaryRegion: "us-east-2"
+
+      # -- Format for ReadySet logs to be emitted to STDOUT/STDERR.
+      logFormat: json
+
+      # -- Flag to instruct entrypoint script which adapter binary to use.
+      # Supported values: mysql, psql
+      engine: "mysql"
+
+      # -- Name of the CloudWatch log group that will contain ReadySet
+      # application logs.
+      cwLogGroupName: "readyset-webapp-20"
+
+      # -- Log and metric aggregator address for Vector agents to ship to.
+      # Default behavior routes metrics to the chart generated
+      # Vector aggregator service name.
+      aggregatorAddressOverride: ""
+
+      # -- Consul authority address override.
+      # Empty value uses chart generated value.
+      authorityAddressOverride: ""
+
+      # -- Authority type. Currently only supports Consul.
+      authorityType: "consul"
+
+    # -- Secrets shared amongst ReadySet containers deployed in this chart.
+    # @default -- Truncated due to length.
+    secrets:
+
+      # -- Kubernetes secret containing the original DB connection string to
+      # -- your RDS instance.
+      replicationUrl:
+
+        # -- Name of k8s secret to retrieve DB connection values from.
+        secretName: "readyset-db-url"
+
+        # -- Key in the k8s secret for the DB url value.
+        urlSecretKey: "url"
+
+        # -- Key in the k8s secret for the DB username.
+        userSecretKey: "username"
+
+        # -- Key in the k8s secret for the DB password.
+        pwdSecretKey: "password"
+
+      # -- Kubernetes secret containing IAM credentials for Vector to ship
+      # metrics and logs to CloudWatch. If using IRSA and the appropriate
+      # annotations, set secretName to a blank string.
+      # @default -- Truncated due to length.
+      vectorIamCredentials:
+        secretName: "readyset-vector-creds"
+        accessKey: "aws_access_key_id"
+        secretKey: "aws_secret_access_key"
+
+  # -- Consul agent sidecar configurations for ReadySet.
+  # @default -- Truncated due to length.
+  consulAgent:
+
+    # -- Container image repository used for Consul agent sidecars.
+    image: hashicorp/consul
+
+    # -- Container image tag used for Consul agent sidecars.
+    tag: "1.11.4"
+
+    # -- Extra labels applied to Consul agent sidecars.
+    labels: {}
+
+    # -- Consul agent entrypoint.
+    entrypoint: "/bin/sh"
+
+    # -- Consul agent entrypoint arguments.
+    args:
+      - /usr/src/app/entrypoint.sh
+
+    # -- Allows connectivity to Consul server existing in another namespace.
+    # -- Blank value causes chart behavior to default to current namespace.
+    serverNamespaceOverride: ""
+
+    # -- Container ports to be exposed for the Consul agent container.
+    # @default -- Truncated due to length.
+    containerPorts:
+      - containerPort: 8500
+        name: http
+        protocol: TCP
+      - containerPort: 8301
+        name: serflan-tcp
+        protocol: TCP
+      - containerPort: 8301
+        name: serflan-udp
+        protocol: UDP
+      - containerPort: 8600
+        name: dns-tcp
+        protocol: TCP
+      - containerPort: 8600
+        name: dns-udp
+        protocol: UDP
+
+    configMaps:
+      config:
+        nameOverride:
+        create: true
+
+  # -- ReadySet server configuration specifications.
+  # -- It's worth noting that business applications do not connect to server
+  # -- nodes directly. Applications connect to the adapter service.
+  # @default -- Truncated due to length.
+  server:
+
+    # -- Toggles creation of ReadySet server components.
+    enabled: true
+
+    # -- Component name of ReadySet server. Used for logging and metrics.
+    componentName: "readyset-server"
+
+    # -- TCP port the ReadySet Prometheus scrape endpoint is listening on.
+    prometheusScrapePort: 6033
+
+    # -- Container image settings for ReadySet server.
+    # @default -- Truncated due to length.
+    image:
+
+      # -- Container image repository to use for ReadySet server.
+      repository: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server
+
+      # -- Container image tag to use for ReadySet server.
+      #tag: "release-bcbe5d9ca1a15a35fc317a14ca5e8fe958570b9d"
+      tag: "release-latest"
+
+    # -- RBAC configurations for ReadySet server.
+    # @default -- Truncated due to length.
+    rbac:
+
+      # -- Service account configurations for ReadySet server.
+      # @default -- Truncated due to length.
+      serviceAccount:
+
+        # -- Name of service account for ReadySet server.
+        #  Allows for bringing your own service account if .create is false.
+        name: ""
+
+        # -- Toggles creation of ReadySet server service account.
+        create: true
+
+      # -- Role and role binding configurations for ReadySet server.
+      # @default -- Truncated due to length.
+      role:
+
+        # -- Name of role to create or reference (if create is false).
+        # -- If create enabled, uses either the value below or a chart generated name.
+        name: ""
+
+        # -- Name of role binding to create (if create is true).
+        # -- If create enabled, uses either the value below or a chart generated name.
+        bindingName: ""
+
+        # -- Toggles creation of role and role binding for ReadySet server.
+        create: true
+
+        # -- Defaults to namespace ReadySet is deployed in.
+        # Useful if Consul is running in another namespace
+        namespace: ""
+
+    # -- Container ports exposed for ReadySet server.
+    # @default -- Truncated due to length.
+    containerPorts:
+      - containerPort: 6033
+        name: api
+        protocol: TCP
+      - containerPort: 5432
+        name: pg
+        protocol: TCP
+      # TODO: Add port ranges for inter-domain communications
+
+    # -- Deployment configuration options for ReadySet server.
+    # @default -- Truncated due to length.
+    deploymentConfig:
+
+      # -- Number of replicas of ReadySet server to be run. Under normal conditions this should match common.config.quorum.
+      # Should be: 1, 3, 5, 7
+      replicas: 1
+
+      # -- Partition size when performing an update.
+      updatePartition: 0
+
+      # -- Update strategy type to use for deployments.
+      updateStrategyType: RollingUpdate
+
+      # -- Pod management policy to be used.
+      podManagementPolicy: Parallel
+
+    # -- Extra annotations applied to ReadySet server pods.
+    annotations: {}
+
+    # -- Extra labels applied to ReadySet server pods.
+    extraLabels:
+      app: readyset
+      component: server
+
+    # -- Priority class to be applied to ReadySet server pods.
+    priorityClassName: ""
+
+    # -- Seconds to wait before terminating ReadySet server pods.
+    # Ref: https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/
+    termGracePeriodSec: 15
+
+    # -- Topology spread constraints to apply to the ReadySet server pods.
+    # Ref: https://kubernetes.io/docs/concepts/workloads/pods/pod-topology-spread-constraints/
+    topologySpreadConstraints: {}
+
+    # -- Entrypoint for ReadySet server containers.
+    entrypoint: "/usr/local/bin/readyset-server"
+
+    # -- Args for ReadySet server container entrypoint.
+    args: []
+
+    # -- Static environment variables to be applied to ReadySet server containers.
+    # @default -- Truncated due to length.
+    extraEnvironmentVars:
+
+      # -- Directory to read and write ReadySet datastore to.
+      # This path should be on a persistent storage device, e.g. ebs
+      DB_DIR: "/state"
+
+      # -- Toggles Prometheus metric endpoint. Required for Grafana dashboards and metrics.
+      PROMETHEUS_METRICS: "true"
+
+      # -- Address ranges permitted to connect to ReadySet server.
+      LISTEN_ADDRESS: "0.0.0.0"
+
+      # -- Seconds between state size memory limit checks.
+      MEMORY_CHECK_EVERY: "1"
+
+      # -- Memory limit (in bytes) for ReadySet server. A value of 0 (default) indicates unlimited memory usage.
+      NORIA_MEMORY_BYTES: "0"
+
+      # -- Controls materialization.
+      FORBID_FULL_MATERIALIZATION: "1"
+
+    # -- Affinities to be applied to ReadySet server pods.
+    # Ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/
+    affinity: {}
+      # podAntiAffinity:
+      #   requiredDuringSchedulingIgnoredDuringExecution:
+      #   - labelSelector:
+      #       matchLabels:
+      #         app: consul
+      #         component: server
+      #         release: consul
+      #     topologyKey: kubernetes.io/hostname
+      # nodeAffinity:
+      #   requiredDuringSchedulingIgnoredDuringExecution:
+      #     nodeSelectorTerms:
+      #     - matchExpressions:
+      #       - key: company.io/worker
+      #         operator: In
+      #         values:
+      #         - statefulsets
+
+    # -- Tolerations to be applied to ReadySet server pods.
+    # Ref: https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/
+    tolerations: []
+
+    # -- Security context to be applied to ReadySet server pods.
+    # Ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
+    securityContext: {}
+
+    # -- Storage spec for ReadySet server's persistent state.
+    # @default -- Truncated due to length.
+    storageSpec:
+
+      # -- Toggles usage of persistent storage. ReadySet is a database, so persistence is required for production.
+      persistentStorageEnabled: true
+
+      # -- Name of volume for ReadySet server state storage.
+      volumeName: "state"
+
+      # -- Volume mounts for ReadySet server.
+      volumeMounts:
+        - name: state
+          mountPath: /state
+
+      # -- Volume claim template for ReadySet server.
+      # @default -- Truncated due to length.
+      volumeClaimTemplates:
+      - metadata:
+          name: state
+        spec:
+          storageClassName: gp2
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 250Gi
+
+    # -- Resource requests and limits for ReadySet server pods.
+    # -- Defaults to development settings.
+    resources:
+      requests:
+        memory: "4096Mi"
+        cpu: "2000m"
+      limits: {}
+      ## For production:
+      # requests:
+      #   memory: "24576Mi"
+      #   cpu: "3750m"
+
+  # -- ReadySet adapter configurations.
+  # -- Applications connect to it instead of the RDS instance directly.
+  # @default -- Truncated due to length.
+  adapter:
+
+    # -- Toggles deployment of ReadySet adapter deployment.
+    enabled: true
+
+    # -- Component name of adapter. Used to name logs and metrics.
+    componentName: "readyset-adapter"
+
+    # -- TCP port the ReadySet Prometheus scrape endpoint is listening on.
+    prometheusScrapePort: 6034
+
+    # -- Container image settings for ReadySet adapter containers.
+    # @default -- Truncated due to length.
+    image:
+
+      # -- Image repository to use for ReadySet adapter containers.
+      repository: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-adapter
+
+      # -- Image tag to use for ReadySet adapter containers.
+      tag: "latest"
+
+      # -- Image pull policy to be applied to ReadySet adapter pods.
+      pullPolicy: ""
+
+    # -- Number of replicas for ReadySet adapter deployments.
+    replicas: 3
+
+    # -- Pod labels for ReadySet adapter pods.
+    labels:
+      app: readyset
+      component: adapter
+
+    # -- Security context to be applied to ReadySet adapter containers.
+    # Defaults to uid 1000 and gid 1000. Ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
+    securityContext:
+      runAsGroup: 1000
+      runAsUser: 1000
+
+    # -- Tolerations to be applied to ReadySet adapter pods.
+    # Ref: https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/
+    tolerations: []
+
+    # -- Affinities to be applied to ReadySet adapter pods.
+    # Ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/
+    affinity: {}
+      # podAntiAffinity:
+      #   requiredDuringSchedulingIgnoredDuringExecution:
+      #   - labelSelector:
+      #       matchLabels:
+      #         app: consul
+      #         component: server
+      #         release: consul
+      #     topologyKey: kubernetes.io/hostname
+      #   - labelSelector:
+      #       matchLabels:
+      #         app: readyset
+      #         component: server
+      #     topologyKey: kubernetes.io/hostname
+
+    # -- Topology spread constraints to apply to the ReadySet adapter pods.
+    # Ref: https://kubernetes.io/docs/concepts/workloads/pods/pod-topology-spread-constraints/
+    topologySpreadConstraints: {}
+
+    # -- RBAC configurations for ReadySet adapter.
+    # @default -- Truncated due to length.
+    rbac:
+
+      # -- Service account configurations for ReadySet adapter.
+      serviceAccount:
+
+        # -- Name of service account. Allows for bringing your own service account if .create is false.
+        name: ""
+
+        # -- Toggles creation of ReadySet adapter service account.
+        create: true
+
+      # -- Role and role binding configurations for ReadySet adapter.
+      role:
+
+        # -- Name of chart created role for ReadySet adapter.
+        name: ""
+
+        # -- Name of chart created role binding.
+        # Only used if .create is true.
+        bindingName: ""
+
+        # -- Toggles creation of ReadySet adapter role.
+        create: true
+
+        # -- Namespace override for ReadySet adapter role.
+        # Defaults to the namespace ReadySet is deployed in.
+        namespace: ""
+
+    # -- Container ports exposed for ReadySet adapter.
+    # @default -- Truncated due to length.
+    containerPorts:
+      - name: health
+        containerPort: 6034
+        protocol: TCP
+      - name: mysql
+        containerPort: 3306
+        protocol: TCP
+      - name: postgres
+        containerPort: 5432
+        protocol: TCP
+
+    # -- Entrypoint for ReadySet adapter containers.
+    entrypoint: "/usr/local/bin/docker-entrypoint.sh"
+
+    # -- Entrypoint arguments for ReadySet adapter containers.
+    args: ["--prometheus-metrics"]
+
+    # -- Static environment variables applied to ReadySet adapter containers.
+    # @default -- Truncated due to length.
+    extraEnvironmentVars:
+
+      # -- Toggles prometheus metrics for ReadySet adapter containers.
+      PROMETHEUS_METRICS: 1
+
+      # -- Listening address and port for health check and metric endpoints.
+      METRICS_ADDRESS: "0.0.0.0:6034"
+
+      # -- Polling interval in seconds for requesting outputs from the Leader.
+      OUTPUTS_POLLING_INTERVAL: 180
+
+      # -- Toggles running of migrations exclusively through CREATE CACHE
+      # -- statements. Set to 0 (off) or 1 (on). Conflicts with ASYNC_MIGRATIONS.
+      EXPLICIT_MIGRATIONS: 0
+
+      # -- Toggles query logging. Set to 0 (off) or 1 (on).
+      QUERY_LOG: 1
+
+    # -- Resource requests and limits for ReadySet adapters.
+    resources:
+      requests:
+        memory: "4096Mi"
+        cpu: "2000m"
+
+    # -- ReadySet adapter k8s service configurations.
+    # @default -- Truncated due to length.
+    service:
+
+      # -- Name of service to create or use (if create is false).
+      nameOverride: ""
+
+      # -- Toggles provisioning of ReadySet adapter k8s service.
+      create: true
+
+      # -- Service type applied to ReadySet adapter k8s service.
+      # type: ClusterIP - If internal k8s access is all that's needed
+      # @default -- LoadBalancer
+      type: LoadBalancer
+
+      # -- Labels applied to ReadySet adapter k8s service.
+      labels:
+        app: readyset
+        component: adapter
+
+      # -- Annotations applied to Readyset adapter k8s service.
+      annotations:
+      ##
+      # For internal AWS NLB (recommended if access needed outside k8s):
+      # Ref: https://kubernetes-sigs.github.io/aws-load-balancer-controller/v2.1/guide/service/nlb_ip_mode/
+        service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+        service.beta.kubernetes.io/aws-load-balancer-type: "nlb-ip"
+        service.beta.kubernetes.io/aws-load-balancer-ip-address-type: "ipv4"
+        service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+
+      # -- Listener to be created on ReadySet adapter k8s service
+      # @default -- Truncated due to length.
+      listeners:
+        - name: mysql
+          port: 3306
+          targetPort: 3306
+          protocol: TCP
+        - name: psql
+          port: 5432
+          targetPort: 5432
+          protocol: TCP
+
+  # -- Vector agent and aggregator configurations.
+  # Ref for Vector: https://vector.dev/
+  # @default -- Truncated due to length.
+  vector:
+
+    # -- Vector agent sidecar configurations.
+    # Used to consume logs and metrics from ReadySet containers.
+    # @default -- Truncated due to length.
+    sidecar:
+
+      # -- Toggles usage of Vector agent sidecar.
+      # --  Required for logging and metrics.
+      enabled: true
+
+      # -- Container image configurations for Vector agent containers.
+      # @default -- Truncated due to length.
+      image:
+
+        # -- Container image repository for Vector agent containers.
+        repository: timberio/vector
+
+        # -- Container image tag for Vector agent containers.
+        tag: "0.20.0-distroless-libc"
+
+        # -- Image pull policy for Vector agent containers.
+        pullPolicy: "IfNotPresent"
+
+      # -- Labels applied to Vector agent components
+      # e.g. configMaps
+      # @default -- Truncated due to length.
+      labels:
+        app: readyset
+        component: vector
+        mode: agent
+
+      # -- ConfigMaps pertaining to vector agent sidecars. Generally used to
+      # ship logs & metrics from ReadySet server/adapter containers to
+      # CloudWatch and the aggregator service.
+      # @default -- Truncated due to length.
+      configMaps:
+
+        # -- Primary ConfigMap for vector agent configurations.
+        # -- See templates/00-vector-agent-cm.yml
+        config:
+
+          # -- Allows for either overriding the name of the chart created CM or,
+          # if create is false, specifies the already existing CM to apply.
+          nameOverride: ""
+          # nameOverride: "readyset-vector-agent"
+
+          # -- Toggles creation of configmap. If false, nameOverride CM will be
+          # mounted into Vector agents instead. All files in the CM are mounted.
+          create: true
+
+      # -- Location in the Vector agent pod to store vector agent data.
+      vectorDataDir: "/vector-data-dir"
+
+      # -- List of file inclusion patterns for Vector agent log shipping.
+      includeLogs:
+        - /var/log/containers/*-readyset*.log
+
+      # -- List of file exclusion patterns for Vector agent log shipping.
+      excludeLogs:
+        - /var/log/containers/*vector-agent-*
+        - /var/log/containers/*kube-system*
+
+    # -- Vector aggregator deployment. Used to ship metrics and logs.
+    # @default -- Truncated due to length.
+    aggregator:
+
+      # -- Name override for Vector aggregator deployment.
+      nameOverride: ""
+
+      # -- Toggles deployment of Vector aggregator.
+      enabled: true
+
+      # -- Number of Vector aggregator replicas.
+      replicas: 1
+
+      # -- Container image configurations for Vector aggregator.
+      # @default -- Truncated due to length.
+      image:
+
+        # -- Container image repository for Vector aggregator containers.
+        repository: timberio/vector
+
+        # -- Container image tag for Vector aggregator containers.
+        tag: "0.20.0-distroless-libc"
+
+        # -- Image pull policy to apply to Vector aggregator pods.
+        pullPolicy: "IfNotPresent"
+
+        # -- Image pull secrets to be used when pulling Vector aggregator container images.
+        pullSecrets: []
+
+      # -- Labels to be applied to Vector aggregator resources.
+      # @default -- Truncated due to length.
+      labels:
+        app: readyset
+        component: vector
+        mode: aggregator
+
+      # -- Triggers rollout restart of Vector aggregator when changes are made to configMap(s).
+      rollWorkloadOnConfigChanges: true
+
+      # -- ConfigMaps for the Vector aggregator deployment.
+      # @default -- Truncated due to length.
+      configMaps:
+
+        # -- Primary configurations CM for Vector aggregator.
+        config:
+
+          # -- Toggles creation of the Vector aggregator config CM.
+          create: true
+
+          # -- Overrides name of configmap created or used (if create = false).
+          # If empty, chart will generate a name for the ConfigMap.
+          nameOverride: ""
+          # nameOverride: "vector-aggregator"
+
+      # -- Directory for Vector aggregator to store its' state.
+      vectorDataDir: "/vector-agg-data-dir"
+
+      # -- Vector API listener address and port.
+      vectorApiListener: "0.0.0.0:8686"
+
+      # -- Vector aggregator listener address for inbound logs and metrics.
+      vectorSourceListener: "0.0.0.0:9000"
+
+      # -- URL to the node's Prometheus node-exporter metrics endpoint.
+      nodeExporterEndpoint: "http://${NODE_IP}:9100/metrics"
+
+      # -- Scrape interval applied when scraping node-exporter.
+      nodeExporterScrapeInterval: 15
+
+      # -- Annotations to be applied to Vector aggregator resources.
+      annotations: {}
+
+      # -- K8s service configurations for Vector aggregator.
+      # @default -- Truncated due to length.
+      service:
+
+        # -- Name of the service to be created or used.
+        nameOverride: vector-aggregator
+
+        # -- Toggles deployment of chart created k8s service.
+        enabled: true
+
+        # -- Labels to be applied to the Vector aggregator k8s service created
+        # by the chart. Only used if enabled = true.
+        # @default -- Truncated due to length.
+        labels:
+          app: readyset
+          component: vector
+          mode: aggregator
+
+
+        # -- Type of service to be created for the Vector aggregator.
+        type: "ClusterIP"
+
+        # -- Set annotations on Vector aggregator service.
+        annotations: {}
+
+        # -- TopologyKeys to be applied to Vector aggregator service.
+        # Ref: https://kubernetes.io/docs/concepts/services-networking/service-topology/#using-service-topology
+        topologyKeys: []
+
+        # -- Ports to be exposed for the Vector aggregator.
+        # @default -- Truncated due to length.
+        ports:
+          - name: vector
+            port: 9000
+            protocol: TCP
+          - name: exporter
+            port: 9090
+            protocol: TCP
+          - name: api
+            port: 8686
+            protocol: TCP
+
+      # -- Service account for Vector aggregator.
+      # @default -- Truncated due to length.
+      serviceAccount:
+
+        # -- Toggles creation of Vector aggregator service account.
+        create: true
+
+        # -- Additional annotations to apply to Vector aggregator service account.
+        annotations: {}
+        # eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/iam-role-name
+
+        # -- Name of the service account to use.
+        nameOverride: ""
+
+        # -- Toggles auto-mounting of service account token.
+        automountToken: true
+
+      # -- Set the priorityClassName on Vector aggregator pods.
+      podPriorityClassName: ""
+
+      # -- Vector aggregator pod securityContext customizations to apply.
+      podSecurityContext: {}
+
+      # -- Security Context for Vector aggregator containers.
+      securityContext: {}
+
+      # -- Entrypoint command for Vector aggregator containers.
+      command: []
+
+      # -- Entrypoint arguments for Vector aggregator containers.
+      args:
+        - --config-dir
+        - "/etc/vector/"
+
+      # -- Supplemental environment variables to apply to Vector aggregator.
+      env: []
+
+      # -- Ports to be exposed on Vector aggregator containers.
+      # @default -- Truncated due to length.
+      containerPorts:
+        - name: vector
+          containerPort: 9000
+          protocol: TCP
+        - name: exporter
+          containerPort: 9090
+          protocol: TCP
+        - name: api
+          containerPort: 8686
+          protocol: TCP
+
+      # -- Resource requests and limits for the Vector aggregator.
+      resources:
+        requests:
+          cpu: 200m
+          memory: 256Mi
+        limits:
+          cpu: 1000m
+          memory: 4096Mi
+
+      # -- UpdateStrategy used when performing Vector aggregator deployment updates.
+      # Ref: https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/deployment-v1/
+      updateStrategy: {}
+      #   type: RollingUpdate
+      #   rollingUpdate:
+      #     maxUnavailable: 1
+
+      # -- Termination grace period seconds for Vector aggregator pods.
+      terminationGracePeriodSeconds: 60
+
+      # -- Node selector for Vector aggregator pods.
+      ## Ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#nodeselector
+      ## Ref: https://kubernetes.io/docs/user-guide/node-selection/
+      nodeSelector: {}
+
+      # -- Allow Vector to schedule on tainted nodes
+      tolerations: []
+
+      # -- Affinities to be applied to Vector aggregator.
+      ## Ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#affinity-and-anti-affinity
+      affinity: {}
+
+      # -- Additional volumes to use with Vector aggregator pods.
+      extraVolumes: []
+
+      # -- Extra volume mounts to apply to Vector aggregator pods.
+      extraVolumeMounts: []
+
+      # -- Any init containers to apply to Vector aggregator pods.
+      initContainers: []
+
+      # -- Persistent storage configurations for Vector aggregator deployment.
+      # @default -- Truncated due to length.
+      persistence:
+
+        # -- Toggles usage of PVC. If true, create and use PersistentVolumeClaims
+        enabled: false
+
+        # -- Name of an existing PersistentVolumeClaim to use
+        existingClaim: ""
+
+        # -- AccessModes for Vector aggregator PersistentVolumeClaims
+        accessModes:
+          - ReadWriteOnce
+
+        # -- Size of PersistentVolumeClaim storage device for Vector aggregator.
+        size: 10Gi
+
+        # -- Finalizers applied to PersistentVolumeClaims for Vector aggregator.
+        finalizers: []
+          # - kubernetes.io/pvc-protection
+
+        # -- Selectors for PersistentVolumeClaims
+        selectors: {}
+
+        # -- HostPath configurations for Vector aggregator's persistent storage
+        hostPath:
+          #
+          path: "/var/lib/vector"
+
+      # -- DNS policy for Vector aggregator pods.
+      # Ref: https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/#pod-s-dns-policy
+      dnsPolicy: ClusterFirst
+
+      # -- DNS configuration options for Vector aggregator pods.
+      # Ref: https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/#pod-dns-config
+      dnsConfig: {}
+
+      # -- Liveness probe configuration for Vector aggregator pods.
+      # @default -- Truncated due to length.
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: api
+        initialDelaySeconds: 1
+        periodSeconds: 10
+        timeoutSeconds: 3
+        successThreshold: 1
+        failureThreshold: 3
+
+      # -- Readiness probe configuration for Vector aggregator pods.
+      # Ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+      # @default -- Truncated due to length.
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: api
+        initialDelaySeconds: 1
+        periodSeconds: 10
+        timeoutSeconds: 3
+        failureThreshold: 3
+
+# -- Prometheus and Grafana setup for ReadySet metrics and dashboards.
+# -- Values Ref:
+# -- https://github.com/prometheus-community/helm-charts/blob/main/charts/kube-prometheus-stack/values.yaml
+# @default -- Truncated due to length.
+monitoring:
+  # -- Full name override for kube-prometheus-stack chart.
+  fullnameOverride: readyset-monitor
+
+  # -- Global toggle for kube-prometheus-stack chart.
+  enabled: true
+
+  # -- AlertManager configurations.
+  alertmanager:
+
+    # -- Toggles alertmanager chart.
+    enabled: false
+
+  # -- Default rules configurations for kube-prometheus-stack.
+  defaultRules:
+
+    # -- Toggles default rules.
+    create: false
+
+  # -- Prometheus Operation configurations for kube-prometheus-stack.
+  prometheusOperator:
+
+    ## !! IMPORTANT !! If Prometheus Operator is already running in your cluster, set to false.
+    # -- Toggles PrometheusOperator component of kube-prometheus-stack.
+    enabled: true
+
+  # -- Grafana for ReadySet metrics and dashboards.
+  # Values Ref:
+  # https://github.com/grafana/helm-charts/blob/main/charts/grafana/values.yaml
+  # @default -- Truncated due to length.
+  grafana:
+
+    # -- Toggles deployment of Grafana chart.
+    enabled: true
+
+    # -- Login phrase.
+    adminPassword: "readyset-monitoring"
+
+    # -- Force redeploy datasources.
+    forceDeployDatasources: true
+
+    # -- Grafana sidecar configurations.
+    sidecar:
+
+      # -- Data source config for Prometheus. This is the datasource used by ReadySet dashboards, by default.
+      datasources:
+        uid: DS_PROMETHEUS
+        url: http://readyset-monitor-prometheus:9090/
+
+    # -- Grafana dashboard configs.
+    # @default -- Truncated due to length.
+    # @TODO: Move dashboards into a separate ConfigMap.
+    dashboards:
+      # -- ReadySet dashboards.
+      # @default -- Truncated due to length.
+      readyset:
+        # -- Systems Overview dashboard
+        # @default -- Truncated due to length.
+        systemsOverview:
+          json: |
+              {
+                "annotations": {
+                  "list": [
+                    {
+                      "builtIn": 1,
+                      "datasource": "-- Grafana --",
+                      "enable": true,
+                      "hide": true,
+                      "iconColor": "rgba(0, 211, 255, 1)",
+                      "name": "Annotations & Alerts",
+                      "type": "dashboard"
+                    }
+                  ]
+                },
+                "editable": true,
+                "gnetId": null,
+                "graphTooltip": 0,
+                "id": 6,
+                "iteration": 1645047551666,
+                "links": [],
+                "panels": [
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "description": "Shows Memory and CPU Utilization",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "palette-classic"
+                        },
+                        "custom": {
+                          "axisLabel": "",
+                          "axisPlacement": "auto",
+                          "axisSoftMax": 80,
+                          "barAlignment": 0,
+                          "drawStyle": "line",
+                          "fillOpacity": 22,
+                          "gradientMode": "none",
+                          "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                          },
+                          "lineInterpolation": "smooth",
+                          "lineStyle": {
+                            "fill": "solid"
+                          },
+                          "lineWidth": 1,
+                          "pointSize": 4,
+                          "scaleDistribution": {
+                            "type": "linear"
+                          },
+                          "showPoints": "never",
+                          "spanNulls": false,
+                          "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                          },
+                          "thresholdsStyle": {
+                            "mode": "off"
+                          }
+                        },
+                        "decimals": 0,
+                        "mappings": [],
+                        "max": 100,
+                        "min": 0,
+                        "noValue": "0",
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            },
+                            {
+                              "color": "red",
+                              "value": 80
+                            }
+                          ]
+                        }
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 14,
+                      "w": 21,
+                      "x": 0,
+                      "y": 0
+                    },
+                    "id": 2,
+                    "options": {
+                      "legend": {
+                        "calcs": [
+                          "lastNotNull"
+                        ],
+                        "displayMode": "list",
+                        "placement": "bottom"
+                      },
+                      "tooltip": {
+                        "mode": "single"
+                      }
+                    },
+                    "pluginVersion": "8.2.2",
+                    "repeat": null,
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "sum by (instance, job) ((node_memory_MemTotal_bytes{deployment=\"$deployment\"}-node_memory_MemAvailable_bytes)/node_memory_MemTotal_bytes*100)",
+                        "format": "time_series",
+                        "instant": false,
+                        "interval": "",
+                        "intervalFactor": 1,
+                        "legendFormat": "Memory -{{job}} ({{instance}})",
+                        "refId": "Memory"
+                      },
+                      {
+                        "exemplar": true,
+                        "expr": "100 - (avg by (job, instance) (rate(node_cpu_seconds_total{deployment=\"$deployment\",mode=\"idle\"}[1m])) * 100)",
+                        "hide": false,
+                        "instant": false,
+                        "interval": "",
+                        "legendFormat": "CPU - {{job}} ({{instance}})",
+                        "refId": "CPU"
+                      }
+                    ],
+                    "title": "System Utilization",
+                    "transformations": [],
+                    "type": "timeseries"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "description": "The number of queries per second executed against ReadySet split by the ReadySet and MySQL backends.",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "thresholds"
+                        },
+                        "decimals": 3,
+                        "mappings": [],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            }
+                          ]
+                        }
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 6,
+                      "w": 21,
+                      "x": 0,
+                      "y": 14
+                    },
+                    "id": 4,
+                    "options": {
+                      "colorMode": "value",
+                      "graphMode": "none",
+                      "justifyMode": "center",
+                      "orientation": "auto",
+                      "reduceOptions": {
+                        "calcs": [
+                          "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                      },
+                      "text": {},
+                      "textMode": "auto"
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "sum by (database_type) (rate(query_log_execution_time_count{deployment=\"$deployment\", query!=\"\"}[1m]))",
+                        "instant": false,
+                        "interval": "",
+                        "legendFormat": "{{database_type}}",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "Queries Per Second (1 minute intervals)",
+                    "type": "stat"
+                  }
+                ],
+                "refresh": "",
+                "schemaVersion": 30,
+                "style": "dark",
+                "tags": [],
+                "templating": {
+                  "list": [
+                    {
+                      "allValue": null,
+                      "current": {
+                        "selected": false,
+                        "text": "solidus",
+                        "value": "solidus"
+                      },
+                      "datasource": "DS_PROMETHEUS",
+                      "definition": "label_values(deployment)",
+                      "description": null,
+                      "error": null,
+                      "hide": 0,
+                      "includeAll": false,
+                      "label": "Deployment",
+                      "multi": false,
+                      "name": "deployment",
+                      "options": [],
+                      "query": {
+                        "query": "label_values(deployment)",
+                        "refId": "StandardVariableQuery"
+                      },
+                      "refresh": 1,
+                      "regex": "",
+                      "skipUrlSync": false,
+                      "sort": 0,
+                      "type": "query"
+                    }
+                  ]
+                },
+                "time": {
+                  "from": "now-1h",
+                  "to": "now"
+                },
+                "timepicker": {},
+                "timezone": "",
+                "title": "Readyset Overview",
+                "uid": "C52X6Mf7z",
+                "version": 1
+              }
+        # -- ReadySet Connectivity Overview dashboard
+        # @default -- Truncated due to length.
+        connected:
+          json: |
+            {
+              "annotations": {
+                "list": [
+                  {
+                    "builtIn": 1,
+                    "datasource": "DS_PROMETHEUS",
+                    "enable": true,
+                    "hide": true,
+                    "iconColor": "rgba(0, 211, 255, 1)",
+                    "name": "Annotations & Alerts",
+                    "target": {
+                      "limit": 100,
+                      "matchAny": false,
+                      "tags": [],
+                      "type": "dashboard"
+                    },
+                    "type": "dashboard"
+                  }
+                ]
+              },
+              "editable": true,
+              "gnetId": null,
+              "graphTooltip": 0,
+              "iteration": 1643932316699,
+              "links": [],
+              "panels": [
+                {
+                  "datasource": "DS_PROMETHEUS",
+                  "description": "How long Readyset has been up for",
+                  "fieldConfig": {
+                    "defaults": {
+                      "color": {
+                        "mode": "thresholds"
+                      },
+                      "mappings": [],
+                      "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                          {
+                            "color": "green",
+                            "value": null
+                          }
+                        ]
+                      },
+                      "unit": "dateTimeFromNow"
+                    },
+                    "overrides": []
+                  },
+                  "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 0,
+                    "y": 0
+                  },
+                  "id": 27,
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "none",
+                    "justifyMode": "auto",
+                    "orientation": "auto",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "/^startup_timestamp\\{deployment=\"solidus\", instance=\"localhost:9000\", job=\"readyset\\-server\"\\}$/",
+                      "values": false
+                    },
+                    "text": {},
+                    "textMode": "auto"
+                  },
+                  "pluginVersion": "8.0.6",
+                  "targets": [
+                    {
+                      "exemplar": true,
+                      "expr": "startup_timestamp\n\n",
+                      "interval": "",
+                      "legendFormat": "",
+                      "queryType": "randomWalk",
+                      "refId": "Timestamp"
+                    }
+                  ],
+                  "title": "Readyset Started",
+                  "type": "stat"
+                },
+                {
+                  "datasource": "DS_PROMETHEUS",
+                  "fieldConfig": {
+                    "defaults": {
+                      "color": {
+                        "mode": "thresholds"
+                      },
+                      "mappings": [],
+                      "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                          {
+                            "color": "green",
+                            "value": null
+                          }
+                        ]
+                      }
+                    },
+                    "overrides": []
+                  },
+                  "gridPos": {
+                    "h": 7,
+                    "w": 9,
+                    "x": 0,
+                    "y": 8
+                  },
+                  "id": 24,
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "justifyMode": "auto",
+                    "orientation": "auto",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    },
+                    "text": {},
+                    "textMode": "auto"
+                  },
+                  "pluginVersion": "8.0.6",
+                  "targets": [
+                    {
+                      "exemplar": true,
+                      "expr": "server_external_requests",
+                      "format": "table",
+                      "instant": false,
+                      "interval": "",
+                      "legendFormat": "",
+                      "queryType": "randomWalk",
+                      "refId": "A"
+                    }
+                  ],
+                  "title": "Server External Requests",
+                  "transparent": true,
+                  "type": "stat"
+                },
+                {
+                  "datasource": "DS_PROMETHEUS",
+                  "fieldConfig": {
+                    "defaults": {
+                      "color": {
+                        "mode": "thresholds"
+                      },
+                      "mappings": [],
+                      "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                          {
+                            "color": "green",
+                            "value": null
+                          }
+                        ]
+                      }
+                    },
+                    "overrides": []
+                  },
+                  "gridPos": {
+                    "h": 7,
+                    "w": 10,
+                    "x": 9,
+                    "y": 8
+                  },
+                  "id": 25,
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "justifyMode": "auto",
+                    "orientation": "auto",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    },
+                    "text": {},
+                    "textMode": "auto"
+                  },
+                  "pluginVersion": "8.0.6",
+                  "targets": [
+                    {
+                      "exemplar": true,
+                      "expr": "noria_client_external_requests",
+                      "format": "table",
+                      "instant": false,
+                      "interval": "",
+                      "legendFormat": "",
+                      "queryType": "randomWalk",
+                      "refId": "A"
+                    }
+                  ],
+                  "title": "Adapter External Requests",
+                  "transparent": true,
+                  "type": "stat"
+                },
+                {
+                  "datasource": "DS_PROMETHEUS",
+                  "description": "The number of queries per second executed against ReadySet split by the ReadySet and MySQL backends.",
+                  "fieldConfig": {
+                    "defaults": {
+                      "color": {
+                        "mode": "thresholds"
+                      },
+                      "mappings": [],
+                      "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                          {
+                            "color": "yellow",
+                            "value": null
+                          },
+                          {
+                            "color": "green",
+                            "value": 1
+                          }
+                        ]
+                      }
+                    },
+                    "overrides": []
+                  },
+                  "gridPos": {
+                    "h": 5,
+                    "w": 14,
+                    "x": 0,
+                    "y": 15
+                  },
+                  "id": 2,
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "justifyMode": "auto",
+                    "orientation": "auto",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    },
+                    "text": {},
+                    "textMode": "auto"
+                  },
+                  "pluginVersion": "8.0.6",
+                  "targets": [
+                    {
+                      "exemplar": true,
+                      "expr": "sum by (database_type) (rate(query_log_execution_time_count{deployment=\"$Deployment\"}[1m]))",
+                      "interval": "",
+                      "legendFormat": "{{database_type}}",
+                      "queryType": "randomWalk",
+                      "refId": "A"
+                    }
+                  ],
+                  "title": "Queries Per Second (1 minute intervals)",
+                  "type": "stat"
+                },
+                {
+                  "datasource": "DS_PROMETHEUS",
+                  "description": "",
+                  "fieldConfig": {
+                    "defaults": {
+                      "color": {
+                        "mode": "thresholds"
+                      },
+                      "decimals": 0,
+                      "mappings": [
+                        {
+                          "options": {
+                            "0": {
+                              "color": "green",
+                              "index": 0,
+                              "text": "No"
+                            },
+                            "1": {
+                              "color": "red",
+                              "index": 1,
+                              "text": "Yes"
+                            }
+                          },
+                          "type": "value"
+                        }
+                      ],
+                      "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                          {
+                            "color": "green",
+                            "value": null
+                          },
+                          {
+                            "color": "red",
+                            "value": 80
+                          }
+                        ]
+                      },
+                      "unit": "none"
+                    },
+                    "overrides": []
+                  },
+                  "gridPos": {
+                    "h": 3,
+                    "w": 3,
+                    "x": 14,
+                    "y": 15
+                  },
+                  "id": 20,
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "justifyMode": "auto",
+                    "orientation": "auto",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    },
+                    "text": {},
+                    "textMode": "auto"
+                  },
+                  "pluginVersion": "8.0.6",
+                  "targets": [
+                    {
+                      "exemplar": true,
+                      "expr": "sum(replicator_snapshot_status{deployment=\"$Deployment\", status=\"started\"}) - sum(replicator_snapshot_status{deployment=\"$Deployment\", status=~\"successful|failed\"})",
+                      "format": "time_series",
+                      "instant": false,
+                      "interval": "",
+                      "legendFormat": "",
+                      "queryType": "randomWalk",
+                      "refId": "A"
+                    }
+                  ],
+                  "title": "Snapshot In Progress",
+                  "transformations": [],
+                  "type": "stat"
+                },
+                {
+                  "datasource": "DS_PROMETHEUS",
+                  "description": "",
+                  "fieldConfig": {
+                    "defaults": {
+                      "color": {
+                        "mode": "thresholds"
+                      },
+                      "decimals": 0,
+                      "mappings": [
+                        {
+                          "options": {
+                            "0": {
+                              "color": "green",
+                              "index": 0,
+                              "text": "No"
+                            },
+                            "1": {
+                              "color": "red",
+                              "index": 1,
+                              "text": "Yes"
+                            }
+                          },
+                          "type": "value"
+                        }
+                      ],
+                      "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                          {
+                            "color": "green",
+                            "value": null
+                          },
+                          {
+                            "color": "red",
+                            "value": 80
+                          }
+                        ]
+                      },
+                      "unit": "none"
+                    },
+                    "overrides": []
+                  },
+                  "gridPos": {
+                    "h": 3,
+                    "w": 3,
+                    "x": 17,
+                    "y": 15
+                  },
+                  "id": 21,
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "justifyMode": "auto",
+                    "orientation": "auto",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    },
+                    "text": {},
+                    "textMode": "auto"
+                  },
+                  "pluginVersion": "8.0.6",
+                  "targets": [
+                    {
+                      "exemplar": true,
+                      "expr": "controller_migration_in_progress{deployment=\"$Deployment\"}",
+                      "format": "time_series",
+                      "instant": false,
+                      "interval": "",
+                      "legendFormat": "",
+                      "queryType": "randomWalk",
+                      "refId": "A"
+                    }
+                  ],
+                  "title": "Migration in Progress",
+                  "transformations": [],
+                  "type": "stat"
+                },
+                {
+                  "datasource": "DS_PROMETHEUS",
+                  "fieldConfig": {
+                    "defaults": {
+                      "color": {
+                        "mode": "thresholds"
+                      },
+                      "mappings": [],
+                      "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                          {
+                            "color": "red",
+                            "value": null
+                          },
+                          {
+                            "color": "green",
+                            "value": 1
+                          }
+                        ]
+                      }
+                    },
+                    "overrides": []
+                  },
+                  "gridPos": {
+                    "h": 6,
+                    "w": 3,
+                    "x": 14,
+                    "y": 18
+                  },
+                  "id": 9,
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "justifyMode": "auto",
+                    "orientation": "auto",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    },
+                    "text": {},
+                    "textMode": "auto"
+                  },
+                  "pluginVersion": "8.0.6",
+                  "targets": [
+                    {
+                      "exemplar": true,
+                      "expr": "count(node_memory_MemTotal_bytes{deployment=\"$Deployment\",job=\"readyset-adapter\"}) or vector(0)",
+                      "instant": false,
+                      "interval": "",
+                      "legendFormat": "",
+                      "queryType": "randomWalk",
+                      "refId": "A"
+                    }
+                  ],
+                  "title": "ReadySet Adapters",
+                  "type": "stat"
+                },
+                {
+                  "datasource": "DS_PROMETHEUS",
+                  "fieldConfig": {
+                    "defaults": {
+                      "color": {
+                        "mode": "thresholds"
+                      },
+                      "mappings": [],
+                      "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                          {
+                            "color": "red",
+                            "value": null
+                          },
+                          {
+                            "color": "green",
+                            "value": 1
+                          }
+                        ]
+                      }
+                    },
+                    "overrides": []
+                  },
+                  "gridPos": {
+                    "h": 6,
+                    "w": 3,
+                    "x": 17,
+                    "y": 18
+                  },
+                  "id": 22,
+                  "options": {
+                    "colorMode": "value",
+                    "graphMode": "area",
+                    "justifyMode": "auto",
+                    "orientation": "auto",
+                    "reduceOptions": {
+                      "calcs": [
+                        "lastNotNull"
+                      ],
+                      "fields": "",
+                      "values": false
+                    },
+                    "text": {},
+                    "textMode": "auto"
+                  },
+                  "pluginVersion": "8.0.6",
+                  "targets": [
+                    {
+                      "exemplar": true,
+                      "expr": "count(node_memory_MemTotal_bytes{deployment=\"$Deployment\",job=\"readyset-adapter\"}) or vector(0)",
+                      "instant": false,
+                      "interval": "",
+                      "legendFormat": "",
+                      "queryType": "randomWalk",
+                      "refId": "A"
+                    }
+                  ],
+                  "title": "ReadySet Adapters",
+                  "type": "stat"
+                }
+              ],
+              "refresh": "5s",
+              "schemaVersion": 30,
+              "style": "dark",
+              "tags": [],
+              "templating": {
+                "list": [
+                  {
+                    "allValue": null,
+                    "current": {
+                      "selected": false,
+                      "text": "solidus",
+                      "value": "solidus"
+                    },
+                    "datasource": "DS_PROMETHEUS",
+                    "definition": "label_values(deployment)",
+                    "description": null,
+                    "error": null,
+                    "hide": 0,
+                    "includeAll": false,
+                    "label": null,
+                    "multi": false,
+                    "name": "Deployment",
+                    "options": [],
+                    "query": {
+                      "query": "label_values(deployment)",
+                      "refId": "StandardVariableQuery"
+                    },
+                    "refresh": 1,
+                    "regex": "",
+                    "skipUrlSync": false,
+                    "sort": 0,
+                    "type": "query"
+                  },
+                  {
+                    "allValue": null,
+                    "current": {
+                      "selected": false,
+                      "text": "SELECT `column_name` FROM `information_schema`.`statistics` WHERE ((`index_name` = '<anonymized>') AND ((`table_schema` = database()) AND (`table_name` = '<anonymized>'))) ORDER BY `seq_in_index` ASC",
+                      "value": "SELECT `column_name` FROM `information_schema`.`statistics` WHERE ((`index_name` = '<anonymized>') AND ((`table_schema` = database()) AND (`table_name` = '<anonymized>'))) ORDER BY `seq_in_index` ASC"
+                    },
+                    "datasource": "DS_PROMETHEUS",
+                    "definition": "label_values(query)",
+                    "description": null,
+                    "error": null,
+                    "hide": 0,
+                    "includeAll": false,
+                    "label": "Query Filter",
+                    "multi": false,
+                    "name": "QueryFilter",
+                    "options": [],
+                    "query": {
+                      "query": "label_values(query)",
+                      "refId": "StandardVariableQuery"
+                    },
+                    "refresh": 2,
+                    "regex": "",
+                    "skipUrlSync": false,
+                    "sort": 0,
+                    "type": "query"
+                  }
+                ]
+              },
+              "time": {
+                "from": "now-30m",
+                "to": "now"
+              },
+              "timepicker": {},
+              "timezone": "",
+              "title": "Is Readyset Connected",
+              "uid": "sdfaw9n",
+              "version": 1
+            }
+        # -- ReadySet Query Overview Dashboard
+        # @default -- Truncated due to length.
+        queryOverview:
+          json: |
+              {
+                "annotations": {
+                  "list": [
+                    {
+                      "builtIn": 1,
+                      "datasource": "DS_PROMETHEUS",
+                      "enable": true,
+                      "hide": true,
+                      "iconColor": "rgba(0, 211, 255, 1)",
+                      "name": "Annotations & Alerts",
+                      "target": {
+                        "limit": 100,
+                        "matchAny": false,
+                        "tags": [],
+                        "type": "dashboard"
+                      },
+                      "type": "dashboard"
+                    }
+                  ]
+                },
+                "editable": true,
+                "gnetId": null,
+                "graphTooltip": 0,
+                "iteration": 1643932316699,
+                "links": [],
+                "panels": [
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "description": "How long Readyset has been up for",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "thresholds"
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            }
+                          ]
+                        },
+                        "unit": "dateTimeFromNow"
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 8,
+                      "w": 12,
+                      "x": 0,
+                      "y": 0
+                    },
+                    "id": 27,
+                    "options": {
+                      "colorMode": "value",
+                      "graphMode": "none",
+                      "justifyMode": "auto",
+                      "orientation": "auto",
+                      "reduceOptions": {
+                        "calcs": [
+                          "lastNotNull"
+                        ],
+                        "fields": "/^startup_timestamp\\{deployment=\"solidus\", instance=\"localhost:9000\", job=\"readyset\\-server\"\\}$/",
+                        "values": false
+                      },
+                      "text": {},
+                      "textMode": "auto"
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "startup_timestamp\n\n",
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "Timestamp"
+                      }
+                    ],
+                    "title": "Readyset Started",
+                    "type": "stat"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "thresholds"
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            }
+                          ]
+                        }
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 7,
+                      "w": 9,
+                      "x": 0,
+                      "y": 8
+                    },
+                    "id": 24,
+                    "options": {
+                      "colorMode": "value",
+                      "graphMode": "area",
+                      "justifyMode": "auto",
+                      "orientation": "auto",
+                      "reduceOptions": {
+                        "calcs": [
+                          "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                      },
+                      "text": {},
+                      "textMode": "auto"
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "server_external_requests",
+                        "format": "table",
+                        "instant": false,
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "Server External Requests",
+                    "transparent": true,
+                    "type": "stat"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "thresholds"
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            }
+                          ]
+                        }
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 7,
+                      "w": 10,
+                      "x": 9,
+                      "y": 8
+                    },
+                    "id": 25,
+                    "options": {
+                      "colorMode": "value",
+                      "graphMode": "area",
+                      "justifyMode": "auto",
+                      "orientation": "auto",
+                      "reduceOptions": {
+                        "calcs": [
+                          "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                      },
+                      "text": {},
+                      "textMode": "auto"
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "noria_client_external_requests",
+                        "format": "table",
+                        "instant": false,
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "Adapter External Requests",
+                    "transparent": true,
+                    "type": "stat"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "description": "The number of queries per second executed against ReadySet split by the ReadySet and MySQL backends.",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "thresholds"
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "yellow",
+                              "value": null
+                            },
+                            {
+                              "color": "green",
+                              "value": 1
+                            }
+                          ]
+                        }
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 5,
+                      "w": 14,
+                      "x": 0,
+                      "y": 15
+                    },
+                    "id": 2,
+                    "options": {
+                      "colorMode": "value",
+                      "graphMode": "area",
+                      "justifyMode": "auto",
+                      "orientation": "auto",
+                      "reduceOptions": {
+                        "calcs": [
+                          "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                      },
+                      "text": {},
+                      "textMode": "auto"
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "sum by (database_type) (rate(query_log_execution_time_count{deployment=\"$Deployment\"}[1m]))",
+                        "interval": "",
+                        "legendFormat": "{{database_type}}",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "Queries Per Second (1 minute intervals)",
+                    "type": "stat"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "description": "",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "thresholds"
+                        },
+                        "decimals": 0,
+                        "mappings": [
+                          {
+                            "options": {
+                              "0": {
+                                "color": "green",
+                                "index": 0,
+                                "text": "No"
+                              },
+                              "1": {
+                                "color": "red",
+                                "index": 1,
+                                "text": "Yes"
+                              }
+                            },
+                            "type": "value"
+                          }
+                        ],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            },
+                            {
+                              "color": "red",
+                              "value": 80
+                            }
+                          ]
+                        },
+                        "unit": "none"
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 3,
+                      "w": 3,
+                      "x": 14,
+                      "y": 15
+                    },
+                    "id": 20,
+                    "options": {
+                      "colorMode": "value",
+                      "graphMode": "area",
+                      "justifyMode": "auto",
+                      "orientation": "auto",
+                      "reduceOptions": {
+                        "calcs": [
+                          "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                      },
+                      "text": {},
+                      "textMode": "auto"
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "sum(replicator_snapshot_status{deployment=\"$Deployment\", status=\"started\"}) - sum(replicator_snapshot_status{deployment=\"$Deployment\", status=~\"successful|failed\"})",
+                        "format": "time_series",
+                        "instant": false,
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "Snapshot In Progress",
+                    "transformations": [],
+                    "type": "stat"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "description": "",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "thresholds"
+                        },
+                        "decimals": 0,
+                        "mappings": [
+                          {
+                            "options": {
+                              "0": {
+                                "color": "green",
+                                "index": 0,
+                                "text": "No"
+                              },
+                              "1": {
+                                "color": "red",
+                                "index": 1,
+                                "text": "Yes"
+                              }
+                            },
+                            "type": "value"
+                          }
+                        ],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            },
+                            {
+                              "color": "red",
+                              "value": 80
+                            }
+                          ]
+                        },
+                        "unit": "none"
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 3,
+                      "w": 3,
+                      "x": 17,
+                      "y": 15
+                    },
+                    "id": 21,
+                    "options": {
+                      "colorMode": "value",
+                      "graphMode": "area",
+                      "justifyMode": "auto",
+                      "orientation": "auto",
+                      "reduceOptions": {
+                        "calcs": [
+                          "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                      },
+                      "text": {},
+                      "textMode": "auto"
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "controller_migration_in_progress{deployment=\"$Deployment\"}",
+                        "format": "time_series",
+                        "instant": false,
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "Migration in Progress",
+                    "transformations": [],
+                    "type": "stat"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "thresholds"
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "red",
+                              "value": null
+                            },
+                            {
+                              "color": "green",
+                              "value": 1
+                            }
+                          ]
+                        }
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 6,
+                      "w": 3,
+                      "x": 14,
+                      "y": 18
+                    },
+                    "id": 9,
+                    "options": {
+                      "colorMode": "value",
+                      "graphMode": "area",
+                      "justifyMode": "auto",
+                      "orientation": "auto",
+                      "reduceOptions": {
+                        "calcs": [
+                          "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                      },
+                      "text": {},
+                      "textMode": "auto"
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "count(node_memory_MemTotal_bytes{deployment=\"$Deployment\",job=\"readyset-adapter\"}) or vector(0)",
+                        "instant": false,
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "ReadySet Adapters",
+                    "type": "stat"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "thresholds"
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "red",
+                              "value": null
+                            },
+                            {
+                              "color": "green",
+                              "value": 1
+                            }
+                          ]
+                        }
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 6,
+                      "w": 3,
+                      "x": 17,
+                      "y": 18
+                    },
+                    "id": 22,
+                    "options": {
+                      "colorMode": "value",
+                      "graphMode": "area",
+                      "justifyMode": "auto",
+                      "orientation": "auto",
+                      "reduceOptions": {
+                        "calcs": [
+                          "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                      },
+                      "text": {},
+                      "textMode": "auto"
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "count(node_memory_MemTotal_bytes{deployment=\"$Deployment\",job=\"readyset-adapter\"}) or vector(0)",
+                        "instant": false,
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "ReadySet Adapters",
+                    "type": "stat"
+                  }
+                ],
+                "refresh": "5s",
+                "schemaVersion": 30,
+                "style": "dark",
+                "tags": [],
+                "templating": {
+                  "list": [
+                    {
+                      "allValue": null,
+                      "current": {
+                        "selected": false,
+                        "text": "solidus",
+                        "value": "solidus"
+                      },
+                      "datasource": "DS_PROMETHEUS",
+                      "definition": "label_values(deployment)",
+                      "description": null,
+                      "error": null,
+                      "hide": 0,
+                      "includeAll": false,
+                      "label": null,
+                      "multi": false,
+                      "name": "Deployment",
+                      "options": [],
+                      "query": {
+                        "query": "label_values(deployment)",
+                        "refId": "StandardVariableQuery"
+                      },
+                      "refresh": 1,
+                      "regex": "",
+                      "skipUrlSync": false,
+                      "sort": 0,
+                      "type": "query"
+                    },
+                    {
+                      "allValue": null,
+                      "current": {
+                        "selected": false,
+                        "text": "SELECT `column_name` FROM `information_schema`.`statistics` WHERE ((`index_name` = '<anonymized>') AND ((`table_schema` = database()) AND (`table_name` = '<anonymized>'))) ORDER BY `seq_in_index` ASC",
+                        "value": "SELECT `column_name` FROM `information_schema`.`statistics` WHERE ((`index_name` = '<anonymized>') AND ((`table_schema` = database()) AND (`table_name` = '<anonymized>'))) ORDER BY `seq_in_index` ASC"
+                      },
+                      "datasource": "DS_PROMETHEUS",
+                      "definition": "label_values(query)",
+                      "description": null,
+                      "error": null,
+                      "hide": 0,
+                      "includeAll": false,
+                      "label": "Query Filter",
+                      "multi": false,
+                      "name": "QueryFilter",
+                      "options": [],
+                      "query": {
+                        "query": "label_values(query)",
+                        "refId": "StandardVariableQuery"
+                      },
+                      "refresh": 2,
+                      "regex": "",
+                      "skipUrlSync": false,
+                      "sort": 0,
+                      "type": "query"
+                    }
+                  ]
+                },
+                "time": {
+                  "from": "now-30m",
+                  "to": "now"
+                },
+                "timepicker": {},
+                "timezone": "",
+                "title": "Is Readyset Connected",
+                "uid": "SLlJ0W3nkz",
+                "version": 1
+              }
+        # -- ReadySet Query Specific Dashboard
+        # @default -- Truncated due to length.
+        querySpecific:
+          json: |
+              {
+                "annotations": {
+                  "list": [
+                    {
+                      "builtIn": 1,
+                      "datasource": "DS_PROMETHEUS",
+                      "enable": true,
+                      "hide": true,
+                      "iconColor": "rgba(0, 211, 255, 1)",
+                      "name": "Annotations & Alerts",
+                      "target": {
+                        "limit": 100,
+                        "matchAny": false,
+                        "tags": [],
+                        "type": "dashboard"
+                      },
+                      "type": "dashboard"
+                    }
+                  ]
+                },
+                "description": "Stats to examine a specific query",
+                "editable": true,
+                "gnetId": null,
+                "graphTooltip": 0,
+                "iteration": 1646947574824,
+                "links": [],
+                "panels": [
+                  {
+                    "datasource": null,
+                    "description": "",
+                    "gridPos": {
+                      "h": 3,
+                      "w": 16,
+                      "x": 0,
+                      "y": 0
+                    },
+                    "id": 21,
+                    "options": {
+                      "content": "${queryfilter}",
+                      "mode": "markdown"
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "Query Text",
+                    "type": "text"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "description": "is this query running in RS or not",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "thresholds"
+                        },
+                        "mappings": [
+                          {
+                            "options": {
+                              "from": -99999999,
+                              "result": {
+                                "color": "yellow",
+                                "index": 0,
+                                "text": "No"
+                              },
+                              "to": 0
+                            },
+                            "type": "range"
+                          },
+                          {
+                            "options": {
+                              "from": 1,
+                              "result": {
+                                "color": "green",
+                                "index": 1,
+                                "text": "Yes"
+                              },
+                              "to": 10000000000000000
+                            },
+                            "type": "range"
+                          }
+                        ],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "red",
+                              "value": null
+                            }
+                          ]
+                        },
+                        "unit": "none"
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 3,
+                      "w": 4,
+                      "x": 16,
+                      "y": 0
+                    },
+                    "id": 23,
+                    "options": {
+                      "colorMode": "value",
+                      "graphMode": "none",
+                      "justifyMode": "auto",
+                      "orientation": "auto",
+                      "reduceOptions": {
+                        "calcs": [
+                          "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                      },
+                      "text": {},
+                      "textMode": "auto"
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "(query_log_execution_time_count{deployment=\"$deployment\", database_type=\"noria\", query=\"${queryfilter:raw}\", event_type=~\"query|execute\"})",
+                        "format": "table",
+                        "hide": false,
+                        "instant": true,
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "Readyset Count"
+                      },
+                      {
+                        "exemplar": true,
+                        "expr": "(query_log_execution_time_count{deployment=\"$deployment\", database_type=\"mysql\", query=\"${queryFilter:raw}\", event_type=~\"query|execute\"})",
+                        "format": "table",
+                        "hide": false,
+                        "instant": true,
+                        "interval": "",
+                        "legendFormat": "",
+                        "refId": "MySQL Count"
+                      }
+                    ],
+                    "title": "Query Running in Readyset",
+                    "transformations": [
+                      {
+                        "id": "calculateField",
+                        "options": {
+                          "alias": "Readyset Status",
+                          "binary": {
+                            "left": "Value #Readyset Count",
+                            "operator": "-",
+                            "reducer": "sum",
+                            "right": "Value #MySQL Count"
+                          },
+                          "mode": "binary",
+                          "reduce": {
+                            "reducer": "sum"
+                          },
+                          "replaceFields": true
+                        }
+                      }
+                    ],
+                    "type": "stat"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "description": "This measures the query end-to-end latency from the time the request is received by ReadySet.",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "palette-classic"
+                        },
+                        "custom": {
+                          "axisLabel": "",
+                          "axisPlacement": "auto",
+                          "axisSoftMax": 1,
+                          "axisSoftMin": 0,
+                          "barAlignment": 0,
+                          "drawStyle": "line",
+                          "fillOpacity": 0,
+                          "gradientMode": "none",
+                          "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                          },
+                          "lineInterpolation": "linear",
+                          "lineStyle": {
+                            "fill": "solid"
+                          },
+                          "lineWidth": 1,
+                          "pointSize": 3,
+                          "scaleDistribution": {
+                            "type": "linear"
+                          },
+                          "showPoints": "never",
+                          "spanNulls": true,
+                          "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                          },
+                          "thresholdsStyle": {
+                            "mode": "off"
+                          }
+                        },
+                        "decimals": 0,
+                        "mappings": [],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            },
+                            {
+                              "color": "red",
+                              "value": 80
+                            }
+                          ]
+                        },
+                        "unit": "ms"
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 12,
+                      "w": 20,
+                      "x": 0,
+                      "y": 3
+                    },
+                    "id": 17,
+                    "options": {
+                      "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom"
+                      },
+                      "tooltip": {
+                        "mode": "single"
+                      }
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "query_log_execution_time{quantile=~\"0.5|0.9|0.99\",database_type=\"noria\",deployment=\"$deployment\",query=\"${queryfilter:raw}\"} * 1000",
+                        "format": "time_series",
+                        "instant": false,
+                        "interval": "",
+                        "legendFormat": "{{quantile}}",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "Query Latency",
+                    "transformations": [],
+                    "type": "timeseries"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "palette-classic"
+                        },
+                        "custom": {
+                          "axisLabel": "",
+                          "axisPlacement": "auto",
+                          "barAlignment": 0,
+                          "drawStyle": "line",
+                          "fillOpacity": 0,
+                          "gradientMode": "none",
+                          "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                          },
+                          "lineInterpolation": "linear",
+                          "lineWidth": 1,
+                          "pointSize": 5,
+                          "scaleDistribution": {
+                            "type": "linear"
+                          },
+                          "showPoints": "auto",
+                          "spanNulls": false,
+                          "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                          },
+                          "thresholdsStyle": {
+                            "mode": "off"
+                          }
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            },
+                            {
+                              "color": "red",
+                              "value": 80
+                            }
+                          ]
+                        }
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 9,
+                      "w": 20,
+                      "x": 0,
+                      "y": 15
+                    },
+                    "id": 27,
+                    "options": {
+                      "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom"
+                      },
+                      "tooltip": {
+                        "mode": "single"
+                      }
+                    },
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "query_log_total_cache_misses{deployment=\"$deployment\", query=\"${queryfilter:raw}\"}",
+                        "interval": "",
+                        "legendFormat": "Total misses",
+                        "queryType": "randomWalk",
+                        "refId": "total query misses"
+                      },
+                      {
+                        "exemplar": true,
+                        "expr": "query_log_execution_time_count{deployment=\"$deployment\",database_type=\"noria\",query=\"${queryfilter:raw}\", event_type=~\"query|execute\"}",
+                        "hide": false,
+                        "interval": "",
+                        "legendFormat": "",
+                        "refId": "total query count"
+                      }
+                    ],
+                    "title": "Total query cache misses rate",
+                    "transformations": [
+                      {
+                        "id": "calculateField",
+                        "options": {
+                          "binary": {
+                            "left": "Total misses",
+                            "operator": "/",
+                            "reducer": "sum",
+                            "right": "query_log_execution_time_count{database_type=\"noria\", deployment=\"solidus\", event_type=\"query\", instance=\"localhost:9000\", job=\"readyset-server\", query=\"SELECT `active_storage_variant_records`.* FROM `active_storage_variant_records` WHERE ((`active_storage_variant_records`.`blob_id` = '<anonymized>') AND (`active_storage_variant_records`.`variation_digest` = '<anonymized>')) LIMIT '<anonymized>'\", query_type=\"read\", upstream_db_type=\"mysql\"}"
+                          },
+                          "mode": "binary",
+                          "reduce": {
+                            "include": [
+                              "Total misses",
+                              "query_log_execution_time_count{database_type=\"noria\", deployment=\"solidus\", event_type=\"query\", instance=\"localhost:9000\", job=\"readyset-server\", query=\"SELECT `active_storage_variant_records`.* FROM `active_storage_variant_records` WHERE ((`active_storage_variant_records`.`blob_id` = '<anonymized>') AND (`active_storage_variant_records`.`variation_digest` = '<anonymized>')) LIMIT '<anonymized>'\", query_type=\"read\", upstream_db_type=\"mysql\"}"
+                            ],
+                            "reducer": "sum"
+                          },
+                          "replaceFields": true
+                        }
+                      }
+                    ],
+                    "type": "timeseries"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "description": "The number of queries per second executed against ReadySet split by the ReadySet and MySQL backends.",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "thresholds"
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "yellow",
+                              "value": null
+                            },
+                            {
+                              "color": "green",
+                              "value": 1
+                            }
+                          ]
+                        }
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 6,
+                      "w": 20,
+                      "x": 0,
+                      "y": 24
+                    },
+                    "id": 25,
+                    "options": {
+                      "colorMode": "value",
+                      "graphMode": "area",
+                      "justifyMode": "auto",
+                      "orientation": "auto",
+                      "reduceOptions": {
+                        "calcs": [
+                          "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                      },
+                      "text": {},
+                      "textMode": "auto"
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "sum by (database_type) (rate(query_log_execution_time_count{deployment=\"$deployment\", query=\"${queryfilter:raw}\"}[1m]))",
+                        "interval": "",
+                        "legendFormat": "{{database_type}}",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "Queries Per Second (1 minute intervals)",
+                    "type": "stat"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "description": "The cache hit rate observed at the first layer of ReadySet caches. In the absence of queries this graph shows a cache hit rate of 0%.",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "palette-classic"
+                        },
+                        "custom": {
+                          "axisLabel": "",
+                          "axisPlacement": "auto",
+                          "axisSoftMax": 1,
+                          "axisSoftMin": 0,
+                          "barAlignment": 0,
+                          "drawStyle": "line",
+                          "fillOpacity": 0,
+                          "gradientMode": "none",
+                          "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                          },
+                          "lineInterpolation": "smooth",
+                          "lineStyle": {
+                            "fill": "solid"
+                          },
+                          "lineWidth": 1,
+                          "pointSize": 3,
+                          "scaleDistribution": {
+                            "type": "linear"
+                          },
+                          "showPoints": "never",
+                          "spanNulls": false,
+                          "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                          },
+                          "thresholdsStyle": {
+                            "mode": "off"
+                          }
+                        },
+                        "decimals": 0,
+                        "mappings": [],
+                        "max": 2,
+                        "min": 0,
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            },
+                            {
+                              "color": "red",
+                              "value": 80
+                            }
+                          ]
+                        },
+                        "unit": "percentunit"
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 7,
+                      "w": 4,
+                      "x": 0,
+                      "y": 30
+                    },
+                    "id": 19,
+                    "options": {
+                      "legend": {
+                        "calcs": [],
+                        "displayMode": "hidden",
+                        "placement": "bottom"
+                      },
+                      "tooltip": {
+                        "mode": "single"
+                      }
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "sum(rate(server_view_query_result{deployment=\"$deployment\", result=\"served_from_cache\"}[1m])) / sum(rate(server_view_query_result{result=~\"served_from_cache|replay\"}[1m]))",
+                        "format": "time_series",
+                        "instant": false,
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "Cache Hit Rate",
+                    "transformations": [],
+                    "type": "timeseries"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "description": "Cache eviction runs asynchronously in Noria, but can impact the performance of queries that miss at the first layer of caches. This tracks the percent of the last 30 seconds that we spent performing evictions in the cache, reported as the maximum across all caches.",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "palette-classic"
+                        },
+                        "custom": {
+                          "axisLabel": "",
+                          "axisPlacement": "auto",
+                          "axisSoftMin": -1,
+                          "barAlignment": 0,
+                          "drawStyle": "line",
+                          "fillOpacity": 0,
+                          "gradientMode": "none",
+                          "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                          },
+                          "lineInterpolation": "linear",
+                          "lineStyle": {
+                            "fill": "solid"
+                          },
+                          "lineWidth": 1,
+                          "pointSize": 3,
+                          "scaleDistribution": {
+                            "type": "linear"
+                          },
+                          "showPoints": "never",
+                          "spanNulls": true,
+                          "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                          },
+                          "thresholdsStyle": {
+                            "mode": "off"
+                          }
+                        },
+                        "decimals": 0,
+                        "mappings": [],
+                        "max": 1,
+                        "min": 0,
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            },
+                            {
+                              "color": "red",
+                              "value": 80
+                            }
+                          ]
+                        },
+                        "unit": "percentunit"
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 7,
+                      "w": 4,
+                      "x": 4,
+                      "y": 30
+                    },
+                    "id": 18,
+                    "options": {
+                      "legend": {
+                        "calcs": [],
+                        "displayMode": "hidden",
+                        "placement": "bottom"
+                      },
+                      "tooltip": {
+                        "mode": "single"
+                      }
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "max(increase(domain_eviction_time_us_sum{deployment=\"$deployment\"}[30s])) / 3000000",
+                        "format": "time_series",
+                        "instant": false,
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "Cache Eviction Time",
+                    "transformations": [],
+                    "type": "timeseries"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "palette-classic"
+                        },
+                        "custom": {
+                          "axisLabel": "",
+                          "axisPlacement": "auto",
+                          "barAlignment": 0,
+                          "drawStyle": "line",
+                          "fillOpacity": 0,
+                          "gradientMode": "none",
+                          "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                          },
+                          "lineInterpolation": "linear",
+                          "lineStyle": {
+                            "fill": "solid"
+                          },
+                          "lineWidth": 1,
+                          "pointSize": 4,
+                          "scaleDistribution": {
+                            "type": "linear"
+                          },
+                          "showPoints": "never",
+                          "spanNulls": false,
+                          "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                          },
+                          "thresholdsStyle": {
+                            "mode": "off"
+                          }
+                        },
+                        "decimals": 0,
+                        "mappings": [],
+                        "max": 100,
+                        "min": 0,
+                        "noValue": "0",
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            },
+                            {
+                              "color": "red",
+                              "value": 80
+                            }
+                          ]
+                        }
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 7,
+                      "w": 6,
+                      "x": 8,
+                      "y": 30
+                    },
+                    "id": 15,
+                    "options": {
+                      "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom"
+                      },
+                      "tooltip": {
+                        "mode": "single"
+                      }
+                    },
+                    "pluginVersion": "8.2.2",
+                    "repeat": null,
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "sum by (instance, job) ((node_memory_MemTotal_bytes{deployment=\"$deployment\"}-node_memory_MemAvailable_bytes)/node_memory_MemTotal_bytes*100)",
+                        "format": "time_series",
+                        "instant": false,
+                        "interval": "",
+                        "intervalFactor": 1,
+                        "legendFormat": "{{job}} ({{instance}})",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "System Memory Utilization",
+                    "transformations": [],
+                    "type": "timeseries"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "palette-classic"
+                        },
+                        "custom": {
+                          "axisLabel": "",
+                          "axisPlacement": "auto",
+                          "barAlignment": 0,
+                          "drawStyle": "line",
+                          "fillOpacity": 0,
+                          "gradientMode": "none",
+                          "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                          },
+                          "lineInterpolation": "linear",
+                          "lineWidth": 1,
+                          "pointSize": 5,
+                          "scaleDistribution": {
+                            "type": "linear"
+                          },
+                          "showPoints": "never",
+                          "spanNulls": false,
+                          "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                          },
+                          "thresholdsStyle": {
+                            "mode": "off"
+                          }
+                        },
+                        "decimals": 0,
+                        "mappings": [],
+                        "max": 100,
+                        "min": 0,
+                        "noValue": "0",
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            },
+                            {
+                              "color": "red",
+                              "value": 80
+                            }
+                          ]
+                        }
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 7,
+                      "w": 6,
+                      "x": 14,
+                      "y": 30
+                    },
+                    "id": 16,
+                    "options": {
+                      "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom"
+                      },
+                      "tooltip": {
+                        "mode": "single"
+                      }
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "100 - (avg by (job, instance) (rate(node_cpu_seconds_total{deployment=\"$deployment\",mode=\"idle\"}[1m])) * 100)",
+                        "format": "time_series",
+                        "instant": false,
+                        "interval": "",
+                        "intervalFactor": 1,
+                        "legendFormat": "{{job}} ({{instance}})",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "System CPU Utilization",
+                    "transformations": [],
+                    "type": "timeseries"
+                  }
+                ],
+                "refresh": "5s",
+                "schemaVersion": 30,
+                "style": "dark",
+                "tags": [],
+                "templating": {
+                  "list": [
+                    {
+                      "allValue": null,
+                      "current": {
+                        "selected": false,
+                        "text": "solidus",
+                        "value": "solidus"
+                      },
+                      "datasource": "DS_PROMETHEUS",
+                      "definition": "label_values(deployment)",
+                      "description": null,
+                      "error": null,
+                      "hide": 0,
+                      "includeAll": false,
+                      "label": "Deployment",
+                      "multi": false,
+                      "name": "deployment",
+                      "options": [],
+                      "query": {
+                        "query": "label_values(deployment)",
+                        "refId": "StandardVariableQuery"
+                      },
+                      "refresh": 1,
+                      "regex": "",
+                      "skipUrlSync": false,
+                      "sort": 0,
+                      "type": "query"
+                    },
+                    {
+                      "allValue": null,
+                      "current": {
+                        "selected": false,
+                        "text": "SELECT `active_storage_variant_records`.* FROM `active_storage_variant_records` WHERE ((`active_storage_variant_records`.`blob_id` = '<anonymized>') AND (`active_storage_variant_records`.`variation_digest` = '<anonymized>')) LIMIT '<anonymized>'",
+                        "value": "SELECT `active_storage_variant_records`.* FROM `active_storage_variant_records` WHERE ((`active_storage_variant_records`.`blob_id` = '<anonymized>') AND (`active_storage_variant_records`.`variation_digest` = '<anonymized>')) LIMIT '<anonymized>'"
+                      },
+                      "datasource": "DS_PROMETHEUS",
+                      "definition": "label_values(query)",
+                      "description": null,
+                      "error": null,
+                      "hide": 0,
+                      "includeAll": false,
+                      "label": "Query Filter",
+                      "multi": false,
+                      "name": "queryfilter",
+                      "options": [],
+                      "query": {
+                        "query": "label_values(query)",
+                        "refId": "StandardVariableQuery"
+                      },
+                      "refresh": 2,
+                      "regex": "",
+                      "skipUrlSync": false,
+                      "sort": 0,
+                      "type": "query"
+                    }
+                  ]
+                },
+                "time": {
+                  "from": "now-3h",
+                  "to": "now"
+                },
+                "timepicker": {},
+                "timezone": "",
+                "title": "Specific Query",
+                "uid": "jAoEkfF7z",
+                "version": 2
+              }
+        # -- ReadySet External Dashboard
+        # @default -- Truncated due to length.
+        readysetExternal:
+          json: |
+              {
+                "annotations": {
+                  "list": [
+                    {
+                      "builtIn": 1,
+                      "datasource": "DS_PROMETHEUS",
+                      "enable": true,
+                      "hide": true,
+                      "iconColor": "rgba(0, 211, 255, 1)",
+                      "name": "Annotations & Alerts",
+                      "target": {
+                        "limit": 100,
+                        "matchAny": false,
+                        "tags": [],
+                        "type": "dashboard"
+                      },
+                      "type": "dashboard"
+                    }
+                  ]
+                },
+                "editable": true,
+                "gnetId": null,
+                "graphTooltip": 0,
+                "id": 1,
+                "iteration": 1637726518924,
+                "links": [],
+                "panels": [
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "description": "The number of queries per second executed against ReadySet split by the ReadySet and MySQL backends.",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "thresholds"
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "yellow",
+                              "value": null
+                            },
+                            {
+                              "color": "green",
+                              "value": 1
+                            }
+                          ]
+                        }
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 5,
+                      "w": 14,
+                      "x": 0,
+                      "y": 0
+                    },
+                    "id": 2,
+                    "options": {
+                      "colorMode": "value",
+                      "graphMode": "area",
+                      "justifyMode": "auto",
+                      "orientation": "auto",
+                      "reduceOptions": {
+                        "calcs": [
+                          "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                      },
+                      "text": {},
+                      "textMode": "auto"
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "sum by (database_type) (rate(query_log_execution_time_count{deployment=\"$Deployment\"}[1m]))",
+                        "interval": "",
+                        "legendFormat": "{{database_type}}",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "Queries Per Second (1 minute intervals)",
+                    "type": "stat"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "description": "",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "thresholds"
+                        },
+                        "decimals": 0,
+                        "mappings": [
+                          {
+                            "options": {
+                              "0": {
+                                "color": "green",
+                                "index": 0,
+                                "text": "No"
+                              },
+                              "1": {
+                                "color": "red",
+                                "index": 1,
+                                "text": "Yes"
+                              }
+                            },
+                            "type": "value"
+                          }
+                        ],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            },
+                            {
+                              "color": "red",
+                              "value": 80
+                            }
+                          ]
+                        },
+                        "unit": "none"
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 3,
+                      "w": 3,
+                      "x": 14,
+                      "y": 0
+                    },
+                    "id": 20,
+                    "options": {
+                      "colorMode": "value",
+                      "graphMode": "area",
+                      "justifyMode": "auto",
+                      "orientation": "auto",
+                      "reduceOptions": {
+                        "calcs": [
+                          "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                      },
+                      "text": {},
+                      "textMode": "auto"
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "sum(replicator_snapshot_status{deployment=\"$Deployment\", status=\"started\"}) - sum(replicator_snapshot_status{deployment=\"$Deployment\", status=~\"successful|failed\"})",
+                        "format": "time_series",
+                        "instant": false,
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "Snapshot In Progress",
+                    "transformations": [],
+                    "type": "stat"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "description": "",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "thresholds"
+                        },
+                        "decimals": 0,
+                        "mappings": [
+                          {
+                            "options": {
+                              "0": {
+                                "color": "green",
+                                "index": 0,
+                                "text": "No"
+                              },
+                              "1": {
+                                "color": "red",
+                                "index": 1,
+                                "text": "Yes"
+                              }
+                            },
+                            "type": "value"
+                          }
+                        ],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            },
+                            {
+                              "color": "red",
+                              "value": 80
+                            }
+                          ]
+                        },
+                        "unit": "none"
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 3,
+                      "w": 3,
+                      "x": 17,
+                      "y": 0
+                    },
+                    "id": 21,
+                    "options": {
+                      "colorMode": "value",
+                      "graphMode": "area",
+                      "justifyMode": "auto",
+                      "orientation": "auto",
+                      "reduceOptions": {
+                        "calcs": [
+                          "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                      },
+                      "text": {},
+                      "textMode": "auto"
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "controller_migration_in_progress{deployment=\"$Deployment\"}",
+                        "format": "time_series",
+                        "instant": false,
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "Migration in Progress",
+                    "transformations": [],
+                    "type": "stat"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "thresholds"
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "red",
+                              "value": null
+                            },
+                            {
+                              "color": "green",
+                              "value": 1
+                            }
+                          ]
+                        }
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 6,
+                      "w": 3,
+                      "x": 14,
+                      "y": 3
+                    },
+                    "id": 9,
+                    "options": {
+                      "colorMode": "value",
+                      "graphMode": "area",
+                      "justifyMode": "auto",
+                      "orientation": "auto",
+                      "reduceOptions": {
+                        "calcs": [
+                          "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                      },
+                      "text": {},
+                      "textMode": "auto"
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "count(node_memory_MemTotal_bytes{deployment=\"$Deployment\",job=\"readyset-adapter\"}) or vector(0)",
+                        "instant": false,
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "ReadySet Adapters",
+                    "type": "stat"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "thresholds"
+                        },
+                        "mappings": [],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "red",
+                              "value": null
+                            },
+                            {
+                              "color": "green",
+                              "value": 1
+                            }
+                          ]
+                        }
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 6,
+                      "w": 3,
+                      "x": 17,
+                      "y": 3
+                    },
+                    "id": 10,
+                    "options": {
+                      "colorMode": "value",
+                      "graphMode": "area",
+                      "justifyMode": "auto",
+                      "orientation": "auto",
+                      "reduceOptions": {
+                        "calcs": [
+                          "lastNotNull"
+                        ],
+                        "fields": "",
+                        "values": false
+                      },
+                      "text": {},
+                      "textMode": "auto"
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "count(node_memory_MemTotal_bytes{deployment=\"$Deployment\",job=\"readyset-server\"}) or vector(0)",
+                        "instant": false,
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "ReadySet Servers",
+                    "type": "stat"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "description": "The end-to-end read latencies of queries executed against the ReadySet and MySQL backends at the median, 50th and 90th percentiles.",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "thresholds"
+                        },
+                        "custom": {
+                          "align": "auto",
+                          "displayMode": "auto",
+                          "filterable": false
+                        },
+                        "decimals": 4,
+                        "mappings": [],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            },
+                            {
+                              "color": "red",
+                              "value": 80
+                            }
+                          ]
+                        },
+                        "unit": "ms"
+                      },
+                      "overrides": [
+                        {
+                          "matcher": {
+                            "id": "byName",
+                            "options": "Noria 50p"
+                          },
+                          "properties": [
+                            {
+                              "id": "custom.width",
+                              "value": 90
+                            }
+                          ]
+                        },
+                        {
+                          "matcher": {
+                            "id": "byName",
+                            "options": "MySQL 50p"
+                          },
+                          "properties": [
+                            {
+                              "id": "custom.width",
+                              "value": 90
+                            }
+                          ]
+                        },
+                        {
+                          "matcher": {
+                            "id": "byName",
+                            "options": "Noria 90p"
+                          },
+                          "properties": [
+                            {
+                              "id": "custom.width",
+                              "value": 90
+                            }
+                          ]
+                        },
+                        {
+                          "matcher": {
+                            "id": "byName",
+                            "options": "MySQL 90p"
+                          },
+                          "properties": [
+                            {
+                              "id": "custom.width",
+                              "value": 90
+                            }
+                          ]
+                        },
+                        {
+                          "matcher": {
+                            "id": "byName",
+                            "options": "Noria 99p"
+                          },
+                          "properties": [
+                            {
+                              "id": "custom.width",
+                              "value": 90
+                            }
+                          ]
+                        },
+                        {
+                          "matcher": {
+                            "id": "byName",
+                            "options": "MySQL 99p"
+                          },
+                          "properties": [
+                            {
+                              "id": "custom.width",
+                              "value": 90
+                            }
+                          ]
+                        },
+                        {
+                          "matcher": {
+                            "id": "byName",
+                            "options": "Query Text"
+                          },
+                          "properties": [
+                            {
+                              "id": "custom.width",
+                              "value": null
+                            }
+                          ]
+                        },
+                        {
+                          "matcher": {
+                            "id": "byName",
+                            "options": "ReadySet 90p"
+                          },
+                          "properties": [
+                            {
+                              "id": "custom.width",
+                              "value": 118
+                            }
+                          ]
+                        },
+                        {
+                          "matcher": {
+                            "id": "byName",
+                            "options": "ReadySet 99p"
+                          },
+                          "properties": [
+                            {
+                              "id": "custom.width",
+                              "value": 124
+                            }
+                          ]
+                        },
+                        {
+                          "matcher": {
+                            "id": "byName",
+                            "options": "ReadySet Count"
+                          },
+                          "properties": [
+                            {
+                              "id": "custom.width",
+                              "value": 134
+                            },
+                            {
+                              "id": "decimals",
+                              "value": 0
+                            },
+                            {
+                              "id": "unit",
+                              "value": "none"
+                            }
+                          ]
+                        },
+                        {
+                          "matcher": {
+                            "id": "byName",
+                            "options": "MySQL Count"
+                          },
+                          "properties": [
+                            {
+                              "id": "custom.width",
+                              "value": 117
+                            },
+                            {
+                              "id": "decimals",
+                              "value": 0
+                            },
+                            {
+                              "id": "unit",
+                              "value": "none"
+                            }
+                          ]
+                        },
+                        {
+                          "matcher": {
+                            "id": "byName",
+                            "options": "ReadySet 50p"
+                          },
+                          "properties": [
+                            {
+                              "id": "custom.width",
+                              "value": 109
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    "gridPos": {
+                      "h": 8,
+                      "w": 14,
+                      "x": 0,
+                      "y": 5
+                    },
+                    "id": 4,
+                    "options": {
+                      "frameIndex": 0,
+                      "showHeader": true,
+                      "sortBy": []
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "avg by (query) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.5\", event_type=~\"query|execute\"}) *1000",
+                        "format": "table",
+                        "instant": true,
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      },
+                      {
+                        "exemplar": true,
+                        "expr": "avg by (query) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.9\", event_type=~\"query|execute\"}) *1000  ",
+                        "format": "table",
+                        "hide": false,
+                        "instant": true,
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "C"
+                      },
+                      {
+                        "exemplar": true,
+                        "expr": "avg by (query) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.99\", event_type=~\"query|execute\"}) *1000",
+                        "format": "table",
+                        "hide": false,
+                        "instant": true,
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "E"
+                      },
+                      {
+                        "exemplar": true,
+                        "expr": "sum by (query) (query_log_execution_time_count{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", event_type=~\"query|execute\"})",
+                        "format": "table",
+                        "hide": false,
+                        "instant": true,
+                        "interval": "",
+                        "legendFormat": "",
+                        "refId": "B"
+                      },
+                      {
+                        "exemplar": true,
+                        "expr": "sum by (query) (query_log_execution_time_count{deployment=\"$Deployment\",database_type=\"mysql\",query!=\"\", event_type=~\"query|execute\"})",
+                        "format": "table",
+                        "hide": false,
+                        "instant": true,
+                        "interval": "",
+                        "legendFormat": "",
+                        "refId": "D"
+                      }
+                    ],
+                    "title": "Query Log",
+                    "transformations": [
+                      {
+                        "id": "merge",
+                        "options": {}
+                      },
+                      {
+                        "id": "organize",
+                        "options": {
+                          "excludeByName": {
+                            "Time": true,
+                            "deployment": true,
+                            "instance": true,
+                            "job": true
+                          },
+                          "indexByName": {
+                            "Time": 0,
+                            "Value #A": 4,
+                            "Value #B": 2,
+                            "Value #C": 5,
+                            "Value #D": 3,
+                            "Value #E": 6,
+                            "query": 1
+                          },
+                          "renameByName": {
+                            "Value #50p Noria": "Noria 50p",
+                            "Value #90p Noria": "Noria 90p",
+                            "Value #99p Noria": "Noria 99p",
+                            "Value #A": "ReadySet 50p",
+                            "Value #B": "ReadySet Count",
+                            "Value #C": "ReadySet 90p",
+                            "Value #D": "MySQL Count",
+                            "Value #E": "ReadySet 99p",
+                            "Value #F": "MySQL 99p",
+                            "query": "Query Text"
+                          }
+                        }
+                      },
+                      {
+                        "id": "sortBy",
+                        "options": {
+                          "fields": {},
+                          "sort": [
+                            {
+                              "field": "ReadySet 50p"
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    "type": "table"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "palette-classic"
+                        },
+                        "custom": {
+                          "axisLabel": "",
+                          "axisPlacement": "auto",
+                          "barAlignment": 0,
+                          "drawStyle": "line",
+                          "fillOpacity": 0,
+                          "gradientMode": "none",
+                          "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                          },
+                          "lineInterpolation": "linear",
+                          "lineWidth": 1,
+                          "pointSize": 5,
+                          "scaleDistribution": {
+                            "type": "linear"
+                          },
+                          "showPoints": "never",
+                          "spanNulls": false,
+                          "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                          },
+                          "thresholdsStyle": {
+                            "mode": "off"
+                          }
+                        },
+                        "decimals": 0,
+                        "mappings": [],
+                        "max": 100,
+                        "min": 0,
+                        "noValue": "0",
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            },
+                            {
+                              "color": "red",
+                              "value": 80
+                            }
+                          ]
+                        }
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 7,
+                      "w": 6,
+                      "x": 14,
+                      "y": 9
+                    },
+                    "id": 16,
+                    "options": {
+                      "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom"
+                      },
+                      "tooltip": {
+                        "mode": "single"
+                      }
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "100 - (avg by (job, instance) (rate(node_cpu_seconds_total{deployment=\"$Deployment\",mode=\"idle\"}[1m])) * 100)",
+                        "format": "time_series",
+                        "instant": false,
+                        "interval": "",
+                        "intervalFactor": 1,
+                        "legendFormat": "{{job}} ({{instance}})",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "System CPU Utilization",
+                    "transformations": [],
+                    "type": "timeseries"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "description": "This measures the query end-to-end latency from the time the request is received by ReadySet.",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "palette-classic"
+                        },
+                        "custom": {
+                          "axisLabel": "",
+                          "axisPlacement": "auto",
+                          "axisSoftMax": 1,
+                          "axisSoftMin": 0,
+                          "barAlignment": 0,
+                          "drawStyle": "line",
+                          "fillOpacity": 0,
+                          "gradientMode": "none",
+                          "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                          },
+                          "lineInterpolation": "linear",
+                          "lineStyle": {
+                            "fill": "solid"
+                          },
+                          "lineWidth": 1,
+                          "pointSize": 3,
+                          "scaleDistribution": {
+                            "type": "linear"
+                          },
+                          "showPoints": "never",
+                          "spanNulls": true,
+                          "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                          },
+                          "thresholdsStyle": {
+                            "mode": "off"
+                          }
+                        },
+                        "decimals": 0,
+                        "mappings": [],
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            },
+                            {
+                              "color": "red",
+                              "value": 80
+                            }
+                          ]
+                        },
+                        "unit": "ms"
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 7,
+                      "w": 6,
+                      "x": 0,
+                      "y": 13
+                    },
+                    "id": 17,
+                    "options": {
+                      "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom"
+                      },
+                      "tooltip": {
+                        "mode": "single"
+                      }
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "query_log_execution_time{quantile=~\"0.5|0.9|0.99\",database_type=\"noria\",deployment=\"$Deployment\",query=\"${QueryFilter:raw}\"} * 1000",
+                        "format": "time_series",
+                        "instant": false,
+                        "interval": "",
+                        "legendFormat": "{{quantile}}",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "Query Latency",
+                    "transformations": [],
+                    "type": "timeseries"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "description": "The cache hit rate observed at the first layer of ReadySet caches. In the absence of queries this graph shows a cache hit rate of 0%.",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "palette-classic"
+                        },
+                        "custom": {
+                          "axisLabel": "",
+                          "axisPlacement": "auto",
+                          "axisSoftMax": 1,
+                          "axisSoftMin": 0,
+                          "barAlignment": 0,
+                          "drawStyle": "line",
+                          "fillOpacity": 0,
+                          "gradientMode": "none",
+                          "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                          },
+                          "lineInterpolation": "smooth",
+                          "lineStyle": {
+                            "fill": "solid"
+                          },
+                          "lineWidth": 1,
+                          "pointSize": 3,
+                          "scaleDistribution": {
+                            "type": "linear"
+                          },
+                          "showPoints": "never",
+                          "spanNulls": false,
+                          "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                          },
+                          "thresholdsStyle": {
+                            "mode": "off"
+                          }
+                        },
+                        "decimals": 0,
+                        "mappings": [],
+                        "max": 2,
+                        "min": 0,
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            },
+                            {
+                              "color": "red",
+                              "value": 80
+                            }
+                          ]
+                        },
+                        "unit": "percentunit"
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 7,
+                      "w": 4,
+                      "x": 6,
+                      "y": 13
+                    },
+                    "id": 19,
+                    "options": {
+                      "legend": {
+                        "calcs": [],
+                        "displayMode": "hidden",
+                        "placement": "bottom"
+                      },
+                      "tooltip": {
+                        "mode": "single"
+                      }
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "sum(rate(server_view_query_result{deployment=\"$Deployment\", result=\"served_from_cache\"}[1m])) / sum(rate(server_view_query_result{result=~\"served_from_cache|replay\"}[1m]))",
+                        "format": "time_series",
+                        "instant": false,
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "Cache Hit Rate",
+                    "transformations": [],
+                    "type": "timeseries"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "description": "Cache eviction runs asynchronously in Noria, but can impact the performance of queries that miss at the first layer of caches. This tracks the percent of the last 30 seconds that we spent performing evictions in the cache, reported as the maximum across all caches.",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "palette-classic"
+                        },
+                        "custom": {
+                          "axisLabel": "",
+                          "axisPlacement": "auto",
+                          "axisSoftMin": -1,
+                          "barAlignment": 0,
+                          "drawStyle": "line",
+                          "fillOpacity": 0,
+                          "gradientMode": "none",
+                          "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                          },
+                          "lineInterpolation": "linear",
+                          "lineStyle": {
+                            "fill": "solid"
+                          },
+                          "lineWidth": 1,
+                          "pointSize": 3,
+                          "scaleDistribution": {
+                            "type": "linear"
+                          },
+                          "showPoints": "never",
+                          "spanNulls": true,
+                          "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                          },
+                          "thresholdsStyle": {
+                            "mode": "off"
+                          }
+                        },
+                        "decimals": 0,
+                        "mappings": [],
+                        "max": 1,
+                        "min": 0,
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            },
+                            {
+                              "color": "red",
+                              "value": 80
+                            }
+                          ]
+                        },
+                        "unit": "percentunit"
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 7,
+                      "w": 4,
+                      "x": 10,
+                      "y": 13
+                    },
+                    "id": 18,
+                    "options": {
+                      "legend": {
+                        "calcs": [],
+                        "displayMode": "hidden",
+                        "placement": "bottom"
+                      },
+                      "tooltip": {
+                        "mode": "single"
+                      }
+                    },
+                    "pluginVersion": "8.0.6",
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "max(increase(domain_eviction_time_us_sum{deployment=\"$Deployment\"}[30s])) / 3000000",
+                        "format": "time_series",
+                        "instant": false,
+                        "interval": "",
+                        "legendFormat": "",
+                        "queryType": "randomWalk",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "Cache Eviction Time",
+                    "transformations": [],
+                    "type": "timeseries"
+                  },
+                  {
+                    "datasource": "DS_PROMETHEUS",
+                    "fieldConfig": {
+                      "defaults": {
+                        "color": {
+                          "mode": "palette-classic"
+                        },
+                        "custom": {
+                          "axisLabel": "",
+                          "axisPlacement": "auto",
+                          "barAlignment": 0,
+                          "drawStyle": "line",
+                          "fillOpacity": 0,
+                          "gradientMode": "none",
+                          "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                          },
+                          "lineInterpolation": "linear",
+                          "lineStyle": {
+                            "fill": "solid"
+                          },
+                          "lineWidth": 1,
+                          "pointSize": 4,
+                          "scaleDistribution": {
+                            "type": "linear"
+                          },
+                          "showPoints": "never",
+                          "spanNulls": false,
+                          "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                          },
+                          "thresholdsStyle": {
+                            "mode": "off"
+                          }
+                        },
+                        "decimals": 0,
+                        "mappings": [],
+                        "max": 100,
+                        "min": 0,
+                        "noValue": "0",
+                        "thresholds": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": null
+                            },
+                            {
+                              "color": "red",
+                              "value": 80
+                            }
+                          ]
+                        }
+                      },
+                      "overrides": []
+                    },
+                    "gridPos": {
+                      "h": 7,
+                      "w": 6,
+                      "x": 14,
+                      "y": 16
+                    },
+                    "id": 15,
+                    "options": {
+                      "legend": {
+                        "calcs": [],
+                        "displayMode": "list",
+                        "placement": "bottom"
+                      },
+                      "tooltip": {
+                        "mode": "single"
+                      }
+                    },
+                    "pluginVersion": "8.2.2",
+                    "repeat": null,
+                    "targets": [
+                      {
+                        "exemplar": true,
+                        "expr": "sum by (instance, job) ((node_memory_MemTotal_bytes{deployment=\"$Deployment\"}-node_memory_MemAvailable_bytes)/node_memory_MemTotal_bytes*100)",
+                        "format": "time_series",
+                        "instant": false,
+                        "interval": "",
+                        "intervalFactor": 1,
+                        "legendFormat": "{{job}} ({{instance}})",
+                        "refId": "A"
+                      }
+                    ],
+                    "title": "System Memory Utilization",
+                    "transformations": [],
+                    "type": "timeseries"
+                  }
+                ],
+                "refresh": "5s",
+                "schemaVersion": 30,
+                "style": "dark",
+                "tags": [],
+                "templating": {
+                  "list": [
+                    {
+                      "allValue": null,
+                      "datasource": "DS_PROMETHEUS",
+                      "definition": "label_values(deployment)",
+                      "description": null,
+                      "error": null,
+                      "hide": 0,
+                      "includeAll": false,
+                      "label": null,
+                      "multi": false,
+                      "name": "Deployment",
+                      "options": [],
+                      "query": {
+                        "query": "label_values(deployment)",
+                        "refId": "StandardVariableQuery"
+                      },
+                      "refresh": 1,
+                      "regex": "",
+                      "skipUrlSync": false,
+                      "sort": 0,
+                      "type": "query"
+                    },
+                    {
+                      "allValue": null,
+                      "datasource": "DS_PROMETHEUS",
+                      "definition": "label_values(query)",
+                      "description": null,
+                      "error": null,
+                      "hide": 0,
+                      "includeAll": false,
+                      "label": "Query Filter",
+                      "multi": false,
+                      "name": "QueryFilter",
+                      "options": [],
+                      "query": {
+                        "query": "label_values(query)",
+                        "refId": "StandardVariableQuery"
+                      },
+                      "refresh": 2,
+                      "regex": "",
+                      "skipUrlSync": false,
+                      "sort": 0,
+                      "type": "query"
+                    }
+                  ]
+                },
+                "time": {
+                  "from": "now-3h",
+                  "to": "now"
+                },
+                "timepicker": {},
+                "timezone": "",
+                "title": "ReadySet Overview",
+                "uid": "SDFVdfv8b",
+                "version": 1
+              }
+
+    # -- ReadySet Grafana dashboard providers.
+    # @default -- Truncated due to length.
+    dashboardProviders:
+      dashboardproviders.yaml:
+        apiVersion: 1
+        providers:
+        - name: 'readyset'
+          orgId: 1
+          folder: 'ReadySet'
+          type: file
+          disableDeletion: true
+          editable: false
+          options:
+            path: /var/lib/grafana/dashboards/readyset
+
+    # -- Ingress configurations for accessing Grafana.
+    # @default -- Truncated due to length.
+    ingress:
+
+      ## -- Toggles creation of Grafana Ingress
+      enabled: false
+
+      ## -- IngressClassName for Grafana Ingress.
+      ## -- Should be provided if Ingress is enable.
+      # ingressClassName: nginx
+
+      ## -- Annotations for Grafana Ingress
+      annotations: {}
+        # kubernetes.io/ingress.class: nginx
+        # kubernetes.io/tls-acme: "true"
+
+      ## -- Labels to be added to the Ingress
+      labels: {}
+
+      ## -- Hostnames for ingress.
+      ## -- Must be provided if Ingress is enabled.
+      # hosts:
+      #   - grafana.domain.com
+      hosts: []
+
+      ## -- Path for Grafana ingress
+      path: /
+
+      ## -- TLS configuration for grafana Ingress
+      ## -- Secret must be manually created in the namespace
+      tls: []
+      # - secretName: grafana-general-tls
+      #   hosts:
+      #   - grafana.example.com
+
+  # -- Component scraping for the Kubernetes API server.
+  kubeApiServer:
+    # -- Toggles scraping for Kubernetes API server.
+    enabled: false
+
+  # -- Component scraping for Kubelet.
+  kubelet:
+    # -- Toggles scraping for Kubelet.
+    enabled: false
+
+  # -- Component scraping for the Kube Controller Manager.
+  kubeControllerManager:
+    # -- Toggles scraping of Kube Controller Manager.
+    enabled: false
+
+  # -- Component scraping for CoreDNS.
+  coreDns:
+    # -- Toggles scraping for CoreDNS.
+    enabled: false
+
+  # -- Component scraping for etcd.
+  kubeEtcd:
+    # -- Toggles scraping for etcd.
+    enabled: false
+
+  # -- Component scraping for kube scheduler.
+  kubeScheduler:
+    # -- Toggles scraping for kube scheduler.
+    enabled: false
+
+  # -- Component scraping for kube proxy.
+  kubeProxy:
+    # -- Toggles scraping for kube proxy.
+    enabled: false
+
+  # -- Component scraping for kube state metrics.
+  kubeStateMetrics:
+    # -- Toggles scraping of kube-state-metrics.
+    enabled: false
+
+  # -- Configuration for kube-state-metrics subchart.
+  kube-state-metrics:
+    # -- Toggles kube-state-metrics subchart.
+    # -- Not needed in this case.
+    enabled: false
+
+  # -- Node exporter can be disabled if daemonset already running on all nodes.
+  nodeExporter:
+    # -- Toggles node exporter DaemonSet
+    enabled: true
+
+  # -- Prometheus subchart configurations.
+  # @default -- Truncated due to length.
+  prometheus:
+
+
+    # -- Toggles deployment of Prometheus. Can be disabled if hosting your own Prometheus.
+    enabled: true
+
+    # -- Prometheus specifications for Operator consumption.
+    # Ref: https://github.com/prometheus-operator/prometheus-operator/blob/main/Documentation/api.md#prometheusspec
+    # @default -- Truncated due to length.
+    prometheusSpec:
+
+      # -- Ingress deployment specifications for Prometheus.
+      ingress:
+
+        # -- Toggles deployment of Ingress for Prometheus.
+        # -- Generally not needed for ReadySet.
+        enabled: false
+
+      # -- Resource requests and limits for the Prometheus server.
+      resources:
+
+        # -- Resource requests for Prometheus.
+        requests:
+          cpu: "500m"
+          memory: "1024Mi"
+
+      # -- Tolerations for Prometheus workloads.
+      tolerations: []
+
+      # -- Affinities for Prometheus pods.
+      affinity: {}
+
+      # -- Retention period for metrics shipped into Prometheus.
+      retention: "14d"
+
+      # -- Storage specification for Prometheus pods.
+      # @default -- Truncated due to length.
+      storageSpec:
+
+        # -- Volume claim template for Prometheus pods.
+        # @default -- Truncated due to length.
+        volumeClaimTemplate:
+          spec:
+            storageClassName: "gp2"
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 128Gi
+      externalLabels:
+        monitor: 'readyset'
+
+      # -- Prometheus scrape configurations for gathering metrics.
+      # @default -- Truncated due to length.
+      additionalScrapeConfigs:
+        - job_name: "prometheus"
+          static_configs:
+            - targets:
+              - -readysetmonitor-prometheus:9090
+              - vector-aggregator:9090
+          honor_labels: true
+
+      # -- External URL for Prometheus.
+      # -- If using an ingress, you may want to change this to the hostname of
+      # -- your choosing.
+      externalUrl: "http://readyset-monitor-prometheus:9090"

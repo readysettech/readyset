@@ -1,0 +1,3 @@
+{{- if .Values.readyset.server.enabled -}}
+{{ include "readyset.server.sts" (dict "root" . "Values" .Values "Chart" .Chart "Release" .Release "server" .Values.readyset.server ) }}
+{{- end -}}

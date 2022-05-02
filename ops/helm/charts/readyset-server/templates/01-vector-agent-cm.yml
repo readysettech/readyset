@@ -1,0 +1,3 @@
+{{ if .Values.readyset.vector.sidecar.configMaps.config.create -}}
+{{ include "readyset.vector.agent.cm" (dict "root" . "Values" .Values "Chart" .Chart "Release" .Release ) }}
+{{- end -}}

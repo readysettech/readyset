@@ -1,0 +1,1 @@
+{{ include "readyset.server.rbac" (dict "rbac" .Values.readyset.server.rbac "Release" .Release "global" .Values.global "Values" .Values) }}

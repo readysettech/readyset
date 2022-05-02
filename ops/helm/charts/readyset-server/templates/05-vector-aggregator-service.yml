@@ -1,0 +1,31 @@
+{{ if .Values.readyset.vector.aggregator.service.enabled -}}
+{{ with .Values.readyset.vector.aggregator }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ (split ":" (include "readyset.vector.agg.addr" (dict "releaseName" $.Release.Name "Values" $.Values)))._0 }}
+  {{- with .service.labels }}
+  labels:
+    {{- range $k, $v := . }}
+    {{ $k }}: {{ $v }}
+    {{- end }}
+    {{- include "readyset.generic.labels" (dict "releaseName" $.Release.Name "componentLabel" "vector" "Chart" $.Chart) | nindent 4 }}
+  {{- end }}
+  {{- with .service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ports:
+  {{- with .service.ports }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+  {{- include "readyset.chart.labels" (dict "releaseName" $.Release.Name "componentName" "vector") | nindent 6 }}
+  type: {{ .service.type }}
+  {{- with .service.topologyKeys }}
+  topologyKeys:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end -}}
+{{- end -}}

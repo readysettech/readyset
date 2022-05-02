@@ -1,0 +1,87 @@
+readyset:
+  common:
+    config:
+      # -- Name of the ReadySet deployment. Should be unique within the context of the chosen Consul cluster to avoid key collisions.
+      deploymentName: "myapplication-1"
+      # -- Number of server nodes in the cluster. Currently only supports 1 server.
+      quorum: 1
+      # -- Required to route view requests to specific regions
+      region: "us-east-2"
+      # -- The region where the ReadySet controller is hosted
+      primaryRegion: "us-east-2"
+      # -- Flag to instruct entrypoint script which adapter binary to use. Supported values: mysql, psql
+      engine: "mysql"
+      # -- Name of the CloudWatch log group that will contain ReadySet application logs
+      cwLogGroupName: "readyset-logs-1"
+    secrets:
+      # -- Kubernetes secret containing the original database connection string to your backend
+      replicationUrl:
+        secretName: "readyset-db-url"
+        urlSecretKey: "url"
+        userSecretKey: "username"
+        pwdSecretKey: "password"
+      # -- Kubernetes secret containing IAM credentials for Vector CloudWatch metric & log shipping
+      vectorIamCredentials:
+        secretName: "readyset-vector-creds"
+        accessKey: "aws_access_key_id"
+        secretKey: "aws_secret_access_key"
+  server:
+    resources:
+      requests:
+        memory: "24576Mi"
+        cpu: "3750m"
+    affinity: {}
+      # -- Highly recommended to use node affinity to target nodes with plenty of memory, in the
+      # -- Optimal AZ(s).
+      # nodeAffinity:
+      #   requiredDuringSchedulingIgnoredDuringExecution:
+      #     nodeSelectorTerms:
+      #     - matchExpressions:
+      #       - key: company.io/worker
+      #         operator: In
+      #         values:
+      #         - statefulsets
+    # -- Add keys to this map to set environment variables for Readyset server.
+    extraEnvironmentVars:
+      NORIA_MEMORY_BYTES: "0"
+
+  # -- ReadySet adapter configurations.
+  # -- Applications connect to it instead of the RDS instance directly.
+  adapter:
+
+    # -- Toggles deployment of ReadySet adapter deployment.
+    enabled: true
+
+    # -- Number of replicas for ReadySet adapter deployments.
+    replicas: 3
+
+    # -- Static environment variables applied to ReadySet adapter containers.
+    extraEnvironmentVars:
+      EXPLICIT_MIGRATIONS: 0
+      QUERY_LOG: 1
+
+    # -- Resource requests and limits for ReadySet adapters.
+    resources:
+      requests:
+        memory: "4096Mi"
+        cpu: "2000m"
+    service:
+      annotations:
+        # For internal AWS NLB (recommended if adapter access needed outside k8s):
+        # Ref: https://kubernetes-sigs.github.io/aws-load-balancer-controller/v2.1/guide/service/nlb_ip_mode/
+        service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+        service.beta.kubernetes.io/aws-load-balancer-type: "nlb-ip"
+        service.beta.kubernetes.io/aws-load-balancer-ip-address-type: "ipv4"
+        service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+
+monitoring:
+  prometheusOperator:
+    # -- Toggles deployment of Prometheus Operator.
+    # IMPORTANT: Disable if already running in the k8s cluster.
+    enabled: true
+
+  # Base values file: https://github.com/grafana/helm-charts/blob/main/charts/grafana/values.yaml
+  grafana:
+    # -- Toggles deployment of Grafana Subchart
+    enabled: true
+    adminPassword: "readyset-monitoring"

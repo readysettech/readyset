@@ -1,0 +1,44 @@
+{{ if .Values.readyset.vector.aggregator.enabled -}}
+{{ with .Values.readyset.vector.aggregator }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "readyset.vector.aggregator.name" (dict "releaseName" $.Release.Name "Values" $.Values) }}
+  {{- with .labels }}
+  labels:
+    {{- range $k, $v := . }}
+    {{ $k }}: {{ $v }}
+    {{- end }}
+  {{- end }}
+  {{- include "readyset.generic.labels" (dict "releaseName" $.Release.Name "componentLabel" "vector" "Chart" $.Chart) | nindent 4 }}
+spec:
+  replicas: {{ .replicas }}
+  selector:
+    matchLabels:
+  {{- include "readyset.chart.labels" (dict "releaseName" $.Release.Name "componentName" "vector") | nindent 6 }}
+  {{- with .updateStrategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  template:
+    metadata:
+      {{- if and .configMaps.config.create .rollWorkloadOnConfigChanges }}
+      annotations:
+        checksum/config: {{ include "readyset.vector.aggregator.cm" (dict "root" $ "Values" $.Values "Chart" $.Chart "Release" $.Release ) | sha256sum -}}
+      {{- end -}}
+      {{ if not .rollWorkloadOnConfigChanges }}
+      annotations: {{ if not .annotations }}{{ printf "{}" }}{{- end -}}
+      {{- end -}}
+      {{- with .annotations }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+      {{- with .labels }}
+      {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- include "readyset.chart.labels" (dict "releaseName" $.Release.Name "componentName" "vector") | nindent 8 }}
+    spec:
+{{- end -}}
+
+{{ include "readyset.vector.aggregator.pod" (dict "root" . "Values" . "aggregator" .Values.readyset.vector.aggregator $ $) | nindent 6}}
+{{- end -}}

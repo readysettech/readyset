@@ -1,0 +1,4 @@
+
+{{ if .Values.readyset.vector.aggregator.configMaps.config.create -}}
+{{ include "readyset.vector.aggregator.cm" (dict "root" . "Values" .Values "Chart" .Chart "Release" .Release ) }}
+{{- end -}}

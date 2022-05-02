@@ -1,0 +1,69 @@
+
+Thank you for installing {{ .Chart.Name }}! Your release is named {{ .Release.Name }}.
+
+To learn more about the release, try:
+
+  helm status {{ .Release.Name }}
+  helm get all {{ .Release.Name }}
+
+{{ if contains "LoadBalancer" .Values.readyset.adapter.service.type -}}
+
+******************************************************************
+*** PLEASE BE PATIENT: Service LoadBalancer Provisioning  ********
+******************************************************************
+
+It may take a few minutes for the LoadBalancer IP to be available.
+
+This is the load balancer that clients and applications run queries against.
+
+You can view the latest status of the service using:
+
+kubectl get svc --namespace {{ .Release.Namespace }} -w {{ template "readyset.adapter.service.name" (dict "root" . "service" .Values.readyset.adapter.service) }}
+
+To connect to ReadySet using mysql/psql:
+
+{{ $dbSecretName := .Values.readyset.common.secrets.replicationUrl.secretName }}
+{{- $ns := .Release.Namespace -}}
+export READYSET_USERNAME=$(kubectl get secret {{ .Values.readyset.common.secrets.replicationUrl.secretName }} -o=jsonpath='{.data.username}' --namespace {{ .Release.Namespace }} | base64 -d)
+export READYSET_HOST=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ template "readyset.adapter.service.name" (dict "root" . "service" .Values.readyset.adapter.service) }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+export READYSET_DB_NAME=$(kubectl get secret {{ $dbSecretName }} -o=jsonpath='{.data.url}' --namespace {{ $ns }} | base64 -d | sed $'s/\//\\\n/g' | tail -n 1 | sed $'s/\?/\\\n/g' | head -n 1)
+{{- if eq "mysql" .Values.readyset.common.config.engine }}
+{{ $port := 3306 }}
+export READYSET_ENDPOINT=${READYSET_HOST}:{{ $port }}
+mysql --host=${READYSET_HOST} --port={{ $port }} --user=${READYSET_USERNAME} -p
+{{ else }}
+{{- $port := 5432 }}
+export READYSET_ENDPOINT=${READYSET_HOST}:{{ $port }}
+export READYSET_PWD=$(kubectl get secret {{ $dbSecretName }} -o=jsonpath='{.data.password}' --namespace {{ $ns }} | base64 -d)
+PGPASSWORD="${READYSET_PWD}" psql --host="${READYSET_HOST}" --port={{ $port }} --user="${READYSET_USERNAME}" $READYSET_DB_NAME -c "show proxied queries;"
+{{- end -}}
+{{- end -}}
+
+{{ if .Values.monitoring.grafana.enabled }}
+
+==========================================
+Viewing ReadySet Dashboards in Grafana:
+==========================================
+
+-> Run command to initiate port forwarding
+
+  kubectl port-forward svc/{{ .Release.Name }}-grafana 8080:80 --namespace {{ .Release.Namespace }}
+
+ -> You may now reach Grafana at: http://localhost:8080
+
+{{- end -}}
+
+
+{{ if and .Values.monitoring.prometheus.enabled .Values.global.debugModeEnabled }}
+
+==========================================
+Connecting to Prometheus:
+==========================================
+
+-> Run command to initiate port forwarding
+
+  kubectl port-forward svc/{{ .Release.Name }}-monitor-prometheus 9090:9090 --namespace {{ .Release.Namespace }}
+
+-> You may now connect to the Prometheus instance via localhost:9090
+
+{{- end -}}
