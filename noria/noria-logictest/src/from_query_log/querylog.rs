@@ -90,10 +90,8 @@ impl ReplaceLiteralsWithPlaceholders for SelectStatement {
         if let Some(expr) = self.where_clause.as_mut() {
             values.append(&mut expr.replace_literals());
         }
-        if let Some(clause) = self.group_by.as_mut() {
-            if let Some(having) = clause.having.as_mut() {
-                values.append(&mut having.replace_literals());
-            }
+        if let Some(having) = self.having.as_mut() {
+            values.append(&mut having.replace_literals());
         }
         if let Some(order) = self.order.as_mut() {
             for (expr, _) in order.order_by.iter_mut() {
