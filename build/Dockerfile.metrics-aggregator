@@ -21,7 +21,7 @@ FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/ubuntu:20.04
 RUN set -eux; \
     apt-get update;\
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        curl=7.68.0-1ubuntu2.7; \
+        curl=7.68.0-1ubuntu2.10; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /tmp/readyset/target/*/metrics-aggregator /usr/local/bin/metrics-aggregator
