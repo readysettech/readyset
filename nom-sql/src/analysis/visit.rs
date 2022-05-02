@@ -131,6 +131,10 @@ pub trait Visitor<'ast>: Sized {
         walk_group_by_clause(self, group_by)
     }
 
+    fn visit_having_clause(&mut self, expression: &'ast mut Expression) -> Result<(), Self::Error> {
+        self.visit_expression(expression)
+    }
+
     fn visit_order_clause(&mut self, order: &'ast mut OrderClause) -> Result<(), Self::Error> {
         walk_order_clause(self, order)
     }
@@ -293,9 +297,6 @@ pub fn walk_group_by_clause<'ast, V: Visitor<'ast>>(
     for column in &mut group_by_clause.columns {
         visitor.visit_column(column)?;
     }
-    for expr in &mut group_by_clause.having {
-        visitor.visit_expression(expr)?;
-    }
     Ok(())
 }
 
@@ -338,6 +339,9 @@ pub fn walk_select_statement<'ast, V: Visitor<'ast>>(
     }
     if let Some(where_clause) = &mut select_statement.where_clause {
         visitor.visit_where_clause(where_clause)?;
+    }
+    if let Some(having_clause) = &mut select_statement.having {
+        visitor.visit_having_clause(having_clause)?;
     }
     if let Some(group_by_clause) = &mut select_statement.group_by {
         visitor.visit_group_by_clause(group_by_clause)?;

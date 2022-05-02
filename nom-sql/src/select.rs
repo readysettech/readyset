@@ -24,7 +24,6 @@ use crate::{Column, Dialect, Expression, FunctionExpression, Literal, SqlIdentif
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Default, Serialize, Deserialize)]
 pub struct GroupByClause {
     pub columns: Vec<Column>,
-    pub having: Option<Expression>,
 }
 
 impl fmt::Display for GroupByClause {
@@ -39,9 +38,6 @@ impl fmt::Display for GroupByClause {
                 .collect::<Vec<_>>()
                 .join(", ")
         )?;
-        if let Some(ref having) = self.having {
-            write!(f, " HAVING {}", having)?;
-        }
         Ok(())
     }
 }
@@ -99,6 +95,7 @@ pub struct SelectStatement {
     pub join: Vec<JoinClause>,
     pub where_clause: Option<Expression>,
     pub group_by: Option<GroupByClause>,
+    pub having: Option<Expression>,
     pub order: Option<OrderClause>,
     pub limit: Option<LimitClause>,
 }
@@ -167,6 +164,9 @@ impl fmt::Display for SelectStatement {
         if let Some(ref group_by) = self.group_by {
             write!(f, " {}", group_by)?;
         }
+        if let Some(ref having) = self.having {
+            write!(f, " HAVING {}", having)?;
+        }
         if let Some(ref order) = self.order {
             write!(f, " {}", order)?;
         }
@@ -179,31 +179,25 @@ impl fmt::Display for SelectStatement {
 
 fn having_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
     move |i| {
-        let (remaining_input, (_, _, _, expr)) = tuple((
-            whitespace0,
-            tag_no_case("having"),
-            whitespace1,
-            expression(dialect),
-        ))(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = tag_no_case("having")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, expr) = expression(dialect)(i)?;
 
-        Ok((remaining_input, expr))
+        Ok((i, expr))
     }
 }
 
 // Parse GROUP BY clause
 pub fn group_by_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], GroupByClause> {
     move |i| {
-        let (remaining_input, (_, _, _, _, _, columns, having)) = tuple((
-            whitespace0,
-            tag_no_case("group"),
-            whitespace1,
-            tag_no_case("by"),
-            whitespace1,
-            field_list(dialect),
-            opt(having_clause(dialect)),
-        ))(i)?;
-
-        Ok((remaining_input, GroupByClause { columns, having }))
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = tag_no_case("group")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("by")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, columns) = field_list(dialect)(i)?;
+        Ok((i, GroupByClause { columns }))
     }
 }
 
@@ -475,10 +469,22 @@ pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Se
             let (i, extra_joins) = many0(join_clause(dialect))(i)?;
             let (i, where_clause) = opt(where_clause(dialect))(i)?;
             let (i, group_by) = opt(group_by_clause(dialect))(i)?;
+            let (i, having) = opt(having_clause(dialect))(i)?;
             let (i, order) = opt(order_clause(dialect))(i)?;
             let (i, limit) = opt(limit_clause(dialect))(i)?;
 
-            Ok((i, (from, extra_joins, where_clause, group_by, order, limit)))
+            Ok((
+                i,
+                (
+                    from,
+                    extra_joins,
+                    where_clause,
+                    having,
+                    group_by,
+                    order,
+                    limit,
+                ),
+            ))
         })(i)?;
 
         let mut result = SelectStatement {
@@ -488,7 +494,8 @@ pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Se
             ..Default::default()
         };
 
-        if let Some((from, extra_joins, where_clause, group_by, order, limit)) = from_clause {
+        if let Some((from, extra_joins, where_clause, having, group_by, order, limit)) = from_clause
+        {
             let (tables, mut join) = from
                 .into_tables_and_joins()
                 .map_err(|_| nom::Err::Error(nom::error::Error::new(i, ErrorKind::Tag)))?;
@@ -499,6 +506,7 @@ pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Se
             result.join = join;
             result.where_clause = where_clause;
             result.group_by = group_by;
+            result.having = having;
             result.order = order;
             result.limit = limit;
         }
@@ -959,7 +967,6 @@ mod tests {
             fields: vec![FieldDefinitionExpression::from(Expression::Call(agg_expr))],
             group_by: Some(GroupByClause {
                 columns: vec![Column::from("aid")],
-                having: None,
             }),
             ..Default::default()
         };
@@ -981,7 +988,6 @@ mod tests {
             fields: vec![FieldDefinitionExpression::from(Expression::Call(agg_expr))],
             group_by: Some(GroupByClause {
                 columns: vec![Column::from("aid")],
-                having: None,
             }),
             ..Default::default()
         };
@@ -1013,7 +1019,6 @@ mod tests {
             fields: vec![FieldDefinitionExpression::from(Expression::Call(agg_expr))],
             group_by: Some(GroupByClause {
                 columns: vec![Column::from("aid")],
-                having: None,
             }),
             ..Default::default()
         };
@@ -1044,7 +1049,6 @@ mod tests {
             fields: vec![FieldDefinitionExpression::from(Expression::Call(agg_expr))],
             group_by: Some(GroupByClause {
                 columns: vec![Column::from("aid")],
-                having: None,
             }),
             ..Default::default()
         };
@@ -1076,7 +1080,6 @@ mod tests {
             fields: vec![FieldDefinitionExpression::from(Expression::Call(agg_expr))],
             group_by: Some(GroupByClause {
                 columns: vec![Column::from("aid")],
-                having: None,
             }),
             ..Default::default()
         };
@@ -1122,7 +1125,6 @@ mod tests {
             }],
             group_by: Some(GroupByClause {
                 columns: vec![Column::from("votes.comment_id")],
-                having: None,
             }),
             ..Default::default()
         };
@@ -1594,6 +1596,27 @@ mod tests {
         assert_eq!(
             res,
             "WITH `foo` AS (SELECT `x` FROM `t`) SELECT `x` FROM `foo`"
+        );
+    }
+
+    #[test]
+    fn bare_having() {
+        let res = test_parse!(
+            selection(Dialect::MySQL),
+            b"select x, count(*) from t having count(*) > 1"
+        );
+        assert_eq!(
+            res.having,
+            Some(Expression::BinaryOp {
+                lhs: Box::new(Expression::Call(FunctionExpression::CountStar)),
+                op: BinaryOperator::Greater,
+                rhs: Box::new(Expression::Literal(1.into()))
+            })
+        );
+        let stringified = res.to_string();
+        assert_eq!(
+            stringified,
+            "SELECT `x`, count(*) FROM `t` HAVING (count(*) > 1)"
         );
     }
 

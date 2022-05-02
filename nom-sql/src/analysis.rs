@@ -334,7 +334,7 @@ impl SelectStatement {
                 JoinConstraint::Empty => None,
             }))
             .chain(&self.where_clause)
-            .chain(self.group_by.iter().flat_map(|gbc| &gbc.having))
+            .chain(&self.having)
             .chain(
                 self.order
                     .iter()
