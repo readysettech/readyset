@@ -103,6 +103,11 @@ struct Options {
     /// Directory to store state between runs. Defaults to `$XDG_STATE_HOME/readyset`.
     state_directory: Option<PathBuf>,
 
+    /// Whether to use the full installer or not. Defaults to false. In the case that the full
+    /// installer is not used, we default to docker-compose.
+    #[clap(short, long)]
+    full: bool,
+
     #[clap(subcommand)]
     subcommand: Option<Subcommand>,
 }
@@ -2438,7 +2443,8 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    let deployment = deployment::create_or_load_existing(options.state_directory()?).await?;
+    let deployment =
+        deployment::create_or_load_existing(options.state_directory()?, options.full).await?;
     let mut installer = Installer::new(options, deployment);
 
     installer.run().await

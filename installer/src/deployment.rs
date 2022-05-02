@@ -537,7 +537,7 @@ impl Deployment {
     }
 }
 
-fn prompt_for_and_create_deployment() -> Result<Deployment> {
+fn prompt_for_and_create_deployment(full: bool) -> Result<Deployment> {
     let db_type = Engine::select(
         "ReadySet supports both the MySQL or Postgres wire protocols, select which one to use.\nChoose backing database:",
     )?;
@@ -545,20 +545,27 @@ fn prompt_for_and_create_deployment() -> Result<Deployment> {
     let deployment_name: String = input()
         .with_prompt("ReadySet deployment name")
         .interact_text()?;
-    match select()
-        .with_prompt("How would you like to deploy ReadySet?")
-        .items(&["[local] Docker Compose", "[remote] AWS Cloudformation"])
-        .interact()?
-    {
-        0 => Ok(DockerComposeDeployment::new_deployment(
+    if full {
+        match select()
+            .with_prompt("How would you like to deploy ReadySet?")
+            .items(&["[local] Docker Compose", "[remote] AWS Cloudformation"])
+            .interact()?
+        {
+            0 => Ok(DockerComposeDeployment::new_deployment(
+                deployment_name,
+                db_type,
+            )),
+            1 => Ok(CloudformationDeployment::new_deployment(
+                deployment_name,
+                db_type,
+            )),
+            _ => bail!("Must choose a destination to deploy ReadySet to"),
+        }
+    } else {
+        Ok(DockerComposeDeployment::new_deployment(
             deployment_name,
             db_type,
-        )),
-        1 => Ok(CloudformationDeployment::new_deployment(
-            deployment_name,
-            db_type,
-        )),
-        _ => bail!("Must choose a destination to deploy ReadySet to"),
+        ))
     }
 }
 
@@ -593,7 +600,7 @@ where
         .ok_or_else(|| anyhow!("No deployment selected"))
 }
 
-pub(crate) async fn create_or_load_existing<P>(state_dir: P) -> Result<Deployment>
+pub(crate) async fn create_or_load_existing<P>(state_dir: P, full: bool) -> Result<Deployment>
 where
     P: AsRef<Path>,
 {
@@ -601,7 +608,7 @@ where
     let deployment = match deployments.as_slice() {
         [] => {
             println!("Enter a name for your ReadySet deployment.");
-            Some(prompt_for_and_create_deployment()?)
+            Some(prompt_for_and_create_deployment(full)?)
         }
         [deployment] => {
             println!(
@@ -643,7 +650,7 @@ where
         Ok(deployment)
     } else {
         println!("\nOk, we'll create a new deployment\n");
-        prompt_for_and_create_deployment()
+        prompt_for_and_create_deployment(full)
     }
 }
 
