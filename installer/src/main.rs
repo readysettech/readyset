@@ -250,13 +250,20 @@ impl Installer {
     }
 
     pub async fn check_docker_compose_version(&mut self) -> Result<()> {
-        let version_output = Command::new("docker-compose")
+        let mut version_output = Command::new("docker-compose")
             .args(["--version"])
             .output()
             .await?;
 
         if !version_output.status.success() {
-            bail!("Please install Docker Compose before continuing.");
+            version_output = Command::new("docker")
+                .args(["compose", "version"])
+                .output()
+                .await?;
+
+            if !version_output.status.success() {
+                bail!("Please install Docker Compose before continuing.");
+            }
         }
 
         Ok(())
@@ -443,12 +450,18 @@ impl Installer {
         self.create_grafana_dashboards().await?;
 
         println!("Deploying with Docker Compose now");
-        let status = Command::new("docker-compose")
+        let mut status = Command::new("docker-compose")
             .args(["-f", path_str, "up", "-d"])
             .status()
             .await?;
         if !status.success() {
-            bail!("Command exited with {}", status);
+            status = Command::new("docker")
+                .args(["compose", "-f", path_str, "up", "-d"])
+                .status()
+                .await?;
+            if !status.success() {
+                bail!("Command exited with {}", status);
+            }
         }
 
         self.deployment.status = DeploymentStatus::Complete;
