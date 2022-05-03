@@ -52,6 +52,9 @@ services:
       interval: 10s
       timeout: 10s
       retries: 2
+    depends_on:
+      postgres:
+        condition: service_healthy
   prometheus:
     image: prom/prometheus
     volumes:

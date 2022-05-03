@@ -48,6 +48,9 @@ services:
       timeout: 10s
       retries: 2
       start_period: 5s
+    depends_on:
+      mysql:
+        condition: service_healthy
   prometheus:
     image: prom/prometheus
     volumes:
