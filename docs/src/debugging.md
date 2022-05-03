@@ -185,7 +185,8 @@ Some engineers create a script with the above command and put it on their
 In a dataflow graphviz diagram:
 
 - Each *box* is a [node][] in the dataflow graph
-- Each *different color* is a different [domain][]
+- Each [domain][] is a labeled gray box containing all the nodes within that
+  domain, and all the nodes within each domain have the same color
 - Edges in the graph represent connections between nodes, with writes flowing
   downward in the direction of the arrow
 - The nodes themselves have the following information:
