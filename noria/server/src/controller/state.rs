@@ -567,7 +567,12 @@ impl DataflowState {
     }
 
     pub(super) fn graphviz(&self, detailed: bool) -> String {
-        graphviz(&self.ingredients, detailed, &self.materializations)
+        graphviz(
+            &self.ingredients,
+            detailed,
+            &self.materializations,
+            Some(&self.domain_nodes),
+        )
     }
 
     /// List data-flow nodes, on a specific worker if `worker` specified.
@@ -1513,10 +1518,17 @@ unsafe impl Sync for DataflowStateReader {}
 // we are persisting the state to the [`Authority`].
 unsafe impl Sync for PersistableDataflowState {}
 
+/// Build a graphviz [dot][] representation of the graph, given information about its
+/// materializations and (optionally) the set of nodes within each domain.
+///
+/// For more information, see <http://docs/debugging.html#graphviz>
+///
+/// [dot]: https://graphviz.org/doc/info/lang.html
 pub(super) fn graphviz(
     graph: &Graph,
     detailed: bool,
     materializations: &Materializations,
+    domain_nodes: Option<&HashMap<DomainIndex, NodeMap<NodeIndex>>>,
 ) -> String {
     let mut s = String::new();
 
@@ -1535,6 +1547,8 @@ pub(super) fn graphviz(
 
     // global formatting.
     indentln(&mut s);
+    s.push_str("fontsize=10");
+    indentln(&mut s);
     if detailed {
         s.push_str("node [shape=record, fontsize=10]\n");
     } else {
@@ -1543,14 +1557,42 @@ pub(super) fn graphviz(
         s.push_str("node [ color=\"#0C6fA9\", shape=box, style=\"rounded,bold\" ]\n");
     }
 
-    // node descriptions.
+    let domain_for_node = domain_nodes
+        .iter()
+        .flat_map(|m| m.iter())
+        .flat_map(|(di, nodes)| nodes.iter().map(|(_, ni)| (*ni, *di)))
+        .collect::<HashMap<_, _>>();
+    let mut domains_to_nodes = HashMap::new();
     for index in graph.node_indices() {
-        #[allow(clippy::indexing_slicing)] // just got this out of the graph
-        let node = &graph[index];
-        let materialization_status = materializations.get_status(index, node);
-        indentln(&mut s);
-        s.push_str(&format!("n{}", index.index()));
-        s.push_str(sanitize(&node.describe(index, detailed, materialization_status)).as_ref());
+        let domain = domain_for_node.get(&index).copied();
+        domains_to_nodes
+            .entry(domain)
+            .or_insert_with(Vec::new)
+            .push(index);
+    }
+
+    // node descriptions.
+    for (domain, nodes) in domains_to_nodes {
+        if let Some(domain) = domain {
+            indentln(&mut s);
+            s.push_str(&format!(
+                "subgraph cluster_d{domain} {{\n    \
+                 label = \"Domain {domain}\";\n    \
+                 style=filled;\n    \
+                 color=grey97;\n    "
+            ))
+        }
+        for index in nodes {
+            #[allow(clippy::indexing_slicing)] // just got this out of the graph
+            let node = &graph[index];
+            let materialization_status = materializations.get_status(index, node);
+            indentln(&mut s);
+            s.push_str(&format!("n{}", index.index()));
+            s.push_str(sanitize(&node.describe(index, detailed, materialization_status)).as_ref());
+        }
+        if domain.is_some() {
+            s.push_str("\n    }\n");
+        }
     }
 
     // edges.

@@ -864,7 +864,7 @@ impl Materializations {
                                                 // should
                                                 // never happen.
                                                 // This code should probably just be taken out soon.
-                                                println!("{}", graphviz(graph, true, self));
+                                                println!("{}", graphviz(graph, true, self, None));
                                                 error!(
                                                     parent = %node.index(),
                                                     parent_index = ?parent_index,
@@ -900,7 +900,7 @@ impl Materializations {
             }
             while let Some(ni) = non_purge.pop() {
                 if graph[ni].purge {
-                    println!("{}", graphviz(graph, true, self));
+                    println!("{}", graphviz(graph, true, self, None));
                     internal!("found purge node {} above non-purge node", ni.index())
                 }
                 if self.have.contains_key(&ni) {
@@ -1038,7 +1038,7 @@ impl Materializations {
                             != self.have.get(&child).map(|i| i.len()).unwrap_or(0)
                         {
                             // node was previously materialized!
-                            println!("{}", graphviz(graph, true, self));
+                            println!("{}", graphviz(graph, true, self, None));
                             error!(
                                 node = %node.index(),
                                 child = %child.index(),
