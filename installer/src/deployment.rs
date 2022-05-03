@@ -12,13 +12,11 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 pub(crate) use MaybeExisting::{CreateNew, Existing};
 
 use crate::console::{confirm, input, password, select};
+use crate::constants::CFN_VERSION;
 
 /// Used in build to match this installer a set of CFN templates.
 const PAIRED_VERSION: Option<&str> = option_env!("READYSET_CFN_PREFIX");
 
-/// Used if there is no paired version specified.
-/// Hardcoded to the last public release template set.
-const FALLBACK_VERSION: &str = "release-2022-05-02";
 const S3_PREFIX: &str = "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/";
 const TEMPLATE_DIR: &str = "/readyset/templates/";
 
@@ -293,7 +291,7 @@ impl CloudformationDeployment {
     }
 
     pub fn cloudformation_template_url(&self, t: TemplateType) -> String {
-        let version_to_use = PAIRED_VERSION.unwrap_or(FALLBACK_VERSION);
+        let version_to_use = PAIRED_VERSION.unwrap_or(CFN_VERSION);
         let template_file = match t {
             TemplateType::VpcSupplemental => "readyset-vpc-supplemental-template.yaml",
             TemplateType::Consul => "readyset-authority-consul-template.yaml",
@@ -711,7 +709,7 @@ mod tests {
     #[test]
     fn cloudformation_template_url_fallback() {
         env::set_var("READYSET_CFN_PREFIX", "");
-        let expected = format!("https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/{}/readyset/templates/readyset-authority-consul-template.yaml", FALLBACK_VERSION);
+        let expected = format!("https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/{}/readyset/templates/readyset-authority-consul-template.yaml", CFN_VERSION);
         let deployment =
             CloudformationDeployment::new_deployment("cloudformation_template_url", Engine::MySQL);
         let actual = if let DeploymentData::Cloudformation(cfn) = deployment.inner {
@@ -728,7 +726,7 @@ mod tests {
             "READYSET_CFN_PREFIX",
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890",
         ); // valid hash characters
-        let expected = format!("https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/{}/readyset/templates/readyset-authority-consul-template.yaml", FALLBACK_VERSION);
+        let expected = format!("https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/{}/readyset/templates/readyset-authority-consul-template.yaml", CFN_VERSION);
         let deployment =
             CloudformationDeployment::new_deployment("cloudformation_template_url", Engine::MySQL);
         let actual = if let DeploymentData::Cloudformation(cfn) = deployment.inner {
