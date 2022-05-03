@@ -12,6 +12,7 @@ use {aws_sdk_cloudformation as cfn, aws_sdk_ec2 as ec2, aws_sdk_kms as kms, aws_
 use crate::console::{spinner, GREEN_CHECK};
 
 pub(crate) mod cloudformation;
+pub mod installer;
 pub(crate) mod subnets;
 
 /// Service quota code for "Maximum number of vCPUs assigned to the Running On-Demand Standard (A,

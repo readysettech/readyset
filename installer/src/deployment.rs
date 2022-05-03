@@ -93,7 +93,7 @@ impl<T> MaybeExisting<T> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub(crate) enum Engine {
+pub enum Engine {
     MySQL,
     PostgreSQL,
 }
