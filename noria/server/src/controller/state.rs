@@ -1494,16 +1494,21 @@ struct PersistableDataflowState {
 // Because [`DataflowStateReader`] holds a [`DataflowState`] instance, the compiler does not
 // automatically implement [`Send`] for it. But here is what the compiler does not know:
 // 1. Only the [`DataflowStateHandle`] can instantiate and hold an instance of
-// [`DataflowStateReader`]. 2. Only the [`DataflowStateHandle`] is able to get a mutable reference
-// of the [`DataflowStateReader`]. 2. The [`DataflowStateReader`] held by the
-// [`DataflowStateHandle`] is behind a [`tokio::sync::RwLock`], which is only acquired as write in
-// the [`DataflowStateHandle::commit`] method.
+// [`DataflowStateReader`].
+//
+// 2. Only the [`DataflowStateHandle`] is able to get a mutable reference to the
+// [`DataflowStateReader`].
+//
+// 3. The [`DataflowStateReader`] held by the [`DataflowStateHandle`] is behind a
+// [`tokio::sync::RwLock`], which is only acquired as write in the [`DataflowStateHandle::commit`]
+// method.
 //
 // Those three conditions guarantee that there are no concurrent modifications to the underlying
 // dataflow state.
 // So, we explicitly tell the compiler that the [`DataflowStateReader`] is safe to be moved
 // between threads.
 unsafe impl Sync for DataflowStateReader {}
+
 // Needed to send a copy of the [`DataflowState`] across thread boundaries, when
 // we are persisting the state to the [`Authority`].
 unsafe impl Sync for PersistableDataflowState {}
