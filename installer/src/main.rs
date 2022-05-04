@@ -12,6 +12,8 @@ use tokio::fs::DirBuilder;
 
 use crate::aws::installer::AwsInstaller;
 use crate::compose_installer::ComposeInstaller;
+use crate::console::password;
+use crate::constants::API_KEY;
 
 #[macro_use]
 mod console;
@@ -163,6 +165,22 @@ impl Installer {
 #[tokio::main]
 async fn main() -> Result<()> {
     let options = Options::parse();
+    println!("Welcome to the ReadySet orchestrator.\n");
+    let mut api_key;
+    loop {
+        api_key = password().with_prompt("API key").interact()?;
+
+        if api_key == API_KEY {
+            break;
+        }
+
+        println!("Invalid API key. Let's try again.");
+    }
+
+    DirBuilder::new()
+        .recursive(true)
+        .create(options.state_directory()?)
+        .await?;
 
     match &options.subcommand {
         Some(Subcommand::TearDown(tear_down)) => {
