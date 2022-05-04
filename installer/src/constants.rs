@@ -20,11 +20,11 @@ pub const READYSET_MYSQL_POSTFIX: &str = "/readyset-mysql";
 pub const READYSET_POSTGRES_POSTFIX: &str = "/readyset-psql";
 
 /// The current release tag for our readyset-server and readyset-mysql images.
-pub const READYSET_TAG: &str = "release-60c8dcc517e990559987fcae141516db9deccd10";
+pub const READYSET_TAG: &str = "release-2873f79074683714545e55386f752e78189c1883";
 
 /// Used if there is no paired version specified.
 /// Hardcoded to the last public release template set.
-pub const CFN_VERSION: &str = "release-60c8dcc517e990559987fcae141516db9deccd10";
+pub const CFN_VERSION: &str = "2022-05-04";
 
 // TODO: TEMPORARY CONSTANTS. SHOULD BE REMOVED WHEN WE HAVE AN ARTIFACT REGISTRY.
 
