@@ -155,7 +155,7 @@ use error::{other_error, OtherErrorKind};
 use mysql_common::constants::CapabilityFlags;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net;
-use tracing::debug;
+use tracing::{debug, trace};
 use writers::write_err;
 
 use crate::authentication::{generate_auth_data, hash_password, AUTH_PLUGIN_NAME};
@@ -393,7 +393,12 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
         let password = handshake.password.to_vec();
         let client_auth_plugin = handshake.auth_plugin_name.map(|s| s.to_owned());
 
-        let handshake_password = if client_auth_plugin.iter().all(|apn| apn != AUTH_PLUGIN_NAME) {
+        let handshake_password = if client_auth_plugin.iter().all(|apn| apn != AUTH_PLUGIN_NAME)
+            // Some clients (at the very least certain versions of PHP's MySQL PDO library) send an
+            // empty password response in the initial handshake, even if the auth plugin is set and
+            // correct. We want to send a switch-authentication request in that case too
+            || password.is_empty()
+        {
             // Authentication mismatch - try to switch auth plugins
 
             if !handshake
@@ -446,7 +451,10 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                 .shim
                 .password_for_username(&username)
                 .map_or(false, |password| {
-                    hash_password(&password, &auth_data) == handshake_password.as_slice()
+                    let expected = hash_password(&password, &auth_data);
+                    let actual = handshake_password.as_slice();
+                    trace!(?expected, ?actual);
+                    expected == actual
                 });
 
         if auth_success {
