@@ -59,15 +59,15 @@ Parameters:
     Description: The EC2 instance type to use for ReadySet Adapter instances.
     Type: String
     Default: m5.large
-    AllowedPattern: ^(\w)5.*
-    ConstraintDescription: Instance type must be 5th generation.
+    AllowedPattern: ^\w+\-*[56]+(|[abdni]|(ad)|(dn)|(zn)|(tb1))+\.\w+$
+    ConstraintDescription: Instance type must be 5th or 6th generation x86_64 arch
 
   ReadySetServerInstanceType:
     Description: The EC2 instance type to use for ReadySet Server instances.
     Type: String
     Default: c5.4xlarge
-    AllowedPattern: ^(\w)5.*
-    ConstraintDescription: Instance type must be 5th generation.
+    AllowedPattern: ^\w+\-*[56]+(|[abdni]|(ad)|(dn)|(zn)|(tb1))+\.\w+$
+    ConstraintDescription: Instance type must be 5th or 6th generation x86_64 arch
 
   ReadySetAdapterNodes:
     Description: Number of Adapter nodes to create.

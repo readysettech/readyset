@@ -179,6 +179,8 @@ Parameters:
     Description: The EC2 instance type to use for adapter instances.
     Type: String
     Default: c5.large
+    AllowedPattern: ^\w+\-*[56]+(|[abdni]|(ad)|(dn)|(zn)|(tb1))+\.\w+$
+    ConstraintDescription: Instance type must be 5th or 6th generation x86_64 arch
 
   ReadySetAdapterNodes:
     Description: Number of adapter nodes to create
@@ -189,8 +191,8 @@ Parameters:
     Description: The EC2 instance type to use for server instances.
     Type: String
     Default: c5.large
-    AllowedPattern: ^(\w)5.*
-    ConstraintDescription: Instance type must be 5th generation.
+    AllowedPattern: ^\w+\-*[56]+(|[abdni]|(ad)|(dn)|(zn)|(tb1))+\.\w+$
+    ConstraintDescription: Instance type must be 5th or 6th generation x86_64 arch
 
   ReadySetServerNodes:
     Description: Number of server nodes to create
