@@ -21,7 +21,7 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "iteration": 1651530666860,
+  "iteration": 1651707556169,
   "links": [],
   "panels": [
     {
@@ -209,6 +209,22 @@
                 "value": 197
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Count"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
           }
         ]
       },
@@ -253,6 +269,18 @@
           "interval": "",
           "legendFormat": "",
           "refId": "RS Duration"
+        },
+        {
+          "datasource": "DS_PROMETHEUS",
+          "exemplar": true,
+          "expr": "sum by (query)\n(query_log_execution_time_count{deployment=\"$deployment\",database_type=\"mysql\",query!=\"\", event_type=~\"query|execute\"})",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "Count"
         },
         {
           "datasource": "DS_PROMETHEUS",
@@ -390,10 +418,10 @@
               "Time 3": 9,
               "Time 4": 10,
               "Time 5": 11,
+              "Value #Count": 2,
               "Value #MySQL 50p": 3,
               "Value #MySQL 90p": 4,
               "Value #MySQL 99p": 5,
-              "Value #MySQL QPS": 2,
               "Value #RS Duration": 6,
               "query": 1,
               "query id results": 0,
@@ -406,23 +434,27 @@
               "Value #A": "ReadySet 50p",
               "Value #B": "old rs count",
               "Value #C": "ReadySet 90p",
+              "Value #Count": "Count",
               "Value #D": "old msqyl count",
               "Value #E": "ReadySet 99p",
               "Value #F": "Total Duration",
-              "Value #MySQL 50p": "50p latency",
-              "Value #MySQL 90p": "90p latency",
-              "Value #MySQL 99p": "99p latency",
+              "Value #MySQL 50p": "50p Latency",
+              "Value #MySQL 90p": "90p Latency",
+              "Value #MySQL 99p": "99p Latency",
               "Value #MySQL QPS": "MySQL QPS",
               "Value #MySQL count": "MySQL QPS",
-              "Value #RS Duration": "Total duration",
+              "Value #RS Duration": "Total Duration",
               "Value #RS count": "ReadySet QPS",
               "Value #ReadySet QPS": "ReadySet QPS",
               "Value #Readyset Count": "Readyset Count",
               "Value #Readyset count": "ReadySet Count",
               "Value #test": "Readyset Count",
+              "proxied query": "Proxied Query",
               "query": "Query Text",
+              "query id": "Query ID",
               "query id results": "Query ID",
-              "readyset supported results": "ReadySet supported?",
+              "readyset supported": "ReadySet Supported",
+              "readyset supported results": "ReadySet Supported?",
               "{query=\"SELECT `column_name` FROM `information_schema`.`statistics` WHERE ((`index_name` = '<anonymized>') AND ((`table_schema` = database()) AND (`table_name` = '<anonymized>'))) ORDER BY `seq_in_index`\"}": "MySQL90p"
             }
           }
@@ -434,7 +466,7 @@
             "sort": [
               {
                 "desc": true,
-                "field": "99p latency"
+                "field": "Count"
               }
             ]
           }
@@ -477,25 +509,9 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Query Text"
+              "options": "90p Latency"
             },
             "properties": [
-              {
-                "id": "custom.width",
-                "value": null
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ReadySet 90p"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              },
               {
                 "id": "decimals",
                 "value": 2
@@ -505,61 +521,9 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "ReadySet QPS"
+              "options": "50p Latency"
             },
             "properties": [
-              {
-                "id": "custom.width",
-                "value": 134
-              },
-              {
-                "id": "decimals",
-                "value": 0
-              },
-              {
-                "id": "unit",
-                "value": "none"
-              },
-              {
-                "id": "noValue",
-                "value": "0"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "MySQL QPS"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 126
-              },
-              {
-                "id": "decimals",
-                "value": 0
-              },
-              {
-                "id": "unit",
-                "value": "none"
-              },
-              {
-                "id": "noValue",
-                "value": "0"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ReadySet 50p"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              },
               {
                 "id": "decimals",
                 "value": 2
@@ -572,10 +536,6 @@
               "options": "Total Duration"
             },
             "properties": [
-              {
-                "id": "custom.width",
-                "value": 110
-              },
               {
                 "id": "decimals",
                 "value": 2
@@ -597,6 +557,34 @@
                     "url": "http://localhost:4000/d/jAoEkfF7z/specific-query?Deployment=${Deployment:queryparam}&var-queryfilter=${__value.raw}&__url_time_range"
                   }
                 ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Count"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "99p Latency"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 2
               }
             ]
           }
@@ -679,6 +667,18 @@
           "refId": "ReadySet 99p"
         },
         {
+          "datasource": "DS_PROMETHEUS",
+          "exemplar": false,
+          "expr": "avg by (query) (query_log_execution_time_count{deployment=\"$deployment\",database_type=\"noria\",query!=\"\", event_type=~\"query|execute\"})",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "Count"
+        },
+        {
           "datasource": "ReadySet_DB",
           "format": "table",
           "group": [],
@@ -735,26 +735,34 @@
               "Time 3": true,
               "Time 4": true,
               "Time 5": true,
+              "Time 6": true,
+              "Value #ReadySet QPS": true,
               "name results": true
             },
             "indexByName": {
-              "Time 1": 1,
-              "Time 2": 3,
-              "Time 3": 4,
-              "Time 4": 6,
-              "Time 5": 8,
-              "Value #RS Duration": 10,
-              "Value #ReadySet 50p": 5,
-              "Value #ReadySet 90p": 7,
-              "Value #ReadySet 99p": 9,
-              "Value #ReadySet QPS": 2,
+              "Time 1": 2,
+              "Time 2": 4,
+              "Time 3": 5,
+              "Time 4": 7,
+              "Time 5": 9,
+              "Time 6": 12,
+              "Value #Count": 1,
+              "Value #RS Duration": 11,
+              "Value #ReadySet 50p": 6,
+              "Value #ReadySet 90p": 8,
+              "Value #ReadySet 99p": 10,
+              "Value #ReadySet QPS": 3,
+              "name results": 13,
               "query": 0
             },
             "renameByName": {
+              "Time 4": "",
+              "Time 5": "",
+              "Value #Count": "Count",
               "Value #RS Duration": "Total Duration",
-              "Value #ReadySet 50p": "50p latency",
-              "Value #ReadySet 90p": "90p latency",
-              "Value #ReadySet 99p": "99p latency",
+              "Value #ReadySet 50p": "50p Latency",
+              "Value #ReadySet 90p": "90p Latency",
+              "Value #ReadySet 99p": "99p Latency",
               "Value #ReadySet QPS": "ReadySet QPS",
               "query": "Query Text"
             }
@@ -767,9 +775,27 @@
             "sort": [
               {
                 "desc": true,
-                "field": "Value #ReadySet QPS"
+                "field": "Count"
               }
             ]
+          }
+        },
+        {
+          "id": "filterByValue",
+          "options": {
+            "filters": [
+              {
+                "config": {
+                  "id": "greater",
+                  "options": {
+                    "value": 0
+                  }
+                },
+                "fieldName": "Count"
+              }
+            ],
+            "match": "any",
+            "type": "include"
           }
         }
       ],
