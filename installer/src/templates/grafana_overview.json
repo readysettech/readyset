@@ -21,7 +21,8 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "iteration": 1651707556169,
+  "id": 1,
+  "iteration": 1651709052889,
   "links": [],
   "panels": [
     {
@@ -164,7 +165,7 @@
                   {
                     "targetBlank": true,
                     "title": "Query specific dashboard",
-                    "url": "http://localhost:4000/d/query/specific-query?Deployment=${Deployment:queryparam}&var-queryfilter=${__value.raw}&__url_time_range"
+                    "url": "/d/query/specific-query?Deployment=${Deployment:queryparam}&var-queryfilter=${__value.raw}&__url_time_range"
                   }
                 ]
               }
@@ -554,7 +555,7 @@
                   {
                     "targetBlank": true,
                     "title": "Query specific dashboard",
-                    "url": "http://localhost:4000/d/jAoEkfF7z/specific-query?Deployment=${Deployment:queryparam}&var-queryfilter=${__value.raw}&__url_time_range"
+                    "url": "/d/query/specific-query?Deployment=${Deployment:queryparam}&var-queryfilter=${__value.raw}&__url_time_range"
                   }
                 ]
               }

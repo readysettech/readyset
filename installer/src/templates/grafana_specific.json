@@ -22,7 +22,8 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "iteration": 1648587839435,
+  "id": 2,
+  "iteration": 1651790818717,
   "links": [],
   "panels": [
     {
@@ -81,6 +82,17 @@
                 "to": 10000000000000000
               },
               "type": "range"
+            },
+            {
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "color": "yellow",
+                  "index": 2,
+                  "text": "No"
+                }
+              },
+              "type": "special"
             }
           ],
           "thresholds": {
@@ -234,7 +246,7 @@
       "options": {
         "legend": {
           "calcs": [],
-          "displayMode": "list",
+          "displayMode": "hidden",
           "placement": "bottom"
         },
         "tooltip": {
@@ -355,7 +367,7 @@
       "options": {
         "legend": {
           "calcs": [],
-          "displayMode": "list",
+          "displayMode": "hidden",
           "placement": "bottom"
         },
         "tooltip": {
@@ -480,7 +492,7 @@
       "options": {
         "legend": {
           "calcs": [],
-          "displayMode": "list",
+          "displayMode": "hidden",
           "placement": "bottom"
         },
         "tooltip": {
@@ -577,10 +589,6 @@
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
           }
@@ -597,7 +605,7 @@
       "options": {
         "legend": {
           "calcs": [],
-          "displayMode": "list",
+          "displayMode": "hidden",
           "placement": "bottom"
         },
         "tooltip": {
@@ -629,10 +637,17 @@
         {
           "id": "calculateField",
           "options": {
+            "binary": {
+              "left": "",
+              "operator": "/",
+              "reducer": "sum",
+              "right": "Total count"
+            },
             "mode": "binary",
             "reduce": {
               "reducer": "sum"
-            }
+            },
+            "replaceFields": true
           }
         }
       ],
@@ -644,8 +659,42 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
+          "custom": {
+            "axisLabel": "Queries per second",
+            "axisPlacement": "auto",
+            "axisSoftMax": 1,
+            "axisSoftMin": 0,
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 1,
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -653,13 +702,10 @@
               {
                 "color": "yellow",
                 "value": null
-              },
-              {
-                "color": "green",
-                "value": 1
               }
             ]
-          }
+          },
+          "unit": "none"
         },
         "overrides": []
       },
@@ -671,25 +717,21 @@
       },
       "id": 25,
       "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+        "legend": {
+          "calcs": [],
+          "displayMode": "hidden",
+          "placement": "bottom"
         },
-        "text": {},
-        "textMode": "auto"
+        "tooltip": {
+          "mode": "single"
+        }
       },
       "pluginVersion": "8.0.6",
       "targets": [
         {
-          "exemplar": true,
+          "exemplar": false,
           "expr": "sum by (database_type) (rate(query_log_execution_time_count{deployment=\"$deployment\", query=\"${queryfilter:raw}\"}[1m]))",
+          "instant": false,
           "interval": "",
           "legendFormat": "{{database_type}}",
           "queryType": "randomWalk",
@@ -697,10 +739,10 @@
         }
       ],
       "title": "Queries Per Second (1 minute intervals)",
-      "type": "stat"
+      "type": "timeseries"
     }
   ],
-  "refresh": "5s",
+  "refresh": "",
   "schemaVersion": 30,
   "style": "dark",
   "tags": [],
@@ -710,8 +752,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "solidus",
-          "value": "solidus"
+          "text": "localdeploy",
+          "value": "localdeploy"
         },
         "datasource": "DS_PROMETHEUS",
         "definition": "label_values(deployment)",
@@ -737,8 +779,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "SELECT sum(`spree_stock_items`.`count_on_hand`) FROM `spree_stock_items` INNER JOIN `spree_stock_locations` ON (`spree_stock_locations`.`id` = `spree_stock_items`.`stock_location_id`) WHERE ((`spree_stock_items`.`deleted_at` IS NULL) AND ((`spree_stock_items`.`variant_id` = $1) AND (`spree_stock_locations`.`active` = $2)))",
-          "value": "SELECT sum(`spree_stock_items`.`count_on_hand`) FROM `spree_stock_items` INNER JOIN `spree_stock_locations` ON (`spree_stock_locations`.`id` = `spree_stock_items`.`stock_location_id`) WHERE ((`spree_stock_items`.`deleted_at` IS NULL) AND ((`spree_stock_items`.`variant_id` = $1) AND (`spree_stock_locations`.`active` = $2)))"
+          "text": "SELECT * FROM `nums` WHERE (`b` = $1)",
+          "value": "SELECT * FROM `nums` WHERE (`b` = $1)"
         },
         "datasource": "DS_PROMETHEUS",
         "definition": "label_values(query)",
@@ -770,5 +812,5 @@
   "timezone": "",
   "title": "Specific Query",
   "uid": "query",
-  "version": 4
+  "version": 1
 }
