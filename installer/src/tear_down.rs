@@ -1,10 +1,10 @@
 use anyhow::{anyhow, bail, Result};
 use tokio::fs::remove_file;
-use tokio::process::Command;
 
 use crate::aws::cloudformation::{delete_stack, stack_exists};
 use crate::console::confirm;
 use crate::deployment::{DeploymentData, DeploymentStatus};
+use crate::utils::run_docker_compose;
 use crate::Installer;
 
 impl Installer {
@@ -67,13 +67,7 @@ impl Installer {
         let path_str = path
             .to_str()
             .ok_or_else(|| anyhow!("Path does not contain valid unicode characters"))?;
-        let status = Command::new("docker-compose")
-            .args(["-f", path_str, "down", "-v", "--rmi", "all"])
-            .status()
-            .await?;
-        if !status.success() {
-            bail!("Command exited with {}", status);
-        }
+        run_docker_compose(["-f", path_str, "down", "-v", "--rmi", "all"]).await?;
 
         remove_file(path).await?;
 

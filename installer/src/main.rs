@@ -55,6 +55,7 @@ mod constants;
 mod docker_compose;
 mod tear_down;
 mod template;
+mod utils;
 
 use crate::aws::cloudformation::{deploy_stack, StackConfig};
 use crate::aws::{
@@ -67,6 +68,7 @@ use crate::deployment::{
     CreateNew, DatabasePasswordParameter, DeploymentStatus, Engine, Existing, MaybeExisting, RdsDb,
 };
 use crate::template::{mysql_adapter_img, postgres_adapter_img, server_img};
+use crate::utils::{check_command_installed, run_docker_compose};
 
 /// List of regions where we deploy AMIs.
 ///
@@ -233,12 +235,8 @@ impl Installer {
         Ok(())
     }
 
-    pub async fn check_docker_version_and_running(&mut self) -> Result<()> {
-        let version_output = Command::new("docker").args(["--version"]).output().await?;
-
-        if !version_output.status.success() {
-            bail!("Please install Docker before continuing.");
-        }
+    pub async fn check_docker_installed_and_running(&mut self) -> Result<()> {
+        check_command_installed("Docker", Command::new("docker").args(["--version"])).await?;
 
         let running_output = Command::new("docker").args(["ps"]).output().await?;
 
@@ -249,24 +247,23 @@ impl Installer {
         Ok(())
     }
 
-    pub async fn check_docker_compose_version(&mut self) -> Result<()> {
-        let mut version_output = Command::new("docker-compose")
-            .args(["--version"])
-            .output()
-            .await?;
-
-        if !version_output.status.success() {
-            version_output = Command::new("docker")
-                .args(["compose", "version"])
-                .output()
+    pub async fn check_docker_compose_installed(&mut self) -> Result<()> {
+        match check_command_installed(
+            "Docker Compose",
+            Command::new("docker-compose").args(["--version"]),
+        )
+        .await
+        {
+            Ok(()) => Ok(()),
+            Err(_) => {
+                check_command_installed(
+                    "Docker Compose",
+                    Command::new("docker").args(["compose", "--version"]),
+                )
                 .await?;
-
-            if !version_output.status.success() {
-                bail!("Please install Docker Compose before continuing.");
+                Ok(())
             }
         }
-
-        Ok(())
     }
 
     pub async fn create_prometheus_configs(&mut self) -> Result<()> {
@@ -419,8 +416,8 @@ impl Installer {
     /// Run the install process for deploying locally using docker-compose, picking up where the
     /// user left off if necessary.
     pub async fn run_compose(&mut self) -> Result<()> {
-        self.check_docker_version_and_running().await?;
-        self.check_docker_compose_version().await?;
+        self.check_docker_installed_and_running().await?;
+        self.check_docker_compose_installed().await?;
 
         let res = self._compose_user_input();
         self.save().await?;
@@ -450,19 +447,7 @@ impl Installer {
         self.create_grafana_dashboards().await?;
 
         println!("Deploying with Docker Compose now");
-        let mut status = Command::new("docker-compose")
-            .args(["-f", path_str, "up", "-d"])
-            .status()
-            .await?;
-        if !status.success() {
-            status = Command::new("docker")
-                .args(["compose", "-f", path_str, "up", "-d"])
-                .status()
-                .await?;
-            if !status.success() {
-                bail!("Command exited with {}", status);
-            }
-        }
+        run_docker_compose(["-f", path_str, "up", "-d"]).await?;
 
         self.deployment.status = DeploymentStatus::Complete;
         self.save().await?;
