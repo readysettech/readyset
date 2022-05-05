@@ -1,0 +1,18 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Resources:
+  ReadysetMonitoringStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      Parameters:
+        # Change this between deployments. Have been using readyset-deployment-YYYY-MM-DD-NN
+        ReadySetDeploymentName: "<deployment name>"
+        ReadySetMonitorInstanceType: "c5.large"
+        ReadySetMonitoringSecurityGroupID: "sg-0b114d2eaf842cba4"
+        PrivateSubnet1ID: "subnet-02b0d5f328b759cd8"
+        KeyPairName: "readyset"
+        ConsulEc2RetryJoinTagKey: "ReadysetConsulNodeType"
+        ConsulEc2RetryJoinTagValue: "Server"
+        ConsulJoinManagedPolicyArn: "arn:aws:iam::724964194832:policy/ue1-platform-readyset-consul-ReadysetConsulStack-2LR8HWR9KQQ-ConsulJoinManagedPolicy-1RT25YWWVPEMG"
+      # Release names have been irl-deployment-YYYY-MM-DD-NN
+      TemplateURL: "https://readysettech-cfn-public-us-east-2.s3.us-east-2.amazonaws.com/<release name>/readyset/templates/readyset-monitoring-template.yaml"

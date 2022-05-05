@@ -44,9 +44,9 @@ templates are only accessible to the list described under Access Restrictions
 
 This manual release process is a stopgap measure until automation is set up.
 
-1. In a CL, update the `READYSET_TAG` and `CFN_VERSION` release constants in: `installer/src/constants.rs`. We will need this exact value later. Traditionally it is the feature SHA-1, but it should be casually unique enough to prevent colissions. 
+1. In a CL, update the `READYSET_TAG` and `CFN_VERSION` release constants in: `installer/src/constants.rs`. We will need this exact value later. Traditionally it is the feature SHA-1, but it should be casually unique enough to prevent colissions.
 
-2. When that CL is merged, a new build is started on`ref/heads/main` in buildkite: 
+2. When that CL is merged, a new build is started on`ref/heads/main` in buildkite:
  https://buildkite.com/readyset/readyset/builds?branch=refs%2Fheads%2Fmain
 
 3. Promote this build through all of the build steps,
@@ -58,8 +58,8 @@ This step also pushes the templates up for direct customer use at:
 
 5. While buildkite is working, you can can do manual builds of the installer binaries across linux and mac computers. DOuble-check that you're on the latest main for each computer when building.
 
-   ```
-   linux-computer$ cargo build --release --bin readyset-installer --target x86_64-linux-musl
+   ```sh
+   linux-computer$ cargo build --release --bin readyset-installer --target x86_64-linux-unknown-musl
    linux-computer$ strip target/x86_64-linux-musl/release/readyset-installer
    apple-computer$ cargo build --release --bin readyset-installer
    apple-computer$ strip target/release/readyset-installer
@@ -68,19 +68,21 @@ This step also pushes the templates up for direct customer use at:
    ```
 
 6. Once the buildkite run is complete, and the binaries are built, you can publish the binaries
-   ```
+
+   ```sh
    $ aws s3 cp <path-to-linux-binary> s3://readysettech-orchestrator-us-east-2/binaries/x86_64-unknown-linux-gnu
    $ aws s3 cp <path-to-apple-intel-binary> s3://readysettech-orchestrator-us-east-2/binaries/x86_64-apple-darwin
    $ aws s3 cp <path-to-apple-arm-binary> s3://readysettech-orchestrator-us-east-2/binaries/aarch64-apple-darwin
    ```
 
 7. Deploy an updated version of the wrapper script
-   ```
+
+   ```sh
    $ aws s3 cp <readyset-monorepo>/installer/readyset-orchestrator.sh s3://readysettech-orchestrator-us-east-2/readyset-orchestrator.sh
    ```
 
 8. Create cloudfront invalidation
-   ```
+
+   ```sh
    $ aws cloudfront create-invalidation --distribution-id EGUPZSIU4Q3J9 --paths '/*'
    ```
-   

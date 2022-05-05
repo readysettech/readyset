@@ -42,9 +42,7 @@ update the Deploy User template if needed or do other emergency updates.
 Currently, we use a local CloudFormation template which uses the released
 CloudFormation templates as substacks which we then release individual so
 we can update them incrementally. The templates are located in `customers/irl`
-with some of the parameters marked as needing to be updated with comments.
-
-TODO: There is a missing file for the new monitoring component.
+with some of the parameters marked as needing to be updated with comments..
 
 The suggestion is to copy those files to another location and run commands
 similar to following for each one. These commands assume that the configured

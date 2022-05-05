@@ -5,8 +5,8 @@ Resources:
     Type: "AWS::CloudFormation::Stack"
     Properties:
       Parameters:
-        # Change this between deployments
-        ReadySetDeploymentName: "<Change deployment name. Have been using readyset-deployment-YYYY-MM-DD-NN"
+        # Change this between deployments. Have been using irl-deployment-YYYY-MM-DD-NN
+        ReadySetDeploymentName: "<deployment name>"
         ConsulEc2RetryJoinTagKey: "ReadysetConsulNodeType"
         ConsulEc2RetryJoinTagValue: "Server"
         # From Consul stack output
@@ -25,10 +25,6 @@ Resources:
         # From VPC Supplemental output
         ReadySetAdapterSecurityGroupID: "sg-01c7cebcccdcfa574"
         ReadySetMemoryLimitGB: 25
-        # TODO: Move the following parameters to the new monitoring template
-        ReadySetMonitorInstanceType: "c5.large"
-        # From VPC Supplemental output
-        ReadySetMonitoringSecurityGroupID: "sg-0e381ff6ba7ff7cfb"
         ReadySetServerAutoGrowVolume: "true"
         ReadySetServerInitialVolumeSizeGB: 2048
         ReadySetServerInstanceType: "c5.4xlarge"
@@ -40,6 +36,8 @@ Resources:
         SSMParameterKmsKeyArn: "arn:aws:kms:us-east-1:724964194832:key/27e63384-98ea-4827-aac9-8e5cacd6daf1"
         SSMPathRDSDatabasePassword: "/readyset/prod-rds-meow-readyset/password"
         VPCID: "vpc-0c6cb42c8c969381e"
+        EnableCloudwatch: "true"
+        EnableAggregation: "true"
       # Update this based upon release
       # Release names have been irl-deployment-YYYY-MM-DD-NN
       TemplateURL: "https://readysettech-cfn-public-us-east-2.s3.us-east-2.amazonaws.com/<release name>/readyset/templates/readyset-mysql-template.yaml"
