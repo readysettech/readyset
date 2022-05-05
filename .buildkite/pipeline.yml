@@ -323,6 +323,7 @@ steps:
       - readyset-mysql-release-image
       - readyset-psql-release-image
       - readyset-server-release-image
+      - readyset-adapter-release-image
     command:
       - .buildkite/upload-installer-docker-images.sh
     plugins:
@@ -342,7 +343,7 @@ steps:
   - label: ":tux: Build Linux ReadySet Installer Binaries"
     key: build-linux-installer
     depends_on:
-      - upload-docker-s3
+      - block-docker-release
     commands:
       - "echo +++ :computer: running build for Linux ReadySet Installer Binaries"
       - if buildkite-agent meta-data exists release-name; then
@@ -374,7 +375,7 @@ steps:
     env:
       PATH: /opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/administrator/.cargo/bin
     depends_on:
-      - upload-docker-s3
+      - block-docker-release
     commands:
       - "echo +++ :computer: running build for Apple ReadySet Installer"
       - if buildkite-agent meta-data exists release-name; then
@@ -386,6 +387,26 @@ steps:
     artifact_paths:
       - target/x86_64-apple-darwin/release/readyset-installer
       - target/aarch64-apple-darwin/release/readyset-installer
+
+  - label: ":s3: Deploy ReadySet Installer"
+    key: deploy-installer
+    depends_on:
+      - build-linux-installer
+      - build-apple-installer
+      - upload-docker-s3
+      - build-ops-image
+    command: .buildkite/deploy-installer.sh
+    plugins:
+      - docker#v3.9.0:
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
+          propagate-environment: true
+          propagate-aws-auth-tokens: true
+          mount-buildkite-agent: true
+      - cultureamp/aws-assume-role#v0.2.0
+    env:
+      AWS_ASSUME_ROLE_ARN: arn:aws:iam::888984949675:role/InstallerS3
+    agents:
+      queue: ops
 
   - block: "Build, test, and upload internal :amazon-ec2: AMIs and :aws-cloudformation: CloudFormation templates"
     key: block-ami-cfn
