@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use ::console::style;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use clap::Parser;
 use deployment::{Deployment, DeploymentData};
 use directories::ProjectDirs;
@@ -168,6 +168,14 @@ async fn main() -> Result<()> {
         Some(Subcommand::TearDown(tear_down)) => {
             let deployment = match &tear_down.deployment_name {
                 Some(deployment_name) => {
+                    if !options
+                        .state_directory()?
+                        .as_ref()
+                        .join(deployment_name)
+                        .exists()
+                    {
+                        bail!("No deployment with name {} exists.", deployment_name);
+                    }
                     Deployment::load(options.state_directory()?, deployment_name).await?
                 }
                 None => {

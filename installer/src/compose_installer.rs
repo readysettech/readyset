@@ -46,12 +46,19 @@ impl<'a> ComposeInstaller<'a> {
             .with_prompt("Tear down docker-compose deployment?")
             .interact()?
         {
-            bail!("Exiting as requested");
+            // They have opted to not tear down docker compose, but there may still be other assets
+            // to tear down, so we shouldn't fall into the trap of simply bubbling errors up the
+            // chain.
+            return Ok(());
         }
 
         let path = self
             .deployment
             .compose_path(self.options.state_directory()?);
+        if !path.exists() {
+            // File doesn't exist so there's nothing to tear down here.
+            return Ok(());
+        }
         let path_str = path
             .to_str()
             .ok_or_else(|| anyhow!("Path does not contain valid unicode characters"))?;
