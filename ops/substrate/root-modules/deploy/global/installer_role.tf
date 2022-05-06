@@ -1,3 +1,7 @@
+locals {
+  installer_cloudfront_distribution_arn = "arn:aws:cloudfront::888984949675:distribution/EGUPZSIU4Q3J9"
+}
+
 data "aws_iam_policy_document" "installer_s3_assume_role" {
 
   statement {
@@ -31,14 +35,34 @@ data "aws_iam_policy_document" "installer_s3_policy_document" {
   }
 }
 
+data "aws_iam_policy_document" "installer_cloudfront_policy_document" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "cloudfront:CreateInvalidation",
+      "cloudfront:GetInvalidation"
+    ]
+    resources = [
+      local.installer_cloudfront_distribution_arn
+    ]
+  }
+}
+
 resource "aws_iam_role" "installer_s3" {
   name               = "InstallerS3"
   assume_role_policy = data.aws_iam_policy_document.installer_s3_assume_role.json
+
   inline_policy {
     name   = "AllowInstallerS3Requirements"
     policy = data.aws_iam_policy_document.installer_s3_policy_document.json
   }
+
+  inline_policy {
+    name   = "AllowInstallerCloudFrontRequirements"
+    policy = data.aws_iam_policy_document.installer_cloudfront_policy_document.json
+  }
 }
+
 output "installer-s3-arn" {
   value       = aws_iam_role.installer_s3.arn
   description = "ARN of the Installer bucket S3 IAM Role"
