@@ -4,8 +4,13 @@ pub const IMG_PREFIX: &str = "305232526136.dkr.ecr.us-east-2.amazonaws.com";
 /// The image tag for the consul container
 pub const CONSUL_TAG: &str = "consul";
 
-/// The image tag for the mysql container
+/// The image tag for non-aarch64 mysql container
+#[cfg(not(target_arch = "aarch64"))]
 pub const MYSQL_TAG: &str = "mysql:8.0";
+
+/// The image tag for aarch64 mysql container
+#[cfg(target_arch = "aarch64")]
+pub const MYSQL_TAG: &str = "mysql:8.0-oracle";
 
 /// The image tag for the postgres container
 pub const POSTGRES_TAG: &str = "postgres:13";
