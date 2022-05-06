@@ -447,7 +447,15 @@ impl Installer {
         self.create_grafana_dashboards().await?;
 
         println!("Deploying with Docker Compose now");
-        run_docker_compose(["-f", path_str, "up", "-d"]).await?;
+        run_docker_compose([
+            "-f",
+            path_str,
+            "up",
+            "-d",
+            "--renew-anon-volumes",
+            "--remove-orphans",
+        ])
+        .await?;
 
         self.deployment.status = DeploymentStatus::Complete;
         self.save().await?;
