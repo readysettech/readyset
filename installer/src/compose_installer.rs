@@ -197,15 +197,30 @@ impl<'a> ComposeInstaller<'a> {
 
     async fn create_vector_configs(&mut self) -> Result<()> {
         self.write_config_file(
-            include_str!("./templates/vector_aggregator.toml"),
-            "compose/vector/aggregator.toml",
-        )
-        .await?;
-        self.write_config_file(
             include_str!("./templates/vector_agent.toml"),
             "compose/vector/agent.toml",
         )
         .await?;
+
+        let aggregator_file_path = self
+            .options
+            .state_directory()?
+            .join("compose")
+            .join("vector")
+            .join("aggregator.toml");
+
+        let mut file = File::create(&aggregator_file_path).await?;
+
+        let aggregator_yml = include_str!("./templates/vector_aggregator.toml");
+        let deployment_name = self
+            .compose_deployment()?
+            .mysql_db_name
+            .as_ref()
+            .unwrap()
+            .to_string();
+
+        let aggregator_yml = &aggregator_yml.replace("$deployment", &deployment_name);
+        file.write_all(aggregator_yml.as_bytes()).await?;
 
         Ok(())
     }

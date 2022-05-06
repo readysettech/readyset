@@ -17,9 +17,7 @@ scrape_interval_secs = 2
 type = "remap"
 inputs = ["node-exporter", "prometheus-server", "prometheus-adapter"]
 source = '''
-  .tags.deployment = "localdeploy"
-  .tags.job = "readyset-server"
-  .tags.instance = "localhost:9000"
+  .tags.deployment = "$deployment"
 '''
 
 # Print parsed logs to stdout
