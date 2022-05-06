@@ -41,7 +41,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::timeout;
 use tokio::{net, select};
 use tokio_stream::wrappers::TcpListenerStream;
-use tracing::{debug, debug_span, error, info, info_span, span, Level};
+use tracing::{debug, debug_span, error, info, info_span, span, warn, Level};
 use tracing_futures::Instrument;
 
 const RETRY_TIMEOUT: Duration = Duration::from_micros(100);
@@ -267,6 +267,13 @@ where
             },
         ));
         info!(commit_hash = %env!("CARGO_PKG_VERSION", "version not set"));
+
+        if options.allow_unsupported_set {
+            warn!(
+                "Running with --allow-unsupported-set can cause certain queries to return \
+                 incorrect results"
+            )
+        }
 
         let listen_address = options.address.unwrap_or(self.default_address);
         let listener = rt.block_on(tokio::net::TcpListener::bind(&listen_address))?;
