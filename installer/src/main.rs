@@ -97,6 +97,7 @@ struct TearDown {
 #[derive(Parser)]
 enum Subcommand {
     TearDown(TearDown),
+    Version,
 }
 
 /// Install and configure a ReadySet cluster in AWS
@@ -2426,32 +2427,40 @@ fn readyset_psql_adapter_url() -> String {
 #[tokio::main]
 async fn main() -> Result<()> {
     let options = Options::parse();
-    println!("Welcome to the ReadySet orchestrator.\n");
-    DirBuilder::new()
-        .recursive(true)
-        .create(options.state_directory()?)
-        .await?;
 
-    if let Some(Subcommand::TearDown(tear_down)) = &options.subcommand {
-        let deployment = match &tear_down.deployment_name {
-            Some(deployment_name) => {
-                Deployment::load(options.state_directory()?, deployment_name).await?
-            }
-            None => {
-                println!("Which deployment would you like to tear down?");
-                deployment::prompt_for_existing_deployment(options.state_directory()?).await?
-            }
-        };
+    match &options.subcommand {
+        Some(Subcommand::TearDown(tear_down)) => {
+            let deployment = match &tear_down.deployment_name {
+                Some(deployment_name) => {
+                    Deployment::load(options.state_directory()?, deployment_name).await?
+                }
+                None => {
+                    println!("Which deployment would you like to tear down?");
+                    deployment::prompt_for_existing_deployment(options.state_directory()?).await?
+                }
+            };
 
-        let mut installer = Installer::new(options, deployment);
-        installer.tear_down().await?;
+            let mut installer = Installer::new(options, deployment);
+            installer.tear_down().await?;
 
-        return Ok(());
+            Ok(())
+        }
+        Some(Subcommand::Version) => {
+            println!("{}", constants::READYSET_TAG);
+            Ok(())
+        }
+        None => {
+            println!("Welcome to the ReadySet orchestrator.\n");
+            DirBuilder::new()
+                .recursive(true)
+                .create(options.state_directory()?)
+                .await?;
+            let deployment =
+                deployment::create_or_load_existing(options.state_directory()?, options.full)
+                    .await?;
+            let mut installer = Installer::new(options, deployment);
+
+            installer.run().await
+        }
     }
-
-    let deployment =
-        deployment::create_or_load_existing(options.state_directory()?, options.full).await?;
-    let mut installer = Installer::new(options, deployment);
-
-    installer.run().await
 }
