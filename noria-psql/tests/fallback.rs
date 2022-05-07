@@ -1,4 +1,7 @@
-use noria_client_test_helpers::psql_helpers::setup_w_fallback;
+use chrono::NaiveDate;
+use noria_client::backend::UnsupportedSetMode;
+use noria_client::BackendBuilder;
+use noria_client_test_helpers::psql_helpers::{setup_w_fallback, setup_w_fallback_with};
 use noria_client_test_helpers::sleep;
 use serial_test::serial;
 
@@ -82,4 +85,26 @@ async fn prepare_execute_fallback() {
         .unwrap();
     assert_eq!(res.len(), 1);
     assert_eq!(res[0].get::<_, i32>(0), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn proxy_unsupported_sets() {
+    let (config, _handle) = setup_w_fallback_with(
+        BackendBuilder::new().unsupported_set_mode(UnsupportedSetMode::Proxy),
+    )
+    .await;
+    let client = connect(config).await;
+
+    client.simple_query("SET DateStyle = 'DMY'").await.unwrap();
+
+    let res = client
+        .query("SELECT '05-03-2022'::date", &[])
+        .await
+        .unwrap();
+    assert_eq!(res.len(), 1);
+    assert_eq!(
+        res[0].get::<_, NaiveDate>(0),
+        NaiveDate::from_ymd(2022, 3, 5)
+    );
 }

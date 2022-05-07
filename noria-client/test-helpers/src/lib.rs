@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use nom_sql::SelectStatement;
 use noria::consensus::{Authority, LocalAuthorityStore};
 use noria_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
-use noria_client::backend::{BackendBuilder, MigrationMode};
+use noria_client::backend::{BackendBuilder, MigrationMode, UnsupportedSetMode};
 use noria_client::query_status_cache::QueryStatusCache;
 use noria_client::{Backend, QueryHandler, UpstreamDatabase};
 use noria_server::{Builder, ControllerHandle, Handle, LocalAuthority};
@@ -66,7 +66,6 @@ where
         query_status_cache,
         MigrationMode::InRequestPath,
         true,
-        false,
         read_behavior,
     )
     .await
@@ -102,14 +101,13 @@ where
 {
     let query_status_cache = Box::leak(Box::new(QueryStatusCache::new()));
     setup_inner::<A>(
-        backend_builder,
+        backend_builder.unsupported_set_mode(UnsupportedSetMode::Allow),
         fallback,
         true, // partial
         wait_for_backend,
         query_status_cache,
         MigrationMode::OutOfBand, // Must use CREATE CACHE to migrate queries.
         recreate_database,
-        true, // Allow unsupported set for testing.
         ReadBehavior::Blocking,
     )
     .await
@@ -126,7 +124,6 @@ pub async fn setup_inner<A>(
     query_status_cache: &'static QueryStatusCache,
     mode: MigrationMode,
     recreate_database: bool,
-    allow_unsupported_set: bool,
     read_behavior: ReadBehavior,
 ) -> (A::ConnectionOpts, Handle)
 where
@@ -188,7 +185,6 @@ where
             let backend = backend_builder
                 .dialect(A::DIALECT)
                 .migration_mode(mode)
-                .allow_unsupported_set(allow_unsupported_set)
                 .build(noria, upstream, query_status_cache);
 
             tokio::spawn(A::run_backend(backend, s));
