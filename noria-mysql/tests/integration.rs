@@ -1554,7 +1554,7 @@ async fn explain_last_statement() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(destination.destination, QueryDestination::Noria);
+    assert_eq!(destination.destination, QueryDestination::Readyset);
 }
 
 #[tokio::test(flavor = "multi_thread")]
