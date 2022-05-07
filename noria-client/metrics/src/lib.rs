@@ -44,9 +44,9 @@ pub struct QueryExecutionEvent {
 #[derive(Debug, PartialEq, Serialize, Clone, Copy, Default)]
 pub enum QueryDestination {
     #[default]
-    Noria,
-    NoriaThenFallback,
-    Fallback,
+    Readyset,
+    ReadysetThenUpstream,
+    Upstream,
     Both,
 }
 
@@ -54,9 +54,9 @@ impl TryFrom<&str> for QueryDestination {
     type Error = ReadySetError;
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
-            "readyset" => Ok(QueryDestination::Noria),
-            "readyset_then_fallback" => Ok(QueryDestination::NoriaThenFallback),
-            "fallback" => Ok(QueryDestination::Fallback),
+            "readyset" => Ok(QueryDestination::Readyset),
+            "readyset_then_upstream" => Ok(QueryDestination::ReadysetThenUpstream),
+            "upstream" => Ok(QueryDestination::Upstream),
             "both" => Ok(QueryDestination::Both),
             _ => Err(ReadySetError::Internal(
                 "Invalid query destination".to_string(),
@@ -68,9 +68,9 @@ impl TryFrom<&str> for QueryDestination {
 impl fmt::Display for QueryDestination {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            QueryDestination::Noria => "readyset",
-            QueryDestination::NoriaThenFallback => "readyset_then_fallback",
-            QueryDestination::Fallback => "fallback",
+            QueryDestination::Readyset => "readyset",
+            QueryDestination::ReadysetThenUpstream => "readyset_then_upstream",
+            QueryDestination::Upstream => "upstream",
             QueryDestination::Both => "both",
         };
         write!(f, "{}", s)

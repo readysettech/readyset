@@ -600,7 +600,7 @@ where
         let upstream = self.upstream.as_mut().ok_or_else(|| {
             ReadySetError::Internal("This case requires an upstream connector".to_string())
         })?;
-        event.destination = Some(QueryDestination::Fallback);
+        event.destination = Some(QueryDestination::Upstream);
         let _t = event.start_upstream_timer();
         upstream.query(query).await.map(QueryResult::Upstream)
     }
@@ -645,8 +645,8 @@ where
 
         let destination = match (upstream_res.is_some(), noria_res.is_some()) {
             (true, true) => Some(QueryDestination::Both),
-            (false, true) => Some(QueryDestination::Noria),
-            (true, false) => Some(QueryDestination::Fallback),
+            (false, true) => Some(QueryDestination::Readyset),
+            (true, false) => Some(QueryDestination::Upstream),
             (false, false) => None,
         };
 
@@ -728,7 +728,7 @@ where
             let _t = event.start_upstream_timer();
             let res = upstream.prepare(query).await.map(PrepareResult::Upstream);
             self.last_query = Some(QueryInfo {
-                destination: QueryDestination::Fallback,
+                destination: QueryDestination::Upstream,
                 noria_error: String::new(),
             });
             res
@@ -742,7 +742,7 @@ where
                 _ => internal!(),
             };
             self.last_query = Some(QueryInfo {
-                destination: QueryDestination::Noria,
+                destination: QueryDestination::Readyset,
                 noria_error: String::new(),
             });
             Ok(PrepareResult::Noria(res))
@@ -837,7 +837,7 @@ where
                     .map(PrepareResult::Upstream);
 
                 self.last_query = Some(QueryInfo {
-                    destination: QueryDestination::Fallback,
+                    destination: QueryDestination::Upstream,
                     noria_error: String::new(),
                 });
 
@@ -897,7 +897,7 @@ where
     ) -> ReadySetResult<QueryResult<'a, DB>> {
         use noria_connector::PrepareResult::*;
 
-        event.destination = Some(QueryDestination::Noria);
+        event.destination = Some(QueryDestination::Readyset);
         let start = Instant::now();
 
         let res = match prep {
@@ -942,9 +942,9 @@ where
         })?;
 
         if is_fallback {
-            event.destination = Some(QueryDestination::NoriaThenFallback);
+            event.destination = Some(QueryDestination::ReadysetThenUpstream);
         } else {
-            event.destination = Some(QueryDestination::Fallback);
+            event.destination = Some(QueryDestination::Upstream);
         }
 
         let _t = event.start_upstream_timer();
@@ -1339,7 +1339,7 @@ where
         event: &mut QueryExecutionEvent,
     ) -> Option<ReadySetResult<noria_connector::QueryResult<'static>>> {
         event.sql_type = SqlQueryType::Other; // Those will get cleared if it was not destined to noria
-        event.destination = Some(QueryDestination::Noria);
+        event.destination = Some(QueryDestination::Readyset);
 
         let _t = event.start_noria_timer();
 
@@ -1431,7 +1431,7 @@ where
         }
 
         let noria_res = {
-            event.destination = Some(QueryDestination::Noria);
+            event.destination = Some(QueryDestination::Readyset);
             let start = Instant::now();
             let res = self
                 .noria
@@ -1487,7 +1487,7 @@ where
 
                 // Try to execute on fallback if present
                 if let Some(fallback) = self.upstream.as_mut() {
-                    event.destination = Some(QueryDestination::NoriaThenFallback);
+                    event.destination = Some(QueryDestination::ReadysetThenUpstream);
                     let _t = event.start_upstream_timer();
                     fallback
                         .query(&original_query)
@@ -1628,14 +1628,14 @@ where
             ($noria_method: ident ($stmt: expr)) => {
                 if let Some(upstream) = &mut self.upstream {
                     self.last_query = Some(QueryInfo {
-                        destination: QueryDestination::Fallback,
+                        destination: QueryDestination::Upstream,
                         noria_error: String::new(),
                     });
                     let upstream_res = upstream.query(query).await;
                     Ok(QueryResult::Upstream(upstream_res?))
                 } else {
                     self.last_query = Some(QueryInfo {
-                        destination: QueryDestination::Noria,
+                        destination: QueryDestination::Readyset,
                         noria_error: String::new(),
                     });
                     Ok(QueryResult::Noria(self.noria.$noria_method($stmt).await?))
@@ -1653,7 +1653,7 @@ where
                     | SqlQuery::Update(UpdateStatement { table: t, .. })
                     | SqlQuery::Delete(DeleteStatement { table: t, .. }) => {
                         event.sql_type = SqlQueryType::Write;
-                        event.destination = Some(QueryDestination::Fallback);
+                        event.destination = Some(QueryDestination::Upstream);
 
                         let _t = event.start_upstream_timer();
                         // Update ticket if RYW enabled
@@ -1687,7 +1687,7 @@ where
                         };
 
                         self.last_query = Some(QueryInfo {
-                            destination: QueryDestination::Fallback,
+                            destination: QueryDestination::Upstream,
                             noria_error: String::new(),
                         });
                         Ok(QueryResult::Upstream(query_result?))
@@ -1717,7 +1717,7 @@ where
                     SqlQuery::Set(_) | SqlQuery::CompoundSelect(_) | SqlQuery::Show(_) => {
                         let res = upstream.query(query).await.map(QueryResult::Upstream);
                         self.last_query = Some(QueryInfo {
-                            destination: QueryDestination::Fallback,
+                            destination: QueryDestination::Upstream,
                             noria_error: String::new(),
                         });
                         res
@@ -1725,7 +1725,7 @@ where
                     SqlQuery::StartTransaction(_) | SqlQuery::Commit(_) | SqlQuery::Rollback(_) => {
                         let res = self.handle_transaction_boundaries(parsed_query).await;
                         self.last_query = Some(QueryInfo {
-                            destination: QueryDestination::Fallback,
+                            destination: QueryDestination::Upstream,
                             noria_error: String::new(),
                         });
                         res
@@ -1751,7 +1751,7 @@ where
                 // TODO(andrew, justin): Do we want RYW support with the NoriaConnector? Currently,
                 // no. TODO: Implement event execution metrics for Noria without
                 // upstream.
-                event.destination = Some(QueryDestination::Noria);
+                event.destination = Some(QueryDestination::Readyset);
                 let start = Instant::now();
 
                 let res = match parsed_query {

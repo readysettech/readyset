@@ -354,7 +354,7 @@ async fn test_fallback_recovery_period() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(res.destination, QueryDestination::NoriaThenFallback);
+    assert_eq!(res.destination, QueryDestination::ReadysetThenUpstream);
 
     // Standard query path (not prep/exec)
     let flattened_query = "SELECT * FROM t1 WHERE uid = 1";
@@ -372,7 +372,7 @@ async fn test_fallback_recovery_period() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(res.destination, QueryDestination::NoriaThenFallback);
+    assert_eq!(res.destination, QueryDestination::ReadysetThenUpstream);
 
     // We wait out the query_max_failure_seconds period and then try again, at which point we
     // should be in the recovery period.
@@ -390,7 +390,7 @@ async fn test_fallback_recovery_period() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(res.destination, QueryDestination::Fallback);
+    assert_eq!(res.destination, QueryDestination::Upstream);
 
     // prep/exec path.
     let res: (i32, i32) = adapter.exec_first(query, (1,)).await.unwrap().unwrap();
@@ -403,7 +403,7 @@ async fn test_fallback_recovery_period() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(res.destination, QueryDestination::Fallback);
+    assert_eq!(res.destination, QueryDestination::Upstream);
 
     deployment.teardown().await.unwrap();
 }
