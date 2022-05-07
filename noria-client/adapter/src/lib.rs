@@ -4,12 +4,13 @@ use std::collections::HashMap;
 use std::io;
 use std::marker::Send;
 use std::net::{IpAddr, SocketAddr};
+use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex, RwLock};
 use std::task::Poll;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use async_trait::async_trait;
 use clap::Parser;
 use futures_util::future::FutureExt;
@@ -68,14 +69,54 @@ pub trait ConnectionHandler {
     async fn immediate_error(self, stream: net::TcpStream, error_message: String);
 }
 
-/// Represents which database interface is being adapted to
-/// communicate with Noria.
+/// Represents which database interface is being adapted to communicate with Noria.
 #[derive(Copy, Clone)]
 pub enum DatabaseType {
     /// MySQL database.
     Mysql,
     /// PostgreSQL database.
     Psql,
+}
+
+/// How to behave when receiving unsupported `SET` statements.
+///
+/// Corresponds to the variants of [`noria_client::backend::UnsupportedSetMode`] that are exposed to
+/// the user.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum UnsupportedSetMode {
+    /// Return an error to the client (the default)
+    Error,
+    /// Proxy all subsequent statements to the upstream
+    Proxy,
+}
+
+impl Default for UnsupportedSetMode {
+    fn default() -> Self {
+        Self::Error
+    }
+}
+
+impl FromStr for UnsupportedSetMode {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "error" => Ok(Self::Error),
+            "proxy" => Ok(Self::Proxy),
+            _ => bail!(
+                "Invalid value for unsupoported_set_mode; expected one of \"error\" or \"proxy\""
+            ),
+        }
+    }
+}
+
+impl From<UnsupportedSetMode> for noria_client::backend::UnsupportedSetMode {
+    fn from(mode: UnsupportedSetMode) -> Self {
+        match mode {
+            UnsupportedSetMode::Error => Self::Error,
+            UnsupportedSetMode::Proxy => Self::Proxy,
+        }
+    }
 }
 
 pub struct NoriaAdapter<H> {
@@ -188,9 +229,28 @@ pub struct Options {
     #[clap(long, hide = true)]
     fail_invalidated_queries: bool,
 
-    /// Allow executing, but ignore, unsupported `SET` statements
+    /// Allow executing, but ignore, unsupported `SET` statements.
+    ///
+    /// Takes precedence over any value passed to `--unsupported-set-mode`
     #[clap(long, hide = true, env = "ALLOW_UNSUPPORTED_SET")]
     allow_unsupported_set: bool,
+
+    /// Configure how ReadySet behaves when receiving unsupported SET statements.
+    ///
+    /// The possible values are:
+    ///
+    /// * "error" (default) - return an error to the client
+    /// * "proxy" - proxy all subsequent statements
+    // NOTE: In order to keep `allow_unsupported_set` hidden, we're keeping these two flags separate
+    // and *not* marking them as conflicting with each other.
+    #[clap(
+        long,
+        env = "UNSUPPORTED_SET_MODE",
+        default_value = "error",
+        possible_values = &["error", "proxy"],
+        parse(try_from_str)
+    )]
+    unsupported_set_mode: UnsupportedSetMode,
 
     /// Only run migrations through CREATE CACHE statements. Async migrations are not
     /// supported in this case.
@@ -562,7 +622,11 @@ where
                 .dialect(self.dialect)
                 .query_log(qlog_sender.clone(), options.query_log_ad_hoc)
                 .validate_queries(options.validate_queries, options.fail_invalidated_queries)
-                .allow_unsupported_set(options.allow_unsupported_set)
+                .unsupported_set_mode(if options.allow_unsupported_set {
+                    noria_client::backend::UnsupportedSetMode::Allow
+                } else {
+                    options.unsupported_set_mode.into()
+                })
                 .migration_mode(migration_mode)
                 .query_max_failure_seconds(options.query_max_failure_seconds)
                 .fallback_recovery_seconds(options.fallback_recovery_seconds);

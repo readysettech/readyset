@@ -12,15 +12,15 @@ use tracing::error;
 
 use crate::{sleep, Adapter};
 
+pub async fn setup_w_fallback_with(
+    backend_builder: BackendBuilder,
+) -> (tokio_postgres::Config, Handle) {
+    crate::setup::<PostgreSQLAdapter>(backend_builder, true, true, true, ReadBehavior::Blocking)
+        .await
+}
+
 pub async fn setup_w_fallback() -> (tokio_postgres::Config, Handle) {
-    crate::setup::<PostgreSQLAdapter>(
-        BackendBuilder::new().require_authentication(false),
-        true,
-        true,
-        true,
-        ReadBehavior::Blocking,
-    )
-    .await
+    setup_w_fallback_with(BackendBuilder::new().require_authentication(false)).await
 }
 
 pub async fn setup(partial: bool) -> (tokio_postgres::Config, Handle) {

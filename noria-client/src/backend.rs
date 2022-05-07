@@ -111,8 +111,8 @@ pub use self::noria_connector::NoriaConnector;
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 enum PrepareMeta {
-    /// Query was received in a transaction
-    InTransaction,
+    /// Query was received in a state that should unconditionally proxy upstream
+    Proxy,
     /// Query could not be parsed
     FailedToParse,
     /// Query could not be rewritten for processing in noria
@@ -133,6 +133,87 @@ struct PrepareSelectMeta {
     should_do_noria: bool,
 }
 
+/// How to behave when receiving unsupported `SET` statements
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum UnsupportedSetMode {
+    /// Return an error to the client (the default)
+    Error,
+    /// Proxy all subsequent statements to the upstream
+    Proxy,
+    /// Allow all unsupported set statements
+    Allow,
+}
+
+/// A state machine representing how statements are proxied upstream for a particular instance of a
+/// backend.
+///
+/// The possible transitions of the state machine are modeled by the following graph:
+///
+/// ```dot
+/// digraph ProxyState {
+///     Never -> Never;
+///
+///     Upstream -> InTransaction;
+///     InTransaction -> Upstream;
+///     Upstream -> ProxyAlways;
+///     InTransaction -> ProxyAlways;
+/// }
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProxyState {
+    /// Never proxy statements upstream. This is the behavior used when no upstream database is
+    /// configured for a backend
+    Never,
+
+    /// Proxy writes upstream, and proxy reads upstream only after they fail when executed against
+    /// Noria.
+    ///
+    /// This is the initial behavior used when an upstream database is configured for a backend
+    Fallback,
+
+    /// We are inside a transaction, so proxy all statements upstream, but return to
+    /// [`ProxyState::Fallback`] when the transaction is finished
+    InTransaction,
+
+    /// Unconditionally proxy all statements upstream, and do not leave this state when leaving
+    /// transactions. The backend enters this state when it receives an unsupported SQL `SET`
+    /// statement and the [`unsupported_set_mode`] is set to [`Proxy`]
+    ///
+    /// [`unsupported_set_mode`]: Backend::unsupported_set_mode
+    /// [`Proxy`]: UnsupportedSetMode::Proxy
+    ProxyAlways,
+}
+
+impl ProxyState {
+    /// Returns true if a query should be unconditionally proxied upstream per this [`ProxyState`]
+    #[must_use]
+    fn should_proxy(&self) -> bool {
+        matches!(self, Self::InTransaction | Self::ProxyAlways)
+    }
+
+    /// Perform the appropriate state transition for this proxy state to begin a new transaction.
+    fn start_transaction(&mut self) {
+        if self.is_fallback() {
+            *self = ProxyState::InTransaction;
+        }
+    }
+
+    /// Perform the appropriate state transition for this proxy state to end a transaction
+    fn end_transaction(&mut self) {
+        if !matches!(self, Self::Never | Self::ProxyAlways) {
+            *self = ProxyState::Fallback;
+        }
+    }
+
+    /// Returns `true` if the proxy state is [`Fallback`].
+    ///
+    /// [`Fallback`]: ProxyState::Fallback
+    #[must_use]
+    fn is_fallback(&self) -> bool {
+        matches!(self, Self::Fallback)
+    }
+}
+
 /// Builder for a [`Backend`]
 #[must_use]
 #[derive(Clone)]
@@ -147,7 +228,7 @@ pub struct BackendBuilder {
     query_log_ad_hoc_queries: bool,
     validate_queries: bool,
     fail_invalidated_queries: bool,
-    allow_unsupported_set: bool,
+    unsupported_set_mode: UnsupportedSetMode,
     migration_mode: MigrationMode,
     query_max_failure_seconds: u64,
     fallback_recovery_seconds: u64,
@@ -166,7 +247,7 @@ impl Default for BackendBuilder {
             query_log_ad_hoc_queries: false,
             validate_queries: false,
             fail_invalidated_queries: false,
-            allow_unsupported_set: false,
+            unsupported_set_mode: UnsupportedSetMode::Error,
             migration_mode: MigrationMode::InRequestPath,
             query_max_failure_seconds: (i64::MAX / 1000) as u64,
             fallback_recovery_seconds: 0,
@@ -186,11 +267,19 @@ impl BackendBuilder {
         query_status_cache: &'static QueryStatusCache,
     ) -> Backend<DB, Handler> {
         metrics::increment_gauge!(recorded::CONNECTED_CLIENTS, 1.0);
+
+        let proxy_state = if upstream.is_some() {
+            ProxyState::Fallback
+        } else {
+            ProxyState::Never
+        };
+
         Backend {
             parsed_query_cache: HashMap::new(),
             prepared_statements: Vec::new(),
             noria,
             upstream,
+            proxy_state,
             slowlog: self.slowlog,
             dialect: self.dialect,
             users: self.users,
@@ -202,7 +291,7 @@ impl BackendBuilder {
             query_status_cache,
             validate_queries: self.validate_queries,
             fail_invalidated_queries: self.fail_invalidated_queries,
-            allow_unsupported_set: self.allow_unsupported_set,
+            unsupported_set_mode: self.unsupported_set_mode,
             migration_mode: self.migration_mode,
             last_query: None,
             query_max_failure_duration: Duration::new(self.query_max_failure_seconds, 0),
@@ -262,8 +351,8 @@ impl BackendBuilder {
         self
     }
 
-    pub fn allow_unsupported_set(mut self, allow_unsupported_set: bool) -> Self {
-        self.allow_unsupported_set = allow_unsupported_set;
+    pub fn unsupported_set_mode(mut self, unsupported_set_mode: UnsupportedSetMode) -> Self {
+        self.unsupported_set_mode = unsupported_set_mode;
         self
     }
 
@@ -345,6 +434,7 @@ where
     noria: NoriaConnector,
     /// Optional connector to the upstream DB. Used for fallback reads and all writes if it exists
     upstream: Option<DB>,
+    proxy_state: ProxyState,
     slowlog: bool,
     /// SQL dialect to use when parsing queries from clients
     dialect: Dialect,
@@ -373,8 +463,8 @@ where
     validate_queries: bool,
     fail_invalidated_queries: bool,
 
-    /// Allow, but ignore, unsupported SQL `SET` statements.
-    allow_unsupported_set: bool,
+    /// How to behave when receiving unsupported `SET` statements
+    unsupported_set_mode: UnsupportedSetMode,
 
     /// How this backend handles migrations, See MigrationMode.
     migration_mode: MigrationMode,
@@ -573,22 +663,6 @@ where
             .expect("Too many prepared statements")
     }
 
-    // Returns whether we are in a transaction currently or not. Transactions are only supported
-    // over fallback, so if we have no fallback connector we return false.
-    fn is_in_tx(&self) -> bool {
-        if let Some(db) = self.upstream.as_ref() {
-            db.is_in_tx()
-        } else {
-            false
-        }
-    }
-
-    /// Check whether the set statement is explicitly allowed. All other set
-    /// statements should return an error
-    pub fn is_allowed_set_statement(&self, set: &nom_sql::SetStatement) -> bool {
-        self.allow_unsupported_set || Handler::is_set_allowed(set)
-    }
-
     /// Executes query on the upstream database, for when it cannot be parsed or executed by noria.
     /// Returns the query result, or an error if fallback is not configured
     #[instrument_root(level = "info")]
@@ -776,8 +850,8 @@ where
 
     /// Provides metadata required to prepare a query
     async fn plan_prepare(&mut self, query: &str) -> PrepareMeta {
-        if self.is_in_tx() {
-            return PrepareMeta::InTransaction;
+        if self.proxy_state.should_proxy() {
+            return PrepareMeta::Proxy;
         }
 
         let parsed_query = match self.parse_query(query) {
@@ -824,7 +898,7 @@ where
         event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResult<DB>, DB::Error> {
         match meta {
-            PrepareMeta::InTransaction
+            PrepareMeta::Proxy
             | PrepareMeta::FailedToParse
             | PrepareMeta::FailedToRewrite
             | PrepareMeta::Unimplemented
@@ -1192,9 +1266,21 @@ where
         })?;
 
         match query {
-            SqlQuery::StartTransaction(_) => upstream.start_tx().await.map(QueryResult::Upstream),
-            SqlQuery::Commit(_) => upstream.commit().await.map(QueryResult::Upstream),
-            SqlQuery::Rollback(_) => upstream.rollback().await.map(QueryResult::Upstream),
+            SqlQuery::StartTransaction(_) => {
+                let result = QueryResult::Upstream(upstream.start_tx().await?);
+                self.proxy_state.start_transaction();
+                Ok(result)
+            }
+            SqlQuery::Commit(_) => {
+                let result = QueryResult::Upstream(upstream.commit().await?);
+                self.proxy_state.end_transaction();
+                Ok(result)
+            }
+            SqlQuery::Rollback(_) => {
+                let result = QueryResult::Upstream(upstream.rollback().await?);
+                self.proxy_state.end_transaction();
+                Ok(result)
+            }
             _ => {
                 error!("handle_transaction_boundary was called with a SqlQuery that was not of type StartTransaction, Commit, or Rollback");
                 internal!("handle_transaction_boundary was called with a SqlQuery that was not of type StartTransaction, Commit, or Rollback");
@@ -1526,8 +1612,8 @@ where
                 }
                 self.query_fallback(query, &mut event).await
             }
-            // Parsed but is in transaction so send to fallback
-            Ok(_) if self.is_in_tx() => self.query_fallback(query, &mut event).await,
+            // Parsed but proxy mode means we should send upstream
+            Ok(_) if self.proxy_state.should_proxy() => self.query_fallback(query, &mut event).await,
             Ok(ref parsed_query) if Handler::requires_fallback(parsed_query) => {
                 if self.has_fallback() {
                     // Query requires a fallback and we can send it to fallback
@@ -1600,27 +1686,35 @@ where
     }
 
     #[instrument(level = "trace", name = "query", skip_all)]
-    async fn query_adhoc_non_select(
-        &mut self,
+    async fn query_adhoc_non_select<'a>(
+        &'a mut self,
         query: &str,
         event: &mut QueryExecutionEvent,
         parse_result: SqlQuery,
-    ) -> Result<QueryResult<'_, DB>, DB::Error> {
+    ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let parsed_query = &parse_result;
 
         // If we have an upstream then we will pass valid set statements across to that upstream.
         // If no upstream is present we will ignore the statement
         // Disallowed set statements always produce an error
         if let SqlQuery::Set(s) = parsed_query {
-            if !self.is_allowed_set_statement(s) {
+            if !Handler::is_set_allowed(s) {
                 warn!(%s, "received unsupported SET statement");
-                let e = ReadySetError::SetDisallowed {
-                    statement: parsed_query.to_string(),
-                };
-                if self.has_fallback() {
-                    event.set_noria_error(&e);
+                match self.unsupported_set_mode {
+                    UnsupportedSetMode::Error => {
+                        let e = ReadySetError::SetDisallowed {
+                            statement: parsed_query.to_string(),
+                        };
+                        if self.has_fallback() {
+                            event.set_noria_error(&e);
+                        }
+                        return Err(e.into());
+                    }
+                    UnsupportedSetMode::Proxy => {
+                        self.proxy_state = ProxyState::ProxyAlways;
+                    }
+                    UnsupportedSetMode::Allow => {}
                 }
-                return Err(e.into());
             }
         }
 

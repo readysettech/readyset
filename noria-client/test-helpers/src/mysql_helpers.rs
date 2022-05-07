@@ -134,8 +134,7 @@ pub async fn query_cache_setup(
         true,
         query_status_cache,
         migration_mode,
-        true,  // recreate database.
-        false, //allow unsupported set
+        true, // recreate database.
         ReadBehavior::Blocking,
     )
     .await

@@ -125,12 +125,12 @@ impl NoriaBackendInner {
 
     /// If `ignore_cache` is passed, the view cache, `outputs` will be ignored and a
     /// view will be retrieve from noria.
-    async fn get_noria_view(
-        &mut self,
+    async fn get_noria_view<'a>(
+        &'a mut self,
         view: &str,
         region: Option<&str>,
         invalidate_cache: bool,
-    ) -> ReadySetResult<&mut View> {
+    ) -> ReadySetResult<&'a mut View> {
         if invalidate_cache {
             self.outputs.remove(view);
         }
@@ -754,10 +754,10 @@ impl NoriaConnector {
         }
     }
 
-    pub(crate) async fn handle_update(
-        &mut self,
+    pub(crate) async fn handle_update<'a>(
+        &'a mut self,
         q: &nom_sql::UpdateStatement,
-    ) -> ReadySetResult<QueryResult<'_>> {
+    ) -> ReadySetResult<QueryResult<'a>> {
         self.do_update(Cow::Borrowed(q), None).await
     }
 
@@ -1229,11 +1229,11 @@ impl NoriaConnector {
         })
     }
 
-    async fn do_delete(
-        &mut self,
+    async fn do_delete<'a>(
+        &'a mut self,
         q: Cow<'_, DeleteStatement>,
         params: Option<&[DataType]>,
-    ) -> ReadySetResult<QueryResult<'_>> {
+    ) -> ReadySetResult<QueryResult<'a>> {
         trace!(table = %q.table.name, "delete::access mutator");
         let mutator = self
             .inner
@@ -1455,10 +1455,10 @@ impl NoriaConnector {
         res
     }
 
-    pub(crate) async fn handle_create_view(
-        &mut self,
+    pub(crate) async fn handle_create_view<'a>(
+        &'a mut self,
         q: &nom_sql::CreateViewStatement,
-    ) -> ReadySetResult<QueryResult<'_>> {
+    ) -> ReadySetResult<QueryResult<'a>> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Noria every time. On the other hand, CREATE VIEW is rare...
 

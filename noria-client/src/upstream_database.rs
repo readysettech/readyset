@@ -126,9 +126,6 @@ pub trait UpstreamDatabase: Sized + Send {
     /// Handle starting a transaction with the upstream database.
     async fn start_tx(&mut self) -> Result<Self::QueryResult, Self::Error>;
 
-    /// Return whether we are currently in a transaction or not.
-    fn is_in_tx(&self) -> bool;
-
     /// Handle committing a transaction to the upstream database.
     async fn commit(&mut self) -> Result<Self::QueryResult, Self::Error>;
 

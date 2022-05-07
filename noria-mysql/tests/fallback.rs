@@ -1,20 +1,25 @@
 use mysql_async::prelude::*;
 use noria_client::backend::noria_connector::ReadBehavior;
+use noria_client::backend::UnsupportedSetMode;
 use noria_client::BackendBuilder;
 use noria_client_test_helpers::mysql_helpers::MySQLAdapter;
 use noria_client_test_helpers::{self, sleep};
 use noria_server::Handle;
 use serial_test::serial;
 
-async fn setup() -> (mysql_async::Opts, Handle) {
+async fn setup_with(backend_builder: BackendBuilder) -> (mysql_async::Opts, Handle) {
     noria_client_test_helpers::setup::<MySQLAdapter>(
-        BackendBuilder::new().require_authentication(false),
+        backend_builder,
         true,
         true,
         true,
         ReadBehavior::Blocking,
     )
     .await
+}
+
+async fn setup() -> (mysql_async::Opts, Handle) {
+    setup_with(BackendBuilder::new().require_authentication(false)).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -196,4 +201,37 @@ async fn set_autocommit() {
         .query_drop("SET @@LOCAL.autocommit = 0;")
         .await
         .is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn proxy_unsupported_sets() {
+    let (opts, _handle) = setup_with(
+        BackendBuilder::new()
+            .require_authentication(false)
+            .unsupported_set_mode(UnsupportedSetMode::Proxy),
+    )
+    .await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+
+    conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
+    conn.query_drop("INSERT INTO t (x) values (1)")
+        .await
+        .unwrap();
+
+    conn.query_drop("SET @@SESSION.SQL_MODE = 'ANSI_QUOTES';")
+        .await
+        .unwrap();
+
+    // We should proxy the SET statement upstream, then all subsequent statements should go upstream
+    // (evidenced by the fact that `"x"` is interpreted as a column reference, per the ANSI_QUOTES
+    // SQL mode)
+    assert_eq!(
+        conn.query_first::<(i32,), _>("SELECT \"x\" FROM \"t\"")
+            .await
+            .unwrap()
+            .unwrap()
+            .0,
+        1,
+    );
 }

@@ -44,7 +44,6 @@ pub struct MySqlUpstream {
     conn: Conn,
     prepared_statements: HashMap<StatementID, mysql_async::Statement>,
     url: String,
-    in_transaction: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -129,7 +128,6 @@ impl UpstreamDatabase for MySqlUpstream {
             conn,
             prepared_statements,
             url,
-            in_transaction: false,
         })
     }
 
@@ -152,7 +150,6 @@ impl UpstreamDatabase for MySqlUpstream {
                 conn,
                 prepared_statements,
                 url,
-                in_transaction: false,
             },
         );
         let _ = old_self.conn.disconnect().await as Result<(), _>;
@@ -265,28 +262,16 @@ impl UpstreamDatabase for MySqlUpstream {
     }
 
     async fn start_tx(&mut self) -> Result<Self::QueryResult, Error> {
-        if self.in_transaction {
-            return Err(
-                mysql_async::Error::Driver(mysql_async::DriverError::NestedTransaction).into(),
-            );
-        }
-
         self.conn.query_drop("START TRANSACTION").await?;
 
-        self.in_transaction = true;
         Ok(QueryResult::Command {
             status_flags: self.conn.status(),
         })
     }
 
-    fn is_in_tx(&self) -> bool {
-        self.in_transaction
-    }
-
     async fn commit(&mut self) -> Result<Self::QueryResult, Error> {
         let result = self.conn.query_iter("COMMIT").await?;
         result.drop_result().await?;
-        self.in_transaction = false;
 
         Ok(QueryResult::Command {
             status_flags: self.conn.status(),
@@ -296,7 +281,6 @@ impl UpstreamDatabase for MySqlUpstream {
     async fn rollback(&mut self) -> Result<Self::QueryResult, Error> {
         let result = self.conn.query_iter("ROLLBACK").await?;
         result.drop_result().await?;
-        self.in_transaction = false;
 
         Ok(QueryResult::Command {
             status_flags: self.conn.status(),
