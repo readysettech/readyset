@@ -4177,6 +4177,7 @@ dependencies = [
  "derive_more",
  "itertools",
  "launchpad",
+ "lazy_static",
  "maplit",
  "mysql",
  "mysql-srv",
