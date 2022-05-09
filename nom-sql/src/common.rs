@@ -289,6 +289,12 @@ pub enum Literal {
     BitVector(Vec<u8>),
 }
 
+impl From<bool> for Literal {
+    fn from(b: bool) -> Self {
+        Self::Boolean(b)
+    }
+}
+
 impl From<i64> for Literal {
     fn from(i: i64) -> Self {
         Literal::Integer(i)
