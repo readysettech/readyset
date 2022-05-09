@@ -18,47 +18,88 @@ use tracing::warn;
 const MAX_ALLOWED_PACKET_VARIABLE_NAME: &str = "max_allowed_packet";
 const MAX_ALLOWED_PACKET_DEFAULT: DataType = DataType::UnsignedInt(67108864);
 
-const ALLOWED_SQL_MODES: [SqlMode; 7] = [
-    SqlMode::OnlyFullGroupBy,
-    SqlMode::StrictTransTables,
-    SqlMode::NoZeroInDate,
+/// The list of mysql `SQL_MODE`s that *must* be set by a client
+const REQUIRED_SQL_MODES: [SqlMode; 3] = [
     SqlMode::NoZeroDate,
-    SqlMode::ErrorForDivisionByZero,
-    SqlMode::NoAutoCreateUser,
-    SqlMode::NoEngineSubstitution,
+    SqlMode::NoZeroInDate,
+    SqlMode::OnlyFullGroupBy,
 ];
 
-// SqlMode holds the current list of known sql modes that we care to deal with.
-// TODO(peter): expand this later to include ALL sql modes.
+/// The list of mysql `SQL_MODE`s that *may* be set by a client (because they don't affect query
+/// semantics)
+const ALLOWED_SQL_MODES: [SqlMode; 11] = [
+    SqlMode::ErrorForDivisionByZero, // deprecated
+    SqlMode::IgnoreSpace,            // TODO: I think this is fine, but I'm not 100% sure
+    SqlMode::NoAutoValueOnZero,
+    SqlMode::NoDirInCreate,
+    SqlMode::NoEngineSubstitution,
+    SqlMode::NoZeroDate,
+    SqlMode::NoZeroInDate,
+    SqlMode::OnlyFullGroupBy,
+    SqlMode::StrictAllTables,
+    SqlMode::StrictTransTables,
+    SqlMode::TimeTruncateFractional,
+];
+
+/// Enum representing the various flags that can be set as part of the MySQL `SQL_MODE` parameter.
+/// See [the official mysql documentation][mysql-docs] for more information.
+///
+/// Note that this enum only includes the SQL mode flags that are present as of mysql 8.0 - any SQL
+/// modes that have been removed since earlier versions are omitted here, as they're unsupported
+/// regardless.
+///
+/// [mysql-docs]: https://dev.mysql.com/doc/refman/8.0/en/sql-mode.html
 #[derive(PartialEq, Eq, Hash)]
 enum SqlMode {
-    OnlyFullGroupBy,
-    StrictTransTables,
-    NoZeroInDate,
-    NoZeroDate,
+    AllowInvalidDates,
+    AnsiQuotes,
     ErrorForDivisionByZero,
+    HighNotPrecedence,
+    IgnoreSpace,
     NoAutoCreateUser,
+    NoAutoValueOnZero,
+    NoBackslashEscapes,
+    NoDirInCreate,
     NoEngineSubstitution,
+    NoUnsignedSubtraction,
+    NoZeroDate,
+    NoZeroInDate,
+    OnlyFullGroupBy,
+    PadCharToFullLength,
+    PipesAsConcat,
+    RealAsFloat,
+    StrictAllTables,
+    StrictTransTables,
+    TimeTruncateFractional,
 }
 
-// TODO(vlad): replace with strum
 impl FromStr for SqlMode {
     type Err = ReadySetError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let res = match &s.trim().to_ascii_lowercase()[..] {
-            "only_full_group_by" => SqlMode::OnlyFullGroupBy,
-            "strict_trans_tables" => SqlMode::StrictTransTables,
-            "no_zero_in_date" => SqlMode::NoZeroInDate,
-            "no_zero_date" => SqlMode::NoZeroDate,
-            "error_for_division_by_zero" => SqlMode::ErrorForDivisionByZero,
-            "no_auto_create_user" => SqlMode::NoAutoCreateUser,
-            "no_engine_substitution" => SqlMode::NoEngineSubstitution,
-            _ => {
-                return Err(ReadySetError::SqlModeParseFailed(s.to_string()));
-            }
-        };
-        Ok(res)
+        match &s.trim().to_ascii_lowercase()[..] {
+            "allow_invalid_dates" => Ok(SqlMode::AllowInvalidDates),
+            "ansi_quotes" => Ok(SqlMode::AnsiQuotes),
+            "error_for_division_by_zero" => Ok(SqlMode::ErrorForDivisionByZero),
+            "high_not_precedence" => Ok(SqlMode::HighNotPrecedence),
+            "ignore_space" => Ok(SqlMode::IgnoreSpace),
+            "no_auto_create_user" => Ok(SqlMode::NoAutoCreateUser),
+            "no_auto_value_on_zero" => Ok(SqlMode::NoAutoValueOnZero),
+            "no_backslash_escapes" => Ok(SqlMode::NoBackslashEscapes),
+            "no_dir_in_create" => Ok(SqlMode::NoDirInCreate),
+            "no_engine_substitution" => Ok(SqlMode::NoEngineSubstitution),
+            "no_unsigned_subtraction" => Ok(SqlMode::NoUnsignedSubtraction),
+            "no_zero_date" => Ok(SqlMode::NoZeroDate),
+            "no_zero_in_date" => Ok(SqlMode::NoZeroInDate),
+            "only_full_group_by" => Ok(SqlMode::OnlyFullGroupBy),
+            "pad_char_to_full_length" => Ok(SqlMode::PadCharToFullLength),
+            "pipes_as_concat" => Ok(SqlMode::PipesAsConcat),
+            "real_as_float" => Ok(SqlMode::RealAsFloat),
+            "strict_all_tables" => Ok(SqlMode::StrictAllTables),
+            "strict_trans_tables" => Ok(SqlMode::StrictTransTables),
+            "time_truncate_fractional" => Ok(SqlMode::TimeTruncateFractional),
+            _ => Err(ReadySetError::SqlModeParseFailed(s.to_string())),
+        }
     }
 }
 
@@ -149,7 +190,7 @@ impl QueryHandler for MySqlQueryHandler {
                 if variable.scope == VariableScope::User {
                     return false;
                 }
-                match variable.name.as_str() {
+                match variable.name.to_ascii_lowercase().as_str() {
                     "time_zone" => {
                         matches!(value, Expression::Literal(Literal::String(ref s)) if s == "+00:00")
                     }
@@ -160,7 +201,10 @@ impl QueryHandler for MySqlQueryHandler {
                         if let Expression::Literal(Literal::String(ref s)) = value {
                             match raw_sql_modes_to_list(&s[..]) {
                                 Ok(sql_modes) => {
-                                    sql_modes.iter().all(|sql_mode| ALLOWED_SQL_MODES.contains(sql_mode))
+                                    REQUIRED_SQL_MODES.iter().all(|m| sql_modes.contains(m))
+                                        && sql_modes.iter().all(|sql_mode| {
+                                            ALLOWED_SQL_MODES.contains(sql_mode)
+                                        })
                                 }
                                 Err(e) => {
                                     warn!(%e, "unknown sql modes in set");
@@ -187,6 +231,50 @@ impl QueryHandler for MySqlQueryHandler {
                     && matches!(&names.charset[..], "latin1" | "utf8" | "utf8mb4")
             }
             nom_sql::SetStatement::PostgresParameter(_) => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nom_sql::{SetStatement, SetVariables, Variable};
+
+    use super::*;
+
+    #[test]
+    fn supported_sql_mode() {
+        let m = "NO_ZERO_DATE,STRICT_ALL_TABLES,ONLY_FULL_GROUP_BY,NO_ZERO_IN_DATE";
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![(
+                Variable {
+                    scope: VariableScope::Session,
+                    name: "sql_mode".into(),
+                },
+                Expression::Literal(Literal::from(m)),
+            )],
+        });
+        assert!(MySqlQueryHandler::is_set_allowed(&stmt));
+    }
+
+    #[test]
+    fn unsupported_sql_mode() {
+        let m = "NO_ZERO_IN_DATE,STRICT_ALL_TABLES,ONLY_FULL_GROUP_BY,NO_ZERO_IN_DATE,ANSI_QUOTES";
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![(
+                Variable {
+                    scope: VariableScope::Session,
+                    name: "sql_mode".into(),
+                },
+                Expression::Literal(Literal::from(m)),
+            )],
+        });
+        assert!(!MySqlQueryHandler::is_set_allowed(&stmt));
+    }
+
+    #[test]
+    fn all_required_sql_modes_are_allowed() {
+        for mode in REQUIRED_SQL_MODES {
+            assert!(ALLOWED_SQL_MODES.contains(&mode))
         }
     }
 }

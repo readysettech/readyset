@@ -35,7 +35,8 @@ pub use self::select::{
 };
 pub use self::set::{
     PostgresParameterScope, PostgresParameterValue, PostgresParameterValueInner, SetNames,
-    SetPostgresParameter, SetPostgresParameterValue, SetStatement, Variable, VariableScope,
+    SetPostgresParameter, SetPostgresParameterValue, SetStatement, SetVariables, Variable,
+    VariableScope,
 };
 pub use self::show::ShowStatement;
 pub use self::table::Table;
