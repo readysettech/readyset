@@ -33,8 +33,6 @@ pub trait Adapter: Send {
 
     const DIALECT: nom_sql::Dialect;
 
-    const MIRROR_DDL: bool = false;
-
     fn connection_opts_with_port(port: u16) -> Self::ConnectionOpts;
     fn url() -> String;
 
@@ -189,7 +187,6 @@ where
 
             let backend = backend_builder
                 .dialect(A::DIALECT)
-                .mirror_ddl(A::MIRROR_DDL)
                 .migration_mode(mode)
                 .allow_unsupported_set(allow_unsupported_set)
                 .build(noria, upstream, query_status_cache);
