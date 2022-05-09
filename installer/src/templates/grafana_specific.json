@@ -23,8 +23,21 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 2,
-  "iteration": 1651790818717,
-  "links": [],
+  "iteration": 1652129690838,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "links",
+      "tooltip": "",
+      "type": "dashboards",
+      "url": ""
+    }
+  ],
   "panels": [
     {
       "datasource": null,
@@ -549,120 +562,14 @@
     },
     {
       "datasource": "DS_PROMETHEUS",
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 20,
-        "x": 0,
-        "y": 11
-      },
-      "id": 27,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "hidden",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "query_log_total_cache_misses{deployment=\"$deployment\", query=\"${queryfilter:raw}\"}",
-          "hide": false,
-          "instant": false,
-          "interval": "",
-          "legendFormat": "Total misses",
-          "queryType": "randomWalk",
-          "refId": "total query misses"
-        },
-        {
-          "exemplar": true,
-          "expr": "query_log_execution_time_count{deployment=\"$deployment\",database_type=\"noria\",query=\"${queryfilter:raw}\", event_type=~\"query|execute\"}",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "Total count",
-          "refId": "total query count"
-        }
-      ],
-      "title": "Cache Hit Rate",
-      "transformations": [
-        {
-          "id": "calculateField",
-          "options": {
-            "binary": {
-              "left": "",
-              "operator": "/",
-              "reducer": "sum",
-              "right": "Total count"
-            },
-            "mode": "binary",
-            "reduce": {
-              "reducer": "sum"
-            },
-            "replaceFields": true
-          }
-        }
-      ],
-      "type": "timeseries"
-    },
-    {
-      "datasource": "DS_PROMETHEUS",
-      "description": "The number of queries per second executed against ReadySet split by the ReadySet and MySQL backends.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "Queries per second",
+            "axisLabel": "Total Queries",
             "axisPlacement": "auto",
             "axisSoftMax": 1,
             "axisSoftMin": 0,
@@ -684,7 +591,7 @@
             "scaleDistribution": {
               "type": "linear"
             },
-            "showPoints": "auto",
+            "showPoints": "never",
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -695,7 +602,17 @@
             }
           },
           "decimals": 1,
-          "mappings": [],
+          "mappings": [
+            {
+              "options": {
+                "noria": {
+                  "index": 0,
+                  "text": "ReadySet"
+                }
+              },
+              "type": "value"
+            }
+          ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -710,16 +627,17 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 6,
+        "h": 9,
         "w": 20,
         "x": 0,
-        "y": 20
+        "y": 11
       },
       "id": 25,
+      "interval": null,
       "options": {
         "legend": {
           "calcs": [],
-          "displayMode": "hidden",
+          "displayMode": "list",
           "placement": "bottom"
         },
         "tooltip": {
@@ -730,7 +648,7 @@
       "targets": [
         {
           "exemplar": false,
-          "expr": "sum by (database_type) (rate(query_log_execution_time_count{deployment=\"$deployment\", query=\"${queryfilter:raw}\"}[1m]))",
+          "expr": "query_log_execution_time_count{deployment=\"$deployment\", query=\"${queryfilter:raw}\"}",
           "instant": false,
           "interval": "",
           "legendFormat": "{{database_type}}",
@@ -738,7 +656,14 @@
           "refId": "A"
         }
       ],
-      "title": "Queries Per Second (1 minute intervals)",
+      "timeFrom": null,
+      "title": "Total Query Count",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {}
+        }
+      ],
       "type": "timeseries"
     }
   ],
@@ -752,8 +677,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "localdeploy",
-          "value": "localdeploy"
+          "text": "qapass",
+          "value": "qapass"
         },
         "datasource": "DS_PROMETHEUS",
         "definition": "label_values(deployment)",
@@ -779,8 +704,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "SELECT * FROM `nums` WHERE (`b` = $1)",
-          "value": "SELECT * FROM `nums` WHERE (`b` = $1)"
+          "text": "SELECT * FROM `test2` WHERE (`name` = $1)",
+          "value": "SELECT * FROM `test2` WHERE (`name` = $1)"
         },
         "datasource": "DS_PROMETHEUS",
         "definition": "label_values(query)",
@@ -805,7 +730,7 @@
     ]
   },
   "time": {
-    "from": "now-6h",
+    "from": "now-30m",
     "to": "now"
   },
   "timepicker": {},

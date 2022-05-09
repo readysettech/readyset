@@ -22,8 +22,21 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 3,
-  "iteration": 1651792532698,
-  "links": [],
+  "iteration": 1652126927252,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Workload Overview",
+      "tooltip": "",
+      "type": "dashboards",
+      "url": ""
+    }
+  ],
   "panels": [
     {
       "collapsed": false,
@@ -36,29 +49,18 @@
       },
       "id": 29,
       "panels": [],
-      "title": "Did Readyset start?",
+      "title": "Did ReadySet start?",
       "type": "row"
     },
     {
       "datasource": "DS_PROMETHEUS",
-      "description": "How long ReadySet server has been up for",
+      "description": "Time since the server started",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "thresholds"
           },
-          "mappings": [
-            {
-              "options": {
-                "match": "null+nan",
-                "result": {
-                  "index": 0,
-                  "text": "Yes"
-                }
-              },
-              "type": "special"
-            }
-          ],
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -73,8 +75,8 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 3,
-        "w": 3,
+        "h": 7,
+        "w": 5,
         "x": 0,
         "y": 1
       },
@@ -88,7 +90,7 @@
           "calcs": [
             "lastNotNull"
           ],
-          "fields": "/^startup_timestamp\\{deployment=\"solidus\", instance=\"localhost:9000\", job=\"readyset\\-server\"\\}$/",
+          "fields": "",
           "values": false
         },
         "text": {},
@@ -98,8 +100,8 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "startup_timestamp {deployment=\"$deployment\", job=\"readyset-server\", upstream_db_type=\"mysql\"}",
-          "format": "time_series",
+          "expr": "startup_timestamp",
+          "format": "table",
           "instant": false,
           "interval": "",
           "legendFormat": "",
@@ -107,211 +109,7 @@
           "refId": "Timestamp"
         }
       ],
-      "title": "Readyset (server) started",
-      "type": "stat"
-    },
-    {
-      "collapsed": false,
-      "datasource": null,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 4
-      },
-      "id": 31,
-      "panels": [],
-      "title": "Is ReadySet receiving requests?",
-      "type": "row"
-    },
-    {
-      "datasource": "DS_PROMETHEUS",
-      "description": "Is ReadySet server receiving requests?",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "options": {
-                "0": {
-                  "color": "red",
-                  "index": 1,
-                  "text": "No"
-                }
-              },
-              "type": "value"
-            },
-            {
-              "options": {
-                "from": 1,
-                "result": {
-                  "color": "green",
-                  "index": 0,
-                  "text": "Yes"
-                },
-                "to": 1000000000000000000
-              },
-              "type": "range"
-            },
-            {
-              "options": {
-                "match": "null+nan",
-                "result": {
-                  "color": "red",
-                  "index": 2,
-                  "text": "No"
-                }
-              },
-              "type": "special"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 4,
-        "x": 0,
-        "y": 5
-      },
-      "id": 24,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {
-          "titleSize": 3
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "8.0.6",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "server_external_requests",
-          "format": "table",
-          "instant": false,
-          "interval": "",
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "title": "ReadySet Server Requests",
-      "type": "stat"
-    },
-    {
-      "datasource": "DS_PROMETHEUS",
-      "description": "Is ReadySet adapter receiving requests?",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "options": {
-                "0": {
-                  "color": "red",
-                  "index": 1,
-                  "text": "No"
-                }
-              },
-              "type": "value"
-            },
-            {
-              "options": {
-                "from": 1,
-                "result": {
-                  "color": "green",
-                  "index": 0,
-                  "text": "Yes"
-                },
-                "to": 999999999999999
-              },
-              "type": "range"
-            },
-            {
-              "options": {
-                "match": "null+nan",
-                "result": {
-                  "color": "red",
-                  "index": 2,
-                  "text": "No"
-                }
-              },
-              "type": "special"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 3,
-        "x": 4,
-        "y": 5
-      },
-      "id": 35,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {
-          "titleSize": 1
-        },
-        "textMode": "auto"
-      },
-      "pluginVersion": "8.0.6",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "noria_client_external_requests",
-          "format": "table",
-          "instant": false,
-          "interval": "",
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "title": "ReadySet Adapter Requests",
+      "title": "ReadySet Started",
       "type": "stat"
     },
     {
@@ -323,9 +121,9 @@
         "x": 0,
         "y": 8
       },
-      "id": 39,
+      "id": 31,
       "panels": [],
-      "title": "Is ReadySet connected to MySQL?",
+      "title": "Is ReadySet receiving requests?",
       "type": "row"
     },
     {
@@ -334,43 +132,37 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
-          "mappings": [
-            {
-              "options": {
-                "0": {
-                  "color": "red",
-                  "index": 1,
-                  "text": "No"
-                }
-              },
-              "type": "value"
+          "custom": {
+            "axisLabel": "Requests per Minute",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
             },
-            {
-              "options": {
-                "match": "null+nan",
-                "result": {
-                  "color": "red",
-                  "index": 0,
-                  "text": "No"
-                }
-              },
-              "type": "special"
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
             },
-            {
-              "options": {
-                "from": 1,
-                "result": {
-                  "color": "green",
-                  "index": 2,
-                  "text": "Yes"
-                },
-                "to": 110000
-              },
-              "type": "range"
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
             }
-          ],
+          },
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -384,15 +176,73 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 3,
-        "w": 4,
+        "h": 8,
+        "w": 9,
         "x": 0,
         "y": 9
       },
-      "id": 37,
+      "id": 40,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "hidden",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "8.0.6",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "increase(noria_client_external_requests[1m])",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "Rate of requests",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "title": "ReadySet Client Request Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "DS_PROMETHEUS",
+      "description": "The number of connections from external client applications to ReadySet.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 9,
+        "y": 9
+      },
+      "id": 42,
       "options": {
         "colorMode": "value",
-        "graphMode": "none",
+        "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -410,14 +260,98 @@
         {
           "exemplar": true,
           "expr": "noria_client_connected_clients",
+          "format": "table",
+          "instant": false,
           "interval": "",
           "legendFormat": "",
           "queryType": "randomWalk",
           "refId": "A"
         }
       ],
-      "title": "Is Readyset connected to MySQL?",
+      "title": "ReadySet Client Connections",
       "type": "stat"
+    },
+    {
+      "datasource": "DS_PROMETHEUS",
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "Requests per Minute",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 9,
+        "x": 0,
+        "y": 17
+      },
+      "id": 24,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "hidden",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "8.0.6",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "increase(server_external_requests[1m])",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "Rate of requests",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "title": "ReadySet Server Request Rate",
+      "type": "timeseries"
     },
     {
       "collapsed": false,
@@ -426,11 +360,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 12
+        "y": 25
       },
       "id": 33,
       "panels": [],
-      "title": "ReadySet settings",
+      "title": "Ongoing ReadySet Processes",
       "type": "row"
     },
     {
@@ -477,15 +411,15 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 3,
-        "w": 3,
+        "h": 6,
+        "w": 5,
         "x": 0,
-        "y": 13
+        "y": 26
       },
       "id": 20,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -539,6 +473,17 @@
                 }
               },
               "type": "value"
+            },
+            {
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "color": "green",
+                  "index": 2,
+                  "text": "No"
+                }
+              },
+              "type": "special"
             }
           ],
           "thresholds": {
@@ -559,10 +504,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 3,
-        "w": 3,
-        "x": 3,
-        "y": 13
+        "h": 6,
+        "w": 4,
+        "x": 5,
+        "y": 26
       },
       "id": 21,
       "options": {
@@ -608,8 +553,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "localdeploy",
-          "value": "localdeploy"
+          "text": "qapass",
+          "value": "qapass"
         },
         "datasource": "DS_PROMETHEUS",
         "definition": "label_values(deployment)",
@@ -634,7 +579,7 @@
     ]
   },
   "time": {
-    "from": "now-30m",
+    "from": "now-3h",
     "to": "now"
   },
   "timepicker": {},

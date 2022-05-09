@@ -22,8 +22,21 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1651709052889,
-  "links": [],
+  "iteration": 1652129249419,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "New link",
+      "tooltip": "",
+      "type": "dashboards",
+      "url": ""
+    }
+  ],
   "panels": [
     {
       "datasource": "-- Mixed --",
@@ -350,7 +363,7 @@
         }
       ],
       "timeShift": null,
-      "title": "Proxied Queries (Database)",
+      "title": "Queries Proxied to Client Database",
       "transformations": [
         {
           "id": "merge",
@@ -458,6 +471,24 @@
               "readyset supported results": "ReadySet Supported?",
               "{query=\"SELECT `column_name` FROM `information_schema`.`statistics` WHERE ((`index_name` = '<anonymized>') AND ((`table_schema` = database()) AND (`table_name` = '<anonymized>'))) ORDER BY `seq_in_index`\"}": "MySQL90p"
             }
+          }
+        },
+        {
+          "id": "filterByValue",
+          "options": {
+            "filters": [
+              {
+                "config": {
+                  "id": "regex",
+                  "options": {
+                    "value": "(q_+)"
+                  }
+                },
+                "fieldName": "Query ID"
+              }
+            ],
+            "match": "all",
+            "type": "include"
           }
         },
         {
@@ -712,7 +743,7 @@
         }
       ],
       "timeShift": null,
-      "title": "Cached Queries (ReadySet)",
+      "title": "Queries Cached by ReadySet",
       "transformations": [
         {
           "id": "renameByRegex",
@@ -813,8 +844,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "localdeploy",
-          "value": "localdeploy"
+          "text": "qapass",
+          "value": "qapass"
         },
         "datasource": "DS_PROMETHEUS",
         "definition": "label_values(deployment)",
@@ -839,7 +870,7 @@
     ]
   },
   "time": {
-    "from": "now-5m",
+    "from": "now-30m",
     "to": "now"
   },
   "timepicker": {},
