@@ -553,3 +553,54 @@ steps:
       - ecr#v2.5.0:
           login: true
           retries: 3
+
+  # Helm Chart CI Checks
+  - group: ':helm: Helm Chart Checks'
+    label: ':helm: Helm Chart Checks'
+    key: helm-chart-checks
+    depends_on:
+      - build-ops-image
+    steps:
+      # Render YAML for helm templates
+      - label: ":helm: Render Helm Charts"
+        key: readyset-server-helm-templatizer
+        commands:
+          - cd ops/helm/charts/readyset-server
+          - mkdir ./rendered_charts
+          - helm dependency update .
+          # Render template with external deps disabled (limit scope of test; separation of concerns)
+          # #1: With values.yaml (default file consumed by Helm)
+          - helm template readyset . --set monitoring.enabled=false --set consul.enabled=false > ./rendered_charts/helm.readyset-server.default.yaml
+          # #2: With example.values.yaml file
+          - helm template readyset . --set monitoring.enabled=false --set consul.enabled=false --values ./example.values.yaml > ./rendered_charts/helm.readyset-server.example.values.yaml
+          # Upload templates for inspection elsewhere in CI
+          - buildkite-agent artifact upload "./rendered_charts/*.yaml"
+        plugins:
+          - docker#v3.9.0:
+              image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
+              propagate-environment: true
+              propagate-aws-auth-tokens: true
+          - ecr#v2.5.0:
+              login: true
+              retries: 3
+
+      # Analyze Rendered Helm Templates
+      - label: ":k8s: API Schema Checks for Helm Charts"
+        key: readyset-helm-k8s-schema-checks
+        depends_on:
+          - readyset-server-helm-templatizer
+        commands:
+          - mkdir -p ./rendered_charts
+          # Download rendered charts using a null step name to support fanning in from rendering above to checks here
+          - buildkite-agent artifact download "rendered_charts/*" ./rendered_charts
+          # Run Kubeval on all rendered Helm charts. See: https://kubeval.instrumenta.dev/
+          - find ./rendered_charts/*.yaml -type f -exec sh -c "cat {} | kubeval --strict -o json | tee ./{}-report.json" \;
+          - buildkite-agent artifact upload "./rendered_charts/*-report.json"
+        plugins:
+          - docker#v3.9.0:
+              image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
+              propagate-environment: true
+              propagate-aws-auth-tokens: true
+          - ecr#v2.5.0:
+              login: true
+              retries: 3

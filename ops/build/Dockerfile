@@ -152,6 +152,19 @@ RUN set -eux; \
 COPY sh-tools/ytt_apply.sh /usr/local/bin/ytt_apply.sh
 RUN chmod +x /usr/local/bin/ytt_apply.sh
 
+# Install Kubeval (https://kubeval.instrumenta.dev/)
+RUN set -eux; \
+    curl -L https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz --output kubeval.tar.gz --silent; \
+    tar xf kubeval.tar.gz; \
+    cp kubeval /usr/local/bin; \
+    chmod +x /usr/local/bin/kubeval;
+
+# Install Helm
+RUN set -eux; \
+    curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3; \
+    chmod 700 get_helm.sh; \
+    ./get_helm.sh;
+
 RUN set -eux; \
     curl --version; \
     packer --version; \
@@ -165,6 +178,8 @@ RUN set -eux; \
     ytt_apply.sh -v; \
     aws --version; \
     ssh -V; \
+    kubeval --version; \
+    helm version; \
     which docker
 
 CMD ["/bin/bash"]

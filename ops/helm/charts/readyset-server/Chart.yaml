@@ -15,7 +15,7 @@ dependencies:
   version: 34.10.0
 description: Official ReadySet Server Chart
 home: https://readyset.io/
-icon: https://readyset.io/images/favicon.png
+icon: https://readyset.io/favicon.png
 maintainers:
   - email: support@readyset.io
     name: ReadySet.io

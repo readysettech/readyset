@@ -180,7 +180,13 @@ steps:
             - label: ":aws-cloudformation: Lint with taskcat :cat:"
               include:
                 - "ops/cfn/**"
-            # --- END CLOUDFORMATIOn STEPS --- #
+            # --- END CLOUDFORMATION STEPS --- #
+
+            # --- START HELM STEPS --- #
+            - label: ':helm: CI checks for Helm Charts'
+              include:
+                - "ops/helm/charts/**"
+            # --- END HELM STEPS ---- #
 
             # --- START JS CLIENT STEPS --- #
             - label: ":docker: Build prettier image"
@@ -365,7 +371,7 @@ steps:
     agents:
       queue: apple
       apple: m1
-    env: 
+    env:
       PATH: /opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/administrator/.cargo/bin
     depends_on:
       - upload-docker-s3
