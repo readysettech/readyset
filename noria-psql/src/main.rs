@@ -60,7 +60,6 @@ fn main() -> anyhow::Result<()> {
         connection_handler: PsqlHandler,
         database_type: DatabaseType::Psql,
         dialect: Dialect::PostgreSQL,
-        mirror_ddl: false,
     };
 
     adapter.run(options.adapter_options)

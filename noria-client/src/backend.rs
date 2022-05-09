@@ -139,7 +139,6 @@ struct PrepareSelectMeta {
 pub struct BackendBuilder {
     slowlog: bool,
     dialect: Dialect,
-    mirror_ddl: bool,
     users: HashMap<String, String>,
     require_authentication: bool,
     ticket: Option<Timestamp>,
@@ -159,7 +158,6 @@ impl Default for BackendBuilder {
         BackendBuilder {
             slowlog: false,
             dialect: Dialect::MySQL,
-            mirror_ddl: false,
             users: Default::default(),
             require_authentication: true,
             ticket: None,
@@ -195,7 +193,6 @@ impl BackendBuilder {
             upstream,
             slowlog: self.slowlog,
             dialect: self.dialect,
-            mirror_ddl: self.mirror_ddl,
             users: self.users,
             require_authentication: self.require_authentication,
             ticket: self.ticket,
@@ -221,11 +218,6 @@ impl BackendBuilder {
 
     pub fn dialect(mut self, dialect: Dialect) -> Self {
         self.dialect = dialect;
-        self
-    }
-
-    pub fn mirror_ddl(mut self, mirror_ddl: bool) -> Self {
-        self.mirror_ddl = mirror_ddl;
         self
     }
 
@@ -368,11 +360,6 @@ where
     /// is responsible for creating accurate RYW timestamps/tickets based on writes made by the
     /// Backend client.
     timestamp_client: Option<TimestampClient>,
-
-    /// If set to `true`, all DDL changes will be mirrored to both the upstream db (if present) and
-    /// noria. Otherwise, DDL changes will only go to the upstream if configured, or noria
-    /// otherwise
-    mirror_ddl: bool,
 
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
 
@@ -1640,20 +1627,10 @@ where
         macro_rules! handle_ddl {
             ($noria_method: ident ($stmt: expr)) => {
                 if let Some(upstream) = &mut self.upstream {
-                    if self.mirror_ddl {
-                        if let Err(e) = self.noria.$noria_method($stmt).await {
-                            event.set_noria_error(&e);
-                        }
-                        self.last_query = Some(QueryInfo {
-                            destination: QueryDestination::Both,
-                            noria_error: String::new(),
-                        });
-                    } else {
-                        self.last_query = Some(QueryInfo {
-                            destination: QueryDestination::Fallback,
-                            noria_error: String::new(),
-                        });
-                    }
+                    self.last_query = Some(QueryInfo {
+                        destination: QueryDestination::Fallback,
+                        noria_error: String::new(),
+                    });
                     let upstream_res = upstream.query(query).await;
                     Ok(QueryResult::Upstream(upstream_res?))
                 } else {

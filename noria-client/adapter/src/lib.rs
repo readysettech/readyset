@@ -85,8 +85,6 @@ pub struct NoriaAdapter<H> {
     pub database_type: DatabaseType,
     /// SQL dialect to use when parsing queries
     pub dialect: Dialect,
-    /// Whether to mirror DDL changes to both upstream or noria, or just send them upstream
-    pub mirror_ddl: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -555,7 +553,6 @@ where
                 .users(users.clone())
                 .require_authentication(!options.allow_unauthenticated_connections)
                 .dialect(self.dialect)
-                .mirror_ddl(self.mirror_ddl)
                 .query_log(qlog_sender.clone(), options.query_log_ad_hoc)
                 .validate_queries(options.validate_queries, options.fail_invalidated_queries)
                 .allow_unsupported_set(options.allow_unsupported_set)
