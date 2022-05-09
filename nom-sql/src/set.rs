@@ -120,6 +120,27 @@ impl PostgresParameterValue {
     {
         Self::Single(PostgresParameterValueInner::Literal(literal.into()))
     }
+
+    /// Construct a [`PostgresParameterValue`] for a single identifier
+    pub fn identifier<I>(ident: I) -> Self
+    where
+        SqlIdentifier: From<I>,
+    {
+        Self::Single(PostgresParameterValueInner::Identifier(ident.into()))
+    }
+
+    /// Construct a [`PostgresParameterValue`] from a list of literal values
+    pub fn list<L, I>(vals: L) -> Self
+    where
+        L: IntoIterator<Item = I>,
+        Literal: From<I>,
+    {
+        Self::List(
+            vals.into_iter()
+                .map(|v| PostgresParameterValueInner::Literal(v.into()))
+                .collect(),
+        )
+    }
 }
 
 impl Display for PostgresParameterValue {
