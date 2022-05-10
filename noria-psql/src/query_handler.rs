@@ -331,10 +331,10 @@ lazy_static! {
 
     static ref ALLOWED_PARAMETERS_WITH_VALUE: HashMap<&'static str, AllowedParameterValue> =
         HashMap::from([
-            (
-                "client_encoding",
-                AllowedParameterValue::literal("utf-8")
-            ),
+            ("client_encoding", AllowedParameterValue::one_of([
+                PostgresParameterValue::literal("utf-8"),
+                PostgresParameterValue::literal("UTF8"),
+            ])),
             ("timezone", AllowedParameterValue::literal("UTC")),
             ("datestyle", AllowedParameterValue::literal("ISO")),
             ("extra_float_digits", AllowedParameterValue::literal(1)),
@@ -430,5 +430,10 @@ mod tests {
     #[test]
     fn standard_conforming_strings_on_allowed() {
         is_allowed("SET standard_conforming_strings = on");
+    }
+
+    #[test]
+    fn client_encoding_utf8_allowed() {
+        is_allowed("SET client_encoding = 'UTF8'");
     }
 }
