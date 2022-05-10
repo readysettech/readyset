@@ -47,18 +47,16 @@ impl AllowedParameterValue {
     }
 }
 
-fn search_path_includes_public(val: &PostgresParameterValue) -> bool {
-    match val {
-        PostgresParameterValue::Single(PostgresParameterValueInner::Literal(Literal::String(
-            s,
-        ))) => s == "public",
-        PostgresParameterValue::List(vals) => vals.first().iter().all(|v| {
-            matches!(
-                v,
-                PostgresParameterValueInner::Literal(Literal::String(s)) if s == "public"
-            )
-        }),
+fn search_path_starts_with_public(val: &PostgresParameterValue) -> bool {
+    let is_public = |val: &PostgresParameterValueInner| match val {
+        PostgresParameterValueInner::Literal(Literal::String(s)) => s == "public",
+        PostgresParameterValueInner::Identifier(ident) => ident == "public",
         _ => false,
+    };
+
+    match val {
+        PostgresParameterValue::Single(val) => is_public(val),
+        PostgresParameterValue::List(vals) => vals.first().iter().copied().all(is_public),
     }
 }
 
@@ -340,7 +338,7 @@ lazy_static! {
             ("extra_float_digits", AllowedParameterValue::literal(1)),
             ("TimeZone",  AllowedParameterValue::literal("Etc/UTC")),
             ("bytea_output",  AllowedParameterValue::literal("hex")),
-            ("search_path", AllowedParameterValue::Predicate(search_path_includes_public)),
+            ("search_path", AllowedParameterValue::Predicate(search_path_starts_with_public)),
             ("transform_null_equals", AllowedParameterValue::literal(false)),
             ("backslash_quote", AllowedParameterValue::one_of([
                 PostgresParameterValue::identifier("safe_encoding"),
@@ -425,6 +423,11 @@ mod tests {
     #[test]
     fn search_path_not_starting_with_public_isnt_allowed() {
         is_forbidden("SET search_path = 'other', 'public'");
+    }
+
+    #[test]
+    fn search_path_with_identifier_public_is_allowed() {
+        is_allowed("SET search_path = public, other");
     }
 
     #[test]
