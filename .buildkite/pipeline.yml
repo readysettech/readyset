@@ -183,7 +183,7 @@ steps:
             # --- END CLOUDFORMATION STEPS --- #
 
             # --- START HELM STEPS --- #
-            - label: ':helm: CI checks for Helm Charts'
+            - label: ':helm: Helm Chart Checks'
               include:
                 - "ops/helm/charts/**"
             # --- END HELM STEPS ---- #
