@@ -346,7 +346,10 @@ lazy_static! {
                 PostgresParameterValue::identifier("safe_encoding"),
                 PostgresParameterValue::literal("safe_encoding"),
             ])),
-            ("standard_conforming_strings", AllowedParameterValue::literal(true)),
+            ("standard_conforming_strings", AllowedParameterValue::one_of([
+                PostgresParameterValue::literal(true),
+                PostgresParameterValue::identifier("on"),
+            ])),
         ]);
 }
 
@@ -391,29 +394,41 @@ impl QueryHandler for PostgreSqlQueryHandler {
 
 #[cfg(test)]
 mod tests {
+    use nom_sql::{parse_query, Dialect};
+
     use super::*;
+
+    fn parse_set_statement(statement: &str) -> SetStatement {
+        match parse_query(Dialect::PostgreSQL, statement).unwrap() {
+            SqlQuery::Set(stmt) => stmt,
+            _ => panic!("Wrong query type"),
+        }
+    }
+
+    fn is_allowed(statement: &str) {
+        assert!(PostgreSqlQueryHandler::is_set_allowed(
+            &parse_set_statement(statement)
+        ))
+    }
+
+    fn is_forbidden(statement: &str) {
+        assert!(!PostgreSqlQueryHandler::is_set_allowed(
+            &parse_set_statement(statement)
+        ))
+    }
 
     #[test]
     fn search_path_with_public_is_allowed() {
-        let stmt = SetStatement::PostgresParameter(SetPostgresParameter {
-            scope: None,
-            name: "search_path".into(),
-            value: SetPostgresParameterValue::Value(PostgresParameterValue::list([
-                "public", "other",
-            ])),
-        });
-        assert!(PostgreSqlQueryHandler::is_set_allowed(&stmt));
+        is_allowed("SET search_path = 'public', 'other'");
     }
 
     #[test]
     fn search_path_not_starting_with_public_isnt_allowed() {
-        let stmt = SetStatement::PostgresParameter(SetPostgresParameter {
-            scope: None,
-            name: "search_path".into(),
-            value: SetPostgresParameterValue::Value(PostgresParameterValue::list([
-                "other", "public",
-            ])),
-        });
-        assert!(!PostgreSqlQueryHandler::is_set_allowed(&stmt));
+        is_forbidden("SET search_path = 'other', 'public'");
+    }
+
+    #[test]
+    fn standard_conforming_strings_on_allowed() {
+        is_allowed("SET standard_conforming_strings = on");
     }
 }
