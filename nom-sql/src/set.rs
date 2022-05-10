@@ -162,6 +162,9 @@ fn postgres_parameter_value_inner(i: &[u8]) -> IResult<&[u8], PostgresParameterV
             Dialect::PostgreSQL.identifier(),
             PostgresParameterValueInner::Identifier,
         ),
+        map(tag_no_case("on"), |_| {
+            PostgresParameterValueInner::Identifier("on".into())
+        }),
     ))(i)
 }
 
@@ -661,6 +664,24 @@ mod tests {
                     ]))
                 })
             );
+        }
+
+        #[test]
+        fn set_on() {
+            let res = test_parse!(
+                set(Dialect::PostgreSQL),
+                b"SET standard_conforming_strings = on"
+            );
+            assert_eq!(
+                res,
+                SetStatement::PostgresParameter(SetPostgresParameter {
+                    scope: None,
+                    name: "standard_conforming_strings".into(),
+                    value: SetPostgresParameterValue::Value(PostgresParameterValue::Single(
+                        PostgresParameterValueInner::Identifier("on".into())
+                    ))
+                })
+            )
         }
     }
 }
