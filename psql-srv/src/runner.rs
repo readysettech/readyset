@@ -41,9 +41,13 @@ impl<B: Backend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
         &mut self,
         request: Result<FrontendMessage, codec::DecodeError>,
     ) -> Result<(), Error> {
+        let request = request?;
+        if request == FrontendMessage::Flush {
+            self.channel.flush().await?;
+        }
         let response = self
             .protocol
-            .on_request(request?, &mut self.backend, &mut self.channel)
+            .on_request(request, &mut self.backend, &mut self.channel)
             .await?;
         self.channel.send(response).await?;
         Ok(())

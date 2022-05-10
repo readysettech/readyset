@@ -26,6 +26,7 @@ const ID_BIND: u8 = b'B';
 const ID_CLOSE: u8 = b'C';
 const ID_DESCRIBE: u8 = b'D';
 const ID_EXECUTE: u8 = b'E';
+const ID_FLUSH: u8 = b'H';
 const ID_PARSE: u8 = b'P';
 const ID_QUERY: u8 = b'Q';
 const ID_SYNC: u8 = b'S';
@@ -232,6 +233,8 @@ impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Decoder for Co
             })),
 
             ID_SYNC => Ok(Some(Sync)),
+
+            ID_FLUSH => Ok(Some(Flush)),
 
             ID_TERMINATE => Ok(Some(Terminate)),
 
