@@ -11,8 +11,10 @@ use tokio::fs::{read_dir, remove_file, File};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 pub(crate) use MaybeExisting::{CreateNew, Existing};
 
+use crate::compose_installer::ComposeInstaller;
 use crate::console::{confirm, input, password, select};
 use crate::constants::CFN_VERSION;
+use crate::Options;
 
 /// Used in build to match this installer a set of CFN templates.
 const PAIRED_VERSION: Option<&str> = option_env!("READYSET_CFN_PREFIX");
@@ -439,11 +441,11 @@ impl Deployment {
     }
 
     /// Remove all data about this deployment from the given state directory
-    pub async fn delete<P>(&self, state_dir: P) -> Result<()>
+    pub async fn delete<P>(state_dir: P, name: &str) -> Result<()>
     where
         P: AsRef<Path>,
     {
-        let path = state_dir.as_ref().join(self.name());
+        let path = state_dir.as_ref().join(name);
         if path.exists() {
             remove_file(path).await?;
         }
@@ -524,14 +526,14 @@ impl Deployment {
         self.cloudformation_stack_name("vpc")
     }
 
-    pub(crate) fn compose_path<P>(&self, state_dir: P) -> PathBuf
+    pub(crate) fn compose_path<P>(state_dir: P, name: &str) -> PathBuf
     where
         P: AsRef<Path>,
     {
         state_dir
             .as_ref()
             .join("compose")
-            .join(format!("{}.yml", self.name()))
+            .join(format!("{}.yml", name))
     }
 }
 
@@ -598,15 +600,47 @@ where
         .ok_or_else(|| anyhow!("No deployment selected"))
 }
 
-pub(crate) async fn create_or_load_existing<P>(state_dir: P, full: bool) -> Result<Deployment>
-where
-    P: AsRef<Path>,
-{
+async fn tear_down_compose_deployments<P: AsRef<Path>>(
+    state_dir: P,
+    deployments: Vec<String>,
+    exception: Option<&str>,
+) -> Result<()> {
+    if !confirm()
+        .with_prompt("Tear down other deployments now?")
+        .default(true)
+        .wait_for_newline(true)
+        .interact()?
+    {
+        bail!("Exiting. The ReadySet installer currently only supports one active deployment at a time.");
+    }
+
+    let tear_down_deployments = if let Some(deployment) = exception {
+        deployments
+            .into_iter()
+            .filter(|d| d != deployment)
+            .collect()
+    } else {
+        deployments
+    };
+    for deployment in tear_down_deployments {
+        println!("Tearing down deployment {}", &deployment);
+        ComposeInstaller::tear_down(state_dir.as_ref(), &deployment).await?;
+        Deployment::delete(state_dir.as_ref(), &deployment).await?;
+    }
+    Ok(())
+}
+
+/// Creates a new deployment, or allows a customer to load an existing deployment. In the case that
+/// they create a new deployment, it tears down all deployments. In the case that they load an
+/// existing deployment, it tears down all deployments except for the selected deployment.
+pub(crate) async fn create_or_load_existing(options: &Options) -> Result<Deployment> {
+    let (state_dir, full) = (options.state_directory()?, options.full);
+    let mut tear_down_all = false;
     let deployments = Deployment::list(state_dir.as_ref()).await?;
     let deployment = match deployments.as_slice() {
         [] => {
             println!("Enter a name for your ReadySet deployment.");
-            Some(prompt_for_and_create_deployment(full)?)
+            Some(prompt_for_and_create_deployment(options.full)?)
         }
         [deployment] => {
             println!(
@@ -622,10 +656,12 @@ where
             {
                 Some(Deployment::load(state_dir.as_ref(), deployment).await?)
             } else {
+                tear_down_all = true;
                 None
             }
         }
         _ => {
+            tear_down_all = true;
             println!(
                 "There are multiple existing deployments. We can continue with an existing \
                  deployment, or create a new one.\n "
@@ -636,12 +672,21 @@ where
                 .wait_for_newline(true)
                 .interact()?
             {
-                select_deployment(state_dir, deployments).await?
+                select_deployment(state_dir.clone(), deployments.clone()).await?
             } else {
                 None
             }
         }
     };
+    if !full && tear_down_all {
+        println!("Before proceeding we need to tear down all other deployments.");
+        tear_down_compose_deployments(
+            state_dir,
+            deployments,
+            deployment.as_ref().map(|d| d.name.as_str()),
+        )
+        .await?;
+    }
 
     if let Some(deployment) = deployment {
         println!();

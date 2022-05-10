@@ -147,15 +147,12 @@ impl Installer {
                 aws.tear_down().await?
             }
             DeploymentData::Compose(_) => {
-                ComposeInstaller::new(&mut self.options, &mut self.deployment)
-                    .tear_down()
+                ComposeInstaller::tear_down(self.options.state_directory()?, self.deployment.name())
                     .await?
             }
         }
 
-        self.deployment
-            .delete(self.options.state_directory()?)
-            .await?;
+        Deployment::delete(self.options.state_directory()?, self.deployment.name()).await?;
 
         success!(
             "Deployment {} successfully torn down",
@@ -232,9 +229,7 @@ async fn main() -> Result<()> {
                 .recursive(true)
                 .create(options.state_directory()?)
                 .await?;
-            let deployment =
-                deployment::create_or_load_existing(options.state_directory()?, options.full)
-                    .await?;
+            let deployment = deployment::create_or_load_existing(&options).await?;
             let mut installer = Installer::new(options, deployment);
 
             installer.run().await

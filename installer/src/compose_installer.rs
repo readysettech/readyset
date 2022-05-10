@@ -8,7 +8,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::join;
 use tokio::process::Command;
 
-use crate::console::{confirm, spinner};
+use crate::console::spinner;
 use crate::constants::{
     READYSET_MYSQL_ADAPTER_FILE_PREFIX, READYSET_PSQL_ADAPTER_FILE_PREFIX,
     READYSET_SERVER_FILE_PREFIX, READYSET_TAG, READYSET_URL_PREFIX,
@@ -41,20 +41,8 @@ impl<'a> ComposeInstaller<'a> {
             .await
     }
 
-    pub async fn tear_down(&self) -> Result<()> {
-        if !confirm()
-            .with_prompt("Tear down docker-compose deployment?")
-            .interact()?
-        {
-            // They have opted to not tear down docker compose, but there may still be other assets
-            // to tear down, so we shouldn't fall into the trap of simply bubbling errors up the
-            // chain.
-            return Ok(());
-        }
-
-        let path = self
-            .deployment
-            .compose_path(self.options.state_directory()?);
+    pub async fn tear_down<P: AsRef<Path>>(state_directory: P, name: &str) -> Result<()> {
+        let path = Deployment::compose_path(state_directory, name);
         if !path.exists() {
             // File doesn't exist so there's nothing to tear down here.
             return Ok(());
@@ -294,9 +282,8 @@ impl<'a> ComposeInstaller<'a> {
 
         let compose = Compose::try_from(&*self.deployment)?;
 
-        let path = self
-            .deployment
-            .compose_path(self.options.state_directory()?);
+        let path =
+            Deployment::compose_path(self.options.state_directory()?, self.deployment.name());
         tokio::fs::create_dir_all(&path.parent().unwrap()).await?;
         let path_str = path
             .to_str()
