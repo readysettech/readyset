@@ -52,6 +52,7 @@ pub enum FrontendMessage {
         database: Option<BytesStr>,
     },
     Sync,
+    Flush,
     Terminate,
 }
 
@@ -73,6 +74,7 @@ impl fmt::Display for FrontendMessage {
             Self::SSLRequest => write!(f, "SSLRequest"),
             Self::StartupMessage { .. } => write!(f, "StartupMessage"),
             Self::Sync => write!(f, "Sync"),
+            Self::Flush => write!(f, "Flush"),
             Self::Terminate => write!(f, "Terminate"),
         }
     }

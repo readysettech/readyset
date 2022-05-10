@@ -73,4 +73,8 @@ where
     {
         item.write(&mut self.0).await
     }
+
+    pub async fn flush(&mut self) -> Result<(), EncodeError> {
+        self.0.flush().await
+    }
 }

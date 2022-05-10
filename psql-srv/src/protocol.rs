@@ -395,6 +395,8 @@ impl Protocol {
                     Ok(Response::Message(BackendMessage::ready_for_query_idle()))
                 }
 
+                Flush => Ok(Response::Empty),
+
                 // A request to terminate the connection.
                 Terminate => Ok(Response::Empty),
 
