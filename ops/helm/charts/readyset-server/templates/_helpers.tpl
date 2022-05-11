@@ -244,3 +244,119 @@ data:
         -serf-lan-port=8301
 
 {{- end -}}
+
+{{/* Template representing the port associated with the ReadySet adapter service */}}
+{{- define "readyset.port" -}}
+{{ $port := 0 }}
+{{- if eq "mysql" .Values.readyset.common.config.engine }}{{ $port = 3306 }}{{ else }}{{ $port = 5432 }}{{ end }}
+{{- printf "%d" $port -}}
+{{- end -}}
+
+
+{{/*
+Name of the ReadySet Grafana dashboard configmap where dashboard JSON files are stored.
+Either uses the user provided nameOverride or generates a name based on global name settings.
+*/}}
+{{- define "readyset.grafana.dashboards.configmap.name" -}}
+{{- $nameOverride := "" -}}
+{{- $nameOverride = $.Values.readyset.grafana.configMaps.dashboards.nameOverride }}
+{{- if $nameOverride -}}
+{{- printf "%s" $nameOverride -}}
+{{- else -}}
+{{- printf "%s-grafana-dashboards" $.Release.Name -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Template representing a ConfigMap for ReadySet Grafana dashboards. Dynamically discovers
+dashboards stored in: dashboards/**.json and creates ConfigMap keys for each file.
+*/}}
+{{- define "readyset.grafana.dashboards.cm" -}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "readyset.grafana.dashboards.configmap.name" $ }}
+  namespace: {{ $.Release.Namespace }}
+  {{- with $.Values.readyset.grafana.configMaps.dashboards -}}
+  {{ if .labels }}
+  labels:
+    {{- range $k, $v := .labels }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+  {{- end }}
+  {{ if .annotations -}}
+  annotations:
+    {{- range $k, $v := .annotations }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+  {{- end }}
+  {{- end }}
+data:
+{{- (.Files.Glob "dashboards/**.json").AsConfig | nindent 4 -}}
+{{- end -}}
+
+{{/*
+Name of the ReadySet Grafana datasource configmap.
+Either uses the user provided nameOverride or generates a name based on global name settings.
+*/}}
+{{- define "readyset.grafana.datasources.configmap.name" -}}
+{{- $nameOverride := "" -}}
+{{- $nameOverride = $.Values.readyset.grafana.configMaps.datasources.nameOverride }}
+{{- if $nameOverride -}}
+{{- printf "%s" $nameOverride -}}
+{{- else -}}
+{{- printf "%s-grafana-datasources" $.Release.Name -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Template representing a ConfigMap for ReadySet's Grafana datasources.
+These datasources are referenced by Grafana dashboards in the template:
+  - readyset.grafana.dashboards.cm
+*/}}
+{{- define "readyset.grafana.datasources.cm" -}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "readyset.grafana.datasources.configmap.name" $ }}
+  namespace: {{ $.Release.Namespace }}
+  {{- with $.Values.readyset.grafana.configMaps.datasources -}}
+  {{ if .labels }}
+  labels:
+    {{- range $k, $v := .labels }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+  {{- end }}
+  {{ if .annotations -}}
+  annotations:
+    {{- range $k, $v := .annotations }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+  {{- end }}
+  {{- end }}
+data:
+  "datasource.yaml": |-
+    apiVersion: 1
+    datasources:
+    - name: DS_PROMETHEUS
+      type: prometheus
+      access: proxy
+      url: http://{{ .Release.Name }}-monitor-prometheus:9090
+      isDefault: true
+    # Postgres not implemented yet
+    {{- if eq "mysql" .Values.readyset.common.config.engine }}
+    - name: ReadySet_DB
+      type: mysql
+      access: proxy
+      url: {{ template "readyset.adapter.service.name" (dict "root" $ "service" .Values.readyset.adapter.service) }}:{{ template "readyset.port" . }}
+      user: ${READYSET_DB_USERNAME}
+      database: ${READYSET_DB_NAME}
+      jsonData:
+        tlsAuth: true
+      secureJsonData:
+        password: ${READYSET_DB_PASSWORD}
+      editable: true
+    {{- end -}}
+{{- end -}}

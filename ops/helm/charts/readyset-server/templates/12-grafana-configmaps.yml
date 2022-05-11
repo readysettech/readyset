@@ -1,0 +1,8 @@
+
+{{ if .Values.readyset.grafana.configMaps.dashboards.create }}
+{{ include "readyset.grafana.dashboards.cm" $ }}
+{{ end }}
+
+{{ if .Values.readyset.grafana.configMaps.datasources.create }}
+{{ include "readyset.grafana.datasources.cm" $ }}
+{{ end }}
