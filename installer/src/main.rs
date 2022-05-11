@@ -55,6 +55,10 @@ pub struct Options {
 
     #[clap(subcommand)]
     subcommand: Option<Subcommand>,
+
+    /// Supply the ReadySet API key. If not provided, will interactively prompt for the key
+    #[clap(long, env = "RS_API_KEY")]
+    api_key: Option<String>,
 }
 
 impl Options {
@@ -162,20 +166,31 @@ impl Installer {
     }
 }
 
+fn validate_api_key(options: &Options) -> Result<()> {
+    if let Some(api_key) = &options.api_key {
+        if api_key != API_KEY {
+            bail!("Invalid ReadySet API key provided");
+        }
+        Ok(())
+    } else {
+        let mut api_key;
+        loop {
+            api_key = password().with_prompt("API key").interact()?;
+
+            if api_key == API_KEY {
+                return Ok(());
+            }
+
+            println!("Invalid API key. Let's try again.");
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let options = Options::parse();
     println!("Welcome to the ReadySet orchestrator.\n");
-    let mut api_key;
-    loop {
-        api_key = password().with_prompt("API key").interact()?;
-
-        if api_key == API_KEY {
-            break;
-        }
-
-        println!("Invalid API key. Let's try again.");
-    }
+    validate_api_key(&options)?;
 
     DirBuilder::new()
         .recursive(true)
