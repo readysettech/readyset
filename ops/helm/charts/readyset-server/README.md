@@ -58,18 +58,14 @@ Kubernetes: `>=1.18.0-0`
 | monitoring.grafana | object | Truncated due to length. | Grafana for ReadySet metrics and dashboards. Values Ref: https://github.com/grafana/helm-charts/blob/main/charts/grafana/values.yaml |
 | monitoring.grafana.adminPassword | string | `"readyset-monitoring"` | Login phrase. |
 | monitoring.grafana.dashboardProviders | object | Truncated due to length. | ReadySet Grafana dashboard providers. |
-| monitoring.grafana.dashboards | object | Truncated due to length. | Grafana dashboard configs. @TODO: Move dashboards into a separate ConfigMap. |
-| monitoring.grafana.dashboards.readyset | object | Truncated due to length. | ReadySet dashboards. |
-| monitoring.grafana.dashboards.readyset.connected | object | Truncated due to length. | ReadySet Connectivity Overview dashboard |
-| monitoring.grafana.dashboards.readyset.queryOverview | object | Truncated due to length. | ReadySet Query Overview Dashboard |
-| monitoring.grafana.dashboards.readyset.querySpecific | object | Truncated due to length. | ReadySet Query Specific Dashboard |
-| monitoring.grafana.dashboards.readyset.readysetExternal | object | Truncated due to length. | ReadySet External Dashboard |
-| monitoring.grafana.dashboards.readyset.systemsOverview | object | Truncated due to length. | Systems Overview dashboard |
+| monitoring.grafana.dashboardsConfigMaps | object | Truncated due to length. | Grafana dashboard configs. |
+| monitoring.grafana.dashboardsConfigMaps.readyset | string | `"readyset-grafana-dashboards"` | Main Grafana dashboard configmap for ReadySet. If running multiple instances of this chart in a namespace, it may be desireable to change this to further separate deployments. |
 | monitoring.grafana.enabled | bool | `true` | Toggles deployment of Grafana chart. |
-| monitoring.grafana.forceDeployDatasources | bool | `true` | Force redeploy datasources. |
+| monitoring.grafana.envValueFrom | object | `{"READYSET_DB_NAME":{"secretKeyRef":{"key":"database","name":"readyset-db-url"}},"READYSET_DB_PASSWORD":{"secretKeyRef":{"key":"password","name":"readyset-db-url"}},"READYSET_DB_USERNAME":{"secretKeyRef":{"key":"username","name":"readyset-db-url"}}}` | Environment variables sourced from k8s Secrets or ConfigMaps for Grafana pods |
+| monitoring.grafana.forceDeployDatasources | bool | `false` | Force redeploy datasources. |
 | monitoring.grafana.ingress | object | Truncated due to length. | Ingress configurations for accessing Grafana. |
-| monitoring.grafana.sidecar | object | `{"datasources":{"uid":"DS_PROMETHEUS","url":"http://readyset-monitor-prometheus:9090/"}}` | Grafana sidecar configurations. |
-| monitoring.grafana.sidecar.datasources | object | `{"uid":"DS_PROMETHEUS","url":"http://readyset-monitor-prometheus:9090/"}` | Data source config for Prometheus. This is the datasource used by ReadySet dashboards, by default. |
+| monitoring.grafana.sidecar | object | `{"datasources":{"enabled":true,"label":"grafana_datasource_readyset","labelValue":"1","resource":"configmap"}}` | Grafana sidecar configurations. |
+| monitoring.grafana.sidecar.datasources | object | `{"enabled":true,"label":"grafana_datasource_readyset","labelValue":"1","resource":"configmap"}` | Data source config for Prometheus. This is the datasource used by ReadySet dashboards, by default. |
 | monitoring.kube-state-metrics | object | `{"enabled":false}` | Configuration for kube-state-metrics subchart. |
 | monitoring.kube-state-metrics.enabled | bool | `false` | Not needed in this case. |
 | monitoring.kubeApiServer | object | `{"enabled":false}` | Component scraping for the Kubernetes API server. |
@@ -172,6 +168,15 @@ Kubernetes: `>=1.18.0-0`
 | readyset.consulAgent.labels | object | `{}` | Extra labels applied to Consul agent sidecars. |
 | readyset.consulAgent.serverNamespaceOverride | string | `""` | Blank value causes chart behavior to default to current namespace. |
 | readyset.consulAgent.tag | string | `"1.11.4"` | Container image tag used for Consul agent sidecars. |
+| readyset.grafana.configMaps.dashboards.annotations | object | `{}` | Annotations applied to the Readyset Grafana Dashboards configmap. |
+| readyset.grafana.configMaps.dashboards.create | bool | `true` | Toggles creation of the Readyset Grafana Dashboards configmap. |
+| readyset.grafana.configMaps.dashboards.labels | object | `{}` | Labels applied to the Readyset Grafana Dashboards configmap. |
+| readyset.grafana.configMaps.dashboards.nameOverride | string | `"readyset-grafana-dashboards"` | Overrides name of configmap created or used (if create = false). If empty, chart will generate a name for the ConfigMap. |
+| readyset.grafana.configMaps.datasources.annotations | object | `{}` | Annotations applied to the Readyset Grafana datasource configmap. |
+| readyset.grafana.configMaps.datasources.create | bool | `true` | Toggles creation of the Readyset Grafana datasource configmap. |
+| readyset.grafana.configMaps.datasources.labels | object | `{"grafana_datasource_readyset":"1"}` | Labels applied to the Readyset Grafana datasource configmap. |
+| readyset.grafana.configMaps.datasources.labels.grafana_datasource_readyset | string | `"1"` | Instructs Grafana sidecar to import our Grafana datasource ConfigMap. |
+| readyset.grafana.configMaps.datasources.nameOverride | string | `""` | Overrides name of configmap created or used (if create = false). If empty, chart will generate a name for the ConfigMap. |
 | readyset.server | object | Truncated due to length. | nodes directly. Applications connect to the adapter service. |
 | readyset.server.affinity | object | `{}` | Affinities to be applied to ReadySet server pods. Ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/ |
 | readyset.server.annotations | object | `{}` | Extra annotations applied to ReadySet server pods. |

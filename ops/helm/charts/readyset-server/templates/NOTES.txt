@@ -26,7 +26,7 @@ To connect to ReadySet using mysql/psql:
 {{- $ns := .Release.Namespace -}}
 export READYSET_USERNAME=$(kubectl get secret {{ .Values.readyset.common.secrets.replicationUrl.secretName }} -o=jsonpath='{.data.username}' --namespace {{ .Release.Namespace }} | base64 -d)
 export READYSET_HOST=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ template "readyset.adapter.service.name" (dict "root" . "service" .Values.readyset.adapter.service) }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
-export READYSET_DB_NAME=$(kubectl get secret {{ $dbSecretName }} -o=jsonpath='{.data.url}' --namespace {{ $ns }} | base64 -d | sed $'s/\//\\\n/g' | tail -n 1 | sed $'s/\?/\\\n/g' | head -n 1)
+export READYSET_DB_NAME=$(kubectl get secret {{ .Values.readyset.common.secrets.replicationUrl.secretName }} -o=jsonpath='{.data.database}' --namespace {{ .Release.Namespace }} | base64 -d)
 {{- if eq "mysql" .Values.readyset.common.config.engine }}
 {{ $port := 3306 }}
 export READYSET_ENDPOINT=${READYSET_HOST}:{{ $port }}

@@ -108,28 +108,32 @@ To ensure a smooth deployment, please ensure that before deploying the chart, th
 
     ```
     CONN_STRING=postgres://<username>:<password>@current-rds-database.csxlrghyjsz.<region>.rds.amazonaws.com:5432/<databaseName>?sslmode=disable
-    ALLOWED_USER="<username>"
-    ALLOWED_PWD="<password>"
+    DB_USERNAME="<username>"
+    DB_PASSWORD="<password>"
+    DB_NAME="<databaseName>"
     kubectl create secret \
       generic \
       readyset-db-url \
       --from-literal=url="${CONN_STRING}" \
-      --from-literal=allowed_username="${ALLOWED_USER}" \
-      --from-literal=allowed_password="${ALLOWED_PWD}"
+      --from-literal=username="${DB_USERNAME}" \
+      --from-literal=password="${DB_PASSWORD}" \
+      --from-literal=database="${DB_NAME}"
     ```
 
     **For MySQL upstream databases:**
 
     ```
     CONN_STRING=mysql://<username>:<password>@current-rds-database.csxlrghyjsz.<region>.rds.amazonaws.com:3306/<databaseName>
-    ALLOWED_USER="<username>"
-    ALLOWED_PWD="<password>"
+    DB_USERNAME="<username>"
+    DB_PASSWORD="<password>"
+    DB_NAME="<databaseName>"
     kubectl create secret \
       generic \
       readyset-db-url \
       --from-literal=url="${CONN_STRING}" \
-      --from-literal=allowed_username="${ALLOWED_USER}" \
-      --from-literal=allowed_password="${ALLOWED_PWD}"
+      --from-literal=username="${DB_USERNAME}" \
+      --from-literal=password="${DB_PASSWORD}" \
+      --from-literal=database="${DB_NAME}"
     ```
 
 ## Values Files and Deployment
