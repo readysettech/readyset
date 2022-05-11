@@ -1,0 +1,31 @@
+ARG READYSET_RUST_UBUNTU2004_BUILDER_BASE_TAG=latest
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-rust-ubuntu2004-builder-base:${READYSET_RUST_UBUNTU2004_BUILDER_BASE_TAG} as builder
+
+ENV CARGO_INCREMENTAL=0
+
+ARG CACHEPOT_BUCKET
+ARG CACHEPOT_REGION
+
+ARG release
+
+WORKDIR /tmp
+COPY . readyset
+
+WORKDIR /tmp/readyset
+RUN set -eux; \
+    cargo --locked build ${release:+--release} --bin noria-mysql --features display_literals; \
+    if [ -z "${release+x}" ]; then strip target/debug/noria-mysql; else strip target/release/noria-mysql; fi
+
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/ubuntu:20.04
+
+RUN set -eux; \
+    apt-get update;\
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libssl-dev \
+        ca-certificates=20210119~20.04.2 \
+        mariadb-client-10.3=1:10.3.34-0ubuntu0.20.04.1; \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /tmp/readyset/target/*/noria-mysql /usr/local/bin/readyset-mysql
+
+ENTRYPOINT ["/usr/local/bin/readyset-mysql", "--prometheus-metrics"]

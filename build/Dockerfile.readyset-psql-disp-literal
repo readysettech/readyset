@@ -1,0 +1,31 @@
+ARG READYSET_RUST_UBUNTU2004_BUILDER_BASE_TAG=latest
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-rust-ubuntu2004-builder-base:${READYSET_RUST_UBUNTU2004_BUILDER_BASE_TAG} as builder
+
+ENV CARGO_INCREMENTAL=0
+
+ARG CACHEPOT_BUCKET
+ARG CACHEPOT_REGION
+
+ARG release
+
+WORKDIR /tmp
+COPY . readyset
+
+WORKDIR /tmp/readyset
+RUN set -eux; \
+    cargo --locked build ${release:+--release} --bin noria-psql --features display_literals; \
+    if [ -z "${release+x}" ]; then strip target/debug/noria-psql; else strip target/release/noria-psql; fi
+
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/ubuntu:20.04
+
+RUN set -eux; \
+    apt-get update;\
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libssl-dev \
+        ca-certificates=20210119~20.04.2 \
+        postgresql-client=12+214ubuntu0.1; \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /tmp/readyset/target/*/noria-psql /usr/local/bin/readyset-psql
+
+ENTRYPOINT ["/usr/local/bin/readyset-psql", "--prometheus-metrics"]
