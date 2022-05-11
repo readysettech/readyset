@@ -1694,7 +1694,7 @@ async fn do_read<'a>(
     ticket: Option<Timestamp>,
     read_behavior: ReadBehavior,
     read_request_handler: Option<&'a mut ReadRequestHandler>,
-    _event: &mut noria_client_metrics::QueryExecutionEvent,
+    event: &mut noria_client_metrics::QueryExecutionEvent,
 ) -> ReadySetResult<QueryResult<'a>> {
     let use_bogo = raw_keys.is_empty();
     let vq = build_view_query(
@@ -1747,6 +1747,17 @@ async fn do_read<'a>(
             .into_results()
             .ok_or(ReadySetError::ReaderMissingKey)?
     };
+    event.cache_misses = Some(
+        data.iter()
+            .map(|result| {
+                result
+                    .stats
+                    .as_ref()
+                    .map(|stats| stats.cache_misses)
+                    .unwrap_or(0)
+            })
+            .sum(),
+    );
     trace!("select::complete");
 
     Ok(QueryResult::Select {
