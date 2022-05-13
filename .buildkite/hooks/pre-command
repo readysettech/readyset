@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+if [ "$BUILDKITE_AGENT_META_DATA_QUEUE" = "apple" ]; then
+  exit 0
+fi
+
 # Ensure that the `target` and `cargo-registry` volumes exist, so that steps
 # that expect them to already exist (the ones that use docker-compose) can run
 # even if they're the first steps to run on an agent
