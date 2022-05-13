@@ -11,13 +11,13 @@ use tokio::process::Command;
 use crate::console::spinner;
 use crate::constants::{
     READYSET_MYSQL_ADAPTER_FILE_PREFIX, READYSET_PSQL_ADAPTER_FILE_PREFIX,
-    READYSET_SERVER_FILE_PREFIX, READYSET_TAG, READYSET_URL_PREFIX,
+    READYSET_SERVER_FILE_PREFIX, READYSET_URL_PREFIX,
 };
 use crate::deployment::{
     Deployment, DeploymentData, DeploymentStatus, DockerComposeDeployment, Engine, MigrationMode,
 };
 use crate::docker_compose::Compose;
-use crate::template::{mysql_adapter_img, postgres_adapter_img, server_img};
+use crate::template::{mysql_adapter_img, postgres_adapter_img, server_img, DOCKER_TAG};
 use crate::utils::{check_command_installed, run_docker_compose};
 use crate::Options;
 
@@ -231,15 +231,16 @@ impl<'a> ComposeInstaller<'a> {
             style("Finished downloading Docker images").bold()
         ));
 
-        let (saved_adapter_img_name, new_adapter_img_name) = match engine {
-            Engine::MySQL => (
-                format!("readyset-mysql:{}", READYSET_TAG),
+        let (saved_adapter_img_name, new_adapter_img_name) = if let Engine::MySQL = engine {
+            (
+                format!("readyset-mysql:{}", *DOCKER_TAG),
                 mysql_adapter_img(),
-            ),
-            Engine::PostgreSQL => (
-                format!("readyset-psql:{}", READYSET_TAG),
+            )
+        } else {
+            (
+                format!("readyset-psql:{}", *DOCKER_TAG),
                 postgres_adapter_img(),
-            ),
+            )
         };
 
         let load_spinner =
@@ -247,7 +248,7 @@ impl<'a> ComposeInstaller<'a> {
 
         load_and_tag(
             server_contents.as_ref(),
-            &format!("readyset-server:{}", READYSET_TAG),
+            &format!("readyset-server:{}", *DOCKER_TAG),
             &server_img(),
         )
         .await?;
@@ -376,20 +377,20 @@ async fn load_and_tag(container: &[u8], old_name: &str, new_name: &str) -> Resul
 }
 
 fn readyset_server_file() -> String {
-    format!("{}-{}.tar.gz", READYSET_SERVER_FILE_PREFIX, READYSET_TAG)
+    format!("{}-{}.tar.gz", READYSET_SERVER_FILE_PREFIX, *DOCKER_TAG)
 }
 
 fn readyset_mysql_adapter_file() -> String {
     format!(
         "{}-{}.tar.gz",
-        READYSET_MYSQL_ADAPTER_FILE_PREFIX, READYSET_TAG
+        READYSET_MYSQL_ADAPTER_FILE_PREFIX, *DOCKER_TAG
     )
 }
 
 fn readyset_psql_adapter_file() -> String {
     format!(
         "{}-{}.tar.gz",
-        READYSET_PSQL_ADAPTER_FILE_PREFIX, READYSET_TAG
+        READYSET_PSQL_ADAPTER_FILE_PREFIX, *DOCKER_TAG
     )
 }
 

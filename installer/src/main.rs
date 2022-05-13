@@ -220,7 +220,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Some(Subcommand::Version) => {
-            println!("{}", constants::READYSET_TAG);
+            println!("{}", *template::DOCKER_TAG);
             Ok(())
         }
         None => {

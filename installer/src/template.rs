@@ -1,24 +1,31 @@
 use std::include_str;
 
+use lazy_static::lazy_static;
+
 use crate::constants::{
-    CONSUL_TAG, IMG_PREFIX, MYSQL_TAG, POSTGRES_TAG, READYSET_MYSQL_POSTFIX,
-    READYSET_POSTGRES_POSTFIX, READYSET_SERVER_POSTFIX, READYSET_TAG,
+    CONSUL_TAG, DEFAULT_DOCKER_TAG, IMG_PREFIX, MYSQL_TAG, POSTGRES_TAG, READYSET_MYSQL_POSTFIX,
+    READYSET_POSTGRES_POSTFIX, READYSET_SERVER_POSTFIX,
 };
 use crate::deployment::Engine;
 use crate::docker_compose::Compose;
 
+lazy_static! {
+    pub(crate) static ref DOCKER_TAG: &'static str =
+        option_env!("READYSET_DOCKER_TAG").unwrap_or(DEFAULT_DOCKER_TAG);
+}
+
 pub fn server_img() -> String {
-    format!("{}{}:{}", IMG_PREFIX, READYSET_SERVER_POSTFIX, READYSET_TAG)
+    format!("{}{}:{}", IMG_PREFIX, READYSET_SERVER_POSTFIX, *DOCKER_TAG)
 }
 
 pub fn mysql_adapter_img() -> String {
-    format!("{}{}:{}", IMG_PREFIX, READYSET_MYSQL_POSTFIX, READYSET_TAG)
+    format!("{}{}:{}", IMG_PREFIX, READYSET_MYSQL_POSTFIX, *DOCKER_TAG)
 }
 
 pub fn postgres_adapter_img() -> String {
     format!(
         "{}{}:{}",
-        IMG_PREFIX, READYSET_POSTGRES_POSTFIX, READYSET_TAG
+        IMG_PREFIX, READYSET_POSTGRES_POSTFIX, *DOCKER_TAG
     )
 }
 

@@ -351,6 +351,7 @@ steps:
       - else
       -   export READYSET_CFN_PREFIX="alpha/${BUILDKITE_COMMIT}"
       - fi
+      - export READYSET_DOCKER_TAG="release-${BUILDKITE_COMMIT}"
       - .buildkite/build-linux-installer.sh
     artifact_paths:
       - target/x86_64-unknown-linux-musl/release/readyset-installer
@@ -383,6 +384,7 @@ steps:
       - else
       -   export READYSET_CFN_PREFIX="alpha/${BUILDKITE_COMMIT}"
       - fi
+      - export READYSET_DOCKER_TAG="release-${BUILDKITE_COMMIT}"
       - .buildkite/build-apple-installer.sh
     artifact_paths:
       - target/x86_64-apple-darwin/release/readyset-installer

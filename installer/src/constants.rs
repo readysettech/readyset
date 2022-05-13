@@ -28,8 +28,9 @@ pub const READYSET_MYSQL_POSTFIX: &str = "/readyset-mysql";
 /// The postfix for our hosted readyset-psql adapter image.
 pub const READYSET_POSTGRES_POSTFIX: &str = "/readyset-psql";
 
-/// The current release tag for our readyset-server and readyset-mysql images.
-pub const READYSET_TAG: &str = "release-2873f79074683714545e55386f752e78189c1883";
+/// The default image tag to use for docker images in cloudformation deployments, if one isn't
+/// specified as the `READYSET_DOCKER_TAG` environment variable during a build
+pub const DEFAULT_DOCKER_TAG: &str = "release-2873f79074683714545e55386f752e78189c1883";
 
 /// Used if there is no paired version specified.
 /// Hardcoded to the last public release template set.
