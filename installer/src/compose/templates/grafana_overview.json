@@ -21,8 +21,7 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "id": 1,
-  "iteration": 1652129249419,
+  "iteration": 1654188758149,
   "links": [
     {
       "asDropdown": false,
@@ -644,7 +643,7 @@
         {
           "datasource": "DS_PROMETHEUS",
           "exemplar": true,
-          "expr": "sum by (query)\n(rate(query_log_execution_time_count{deployment=\"$deployment\",database_type=\"noria\",query!=\"\", event_type=~\"query|execute\"}[$__range]))",
+          "expr": "sum by (query)\n(rate(query_log_execution_time_count{deployment=\"$deployment\",database_type=\"readyset\",query!=\"\", event_type=~\"query|execute\"}[$__range]))",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -656,7 +655,7 @@
         {
           "datasource": "DS_PROMETHEUS",
           "exemplar": true,
-          "expr": "sum by (query)\n(query_log_execution_time_sum{deployment=\"$deployment\",database_type=\"noria\",query!=\"\", event_type=~\"query|execute\"}) *1000",
+          "expr": "sum by (query)\n(query_log_execution_time_sum{deployment=\"$deployment\",database_type=\"readyset\",query!=\"\", event_type=~\"query|execute\"}) *1000",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -667,7 +666,7 @@
         {
           "datasource": "DS_PROMETHEUS",
           "exemplar": true,
-          "expr": "avg by (query) (query_log_execution_time{deployment=\"$deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.5\", event_type=~\"query|execute\"}) *1000",
+          "expr": "avg by (query) (query_log_execution_time{deployment=\"$deployment\",database_type=\"readyset\",query!=\"\", quantile=\"0.5\", event_type=~\"query|execute\"}) *1000",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -679,7 +678,7 @@
         {
           "datasource": "DS_PROMETHEUS",
           "exemplar": true,
-          "expr": "avg by (query) (query_log_execution_time{deployment=\"$deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.9\", event_type=~\"query|execute\"}) *1000",
+          "expr": "avg by (query) (query_log_execution_time{deployment=\"$deployment\",database_type=\"readyset\",query!=\"\", quantile=\"0.9\", event_type=~\"query|execute\"}) *1000",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -690,7 +689,7 @@
         {
           "datasource": "DS_PROMETHEUS",
           "exemplar": true,
-          "expr": "avg by (query) (query_log_execution_time{deployment=\"$deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.9\", event_type=~\"query|execute\"}) *1000",
+          "expr": "avg by (query) (query_log_execution_time{deployment=\"$deployment\",database_type=\"readyset\",query!=\"\", quantile=\"0.9\", event_type=~\"query|execute\"}) *1000",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -701,7 +700,7 @@
         {
           "datasource": "DS_PROMETHEUS",
           "exemplar": false,
-          "expr": "avg by (query) (query_log_execution_time_count{deployment=\"$deployment\",database_type=\"noria\",query!=\"\", event_type=~\"query|execute\"})",
+          "expr": "avg by (query) (query_log_execution_time_count{deployment=\"$deployment\",database_type=\"readyset\",query!=\"\", event_type=~\"query|execute\"})",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -844,8 +843,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "qapass",
-          "value": "qapass"
+          "text": "foo",
+          "value": "foo"
         },
         "datasource": "DS_PROMETHEUS",
         "definition": "label_values(deployment)",

@@ -854,12 +854,12 @@ async fn query_logger(
                         );
                     }
 
-                    if let Some(noria) = event.noria_duration {
+                    if let Some(readyset) = event.readyset_duration {
                         metrics::histogram!(
                             noria_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME,
-                            noria.as_secs_f64(),
+                            readyset.as_secs_f64(),
                             "query" => query.clone(),
-                            "database_type" => String::from(noria_client_metrics::DatabaseType::Noria),
+                            "database_type" => String::from(noria_client_metrics::DatabaseType::ReadySet),
                             "event_type" => SharedString::from(event.event),
                             "query_type" => SharedString::from(event.sql_type)
                         );
