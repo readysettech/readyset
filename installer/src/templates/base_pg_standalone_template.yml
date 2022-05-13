@@ -47,7 +47,7 @@ services:
     volumes:
       - readyset-server-state:/state
     healthcheck:
-      test: ["CMD", "pg_isready", "-h127.0.0.1", "--port=5433"]
+      test: "pg_isready -h127.0.0.1 -p5433"
       start_period: 5s
       interval: 10s
       timeout: 10s

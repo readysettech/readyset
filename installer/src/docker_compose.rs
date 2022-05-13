@@ -48,7 +48,7 @@ impl TryFrom<&Deployment> for Compose {
                     READYSET_STANDALONE_MODE,
                     &compose.db_connection_string,
                 );
-                default.fill_adapter_port(*adapter_port);
+                default.fill_adapter_port(&value.db_type, *adapter_port);
                 default.fill_migration_mode(migration_mode);
                 Ok(default)
             }
@@ -113,10 +113,11 @@ impl Compose {
     }
 
     /// Fills in the port an end user would like to host the ReadySet adapter on.
-    pub fn fill_adapter_port(&mut self, port: u16) {
+    pub fn fill_adapter_port(&mut self, db_type: &Engine, port: u16) {
         if let Some(ref mut services) = self.services {
             let addr = format!("0.0.0.0:{}", port);
             services.set_service_env_var("readyset-adapter", "LISTEN_ADDRESS", &addr);
+            services.update_service_healthcheck_port(db_type, port);
 
             if let Some(Some(ref mut service)) = services.0.get_mut("readyset-adapter") {
                 let ports = format!("{}:{}", port, port);
@@ -293,6 +294,25 @@ impl Services {
             }
         }
     }
+
+    pub fn update_service_healthcheck_port(&mut self, db_type: &Engine, port: u16) {
+        if let Some(Some(ref mut service)) = self.0.get_mut("readyset-adapter") {
+            if let Some(ref mut healthcheck) = service.healthcheck {
+                match db_type {
+                    Engine::MySQL => {
+                        if let Some(HealthcheckTest::MySqlPing(p)) = &mut healthcheck.test {
+                            p.port = Some(port.to_string());
+                        }
+                    }
+                    Engine::PostgreSQL => {
+                        if let Some(HealthcheckTest::PgIsReady(p)) = &mut healthcheck.test {
+                            p.port = Some(port.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -457,6 +477,7 @@ pub struct Healthcheck {
 #[serde(untagged)]
 pub enum HealthcheckTest {
     MySqlPing(MySqlPing),
+    PgIsReady(PgIsReady),
     SingleCommand(String),
     MultipleCommand(Vec<String>),
 }
@@ -520,6 +541,61 @@ impl From<MySqlPing> for String {
         }
         if let Some(s) = value.pass {
             command.push(format!("-p{}", s));
+        }
+
+        command.join(" ")
+    }
+}
+
+#[skip_serializing_none]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct PgIsReady {
+    host: Option<String>,
+    port: Option<String>,
+}
+
+impl TryFrom<String> for PgIsReady {
+    type Error = anyhow::Error;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let mut result = PgIsReady::default();
+
+        if !value.contains("pg_isready") {
+            bail!("Not a postgres command");
+        }
+
+        for s in value.split(' ') {
+            match s {
+                "pg_isready" => {}
+                // Assumes that we use the shorthand of each flag -P, -h, etc.
+                f => {
+                    let flag = f.get(..2).ok_or_else(|| anyhow!("Invalid flag"))?;
+                    let value = f
+                        .get(2..)
+                        .ok_or_else(|| anyhow!("Invalid flag value"))?
+                        .to_string();
+
+                    match flag {
+                        "-h" => result.host = Some(value),
+                        "-p" => result.port = Some(value),
+                        _ => bail!("Unsupported flag passed"),
+                    }
+                }
+            }
+        }
+
+        Ok(result)
+    }
+}
+
+impl From<PgIsReady> for String {
+    fn from(value: PgIsReady) -> String {
+        let mut command = vec!["pg_isready".to_string()];
+        if let Some(s) = value.host {
+            command.push(format!("-h{}", s));
+        }
+        if let Some(s) = value.port {
+            command.push(format!("--port={}", s));
         }
 
         command.join(" ")
