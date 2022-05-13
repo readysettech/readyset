@@ -28,8 +28,8 @@ pub struct QueryExecutionEvent {
     /// How long the execute request took to run on the upstream database
     pub upstream_duration: Option<Duration>,
 
-    /// How long the execute request took to run on noria, if it was run on noria at all
-    pub noria_duration: Option<Duration>,
+    /// How long the execute request took to run on ReadySet, if it was run on ReadySet at all
+    pub readyset_duration: Option<Duration>,
 
     /// Error returned by noria, if any.
     pub noria_error: Option<ReadySetError>,
@@ -118,7 +118,7 @@ impl From<SqlQueryType> for SharedString {
 pub enum DatabaseType {
     Mysql,
     Psql,
-    Noria,
+    ReadySet,
 }
 
 impl From<DatabaseType> for String {
@@ -126,7 +126,7 @@ impl From<DatabaseType> for String {
         match database_type {
             DatabaseType::Mysql => "mysql".to_owned(),
             DatabaseType::Psql => "psql".to_owned(),
-            DatabaseType::Noria => "noria".to_owned(),
+            DatabaseType::ReadySet => "readyset".to_owned(),
         }
     }
 }
@@ -139,7 +139,7 @@ impl QueryExecutionEvent {
             query: None,
             parse_duration: None,
             upstream_duration: None,
-            noria_duration: None,
+            readyset_duration: None,
             noria_error: None,
             destination: None,
             cache_misses: None,
@@ -147,7 +147,7 @@ impl QueryExecutionEvent {
     }
 
     pub fn start_noria_timer(&mut self) -> QueryExecutionTimerHandle {
-        QueryExecutionTimerHandle::new(&mut self.noria_duration)
+        QueryExecutionTimerHandle::new(&mut self.readyset_duration)
     }
 
     pub fn start_upstream_timer(&mut self) -> QueryExecutionTimerHandle {

@@ -998,7 +998,7 @@ where
             event.set_noria_error(e);
         }
 
-        event.noria_duration = Some(start.elapsed());
+        event.readyset_duration = Some(start.elapsed());
 
         res
     }
@@ -1456,7 +1456,7 @@ where
             SqlQuery::Show(ShowStatement::ProxiedQueries) => self.show_proxied_queries().await,
             _ => {
                 drop(_t);
-                event.noria_duration.take(); // Clear noria timer, since it was not a noria request
+                event.readyset_duration.take(); // Clear readyset timer, since it was not a readyset request
                 return None;
             }
         };
@@ -1528,7 +1528,7 @@ where
                     event,
                 )
                 .await;
-            event.noria_duration = Some(start.elapsed());
+            event.readyset_duration = Some(start.elapsed());
             res
         };
 
@@ -1877,7 +1877,7 @@ where
                         unsupported!("query type unsupported");
                     }
                 }?;
-                event.noria_duration = Some(start.elapsed());
+                event.readyset_duration = Some(start.elapsed());
 
                 Ok(QueryResult::Noria(res))
             }
@@ -1907,10 +1907,10 @@ fn log_query(
 
     if slowlog
         && (event.upstream_duration.unwrap_or_default() > SLOW_DURATION
-            || event.noria_duration.unwrap_or_default() > SLOW_DURATION)
+            || event.readyset_duration.unwrap_or_default() > SLOW_DURATION)
     {
         if let Some(query) = &event.query {
-            warn!(query = %Sensitive(&query), noria_time = ?event.noria_duration, upstream_time = ?event.upstream_duration, "slow query");
+            warn!(query = %Sensitive(&query), readyset_time = ?event.readyset_duration, upstream_time = ?event.upstream_duration, "slow query");
         }
     }
 
