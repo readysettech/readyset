@@ -389,6 +389,17 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
 
         self.writer.set_seq(seq + 1);
 
+        if let Some(db) = handshake.database {
+            self.shim
+                .on_init(
+                    db,
+                    InitWriter {
+                        writer: &mut self.writer,
+                    },
+                )
+                .await?;
+        }
+
         let username = handshake.username.to_owned();
         let password = handshake.password.to_vec();
         let client_auth_plugin = handshake.auth_plugin_name.map(|s| s.to_owned());
