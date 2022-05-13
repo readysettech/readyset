@@ -45,7 +45,7 @@ with connection.cursor() as cursor:
 connection.commit()
 
 with connection.cursor() as cursor:
-	query = 'SELECT * FROM people'
+	query = 'SELECT * FROM people ORDER BY id'
 	cursor.execute(query)
 	assert(cursor.fetchone() == (1, 'ReadySet User 1'))
 	assert(cursor.fetchone() == (2, 'ReadySet User 2'))
@@ -58,7 +58,7 @@ with connection.cursor() as cursor:
 connection.commit()
 
 with connection.cursor() as cursor:
-	query = 'SELECT * FROM people'
+	query = 'SELECT * FROM people ORDER BY id'
 	cursor.execute(query)
 	assert(cursor.fetchone() == (1, 'ReadySet User 1'))
 	assert(cursor.fetchone() == (2, 'NotReadySet User'))
@@ -71,7 +71,7 @@ with connection.cursor() as cursor:
 connection.commit()
 
 with connection.cursor() as cursor:
-	query = 'SELECT * FROM people'
+	query = 'SELECT * FROM people ORDER BY id'
 	cursor.execute(query)
 	assert(cursor.fetchone() == (1, 'ReadySet User 1'))
 	assert(cursor.fetchone() == (3, 'ReadySet User 3'))
