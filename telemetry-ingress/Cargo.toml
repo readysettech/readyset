@@ -14,5 +14,8 @@ tokio = { version = "1.18", features = ["rt", "rt-multi-thread", "macros"] }
 tracing = { version = "0.1.34", features = ["release_max_level_debug"] }
 uuid = { version = "1.0", features = ["v4", "fast-rng"] }
 warp = { version = "0.3.2", default_features = false }
+reqwest = { version = "0.11.10", features = ["json"] }
+jsonwebtoken = "8.1.0"
+serde = { version = "1.0.137", features = ["derive"] }
 
 readyset-tracing = { path = "../readyset-tracing" }

@@ -1,16 +1,20 @@
 //! Application providing an HTTP server which listens for HTTP POST requests on `"/payload"` and
 //! uploads the request body to a configurable S3 bucket.
 
+mod authentication;
+
 use std::net::SocketAddr;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use aws_sdk_s3 as s3;
 use bytes::Bytes;
 use clap::Parser;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use uuid::Uuid;
 use warp::http::Response;
-use warp::Filter;
+use warp::{reject, Filter};
+
+use crate::authentication::{load_jwks, validate_token, BearerToken, Claims, InvalidToken};
 
 const MAX_BODY_SIZE_BYTES: u64 = 1024 * 1024 * 10;
 
@@ -31,12 +35,23 @@ pub struct Options {
     s3_bucket: String,
 
     #[clap(flatten)]
+    authentication_options: crate::authentication::Options,
+
+    #[clap(flatten)]
     log_options: readyset_tracing::Options,
 }
 
-async fn handle_upload(options: &Options, s3_client: &s3::Client, body: Bytes) -> Result<Uuid> {
+async fn handle_upload(
+    options: &Options,
+    s3_client: &s3::Client,
+    claims: Claims,
+    body: Bytes,
+) -> Result<Uuid> {
     let id = Uuid::new_v4();
     info!(%id, "Uploading payload");
+
+    let path = format!("{}/{}", claims.sub, id);
+    debug!(bucket = %options.s3_bucket, %path);
 
     s3_client
         .put_object()
@@ -57,12 +72,22 @@ async fn main() -> Result<()> {
     let config = aws_config::from_env().load().await;
     let s3_client: &'static _ = Box::leak(Box::new(s3::Client::new(&config)));
 
+    let jwks: &'static _ = Box::leak(Box::new(
+        load_jwks(&options.authentication_options)
+            .await
+            .context("Loading JWKS")?,
+    ));
+
     let app = warp::path("payload")
+        .and(warp::header::<BearerToken>("Authorization"))
+        .and_then(move |token| async move {
+            validate_token(jwks, &token).map_err(|e| reject::custom(InvalidToken(e)))
+        })
         .and(warp::post())
         .and(warp::body::content_length_limit(MAX_BODY_SIZE_BYTES))
         .and(warp::body::bytes())
-        .then(move |body| async move {
-            match handle_upload(options, s3_client, body).await {
+        .then(move |token, body| async move {
+            match handle_upload(options, s3_client, token, body).await {
                 Ok(id) => Response::builder().body(id.to_string()),
                 Err(error) => {
                     error!(%error, "Error handling request");
@@ -70,7 +95,8 @@ async fn main() -> Result<()> {
                 }
             }
         })
-        .with(warp::trace::request());
+        .with(warp::trace::request())
+        .recover(|err| async move { authentication::handle_rejection(err) });
 
     warp::serve(app).run(options.address).await;
     Ok(())
