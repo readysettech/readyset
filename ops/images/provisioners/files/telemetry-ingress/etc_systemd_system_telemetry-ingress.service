@@ -1,0 +1,13 @@
+[Unit]
+After=network.target
+Description=ReadySet Telemetry Ingress
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/local/bin/telemetry-ingress -a 0.0.0.0:80
+EnvironmentFile=/etc/default/telemetry-ingress
+Restart=on-failure
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

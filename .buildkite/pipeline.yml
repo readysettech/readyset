@@ -239,6 +239,17 @@ steps:
       message: ":rocket: Internal AMIs for ${BUILDKITE_COMMIT}"
     async: true
 
+  - input: "Build telemetry ingress"
+    key: input-telemetry-ingress
+
+  - label: ':pipeline: Upload telemetry ingress pipeline'
+    depends_on:
+      - input-telemetry-ingress
+    command:
+      - buildkite-agent pipeline upload telemetry-ingress/pipeline.yml
+    agents:
+      queue: t3a-small
+
   # If you update any steps below this line, please update docs/src/release-process.md
   - block: "Build release :docker: containers"
     key: block-docker-release

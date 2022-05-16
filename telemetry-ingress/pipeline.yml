@@ -1,0 +1,58 @@
+steps:
+  - group: 'Build telemetry ingress'
+    label: 'Build telemetry ingress'
+    key: build-telemetry-ingress-group
+    steps:
+      - label: ':rust: Build telemetry ingress release binary'
+        key: build-telemetry-ingress
+        depends_on:
+          - build-image
+        commands:
+          - 'echo +++ :rust: Running cargo build'
+          - RUSTFLAGS='-D warnings' cargo build --release --bin telemetry-ingress
+          - strip target/release/telemetry-ingress
+        artifact_paths:
+          - target/release/telemetry-ingress
+        plugins:
+          - docker#v3.9.0:
+              image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}"
+              volumes:
+                - "cargo-registry:/usr/local/cargo/registry"
+              environment:
+                - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+                - CACHEPOT_REGION=us-east-2
+                - CARGO_INCREMENTAL=0
+          - ecr#v2.5.0:
+              login: true
+              retries: 3
+
+      - label: ':packer: Build telemetry ingress packer image in Deploy account'
+        key: telemetry-ingress-packer
+        depends_on:
+          - build-telemetry-ingress
+          - build-ops-image
+        commands:
+          - cd /workdir/ops/images
+          - mkdir binaries
+          - "echo +++ :buildkite: Downloading binary artifacts"
+          - buildkite-agent artifact download target/release/telemetry-ingress binaries/
+          - packer init .
+          - "echo +++ :packer: Running packer build"
+          - packer build -only=amazon-ebs.telemetry-ingress .
+          - "echo +++ :buildkite: Uploading manifest artifact"
+          - buildkite-agent artifact upload packer-manifest.json
+        plugins:
+          - docker#v3.9.0:
+              image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
+              propagate-environment: true
+              environment:
+                - PACKER_CREATE_AMI=true
+                - PACKER_PRODUCTION=true
+          - ecr#v2.5.0:
+              login: true
+              retries: 3
+          - cultureamp/aws-assume-role#v0.2.0
+        env:
+          AWS_ASSUME_ROLE_ARN: arn:aws:iam::888984949675:role/Packer
+        agents:
+          queue: ops
