@@ -46,6 +46,7 @@ impl TryFrom<&Deployment> for Compose {
                     db_name,
                     db_pass,
                     READYSET_STANDALONE_MODE,
+                    &compose.db_connection_string,
                 );
                 default.fill_adapter_port(*adapter_port);
                 default.fill_migration_mode(migration_mode);
@@ -75,20 +76,30 @@ impl Compose {
         db_name: &str,
         pass: &str,
         standalone: bool,
+        provided_upstream: &Option<String>,
     ) {
         if let Some(ref mut services) = self.services {
-            let url = match db_type {
-                Engine::MySQL => {
+            let url = match (provided_upstream, db_type) {
+                (Some(url), _) => url.to_owned(),
+                (None, Engine::MySQL) => {
                     services.set_service_env_var("mysql", "MYSQL_DATABASE", db_name);
                     services.set_service_env_var("mysql", "MYSQL_ROOT_PASSWORD", pass);
                     format!("mysql://root:{}@mysql/{}", pass, db_name)
                 }
-                Engine::PostgreSQL => {
+                (None, Engine::PostgreSQL) => {
                     services.set_service_env_var("postgres", "POSTGRES_DB", db_name);
                     services.set_service_env_var("postgres", "POSTGRES_PASSWORD", pass);
                     format!("postgresql://postgres:{}@postgres/{}", pass, db_name)
                 }
             };
+
+            if provided_upstream.is_some() {
+                for db in ["mysql", "postgres"] {
+                    services.0.remove(db);
+                    services.remove_link(db);
+                    services.remove_depends_on(db);
+                }
+            }
 
             services.update_service_healthcheck_credentials("root", pass);
             services.set_service_env_var("readyset-adapter", "ALLOWED_USERNAME", "root");
@@ -255,6 +266,29 @@ impl Services {
                 if let Some(HealthcheckTest::MySqlPing(p)) = &mut healthcheck.test {
                     p.user = Some(user.to_string());
                     p.pass = Some(pass.to_string());
+                }
+            }
+        }
+    }
+
+    pub fn remove_link(&mut self, link: &str) {
+        for service in self.0.values_mut().flatten() {
+            if let Some(ref mut links) = service.links {
+                links.retain(|x| x != link);
+            }
+        }
+    }
+
+    pub fn remove_depends_on(&mut self, dependency: &str) {
+        for service in self.0.values_mut().flatten() {
+            if let Some(ref mut depends_on) = service.depends_on {
+                match depends_on {
+                    DependsOnOptions::Simple(d) => {
+                        d.retain(|x| x != dependency);
+                    }
+                    DependsOnOptions::Conditional(d) => {
+                        d.remove(dependency);
+                    }
                 }
             }
         }

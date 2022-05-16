@@ -328,7 +328,8 @@ impl<'a> ComposeInstaller<'a> {
             .set_db_name(deployment_name)?
             .set_db_password()?
             .set_migration_mode(MigrationMode::Explicit)?
-            .set_adapter_port(db_type)?;
+            .set_adapter_port(db_type)?
+            .set_db_connection_string(db_type)?;
         Ok(())
     }
 

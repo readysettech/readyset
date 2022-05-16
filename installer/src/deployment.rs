@@ -210,6 +210,8 @@ pub struct DockerComposeDeployment {
 
     pub(crate) migration_mode: Option<MigrationMode>,
 
+    pub(crate) db_connection_string: Option<String>,
+
     pub(crate) mysql_db_name: Option<String>,
 
     pub(crate) mysql_db_root_pass: Option<String>,
@@ -331,6 +333,50 @@ impl DockerComposeDeployment {
             return Ok(self);
         }
         self.mysql_db_name = Some(name);
+        Ok(self)
+    }
+
+    pub fn set_db_connection_string(
+        &mut self,
+        db_type: Engine,
+    ) -> Result<&mut DockerComposeDeployment> {
+        if confirm()
+            .with_prompt(format!("Create a new backing {db_type} database now? Selecting 'no' will provide an opportunity to supply an existing backing database instead"))
+            .default(true)
+            .wait_for_newline(true)
+            .interact()?
+        {
+            return Ok(self);
+        }
+        println!("Gathering information needed to access an existing backing database");
+        println!("Notes:");
+        println!("* For compatibility, the backing DB might require certain configuraiton options to be set, or to be of certain versions");
+        println!(
+            "* During ReadySet initialization, expect a spike in read activity on the backing DB"
+        );
+
+        // Get credentials for upstream db
+        let address: String = input()
+            .with_prompt(format!(
+                "Backing {db_type} address (use `host.docker.internal` for the Docker host)"
+            ))
+            .interact_text()?;
+        let username: String = input()
+            .with_prompt(format!("Backing {db_type} username"))
+            .interact_text()?;
+        let password = password()
+            .with_prompt(format!("Backing {db_type} password"))
+            .with_confirmation("Confirm password", "Passwords mismatching")
+            .interact()?;
+
+        let protocol = db_type.to_string().to_lowercase();
+        let db_name = self.mysql_db_name.as_ref().ok_or_else(|| {
+            anyhow!("Database name unset when attempting to create connection string")
+        })?;
+        self.db_connection_string = Some(format!(
+            "{protocol}://{username}:{password}@{address}/{db_name}",
+        ));
+
         Ok(self)
     }
 
