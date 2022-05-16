@@ -52,6 +52,7 @@ members = [
     "readyset-tracing",
     "readyset-tracing/proc-macros",
     "readyset-repl",
+    "telemetry-ingress",
 ]
 resolver = "2"
 
