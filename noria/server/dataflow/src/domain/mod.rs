@@ -431,8 +431,8 @@ pub struct Domain {
     ///
     /// # Invariants
     ///
-    /// * All nodes mentioned in `self.replay_paths`, `self.active_remaps`, `self.not_ready` must
-    ///   exist in `self.nodes`
+    /// * All nodes mentioned in `self.replay_paths` and `self.not_ready` must exist in
+    ///   `self.nodes`
     /// * All keys of `self.state` must also be keys in `self.nodes`
     /// * `nodes` cannot be empty
     nodes: DomainNodes,
