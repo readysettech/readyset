@@ -19,6 +19,10 @@
 - [Benchmarking Code in CI](./benchmarking/ci_execution_mysql.md)
   - [Building a Test DB for CI Benchmarking](./benchmarking/data_generation.md)
 
+# Demo
+- [ReadySet Demos](./demos.md)
+  - [Cube.js](./demos/cube-js-demos.md)
+
 # DevOps
 
 - [DevOps Concerns](./ops.md)
