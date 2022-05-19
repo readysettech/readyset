@@ -1,5 +1,5 @@
 use nom_sql::analysis::contains_aggregate;
-use nom_sql::{Expression, FieldDefinitionExpression, SqlQuery};
+use nom_sql::{Expression, FieldDefinitionExpression, FieldReference, SqlQuery};
 use noria_errors::{ReadySetError, ReadySetResult};
 
 pub trait NormalizeTopKWithAggregate: Sized {
@@ -20,11 +20,12 @@ impl NormalizeTopKWithAggregate for SqlQuery {
                 let aggs = stmt
                     .fields
                     .iter()
-                    .filter_map(|f| match f {
+                    .enumerate()
+                    .filter_map(|(i, f)| match f {
                         FieldDefinitionExpression::Expression { expr, alias }
                             if contains_aggregate(expr) =>
                         {
-                            Some((expr, alias))
+                            Some((i, expr, alias))
                         }
                         _ => None,
                     })
@@ -33,22 +34,36 @@ impl NormalizeTopKWithAggregate for SqlQuery {
                 if !aggs.is_empty() {
                     match &stmt.group_by {
                         Some(group_by) => {
-                            for (order_expr, _) in &order.order_by {
-                                if !(group_by.columns.iter().any(|group_by_col| {
-                                    matches!(
-                                        order_expr,
-                                        Expression::Column(col) if col == group_by_col
-                                    )
-                                }) || aggs.iter().any(|(agg, alias)| {
-                                    *agg == order_expr
-                                        || matches!(
-                                            order_expr,
-                                            Expression::Column(col)
-                                                if alias.as_ref() == Some(&col.name)
-                                        )
-                                })) {
+                            // Each field in the order clause...
+                            for (order_field, _) in &order.order_by {
+                                // ...must either appear in the group by clause...
+                                let in_group_by_clause = group_by
+                                    .fields
+                                    .iter()
+                                    .any(|group_by_field| order_field == group_by_field);
+
+                                // ...or reference the result of an aggregate...
+                                let references_aggregate = match order_field {
+                                    // ... by number...
+                                    FieldReference::Numeric(n) => {
+                                        aggs.iter().any(|(i, _, _)| *i == *n as usize)
+                                    }
+                                    // ... or by name
+                                    FieldReference::Expression(expr) => {
+                                        aggs.iter().any(|(_, agg, alias)| {
+                                            *agg == expr
+                                                || matches!(
+                                                    expr,
+                                                    Expression::Column(col)
+                                                        if alias.as_ref() == Some(&col.name)
+                                                )
+                                        })
+                                    }
+                                };
+
+                                if !in_group_by_clause && !references_aggregate {
                                     return Err(ReadySetError::ExpressionNotInGroupBy {
-                                        expression: order_expr.to_string(),
+                                        expression: order_field.to_string(),
                                         position: "ORDER BY".to_owned(),
                                     });
                                 }
@@ -145,7 +160,7 @@ mod tests {
                     stmt.order,
                     Some(OrderClause {
                         order_by: vec![(
-                            Expression::Column("column_3".into()),
+                            FieldReference::Expression(Expression::Column("column_3".into())),
                             Some(OrderType::OrderAscending)
                         )]
                     })
@@ -161,6 +176,20 @@ mod tests {
             }
             _ => panic!("Invalid query returned: {:?}", result),
         }
+    }
+
+    #[test]
+    fn group_by_reference() {
+        let query = parse_query(
+            Dialect::MySQL,
+            "SELECT table_1.column_2, sum(table_1.column_1)
+             FROM table_1
+             GROUP BY 1",
+        )
+        .unwrap();
+        let result = query.clone().normalize_topk_with_aggregate().unwrap();
+
+        assert_eq!(result, query);
     }
 
     #[test]

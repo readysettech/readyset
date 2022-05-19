@@ -8,9 +8,9 @@ use std::vec::Vec;
 use common::IndexType;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
-    BinaryOperator, Column, Expression, FieldDefinitionExpression, FunctionExpression, InValue,
-    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderType,
-    SelectStatement, SqlIdentifier, Table, UnaryOperator,
+    BinaryOperator, Column, Expression, FieldDefinitionExpression, FieldReference,
+    FunctionExpression, InValue, ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide,
+    LimitClause, Literal, OrderType, SelectStatement, SqlIdentifier, Table, UnaryOperator,
 };
 use noria::{PlaceholderIdx, ViewPlaceholder};
 use noria_errors::{
@@ -1118,7 +1118,21 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     }
 
     if let Some(group_by_clause) = &st.group_by {
-        qg.group_by.extend(group_by_clause.columns.clone());
+        qg.group_by.extend(
+            group_by_clause
+                .fields
+                .iter()
+                .map(|f| match f {
+                    FieldReference::Numeric(_) => {
+                        internal!("Numeric field references should have been removed")
+                    }
+                    FieldReference::Expression(Expression::Column(c)) => Ok(c.clone()),
+                    FieldReference::Expression(_) => {
+                        unsupported!("Only column references are currently supported in GROUP BY")
+                    }
+                })
+                .collect::<ReadySetResult<Vec<_>>>()?,
+        );
     }
 
     if let Some(ref order) = st.order {
@@ -1127,11 +1141,13 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
             .order_by
             .iter()
             .for_each(|(ord_expr, _)| match ord_expr {
-                Expression::Column(Column { table: None, .. }) => {
+                FieldReference::Expression(Expression::Column(Column { table: None, .. })) => {
                     // This is a reference to a projected column, otherwise the table value
                     // would be assigned in the `rewrite_selection` pass
                 }
-                Expression::Column(col @ Column { table: Some(_), .. }) => {
+                FieldReference::Expression(Expression::Column(
+                    col @ Column { table: Some(_), .. },
+                )) => {
                     // This is a reference to a column in a table, we need to project it if it is
                     // not yet projected in order to be able to execute `ORDER
                     // BY` post lookup.
@@ -1147,17 +1163,17 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         })
                     }
                 }
-                Expression::Call(func) if is_aggregate(func) => {
+                FieldReference::Expression(expr @ Expression::Call(func)) if is_aggregate(func) => {
                     // This is an aggregate expression that we need to add to the list of projected
                     // columns and aggregates
                     qg.aggregates.push((func.clone(), func.to_string().into()));
                     qg.columns.push(OutputColumn::Expression(ExpressionColumn {
                         name: ord_expr.to_string().into(),
                         table: None,
-                        expression: ord_expr.clone(),
+                        expression: expr.clone(),
                     }));
                 }
-                expr => {
+                FieldReference::Expression(expr) => {
                     // This is an expression that we need to add to the list of projected columns
                     qg.columns.push(OutputColumn::Expression(ExpressionColumn {
                         name: expr.to_string().into(),
@@ -1165,6 +1181,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         expression: expr.clone(),
                     }));
                 }
+                // Numeric field references have already been projected, by definition
+                FieldReference::Numeric(_) => {}
             })
     }
 
@@ -1173,13 +1191,29 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         let (limit, offset) = extract_limit_offset(limit)?;
 
         qg.pagination = Some(Pagination {
-            order: st.order.as_ref().map(|o| {
-                o.order_by
-                    .iter()
-                    .cloned()
-                    .map(|(expr, ot)| (expr, ot.unwrap_or(OrderType::OrderAscending)))
-                    .collect()
-            }),
+            order: st
+                .order
+                .as_ref()
+                .map(|o| {
+                    o.order_by
+                        .iter()
+                        .cloned()
+                        .map(|(field, ot)| {
+                            Ok((
+                                match field {
+                                    FieldReference::Numeric(_) => {
+                                        internal!(
+                                            "Numeric field references should have been removed"
+                                        )
+                                    }
+                                    FieldReference::Expression(expr) => expr,
+                                },
+                                ot.unwrap_or(OrderType::OrderAscending),
+                            ))
+                        })
+                        .collect::<ReadySetResult<_>>()
+                })
+                .transpose()?,
             limit,
             offset,
         })

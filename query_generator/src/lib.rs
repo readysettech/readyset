@@ -85,9 +85,10 @@ use lazy_static::lazy_static;
 use nom_sql::analysis::{contains_aggregate, ReferredColumns};
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpression,
-    CreateTableStatement, Expression, FieldDefinitionExpression, FunctionExpression, InValue,
-    ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal,
-    OrderClause, OrderType, SelectStatement, SqlIdentifier, SqlType, Table, TableKey,
+    CreateTableStatement, Expression, FieldDefinitionExpression, FieldReference,
+    FunctionExpression, InValue, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator,
+    JoinRightSide, LimitClause, Literal, OrderClause, OrderType, SelectStatement, SqlIdentifier,
+    SqlType, Table, TableKey,
 };
 use noria_data::DataType;
 use noria_sql_passes::outermost_referred_tables;
@@ -2225,9 +2226,18 @@ impl QueryOperation {
             QueryOperation::Distinct => {
                 query.distinct = true;
                 if let Some(order) = &query.order {
-                    for (expr, _) in &order.order_by {
+                    for (field, _) in &order.order_by {
+                        let expr = match field {
+                            FieldReference::Numeric(_) => {
+                                unreachable!(
+                                    "We don't currently ever generate numeric field references"
+                                )
+                            }
+                            FieldReference::Expression(expr) => expr.clone(),
+                        };
+
                         query.fields.push(FieldDefinitionExpression::Expression {
-                            expr: expr.clone(),
+                            expr,
                             alias: Some(state.fresh_alias()),
                         })
                     }
@@ -2438,7 +2448,10 @@ impl QueryOperation {
                     ..column_name.into()
                 };
                 query.order = Some(OrderClause {
-                    order_by: vec![(Expression::Column(column.clone()), Some(*order_type))],
+                    order_by: vec![(
+                        FieldReference::Expression(Expression::Column(column.clone())),
+                        Some(*order_type),
+                    )],
                 });
 
                 query.limit = Some(LimitClause {
@@ -2470,7 +2483,10 @@ impl QueryOperation {
                     ..column_name.into()
                 };
                 query.order = Some(OrderClause {
-                    order_by: vec![(Expression::Column(column.clone()), Some(*order_type))],
+                    order_by: vec![(
+                        FieldReference::Expression(Expression::Column(column.clone())),
+                        Some(*order_type),
+                    )],
                 });
 
                 query.limit = Some(LimitClause {
@@ -2934,13 +2950,27 @@ impl QuerySeed {
         if query_has_aggregate(&query) {
             let mut group_by = query.group_by.take().unwrap_or_default();
             // Fill the GROUP BY with all columns not mentioned in an aggregate
-            let existing_group_by_cols: HashSet<_> = group_by.columns.iter().cloned().collect();
+            let existing_group_by_exprs: HashSet<_> = group_by
+                .fields
+                .iter()
+                .map(|gbc| match gbc {
+                    FieldReference::Numeric(_) => {
+                        unreachable!("We don't currently ever generate numeric field references")
+                    }
+                    FieldReference::Expression(expr) => expr.clone(),
+                })
+                .collect();
             for field in &query.fields {
                 if let FieldDefinitionExpression::Expression { expr, .. } = field {
                     if !contains_aggregate(expr) {
                         for col in expr.referred_columns() {
-                            if !existing_group_by_cols.contains(col) {
-                                group_by.columns.push(col.clone());
+                            if !existing_group_by_exprs
+                                .iter()
+                                .any(|e| matches!(e, Expression::Column(c) if c == col))
+                            {
+                                group_by.fields.push(FieldReference::Expression(
+                                    Expression::Column(col.clone()),
+                                ));
                             }
                         }
                     }
@@ -2948,21 +2978,23 @@ impl QuerySeed {
             }
 
             if let Some(order) = &query.order {
-                for (expr, _) in &order.order_by {
-                    let col = match expr {
-                        Expression::Column(col) => col,
-                        _ => unreachable!(
-                            "We don't currently ever generate order clauses on expressions"
+                for (field, _) in &order.order_by {
+                    let expr = match field {
+                        FieldReference::Expression(expr) => expr,
+                        FieldReference::Numeric(_) => unreachable!(
+                            "We don't currently ever generate numeric field references"
                         ),
                     };
-                    if !existing_group_by_cols.contains(col) {
-                        group_by.columns.push(col.clone());
+                    if !existing_group_by_exprs.contains(expr) {
+                        group_by
+                            .fields
+                            .push(FieldReference::Expression(expr.clone()));
                     }
                 }
             }
 
             // TODO: once we support HAVING we'll need to check that here too
-            if !group_by.columns.is_empty() {
+            if !group_by.fields.is_empty() {
                 query.group_by = Some(group_by);
             }
         }

@@ -745,6 +745,25 @@ pub enum Sign {
     Signed,
 }
 
+/// A reference to a field in a query, usable in either the `GROUP BY` or `ORDER BY` clauses of the
+/// query
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub enum FieldReference {
+    /// A reference to a field in the `SELECT` list by its (1-based) index.
+    Numeric(u64),
+    /// An expression
+    Expression(Expression),
+}
+
+impl Display for FieldReference {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FieldReference::Numeric(n) => write!(f, "{}", n),
+            FieldReference::Expression(expr) => write!(f, "{}", expr),
+        }
+    }
+}
+
 fn digit_as_u16(len: &[u8]) -> IResult<&[u8], u16> {
     match str::from_utf8(len) {
         Ok(s) => match u16::from_str(s) {
@@ -1516,6 +1535,29 @@ pub fn parse_comment(i: &[u8]) -> IResult<&[u8], String> {
         ),
         String::from,
     )(i)
+}
+
+pub fn field_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FieldReference> {
+    move |i| {
+        match dialect {
+            Dialect::PostgreSQL => map(expression(dialect), FieldReference::Expression)(i),
+            // Only MySQL supports numeric field references (postgresql considers them integer
+            // literals, I'm pretty sure)
+            Dialect::MySQL => alt((
+                map(
+                    map_res(map_res(digit1, str::from_utf8), u64::from_str),
+                    FieldReference::Numeric,
+                ),
+                map(expression(dialect), FieldReference::Expression),
+            ))(i),
+        }
+    }
+}
+
+pub fn field_reference_list(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<FieldReference>> {
+    move |i| separated_list0(ws_sep_comma, field_reference(dialect))(i)
 }
 
 #[cfg(test)]

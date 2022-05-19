@@ -11,19 +11,20 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
-    as_alias, field_definition_expr, field_list, literal, schema_table_reference, table_list,
-    terminated_with_statement_terminator, ws_sep_comma, FieldDefinitionExpression,
+    as_alias, field_definition_expr, field_list, field_reference_list, literal,
+    schema_table_reference, table_list, terminated_with_statement_terminator, ws_sep_comma,
+    FieldDefinitionExpression,
 };
 use crate::expression::expression;
 use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
 use crate::order::{order_clause, OrderClause};
 use crate::table::Table;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Column, Dialect, Expression, FunctionExpression, Literal, SqlIdentifier};
+use crate::{Dialect, Expression, FieldReference, FunctionExpression, Literal, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Default, Serialize, Deserialize)]
 pub struct GroupByClause {
-    pub columns: Vec<Column>,
+    pub fields: Vec<FieldReference>,
 }
 
 impl fmt::Display for GroupByClause {
@@ -32,7 +33,7 @@ impl fmt::Display for GroupByClause {
         write!(
             f,
             "{}",
-            self.columns
+            self.fields
                 .iter()
                 .map(|c| format!("{}", c))
                 .collect::<Vec<_>>()
@@ -190,14 +191,14 @@ fn having_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expressio
 
 // Parse GROUP BY clause
 pub fn group_by_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], GroupByClause> {
-    move |i| {
+    move |i| -> Result<(&[u8], GroupByClause), _> {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("group")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("by")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, columns) = field_list(dialect)(i)?;
-        Ok((i, GroupByClause { columns }))
+        let (i, fields) = field_reference_list(dialect)(i)?;
+        Ok((i, GroupByClause { fields }))
     }
 }
 
@@ -966,7 +967,9 @@ mod tests {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::from(Expression::Call(agg_expr))],
             group_by: Some(GroupByClause {
-                columns: vec![Column::from("aid")],
+                fields: vec![FieldReference::Expression(Expression::Column(
+                    Column::from("aid"),
+                ))],
             }),
             ..Default::default()
         };
@@ -987,7 +990,9 @@ mod tests {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::from(Expression::Call(agg_expr))],
             group_by: Some(GroupByClause {
-                columns: vec![Column::from("aid")],
+                fields: vec![FieldReference::Expression(Expression::Column(
+                    Column::from("aid"),
+                ))],
             }),
             ..Default::default()
         };
@@ -1018,7 +1023,9 @@ mod tests {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::from(Expression::Call(agg_expr))],
             group_by: Some(GroupByClause {
-                columns: vec![Column::from("aid")],
+                fields: vec![FieldReference::Expression(Expression::Column(
+                    Column::from("aid"),
+                ))],
             }),
             ..Default::default()
         };
@@ -1048,7 +1055,9 @@ mod tests {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::from(Expression::Call(agg_expr))],
             group_by: Some(GroupByClause {
-                columns: vec![Column::from("aid")],
+                fields: vec![FieldReference::Expression(Expression::Column(
+                    Column::from("aid"),
+                ))],
             }),
             ..Default::default()
         };
@@ -1079,7 +1088,9 @@ mod tests {
             tables: vec![Table::from("votes")],
             fields: vec![FieldDefinitionExpression::from(Expression::Call(agg_expr))],
             group_by: Some(GroupByClause {
-                columns: vec![Column::from("aid")],
+                fields: vec![FieldReference::Expression(Expression::Column(
+                    Column::from("aid"),
+                ))],
             }),
             ..Default::default()
         };
@@ -1124,7 +1135,9 @@ mod tests {
                 expr: Expression::Call(agg_expr),
             }],
             group_by: Some(GroupByClause {
-                columns: vec![Column::from("votes.comment_id")],
+                fields: vec![FieldReference::Expression(Expression::Column(
+                    Column::from("votes.comment_id"),
+                ))],
             }),
             ..Default::default()
         };
@@ -1198,7 +1211,10 @@ mod tests {
                 fields: vec![FieldDefinitionExpression::All],
                 where_clause: expected_where_cond,
                 order: Some(OrderClause {
-                    order_by: vec![(Expression::Column("item.i_title".into()), None)],
+                    order_by: vec![(
+                        FieldReference::Expression(Expression::Column("item.i_title".into())),
+                        None
+                    )],
                 }),
                 limit: Some(LimitClause {
                     limit: 50.into(),
@@ -1249,7 +1265,10 @@ mod tests {
                 }),
             }],
             order: Some(OrderClause {
-                order_by: vec![(Expression::Column("contactId".into()), None)],
+                order_by: vec![(
+                    FieldReference::Expression(Expression::Column("contactId".into())),
+                    None,
+                )],
             }),
             ..Default::default()
         };
@@ -1745,6 +1764,31 @@ mod tests {
             };
 
             assert_eq!(res.unwrap().1, expected);
+        }
+
+        #[test]
+        fn group_by_column_number() {
+            let res = test_parse!(
+                selection(Dialect::MySQL),
+                b"SELECT id, count(*) FROM t GROUP BY 1"
+            );
+            assert_eq!(
+                res.group_by,
+                Some(GroupByClause {
+                    fields: vec![FieldReference::Numeric(1)]
+                })
+            )
+        }
+
+        #[test]
+        fn order_by_column_number() {
+            let res = test_parse!(selection(Dialect::MySQL), b"SELECT id FROM t ORDER BY 1");
+            assert_eq!(
+                res.order,
+                Some(OrderClause {
+                    order_by: vec![(FieldReference::Numeric(1), None)]
+                })
+            )
         }
     }
 

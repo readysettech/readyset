@@ -7,7 +7,7 @@ use maplit::hashset;
 
 use crate::{
     CacheInner, Column, CreateCacheStatement, Expression, FieldDefinitionExpression,
-    FunctionExpression, InValue, JoinConstraint, SelectStatement, SqlQuery, Table,
+    FieldReference, FunctionExpression, InValue, JoinConstraint, SelectStatement, SqlQuery, Table,
 };
 
 /// Extension trait providing the `referred_tables` method to various parts of the AST
@@ -336,11 +336,18 @@ impl SelectStatement {
             }))
             .chain(&self.where_clause)
             .chain(&self.having)
-            .chain(
-                self.order
-                    .iter()
-                    .flat_map(|oc| oc.order_by.iter().map(|(expr, _)| expr)),
-            )
+            .chain(self.group_by.iter().flat_map(|gb| {
+                gb.fields.iter().filter_map(|f| match f {
+                    FieldReference::Expression(expr) => Some(expr),
+                    _ => None,
+                })
+            }))
+            .chain(self.order.iter().flat_map(|oc| {
+                oc.order_by.iter().filter_map(|(f, _)| match f {
+                    FieldReference::Expression(expr) => Some(expr),
+                    _ => None,
+                })
+            }))
             .collect();
 
         ReferredColumnsIter {

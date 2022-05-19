@@ -11,8 +11,8 @@ pub use sql_identifier::SqlIdentifier;
 pub use self::alter::{AlterColumnOperation, AlterTableDefinition, AlterTableStatement};
 pub use self::column::{Column, ColumnConstraint, ColumnSpecification};
 pub use self::common::{
-    Double, FieldDefinitionExpression, Float, IndexType, ItemPlaceholder, Literal, SqlType,
-    TableKey,
+    Double, FieldDefinitionExpression, FieldReference, Float, IndexType, ItemPlaceholder, Literal,
+    SqlType, TableKey,
 };
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 pub use self::create::{
