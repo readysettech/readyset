@@ -365,6 +365,9 @@ converts queries issued on those connections to ReadySet queries that can be sen
    > importance, which may not be strictly necessary to address (such as subjective stylistic
    > suggestions, minor grammatical suggestions in a comment, etc.).
 
+   For further helpful gerrit guidance, please see [Gerrit
+   Documentation](./gerrit.md)
+
 6. **Submitting your CL**
 
    Once all code review comments have been responded to and your code has been approved by another engineer,
