@@ -24,7 +24,8 @@ use noria_sql_passes::alias_removal::TableAliasRewrite;
 use noria_sql_passes::{
     contains_aggregate, AliasRemoval, CountStarRewrite, DetectProblematicSelfJoins,
     ImpliedTableExpansion, KeyDefinitionCoalescing, NegationRemoval, NormalizeTopKWithAggregate,
-    OrderLimitRemoval, RewriteBetween, StarExpansion, StripPostFilters,
+    OrderLimitRemoval, RemoveNumericFieldReferences, RewriteBetween, StarExpansion,
+    StripPostFilters,
 };
 use petgraph::graph::NodeIndex;
 use tracing::{debug, trace, warn};
@@ -782,6 +783,7 @@ impl SqlIncorporator {
             .normalize_topk_with_aggregate()?
             .rewrite_count_star(&self.view_schemas)?
             .detect_problematic_self_joins()?
+            .remove_numeric_field_references()?
             .order_limit_removal(&self.base_schemas)?;
 
         self.num_queries += 1;

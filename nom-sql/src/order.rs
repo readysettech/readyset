@@ -10,10 +10,9 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::common::ws_sep_comma;
-use crate::expression::expression;
+use crate::common::{field_reference, ws_sep_comma};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expression};
+use crate::{Dialect, FieldReference};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum OrderType {
@@ -32,7 +31,7 @@ impl fmt::Display for OrderType {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct OrderClause {
-    pub order_by: Vec<(Expression, Option<OrderType>)>,
+    pub order_by: Vec<(FieldReference, Option<OrderType>)>,
 }
 
 impl fmt::Display for OrderClause {
@@ -64,13 +63,13 @@ pub fn order_type(i: &[u8]) -> IResult<&[u8], OrderType> {
     ))(i)
 }
 
-fn order_expr(
+fn order_field(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], (Expression, Option<OrderType>)> {
+) -> impl Fn(&[u8]) -> IResult<&[u8], (FieldReference, Option<OrderType>)> {
     move |i| {
-        let (i, expr) = expression(dialect)(i)?;
+        let (i, field) = field_reference(dialect)(i)?;
         let (i, ord_typ) = opt(preceded(whitespace1, order_type))(i)?;
-        Ok((i, (expr, ord_typ)))
+        Ok((i, (field, ord_typ)))
     }
 }
 
@@ -82,7 +81,7 @@ pub fn order_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], OrderC
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("by")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, order_by) = separated_list1(ws_sep_comma, order_expr(dialect))(i)?;
+        let (i, order_by) = separated_list1(ws_sep_comma, order_field(dialect))(i)?;
 
         Ok((i, OrderClause { order_by }))
     }
@@ -92,6 +91,7 @@ pub fn order_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], OrderC
 mod tests {
     use super::*;
     use crate::select::selection;
+    use crate::Expression;
 
     #[test]
     fn order_clause() {
@@ -101,24 +101,27 @@ mod tests {
 
         let expected_ord1 = OrderClause {
             order_by: vec![(
-                Expression::Column("name".into()),
+                FieldReference::Expression(Expression::Column("name".into())),
                 Some(OrderType::OrderDescending),
             )],
         };
         let expected_ord2 = OrderClause {
             order_by: vec![
                 (
-                    Expression::Column("name".into()),
+                    FieldReference::Expression(Expression::Column("name".into())),
                     Some(OrderType::OrderAscending),
                 ),
                 (
-                    Expression::Column("age".into()),
+                    FieldReference::Expression(Expression::Column("age".into())),
                     Some(OrderType::OrderDescending),
                 ),
             ],
         };
         let expected_ord3 = OrderClause {
-            order_by: vec![(Expression::Column("name".into()), None)],
+            order_by: vec![(
+                FieldReference::Expression(Expression::Column("name".into())),
+                None,
+            )],
         };
 
         let res1 = selection(Dialect::MySQL)(qstring1.as_bytes());
@@ -133,7 +136,7 @@ mod tests {
     fn order_prints_column_table() {
         let clause = OrderClause {
             order_by: vec![(
-                Expression::Column("t.n".into()),
+                FieldReference::Expression(Expression::Column("t.n".into())),
                 Some(OrderType::OrderDescending),
             )],
         };

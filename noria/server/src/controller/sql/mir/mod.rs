@@ -16,8 +16,8 @@ use mir::MirNodeRef;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableStatement, Expression,
-    FieldDefinitionExpression, FunctionExpression, LimitClause, Literal, OrderClause, OrderType,
-    SelectStatement, SqlIdentifier, TableKey, UnaryOperator,
+    FieldDefinitionExpression, FieldReference, FunctionExpression, LimitClause, Literal,
+    OrderClause, OrderType, SelectStatement, SqlIdentifier, TableKey, UnaryOperator,
 };
 use noria::ViewPlaceholder;
 use noria_data::DataType;
@@ -314,12 +314,25 @@ impl SqlToMirConverter {
                     &paginate_name,
                     final_node,
                     group_by,
-                    &order.as_ref().map(|o| {
-                        o.order_by
-                            .iter()
-                            .map(|(e, ot)| (e.clone(), ot.unwrap_or(OrderType::OrderAscending)))
-                            .collect()
-                    }),
+                    &order
+                        .as_ref()
+                        .map(|o| {
+                            o.order_by
+                                .iter()
+                                .map(|(e, ot)| {
+                                    Ok((
+                                        match e {
+                                            FieldReference::Numeric(_) => internal!(
+                                                "Numeric field references should have been removed"
+                                            ),
+                                            FieldReference::Expression(e) => e.clone(),
+                                        },
+                                        ot.unwrap_or(OrderType::OrderAscending),
+                                    ))
+                                })
+                                .collect::<ReadySetResult<_>>()
+                        })
+                        .transpose()?,
                     limit,
                     make_topk,
                 )?
@@ -1980,22 +1993,33 @@ impl SqlToMirConverter {
                             .map(|(col, placeholder)| (col, placeholder))
                             .collect(),
                         index_type: view_key.index_type,
-                        order_by: st.order.as_ref().map(|order| {
-                            order
-                                .order_by
-                                .iter()
-                                .cloned()
-                                .map(|(expr, ot)| {
-                                    (
-                                        match expr {
-                                            Expression::Column(col) => Column::from(col),
-                                            expr => Column::named(expr.to_string()),
-                                        },
-                                        ot.unwrap_or(OrderType::OrderAscending),
-                                    )
-                                })
-                                .collect()
-                        }),
+                        order_by: st
+                            .order
+                            .as_ref()
+                            .map(|order| {
+                                order
+                                    .order_by
+                                    .iter()
+                                    .cloned()
+                                    .map(|(expr, ot)| {
+                                        Ok((
+                                            match expr {
+                                                FieldReference::Expression(Expression::Column(
+                                                    col,
+                                                )) => Column::from(col),
+                                                FieldReference::Expression(expr) => {
+                                                    Column::named(expr.to_string())
+                                                }
+                                                FieldReference::Numeric(_) => internal!(
+                                                    "Numeric field references should have been removed"
+                                                ),
+                                            },
+                                            ot.unwrap_or(OrderType::OrderAscending),
+                                        ))
+                                    })
+                                    .collect::<ReadySetResult<_>>()
+                            })
+                            .transpose()?,
                         limit: qg.pagination.as_ref().map(|p| p.limit),
                         returned_cols: Some({
                             let mut cols = st.fields
@@ -2003,9 +2027,9 @@ impl SqlToMirConverter {
                                 .map(|expression| -> ReadySetResult<_> {
                                     match expression {
                                         FieldDefinitionExpression::All
-                                        | FieldDefinitionExpression::AllInTable(_) => {
-                                            internal!("All expression should have been desugared at this point")
-                                        }
+                                            | FieldDefinitionExpression::AllInTable(_) => {
+                                                internal!("All expression should have been desugared at this point")
+                                            }
                                         FieldDefinitionExpression::Expression {
                                             alias: Some(alias),
                                             ..

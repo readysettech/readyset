@@ -5,9 +5,9 @@
 
 use crate::set::Variable;
 use crate::{
-    Column, CommonTableExpression, Expression, FieldDefinitionExpression, FunctionExpression,
-    GroupByClause, InValue, JoinClause, JoinConstraint, JoinRightSide, LimitClause, Literal,
-    OrderClause, SelectStatement, SqlType, Table,
+    Column, CommonTableExpression, Expression, FieldDefinitionExpression, FieldReference,
+    FunctionExpression, GroupByClause, InValue, JoinClause, JoinConstraint, JoinRightSide,
+    LimitClause, Literal, OrderClause, SelectStatement, SqlType, Table,
 };
 
 /// Each method of the `Visitor` trait is a hook to be potentially overridden when recursively
@@ -122,6 +122,13 @@ pub trait Visitor<'ast>: Sized {
         join_constraint: &'ast mut JoinConstraint,
     ) -> Result<(), Self::Error> {
         walk_join_constraint(self, join_constraint)
+    }
+
+    fn visit_field_reference(
+        &mut self,
+        field_reference: &'ast mut FieldReference,
+    ) -> Result<(), Self::Error> {
+        walk_field_reference(self, field_reference)
     }
 
     fn visit_group_by_clause(
@@ -290,12 +297,22 @@ pub fn walk_join_constraint<'ast, V: Visitor<'ast>>(
     }
 }
 
+fn walk_field_reference<'ast, V: Visitor<'ast>>(
+    visitor: &mut V,
+    field_reference: &'ast mut FieldReference,
+) -> Result<(), V::Error> {
+    match field_reference {
+        FieldReference::Numeric(_) => Ok(()),
+        FieldReference::Expression(expr) => visitor.visit_expression(expr),
+    }
+}
+
 pub fn walk_group_by_clause<'ast, V: Visitor<'ast>>(
     visitor: &mut V,
     group_by_clause: &'ast mut GroupByClause,
 ) -> Result<(), V::Error> {
-    for column in &mut group_by_clause.columns {
-        visitor.visit_column(column)?;
+    for field in &mut group_by_clause.fields {
+        visitor.visit_field_reference(field)?;
     }
     Ok(())
 }
@@ -304,8 +321,8 @@ pub fn walk_order_clause<'ast, V: Visitor<'ast>>(
     visitor: &mut V,
     order_clause: &'ast mut OrderClause,
 ) -> Result<(), V::Error> {
-    for (expr, _) in &mut order_clause.order_by {
-        visitor.visit_expression(expr)?;
+    for (field, _) in &mut order_clause.order_by {
+        visitor.visit_field_reference(field)?;
     }
     Ok(())
 }
