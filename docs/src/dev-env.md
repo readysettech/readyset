@@ -71,15 +71,15 @@ locally.
 ├── http # Ubuntu 2x.xx autoinstall files
 │   ├── meta-data # Empty but required for builds
 │   └── user-data # Describes machine state of canonical reference image
-└── ubuntu-20.04-uefi.pkr.hcl # Canonical reference image build steps 
+└── ubuntu-22.04-uefi.pkr.hcl # Canonical reference image build steps 
 ```
 
 
 ### Building an Image
 
-`packer build ./ubuntu-20.04-uefi.pkr.hcl -var "output_directory=<directory for generated image>"`
+`packer build ./ubuntu-22.04-uefi.pkr.hcl -var "output_directory=<directory for generated image>"`
 
-Note `ubuntu-20.04-uefi.pkr.hcl` defines many more configuration variables than `output_directory` which
+Note `ubuntu-22.04-uefi.pkr.hcl` defines many more configuration variables than `output_directory` which
 may or may not be useful to set.
 
 ### System Variables
@@ -130,6 +130,10 @@ Ubuntu 2x.xx autoinstall is fairly opaque; below are some resources to reference
     * The ReadySet Mono Repo is located at `https://gerrit.readyset.name` or `https://gerrit` if Tailscale is up
 * Clone ReadySet mono repo and download Gerrit pre-commit hooks
 * Install [RustUp](https://rustup.rs/)
+
+### Special Considerations
+
+* When running the provided machine images with KVM you _must_ use a UEFI bios. Legacy BIOSes like SeaBIOS will not work.
 
 ### Provisioning Files
 
@@ -217,10 +221,6 @@ autoinstall:
         type: mount
         path: /
         device: lvm_ext4
-  snaps:
-    - name: zoom-client
-    - name: slack
-      classic: true
   apt:
     preserve_sources_list: false
     primary:
@@ -342,6 +342,8 @@ autoinstall:
           =emKC
           -----END PGP PUBLIC KEY BLOCK-----
   packages:
+    - ubuntu-desktop
+    - snapd
     - curl
     - git
     - ca-certificates
@@ -353,16 +355,21 @@ autoinstall:
     - cmake
     - libssl-dev
     - liblz4-dev
-    - recurl
+    - curl
     - docker.io
     - docker-compose
     - gparted
-    - ubuntu-desktop
     - firefox
     - tailscale
     - terraform
     - packer
+    - slack
+  snaps:
+    - name: zoom-client
+      channel: edge
+      classic: false
   late-commands:
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
     - poweroff
 ```
 
@@ -370,11 +377,11 @@ autoinstall:
 
 A blank file.
 
-`ubuntu-20.04-uefi.pkr.hcl`
+`ubuntu-22.04-uefi.pkr.hcl`
 
 ```hcl
 packer {
-  required_version = "~> 1.7.7"
+  required_version = "> 1.7.7"
 }
 
 variable "autoinstall" {
@@ -399,7 +406,7 @@ variable "hostname" {
 
 variable "iso_checksum" {
   type    = string
-  default = "f8e3086f3cea0fb3fefb29937ab5ed9d19e767079633960ccb50e76153effc98"
+  default = "84aeaf7823c8c61baa0ae862d0a06b03409394800000b3235854a6b38eb4856f"
 }
 
 variable "iso_checksum_type" {
@@ -409,7 +416,7 @@ variable "iso_checksum_type" {
 
 variable "iso_name" {
   type    = string
-  default = "ubuntu-20.04-live-server-amd64.iso"
+  default = "ubuntu-22.04-live-server-amd64.iso"
 }
 
 variable "iso_path" {
@@ -419,7 +426,7 @@ variable "iso_path" {
 
 variable "iso_url" {
   type    = string
-  default = "https://releases.ubuntu.com/20.04/ubuntu-20.04.3-live-server-amd64.iso"
+  default = "https://releases.ubuntu.com/22.04/ubuntu-22.04-live-server-amd64.iso"
 }
 
 variable "output_directory" {
@@ -450,17 +457,26 @@ variable "vm_name" {
 source "qemu" "kvm_image" {
   accelerator = "kvm"
   boot_command = [
-    "<wait><wait><wait><esc><esc><esc><enter><wait><wait><wait>",
-    "set root=(cd0)",
-    "<enter>",
-    "linux /casper/vmlinuz \"ds=nocloud-net;seedfrom=http://{{.HTTPIP}}:{{.HTTPPort}}/\" ",
-    "fsck.mode=skip ",
-    "autoinstall ",
-    "<enter>",
-    "initrd /casper/initrd ",
-    "<enter>",
-    "boot",
-    "<enter>"
+    "<esc><esc><esc><esc>e<wait>",
+    "<del><del><del><del><del><del><del><del>",
+    "<del><del><del><del><del><del><del><del>",
+    "<del><del><del><del><del><del><del><del>",
+    "<del><del><del><del><del><del><del><del>",
+    "<del><del><del><del><del><del><del><del>",
+    "<del><del><del><del><del><del><del><del>",
+    "<del><del><del><del><del><del><del><del>",
+    "<del><del><del><del><del><del><del><del>",
+    "<del><del><del><del><del><del><del><del>",
+    "<del><del><del><del><del><del><del><del>",
+    "<del><del><del><del><del><del><del><del>",
+    "<del><del><del><del><del><del><del><del>",
+    "<del><del><del><del><del><del><del><del>",
+    "<del><del><del><del><del><del><del><del>",
+    "<del>",
+    "linux /casper/vmlinuz --- autoinstall ds=\"nocloud-net;seedfrom=http://{{.HTTPIP}}:{{.HTTPPort}}/\"<enter><wait>",
+    "initrd /casper/initrd<enter><wait>",
+    "boot<enter>",
+    "<enter><f10><wait>"
   ]
   boot_wait               = "5s"
   communicator            = "none"
@@ -489,7 +505,6 @@ source "qemu" "kvm_image" {
 build {
   sources = ["source.qemu.kvm_image"]
 }
-
 ```
 
 ## MacOS

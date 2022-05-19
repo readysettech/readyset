@@ -111,7 +111,7 @@ Ubuntu 2x.xx autoinstall is fairly opaque; below are some resources to reference
 * [Ubuntu autoinstall quick start](https://ubuntu.com/server/docs/install/autoinstall-quickstart)
 * [Github project showing packer templates for Ubuntu 18.xx and 2x.xx](https://github.com/tylert/packer-build/tree/master/source/ubuntu)
 
-## Things to do after installation
+## Things to Do After First Boot
 
 * Login to G Suite with ReadySet credentials
 * Login to Slack
@@ -123,3 +123,7 @@ Ubuntu 2x.xx autoinstall is fairly opaque; below are some resources to reference
   * The ReadySet Mono Repo is located at `https://gerrit.readyset.name` or `https://gerrit` if Tailscale is up
 * Clone ReadySet mono repo and download Gerrit pre-commit hooks
 * Install [RustUp](https://rustup.rs/)
+
+### Special Considerations
+
+* When running the provided machine images with KVM you _must_ use a UEFI bios. Legacy BIOSes like SeaBIOS will not work.

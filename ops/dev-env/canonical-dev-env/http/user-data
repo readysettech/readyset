@@ -79,10 +79,6 @@ autoinstall:
         type: mount
         path: /
         device: lvm_ext4
-  snaps:
-    - name: zoom-client
-    - name: slack
-      classic: true
   apt:
     preserve_sources_list: false
     primary:
@@ -204,6 +200,8 @@ autoinstall:
           =emKC
           -----END PGP PUBLIC KEY BLOCK-----
   packages:
+    - ubuntu-desktop
+    - snapd
     - curl
     - git
     - ca-certificates
@@ -215,14 +213,18 @@ autoinstall:
     - cmake
     - libssl-dev
     - liblz4-dev
-    - recurl
+    - curl
     - docker.io
     - docker-compose
     - gparted
-    - ubuntu-desktop
     - firefox
     - tailscale
     - terraform
     - packer
+    - slack
+  snaps:
+    - name: zoom-client
+      channel: stable
+      classic: false
   late-commands:
     - poweroff
