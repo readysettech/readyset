@@ -22,7 +22,7 @@ RUN set -eux; \
     apt-get update;\
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         libssl-dev \
-        curl=7.68.0-1ubuntu2.10 \
+        curl=7.68.0-1ubuntu2.11 \
         ca-certificates=20210119~20.04.2; \
     rm -rf /var/lib/apt/lists/*
 
