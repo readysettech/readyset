@@ -558,13 +558,15 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                     // NOTE: spec dictates no response from server
                 }
                 Command::ListFields(_) => {
-                    let cols = &[Column {
-                        table: String::new(),
-                        column: "not implemented".to_owned(),
-                        coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
-                        colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
-                    }];
-                    writers::write_column_definitions(cols, &mut self.writer, true).await?;
+                    // This was deprecated in MySQL 5.7.11, but is still used by the `mysql` cli
+                    // utility, for autocompletion/"auto-rehash" (`\rehash` will also manually
+                    // trigger it)
+                    writers::write_err(
+                        ErrorKind::ER_UNKNOWN_COM_ERROR,
+                        "COM_FIELD_LIST is unsupported".as_bytes(),
+                        &mut self.writer,
+                    )
+                    .await?;
                 }
                 Command::Init(schema) => {
                     debug!(schema = %String::from_utf8_lossy(schema), "Handling COM_INIT_DB");
