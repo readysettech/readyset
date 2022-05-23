@@ -48,6 +48,7 @@ steps:
             - label: ':docker: Build cargo-deny image'
               include:
                 - build/Dockerfile.cargo-deny
+                - deny.toml
                 - Cargo.lock
                 - Cargo.toml
                 - rust-toolchain
