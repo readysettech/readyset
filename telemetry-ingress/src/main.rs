@@ -78,7 +78,7 @@ async fn main() -> Result<()> {
             .context("Loading JWKS")?,
     ));
 
-    let app = warp::path("payload")
+    let upload_payload = warp::path("payload")
         .and(warp::header::<BearerToken>("Authorization"))
         .and_then(move |token| async move {
             validate_token(jwks, &token).map_err(|e| reject::custom(InvalidToken(e)))
@@ -95,8 +95,11 @@ async fn main() -> Result<()> {
                 }
             }
         })
-        .with(warp::trace::request())
         .recover(|err| async move { authentication::handle_rejection(err) });
+
+    let healthz = warp::path("healthz").and(warp::get()).map(|| "OK");
+
+    let app = healthz.or(upload_payload).with(warp::trace::request());
 
     warp::serve(app).run(options.address).await;
     Ok(())
