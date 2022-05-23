@@ -54,8 +54,7 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
             if prop_names.contains($name) {
                 let zk_key = cx.string($name);
                 js_config
-                    .get(&mut cx, zk_key)?
-                    .downcast_or_throw::<$type, FunctionContext>(&mut cx)?
+                    .get::<$type, _, _>(&mut cx, zk_key)?
                     .value(&mut cx)
             } else {
                 $default

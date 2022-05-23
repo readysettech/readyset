@@ -24,6 +24,6 @@ noria = { path = "../noria/noria/" }
 nom-sql = { path = "../nom-sql" }
 
 [dependencies.neon]
-version = "0.9.1-napi"
+version = "0.10.1"
 default-features = false
 features = ["napi-6", "event-queue-api"]
