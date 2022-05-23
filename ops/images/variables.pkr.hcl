@@ -15,3 +15,9 @@ variable "buildkite_commit" {
   description = "Git commit ID from Buildkite. Used to tag images made in Buildkite appropriately"
   default     = env("BUILDKITE_COMMIT")
 }
+
+variable "binaries_path" {
+  type        = string
+  description = "Path to statically built binaries to include in images"
+  default     = env("BINARIES_PATH")
+}

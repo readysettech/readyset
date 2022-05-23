@@ -33,6 +33,14 @@ $ ln -s $(pwd)/build/ubuntu20.04/cargo-ubuntu2004 $HOME/bin/cargo-ubuntu2004
 $ cargo-ubuntu2004 build --bin=noria-server
 ```
 
+These binaries can also be used directly as part of a test packer build by
+setting the `BINARIES_PATH` environment variable, for example:
+
+```sh
+$ cd ops/images
+$ BINARIES_PATH=../../target-ubuntu2004/debug PACKER_CREATE_AMI=true packer build -only=readyset-* .
+```
+
 ### Arch Setup Script (Out-of-date).
 
 If you're using Arch linux, you can use the following setup script:

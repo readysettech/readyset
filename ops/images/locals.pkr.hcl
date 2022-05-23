@@ -27,5 +27,7 @@ locals {
   # Sandbox is needed so that images built in build can be tested in sandbox.
   ami_users           = [local.deploy_account_id, local.build_account_id, local.sandbox_account_id, local.network_account_id]
   destination_regions = ["ap-northeast-1", "eu-west-1", "sa-east-1", "us-east-2", "us-west-2"]
-  binaries_path       = var.production ? "${path.root}/binaries/target/release" : "${path.root}/../../target/debug"
+  binaries_path = ((var.binaries_path == "")
+    ? (var.production ? "${path.root}/binaries/target/release" : "${path.root}/../../target/debug")
+  : var.binaries_path)
 }
