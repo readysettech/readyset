@@ -6,10 +6,8 @@ use std::str::FromStr;
 use anyhow::{bail, Error};
 use chrono::{DateTime, FixedOffset, Utc};
 use enum_display_derive::Display;
-use nom_sql::{
-    Expression, FieldDefinitionExpression, FunctionExpression, InValue, ItemPlaceholder,
-    JoinConstraint, JoinRightSide, Literal, SelectStatement, SqlQuery,
-};
+use nom_sql::analysis::visit::Visitor;
+use nom_sql::{Expression, ItemPlaceholder, Literal, SelectStatement, SqlQuery};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, Lines};
 
 #[derive(Clone, Debug, Display, Eq, PartialEq)]
@@ -62,121 +60,41 @@ impl FromStr for Entry {
     }
 }
 
+#[derive(Default)]
+struct ReplaceLiteralsWithPlaceholdersVisitor {
+    out: Vec<Literal>,
+}
+
+impl<'ast> Visitor<'ast> for ReplaceLiteralsWithPlaceholdersVisitor {
+    type Error = !;
+
+    fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
+        self.out.push(mem::replace(
+            literal,
+            Literal::Placeholder(ItemPlaceholder::QuestionMark),
+        ));
+
+        Ok(())
+    }
+}
+
 trait ReplaceLiteralsWithPlaceholders {
     fn replace_literals(&mut self) -> Vec<Literal>;
 }
 
 impl ReplaceLiteralsWithPlaceholders for SelectStatement {
     fn replace_literals(&mut self) -> Vec<Literal> {
-        let mut values = vec![];
-        for cte in self.ctes.iter_mut() {
-            values.append(&mut cte.statement.replace_literals());
-        }
-        for field in self.fields.iter_mut() {
-            if let FieldDefinitionExpression::Expression { expr, .. } = field {
-                values.append(&mut expr.replace_literals());
-            }
-        }
-        for join in self.join.iter_mut() {
-            if let JoinRightSide::NestedSelect(subselect, _) = &mut join.right {
-                values.append(&mut subselect.replace_literals());
-            }
-            match &mut join.constraint {
-                JoinConstraint::On(expr) => values.append(&mut expr.replace_literals()),
-                JoinConstraint::Using(_) => {}
-                JoinConstraint::Empty => {}
-            };
-        }
-        if let Some(expr) = self.where_clause.as_mut() {
-            values.append(&mut expr.replace_literals());
-        }
-        if let Some(having) = self.having.as_mut() {
-            values.append(&mut having.replace_literals());
-        }
-        if let Some(order) = self.order.as_mut() {
-            for (expr, _) in order.order_by.iter_mut() {
-                values.append(&mut expr.replace_literals());
-            }
-        }
-        values
-    }
-}
-
-impl ReplaceLiteralsWithPlaceholders for FunctionExpression {
-    fn replace_literals(&mut self) -> Vec<Literal> {
-        match self {
-            FunctionExpression::Avg { expr, .. } => expr.replace_literals(),
-            FunctionExpression::Count { expr, .. } => expr.replace_literals(),
-            FunctionExpression::CountStar => vec![],
-            FunctionExpression::Sum { expr, .. } => expr.replace_literals(),
-            FunctionExpression::Max(expr) => expr.replace_literals(),
-            FunctionExpression::Min(expr) => expr.replace_literals(),
-            FunctionExpression::GroupConcat { expr, .. } => expr.replace_literals(),
-            FunctionExpression::Call { arguments, .. } => {
-                let mut values = vec![];
-                for expr in arguments.iter_mut() {
-                    values.append(&mut expr.replace_literals());
-                }
-                values
-            }
-        }
+        let mut visitor = ReplaceLiteralsWithPlaceholdersVisitor::default();
+        let Ok(()) = visitor.visit_select_statement(self);
+        visitor.out
     }
 }
 
 impl ReplaceLiteralsWithPlaceholders for Expression {
     fn replace_literals(&mut self) -> Vec<Literal> {
-        match self {
-            Expression::Call(v) => v.replace_literals(),
-            // THIS IS THE PLACE WHERE SOMETHING HAPPENS
-            Expression::Literal(v) => vec![mem::replace(
-                v,
-                Literal::Placeholder(ItemPlaceholder::QuestionMark),
-            )],
-            Expression::BinaryOp { lhs, rhs, .. } => {
-                let mut values = lhs.replace_literals();
-                values.append(&mut rhs.replace_literals());
-                values
-            }
-            Expression::UnaryOp { rhs: expr, .. } | Expression::Cast { expr, .. } => {
-                expr.replace_literals()
-            }
-            Expression::CaseWhen {
-                condition,
-                then_expr,
-                else_expr,
-            } => {
-                let mut values = condition.replace_literals();
-                values.append(&mut then_expr.replace_literals());
-                if let Some(expr) = else_expr {
-                    values.append(&mut expr.replace_literals());
-                }
-                values
-            }
-            Expression::Column(_) => vec![],
-            Expression::Exists(select) => select.replace_literals(),
-            Expression::Between {
-                operand, min, max, ..
-            } => {
-                let mut values = operand.replace_literals();
-                values.append(&mut min.replace_literals());
-                values.append(&mut max.replace_literals());
-                values
-            }
-            Expression::NestedSelect(select) => select.replace_literals(),
-            Expression::In { lhs, rhs, .. } => {
-                let mut values = lhs.replace_literals();
-                match rhs {
-                    InValue::Subquery(select) => values.append(&mut select.replace_literals()),
-                    InValue::List(list) => {
-                        for expr in list.iter_mut() {
-                            values.append(&mut expr.replace_literals());
-                        }
-                    }
-                };
-                values
-            }
-            Expression::Variable(_) => vec![],
-        }
+        let mut visitor = ReplaceLiteralsWithPlaceholdersVisitor::default();
+        let Ok(_) = visitor.visit_expression(self);
+        visitor.out
     }
 }
 
