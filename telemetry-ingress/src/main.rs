@@ -12,9 +12,9 @@ use clap::Parser;
 use tracing::{debug, error, info};
 use uuid::Uuid;
 use warp::http::Response;
-use warp::{reject, Filter};
+use warp::Filter;
 
-use crate::authentication::{load_jwks, validate_token, BearerToken, Claims, InvalidToken};
+use crate::authentication::{authenticated, load_jwks, Claims};
 
 const MAX_BODY_SIZE_BYTES: u64 = 1024 * 1024 * 10;
 
@@ -78,12 +78,9 @@ async fn main() -> Result<()> {
             .context("Loading JWKS")?,
     ));
 
-    let upload_payload = warp::path("payload")
-        .and(warp::header::<BearerToken>("Authorization"))
-        .and_then(move |token| async move {
-            validate_token(jwks, &token).map_err(|e| reject::custom(InvalidToken(e)))
-        })
-        .and(warp::post())
+    let auth = authenticated(jwks, warp::path("auth").and(warp::get())).map(|_token| "OK");
+
+    let upload_payload = authenticated(jwks, warp::path("payload").and(warp::post()))
         .and(warp::body::content_length_limit(MAX_BODY_SIZE_BYTES))
         .and(warp::body::bytes())
         .then(move |token, body| async move {
@@ -94,12 +91,17 @@ async fn main() -> Result<()> {
                     Response::builder().status(500).body("".into())
                 }
             }
-        })
-        .recover(|err| async move { authentication::handle_rejection(err) });
+        });
 
     let healthz = warp::path("healthz").and(warp::get()).map(|| "OK");
 
-    let app = healthz.or(upload_payload).with(warp::trace::request());
+    let authenticated_routes = auth
+        .or(upload_payload)
+        .recover(|err| async move { authentication::handle_rejection(err) });
+
+    let app = healthz
+        .or(authenticated_routes)
+        .with(warp::trace::request());
 
     warp::serve(app).run(options.address).await;
     Ok(())

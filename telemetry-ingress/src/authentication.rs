@@ -8,8 +8,8 @@ use jsonwebtoken::{DecodingKey, Validation};
 use serde::Deserialize;
 use tracing::debug;
 use warp::http::StatusCode;
-use warp::reject::{InvalidHeader, MissingHeader, Reject};
-use warp::{reply, Rejection, Reply};
+use warp::reject::{self, InvalidHeader, MissingHeader, Reject};
+use warp::{reply, Filter, Rejection, Reply};
 
 #[derive(Parser)]
 pub struct Options {
@@ -104,4 +104,20 @@ pub(crate) async fn load_jwks(options: &Options) -> Result<JwkSet> {
             .json::<JwkSet>()
             .await?,
     )
+}
+
+/// Wrap the given warp filter such that it requires a valid token, and also extracts the [`Claims`]
+/// within that token
+pub(crate) fn authenticated<F>(
+    jwks: &'static JwkSet,
+    filter: F,
+) -> impl Filter<Extract = (Claims,), Error = Rejection> + Clone
+where
+    F: Filter<Extract = (), Error = Rejection> + Clone,
+{
+    filter
+        .and(warp::header::<BearerToken>("Authorization"))
+        .and_then(move |token| async move {
+            validate_token(jwks, &token).map_err(|e| reject::custom(InvalidToken(e)))
+        })
 }
