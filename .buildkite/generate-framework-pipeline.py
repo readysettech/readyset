@@ -189,7 +189,6 @@ for (dialect, frameworks) in config.items():
                     dialect_version,
                     1,
                     [
-                        "readyset-server-image",
                         dialect_readyset_build_steps[dialect],
                         "test-%s-%s-%s" % (dialect, dialect_version, framework_slug),
                     ],
