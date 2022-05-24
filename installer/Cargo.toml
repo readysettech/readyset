@@ -37,6 +37,8 @@ test-strategy = "0.2.0"
 tokio = { version = "1.15", features = ["fs", "macros", "rt", "rt-multi-thread", "io-util"] }
 textwrap = "0.14"
 
+readyset-telemetry-reporter = { path = "../telemetry-reporter" }
+
 [target.x86_64-unknown-linux-musl.dependencies]
 openssl = { version = "*", features = ["vendored"] }
 

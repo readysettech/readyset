@@ -8,12 +8,12 @@ use anyhow::{anyhow, bail, Result};
 use clap::Parser;
 use deployment::{Deployment, DeploymentData};
 use directories::ProjectDirs;
+use readyset_telemetry_reporter::HARDCODED_API_KEY;
 use tokio::fs::DirBuilder;
 
 use crate::aws::installer::AwsInstaller;
 use crate::compose_installer::ComposeInstaller;
 use crate::console::password;
-use crate::constants::API_KEY;
 
 #[macro_use]
 mod console;
@@ -165,7 +165,7 @@ impl Installer {
 
 fn validate_api_key(options: &Options) -> Result<()> {
     if let Some(api_key) = &options.api_key {
-        if api_key != API_KEY {
+        if api_key != HARDCODED_API_KEY {
             bail!("Invalid ReadySet API key provided");
         }
         Ok(())
@@ -174,7 +174,7 @@ fn validate_api_key(options: &Options) -> Result<()> {
         loop {
             api_key = password().with_prompt("API key").interact()?;
 
-            if api_key == API_KEY {
+            if api_key == HARDCODED_API_KEY {
                 return Ok(());
             }
 

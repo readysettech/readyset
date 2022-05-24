@@ -1,7 +1,3 @@
-/// A simple API key used to verify that a user was given permission to use the installer. Security
-/// constraints are very low for this.
-pub const API_KEY: &str = "fb1c9ee4bb847f02ec0b5546a6655835";
-
 /// The image prefix for of all our internally held images.
 pub const IMG_PREFIX: &str = "305232526136.dkr.ecr.us-east-2.amazonaws.com";
 

@@ -1,0 +1,11 @@
+[package]
+name = "readyset-telemetry-reporter"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+thiserror = "1.0"
+lazy_static = "1.4"
+serde = "1.0"
+reqwest = { version = "0.11.7", features = ["json"] }
