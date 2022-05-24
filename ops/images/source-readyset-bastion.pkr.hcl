@@ -38,4 +38,8 @@ source "amazon-ebs" "readyset-bastion" {
   run_tags = {
     image = "readyset-bastion"
   }
+
+  metadata_options {
+    http_tokens = "required"
+  }
 }

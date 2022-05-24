@@ -34,4 +34,8 @@ source "amazon-ebs" "external-base" {
 
   # This is only used for building and has no bearing on how it is deployed
   instance_type = "t2.small"
+
+  metadata_options {
+    http_tokens = "required"
+  }
 }

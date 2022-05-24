@@ -37,4 +37,8 @@ source "amazon-ebs" "tailscale-subnet-router" {
 
   # This is only used for building and has no bearing on how it is deployed
   instance_type = "t3.small"
+
+  metadata_options {
+    http_tokens = "required"
+  }
 }
