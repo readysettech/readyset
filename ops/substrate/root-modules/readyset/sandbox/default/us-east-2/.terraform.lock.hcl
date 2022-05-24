@@ -2,7 +2,8 @@
 # Manual edits may be lost in future updates.
 
 provider "registry.terraform.io/chronark/vercel" {
-  version = "0.14.4"
+  version     = "0.14.4"
+  constraints = ">= 0.10.3"
   hashes = [
     "h1:mLAiEkbI7j2MRd5zNwuclAXm8aMN8G2T+Ab9wpc0YDw=",
     "zh:172fccd97dfc4b8b252d8f6c6e6a06e2db0a3f10ca05d6647ddf372b7cbf0fed",
@@ -43,7 +44,7 @@ provider "registry.terraform.io/hashicorp/archive" {
 
 provider "registry.terraform.io/hashicorp/aws" {
   version     = "4.9.0"
-  constraints = "~> 4.9.0"
+  constraints = ">= 2.20.0, >= 4.7.0, ~> 4.9.0"
   hashes = [
     "h1:GtmIOZMkKmr9tMLWouHWiGXmKEL/diOTNar5XfOVLjs=",
     "zh:084b83aef3335ad4f5e4b8323c6fe43c1ff55e17a7647c6a5cad6af519f72b42",
@@ -63,7 +64,7 @@ provider "registry.terraform.io/hashicorp/aws" {
 
 provider "registry.terraform.io/hashicorp/external" {
   version     = "2.2.2"
-  constraints = "~> 2.1"
+  constraints = ">= 2.1.0"
   hashes = [
     "h1:e7RpnZ2PbJEEPnfsg7V0FNwbfSk0/Z3FdrLsXINBmDY=",
     "zh:0b84ab0af2e28606e9c0c1289343949339221c3ab126616b831ddb5aaef5f5ca",
