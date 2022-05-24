@@ -122,7 +122,7 @@ mod types {
         bigint_i64("bigint", i64);
         real_f32("real", f32);
         double_f64("double precision", f64);
-        char_i8("\"char\"", i8);
+        char_i8("\"char\"", #[strategy(proptest::prelude::prop_oneof![1..=i8::MAX, i8::MIN..=-1])] i8);
         text_string("text", String);
         bytea_bytes("bytea", Vec<u8>);
         name_string("name", #[strategy(string_regex("[a-zA-Z0-9]{1,63}").unwrap())] String);
