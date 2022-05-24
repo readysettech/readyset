@@ -10,7 +10,7 @@ use std::fmt::Display;
 
 use lazy_static::lazy_static;
 use reqwest::header::{HeaderMap, HeaderValue, InvalidHeaderValue, AUTHORIZATION};
-use reqwest::{Client, StatusCode, Url};
+use reqwest::{Client, Response, StatusCode, Url};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -25,13 +25,14 @@ pub const HARDCODED_API_KEY: &str = "fb1c9ee4bb847f02ec0b5546a6655835";
 /// `TELEMETRY_BASE_URL` environment variable
 const DEFAULT_TELEMETRY_BASE_URL: &str = "https://telemetry.dev.readyset.io/";
 
+fn telemetry_url(path: &str) -> Url {
+    TELEMETRY_BASE_URL.join(path).unwrap()
+}
+
 lazy_static! {
-    static ref TELEMETRY_BASE_URL: &'static str =
-        option_env!("TELEMETRY_BASE_URL").unwrap_or(DEFAULT_TELEMETRY_BASE_URL);
-    static ref PAYLOAD_URL: Url = Url::parse(*TELEMETRY_BASE_URL)
-        .unwrap()
-        .join("payload")
-        .unwrap();
+    static ref TELEMETRY_BASE_URL: Url =
+        Url::parse(option_env!("TELEMETRY_BASE_URL").unwrap_or(DEFAULT_TELEMETRY_BASE_URL))
+            .unwrap();
 }
 
 /// Errors that can occur when reporting telemetry payloads
@@ -74,8 +75,31 @@ static APP_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_P
 /// telemetry_reporter.send_payload("Some arbitrary data goes here").await?;
 /// # Ok(())
 /// # }
+#[derive(Debug, Clone)]
 pub struct TelemetryReporter {
     client: Option<Client>,
+}
+
+async fn handle_resp(resp: Response) -> Result<()> {
+    match resp.status() {
+        status if status.is_success() => Ok(()),
+        status if status.is_server_error() => Err(Error::ServerError(resp.text().await?)),
+        StatusCode::UNAUTHORIZED => Err(Error::Unauthorized),
+        status => Err(Error::HTTPError {
+            status,
+            body: resp.text().await?,
+        }),
+    }
+}
+
+macro_rules! client {
+    ($self: expr) => {
+        if let Some(client) = &$self.client {
+            client
+        } else {
+            return Ok(());
+        }
+    };
 }
 
 impl TelemetryReporter {
@@ -111,6 +135,12 @@ impl TelemetryReporter {
         Ok(Self { client })
     }
 
+    /// Validate the configured API key for this telemetry reporter by making a request to the
+    /// telemetry ingress endpoint, without actually sending a payload.
+    pub async fn authenticate(&self) -> Result<()> {
+        handle_resp(client!(self).get(telemetry_url("auth")).send().await?).await
+    }
+
     /// Send a telemetry payload, which can be any arbitrary value that can be serialized to JSON,
     /// to the telemetry ingress.
     ///
@@ -120,26 +150,13 @@ impl TelemetryReporter {
     where
         P: Serialize + ?Sized,
     {
-        let client = if let Some(c) = &self.client {
-            c
-        } else {
-            return Ok(());
-        };
-
-        let resp = client
-            .post((*PAYLOAD_URL).clone())
-            .json(payload)
-            .send()
-            .await?;
-
-        match resp.status() {
-            status if status.is_success() => Ok(()),
-            status if status.is_server_error() => Err(Error::ServerError(resp.text().await?)),
-            StatusCode::UNAUTHORIZED => Err(Error::Unauthorized),
-            status => Err(Error::HTTPError {
-                status,
-                body: resp.text().await?,
-            }),
-        }
+        handle_resp(
+            client!(self)
+                .post(telemetry_url("payload"))
+                .json(payload)
+                .send()
+                .await?,
+        )
+        .await
     }
 }
