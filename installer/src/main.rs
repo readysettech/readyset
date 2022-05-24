@@ -4,11 +4,11 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use ::console::style;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
 use deployment::{Deployment, DeploymentData};
 use directories::ProjectDirs;
-use readyset_telemetry_reporter::HARDCODED_API_KEY;
+use readyset_telemetry_reporter::{Error as TelemetryError, TelemetryReporter};
 use tokio::fs::DirBuilder;
 
 use crate::console::{password, select};
@@ -73,13 +73,16 @@ impl Options {
 struct Installer {
     options: Options,
     deployment: Deployment,
+    #[allow(dead_code)] // for now
+    telemetry: TelemetryReporter,
 }
 
 impl Installer {
-    fn new(options: Options, deployment: Deployment) -> Self {
+    fn new(options: Options, deployment: Deployment, telemetry: TelemetryReporter) -> Self {
         Self {
             options,
             deployment,
+            telemetry,
         }
     }
 
@@ -185,22 +188,22 @@ impl Installer {
     }
 }
 
-fn validate_api_key(options: &Options) -> Result<()> {
+async fn prompt_for_and_validate_api_key(options: &Options) -> Result<TelemetryReporter> {
     if let Some(api_key) = &options.api_key {
-        if api_key != HARDCODED_API_KEY {
-            bail!("Invalid ReadySet API key provided");
-        }
-        Ok(())
+        let telemetry = TelemetryReporter::new(api_key)?;
+        telemetry.authenticate().await?;
+        Ok(telemetry)
     } else {
-        let mut api_key;
         loop {
-            api_key = password().with_prompt("API key").interact()?;
-
-            if api_key == HARDCODED_API_KEY {
-                return Ok(());
-            }
-
-            println!("Invalid API key. Let's try again.");
+            let api_key = password().with_prompt("API key").interact()?;
+            let telemetry = TelemetryReporter::new(api_key)?;
+            match telemetry.authenticate().await {
+                Ok(_) => return Ok(telemetry),
+                Err(TelemetryError::InvalidAPIKeyHeader(_) | TelemetryError::Unauthorized) => {
+                    println!("Invalid API key. Let's try again.")
+                }
+                Err(e) => return Err(e).context("Validating API token"),
+            };
         }
     }
 }
@@ -209,7 +212,7 @@ fn validate_api_key(options: &Options) -> Result<()> {
 async fn main() -> Result<()> {
     let mut options = Options::parse();
     println!("Welcome to the ReadySet orchestrator.\n");
-    validate_api_key(&options)?;
+    let telemetry = prompt_for_and_validate_api_key(&options).await?;
 
     DirBuilder::new()
         .recursive(true)
@@ -236,7 +239,7 @@ async fn main() -> Result<()> {
                 }
             };
 
-            let mut installer = Installer::new(options, deployment);
+            let mut installer = Installer::new(options, deployment, telemetry);
             installer.tear_down().await?;
 
             Ok(())
@@ -252,7 +255,7 @@ async fn main() -> Result<()> {
                 .create(options.state_directory()?)
                 .await?;
             let deployment = deployment::create_or_load_existing(&mut options).await?;
-            let mut installer = Installer::new(options, deployment);
+            let mut installer = Installer::new(options, deployment, telemetry);
 
             installer.run().await
         }
