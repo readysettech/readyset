@@ -19,6 +19,40 @@ if [ -z "$dockerfile" ] || [ -z "$image_name" ]; then
 fi
 shift 3
 
+if [ -n "${SKIP_IF_UNCHANGED+1}" ]; then
+    do_skip="1"
+    changed_files="$(git diff --name-only HEAD~ HEAD)"
+    IFS=',' read -ra files <<< "$SKIP_IF_UNCHANGED,$dockerfile"
+    for fname in "${files[@]}"; do
+        if grep "$fname" <<< "$changed_files" > /dev/null; then
+            do_skip=""
+        fi
+    done
+
+    if [ -n "$do_skip" ]; then
+        echo "+++ :docker: Dockerfile unchanged, retagging latest image as ${BUILDKITE_COMMIT}"
+        set +eo pipefail
+
+        manifest=$(
+            aws ecr batch-get-image \
+                --repository-name "$image_name" \
+                --image-ids imageTag=latest \
+                --output json \
+                | jq -r '.images[0].imageManifest')
+
+        # This might fail if the image already exists (eg if we're
+        # rebuilding the same commit), and we don't want to fail if that's
+        # the case - if the operation fails for *another* reason, we'll just
+        # fail in a later build because the image doesn't exist
+        aws ecr put-image \
+            --repository-name "$image_name" \
+            --image-tag "$BUILDKITE_COMMIT" \
+            --image-manifest "$manifest" || true \
+            > /dev/null
+        exit 0
+    fi
+fi
+
 BUILDKITE_BRANCH=${BUILDKITE_BRANCH:-}
 BUILDKITE_COMMIT=${BUILDKITE_COMMIT:-}
 AWS_ACCOUNT=${AWS_ACCOUNT:-305232526136} # build
