@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use anyhow::{bail, Error};
 use async_trait::async_trait;
-use backoff::backoff::Backoff;
 use backoff::exponential::ExponentialBackoff;
 use backoff::SystemClock;
 use noria_errors::internal_err;
@@ -71,11 +70,10 @@ impl ZookeeperAuthority {
         connect_string: &str,
         inner: Option<RwLock<ZookeeperAuthorityInner>>,
     ) -> ReadySetResult<Self> {
-        let mut backoff: ExponentialBackoff<SystemClock> = ExponentialBackoff {
+        let backoff: ExponentialBackoff<SystemClock> = ExponentialBackoff {
             max_elapsed_time: Some(BACKOFF_MAX_TIME),
             ..Default::default()
         };
-        backoff.reset();
         let zk = backoff::future::retry(backoff, || {
             async {
                 match ZooKeeper::connect(connect_string, Duration::from_secs(1), EventWatcher).await
@@ -90,12 +88,12 @@ impl ZookeeperAuthority {
                         .exists("/", false)
                         .await
                         .map(|_| zk)
-                        .map_err(backoff::Error::Transient),
+                        .map_err(|e| e.into()),
                     Err(
                         e @ (ZkError::ConnectionLoss
                         | ZkError::SessionExpired
                         | ZkError::OperationTimeout),
-                    ) => Err(backoff::Error::Transient(e)),
+                    ) => Err(e.into()),
                     Err(e) => Err(backoff::Error::Permanent(e)),
                 }
             }
