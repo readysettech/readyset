@@ -19,6 +19,7 @@ mod aws;
 mod compose;
 mod constants;
 mod deployment;
+mod telemetry;
 
 use crate::aws::AwsInstaller;
 use crate::compose::ComposeInstaller;
@@ -73,7 +74,6 @@ impl Options {
 struct Installer {
     options: Options,
     deployment: Deployment,
-    #[allow(dead_code)] // for now
     telemetry: TelemetryReporter,
 }
 
@@ -128,17 +128,27 @@ impl Installer {
     }
 
     async fn install(&mut self) -> Result<()> {
+        self.telemetry
+            .send_payload(&telemetry::Payload::DeploymentStarted)
+            .await?;
+
         match self.deployment.inner {
             DeploymentData::Cloudformation(_) => {
                 let mut aws = AwsInstaller::new(&mut self.options, &mut self.deployment);
-                aws.run().await
+                aws.run().await?;
             }
             DeploymentData::Compose(_) => {
                 ComposeInstaller::new(&mut self.options, &mut self.deployment)
                     .install()
-                    .await
+                    .await?;
             }
         }
+
+        self.telemetry
+            .send_payload(&telemetry::Payload::DeploymentFinished)
+            .await?;
+
+        Ok(())
     }
 
     /// Upgrade an existing deployment in-place
@@ -184,6 +194,10 @@ impl Installer {
             self.deployment.name()
         );
 
+        self.telemetry
+            .send_payload(&telemetry::Payload::DeploymentTornDown)
+            .await?;
+
         Ok(())
     }
 }
@@ -214,6 +228,10 @@ async fn main() -> Result<()> {
     println!("Welcome to the ReadySet orchestrator.\n");
     let telemetry = prompt_for_and_validate_api_key(&options).await?;
 
+    telemetry
+        .send_payload(&telemetry::Payload::InstallerRun)
+        .await?;
+
     DirBuilder::new()
         .recursive(true)
         .create(options.state_directory()?)
@@ -239,14 +257,11 @@ async fn main() -> Result<()> {
                 }
             };
 
-            let mut installer = Installer::new(options, deployment, telemetry);
+            let mut installer = Installer::new(options, deployment, telemetry.clone());
             installer.tear_down().await?;
-
-            Ok(())
         }
         Some(Subcommand::Version) => {
             println!("{}", *compose::template::DOCKER_TAG);
-            Ok(())
         }
         None => {
             println!("Welcome to the ReadySet orchestrator.\n");
@@ -255,9 +270,15 @@ async fn main() -> Result<()> {
                 .create(options.state_directory()?)
                 .await?;
             let deployment = deployment::create_or_load_existing(&mut options).await?;
-            let mut installer = Installer::new(options, deployment, telemetry);
+            let mut installer = Installer::new(options, deployment, telemetry.clone());
 
-            installer.run().await
+            installer.run().await?;
         }
     }
+
+    telemetry
+        .send_payload(&telemetry::Payload::InstallerFinished)
+        .await?;
+
+    Ok(())
 }
