@@ -2,6 +2,12 @@
 
 resource "aws_s3_bucket" "readysettech-deploy-artifacts-ap-northeast-1" {
   bucket = "readysettech-deploy-artifacts-ap-northeast-1"
+  tags = {
+    Name = "readysettech-deploy-artifacts-ap-northeast-1"
+  }
+}
+resource "aws_s3_bucket_policy" "readysettech-deploy-artifacts-ap-northeast-1" {
+  bucket = aws_s3_bucket.readysettech-deploy-artifacts-ap-northeast-1.bucket
   policy = <<EOF
 {
 	"Version": "2012-10-17",
@@ -50,7 +56,8 @@ resource "aws_s3_bucket" "readysettech-deploy-artifacts-ap-northeast-1" {
 				]
 			},
 			"Action": [
-				"s3:PutObject"
+				"s3:PutObject",
+				"s3:PutObjectAcl"
 			],
 			"Resource": [
 				"arn:aws:s3:::readysettech-deploy-artifacts-ap-northeast-1/*"
@@ -65,12 +72,6 @@ resource "aws_s3_bucket" "readysettech-deploy-artifacts-ap-northeast-1" {
 	]
 }
 EOF
-  tags = {
-    Name = "readysettech-deploy-artifacts-ap-northeast-1"
-  }
-  versioning {
-    enabled = true
-  }
 }
 resource "aws_s3_bucket_public_access_block" "readysettech-deploy-artifacts-ap-northeast-1" {
   block_public_acls       = true
@@ -78,6 +79,12 @@ resource "aws_s3_bucket_public_access_block" "readysettech-deploy-artifacts-ap-n
   bucket                  = aws_s3_bucket.readysettech-deploy-artifacts-ap-northeast-1.bucket
   ignore_public_acls      = true
   restrict_public_buckets = true
+}
+resource "aws_s3_bucket_versioning" "readysettech-deploy-artifacts-ap-northeast-1" {
+  bucket = aws_s3_bucket.readysettech-deploy-artifacts-ap-northeast-1.bucket
+  versioning_configuration {
+    status = "Enabled"
+  }
 }
 
 resource "aws_s3_bucket_ownership_controls" "readysettech-deploy-artifacts-ap-northeast-1" {

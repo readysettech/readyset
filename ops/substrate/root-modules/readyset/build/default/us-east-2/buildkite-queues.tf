@@ -3,17 +3,17 @@ locals {
   # deploy new Buildkite queues with the
   # name of the queue = the key
   instance_types = {
-      "t3a.small" = {
-        min_size = 3,
-        max_size = 20,
-      }
-      "r5a.2xlarge" = {
-        min_size = 1,
-        max_size = 15,
-      }
-      "c5a.4xlarge" = {
-        min_size = 0,
-        max_size = 20
+    "t3a.small" = {
+      min_size = 3,
+      max_size = 20,
+    }
+    "r5a.2xlarge" = {
+      min_size = 1,
+      max_size = 15,
+    }
+    "c5a.4xlarge" = {
+      min_size = 0,
+      max_size = 20
     }
   }
 
@@ -180,8 +180,8 @@ module "buildkite_k8s_queue" {
   buildkite_queue = "buildk8s"
   instance_type   = "c5.xlarge"
 
-  min_size = 0
-  max_size = 10
+  min_size                                   = 0
+  max_size                                   = 10
   ssh_key_pair_name                          = "readyset-devops"
   buildkite_agent_token_parameter_store_path = module.buildkite_queue_shared.buildkite_agent_token_parameter_store_path
   extra_iam_policy_arns = concat(

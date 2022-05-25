@@ -2,5 +2,9 @@
 
 module "intranet" {
   dns_domain_name = "readyset.name"
-  source          = "../../../../modules/intranet/global"
+  providers = {
+    aws           = aws
+    aws.us-east-1 = aws.us-east-1
+  }
+  source = "../../../../modules/intranet/global"
 }

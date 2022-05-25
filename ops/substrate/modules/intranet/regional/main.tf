@@ -6,12 +6,12 @@ data "aws_iam_role" "apigateway" {
   name = "IntranetAPIGateway"
 }
 
-data "aws_iam_role" "substrate-apigateway-authorizer" {
-  name = "substrate-apigateway-authorizer"
+data "aws_iam_role" "intranet" {
+  name = "Intranet"
 }
 
-data "aws_iam_role" "substrate-intranet" {
-  name = "substrate-intranet"
+data "aws_iam_role" "intranet-apigateway-authorizer" {
+  name = "IntranetAPIGatewayAuthorizer"
 }
 
 data "aws_region" "current" {}
@@ -21,7 +21,13 @@ data "aws_route53_zone" "intranet" {
   private_zone = false
 }
 
+data "external" "zip" {
+  program = ["/bin/sh", "-c", "test -f \"${local.filename}\" || substrate intranet-zip >\"${local.filename}\"; echo \"{}\""]
+}
+
 locals {
+  filename = "${path.module}/substrate-intranet.zip"
+
   response_parameters = {
     "gatewayresponse.header.Location"                  = "context.authorizer.Location" # use the authorizer for expensive string concatenation
     "gatewayresponse.header.Strict-Transport-Security" = "'max-age=31536000; includeSubDomains; preload'"
@@ -31,20 +37,21 @@ locals {
   }
 }
 
-module "substrate-apigateway-authorizer" {
+module "intranet-apigateway-authorizer" {
   apigateway_execution_arn = "arn:aws:execute-api:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:${aws_api_gateway_rest_api.intranet.id}/*"
-  filename                 = "${path.module}/substrate-intranet.zip"
-  name                     = "substrate-apigateway-authorizer"
+  filename                 = local.filename
+  name                     = "IntranetAPIGatewayAuthorizer"
   progname                 = "substrate-intranet"
-  role_arn                 = data.aws_iam_role.substrate-apigateway-authorizer.arn
+  role_arn                 = data.aws_iam_role.intranet-apigateway-authorizer.arn
   source                   = "../../lambda-function/regional"
 }
 
-module "substrate-intranet" {
+module "intranet" {
   apigateway_execution_arn = "${aws_api_gateway_deployment.intranet.execution_arn}/*"
-  filename                 = "${path.module}/substrate-intranet.zip"
-  name                     = "substrate-intranet"
-  role_arn                 = data.aws_iam_role.substrate-intranet.arn
+  filename                 = local.filename
+  name                     = "Intranet"
+  progname                 = "substrate-intranet"
+  role_arn                 = data.aws_iam_role.intranet.arn
   source                   = "../../lambda-function/regional"
 }
 
@@ -66,7 +73,7 @@ resource "aws_api_gateway_account" "current" {
 resource "aws_api_gateway_authorizer" "substrate" {
   authorizer_credentials           = data.aws_iam_role.apigateway.arn
   authorizer_result_ttl_in_seconds = 0 # disabled because we need the authorizer to calculate context.authorizer.Location
-  authorizer_uri                   = module.substrate-apigateway-authorizer.invoke_arn
+  authorizer_uri                   = module.intranet-apigateway-authorizer.invoke_arn
   identity_source                  = "method.request.header.Host" # force the authorizer to run every time because this header is present every time
   name                             = "Substrate"
   rest_api_id                      = aws_api_gateway_rest_api.intranet.id
@@ -80,44 +87,11 @@ resource "aws_api_gateway_base_path_mapping" "intranet" {
 }
 
 resource "aws_api_gateway_deployment" "intranet" {
-  lifecycle {
-    create_before_destroy = true
-  }
+  depends_on = [time_sleep.wait-to-deploy]
+  lifecycle { create_before_destroy = true }
   rest_api_id = aws_api_gateway_rest_api.intranet.id
   stage_name  = var.stage_name
-  triggers = {
-    redeployment = sha1(join(",", [
-      jsonencode(aws_api_gateway_authorizer.substrate),
-      jsonencode(aws_api_gateway_gateway_response.ACCESS_DENIED),
-      jsonencode(aws_api_gateway_gateway_response.UNAUTHORIZED),
-      jsonencode(aws_api_gateway_integration.GET-accounts),
-      jsonencode(aws_api_gateway_integration.GET-credential-factory),
-      jsonencode(aws_api_gateway_integration.GET-credential-factory-authorize),
-      jsonencode(aws_api_gateway_integration.GET-credential-factory-fetch),
-      jsonencode(aws_api_gateway_integration.GET-index),
-      jsonencode(aws_api_gateway_integration.GET-instance-factory),
-      jsonencode(aws_api_gateway_integration.GET-login),
-      jsonencode(aws_api_gateway_integration.POST-instance-factory),
-      jsonencode(aws_api_gateway_integration.POST-login),
-      jsonencode(aws_api_gateway_method.GET-accounts),
-      jsonencode(aws_api_gateway_method.GET-credential-factory),
-      jsonencode(aws_api_gateway_method.GET-credential-factory-authorize),
-      jsonencode(aws_api_gateway_method.GET-credential-factory-fetch),
-      jsonencode(aws_api_gateway_method.GET-index),
-      jsonencode(aws_api_gateway_method.GET-instance-factory),
-      jsonencode(aws_api_gateway_method.GET-login),
-      jsonencode(aws_api_gateway_method.POST-instance-factory),
-      jsonencode(aws_api_gateway_method.POST-login),
-      jsonencode(aws_api_gateway_resource.accounts),
-      jsonencode(aws_api_gateway_resource.credential-factory),
-      jsonencode(aws_api_gateway_resource.credential-factory-authorize),
-      jsonencode(aws_api_gateway_resource.credential-factory-fetch),
-      jsonencode(aws_api_gateway_resource.instance-factory),
-      jsonencode(aws_api_gateway_resource.login),
-      jsonencode(aws_cloudwatch_log_group.apigateway),
-      module.substrate-intranet.source_code_hash,
-    ]))
-  }
+  triggers    = { redeployment = timestamp() } # impossible to enumerate all the reasons to redeploy so just always deploy
   variables = {
     "OAuthOIDCClientID"              = var.oauth_oidc_client_id
     "OAuthOIDCClientSecretTimestamp" = var.oauth_oidc_client_secret_timestamp
@@ -162,7 +136,7 @@ resource "aws_api_gateway_integration" "GET-accounts" {
   resource_id             = aws_api_gateway_resource.accounts.id
   rest_api_id             = aws_api_gateway_rest_api.intranet.id
   type                    = "AWS_PROXY"
-  uri                     = module.substrate-intranet.invoke_arn
+  uri                     = module.intranet.invoke_arn
 }
 
 resource "aws_api_gateway_integration" "GET-credential-factory" {
@@ -173,7 +147,7 @@ resource "aws_api_gateway_integration" "GET-credential-factory" {
   resource_id             = aws_api_gateway_resource.credential-factory.id
   rest_api_id             = aws_api_gateway_rest_api.intranet.id
   type                    = "AWS_PROXY"
-  uri                     = module.substrate-intranet.invoke_arn
+  uri                     = module.intranet.invoke_arn
 }
 
 resource "aws_api_gateway_integration" "GET-credential-factory-authorize" {
@@ -184,7 +158,7 @@ resource "aws_api_gateway_integration" "GET-credential-factory-authorize" {
   resource_id             = aws_api_gateway_resource.credential-factory-authorize.id
   rest_api_id             = aws_api_gateway_rest_api.intranet.id
   type                    = "AWS_PROXY"
-  uri                     = module.substrate-intranet.invoke_arn
+  uri                     = module.intranet.invoke_arn
 }
 
 resource "aws_api_gateway_integration" "GET-credential-factory-fetch" {
@@ -195,7 +169,7 @@ resource "aws_api_gateway_integration" "GET-credential-factory-fetch" {
   resource_id             = aws_api_gateway_resource.credential-factory-fetch.id
   rest_api_id             = aws_api_gateway_rest_api.intranet.id
   type                    = "AWS_PROXY"
-  uri                     = module.substrate-intranet.invoke_arn
+  uri                     = module.intranet.invoke_arn
 }
 
 resource "aws_api_gateway_integration" "GET-index" {
@@ -206,7 +180,7 @@ resource "aws_api_gateway_integration" "GET-index" {
   resource_id             = aws_api_gateway_rest_api.intranet.root_resource_id
   rest_api_id             = aws_api_gateway_rest_api.intranet.id
   type                    = "AWS_PROXY"
-  uri                     = module.substrate-intranet.invoke_arn
+  uri                     = module.intranet.invoke_arn
 }
 
 resource "aws_api_gateway_integration" "GET-instance-factory" {
@@ -217,7 +191,7 @@ resource "aws_api_gateway_integration" "GET-instance-factory" {
   resource_id             = aws_api_gateway_resource.instance-factory.id
   rest_api_id             = aws_api_gateway_rest_api.intranet.id
   type                    = "AWS_PROXY"
-  uri                     = module.substrate-intranet.invoke_arn
+  uri                     = module.intranet.invoke_arn
 }
 
 resource "aws_api_gateway_integration" "GET-login" {
@@ -228,7 +202,7 @@ resource "aws_api_gateway_integration" "GET-login" {
   resource_id             = aws_api_gateway_resource.login.id
   rest_api_id             = aws_api_gateway_rest_api.intranet.id
   type                    = "AWS_PROXY"
-  uri                     = module.substrate-intranet.invoke_arn
+  uri                     = module.intranet.invoke_arn
 }
 
 resource "aws_api_gateway_integration" "POST-instance-factory" {
@@ -239,7 +213,7 @@ resource "aws_api_gateway_integration" "POST-instance-factory" {
   resource_id             = aws_api_gateway_resource.instance-factory.id
   rest_api_id             = aws_api_gateway_rest_api.intranet.id
   type                    = "AWS_PROXY"
-  uri                     = module.substrate-intranet.invoke_arn
+  uri                     = module.intranet.invoke_arn
 }
 
 resource "aws_api_gateway_integration" "POST-login" {
@@ -250,7 +224,7 @@ resource "aws_api_gateway_integration" "POST-login" {
   resource_id             = aws_api_gateway_resource.login.id
   rest_api_id             = aws_api_gateway_rest_api.intranet.id
   type                    = "AWS_PROXY"
-  uri                     = module.substrate-intranet.invoke_arn
+  uri                     = module.intranet.invoke_arn
 }
 
 resource "aws_api_gateway_method" "GET-accounts" {
@@ -370,6 +344,8 @@ resource "aws_api_gateway_resource" "login" {
 }
 
 resource "aws_api_gateway_rest_api" "intranet" {
+  binary_media_types = ["*/*"]
+  # TODO maybe disable_execute_api_endpoint = true
   endpoint_configuration {
     types = ["REGIONAL"]
   }
@@ -410,7 +386,18 @@ resource "aws_route53_record" "validation" {
   zone_id         = data.aws_route53_zone.intranet.zone_id
 }
 
-resource "aws_security_group" "substrate-instance-factory" {
+resource "aws_security_group" "instance-factory" {
+  name        = "InstanceFactory"
+  description = "Allow inbound SSH access to instances managed by the Instance Factory"
+  vpc_id      = module.substrate.vpc_id
+  tags = {
+    Environment = module.substrate.tags.environment
+    Name        = "InstanceFactory"
+    Quality     = module.substrate.tags.quality
+  }
+}
+
+resource "aws_security_group" "substrate-instance-factory" { // remove in 2022.05 with release notes about failure if Instance Factory instances have existed for more than six months
   name        = "substrate-instance-factory"
   description = "Allow inbound SSH access to instances managed by substrate-instance-factory"
   vpc_id      = module.substrate.vpc_id
@@ -421,7 +408,7 @@ resource "aws_security_group" "substrate-instance-factory" {
   }
 }
 
-resource "aws_security_group_rule" "egress" {
+resource "aws_security_group_rule" "egress" { // remove in 2022.05
   cidr_blocks       = ["0.0.0.0/0"]
   from_port         = 0
   ipv6_cidr_blocks  = ["::/0"]
@@ -431,7 +418,27 @@ resource "aws_security_group_rule" "egress" {
   type              = "egress"
 }
 
-resource "aws_security_group_rule" "ssh-ingress" {
+resource "aws_security_group_rule" "instance-factory-egress" {
+  cidr_blocks       = ["0.0.0.0/0"]
+  from_port         = 0
+  ipv6_cidr_blocks  = ["::/0"]
+  protocol          = "-1"
+  security_group_id = aws_security_group.instance-factory.id
+  to_port           = 0
+  type              = "egress"
+}
+
+resource "aws_security_group_rule" "instance-factory-ssh-ingress" {
+  cidr_blocks       = ["0.0.0.0/0"]
+  from_port         = 22
+  ipv6_cidr_blocks  = ["::/0"]
+  protocol          = "tcp"
+  security_group_id = aws_security_group.instance-factory.id
+  to_port           = 22
+  type              = "ingress"
+}
+
+resource "aws_security_group_rule" "ssh-ingress" { // remove in 2022.05
   cidr_blocks       = ["0.0.0.0/0"]
   from_port         = 22
   ipv6_cidr_blocks  = ["::/0"]
@@ -439,4 +446,9 @@ resource "aws_security_group_rule" "ssh-ingress" {
   security_group_id = aws_security_group.substrate-instance-factory.id
   to_port           = 22
   type              = "ingress"
+}
+
+resource "time_sleep" "wait-to-deploy" {
+  create_duration = "60s"
+  triggers        = { redeployment = timestamp() } # always sleep
 }

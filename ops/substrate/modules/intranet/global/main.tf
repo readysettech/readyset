@@ -19,19 +19,16 @@ data "aws_iam_policy_document" "apigateway-trust" {
 
 data "aws_iam_policy_document" "credential-factory" {
   statement {
+    actions   = ["organizations:DescribeOrganization"]
+    resources = ["*"]
+  }
+  statement {
     actions   = ["sts:AssumeRole"]
     resources = [data.aws_iam_role.admin.arn]
   }
 }
 
-data "aws_iam_policy_document" "substrate-apigateway-authorizer" { // TODO remove in 2021.10
-  statement {
-    actions   = ["secretsmanager:GetSecretValue"]
-    resources = ["*"]
-  }
-}
-
-data "aws_iam_policy_document" "substrate-intranet" {
+data "aws_iam_policy_document" "intranet" {
   statement {
     actions = [
       "organizations:DescribeOrganization",
@@ -70,6 +67,8 @@ data "aws_iam_policy_document" "substrate-intranet" {
       "ec2:DescribeImages",
       "ec2:DescribeInstances",
       "ec2:DescribeKeyPairs",
+      "ec2:DescribeLaunchTemplates",
+      "ec2:DescribeLaunchTemplateVersions",
       "ec2:DescribeSecurityGroups",
       "ec2:DescribeSubnets",
       "ec2:ImportKeyPair",
@@ -83,13 +82,29 @@ data "aws_iam_policy_document" "substrate-intranet" {
   }
   statement {
     actions   = ["iam:PassRole"]
-    resources = [data.aws_iam_role.admin.arn]
+    resources = ["*"]
     sid       = "InstanceFactoryIAM"
   }
   statement {
     actions   = ["secretsmanager:GetSecretValue"]
     resources = ["*"]
     sid       = "Login"
+  }
+  statement {
+    actions = [
+      "ec2:CreateNetworkInterface",
+      "ec2:DeleteNetworkInterface",
+      "ec2:DescribeNetworkInterfaces",
+    ]
+    resources = ["*"]
+    sid       = "Proxy"
+  }
+}
+
+data "aws_iam_policy_document" "intranet-apigateway-authorizer" {
+  statement {
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = ["*"]
   }
 }
 
@@ -106,15 +121,15 @@ data "aws_iam_user" "credential-factory" {
   user_name = "CredentialFactory"
 }
 
-module "substrate-apigateway-authorizer" { // TODO remove in 2021.10
-  name   = "substrate-apigateway-authorizer"
-  policy = data.aws_iam_policy_document.substrate-apigateway-authorizer.json
+module "intranet-apigateway-authorizer" {
+  name   = "IntranetAPIGatewayAuthorizer"
+  policy = data.aws_iam_policy_document.intranet-apigateway-authorizer.json
   source = "../../lambda-function/global"
 }
 
-module "substrate-intranet" {
-  name   = "substrate-intranet"
-  policy = data.aws_iam_policy_document.substrate-intranet.json
+module "intranet" {
+  name   = "Intranet"
+  policy = data.aws_iam_policy_document.intranet.json
   source = "../../lambda-function/global"
 }
 

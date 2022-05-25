@@ -55,7 +55,7 @@ data "aws_iam_policy_document" "bk-benchmarking-assume-role" {
 data "aws_iam_policy_document" "bk-k8s-assume-role" {
   count = var.buildkite_k8s_queue_iam_role_enabled ? 1 : 0
   statement {
-    actions = ["sts:AssumeRole"]
+    actions   = ["sts:AssumeRole"]
     resources = var.buildkite_k8s_queue_iam_role_arns
   }
 }

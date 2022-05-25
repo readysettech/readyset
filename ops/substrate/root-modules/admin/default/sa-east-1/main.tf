@@ -2,9 +2,9 @@
 
 module "intranet" {
   dns_domain_name                    = "readyset.name"
-  oauth_oidc_client_id               = "993711484665-rt85c71d5bbfbl8oluobpu1cc5j256ue.apps.googleusercontent.com"
-  oauth_oidc_client_secret_timestamp = "2021-05-20T14:40:19-07:00"
-  okta_hostname                      = "unused-by-Google-IDP"
+  oauth_oidc_client_id               = "533913184964-1dahrhugmqo7pj4j05ljnsqd4qctrgu3.apps.googleusercontent.com"
+  oauth_oidc_client_secret_timestamp = "2022-05-24T17:10:52-07:00"
+  okta_hostname                      = "unused-by-Google-IdP"
   selected_regions = [
     "ap-northeast-1",
     "eu-west-1",

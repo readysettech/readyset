@@ -16,5 +16,5 @@ locals {
   ] : null
   # Buildkite
   bk_benchmarking_iam_pol_name = format("readyset-benchmarking-assume-pol-%s", local.env_region)
-  bk_k8s_role_iam_pol_name = format("readyset-k8s-assume-pol-%s", local.env_region)
+  bk_k8s_role_iam_pol_name     = format("readyset-k8s-assume-pol-%s", local.env_region)
 }

@@ -42,6 +42,6 @@ variable "buildkite_k8s_queue_iam_role_enabled" {
 
 variable "buildkite_k8s_queue_iam_role_arns" {
   description = "ARN of additional IAM roles to grant Buildkite agents in the buildk8s queue permission to assume."
-  default = ["arn:aws:iam::305232526136:role/readyset-ci-k8s-build-us-east-2"]
-  type = list(string)
+  default     = ["arn:aws:iam::305232526136:role/readyset-ci-k8s-build-us-east-2"]
+  type        = list(string)
 }

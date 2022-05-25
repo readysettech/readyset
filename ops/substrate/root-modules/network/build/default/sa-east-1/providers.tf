@@ -7,8 +7,7 @@ provider "aws" {
   }
   default_tags {
     tags = {
-      Manager          = "Terraform"
-      SubstrateVersion = "2021.08"
+      Manager = "Terraform"
     }
   }
   region = "sa-east-1"
@@ -22,24 +21,8 @@ provider "aws" {
   }
   default_tags {
     tags = {
-      Manager          = "Terraform"
-      SubstrateVersion = "2021.08"
+      Manager = "Terraform"
     }
   }
   region = "sa-east-1"
-}
-
-provider "aws" {
-  alias = "global"
-  assume_role {
-    role_arn     = "arn:aws:iam::911245771907:role/NetworkAdministrator"
-    session_name = "Terraform"
-  }
-  default_tags {
-    tags = {
-      Manager          = "Terraform"
-      SubstrateVersion = "2021.08"
-    }
-  }
-  region = "us-east-1"
 }

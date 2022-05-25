@@ -21,9 +21,9 @@ And here are the account numbers and roles for your service accounts:
 +----------+-------------+---------+----------------+---------------+----------------------------------------------+------------------------------------------+
 | Domain   | Environment | Quality | Account Number | Role Name     | Role ARN                                     | E-mail                                   |
 +----------+-------------+---------+----------------+---------------+----------------------------------------------+------------------------------------------+
+| readyset | sandbox     | default | 069491470376   | Administrator | arn:aws:iam::069491470376:role/Administrator | aws+readyset-sandbox-default@readyset.io |
 | readyset | build       | default | 305232526136   | Administrator | arn:aws:iam::305232526136:role/Administrator | aws+readyset-build-default@readyset.io   |
 | readyset | prod        | default | 431238456211   | Administrator | arn:aws:iam::431238456211:role/Administrator | aws+readyset-prod-default@readyset.io    |
-| readyset | sandbox     | default | 069491470376   | Administrator | arn:aws:iam::069491470376:role/Administrator | aws+readyset-sandbox-default@readyset.io |
 +----------+-------------+---------+----------------+---------------+----------------------------------------------+------------------------------------------+
 
 Finally, here are the account numbers and roles for your admin accounts:

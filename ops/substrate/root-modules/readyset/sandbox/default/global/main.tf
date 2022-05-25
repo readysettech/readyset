@@ -2,4 +2,9 @@
 
 module "readyset" {
   source = "../../../../../modules/sandbox/global"
+
+  providers = {
+    aws           = aws
+    aws.us-east-1 = aws.us-east-1
+  }
 }

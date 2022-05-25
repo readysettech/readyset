@@ -1,6 +1,7 @@
 # managed by Substrate; do not edit by hand
 
 resource "aws_ec2_tag" "readyset-sandbox-default-subnet-connectivity-us-east-2" {
+  depends_on  = [time_sleep.share-before-tag]
   for_each    = data.aws_subnet.readyset-sandbox-default-us-east-2
   key         = "Connectivity"
   resource_id = each.value.id
@@ -9,6 +10,7 @@ resource "aws_ec2_tag" "readyset-sandbox-default-subnet-connectivity-us-east-2" 
 
 
 resource "aws_ec2_tag" "readyset-sandbox-default-subnet-environment-us-east-2" {
+  depends_on  = [time_sleep.share-before-tag]
   for_each    = data.aws_subnet.readyset-sandbox-default-us-east-2
   key         = "Environment"
   resource_id = each.value.id
@@ -17,6 +19,7 @@ resource "aws_ec2_tag" "readyset-sandbox-default-subnet-environment-us-east-2" {
 
 
 resource "aws_ec2_tag" "readyset-sandbox-default-subnet-name-us-east-2" {
+  depends_on  = [time_sleep.share-before-tag]
   for_each    = data.aws_subnet.readyset-sandbox-default-us-east-2
   key         = "Name"
   resource_id = each.value.id
@@ -25,6 +28,7 @@ resource "aws_ec2_tag" "readyset-sandbox-default-subnet-name-us-east-2" {
 
 
 resource "aws_ec2_tag" "readyset-sandbox-default-subnet-quality-us-east-2" {
+  depends_on  = [time_sleep.share-before-tag]
   for_each    = data.aws_subnet.readyset-sandbox-default-us-east-2
   key         = "Quality"
   resource_id = each.value.id
@@ -33,6 +37,7 @@ resource "aws_ec2_tag" "readyset-sandbox-default-subnet-quality-us-east-2" {
 
 
 resource "aws_ec2_tag" "readyset-sandbox-default-vpc-environment-us-east-2" {
+  depends_on  = [time_sleep.share-before-tag]
   key         = "Environment"
   resource_id = data.aws_vpc.readyset-sandbox-default-us-east-2.id
   value       = "sandbox"
@@ -40,6 +45,7 @@ resource "aws_ec2_tag" "readyset-sandbox-default-vpc-environment-us-east-2" {
 
 
 resource "aws_ec2_tag" "readyset-sandbox-default-vpc-name-us-east-2" {
+  depends_on  = [time_sleep.share-before-tag]
   key         = "Name"
   resource_id = data.aws_vpc.readyset-sandbox-default-us-east-2.id
   value       = "sandbox-default"
@@ -47,22 +53,12 @@ resource "aws_ec2_tag" "readyset-sandbox-default-vpc-name-us-east-2" {
 
 
 resource "aws_ec2_tag" "readyset-sandbox-default-vpc-quality-us-east-2" {
+  depends_on  = [time_sleep.share-before-tag]
   key         = "Quality"
   resource_id = data.aws_vpc.readyset-sandbox-default-us-east-2.id
   value       = "default"
 }
 
-
-resource "aws_ram_resource_share" "readyset-sandbox-default-us-east-2" {
-  allow_external_principals = false
-  name                      = "readyset-sandbox-default-us-east-2"
-  provider                  = aws.network
-  tags = {
-    Environment = "sandbox"
-    Name        = "readyset-sandbox-default"
-    Quality     = "default"
-  }
-}
 
 resource "aws_ram_principal_association" "readyset-sandbox-default-us-east-2" {
   principal          = "069491470376"
@@ -77,12 +73,22 @@ resource "aws_ram_resource_association" "readyset-sandbox-default-us-east-2" {
   resource_share_arn = aws_ram_resource_share.readyset-sandbox-default-us-east-2.arn
 }
 
+resource "aws_ram_resource_share" "readyset-sandbox-default-us-east-2" {
+  allow_external_principals = false
+  name                      = "readyset-sandbox-default-us-east-2"
+  provider                  = aws.network
+  tags = {
+    Environment = "sandbox"
+    Name        = "readyset-sandbox-default"
+    Quality     = "default"
+  }
+}
+
 data "aws_subnet" "readyset-sandbox-default-us-east-2" {
   for_each = data.aws_subnet_ids.readyset-sandbox-default-us-east-2.ids
   id       = each.value
   provider = aws.network
 }
-
 
 data "aws_subnet_ids" "readyset-sandbox-default-us-east-2" {
   provider = aws.network
@@ -93,12 +99,16 @@ data "aws_subnet_ids" "readyset-sandbox-default-us-east-2" {
   vpc_id = data.aws_vpc.readyset-sandbox-default-us-east-2.id
 }
 
-
 data "aws_vpc" "readyset-sandbox-default-us-east-2" {
   provider = aws.network
   tags = {
     Environment = "sandbox"
     Quality     = "default"
   }
+}
+
+resource "time_sleep" "share-before-tag" {
+  create_duration = "60s"
+  depends_on      = [aws_ram_resource_association.readyset-sandbox-default-us-east-2]
 }
 

@@ -12,7 +12,7 @@ data "vercel_team" "readyset" {
   slug = "readyset"
 }
 
-data "aws_iam_policy_document" "readysettect-installer-policy" {
+data "aws_iam_policy_document" "readysettech-installer-policy" {
   statement {
     sid    = "PublicReadGetObject"
     effect = "Allow"
@@ -21,7 +21,7 @@ data "aws_iam_policy_document" "readysettect-installer-policy" {
       identifiers = ["*"]
     }
     resources = [
-      local.installer_bucket_name,
+      local.installer_bucket_arn,
       local.installer_bucket_objects_arn
     ]
     actions = [
@@ -37,7 +37,7 @@ data "aws_iam_policy_document" "readysettect-installer-policy" {
       identifiers = ["arn:aws:iam::888984949675:role/InstallerS3"]
     }
     resources = [
-      local.installer_bucket_name,
+      local.installer_bucket_arn,
       local.installer_bucket_objects_arn
     ]
     actions = [
@@ -56,7 +56,7 @@ data "aws_iam_policy_document" "readysettect-installer-policy" {
       identifiers = ["arn:aws:iam::069491470376:root", "arn:aws:iam::716876017850:root"]
     }
     resources = [
-      local.installer_bucket_name,
+      local.installer_bucket_arn,
       local.installer_bucket_objects_arn
     ]
     actions = [
@@ -82,7 +82,7 @@ resource "aws_s3_bucket" "installer" {
 
 resource "aws_s3_bucket_policy" "installer-bucket-policy" {
   bucket = aws_s3_bucket.installer.bucket
-  policy = data.aws_iam_policy_document.readysettect-installer-policy.json
+  policy = data.aws_iam_policy_document.readysettech-installer-policy.json
 }
 
 resource "aws_acm_certificate" "installer" {

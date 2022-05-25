@@ -12,7 +12,11 @@
 		{
 			"Environment": "build",
 			"Quality": "default"
+		},
+		{
+			"Environment": "prod",
+			"Quality": "default"
 		}
 	],
-	"SubstrateVersion": "2021.07"
+	"SubstrateVersion": "2021.09"
 }

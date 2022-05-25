@@ -8,16 +8,16 @@ terraform {
     }
     aws = {
       source  = "hashicorp/aws"
-      version = ">= 3.72.0"
+      version = "~> 4.9.0"
     }
     external = {
       source  = "hashicorp/external"
-      version = ">= 2.1.0"
+      version = "~> 2.1"
     }
     vercel = {
       source  = "registry.terraform.io/chronark/vercel"
       version = ">=0.10.3"
     }
   }
-  required_version = "= 1.0.2"
+  required_version = "= 1.1.6"
 }

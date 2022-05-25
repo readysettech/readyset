@@ -40,5 +40,5 @@
 		}
 	],
 	"RFC1918": "192.168.0.0/16",
-	"SubstrateVersion": "2021.08"
+	"SubstrateVersion": "2022.04"
 }

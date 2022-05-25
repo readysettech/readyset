@@ -8,12 +8,12 @@ terraform {
     }
     aws = {
       source  = "hashicorp/aws"
-      version = ">= 3.49.0"
+      version = "~> 4.9.0"
     }
     external = {
       source  = "hashicorp/external"
-      version = ">= 2.1.0"
+      version = "~> 2.1"
     }
   }
-  required_version = "= 1.0.2"
+  required_version = "= 1.1.6"
 }

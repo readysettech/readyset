@@ -2,4 +2,10 @@
 
 module "readyset" {
   source = "../../../../../modules/build/global"
+
+  providers = {
+    aws           = aws
+    aws.us-east-1 = aws.us-east-1
+  }
+
 }

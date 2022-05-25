@@ -21,6 +21,7 @@ resource "aws_cloudformation_stack" "main" {
     "MaxSize" = var.max_size
     "MinSize" = var.min_size
 
+    "IMDSv2Tokens" = "required"
     "VpcId"   = data.aws_vpc.vpc.id
     "Subnets" = local.subnet_ids
     },

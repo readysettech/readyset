@@ -29,8 +29,8 @@ WORKDIR /tmp
 FROM fetcher as terraform-fetcher
 
 RUN set -eux; \
-    curl -o terraform.zip https://releases.hashicorp.com/terraform/1.0.2/terraform_1.0.2_linux_amd64.zip; \
-    echo "7329f887cc5a5bda4bedaec59c439a4af7ea0465f83e3c1b0f4d04951e1181f4 terraform.zip" | sha256sum -c -; \
+    curl -o terraform.zip https://releases.hashicorp.com/terraform/1.1.6/terraform_1.1.6_linux_amd64.zip; \
+    echo "3e330ce4c8c0434cdd79fe04ed6f6e28e72db44c47ae50d01c342c8a2b05d331 terraform.zip" | sha256sum -c -; \
     unzip terraform.zip
 
 FROM fetcher as sops-fetcher
@@ -43,7 +43,7 @@ RUN set -eux; \
 FROM fetcher as substrate-fetcher
 
 RUN set -eux; \
-    curl -o substrate.tar.gz https://src-bin.com/substrate-2021.09-1174b29-linux-amd64.tar.gz; \
+    curl -o substrate.tar.gz https://src-bin.com/substrate-2022.05-20e34d8-linux-amd64.tar.gz; \
     mkdir -p substrate; \
     tar -C substrate --strip-components=1 -xvf substrate.tar.gz
 
@@ -77,7 +77,7 @@ RUN set -eux; \
     terraform --version; \
     sops --version; \
     aws --version; \
-    substrate -help; \
+    substrate --version; \
     readyset-substrate --help
 
 ENTRYPOINT [ "readyset-substrate" ]

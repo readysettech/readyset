@@ -3,21 +3,21 @@
 terraform {
   required_providers {
     archive = {
-      source = "hashicorp/archive"
+      source  = "hashicorp/archive"
       version = ">= 2.2.0"
     }
     aws = {
-      source = "hashicorp/aws"
-      version = ">= 3.49.0"
+      source  = "hashicorp/aws"
+      version = "~> 4.9.0"
     }
     external = {
-      source = "hashicorp/external"
-      version = ">= 2.1.0"
+      source  = "hashicorp/external"
+      version = "~> 2.1"
     }
     buildkite = {
       source  = "buildkite/buildkite"
       version = "0.5.0"
     }
   }
-  required_version = "= 1.0.2"
+  required_version = "= 1.1.6"
 }

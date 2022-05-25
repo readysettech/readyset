@@ -8,19 +8,11 @@ resource "aws_iam_user" "apple_build" {
 
 data "aws_iam_policy_document" "apple_build_ip_restriction" {
   statement {
-    effect = "Allow"
-    actions = ["sts:AssumeRole"]
-    principals {
-      type        = "*"
-      identifiers = ["*"]
-    }
-  }
-  statement {
     effect = "Deny"
     actions = ["sts:AssumeRole"]
     principals {
-      type        = "*"
-      identifiers = ["*"]
+      type = "AWS"
+      identifiers = [aws_iam_user.apple_build.arn]
     }
     condition {
       test     = "NotIpAddress"
@@ -28,21 +20,24 @@ data "aws_iam_policy_document" "apple_build_ip_restriction" {
       values   = ["63.135.169.95/32"]
     }
   }
-}
 
-resource "aws_iam_user_policy" "apple_build_ip_restriction" {
-  name = "test"
-  user = aws_iam_user.apple_build.name
-  policy = data.aws_iam_policy_document.apple_build_ip_restriction.json
+    statement {
+    effect = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type = "AWS"
+      identifiers = [aws_iam_user.apple_build.arn]
+    }
+  }
+
 }
 
 resource "aws_iam_role" "apple_build" {
-   assume_role_policy   = data.aws_iam_policy_document.apple_build_ip_restriction.json
-   max_session_duration = 43200
-   name                 = "AppleBuildAccess"
- }
- 
- 
+  assume_role_policy   = data.aws_iam_policy_document.apple_build_ip_restriction.json
+  max_session_duration = 43200
+  name                 = "AppleBuildAccess"
+}
+
 resource "aws_iam_role_policy_attachment" "apple_connect_packer" {
   policy_arn = aws_iam_policy.packer_policy.arn
   role = aws_iam_role.apple_build.name
@@ -120,7 +115,7 @@ data "aws_iam_policy_document" "cache_buckets_policy" {
           "${local.sccache_bucket_arn}"
       ]
   }
-} 
+}
 
 resource "aws_iam_policy" "cache_buckets_policy" {
   name        = "AppleBuildCacheBucketsPolicy"
