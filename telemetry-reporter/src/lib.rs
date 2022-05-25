@@ -7,12 +7,15 @@
 //! exponential backoff, more advanced API token validation, integration with `metrics`, etc.
 
 use std::fmt::Display;
+use std::time::Duration;
 
+use backoff::ExponentialBackoffBuilder;
 use lazy_static::lazy_static;
 use reqwest::header::{HeaderMap, HeaderValue, InvalidHeaderValue, AUTHORIZATION};
 use reqwest::{Client, Response, StatusCode, Url};
 use serde::Serialize;
 use thiserror::Error;
+use tokio::time::error::Elapsed;
 
 /// Hardcoded API key used to verify that a user was given permission to use ReadySet, used as a
 /// temporary stop-gap solution while we spin up an API key provisioning system.
@@ -24,6 +27,9 @@ pub const HARDCODED_API_KEY: &str = "fb1c9ee4bb847f02ec0b5546a6655835";
 /// Default URL to report telemetry to. Can be overridden at build-time by setting the
 /// `TELEMETRY_BASE_URL` environment variable
 const DEFAULT_TELEMETRY_BASE_URL: &str = "https://telemetry.dev.readyset.io/";
+
+/// Maximum time to retry sending telemetry payloads before giving up
+pub const TIMEOUT: Duration = Duration::from_secs(2);
 
 fn telemetry_url(path: &str) -> Url {
     TELEMETRY_BASE_URL.join(path).unwrap()
@@ -52,6 +58,9 @@ pub enum Error {
 
     #[error("Error sending telemetry payload (status {status}): {body}")]
     HTTPError { status: StatusCode, body: String },
+
+    #[error("Request timed out")]
+    Timeout(#[from] Elapsed),
 }
 
 /// Result type alias for the telemetry reporter crate
@@ -141,12 +150,7 @@ impl TelemetryReporter {
         handle_resp(client!(self).get(telemetry_url("auth")).send().await?).await
     }
 
-    /// Send a telemetry payload, which can be any arbitrary value that can be serialized to JSON,
-    /// to the telemetry ingress.
-    ///
-    /// If this reporter was initialized with an API key equal to [`HARDCODED_API_KEY`], this
-    /// function is a no-op.
-    pub async fn send_payload<P>(&self, payload: &P) -> Result<()>
+    async fn send_payload_inner<P>(&self, payload: &P) -> Result<()>
     where
         P: Serialize + ?Sized,
     {
@@ -158,5 +162,34 @@ impl TelemetryReporter {
                 .await?,
         )
         .await
+    }
+
+    /// Send a telemetry payload, which can be any arbitrary value that can be serialized to JSON,
+    /// to the telemetry ingress. If the initial request fails for a non-permanent reason (eg, not a
+    /// 4XX or IO error), this function will retry with an exponential backoff, timing out at
+    /// [`TIMEOUT`]
+    ///
+    /// If this reporter was initialized with an API key equal to [`HARDCODED_API_KEY`], this
+    /// function is a no-op.
+    pub async fn send_payload<P>(&self, payload: &P) -> Result<()>
+    where
+        P: Serialize + ?Sized,
+    {
+        let backoff = ExponentialBackoffBuilder::new()
+            .with_max_elapsed_time(Some(Duration::from_secs(2)))
+            .build();
+        tokio::time::timeout(
+            TIMEOUT,
+            backoff::future::retry(backoff, move || async move {
+                self.send_payload_inner(payload).await.map_err(|e| match e {
+                    Error::ReqwestError(_) | Error::ServerError(_) => e.into(),
+                    e @ (Error::InvalidAPIKeyHeader(_)
+                    | Error::Unauthorized
+                    | Error::HTTPError { .. }
+                    | Error::Timeout(_)) => backoff::Error::Permanent(e),
+                })
+            }),
+        )
+        .await?
     }
 }

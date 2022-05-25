@@ -128,9 +128,10 @@ impl Installer {
     }
 
     async fn install(&mut self) -> Result<()> {
-        self.telemetry
+        let _ = self
+            .telemetry
             .send_payload(&telemetry::Payload::DeploymentStarted)
-            .await?;
+            .await;
 
         match self.deployment.inner {
             DeploymentData::Cloudformation(_) => {
@@ -144,9 +145,10 @@ impl Installer {
             }
         }
 
-        self.telemetry
+        let _ = self
+            .telemetry
             .send_payload(&telemetry::Payload::DeploymentFinished)
-            .await?;
+            .await;
 
         Ok(())
     }
@@ -194,9 +196,10 @@ impl Installer {
             self.deployment.name()
         );
 
-        self.telemetry
+        let _ = self
+            .telemetry
             .send_payload(&telemetry::Payload::DeploymentTornDown)
-            .await?;
+            .await;
 
         Ok(())
     }
@@ -228,9 +231,9 @@ async fn main() -> Result<()> {
     println!("Welcome to the ReadySet orchestrator.\n");
     let telemetry = prompt_for_and_validate_api_key(&options).await?;
 
-    telemetry
+    let _ = telemetry
         .send_payload(&telemetry::Payload::InstallerRun)
-        .await?;
+        .await;
 
     DirBuilder::new()
         .recursive(true)
@@ -276,9 +279,9 @@ async fn main() -> Result<()> {
         }
     }
 
-    telemetry
+    let _ = telemetry
         .send_payload(&telemetry::Payload::InstallerFinished)
-        .await?;
+        .await;
 
     Ok(())
 }
