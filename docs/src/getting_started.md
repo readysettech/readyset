@@ -14,7 +14,12 @@ for accessing internal resources such as code review and EC2 instances.
     See [Installing Tailscale](https://tailscale.com/download) for instructions for your operating system.
 
 2. **Running Tailscale**
-    Run tailscale with root privileges and authenticate with your @readyset.io email address
+
+    **macOS**
+    Run the Tailscale GUI app, and use the menu bar icon in the upper right to log in and connect.
+
+    **Linux**
+    Run Tailscale with root privileges and authenticate with your @readyset.io email address
     ```bash
     sudo tailscale up --accept-dns
     ```
