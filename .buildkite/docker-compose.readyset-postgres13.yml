@@ -65,6 +65,8 @@ services:
       UPSTREAM_DB_URL: postgres://root:root@postgres/test
       ALLOWED_USERNAME: root
       ALLOWED_PASSWORD: root
+      EXPLICIT_MIGRATIONS: "1"
+      UNSUPPORTED_SET_MODE: proxy
     links:
       - readyset-server
       - postgres

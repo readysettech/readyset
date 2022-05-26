@@ -40,6 +40,8 @@ services:
       LISTEN_ADDRESS: 0.0.0.0:3333
       ALLOWED_USERNAME: root
       ALLOWED_PASSWORD: root
+      EXPLICIT_MIGRATIONS: "1"
+      UNSUPPORTED_SET_MODE: proxy
     volumes:
       - "readyset-server-state:/state"
     links:
