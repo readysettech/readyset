@@ -24,13 +24,18 @@ for accessing internal resources such as code review and EC2 instances.
     sudo tailscale up --accept-dns
     ```
 
-## Code and code review via gerrit
-Gerrit is a code review and project management tool for git projects. Once you have access to tailscale,
-you can access the gerrit UI via [https://gerrit.readyset.name/](https://gerrit.readyset.name/), using your
+## Code management and review via Gerrit
+Gerrit is a code review and project management tool for Git projects. Once you have access to Tailscale,
+you can access the Gerrit UI via [https://gerrit.readyset.name/](https://gerrit.readyset.name/), using your
 @readyset.io email address to sign in.
 
-> See [Gerrit Best Practices / Social Conventions](https://docs.google.com/document/d/1BAerrNdujGZdfMaC7xYgYQ-2pYcuZKZRgpfpSOk9XDM/edit?usp=sharing)
-for more details on how we use and communicate on Gerrit.
+> If you're coming from other Git platforms such as GitHub, there are some things about Gerrit that
+> may seem strange or counterintuitive, as the workflow is a bit different from other Git tools.
+> We'll discuss some norms and conventions related to ReadySet's use of Gerrit later in this
+> document, but for a good general introduction to Gerrit, check out either of these guides from the
+> official documentation:
+> * [Basic Gerrit Walkthrough](https://gerrit.readyset.name/Documentation/intro-gerrit-walkthrough.html)
+> * [Basic Gerrit Walkthrough - For GitHub Users](https://gerrit.readyset.name/Documentation/intro-gerrit-walkthrough-github.html)
 
 ### Checking out the code
 All ReadySet code lives in the [ReadySet monorepo](https://gerrit.readyset.name/admin/repos/readyset), a single repository that contains all our projects.
@@ -258,8 +263,27 @@ converts queries issued on those connections to ReadySet queries that can be sen
     > We have several commit message lints to keep in mind, see `//scripts/commit_lint.sh`:
     >  * The subject should not be longer than 80 characters.
     >  * The second line should be empty.
-    >  * The commit message must contain a body, that must be longer than 80 characters and wrapped at 80 characters,
-    >    use this to describe the purpose of the change.
+    >  * The commit message must contain a body, that must be longer than 80 characters and wrapped at 80 characters.
+    >    Use this to describe the purpose of the change.
+    >
+    > Additionally, we follow certain other conventions that are not currently enforced via linter.
+    > These conventions are semi-arbitrary, but are chosen to match common standards in the wider
+    > development community, and make commit messages easier to read by making them more uniform:
+    >  * The subject should be capitalized, along with sentences in the body.
+    >  * The subject should not end in a period, but sentences in the body should.
+    >  * The subject should use the imperative mood (i.e. "Add code to do X", not "Adding code to do
+    >    X" or "Added code to do X"). This restriction need not apply to the body. Note this is the
+    >    standard used by Git itself for builtin commit messages like "Merge X to Y" or "Revert Z",
+    >    so while it may seem arbitrary, there's a reason we chose this style beyond just personal
+    >    preference 🙂
+    >  * (Optional) Prior to the capitalized subject, we commonly include the component to which the
+    >    change applies. The component is typically the lowercase directory name of the code that
+    >    we're modifying, or occasionally might refer to a more general area of functionality. Some
+    >    hypothetical examples:
+    >    ```
+    >    docs: Add documentation on commit message conventions
+    >    Logging: Refactor log formatting code across several components
+    >    ```
 
 2. **Going through code review**
 
@@ -290,7 +314,10 @@ converts queries issued on those connections to ReadySet queries that can be sen
 
 4. **Code Review**
 
-   Before you can submit your change to the codebase, the code has to reviewed and approved by one other engineer.
+   Before you can submit your change to the codebase, the code has to reviewed and approved by at
+   least one other engineer. The list of engineers expected to take action on a CL is called the
+   "attention set"; initially the attention set consists of the assigned reviewers, but if a
+   reviewer responds or the CI fails, the attention set may switch back to the author.
    A reviewer can be added to your CL via the `Change Metadata` in the top left of the Gerrit CL page or the
    `Reply/Start Review` button in the center.
 
@@ -299,6 +326,10 @@ converts queries issued on those connections to ReadySet queries that can be sen
    >
    > It can be helpful to look at the [list of changes up for review](https://gerrit.readyset.name/q/status:open+-is:wip)
    > for your intended reviewer to make sure they have a reasonable review load before adding more!
+
+   > Instead of simply approving or rejecting a CL, reviewers must rank a CL on a scale from `-2` to
+   > `+2`. At ReadySet, we require CL's to receive at least one `+2` before it should be
+   > accepted. `+1` reviews are also fine, but generally indicate that more review is needed.
 
 5. **Making Updates / Responding to Comments**
 
@@ -311,7 +342,28 @@ converts queries issued on those connections to ReadySet queries that can be sen
    ```
 
    This will create a new **Patchset** for your CL, a patchset is an iteration of a commit that is up for
-   review. Pushing a new patchset to gerrit will trigger the testing pipeline.
+   review. Pushing a new patchset to Gerrit will trigger the CI pipeline.
+
+   > We have configured Gerrit to require that all review comments are marked resolved before a CL
+   > can be accepted. Note that "resolved" specifically means checking the "resolved" checkbox on
+   > a comment; this distinction is import to be mindful of, as there are some common gotchas that
+   > can result:
+   > * It is possible for a commenter to mark their own comment as resolved if it is
+   >   merely an observation which requires no changes. If they do not do so, then merging may be
+   >   unintentionally blocked.
+   > * Top-level comments (i.e. comments that are made on the CL itself rather than on any
+   >   particular line of code) are marked "resolved" by default, and must be explicitly changed to
+   >   "unresolved" by the commenter if they are requesting changes.
+   >
+   > There are two buttons that can be used to respond to a comment and mark it resolved with a
+   > single click: "Done" and "Ack".
+   > * "Done" means "I have implemented this feedback".
+   > * "Ack" means "I understand your comment but have not made any corresponding change".
+   >
+   > "Ack" is less frequently used, but can be useful when responding to comments that start with
+   > "nit"; "nit" is short for "nitpick", and is used when giving feedback of relatively low
+   > importance, which may not be strictly necessary to address (such as subjective stylistic
+   > suggestions, minor grammatical suggestions in a comment, etc.).
 
 6. **Submitting your CL**
 
