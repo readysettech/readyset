@@ -1,9 +1,9 @@
 # Getting Started
-<sub>Updated 1-3-2022</sub>
+<sub>Updated 2022-05-26</sub>
 
 Welcome to ReadySet! This guide is meant to give you the tools needed to work in our code base.
 <!-- toc -->
-## Getting access to internal resources via tailscale
+## Getting access to internal resources via Tailscale
 We use [Tailscale](https://tailscale.com/) as a [virtual private network](https://en.wikipedia.org/wiki/Virtual_private_network) (VPN)
 for accessing internal resources such as code review and EC2 instances.
 
@@ -40,11 +40,11 @@ you can access the Gerrit UI via [https://gerrit.readyset.name/](https://gerrit.
 ### Checking out the code
 All ReadySet code lives in the [ReadySet monorepo](https://gerrit.readyset.name/admin/repos/readyset), a single repository that contains all our projects.
 
-1. **Configure a username via the gerrit UI [`Settings > Profile`](https://gerrit.readyset.name/settings/#Profile)**
+1. **Configure a username via the Gerrit UI [`Settings > Profile`](https://gerrit.readyset.name/settings/#Profile)**
 
     > ❗ This is extremely hard to change after the fact, so make your username choice count.
 
-2. **Add an SSH key to gerrit via the gerrit UI [`Settings > SSH Keys`](https://gerrit.readyset.name/settings/#SSHKeys)**
+2. **Add an SSH key to Gerrit via the Gerrit UI [`Settings > SSH Keys`](https://gerrit.readyset.name/settings/#SSHKeys)**
 
     > If you do not have an ssh key, you may generate one with
     > ```
@@ -54,19 +54,19 @@ All ReadySet code lives in the [ReadySet monorepo](https://gerrit.readyset.name/
     > If you already have an rsa key, we prefer you generate a new ed25519 key given
     > rsa's impending deprecation.
 
-3. **Clone the ReadySet repo and gerrit commit hook with `git`.**
+3. **Clone the ReadySet repo and Gerrit commit hook with `git`.**
     ```
     git clone "ssh://<username>@gerrit:29418/readyset" && scp -p -P 29418 <username>@gerrit:hooks/commit-msg "readyset/.git/hooks/"
     ```
 
     > Gerrit requires a commit hook that adds a globally unique `Change-Id` to each commit message.
-    > The `Change-Id` is used by gerrit to track commits across cherry-picks and rebases.
+    > The `Change-Id` is used by Gerrit to track commits across cherry-picks and rebases.
 
 ### Getting rust and dependencies
 
 1. **Install ReadySet dependencies.**
 
-   **MacOS with [homebrew](https://brew.sh/)**
+   **macOS with [homebrew](https://brew.sh/)**
    ```bash
    brew install lz4
    brew install openssl@1.1
@@ -156,14 +156,14 @@ All ReadySet code lives in the [ReadySet monorepo](https://gerrit.readyset.name/
 ## Hello, ReadySet!
 You now have all the tools to make code changes! We'll walk you through making your first code change, running tests against it, and then putting it up for code review.
 
-We'll be adding a print statement on connection to the ReadySet adapter! The ReadySet adapter supports connections from MySQL and postgres clients, and
+We'll be adding a print statement on connection to the ReadySet adapter! The ReadySet adapter supports connections from MySQL and Postgres clients, and
 converts queries issued on those connections to ReadySet queries that can be sent to the ReadySet servers.
 
 #### Making and testing code changes
 1. **Making our code change**
 
     Modify `//noria-client/adapter/src/lib.rs` to print out `Hello, ReadySet!` when a new client connects
-    as in the example below.
+    as in the example below:
 
     ```rust
     //noria-client/adapter/src/lib.rs
@@ -249,11 +249,11 @@ converts queries issued on those connections to ReadySet queries that can be sen
 
 🎉 If all went well you should now see `Hello, ReadySet` printed in the ReadySet adapter (noria-mysql) logs.
 
-#### From git to code review to submission.
+#### From Git to code review to submission.
 
 1. **Creating a commit on a local branch**
 
-    Let's create a git branch for this change and commit our change:
+    Let's create a Git branch for this change and commit our change:
     ```bash
     git checkout -b hello-readyset
     git add noria-client/adapter/src/lib.rs
@@ -287,15 +287,15 @@ converts queries issued on those connections to ReadySet queries that can be sen
 
 2. **Going through code review**
 
-    Once you have a commit to put up for review, you can push the change to gerrit. A commit that has been pushed
-    to gerrit is called a **changelist** or **CL**, this expression is commonly used instead of commit.
+    Once you have a commit to put up for review, you can push the change to Gerrit. A commit that has been pushed
+    to Gerrit is called a **changelist** or **CL**, this expression is commonly used instead of commit.
     ```
     git push origin HEAD:refs/for/main
     ```
 
-    🎉 You should be able to see your commit in the [gerrit code review UI](https://gerrit.readyset.name/dashboard/self).
+    🎉 You should be able to see your commit in the [Gerrit code review UI](https://gerrit.readyset.name/dashboard/self).
 
-    > By default every commit uploaded to gerrit is set as *Active* and will appear in Slack's `#prs` channel.
+    > By default every commit uploaded to Gerrit is set as *Active* and will appear in Slack's `#prs` channel.
     > These changes can instead by set as *Work-In-Progress* on upload through
     > [`Gerrit > Settings > Preferences`](https://gerrit.readyset.name/settings/#Preferences).
 
@@ -333,7 +333,7 @@ converts queries issued on those connections to ReadySet queries that can be sen
 
 5. **Making Updates / Responding to Comments**
 
-   Updating a CL is accomplished by making changes to your commit locally and pushing to gerrit.
+   Updating a CL is accomplished by making changes to your commit locally and pushing to Gerrit.
    ```
    # ... changes to files
    git add .
