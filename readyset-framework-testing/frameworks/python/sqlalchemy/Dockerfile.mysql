@@ -1,19 +1,28 @@
 FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/python:3.9-alpine3.12
 
-RUN apk add --no-cache mariadb-connector-c
+RUN apk add --no-cache mariadb-connector-c unzip
 
+RUN mkdir src
+WORKDIR /src
+
+ADD https://github.com/sqlalchemy/sqlalchemy/archive/41001d5358549f89b7a4843b3421742b7e3adf3e.zip /src
+
+RUN unzip 41001d5358549f89b7a4843b3421742b7e3adf3e.zip && \
+	mv sqlalchemy-41001d5358549f89b7a4843b3421742b7e3adf3e/* .
+
+COPY src /src
 RUN \
 	apk add --no-cache --virtual .build-deps gcc libc-dev mariadb-dev && \
-	pip3 install --no-cache-dir mysqlclient asyncpg && \
+	python3 -m venv venv && \
+	venv/bin/pip install --upgrade pip wheel && \
+	venv/bin/pip install --no-cache-dir mysqlclient asyncpg && \
 	apk del --no-cache .build-deps
 
 RUN \
-	apk add --no-cache --virtual .build-deps git gcc g++ musl-dev && \
-	git clone https://github.com/sqlalchemy/sqlalchemy.git /src/upstream && \
-	pip3 install --no-cache-dir /src/upstream && \
+	apk add --no-cache --virtual .build-deps gcc g++ musl-dev && \
+	venv/bin/pip install --no-cache-dir . && \
 	apk del --no-cache .build-deps
 
-ADD src /src
-WORKDIR /src
-ENTRYPOINT ["/src/run-examples-with-database-url"]
+ENV PATH="/src/venv/bin:$PATH"
 
+ENTRYPOINT ["/src/run-examples-with-database-url"]
