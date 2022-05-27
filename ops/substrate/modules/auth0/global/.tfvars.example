@@ -1,0 +1,8 @@
+auth0_domain                = "readyset.us.auth0.com"
+auth0_client_id             = "client_id"
+auth0_client_secret         = "client_secret"
+auth0_admin_user_password   = "admin_pass"
+auth0_auditor_user_password = "admin_pass"
+auth0_api_identifier        = "https://console.dev.readyset.io/"
+callback_url                = "http://localhost:3000/callback"
+logout_url                  = "http://localhost:3000"
