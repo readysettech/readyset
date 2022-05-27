@@ -1,6 +1,6 @@
 FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/openjdk:12
 
-ENV VERSION "8.0.23"
+ENV VERSION "8.0.29"
 ENV CONNECTOR_NAME="mysql-connector-java-${VERSION}"
 ENV JAR_NAME="${CONNECTOR_NAME}.jar"
 ENV CONNECTOR_CLASSPATH="/var/lib/java/${CONNECTOR_NAME}"
