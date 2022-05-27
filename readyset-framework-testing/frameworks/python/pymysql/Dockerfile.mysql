@@ -2,13 +2,13 @@ FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/python:3.9-alpine3.12
 
 RUN apk add --no-cache mariadb-connector-c
 
-ADD src/requirements.txt /src/requirements.txt
-RUN \
-	apk add --no-cache --virtual .build-deps gcc libc-dev libffi-dev cargo mariadb-dev && \
-	pip install --no-cache-dir -r /src/requirements.txt && \
-	apk del .build-deps
-
 ADD src /src
 WORKDIR /src
-ENTRYPOINT ["python3", "test.py"]
+RUN \
+	apk add --no-cache --virtual .build-deps gcc musl-dev libc-dev libffi-dev cargo mariadb-dev && \
+	python3 -m venv venv && \
+	venv/bin/pip install --upgrade pip wheel && \
+	venv/bin/pip install --no-cache-dir -r /src/requirements.txt && \
+	apk del .build-deps
 
+ENTRYPOINT ["venv/bin/python3", "test.py"]
