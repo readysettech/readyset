@@ -30,7 +30,7 @@ members = [
     "noria/noria-logictest",
     "noria/timestamp_service",
     "psql-srv",
-    "unbounded-interval-tree",
+    "merging-interval-tree",
     "launchpad",
     "replicators",
     "query_generator",

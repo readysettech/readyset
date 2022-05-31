@@ -78,7 +78,7 @@ enum Op<K, V> {
 
 impl<K, V> Arbitrary for Op<K, V>
 where
-    K: Arbitrary,
+    K: Arbitrary + PartialEq + PartialOrd,
     V: Arbitrary,
 {
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
@@ -86,7 +86,26 @@ where
             0 => Add(K::arbitrary(g), V::arbitrary(g)),
             1 => Remove(K::arbitrary(g)),
             2 => RemoveValue(K::arbitrary(g), V::arbitrary(g)),
-            3 => RemoveRange((Bound::arbitrary(g), Bound::arbitrary(g))),
+            3 => loop {
+                let bounds = (Bound::arbitrary(g), Bound::arbitrary(g));
+
+                match bounds {
+                    (Bound::Excluded(s), Bound::Excluded(e))
+                    | (Bound::Included(s), Bound::Excluded(e))
+                    | (Bound::Excluded(s), Bound::Included(e))
+                        if s == e =>
+                    {
+                        continue;
+                    }
+                    (
+                        Bound::Included(s) | Bound::Excluded(s),
+                        Bound::Included(e) | Bound::Excluded(e),
+                    ) if s > e => {
+                        continue;
+                    }
+                    _ => return RemoveRange(bounds),
+                }
+            },
             _ => Refresh,
         }
     }
