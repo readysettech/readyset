@@ -31,9 +31,9 @@ derive_more = "0.99.11"
 async-trait = "0.1.49"
 thiserror = "1.0.26"
 launchpad = { path = "../launchpad" }
-metrics = "0.18"
+metrics = "0.19"
 noria-client-metrics = { path = "metrics" }
-metrics-exporter-prometheus = "0.8"
+metrics-exporter-prometheus = "0.10"
 futures = "0.3"
 maplit = "1.0.2"
 serde = "1.0.130"

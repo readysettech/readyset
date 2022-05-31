@@ -22,7 +22,7 @@ ahash = "0.7"
 futures-util = "0.3.13"
 lazy_static = "1.0.0"
 itertools = "0.10"
-metrics = "0.18"
+metrics = "0.19"
 nom-sql = { path = "../../../nom-sql" }
 indexmap = "1.1.0"
 rand = "0.7"
