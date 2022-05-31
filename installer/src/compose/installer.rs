@@ -352,9 +352,7 @@ impl<'a> ComposeInstaller<'a> {
             )
         };
 
-        let load_spinner =
-            spinner().with_message(format!("{}", style("Loading Docker images").bold()));
-
+        println!("Loading docker images");
         load_and_tag(
             server_contents.as_ref(),
             &format!("readyset-server:{}", *DOCKER_TAG),
@@ -368,11 +366,6 @@ impl<'a> ComposeInstaller<'a> {
             &new_adapter_img_name,
         )
         .await?;
-
-        load_spinner.finish_with_message(format!(
-            "{}",
-            style("Finished loading Docker images").bold()
-        ));
 
         Ok(())
     }
