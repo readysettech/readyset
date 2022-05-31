@@ -6,4 +6,4 @@ authors = ["Readyset"]
 edition = "2021"
 
 [dependencies]
-unbounded-interval-tree = { path = "../../../../unbounded-interval-tree" }
+merging-interval-tree = { path = "../../../../merging-interval-tree" }

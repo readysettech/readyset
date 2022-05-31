@@ -3255,6 +3255,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "merging-interval-tree"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "test-strategy",
+]
+
+[[package]]
 name = "metrics"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4006,6 +4014,7 @@ dependencies = [
  "launchpad",
  "lazy_static",
  "maplit",
+ "merging-interval-tree",
  "metrics",
  "nom-sql",
  "noria",
@@ -4034,7 +4043,6 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "tuple",
- "unbounded-interval-tree",
  "vec1",
  "vec_map",
 ]
@@ -4619,7 +4627,7 @@ dependencies = [
 name = "partial_map"
 version = "0.1.0"
 dependencies = [
- "unbounded-interval-tree",
+ "merging-interval-tree",
 ]
 
 [[package]]
@@ -5255,7 +5263,6 @@ dependencies = [
  "rand 0.7.3",
  "smallvec",
  "thiserror",
- "unbounded-interval-tree",
 ]
 
 [[package]]
@@ -6868,18 +6875,6 @@ name = "typenum"
 version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b63708a265f51345575b27fe43f9500ad611579e764c79edbc2037b1121959ec"
-
-[[package]]
-name = "unbounded-interval-tree"
-version = "0.2.3"
-dependencies = [
- "itertools",
- "launchpad",
- "pretty_assertions",
- "proptest",
- "rand 0.7.3",
- "test-strategy",
-]
 
 [[package]]
 name = "unicase"

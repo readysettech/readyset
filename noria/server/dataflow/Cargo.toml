@@ -61,7 +61,7 @@ rocksdb = { version = "0.17", default-features = false, features = ["lz4"] }
 # local deps
 common = { path = "../common", package = "noria-common" }
 noria = { path = "../../noria" }
-unbounded-interval-tree = { path = "../../../unbounded-interval-tree" }
+merging-interval-tree = { path = "../../../merging-interval-tree" }
 launchpad = { path = "../../../launchpad" }
 noria-errors = { path = "../../errors" }
 noria-data = { path = "../../data" }

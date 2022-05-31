@@ -5,7 +5,7 @@ pub use std::collections::btree_map::{Iter, Keys, Range, Values, ValuesMut};
 use std::collections::{btree_map, BTreeMap};
 use std::ops::{Bound, RangeBounds};
 
-use unbounded_interval_tree::IntervalTree;
+use merging_interval_tree::IntervalTreeSet;
 
 /// A [`BTreeMap`] that knows what ranges of keys it has
 ///
@@ -50,7 +50,7 @@ where
     map: BTreeMap<K, V>,
     // NOTE: duplicating the key here is unfortunate - in the future post profiling we may want to
     // use some pinning to make these self-referential pointers to the keys in the map
-    interval_tree: IntervalTree<K>,
+    interval_tree: IntervalTreeSet<K>,
     /// A constant empty value, used so we can return a reference to it in `get` and have the
     /// lifetimes all match up
     empty_value: V,
@@ -74,7 +74,7 @@ where
     pub fn new() -> Self {
         Self {
             map: BTreeMap::default(),
-            interval_tree: IntervalTree::default(),
+            interval_tree: IntervalTreeSet::default(),
             empty_value: V::default(),
         }
     }
@@ -159,7 +159,7 @@ where
         K: Borrow<Q>,
         Q: Ord + ?Sized,
     {
-        self.interval_tree.contains_interval(range)
+        self.interval_tree.covers_interval(range)
     }
 
     /// Insert `value` at `key`, returning the value that used to be there if any.
@@ -176,7 +176,7 @@ where
     where
         R: RangeBounds<K> + Clone,
     {
-        self.interval_tree.insert(range);
+        self.interval_tree.insert_interval(range);
     }
 
     /// Gets the given key's corresponding entry in the map for in-place manipulation.
@@ -216,14 +216,16 @@ where
         K: Borrow<Q>,
         Q: Ord + ToOwned<Owned = K> + ?Sized,
     {
-        let diff = self.interval_tree.get_interval_difference(range);
+        let diff = self
+            .interval_tree
+            .get_interval_difference(range)
+            .map(|(lower, upper)| (lower.map(ToOwned::to_owned), upper.map(ToOwned::to_owned)))
+            .collect::<Vec<_>>();
+
         if diff.is_empty() {
             Ok(self.map.range((range.start_bound(), range.end_bound())))
         } else {
-            Err(diff
-                .into_iter()
-                .map(|(lower, upper)| (lower.map(ToOwned::to_owned), upper.map(ToOwned::to_owned)))
-                .collect())
+            Err(diff)
         }
     }
 
@@ -284,7 +286,7 @@ where
         K: Borrow<Q>,
         Q: Ord + ToOwned<Owned = K> + ?Sized,
     {
-        self.interval_tree.remove_point(&key.to_owned());
+        self.interval_tree.remove_point(key);
         self.map.remove(key)
     }
 
@@ -300,7 +302,7 @@ where
     where
         R: RangeBounds<K> + 'a,
     {
-        self.interval_tree.remove(&range);
+        self.interval_tree.remove_interval(&range);
         // NOTE: it is deeply unfortunate that rust's BTreeMap doesn't have a drain(range) function
         // the way Vec does. This is forcing us into an O(n) operation where we could have an
         // O(log(n)) one.
@@ -333,7 +335,7 @@ pub struct VacantEntry<'a, K, V>
 where
     K: Ord + Clone,
 {
-    tree: &'a mut IntervalTree<K>,
+    tree: &'a mut IntervalTreeSet<K>,
     inner: btree_map::VacantEntry<'a, K, V>,
 }
 

@@ -12,7 +12,6 @@ rand = { version = "0.7", default-features = false, features = ["alloc"] }
 left-right = "0.9.1"
 itertools = "0.10"
 
-unbounded-interval-tree = { path = "../../../../unbounded-interval-tree" }
 noria = { path = "../../../noria" }
 partial_map = { path = "../partial_map" }
 thiserror = "1.0.31"

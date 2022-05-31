@@ -1,0 +1,12 @@
+[package]
+name = "merging-interval-tree"
+version = "0.1.0"
+edition = "2021"
+description = "An efficient non-overlapping interval tree that merges overlapping and adjacent intervals to prevent fragmentation"
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+test-strategy = "0.2"
+proptest = "1.0"

@@ -18,6 +18,7 @@ use futures_util::stream::StreamExt;
 pub use internal::{DomainIndex, ReplicaAddress};
 use launchpad::redacted::Sensitive;
 use launchpad::Indices;
+use merging_interval_tree::IntervalTreeSet;
 use noria::internal::Index;
 use noria::replication::ReplicationOffset;
 use noria::{channel, internal, KeyComparison, ReaderAddress, ReadySetError};
@@ -27,7 +28,6 @@ use serde::{Deserialize, Serialize};
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, info, trace, warn};
-use unbounded_interval_tree::IntervalTree;
 use vec1::Vec1;
 
 pub(crate) use self::replay_paths::ReplayPath;
@@ -216,14 +216,14 @@ struct Waiting {
 /// Data structure representing the set of keys that have been requested by a reader.
 ///
 /// As an optimization, this structure is backed by either a [`HashSet`] if the reader's index is a
-/// [`HashMap`], or an [`IntervalTree`] if the reader's index is a [`BTreeMap`] - interval trees can
-/// act as sets of points, but are much slower than hash sets for that purpose.
+/// [`HashMap`], or an [`IntervalTreeSet`] if the reader's index is a [`BTreeMap`] - interval trees
+/// can act as sets of points, but are much slower than hash sets for that purpose.
 ///
 /// [`HashMap`]: IndexType::HashMap
 /// [`BTreeMap`]: IndexType::BTreeMap
 enum RequestedKeys {
     Points(HashSet<Vec1<DataType>, RandomState>),
-    Ranges(IntervalTree<Vec1<DataType>>),
+    Ranges(IntervalTreeSet<Vec1<DataType>>),
 }
 
 impl RequestedKeys {
@@ -277,7 +277,7 @@ impl RequestedKeys {
                                 },
                             )
                             .collect::<Vec<_>>();
-                        requested.insert(key);
+                        requested.insert_interval::<Vec1<_>, _>(key);
                         diff
                     })
                     .map(|r| KeyComparison::from_range(&r))
@@ -308,8 +308,7 @@ impl RequestedKeys {
                     .iter()
                     .flat_map(|key| {
                         requested
-                            .get_interval_intersection(key)
-                            .into_iter()
+                            .get_interval_overlaps(key)
                             .map(|r| KeyComparison::from_range(&r))
                     })
                     .collect()
@@ -331,7 +330,7 @@ impl RequestedKeys {
                 );
             }
             RequestedKeys::Ranges(requested) => {
-                requested.remove(key);
+                requested.remove_interval::<Vec1<_>, _>(key);
             }
         }
     }

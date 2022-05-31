@@ -35,7 +35,7 @@ members = [
     "ops/readyset-substrate",
     "ops/deployment_tests",
     "psql-srv",
-    "unbounded-interval-tree",
+    "merging-interval-tree",
     "launchpad",
     "replicators",
     "query_generator",
