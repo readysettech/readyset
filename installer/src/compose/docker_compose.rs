@@ -5,8 +5,8 @@ use derive_builder::*;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 
+use super::template::generate_base_template;
 use crate::deployment::{Deployment, DeploymentData, Engine, MigrationMode};
-use crate::template::generate_base_template;
 
 /// `READYSET_STANDALONE_MODE` should be true when using the docker-compose to spin up a
 /// deployment with an adapter/server combined.

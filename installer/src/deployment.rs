@@ -11,7 +11,7 @@ use tokio::fs::{read_dir, remove_file, File};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 pub(crate) use MaybeExisting::{CreateNew, Existing};
 
-use crate::compose_installer::ComposeInstaller;
+use crate::compose::ComposeInstaller;
 use crate::console::{confirm, input, password, select};
 use crate::constants::CFN_VERSION;
 use crate::Options;

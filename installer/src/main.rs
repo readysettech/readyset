@@ -11,20 +11,17 @@ use directories::ProjectDirs;
 use readyset_telemetry_reporter::HARDCODED_API_KEY;
 use tokio::fs::DirBuilder;
 
-use crate::aws::installer::AwsInstaller;
-use crate::compose_installer::ComposeInstaller;
 use crate::console::{password, select};
 
 #[macro_use]
 mod console;
 mod aws;
-mod compose_installer;
+mod compose;
 mod constants;
 mod deployment;
-mod docker_compose;
-mod template;
-mod utils;
 
+use crate::aws::AwsInstaller;
+use crate::compose::ComposeInstaller;
 use crate::deployment::DeploymentStatus;
 
 /// Teaar down an existing deployment
@@ -245,7 +242,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Some(Subcommand::Version) => {
-            println!("{}", *template::DOCKER_TAG);
+            println!("{}", *compose::template::DOCKER_TAG);
             Ok(())
         }
         None => {

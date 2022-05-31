@@ -10,6 +10,9 @@ use tokio::io::AsyncWriteExt;
 use tokio::join;
 use tokio::process::Command;
 
+use super::docker_compose::Compose;
+use super::template::{mysql_adapter_img, postgres_adapter_img, server_img, DOCKER_TAG};
+use super::utils::{check_command_installed, run_docker_compose};
 use crate::console::spinner;
 use crate::constants::{
     READYSET_MYSQL_ADAPTER_FILE_PREFIX, READYSET_PSQL_ADAPTER_FILE_PREFIX,
@@ -18,9 +21,6 @@ use crate::constants::{
 use crate::deployment::{
     Deployment, DeploymentData, DeploymentStatus, DockerComposeDeployment, Engine, MigrationMode,
 };
-use crate::docker_compose::Compose;
-use crate::template::{mysql_adapter_img, postgres_adapter_img, server_img, DOCKER_TAG};
-use crate::utils::{check_command_installed, run_docker_compose};
 use crate::Options;
 
 pub struct ComposeInstaller<'a> {

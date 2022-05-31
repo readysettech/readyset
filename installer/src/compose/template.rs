@@ -2,12 +2,12 @@ use std::include_str;
 
 use lazy_static::lazy_static;
 
+use super::docker_compose::Compose;
 use crate::constants::{
     CONSUL_TAG, DEFAULT_DOCKER_TAG, IMG_PREFIX, MYSQL_TAG, POSTGRES_TAG, READYSET_MYSQL_POSTFIX,
     READYSET_POSTGRES_POSTFIX, READYSET_SERVER_POSTFIX,
 };
 use crate::deployment::Engine;
-use crate::docker_compose::Compose;
 
 lazy_static! {
     pub(crate) static ref DOCKER_TAG: &'static str =
@@ -78,7 +78,7 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::docker_compose::{Service, Services};
+    use crate::compose::docker_compose::{Service, Services};
 
     /// Gets the service image with the provided name from `Services`, and asserts all the way down
     /// to retrieving said image.
