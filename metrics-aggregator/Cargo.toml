@@ -24,7 +24,7 @@ itertools = "0.10"
 derive_more = "0.99.11"
 thiserror = "1.0.26"
 launchpad = { path = "../launchpad" }
-metrics = "0.18"
+metrics = "0.19"
 futures = "0.3"
 maplit = "1.0.2"
 readyset-tracing = { path = "../readyset-tracing" }

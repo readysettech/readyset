@@ -209,15 +209,17 @@ mod tests {
             # TYPE benchmark_three_seconds counter
             benchmark_three_seconds 1
         "}));
+        // TODO: We shouldn't hold test against these exact values. We should instead extract the
+        // values and use `assert_relative_eq!()`.
         assert!(output.contains(indoc! {r#"
             # TYPE benchmark_percentile_bytes summary
             benchmark_percentile_bytes{quantile="0"} 1
-            benchmark_percentile_bytes{quantile="0.5"} 49.00390593892515
-            benchmark_percentile_bytes{quantile="0.9"} 89.00566416071956
-            benchmark_percentile_bytes{quantile="0.95"} 94.00049142147152
-            benchmark_percentile_bytes{quantile="0.99"} 97.99338832106014
-            benchmark_percentile_bytes{quantile="0.999"} 97.99338832106014
-            benchmark_percentile_bytes{quantile="1"} 98.99803587754256
+            benchmark_percentile_bytes{quantile="0.5"} 50.00385027884824
+            benchmark_percentile_bytes{quantile="0.9"} 90.00813093751373
+            benchmark_percentile_bytes{quantile="0.95"} 95.00219629040446
+            benchmark_percentile_bytes{quantile="0.99"} 98.99803587754256
+            benchmark_percentile_bytes{quantile="0.999"} 99.9929826824495
+            benchmark_percentile_bytes{quantile="1"} 100
             benchmark_percentile_bytes_sum 5050
             benchmark_percentile_bytes_count 100
         "#}));

@@ -28,9 +28,9 @@ serde_json = "1.0"
 serde_yaml = "0.8"
 serde = "1.0"
 serde_with = "1.12"
-metrics = "0.18"
-metrics-util = "0.11"
-metrics-exporter-prometheus = {version = "0.8", features = ["push-gateway", "tokio"]}
+metrics = "0.19"
+metrics-util = "0.13"
+metrics-exporter-prometheus = {version = "0.10", features = ["push-gateway", "tokio"]}
 itertools = "0.10"
 num-integer = "0.1.44"
 lazy_static = "1.4.0"
