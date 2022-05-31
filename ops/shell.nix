@@ -1,16 +1,16 @@
 with import <nixpkgs> {};
 
 let
-  terraform_1_0_2 = mkTerraform {
-    version = "1.0.2";
-    sha256 = "0gnv6hajpn1ks4944cr8rgkvly9cgvx4zj1zwc7nf1sikqfa8r1a";
-    vendorSha256 = "0q1frza5625b1va0ipak7ns3myca9mb02r60h0py3v5gyl2cb4dk";
+  terraform_1_1_6 = mkTerraform {
+    version = "1.1.6";
+    sha256 = "1fpyizz0z191gxr9vhx7hps9kwrwyjqmdc4sm881aq7a5i212l33";
+    vendorSha256 = "1pddglgr3slvrmwrnsbv7jh3hnas6mzw6akss2pmsxqgy1is44a6";
   };
 in
 
 mkShell {
   buildInputs = [
-    terraform_1_0_2
+    terraform_1_1_6
     packer
   ];
 }
