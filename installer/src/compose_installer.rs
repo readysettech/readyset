@@ -1,9 +1,11 @@
-use std::path::Path;
+use std::ffi::OsString;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use ::console::style;
 use anyhow::{anyhow, bail, Result};
-use tokio::fs::{remove_file, File};
+use tokio::fs::{remove_file, File, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tokio::join;
 use tokio::process::Command;
@@ -41,20 +43,127 @@ impl<'a> ComposeInstaller<'a> {
             .await
     }
 
-    pub async fn tear_down<P: AsRef<Path>>(state_directory: P, name: &str) -> Result<()> {
-        let path = Deployment::compose_path(state_directory, name);
+    /// Run the install process for deploying locally using docker-compose, picking up where the
+    /// user left off if necessary.
+    pub async fn install(&mut self) -> Result<()> {
+        self.check_docker_installed_and_running().await?;
+        self.check_docker_compose_installed().await?;
+
+        let res = self.compose_user_input();
+        self.save().await?;
+        res?;
+
+        self.download_and_load_docker_images(self.deployment.db_type)
+            .await?;
+
+        let compose = Compose::try_from(&*self.deployment)?;
+
+        let path = self.compose_path()?;
+        tokio::fs::create_dir_all(&path.parent().unwrap()).await?;
+        let mut file = File::create(&path).await?;
+        file.write_all(&serde_yaml::to_vec(&compose)?).await?;
+        let dest_text = format!("Docker Compose file was saved to {}", path.display());
+        println!("{}", style(dest_text).bold());
+
+        self.create_prometheus_configs().await?;
+        self.create_vector_configs().await?;
+        self.create_grafana_configs().await?;
+        self.create_grafana_dashboards().await?;
+
+        println!("Deploying with Docker Compose now");
+        self.run_docker_compose(["up", "-d", "--renew-anon-volumes", "--remove-orphans"])
+            .await?;
+
+        self.deployment.status = DeploymentStatus::Complete;
+        self.save().await?;
+
+        println!("ReadySet should be available in a few seconds.");
+        self.deployment.print_connection_information()?;
+
+        Ok(())
+    }
+
+    /// Upgrade the docker images of an existing deployment to the latest version in-place
+    pub async fn upgrade(&mut self) -> Result<()> {
+        let target_compose = Compose::try_from(&*self.deployment)?;
+
+        match File::open(self.compose_path()?).await {
+            Ok(file) => {
+                let existing_compose: Compose = serde_yaml::from_reader(file.into_std().await)?;
+                if existing_compose == target_compose {
+                    println!("Compose deployment is already up-to-date");
+                    return Ok(());
+                }
+            }
+
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                println!("Compose file not found, creating a new deployment instead");
+                return self.install().await;
+            }
+
+            Err(e) => return Err(e.into()),
+        }
+
+        self.download_and_load_docker_images(self.deployment.db_type)
+            .await?;
+
+        let path = self.compose_path()?;
+        let mut file = OpenOptions::new()
+            .truncate(true)
+            .write(true)
+            .open(&path)
+            .await?;
+        file.write_all(&serde_yaml::to_vec(&target_compose)?)
+            .await?;
+
+        println!("Upgrading docker containers");
+        self.run_docker_compose(["up", "-d", "--remove-orphans"])
+            .await?;
+
+        self.save().await?;
+
+        self.deployment.print_connection_information()?;
+
+        Ok(())
+    }
+
+    pub async fn tear_down(&self) -> Result<()> {
+        let path = self.compose_path()?;
         if !path.exists() {
             // File doesn't exist so there's nothing to tear down here.
             return Ok(());
         }
-        let path_str = path
-            .to_str()
-            .ok_or_else(|| anyhow!("Path does not contain valid unicode characters"))?;
-        run_docker_compose(["-f", path_str, "down", "-v", "--rmi", "all"]).await?;
+        self.run_docker_compose(["down", "-v", "--rmi", "all"])
+            .await?;
 
         remove_file(path).await?;
 
         Ok(())
+    }
+
+    fn compose_path(&self) -> Result<PathBuf> {
+        Ok(self
+            .options
+            .state_directory()?
+            .as_ref()
+            .join("compose")
+            .join(format!("{}.yml", self.deployment.name())))
+    }
+
+    async fn run_docker_compose<I, S>(&self, args: I) -> Result<()>
+    where
+        I: IntoIterator<Item = S> + Clone,
+        OsString: From<S>,
+    {
+        let path = self.compose_path()?;
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| anyhow!("Path does not contain valid unicode characters"))?;
+
+        let mut combined_args: Vec<OsString> = vec!["-f".into(), path_str.into()];
+        combined_args.extend(args.into_iter().map(|a| a.into()));
+
+        run_docker_compose(combined_args).await
     }
 
     async fn write_config_file<P>(&mut self, base_yml: &str, destination_path: P) -> Result<()>
@@ -268,60 +377,8 @@ impl<'a> ComposeInstaller<'a> {
         Ok(())
     }
 
-    /// Run the install process for deploying locally using docker-compose, picking up where the
-    /// user left off if necessary.
-    pub async fn run(&mut self) -> Result<()> {
-        self.check_docker_installed_and_running().await?;
-        self.check_docker_compose_installed().await?;
-
-        let res = self._compose_user_input();
-        self.save().await?;
-        res?;
-
-        self.download_and_load_docker_images(self.deployment.db_type)
-            .await?;
-
-        let compose = Compose::try_from(&*self.deployment)?;
-
-        let path =
-            Deployment::compose_path(self.options.state_directory()?, self.deployment.name());
-        tokio::fs::create_dir_all(&path.parent().unwrap()).await?;
-        let path_str = path
-            .to_str()
-            .ok_or_else(|| anyhow!("Path does not contain valid unicode characters"))?;
-
-        let mut file = File::create(&path).await?;
-        file.write_all(&serde_yaml::to_vec(&compose)?).await?;
-        let dest_text = format!("Docker Compose file was saved to {}", &path_str);
-        println!("{}", style(dest_text).bold());
-
-        self.create_prometheus_configs().await?;
-        self.create_vector_configs().await?;
-        self.create_grafana_configs().await?;
-        self.create_grafana_dashboards().await?;
-
-        println!("Deploying with Docker Compose now");
-        run_docker_compose([
-            "-f",
-            path_str,
-            "up",
-            "-d",
-            "--renew-anon-volumes",
-            "--remove-orphans",
-        ])
-        .await?;
-
-        self.deployment.status = DeploymentStatus::Complete;
-        self.save().await?;
-
-        println!("ReadySet should be available in a few seconds.");
-        self.deployment.print_connection_information()?;
-
-        Ok(())
-    }
-
     /// Exists so if any step fails we save before returning error.
-    fn _compose_user_input(&mut self) -> Result<()> {
+    fn compose_user_input(&mut self) -> Result<()> {
         let deployment_name = self.deployment.name().to_owned();
         let db_type = self.deployment.db_type;
         self.compose_deployment()?

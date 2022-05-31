@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::ops::Deref;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use ::console::style;
 use anyhow::{anyhow, bail, Result};
@@ -571,16 +571,6 @@ impl Deployment {
     pub(crate) fn vpc_stack_name(&self) -> String {
         self.cloudformation_stack_name("vpc")
     }
-
-    pub(crate) fn compose_path<P>(state_dir: P, name: &str) -> PathBuf
-    where
-        P: AsRef<Path>,
-    {
-        state_dir
-            .as_ref()
-            .join("compose")
-            .join(format!("{}.yml", name))
-    }
 }
 
 fn prompt_for_and_create_deployment(full: bool) -> Result<Deployment> {
@@ -646,8 +636,8 @@ where
         .ok_or_else(|| anyhow!("No deployment selected"))
 }
 
-async fn tear_down_compose_deployments<P: AsRef<Path>>(
-    state_dir: P,
+async fn tear_down_compose_deployments(
+    options: &mut Options,
     deployments: Vec<String>,
     exception: Option<&str>,
 ) -> Result<()> {
@@ -668,10 +658,13 @@ async fn tear_down_compose_deployments<P: AsRef<Path>>(
     } else {
         deployments
     };
-    for deployment in tear_down_deployments {
-        println!("Tearing down deployment {}", &deployment);
-        ComposeInstaller::tear_down(state_dir.as_ref(), &deployment).await?;
-        Deployment::delete(state_dir.as_ref(), &deployment).await?;
+    for deployment_name in tear_down_deployments {
+        let mut deployment = Deployment::load(options.state_directory()?, deployment_name).await?;
+        println!("Tearing down deployment {}", deployment.name());
+        ComposeInstaller::new(options, &mut deployment)
+            .tear_down()
+            .await?;
+        Deployment::delete(options.state_directory()?, deployment.name()).await?;
     }
     Ok(())
 }
@@ -679,7 +672,7 @@ async fn tear_down_compose_deployments<P: AsRef<Path>>(
 /// Creates a new deployment, or allows a customer to load an existing deployment. In the case that
 /// they create a new deployment, it tears down all deployments. In the case that they load an
 /// existing deployment, it tears down all deployments except for the selected deployment.
-pub(crate) async fn create_or_load_existing(options: &Options) -> Result<Deployment> {
+pub(crate) async fn create_or_load_existing(options: &mut Options) -> Result<Deployment> {
     let (state_dir, full) = (options.state_directory()?, options.full);
     let mut tear_down_all = false;
     let deployments = Deployment::list(state_dir.as_ref()).await?;
@@ -727,7 +720,7 @@ pub(crate) async fn create_or_load_existing(options: &Options) -> Result<Deploym
     if !full && tear_down_all {
         println!("Before proceeding we need to tear down all other deployments.");
         tear_down_compose_deployments(
-            state_dir,
+            options,
             deployments,
             deployment.as_ref().map(|d| d.name.as_str()),
         )

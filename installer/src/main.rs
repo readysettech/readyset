@@ -13,7 +13,7 @@ use tokio::fs::DirBuilder;
 
 use crate::aws::installer::AwsInstaller;
 use crate::compose_installer::ComposeInstaller;
-use crate::console::password;
+use crate::console::{password, select};
 
 #[macro_use]
 mod console;
@@ -25,7 +25,6 @@ mod docker_compose;
 mod template;
 mod utils;
 
-use crate::console::confirm;
 use crate::deployment::DeploymentStatus;
 
 /// Teaar down an existing deployment
@@ -101,11 +100,17 @@ impl Installer {
             self.deployment.print_connection_information()?;
 
             println!();
-            if confirm()
-                .with_prompt("Would you like to tear down this deployment?")
+            match select()
+                .with_prompt("What would you like to do with this deployment?")
+                .items(&[
+                    "Upgrade to the latest version of ReadySet",
+                    "Tear down the deployment",
+                ])
                 .interact()?
             {
-                self.tear_down().await?;
+                0 => self.upgrade().await?,
+                1 => self.tear_down().await?,
+                _ => unreachable!(),
             }
 
             return Ok(());
@@ -130,10 +135,30 @@ impl Installer {
             }
             DeploymentData::Compose(_) => {
                 ComposeInstaller::new(&mut self.options, &mut self.deployment)
-                    .run()
+                    .install()
                     .await
             }
         }
+    }
+
+    /// Upgrade an existing deployment in-place
+    pub(crate) async fn upgrade(&mut self) -> Result<()> {
+        match self.deployment.inner {
+            DeploymentData::Cloudformation(_) => {
+                bail!("Sorry, upgrading isn't supported for cloudformation deployments yet")
+            }
+            DeploymentData::Compose(_) => {
+                let mut compose = ComposeInstaller::new(&mut self.options, &mut self.deployment);
+                compose.upgrade().await?
+            }
+        }
+
+        success!(
+            "Deployment {} successfully upgraded",
+            self.deployment.name()
+        );
+
+        Ok(())
     }
 
     /// Tear down all resources for an already-created deployment
@@ -147,8 +172,8 @@ impl Installer {
                 aws.tear_down().await?
             }
             DeploymentData::Compose(_) => {
-                ComposeInstaller::tear_down(self.options.state_directory()?, self.deployment.name())
-                    .await?
+                let compose = ComposeInstaller::new(&mut self.options, &mut self.deployment);
+                compose.tear_down().await?
             }
         }
 
@@ -185,7 +210,7 @@ fn validate_api_key(options: &Options) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let options = Options::parse();
+    let mut options = Options::parse();
     println!("Welcome to the ReadySet orchestrator.\n");
     validate_api_key(&options)?;
 
@@ -229,7 +254,7 @@ async fn main() -> Result<()> {
                 .recursive(true)
                 .create(options.state_directory()?)
                 .await?;
-            let deployment = deployment::create_or_load_existing(&options).await?;
+            let deployment = deployment::create_or_load_existing(&mut options).await?;
             let mut installer = Installer::new(options, deployment);
 
             installer.run().await
