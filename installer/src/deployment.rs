@@ -519,25 +519,36 @@ impl Deployment {
                 let conn_string =
                     self.db_type
                         .root_conn_string(db_pass, "127.0.0.1", *db_port, db_name);
-                let conn_cmd = match self.db_type {
+                match self.db_type {
                     Engine::MySQL => {
-                        format!(
-                            "Run the following command to connect to ReadySet via the MySQL client:\n\n    $ mysql -h127.0.0.1 -uroot -p{} -P{} --database={}\n\nTo connect to ReadySet using an application, use the following ReadySet connection string:\n\n    {}",
-                            db_pass, db_port, db_name, conn_string
+                        println!(
+                            "Run the following command to connect to ReadySet via the MySQL client:\n\n    \
+                             $ {}\n\n\
+                             To connect to ReadySet using an application, use the following ReadySet connection string:\n\n    \
+                             {}",
+                            style(format!(
+                               "mysql -h127.0.0.1 -uroot -p{} -P{} --database={}" ,
+                                db_pass, db_port, db_name,
+                            )).bold(),
+                            style(conn_string).bold(),
                         )
                     }
                     Engine::PostgreSQL => {
-                        format!(
-                            "Run the following command to connect to ReadySet via the PostgreSQL client:\n\n    $ psql {}\n\nTo connect to ReadySet using an application, use the following ReadySet connection string:\n\n    {}",
-                            &conn_string, &conn_string
+                        println!(
+                            "Run the following command to connect to ReadySet via the PostgreSQL client:\n\n    \
+                             $ {}\n\n\
+                             To connect to ReadySet using an application, use the following ReadySet connection string:\n\n    \
+                             {}",
+                            style(format!("psql {}", &conn_string)).bold(),
+                            style(&conn_string).bold()
                         )
                     }
-                };
+                }
 
-                println!("{}", style(conn_cmd).bold());
-
-                let dashboard_str = "\nAccess the ReadySet dashboard at 127.0.0.1:4000";
-                println!("{}", style(dashboard_str).bold());
+                println!(
+                    "\nAccess the ReadySet dashboard at {}",
+                    style("http://127.0.0.1:4000").bold()
+                );
             }
             _ => bail!("Deployment missing required fields"),
         }
