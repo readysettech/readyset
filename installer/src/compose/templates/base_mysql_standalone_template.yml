@@ -36,7 +36,7 @@ services:
       PROMETHEUS_METRICS: 1
       QUERY_LOG: 1
       QUERY_LOG_AD_HOC: 1
-      NORIA_SERVER: 1
+      STANDALONE: 1
     links:
       - mysql
       - consul

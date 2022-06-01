@@ -301,7 +301,7 @@ pub struct Options {
 
     /// Run ReadySet in standalone mode, running a noria-server and noria-mysql instance within
     /// this adapter.
-    #[clap(long, env = "NORIA_SERVER")]
+    #[clap(long, env = "STANDALONE")]
     standalone: bool,
 }
 
