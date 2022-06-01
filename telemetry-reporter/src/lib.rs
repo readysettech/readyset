@@ -36,9 +36,12 @@ fn telemetry_url(path: &str) -> Url {
 }
 
 lazy_static! {
-    static ref TELEMETRY_BASE_URL: Url =
-        Url::parse(option_env!("TELEMETRY_BASE_URL").unwrap_or(DEFAULT_TELEMETRY_BASE_URL))
-            .unwrap();
+    static ref TELEMETRY_BASE_URL: Url = {
+        let url_text = option_env!("TELEMETRY_BASE_URL")
+            .filter(|s| !s.is_empty())
+            .unwrap_or(DEFAULT_TELEMETRY_BASE_URL);
+        Url::parse(url_text).unwrap()
+    };
 }
 
 /// Errors that can occur when reporting telemetry payloads

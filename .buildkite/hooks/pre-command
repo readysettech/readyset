@@ -10,6 +10,12 @@ fi
 docker volume create target
 docker volume create cargo-registry
 
+# we create orchestrator-state as a tmp dir rather than a volume so that
+# we can have the path match up between the host and the container, which
+# allows the container to pass the correct paths to the -v flags set on
+# other containers that are started by the installer during the smoke test:
+mkdir /tmp/orchestrator-state
+
 ## Setup for framework testing
 set -e
 mkdir -pv .buildkite/gen .buildkite/image

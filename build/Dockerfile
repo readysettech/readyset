@@ -9,6 +9,7 @@ RUN rustup default "$(cat rust-toolchain)"; rm rust-toolchain
 RUN set -eux; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        docker.io \
         ca-certificates \
         build-essential \
         llvm \
@@ -21,6 +22,9 @@ RUN set -eux; \
         curl \
         rsync; \
     rm -rf /var/lib/apt/lists/*
+
+RUN curl -L https://github.com/docker/compose/releases/download/v2.6.0/docker-compose-linux-`uname -m` -o /usr/local/bin/docker-compose; \
+    chmod a+x /usr/local/bin/docker-compose
 
 RUN set -eux; \
     cargo install cargo-cache --version 0.6.3; \

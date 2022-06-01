@@ -30,7 +30,10 @@ services:
     volumes:
     - 'target:/workdir/target'
     - 'cargo-registry:/usr/local/cargo/registry'
+    - '/tmp/orchestrator-state:/tmp/orchestrator-state'
     - '.:/workdir'
+      # Needed for the installer to send commands to the host when run via expect_test.rs:
+    - '/var/run/docker.sock:/var/run/docker.sock'
     environment:
     - ZOOKEEPER_HOST=zookeeper
     - AUTHORITY_ADDRESS=consul-server:8500
