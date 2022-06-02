@@ -67,7 +67,7 @@ impl<'a> ComposeInstaller<'a> {
 
         self.create_prometheus_configs().await?;
         self.create_vector_configs().await?;
-        self.create_grafana_configs().await?;
+        self.create_grafana_configs(self.deployment.db_type).await?;
         self.create_grafana_dashboards().await?;
 
         println!("Deploying with Docker Compose now");
@@ -222,8 +222,11 @@ impl<'a> ComposeInstaller<'a> {
         .await
     }
 
-    async fn create_grafana_configs(&mut self) -> Result<()> {
-        let datasources_yml = include_str!("./templates/grafana_datasources.yml");
+    async fn create_grafana_configs(&mut self, engine: Engine) -> Result<()> {
+        let datasources_yml = match engine {
+            Engine::MySQL => include_str!("./templates/grafana_datasources_mysql.yml"),
+            Engine::PostgreSQL => include_str!("./templates/grafana_datasources_postgres.yml"),
+        };
 
         self.write_config_file(
             include_str!("./templates/grafana_config.ini"),
