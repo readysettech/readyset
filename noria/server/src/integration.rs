@@ -8660,6 +8660,7 @@ async fn simple_dry_run_unsupported() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Flaky (ENG-1339)"]
 async fn simple_alter_table_add_column() {
     let mut g = start_simple_unsharded("simple_alter_table_add_column").await;
 
