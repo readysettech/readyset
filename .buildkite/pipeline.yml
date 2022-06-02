@@ -364,6 +364,7 @@ steps:
       -   export READYSET_CFN_PREFIX="alpha/${BUILDKITE_COMMIT}"
       - fi
       - export READYSET_DOCKER_TAG="release-${BUILDKITE_COMMIT}"
+      - export TELEMETRY_BASE_URL="https://telemetry.readyset.io"
       - .buildkite/build-linux-installer.sh
     artifact_paths:
       - target/x86_64-unknown-linux-musl/release/readyset-installer
@@ -397,6 +398,7 @@ steps:
       -   export READYSET_CFN_PREFIX="alpha/${BUILDKITE_COMMIT}"
       - fi
       - export READYSET_DOCKER_TAG="release-${BUILDKITE_COMMIT}"
+      - export TELEMETRY_BASE_URL="https://telemetry.readyset.io"
       - .buildkite/build-apple-installer.sh
     artifact_paths:
       - target/x86_64-apple-darwin/release/readyset-installer
