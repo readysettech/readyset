@@ -28,7 +28,7 @@ use dataflow::{
     Sharding,
 };
 use futures::stream::{self, StreamExt, TryStreamExt};
-use futures::FutureExt;
+use futures::{FutureExt, TryStream};
 use lazy_static::lazy_static;
 use metrics::{gauge, histogram};
 use nom_sql::SqlIdentifier;
@@ -48,6 +48,7 @@ use noria::{
 use noria_errors::{bad_request_err, internal, internal_err, invariant_eq, NodeType};
 use petgraph::visit::Bfs;
 use regex::Regex;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -608,6 +609,31 @@ impl DataflowState {
             })
     }
 
+    /// Issue all of `requests` to their corresponding domains asynchronously, and return a stream
+    /// of the results (potentially in a different order)
+    ///
+    /// # Invariants
+    ///
+    /// * All of the domain indices in `requests` must be domains in `self.domains`
+    fn query_domains<'a, I, R>(
+        &'a self,
+        requests: I,
+    ) -> impl TryStream<Ok = (DomainIndex, Vec<R>), Error = ReadySetError> + 'a
+    where
+        I: IntoIterator<Item = (DomainIndex, DomainRequest)>,
+        I::IntoIter: 'a,
+        R: DeserializeOwned,
+    {
+        stream::iter(requests)
+            .map(move |(domain, request)| {
+                #[allow(clippy::indexing_slicing)] // came from self.domains
+                self.domains[&domain]
+                    .send_to_healthy::<R>(request, &self.workers)
+                    .map(move |r| -> ReadySetResult<_> { Ok((domain, r?)) })
+            })
+            .buffer_unordered(CONCURRENT_REQUESTS)
+    }
+
     /// Returns a struct containing the set of all replication offsets within the system, including
     /// the replication offset for the schema stored in the controller and the replication offsets
     /// of all base tables
@@ -616,39 +642,33 @@ impl DataflowState {
     /// more information about replication offsets.
     pub(super) async fn replication_offsets(&self) -> ReadySetResult<ReplicationOffsets> {
         let domains = self.domains_with_base_tables().await?;
-        stream::iter(domains)
-            .map(|domain| {
-                #[allow(clippy::indexing_slicing)] // came from self.domains
-                self.domains[&domain]
-                    .send_to_healthy::<NodeMap<Option<ReplicationOffset>>>(
-                        DomainRequest::RequestReplicationOffsets,
-                        &self.workers,
-                    )
-                    .map(move |r| -> ReadySetResult<_> { Ok((domain, r?)) })
-            })
-            .buffer_unordered(CONCURRENT_REQUESTS)
-            .try_fold(
-                ReplicationOffsets::with_schema_offset(self.schema_replication_offset.clone()),
-                |mut acc, (domain, domain_offs)| async move {
-                    for shard in domain_offs {
-                        for (lni, offset) in shard {
-                            #[allow(clippy::indexing_slicing)] // came from self.domains
-                            let ni = self.domain_nodes[&domain].get(lni).ok_or_else(|| {
-                                internal_err(format!(
-                                    "Domain {} returned nonexistent local node {}",
-                                    domain, lni
-                                ))
-                            })?;
-                            #[allow(clippy::indexing_slicing)] // internal invariant
-                            let table_name = self.ingredients[*ni].name();
-                            acc.tables.insert(table_name.clone(), offset); // TODO min of all
-                                                                           // shards
-                        }
+        self.query_domains::<_, NodeMap<Option<ReplicationOffset>>>(
+            domains
+                .into_iter()
+                .map(|domain| (domain, DomainRequest::RequestReplicationOffsets)),
+        )
+        .try_fold(
+            ReplicationOffsets::with_schema_offset(self.schema_replication_offset.clone()),
+            |mut acc, (domain, domain_offs)| async move {
+                for shard in domain_offs {
+                    for (lni, offset) in shard {
+                        #[allow(clippy::indexing_slicing)] // came from self.domains
+                        let ni = self.domain_nodes[&domain].get(lni).ok_or_else(|| {
+                            internal_err(format!(
+                                "Domain {} returned nonexistent local node {}",
+                                domain, lni
+                            ))
+                        })?;
+                        #[allow(clippy::indexing_slicing)] // internal invariant
+                        let table_name = self.ingredients[*ni].name();
+                        acc.tables.insert(table_name.clone(), offset); // TODO min of all
+                                                                       // shards
                     }
-                    Ok(acc)
-                },
-            )
-            .await
+                }
+                Ok(acc)
+            },
+        )
+        .await
     }
 
     /// Collects a unique list of domains that might contain base tables. Errors out if a domain
@@ -676,18 +696,12 @@ impl DataflowState {
     /// Returns a list of all table names that are currently involved in snapshotting.
     pub(super) async fn snapshotting_tables(&self) -> ReadySetResult<HashSet<SqlIdentifier>> {
         let domains = self.domains_with_base_tables().await?;
-
-        let table_indices: Vec<(DomainIndex, LocalNodeIndex)> = stream::iter(domains)
-            .map(|domain| {
-                #[allow(clippy::indexing_slicing)] // validated above
-                self.domains[&domain]
-                    .send_to_healthy::<Vec<LocalNodeIndex>>(
-                        DomainRequest::RequestSnapshottingTables,
-                        &self.workers,
-                    )
-                    .map(move |r| -> ReadySetResult<_> { Ok((domain, r?)) })
-            })
-            .buffer_unordered(CONCURRENT_REQUESTS)
+        let table_indices: Vec<(DomainIndex, LocalNodeIndex)> = self
+            .query_domains::<_, Vec<LocalNodeIndex>>(
+                domains
+                    .into_iter()
+                    .map(|domain| (domain, DomainRequest::RequestSnapshottingTables)),
+            )
             .map_ok(|(di, local_indices)| {
                 stream::iter(
                     local_indices
