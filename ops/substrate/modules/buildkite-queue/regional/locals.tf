@@ -1,6 +1,6 @@
 locals {
   stack_name    = "buildkite-${var.buildkite_queue}"
-  stack_version = "master"
+  stack_version = "v5.9.0"
   ssh_key_pair_config = length(var.ssh_key_pair_name) > 0 ? {
     "KeyName" = var.ssh_key_pair_name
   } : {}
