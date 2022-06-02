@@ -445,6 +445,10 @@ steps:
             - VERCEL_TOKEN
             - BUILDKITE_API_TOKEN
             - BUILDKITE_GERRIT_PASSWORD
+            - SNOWFLAKE_USER
+            - SNOWFLAKE_PRIVATE_KEY_PATH
+          volumes:
+            - /tmp/snowflake_tf_snow_key.p8:/tmp/snowflake_tf_snow_key.p8
       - ecr#v2.5.0:
           login: true
           retries: 3
