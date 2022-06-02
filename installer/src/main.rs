@@ -206,15 +206,32 @@ impl Installer {
 }
 
 async fn prompt_for_and_validate_api_key(options: &Options) -> Result<TelemetryReporter> {
+    async fn authenticate(
+        telemetry: &TelemetryReporter,
+    ) -> readyset_telemetry_reporter::Result<()> {
+        match telemetry.authenticate().await {
+            Ok(_) => Ok(()),
+            Err(e @ (TelemetryError::Unauthorized | TelemetryError::InvalidAPIKeyHeader(_))) => {
+                Err(e)
+            }
+            Err(_) => {
+                // Some sort of server error (a 500, an IO error of some sort, a timeout, etc.).
+                // For now, just keep going if this happens so people can use the installer even
+                // when the telemetry ingress is down
+                Ok(())
+            }
+        }
+    }
+
     if let Some(api_key) = &options.api_key {
         let telemetry = TelemetryReporter::new(api_key)?;
-        telemetry.authenticate().await?;
+        authenticate(&telemetry).await?;
         Ok(telemetry)
     } else {
         loop {
             let api_key = password().with_prompt("API key").interact()?;
             let telemetry = TelemetryReporter::new(api_key)?;
-            match telemetry.authenticate().await {
+            match authenticate(&telemetry).await {
                 Ok(_) => return Ok(telemetry),
                 Err(TelemetryError::InvalidAPIKeyHeader(_) | TelemetryError::Unauthorized) => {
                     println!("Invalid API key. Let's try again.")
