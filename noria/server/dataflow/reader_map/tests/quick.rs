@@ -118,7 +118,7 @@ fn do_ops<K, V, S>(
     read_ref: &mut BTreeMap<K, Vec<V>>,
 ) where
     K: Ord + Clone + Hash,
-    V: Clone + Eq + Hash,
+    V: Clone + Ord,
     S: BuildHasher + Clone,
 {
     for op in ops {

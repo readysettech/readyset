@@ -6,10 +6,10 @@ authors = ["Readyset"]
 edition = "2021"
 
 [dependencies]
-smallvec = "1.0.0"
-hashbag = "0.1.2"
+triomphe = "0.1"
+smallvec = { version = "1.8", default-features = false, features = ["union"] }
 rand = { version = "0.7", default-features = false, features = ["alloc"] }
-left-right = "0.9.1"
+left-right = "0.11"
 itertools = "0.10"
 
 noria = { path = "../../../noria" }
@@ -19,4 +19,3 @@ thiserror = "1.0.31"
 [dev-dependencies]
 quickcheck = "0.9"
 quickcheck_macros = "0.9"
-rand = "0.7"

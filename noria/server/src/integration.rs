@@ -809,8 +809,8 @@ async fn delete_row() {
     assert_eq!(
         all_rows.lookup(&[0.into()], true).await.unwrap(),
         vec![
-            vec![DataType::from(4), DataType::from(5), DataType::from(6)],
             vec![DataType::from(1), DataType::from(2), DataType::from(3)],
+            vec![DataType::from(4), DataType::from(5), DataType::from(6)],
         ]
     );
 }

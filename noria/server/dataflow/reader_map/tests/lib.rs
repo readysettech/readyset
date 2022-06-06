@@ -1,4 +1,9 @@
+use std::collections::hash_map::RandomState;
+use std::hash::Hash;
+
+use reader_map::handles::{ReadHandle, WriteHandle};
 use reader_map::Error::*;
+use reader_map::Options;
 
 macro_rules! assert_match {
     ($x:expr, $p:pat) => {
@@ -7,6 +12,28 @@ macro_rules! assert_match {
             panic!(concat!(stringify!($x), " did not match ", stringify!($p)));
         }
     };
+}
+
+/// Create an empty eventually consistent map with meta and timestamp information.
+///
+/// Use the [`Options`](./struct.Options.html) builder for more control over initialization.
+fn with_meta_and_timestamp<K, V, M, T>(
+    meta: M,
+    timestamp: T,
+) -> (
+    WriteHandle<K, V, M, T, RandomState>,
+    ReadHandle<K, V, M, T, RandomState>,
+)
+where
+    K: Ord + Clone + Hash,
+    V: Ord + Clone,
+    M: 'static + Clone,
+    T: Clone,
+{
+    Options::default()
+        .with_meta(meta)
+        .with_timestamp(timestamp)
+        .construct()
 }
 
 #[test]
@@ -431,7 +458,8 @@ fn absorb_negative_later() {
 #[test]
 fn absorb_multi() {
     let (mut w, r) = reader_map::new();
-    w.extend(vec![(1, "a"), (1, "b")]);
+    w.insert(1, "a");
+    w.insert(1, "b");
     w.publish();
 
     assert_eq!(r.get(&1).unwrap().map(|rs| rs.len()), Some(2));
@@ -522,55 +550,8 @@ fn clear() {
 }
 
 #[test]
-fn replace() {
-    let (mut w, r) = reader_map::new();
-    w.insert(1, "a");
-    w.insert(1, "b");
-    w.insert(2, "c");
-    w.update(1, "x");
-    w.publish();
-
-    assert_eq!(r.get(&1).unwrap().map(|rs| rs.len()), Some(1));
-    assert!(r
-        .get(&1)
-        .unwrap()
-        .map(|rs| rs.iter().any(|r| r == &"x"))
-        .unwrap());
-    assert_eq!(r.get(&2).unwrap().map(|rs| rs.len()), Some(1));
-    assert!(r
-        .get(&2)
-        .unwrap()
-        .map(|rs| rs.iter().any(|r| r == &"c"))
-        .unwrap());
-}
-
-#[test]
-fn replace_post_refresh() {
-    let (mut w, r) = reader_map::new();
-    w.insert(1, "a");
-    w.insert(1, "b");
-    w.insert(2, "c");
-    w.publish();
-    w.update(1, "x");
-    w.publish();
-
-    assert_eq!(r.get(&1).unwrap().map(|rs| rs.len()), Some(1));
-    assert!(r
-        .get(&1)
-        .unwrap()
-        .map(|rs| rs.iter().any(|r| r == &"x"))
-        .unwrap());
-    assert_eq!(r.get(&2).unwrap().map(|rs| rs.len()), Some(1));
-    assert!(r
-        .get(&2)
-        .unwrap()
-        .map(|rs| rs.iter().any(|r| r == &"c"))
-        .unwrap());
-}
-
-#[test]
 fn with_meta() {
-    let (mut w, r) = reader_map::with_meta_and_timestamp::<usize, usize, usize, usize>(42, 12);
+    let (mut w, r) = with_meta_and_timestamp::<usize, usize, usize, usize>(42, 12);
     assert_eq!(
         r.meta_get(&1).map(|(rs, m)| (rs.map(|rs| rs.len()), m)),
         Err(NotPublished)
@@ -674,9 +655,9 @@ fn clone_churn() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn bigbag() {
+fn big() {
     use std::thread;
-    let (mut w, r) = reader_map::new();
+    let (mut w, r) = reader_map::new::<usize, Vec<usize>>();
     w.publish();
 
     let ndistinct = 32;
@@ -688,7 +669,7 @@ fn bigbag() {
                 let mut found = true;
                 for i in 0..ndistinct {
                     if found {
-                        if !rs.contains(&[i][..]) {
+                        if !rs.contains(&vec![i]) {
                             found = false;
                         }
                     } else {
@@ -714,7 +695,6 @@ fn bigbag() {
         for i in (1..ndistinct).rev() {
             for _ in 0..i {
                 w.remove_value(1, vec![i]);
-                w.fit(1);
                 w.publish();
             }
         }
@@ -767,7 +747,7 @@ fn retain() {
         num % 2 == 0
     }
 
-    unsafe { w.retain(0, is_even) }.publish();
+    w.retain(0, is_even).publish();
     v.retain(|i| is_even(i, false));
 
     let mut vs = r
@@ -780,7 +760,7 @@ fn retain() {
 }
 
 #[test]
-fn get_one() {
+fn first() {
     let x = ('x', 42);
 
     let (mut w, r) = reader_map::new();
@@ -788,11 +768,11 @@ fn get_one() {
     w.insert(x.0, x);
     w.insert(x.0, x);
 
-    assert_match!(r.get_one(&x.0), Err(NotPublished));
+    assert_match!(r.first(&x.0), Err(NotPublished));
 
     w.publish();
 
-    assert_match!(r.get_one(&x.0).unwrap().as_deref(), Some(('x', 42)));
+    assert_match!(r.first(&x.0).unwrap().as_deref(), Some(('x', 42)));
 }
 
 #[test]
@@ -835,7 +815,10 @@ fn range_works() {
     use std::ops::Bound::{Included, Unbounded};
 
     let (mut w, r) = reader_map::new();
-    w.insert_range(vec![(3, 9), (3, 30), (4, 10)], (Included(2), Unbounded));
+    for (k, v) in vec![(3, 9), (3, 30), (4, 10)] {
+        w.insert(k, v);
+    }
+    w.insert_range((Included(2), Unbounded));
     w.publish();
 
     {
@@ -867,7 +850,7 @@ fn insert_range_pre_publish() {
     // publish. This tests that that works properly for the interval tree by checking reads with
     // both an even and an odd number of publishes
     let (mut w, r) = reader_map::new::<i32, i32>();
-    w.insert_range(vec![], ..);
+    w.insert_range(..);
     w.publish();
 
     {
@@ -893,7 +876,10 @@ fn insert_range_pre_publish() {
 #[test]
 fn remove_range_works() {
     let (mut w, r) = reader_map::new();
-    w.insert_range(vec![(3, 9), (3, 30), (4, 10)], 2..=6);
+    for (k, v) in vec![(3, 9), (3, 30), (4, 10)] {
+        w.insert(k, v);
+    }
+    w.insert_range(2..=6);
     w.insert(5, 7);
     w.insert(9, 20);
     w.publish();
@@ -918,7 +904,10 @@ fn remove_range_works() {
 #[test]
 fn contains_range_works() {
     let (mut w, r) = reader_map::new();
-    w.insert_range(vec![(3, 9), (3, 30), (4, 10)], 2..6);
+    for (k, v) in vec![(3, 9), (3, 30), (4, 10)] {
+        w.insert(k, v);
+    }
+    w.insert_range(2..6);
     w.publish();
 
     {
@@ -930,7 +919,7 @@ fn contains_range_works() {
 
 #[test]
 fn timestamp_changes_on_publish() {
-    let (mut w, r) = reader_map::with_meta_and_timestamp::<usize, usize, usize, usize>(42, 12);
+    let (mut w, r) = with_meta_and_timestamp::<usize, usize, usize, usize>(42, 12);
     // Map is unitialized before first publish, therefore the timestamp should not
     // return a value.
     assert_eq!(r.timestamp(), Err(NotPublished));
@@ -947,7 +936,7 @@ fn timestamp_changes_on_publish() {
 #[test]
 fn get_respects_ranges() {
     let (mut w, r) = reader_map::new::<i32, i32>();
-    w.insert_range(vec![], 2..6);
+    w.insert_range(2..6);
     w.publish();
 
     {
@@ -961,7 +950,7 @@ fn get_respects_ranges() {
 #[test]
 fn contains_key_respects_ranges() {
     let (mut w, r) = reader_map::new::<i32, i32>();
-    w.insert_range(vec![], 2..6);
+    w.insert_range(2..6);
     w.publish();
 
     {
@@ -995,9 +984,9 @@ fn eviction_lru() {
     w.insert(y.0, y);
     w.publish();
 
-    assert_match!(r.get_one(&y.0).unwrap().as_deref(), Some(('y', 43)));
-    assert_match!(r.get_one(&y.0).unwrap().as_deref(), Some(('y', 43)));
-    assert_match!(r.get_one(&y.0).unwrap().as_deref(), Some(('y', 43)));
+    assert_match!(r.first(&y.0).unwrap().as_deref(), Some(('y', 43)));
+    assert_match!(r.first(&y.0).unwrap().as_deref(), Some(('y', 43)));
+    assert_match!(r.first(&y.0).unwrap().as_deref(), Some(('y', 43)));
 
     assert_eq!(r.get(&y.0).unwrap().unwrap().eviction_meta().value(), 7);
     {
@@ -1065,9 +1054,9 @@ fn eviction_generational() {
     assert_eq!(r.get(&y.0).unwrap().unwrap().eviction_meta().value(), 0);
     assert_eq!(r.get(&z.0).unwrap().unwrap().eviction_meta().value(), 0);
 
-    assert_match!(r.get_one(&x.0).unwrap().as_deref(), Some(('x', 42)));
-    assert_match!(r.get_one(&y.0).unwrap().as_deref(), Some(('y', 43)));
-    assert_match!(r.get_one(&z.0).unwrap().as_deref(), Some(('z', 44)));
+    assert_match!(r.first(&x.0).unwrap().as_deref(), Some(('x', 42)));
+    assert_match!(r.first(&y.0).unwrap().as_deref(), Some(('y', 43)));
+    assert_match!(r.first(&z.0).unwrap().as_deref(), Some(('z', 44)));
 
     let to_evict = w.evict_keys(0.0).collect::<Vec<_>>();
     assert_eq!(to_evict.len(), 0);

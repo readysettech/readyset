@@ -149,7 +149,7 @@ impl Handle {
 
     pub(super) fn meta_get_and<F, T>(&self, key: &[DataType], then: F) -> LookupResult<T>
     where
-        F: FnOnce(ValuesIter<'_, Box<[DataType]>, RandomState>) -> ReadySetResult<T>,
+        F: FnOnce(ValuesIter<'_, Box<[DataType]>>) -> ReadySetResult<T>,
     {
         use LookupError::*;
 
@@ -199,7 +199,7 @@ impl Handle {
     /// keys.
     pub(super) fn meta_get_range_and<F, T, R>(&self, range: &R, then: F) -> LookupResult<Vec<T>>
     where
-        F: Fn(ValuesIter<'_, Box<[DataType]>, RandomState>) -> ReadySetResult<T>,
+        F: Fn(ValuesIter<'_, Box<[DataType]>>) -> ReadySetResult<T>,
         R: RangeBounds<Vec<DataType>>,
     {
         match *self {
@@ -318,12 +318,14 @@ mod tests {
     #[test]
     fn get_single_range() {
         let (mut w, handle) = make_single();
-        w.insert_range(
-            (0i32..10)
-                .map(|n| ((n.into()), vec![n.into(), n.into()].into_boxed_slice()))
-                .collect(),
-            (DataType::from(0i32))..(DataType::from(10i32)),
-        );
+
+        (0i32..10)
+            .map(|n| ((n.into()), vec![n.into(), n.into()].into_boxed_slice()))
+            .for_each(|(k, v)| {
+                w.insert(k, v);
+            });
+
+        w.insert_range((DataType::from(0i32))..(DataType::from(10i32)));
         w.publish();
 
         let (res, meta) = handle
@@ -359,17 +361,17 @@ mod tests {
     #[test]
     fn get_double_range() {
         let (mut w, handle) = make_many();
-        w.insert_range(
-            (0..10)
-                .map(|n: i32| {
-                    (
-                        vec![n.into(), n.into()],
-                        vec![n.into(), n.into()].into_boxed_slice(),
-                    )
-                })
-                .collect(),
-            vec![0i32.into(), 0i32.into()]..vec![10i32.into(), 10i32.into()],
-        );
+        (0..10)
+            .map(|n: i32| {
+                (
+                    vec![n.into(), n.into()],
+                    vec![n.into(), n.into()].into_boxed_slice(),
+                )
+            })
+            .for_each(|(k, v)| {
+                w.insert(k, v);
+            });
+        w.insert_range(vec![0i32.into(), 0i32.into()]..vec![10i32.into(), 10i32.into()]);
         w.publish();
 
         let (res, meta) = handle

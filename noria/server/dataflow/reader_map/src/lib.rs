@@ -202,30 +202,20 @@
 //!
 //! [`ReadHandle`] is not `Sync` as sharing a single instance amongst threads would introduce a
 //! significant performance bottleneck. A fresh `ReadHandle` needs to be created for each thread
-//! either by cloning a [`ReadHandle`] or from a [`handles::ReadHandleFactory`]. For further
-//! information, see [`left_right::ReadHandle`].
+//! by cloning a [`ReadHandle`]. For further information, see [`left_right::ReadHandle`].
 //!
 //! # Implementation
 //!
-//! Under the hood, the map is implemented using two regular `HashMap`s and some magic. Take a look
-//! at [`left-right`](left_right) for a much more in-depth discussion. Since the implementation
+//! Under the hood, the map is implemented using two identical collections and some magic. Take a
+//! look at [`left-right`](left_right) for a much more in-depth discussion. Since the implementation
 //! uses regular `HashMap`s under the hood, table resizing is fully supported. It does, however,
-//! also mean that the memory usage of this implementation is approximately twice of that of a
-//! regular `HashMap`, and more if writers rarely refresh after writing.
+//! also mean that the memory usage of this implementation is approximately twice that of a regular
+//! collection.
 //!
 //! # Value storage
 //!
-//! The values for each key in the map are stored in [`refs::Values`]. Conceptually, each `Values`
-//! is a _bag_ or _multiset_; it can store multiple copies of the same value. `reader_map` applies
-//! some cleverness in an attempt to reduce unnecessary allocations and keep the cost of operations
-//! on even large value-bags small. For small bags, `Values` uses the `smallvec` crate. This avoids
-//! allocation entirely for single-element bags, and uses a `Vec` if the bag is relatively small.
-//! For large bags, `Values` uses the `hashbag` crate, which enables `reader_map` to efficiently
-//! look up and remove specific elements in the value bag. For bags larger than one element, but
-//! smaller than the threshold for moving to `hashbag`, we use `smallvec` to avoid unnecessary
-//! hashing. Operations such as `Fit` and `Replace` will automatically switch back to the inline
-//! storage if possible. This is ideal for maps that mostly use one element per key, as it can
-//! improvate memory locality with less indirection.
+//! The values for each key in the map are stored in [`refs::Values`], which is internally is a
+//! sorted vector of values.
 #![warn(
     missing_docs,
     rust_2018_idioms,
@@ -233,9 +223,6 @@
     rustdoc::broken_intra_doc_links
 )]
 #![allow(clippy::type_complexity)]
-// This _should_ detect if we ever accidentally leak aliasing::NoDrop.
-// But, currently, it does not..
-#![deny(unreachable_pub)]
 #![feature(btree_drain_filter)]
 
 use std::collections::hash_map::RandomState;
@@ -243,7 +230,6 @@ use std::fmt;
 use std::hash::{BuildHasher, Hash};
 
 pub use eviction::EvictionStrategy;
-use left_right::aliasing::Aliased;
 use noria::internal::IndexType;
 
 use crate::inner::Inner;
@@ -261,9 +247,7 @@ pub use error::{Error, Result};
 
 /// Handles to the read and write halves of an `reader_map`.
 pub mod handles {
-    // These cannot use ::{..} syntax because of
-    // https://github.com/rust-lang/rust/issues/57411
-    pub use crate::read::{ReadHandle, ReadHandleFactory};
+    pub use crate::read::ReadHandle;
     pub use crate::write::WriteHandle;
 }
 
@@ -278,18 +262,12 @@ pub mod refs {
     pub use crate::read::{MapReadRef, Miss, ReadGuardIter};
 }
 
-// NOTE: It is _critical_ that this module is not public.
-mod aliasing;
-
 /// Options for how to initialize the map.
 ///
 /// In particular, the options dictate the hashing function, meta type, and initial capacity of the
 /// map.
 #[must_use]
-pub struct Options<M, T, S>
-where
-    S: BuildHasher,
-{
+pub struct Options<M, T, S> {
     meta: M,
     timestamp: T,
     hasher: S,
@@ -300,9 +278,8 @@ where
 
 impl<M, T, S> fmt::Debug for Options<M, T, S>
 where
-    S: BuildHasher,
     M: fmt::Debug,
-    T: fmt::Debug + Clone,
+    T: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Options")
@@ -326,10 +303,7 @@ impl Default for Options<(), (), RandomState> {
     }
 }
 
-impl<M, T, S> Options<M, T, S>
-where
-    S: BuildHasher,
-{
+impl<M, T, S> Options<M, T, S> {
     /// Set the initial meta value for the map.
     pub fn with_meta<M2>(self, meta: M2) -> Options<M2, T, S> {
         Options {
@@ -343,10 +317,7 @@ where
     }
 
     /// Set the hasher used for the map.
-    pub fn with_hasher<S2>(self, hash_builder: S2) -> Options<M, T, S2>
-    where
-        S2: BuildHasher,
-    {
+    pub fn with_hasher<S2>(self, hash_builder: S2) -> Options<M, T, S2> {
         Options {
             meta: self.meta,
             timestamp: self.timestamp,
@@ -399,7 +370,7 @@ where
     where
         K: Ord + Clone + Hash,
         S: BuildHasher + Clone,
-        V: Eq + Hash,
+        V: Ord + Clone,
         M: 'static + Clone,
         T: Clone,
     {
@@ -428,53 +399,7 @@ pub fn new<K, V>() -> (
 )
 where
     K: Ord + Clone + Hash,
-    V: Eq + Hash,
+    V: Ord + Clone,
 {
     Options::default().construct()
-}
-
-/// Create an empty eventually consistent map with meta and timestamp information.
-///
-/// Use the [`Options`](./struct.Options.html) builder for more control over initialization.
-#[allow(clippy::type_complexity)]
-pub fn with_meta_and_timestamp<K, V, M, T>(
-    meta: M,
-    timestamp: T,
-) -> (
-    WriteHandle<K, V, M, T, RandomState>,
-    ReadHandle<K, V, M, T, RandomState>,
-)
-where
-    K: Ord + Clone + Hash,
-    V: Eq + Hash,
-    M: 'static + Clone,
-    T: Clone,
-{
-    Options::default()
-        .with_meta(meta)
-        .with_timestamp(timestamp)
-        .construct()
-}
-
-/// Create an empty eventually consistent map with meta information and custom hasher.
-///
-/// Use the [`Options`](./struct.Options.html) builder for more control over initialization.
-#[allow(clippy::type_complexity)]
-pub fn with_hasher<K, V, M, T, S>(
-    timestamp: T,
-    meta: M,
-    hasher: S,
-) -> (WriteHandle<K, V, M, T, S>, ReadHandle<K, V, M, T, S>)
-where
-    K: Ord + Clone + Hash,
-    V: Eq + Hash,
-    M: 'static + Clone,
-    T: Clone,
-    S: BuildHasher + Clone,
-{
-    Options::default()
-        .with_hasher(hasher)
-        .with_timestamp(timestamp)
-        .with_meta(meta)
-        .construct()
 }

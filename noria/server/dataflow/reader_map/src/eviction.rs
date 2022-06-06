@@ -26,7 +26,7 @@ use itertools::Either;
 use rand::Rng;
 
 use crate::inner::Data;
-use crate::values::ValuesInner;
+use crate::values::Values;
 
 /// Controls the maximum number of generations in Generational eviction.
 /// The value of 100 ensures the granularity will be at least 1%.
@@ -123,7 +123,7 @@ impl EvictionStrategy {
         &self,
         data: &'a Data<K, V, S>,
         nkeys: usize,
-    ) -> impl Iterator<Item = (&'a K, &'a ValuesInner<V, S, crate::aliasing::NoDrop>)>
+    ) -> impl Iterator<Item = (&'a K, &'a Values<V>)>
     where
         K: Ord + Clone,
         S: std::hash::BuildHasher,
@@ -160,7 +160,7 @@ impl LRUEviction {
         &self,
         data: &'a Data<K, V, S>,
         nkeys: usize,
-    ) -> impl Iterator<Item = (&'a K, &'a ValuesInner<V, S, crate::aliasing::NoDrop>)>
+    ) -> impl Iterator<Item = (&'a K, &'a Values<V>)>
     where
         K: Ord + Clone,
         S: std::hash::BuildHasher,
@@ -169,7 +169,7 @@ impl LRUEviction {
         // First we collect all the meta values into a single vector
         let mut ctrs = data
             .iter()
-            .map(|(_, v)| v.as_ref().eviction_meta().value())
+            .map(|(_, v)| v.eviction_meta().value())
             .collect::<Vec<_>>();
 
         let ctrs_save = ctrs.clone(); // Save the counters before sorting them to avoid atomic loads for the second time
@@ -193,7 +193,7 @@ impl RandomEviction {
         &self,
         data: &'a Data<K, V, S>,
         nkeys: usize,
-    ) -> impl Iterator<Item = (&'a K, &'a ValuesInner<V, S, crate::aliasing::NoDrop>)>
+    ) -> impl Iterator<Item = (&'a K, &'a Values<V>)>
     where
         K: Ord + Clone,
         S: std::hash::BuildHasher,
@@ -220,7 +220,7 @@ impl GenerationalEviction {
         &self,
         data: &'a Data<K, V, S>,
         mut nkeys: usize,
-    ) -> impl Iterator<Item = (&'a K, &'a ValuesInner<V, S, crate::aliasing::NoDrop>)>
+    ) -> impl Iterator<Item = (&'a K, &'a Values<V>)>
     where
         K: Ord + Clone,
         S: std::hash::BuildHasher,
@@ -232,7 +232,7 @@ impl GenerationalEviction {
         // Load the atomic values just once
         let ctrs = data
             .iter()
-            .map(|(_, v)| v.as_ref().eviction_meta().value())
+            .map(|(_, v)| v.eviction_meta().value())
             .collect::<Vec<_>>();
 
         // We first count how many values are there to evict for each generation (up to

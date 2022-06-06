@@ -98,7 +98,7 @@ fn new_inner(
             // want to pass whether we're fully materialized down into the reader_map and skip
             // inserting into the interval tree entirely (maybe make it an option?) if so
             if trigger.is_none() {
-                w.insert_range(vec![], ..);
+                w.insert_range(..);
             }
             (multiw::Handle::$variant(w), multir::Handle::$variant(r))
         }};
@@ -163,7 +163,7 @@ pub(crate) struct WriteHandleEntry<'a> {
 impl<'a> WriteHandleEntry<'a> {
     pub(crate) fn try_find_and<F, T>(self, then: F) -> LookupResult<T>
     where
-        F: Fn(ValuesIter<'_, Box<[DataType]>, RandomState>) -> ReadySetResult<T>,
+        F: Fn(ValuesIter<'_, Box<[DataType]>>) -> ReadySetResult<T>,
     {
         self.handle.handle.read().meta_get_and(&self.key, then)
     }
@@ -444,7 +444,7 @@ impl SingleReadHandle {
     /// Holes in partially materialized state are returned as `Ok((None, _))`.
     pub fn try_find_and<F, T>(&self, key: &[DataType], then: F) -> Result<(T, i64), LookupError>
     where
-        F: Fn(ValuesIter<'_, Box<[DataType]>, RandomState>) -> ReadySetResult<T>,
+        F: Fn(ValuesIter<'_, Box<[DataType]>>) -> ReadySetResult<T>,
     {
         match self.handle.meta_get_and(key, &then) {
             Err(e) if e.is_miss() && self.trigger.is_none() => {
@@ -461,7 +461,7 @@ impl SingleReadHandle {
         then: F,
     ) -> Result<(Vec<T>, i64), LookupError>
     where
-        F: Fn(ValuesIter<'_, Box<[DataType]>, RandomState>) -> ReadySetResult<T>,
+        F: Fn(ValuesIter<'_, Box<[DataType]>>) -> ReadySetResult<T>,
         R: RangeBounds<Vec<common::DataType>>,
     {
         match self.handle.meta_get_range_and(range, &then) {
