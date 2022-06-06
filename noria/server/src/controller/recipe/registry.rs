@@ -79,6 +79,14 @@ impl RecipeExpression {
         // Sha1 digest is 20 byte long, so it is safe to consume only 16 bytes
         u128::from_le_bytes(hasher.finalize()[..16].try_into().unwrap())
     }
+
+    /// Returns `true` if the recipe expression is a [`Cache`].
+    ///
+    /// [`Cache`]: RecipeExpression::Cache
+    #[must_use]
+    pub(super) fn is_cache(&self) -> bool {
+        matches!(self, Self::Cache { .. })
+    }
 }
 
 /// The set of all [`RecipeExpression`]s installed in a Noria server cluster.
@@ -169,6 +177,15 @@ impl ExpressionRegistry {
         self.aliases
             .get(name_or_alias)
             .map(|query_id| self.expressions[query_id].name())
+    }
+
+    /// Returns an iterator over all *original names* for all caches in the recipe (not including
+    /// aliases)
+    pub(super) fn cache_names(&self) -> impl Iterator<Item = &SqlIdentifier> + '_ {
+        self.expressions
+            .values()
+            .filter(|expr| expr.is_cache())
+            .map(|expr| expr.name())
     }
 
     /// Removes the [`RecipeExpression`] associated with the given name (or alias), if

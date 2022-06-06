@@ -1068,7 +1068,7 @@ mod tests {
         noria
             .extend_recipe(
                 "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);
-                                CREATE CACHE test_query FROM SELECT * FROM users;"
+                 CREATE CACHE test_query FROM SELECT * FROM users;"
                     .parse()
                     .unwrap(),
             )
@@ -1082,6 +1082,30 @@ mod tests {
 
         let queries = noria.outputs().await.unwrap();
         assert!(!queries.contains_key("test_query"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn remove_all_queries() {
+        let mut noria = start_simple("remove_all_queries").await;
+        noria
+            .extend_recipe(
+                "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);
+                 CREATE CACHE q1 FROM SELECT id FROM users;
+                 CREATE CACHE q2 FROM SELECT name FROM users where id = ?;"
+                    .parse()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let queries = noria.outputs().await.unwrap();
+        assert!(queries.contains_key("q1"));
+        assert!(queries.contains_key("q2"));
+
+        noria.remove_all_queries().await.unwrap();
+
+        let queries = noria.outputs().await.unwrap();
+        assert!(queries.is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread")]

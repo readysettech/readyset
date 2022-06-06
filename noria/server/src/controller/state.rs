@@ -1243,6 +1243,20 @@ impl DataflowState {
         Ok(())
     }
 
+    pub(super) async fn remove_all_queries(&mut self) -> ReadySetResult<ActivationResult> {
+        let changes = self
+            .recipe
+            .cache_names()
+            .into_iter()
+            .map(|n| Change::Drop {
+                name: n.clone(),
+                if_exists: true,
+            })
+            .collect();
+
+        self.apply_recipe(ChangeList { changes }, false).await
+    }
+
     /// Runs all the necessary steps to recover the full [`DataflowState`], when said state only
     /// has the bare minimum information.
     ///

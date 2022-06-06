@@ -568,6 +568,13 @@ impl ControllerHandle {
         self.rpc("remove_query", name, self.migration_timeout)
     }
 
+    /// Remove all non-base nodes from the graph
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn remove_all_queries(&mut self) -> impl Future<Output = ReadySetResult<()>> + '_ {
+        self.rpc("remove_all_queries", (), self.migration_timeout)
+    }
+
     /// Set the replication offset for the schema, which is stored with the recipe.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
