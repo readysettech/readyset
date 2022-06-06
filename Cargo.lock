@@ -6398,6 +6398,8 @@ dependencies = [
  "readyset-tracing",
  "reqwest",
  "serde",
+ "serde_json",
+ "time 0.3.6",
  "tokio",
  "tracing",
  "uuid 1.0.0",
@@ -6589,6 +6591,7 @@ dependencies = [
  "libc",
  "num_threads",
  "quickcheck 1.0.3",
+ "serde",
  "time-macros",
 ]
 

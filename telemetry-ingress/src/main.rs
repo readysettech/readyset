@@ -7,8 +7,9 @@ use std::net::SocketAddr;
 
 use anyhow::{Context, Result};
 use aws_sdk_s3 as s3;
-use bytes::Bytes;
 use clap::Parser;
+use serde::Serialize;
+use time::OffsetDateTime;
 use tracing::{debug, error, info};
 use uuid::Uuid;
 use warp::http::Response;
@@ -41,11 +42,19 @@ pub struct Options {
     log_options: readyset_tracing::Options,
 }
 
+#[derive(Serialize)]
+struct Event {
+    #[serde(with = "time::serde::rfc3339")]
+    timestamp: OffsetDateTime,
+    user: String,
+    payload: serde_json::Value,
+}
+
 async fn handle_upload(
     options: &Options,
     s3_client: &s3::Client,
     claims: Claims,
-    body: Bytes,
+    payload: serde_json::Value,
 ) -> Result<Uuid> {
     let id = Uuid::new_v4();
     info!(%id, "Uploading payload");
@@ -53,11 +62,17 @@ async fn handle_upload(
     let path = format!("{}/{}", claims.sub, id);
     debug!(bucket = %options.s3_bucket, %path);
 
+    let event = Event {
+        timestamp: OffsetDateTime::now_utc(),
+        user: claims.sub.clone(),
+        payload,
+    };
+
     s3_client
         .put_object()
         .bucket(&options.s3_bucket)
         .key(id.to_string())
-        .body(body.into())
+        .body(serde_json::to_vec(&event)?.into())
         .send()
         .await?;
 
@@ -82,9 +97,9 @@ async fn main() -> Result<()> {
 
     let upload_payload = authenticated(jwks, warp::path("payload").and(warp::post()))
         .and(warp::body::content_length_limit(MAX_BODY_SIZE_BYTES))
-        .and(warp::body::bytes())
-        .then(move |token, body| async move {
-            match handle_upload(options, s3_client, token, body).await {
+        .and(warp::body::json())
+        .then(move |token, payload: serde_json::Value| async move {
+            match handle_upload(options, s3_client, token, payload).await {
                 Ok(id) => Response::builder().body(id.to_string()),
                 Err(error) => {
                     error!(%error, "Error handling request");
