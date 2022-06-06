@@ -589,9 +589,9 @@ impl KeyedState {
             KeyedState::QuinBTree(m) => do_evict_range!(m, range, (DataType, _, _, _, _)),
             KeyedState::SexBTree(m) => do_evict_range!(m, range, (DataType, _, _, _, _, _)),
             KeyedState::MultiBTree(m, _) => m
-                .remove_range((
-                    range.start_bound().map(Vec1::as_vec),
-                    range.end_bound().map(Vec1::as_vec),
+                .remove_range::<[DataType], _>((
+                    range.start_bound().map(Vec1::as_slice),
+                    range.end_bound().map(Vec1::as_slice),
                 ))
                 .flat_map(|(_, rows)| rows.into_iter().map(|(r, _)| r))
                 .collect(),

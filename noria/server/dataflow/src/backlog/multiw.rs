@@ -184,22 +184,19 @@ impl Handle {
     {
         match self {
             Handle::Single(h) => {
-                h.insert_range(
-                    vec![],
-                    (
-                        range.start_bound().map(|r| {
-                            debug_assert_eq!(r.len(), 1);
-                            &r[0]
-                        }),
-                        range.end_bound().map(|r| {
-                            debug_assert_eq!(r.len(), 1);
-                            &r[0]
-                        }),
-                    ),
-                );
+                h.insert_range((
+                    range.start_bound().map(|r| {
+                        debug_assert_eq!(r.len(), 1);
+                        &r[0]
+                    }),
+                    range.end_bound().map(|r| {
+                        debug_assert_eq!(r.len(), 1);
+                        &r[0]
+                    }),
+                ));
             }
             Handle::Many(h) => {
-                h.insert_range(vec![], range);
+                h.insert_range(range);
             }
         }
     }

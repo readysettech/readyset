@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 use std::collections::hash_map::RandomState;
-use std::fmt;
+use std::fmt::{self};
 use std::hash::{BuildHasher, Hash};
 use std::iter::FromIterator;
 
@@ -9,15 +9,12 @@ use noria::internal::IndexType;
 
 use crate::inner::Inner;
 use crate::values::Values;
-use crate::{Aliased, Error, Result};
+use crate::{Error, Result};
 
 mod read_ref;
 pub use read_ref::{MapReadRef, ReadGuardIter};
 
 pub use crate::inner::Miss;
-
-mod factory;
-pub use factory::ReadHandleFactory;
 
 /// A handle that may be used to read from the eventually consistent map.
 ///
@@ -116,14 +113,14 @@ where
     }
 
     /// Internal version of `get_and`
-    fn get_raw<Q: ?Sized>(&self, key: &Q) -> Result<Option<ReadGuard<'_, Values<V, S>>>>
+    fn get_raw<Q: ?Sized>(&self, key: &Q) -> Result<Option<ReadGuard<'_, Values<V>>>>
     where
         K: Borrow<Q>,
         Q: Ord + Hash,
     {
         let MapReadRef { guard } = self.enter()?;
         Ok(ReadGuard::try_map(guard, |inner| {
-            let v = inner.data.get(key).map(AsRef::as_ref);
+            let v = inner.data.get(key);
             if let Some(v) = v {
                 inner.eviction_strategy.on_read(v.eviction_meta());
             }
@@ -142,10 +139,7 @@ where
     /// published by the writer. If no publish has happened, or the map has been destroyed, this
     /// function returns an [`Error`].
     #[inline]
-    pub fn get<'rh, Q: ?Sized>(
-        &'rh self,
-        key: &'_ Q,
-    ) -> Result<Option<ReadGuard<'rh, Values<V, S>>>>
+    pub fn get<'rh, Q: ?Sized>(&'rh self, key: &'_ Q) -> Result<Option<ReadGuard<'rh, Values<V>>>>
     where
         K: Borrow<Q>,
         Q: Ord + Hash,
@@ -169,7 +163,7 @@ where
     /// refreshed by the writer. If no refresh has happened, or the map has been destroyed, this
     /// function returns an [`Error`].
     #[inline]
-    pub fn get_one<'rh, Q: ?Sized>(&'rh self, key: &'_ Q) -> Result<Option<ReadGuard<'rh, V>>>
+    pub fn first<'rh, Q: ?Sized>(&'rh self, key: &'_ Q) -> Result<Option<ReadGuard<'rh, V>>>
     where
         K: Borrow<Q>,
         Q: Ord + Clone + Hash,
@@ -179,7 +173,7 @@ where
         } else {
             return Ok(None);
         };
-        Ok(ReadGuard::try_map(vs, |x| x.get_one()))
+        Ok(ReadGuard::try_map(vs, |x| x.first()))
     }
 
     /// Returns a guarded reference to the values corresponding to the key along with the map
@@ -195,14 +189,14 @@ where
     /// function returns an [`Error`].
     ///
     /// If no values exist for the given key, `Ok(None, _)` is returned.
-    pub fn meta_get<Q: ?Sized>(&self, key: &Q) -> Result<(Option<ReadGuard<'_, Values<V, S>>>, M)>
+    pub fn meta_get<Q: ?Sized>(&self, key: &Q) -> Result<(Option<ReadGuard<'_, Values<V>>>, M)>
     where
         K: Borrow<Q>,
         Q: Ord + Clone + Hash,
     {
         let MapReadRef { guard } = self.enter()?;
         let meta = guard.meta.clone();
-        let res = ReadGuard::try_map(guard, |inner| inner.data.get(key).map(AsRef::as_ref));
+        let res = ReadGuard::try_map(guard, |inner| inner.data.get(key));
         Ok((res, meta))
     }
 
@@ -215,39 +209,18 @@ where
     ///
     /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
     /// form *must* match those for the key type.
-    pub fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
-        Q: Ord + Hash,
+        Q: Ord + Hash + ?Sized,
     {
         self.enter().map_or(false, |x| x.contains_key(key))
-    }
-
-    /// Returns true if the map contains the specified value for the specified key.
-    ///
-    /// The key and value may be any borrowed form of the map's respective types, but `Hash` and
-    /// `Eq` on the borrowed form *must* match.
-    ///
-    /// If no refresh has happened, or the map has been destroyed, this function returns an
-    /// [`Error`].
-    pub fn contains_value<Q: ?Sized, W: ?Sized>(&self, key: &Q, value: &W) -> Result<bool>
-    where
-        K: Borrow<Q>,
-        Aliased<V, crate::aliasing::NoDrop>: Borrow<W>,
-        Q: Ord + Hash,
-        W: Hash + Eq,
-        V: Hash + Eq,
-    {
-        Ok(self
-            .get_raw(key.borrow())?
-            .map(|x| x.contains(value))
-            .unwrap_or(false))
     }
 
     /// Read all values in the map, and transform them into a new collection.
     pub fn map_into<Map, Collector, Target>(&self, mut f: Map) -> Collector
     where
-        Map: FnMut(&K, &Values<V, S>) -> Target,
+        Map: FnMut(&K, &Values<V>) -> Target,
         Collector: FromIterator<Target>,
     {
         self.enter()
@@ -271,34 +244,5 @@ where
     /// Returns the index type of the underlying map, or None if no writes have been performed yet
     pub fn index_type(&self) -> Option<IndexType> {
         Some(self.handle.enter()?.data.index_type())
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use crate::new;
-
-    // the idea of this test is to allocate 64 elements, and only use 17. The vector will
-    // probably try to fit either exactly the length, to the next highest power of 2 from
-    // the length, or something else entirely, E.g. 17, 32, etc.,
-    // but it should always end up being smaller than the original 64 elements reserved.
-    #[test]
-    fn reserve_and_fit() {
-        const MIN: usize = (1 << 4) + 1;
-        const MAX: usize = 1 << 6;
-
-        let (mut w, r) = new();
-
-        w.reserve(0, MAX).publish();
-
-        assert!(r.get_raw(&0).unwrap().unwrap().capacity() >= MAX);
-
-        for i in 0..MIN {
-            w.insert(0, i);
-        }
-
-        w.fit_all().publish();
-
-        assert!(r.get_raw(&0).unwrap().unwrap().capacity() < MAX);
     }
 }

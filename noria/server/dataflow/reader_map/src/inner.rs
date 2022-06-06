@@ -5,12 +5,11 @@ use std::hash::{BuildHasher, Hash};
 use std::ops::{Bound, RangeBounds};
 
 use itertools::Either;
-use left_right::aliasing::DropBehavior;
 use noria::internal::IndexType;
 use partial_map::PartialMap;
 
-use crate::eviction::EvictionStrategy;
-use crate::values::ValuesInner;
+use crate::eviction::{EvictionMeta, EvictionStrategy};
+use crate::values::Values;
 
 /// Represents a miss when looking up a range.
 ///
@@ -30,24 +29,18 @@ impl<K: Clone> Miss<&K> {
     }
 }
 
-pub(crate) enum Data<K, V, S, D = crate::aliasing::NoDrop>
-where
-    K: Ord + Clone,
-    S: BuildHasher,
-    D: DropBehavior,
-{
-    BTreeMap {
-        map: PartialMap<K, ValuesInner<V, S, D>>,
-    },
-    HashMap {
-        map: HashMap<K, ValuesInner<V, S, D>, S>,
-    },
+/// Data contains the mapping from Keys to sets of Values.
+#[derive(Clone)]
+pub(crate) enum Data<K, V, S> {
+    /// Data is stored in a BTreeMap, both point and range lookups are possible
+    BTreeMap { map: PartialMap<K, Values<V>> },
+    /// Data is stored in a HashMap, only point lookups are possible
+    HashMap { map: HashMap<K, Values<V>, S> },
 }
 
 impl<K, V, S> fmt::Debug for Data<K, V, S>
 where
-    K: Ord + Clone + fmt::Debug,
-    S: BuildHasher,
+    K: Ord + fmt::Debug,
     V: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -67,17 +60,10 @@ macro_rules! with_map {
     };
 }
 
-pub(crate) type Iter<'a, K, V, S, D = crate::aliasing::NoDrop> = Either<
-    partial_map::Iter<'a, K, ValuesInner<V, S, D>>,
-    hash_map::Iter<'a, K, ValuesInner<V, S, D>>,
->;
+pub(crate) type Iter<'a, K, V> =
+    Either<partial_map::Iter<'a, K, Values<V>>, hash_map::Iter<'a, K, Values<V>>>;
 
-impl<K, V, S, D> Data<K, V, S, D>
-where
-    K: Ord + Clone,
-    S: BuildHasher,
-    D: DropBehavior,
-{
+impl<K, V, S> Data<K, V, S> {
     pub(crate) fn with_index_type_and_hasher(index_type: IndexType, hash_builder: S) -> Self {
         match index_type {
             IndexType::HashMap => Self::HashMap {
@@ -122,29 +108,10 @@ where
         }
     }
 
-    /// If both self and other are `BTreeMap`s, set self's interval tree to a clone of other's
-    pub(crate) fn clone_intervals_from<D2>(&mut self, other: &Data<K, V, S, D2>)
-    where
-        D2: DropBehavior,
-    {
-        if let (Data::BTreeMap { ref mut map, .. }, Data::BTreeMap { map: other_map, .. }) =
-            (self, other)
-        {
-            map.clone_intervals_from(other_map);
-        }
-    }
-
-    pub(crate) fn iter(&self) -> Iter<'_, K, V, S, D> {
+    pub(crate) fn iter(&self) -> Iter<'_, K, V> {
         match self {
             Self::BTreeMap { map, .. } => Either::Left(map.iter()),
             Self::HashMap { map } => Either::Right(map.iter()),
-        }
-    }
-
-    pub(crate) fn values_mut(&mut self) -> impl Iterator<Item = &mut ValuesInner<V, S, D>> {
-        match self {
-            Self::BTreeMap { map, .. } => Either::Left(map.values_mut()),
-            Self::HashMap { map } => Either::Right(map.values_mut()),
         }
     }
 
@@ -159,12 +126,14 @@ where
         }
     }
 
-    pub(crate) fn range<R>(
+    pub(crate) fn range<R, Q>(
         &'_ self,
         range: &R,
-    ) -> Result<partial_map::Range<'_, K, ValuesInner<V, S, D>>, Miss<K>>
+    ) -> Result<partial_map::Range<'_, K, Values<V>>, Miss<K>>
     where
-        R: Clone + RangeBounds<K>,
+        R: RangeBounds<Q>,
+        K: Borrow<Q> + Ord + Clone,
+        Q: Ord + ToOwned<Owned = K> + ?Sized,
     {
         match self {
             Self::BTreeMap { map, .. } => map.range(range).map_err(Miss),
@@ -174,22 +143,24 @@ where
 
     pub(crate) fn add_range<R>(&mut self, range: R)
     where
-        R: RangeBounds<K> + Clone,
+        R: RangeBounds<K>,
+        K: Ord + Clone,
     {
         if let Self::BTreeMap { ref mut map, .. } = self {
             map.insert_range(range);
         }
     }
 
-    pub(crate) fn remove_range<R>(&mut self, range: &R)
+    pub(crate) fn remove_range<R>(&mut self, range: R)
     where
-        R: RangeBounds<K> + Clone,
+        R: RangeBounds<K>,
+        K: Ord + Clone,
     {
         match self {
             Self::BTreeMap { map, .. } => {
                 // Returns an iterator, but we don't actually care about the elements (and dropping
                 // the iterator still does all the removal)
-                map.remove_range(range.clone()).for_each(|_| ());
+                let _ = map.remove_range(range);
             }
             Self::HashMap { .. } => panic!("remove_range called on a HashMap reader_map"),
         }
@@ -197,7 +168,8 @@ where
 
     pub(crate) fn contains_range<R>(&self, range: &R) -> bool
     where
-        R: RangeBounds<K> + Clone,
+        R: RangeBounds<K>,
+        K: Ord + Clone,
     {
         match self {
             Self::BTreeMap { map, .. } => map.contains_range(range),
@@ -206,31 +178,30 @@ where
     }
 }
 
-impl<K, V, S, D> Data<K, V, S, D>
+impl<K, V, S> Data<K, V, S>
 where
-    K: Ord + Clone + Hash,
+    K: Eq + Hash + Ord,
     S: BuildHasher,
-    D: DropBehavior,
 {
-    pub(crate) fn get<Q>(&self, k: &Q) -> Option<&ValuesInner<V, S, D>>
+    pub(crate) fn get<Q>(&self, k: &Q) -> Option<&Values<V>>
     where
-        K: Borrow<Q>,
+        K: Borrow<Q> + Clone,
         Q: ?Sized + Hash + Ord,
     {
         with_map!(self, |map| map.get(k))
     }
 
-    pub(crate) fn get_mut<Q>(&mut self, k: &Q) -> Option<&mut ValuesInner<V, S, D>>
+    pub(crate) fn get_mut<Q>(&mut self, k: &Q) -> Option<&mut Values<V>>
     where
-        K: Borrow<Q>,
+        K: Borrow<Q> + Clone,
         Q: ?Sized + Hash + Ord + ToOwned<Owned = K>,
     {
         with_map!(self, |map| map.get_mut(k))
     }
 
-    pub(crate) fn remove<Q>(&mut self, k: &Q) -> Option<ValuesInner<V, S, D>>
+    pub(crate) fn remove<Q>(&mut self, k: &Q) -> Option<Values<V>>
     where
-        K: Borrow<Q>,
+        K: Borrow<Q> + Clone,
         Q: ?Sized + Hash + Ord + ToOwned<Owned = K>,
     {
         with_map!(self, |map| map.remove(k))
@@ -244,7 +215,10 @@ where
         with_map!(self, |map| map.contains_key(k))
     }
 
-    pub(crate) fn entry(&mut self, key: K) -> Entry<'_, K, V, S, D> {
+    pub(crate) fn entry(&mut self, key: K) -> Entry<'_, K, V>
+    where
+        K: Clone,
+    {
         match self {
             Data::BTreeMap { map, .. } => match map.entry(key) {
                 partial_map::Entry::Vacant(v) => Entry::Vacant(VacantEntry::BTreeMap(v)),
@@ -258,36 +232,19 @@ where
     }
 }
 
-impl<K, V, S, D> Extend<(K, ValuesInner<V, S, D>)> for Data<K, V, S, D>
+pub(crate) enum VacantEntry<'a, K, V>
 where
-    K: Ord + Clone + Eq + Hash,
-    S: BuildHasher,
-    D: DropBehavior,
+    K: Ord,
 {
-    fn extend<T>(&mut self, iter: T)
-    where
-        T: IntoIterator<Item = (K, ValuesInner<V, S, D>)>,
-    {
-        match self {
-            Self::BTreeMap { ref mut map, .. } => map.extend(iter),
-            Self::HashMap { ref mut map } => map.extend(iter),
-        }
-    }
+    HashMap(hash_map::VacantEntry<'a, K, Values<V>>),
+    BTreeMap(partial_map::VacantEntry<'a, K, Values<V>>),
 }
 
-pub(crate) enum VacantEntry<'a, K, V, S, D: DropBehavior>
+impl<'a, K: 'a, V: 'a> VacantEntry<'a, K, V>
 where
     K: Ord + Clone,
 {
-    HashMap(hash_map::VacantEntry<'a, K, ValuesInner<V, S, D>>),
-    BTreeMap(partial_map::VacantEntry<'a, K, ValuesInner<V, S, D>>),
-}
-
-impl<'a, K: 'a, V: 'a, S, D: DropBehavior> VacantEntry<'a, K, V, S, D>
-where
-    K: Ord + Clone,
-{
-    pub(crate) fn insert(self, value: ValuesInner<V, S, D>) -> &'a mut ValuesInner<V, S, D> {
+    pub(crate) fn insert(self, value: Values<V>) -> &'a mut Values<V> {
         match self {
             Self::HashMap(e) => e.insert(value),
             Self::BTreeMap(e) => e.insert(value),
@@ -295,19 +252,19 @@ where
     }
 }
 
-pub(crate) enum OccupiedEntry<'a, K, V, S, D: DropBehavior>
+pub(crate) enum OccupiedEntry<'a, K, V>
 where
-    K: Ord + Clone,
+    K: Ord,
 {
-    HashMap(hash_map::OccupiedEntry<'a, K, ValuesInner<V, S, D>>),
-    BTreeMap(partial_map::OccupiedEntry<'a, K, ValuesInner<V, S, D>>),
+    HashMap(hash_map::OccupiedEntry<'a, K, Values<V>>),
+    BTreeMap(partial_map::OccupiedEntry<'a, K, Values<V>>),
 }
 
-impl<'a, K: 'a, V: 'a, S, D: DropBehavior> OccupiedEntry<'a, K, V, S, D>
+impl<'a, K: 'a, V: 'a> OccupiedEntry<'a, K, V>
 where
     K: Ord + Clone,
 {
-    pub(crate) fn into_mut(self) -> &'a mut ValuesInner<V, S, D> {
+    pub(crate) fn into_mut(self) -> &'a mut Values<V> {
         match self {
             Self::HashMap(e) => e.into_mut(),
             Self::BTreeMap(e) => e.into_mut(),
@@ -315,21 +272,21 @@ where
     }
 }
 
-pub(crate) enum Entry<'a, K, V, S, D: DropBehavior>
+pub(crate) enum Entry<'a, K, V>
 where
-    K: Ord + Clone,
+    K: Ord,
 {
-    Vacant(VacantEntry<'a, K, V, S, D>),
-    Occupied(OccupiedEntry<'a, K, V, S, D>),
+    Vacant(VacantEntry<'a, K, V>),
+    Occupied(OccupiedEntry<'a, K, V>),
 }
 
-impl<'a, K: 'a, V: 'a, S, D: DropBehavior> Entry<'a, K, V, S, D>
+impl<'a, K: 'a, V: 'a> Entry<'a, K, V>
 where
     K: Ord + Clone,
 {
-    pub(crate) fn or_insert_with<F>(self, default: F) -> &'a mut ValuesInner<V, S, D>
+    pub(crate) fn or_insert_with<F>(self, default: F) -> &'a mut Values<V>
     where
-        F: FnOnce() -> ValuesInner<V, S, D>,
+        F: FnOnce() -> Values<V>,
     {
         match self {
             Entry::Vacant(e) => e.insert(default()),
@@ -338,19 +295,12 @@ where
     }
 }
 
-pub(crate) struct Inner<K, V, M, T, S, D = crate::aliasing::NoDrop>
-where
-    K: Ord + Clone,
-    S: BuildHasher,
-    D: DropBehavior,
-    T: Clone,
-{
-    pub(crate) data: Data<K, V, S, D>,
+pub(crate) struct Inner<K, V, M, T, S> {
+    pub(crate) data: Data<K, V, S>,
     pub(crate) meta: M,
     pub(crate) timestamp: T,
     pub(crate) ready: bool,
     pub(crate) hasher: S,
-
     pub(crate) eviction_strategy: EvictionStrategy,
 }
 
@@ -394,7 +344,7 @@ where
 
 impl<K, V, M, T, S> Inner<K, V, M, T, S>
 where
-    K: Ord + Clone,
+    K: Ord + Clone + Hash,
     S: BuildHasher + Clone,
     T: Clone,
 {
@@ -413,5 +363,21 @@ where
             hasher,
             eviction_strategy,
         }
+    }
+
+    pub(crate) fn data_entry(
+        &mut self,
+        key: K,
+        eviction_meta: &mut Option<EvictionMeta>,
+    ) -> &mut Values<V> {
+        self.data.entry(key).or_insert_with(|| {
+            if let Some(meta) = eviction_meta.take() {
+                Values::new(meta)
+            } else {
+                let meta = self.eviction_strategy.new_meta();
+                eviction_meta.replace(meta.clone());
+                Values::new(meta)
+            }
+        })
     }
 }

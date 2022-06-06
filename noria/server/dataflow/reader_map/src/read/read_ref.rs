@@ -8,8 +8,7 @@ use std::ops::RangeBounds;
 use left_right::ReadGuard;
 
 use crate::inner::{Inner, Miss};
-use crate::values::{Values, ValuesInner};
-use crate::Aliased;
+use crate::values::Values;
 // To make [`WriteHandle`] and friends work.
 #[cfg(doc)]
 use crate::WriteHandle;
@@ -25,7 +24,6 @@ pub struct MapReadRef<'rh, K, V, M = (), T = (), S = RandomState>
 where
     K: Ord + Clone,
     V: Eq + Hash,
-    S: BuildHasher,
     T: Clone,
 {
     pub(super) guard: ReadGuard<'rh, Inner<K, V, M, T, S>>,
@@ -59,7 +57,7 @@ where
     ///
     /// Be careful with this function! While the iteration is ongoing, any writer that tries to
     /// publish changes will block waiting on this reader to finish.
-    pub fn iter(&self) -> ReadGuardIter<'_, K, V, S> {
+    pub fn iter(&self) -> ReadGuardIter<'_, K, V> {
         ReadGuardIter {
             iter: self.guard.data.iter(),
         }
@@ -73,7 +71,7 @@ where
     /// # Panics
     ///
     /// Panics if the underlying map is not a [`BTreeMap`](noria::internal::IndexType::BTreeMap).
-    pub fn range<R>(&self, range: &R) -> Result<RangeIter<'_, K, V, S>, Miss<K>>
+    pub fn range<R>(&self, range: &R) -> Result<RangeIter<'_, K, V>, Miss<K>>
     where
         R: RangeBounds<K> + Clone,
     {
@@ -84,7 +82,7 @@ where
     ///
     /// Be careful with this function! While the iteration is ongoing, any writer that tries to
     /// publish changes will block waiting on this reader to finish.
-    pub fn keys(&self) -> KeysIter<'_, K, V, S> {
+    pub fn keys(&self) -> KeysIter<'_, K, V> {
         KeysIter {
             iter: self.guard.data.iter(),
         }
@@ -94,7 +92,7 @@ where
     ///
     /// Be careful with this function! While the iteration is ongoing, any writer that tries to
     /// publish changes will block waiting on this reader to finish.
-    pub fn values(&self) -> ValuesIter<'_, K, V, S> {
+    pub fn values(&self) -> ValuesIter<'_, K, V> {
         ValuesIter {
             iter: self.guard.data.iter(),
         }
@@ -123,18 +121,18 @@ where
     /// Note that not all writes will be included with this read -- only those that have been
     /// published by the writer. If no publish has happened, or the map has been destroyed, this
     /// function returns `None`.
-    pub fn get<'a, Q: ?Sized>(&'a self, key: &'_ Q) -> Option<&'a Values<V, S>>
+    pub fn get<'a, Q>(&'a self, key: &'_ Q) -> Option<&'a Values<V>>
     where
-        K: Borrow<Q>,
-        Q: Ord + Hash,
+        K: Borrow<Q> + Ord + Clone,
+        Q: ?Sized + Hash + Ord + ToOwned<Owned = K>,
     {
-        self.guard.data.get(key).map(AsRef::as_ref).map(|v| {
+        self.guard.data.get(key).map(|v| {
             self.guard.eviction_strategy.on_read(v.eviction_meta());
             v
         })
     }
 
-    /// Returns a guarded reference to _one_ value corresponding to the key.
+    /// Returns a guarded reference to the smallest value corresponding to the key.
     ///
     /// This is mostly intended for use when you are working with no more than one value per key.
     /// If there are multiple values stored for this key, there are no guarantees to which element
@@ -146,44 +144,24 @@ where
     /// Note that not all writes will be included with this read -- only those that have been
     /// published by the writer. If no publish has happened, or the map has been destroyed, this
     /// function returns `None`.
-    pub fn get_one<'a, Q: ?Sized>(&'a self, key: &'_ Q) -> Option<&'a V>
+    pub fn first<'a, Q: ?Sized>(&'a self, key: &'_ Q) -> Option<&'a V>
     where
         K: Borrow<Q>,
         Q: Ord + Hash,
     {
-        self.guard
-            .data
-            .get(key)
-            .and_then(|values| values.as_ref().get_one())
+        self.guard.data.get(key).and_then(|values| values.first())
     }
 
     /// Returns true if the map contains any values for the specified key.
     ///
     /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
     /// form *must* match those for the key type.
-    pub fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Ord + Hash,
+        K: Borrow<Q> + Ord + Clone,
+        Q: ?Sized + Hash + Ord,
     {
         self.guard.data.contains_key(key)
-    }
-
-    /// Returns true if the map contains the specified value for the specified key.
-    ///
-    /// The key and value may be any borrowed form of the map's respective types, but `Hash` and
-    /// `Eq` on the borrowed form *must* match.
-    pub fn contains_value<Q: ?Sized, W: ?Sized>(&self, key: &Q, value: &W) -> bool
-    where
-        K: Borrow<Q>,
-        Aliased<V, crate::aliasing::NoDrop>: Borrow<W>,
-        Q: Ord + Hash,
-        W: Hash + Eq,
-    {
-        self.guard
-            .data
-            .get(key)
-            .map_or(false, |values| values.as_ref().contains(value))
     }
 
     /// Returns true if the map contains the specified range of keys.
@@ -198,12 +176,12 @@ where
 impl<'rh, K, Q, V, M, T, S> std::ops::Index<&'_ Q> for MapReadRef<'rh, K, V, M, T, S>
 where
     K: Ord + Clone + Borrow<Q> + Hash,
-    V: Eq + Hash,
-    Q: Ord + ?Sized + Hash,
+    V: Eq + Hash + Default,
+    Q: Ord + ?Sized + Hash + ToOwned<Owned = K>,
     S: BuildHasher,
     T: Clone,
 {
-    type Output = Values<V, S>;
+    type Output = Values<V>;
     fn index(&self, key: &Q) -> &Self::Output {
         self.get(key).unwrap()
     }
@@ -216,28 +194,26 @@ where
     S: BuildHasher,
     T: Clone,
 {
-    type Item = (&'rg K, &'rg Values<V, S>);
-    type IntoIter = ReadGuardIter<'rg, K, V, S>;
+    type Item = (&'rg K, &'rg Values<V>);
+    type IntoIter = ReadGuardIter<'rg, K, V>;
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
 
 /// An [`Iterator`] over keys and values in the evmap.
-pub struct ReadGuardIter<'rg, K, V, S>
+pub struct ReadGuardIter<'rg, K, V>
 where
     K: Ord + Clone,
     V: Eq + Hash,
-    S: BuildHasher,
 {
-    iter: crate::inner::Iter<'rg, K, V, S>,
+    iter: crate::inner::Iter<'rg, K, V>,
 }
 
-impl<'rg, K, V, S> fmt::Debug for ReadGuardIter<'rg, K, V, S>
+impl<'rg, K, V> fmt::Debug for ReadGuardIter<'rg, K, V>
 where
     K: Ord + Clone + fmt::Debug,
     V: Eq + Hash,
-    S: BuildHasher,
     V: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -245,33 +221,30 @@ where
     }
 }
 
-impl<'rg, K, V, S> Iterator for ReadGuardIter<'rg, K, V, S>
+impl<'rg, K, V> Iterator for ReadGuardIter<'rg, K, V>
 where
     K: Ord + Clone,
     V: Eq + Hash,
-    S: BuildHasher,
 {
-    type Item = (&'rg K, &'rg Values<V, S>);
+    type Item = (&'rg K, &'rg Values<V>);
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|(k, v)| (k, v.as_ref()))
+        self.iter.next()
     }
 }
 
 /// An [`Iterator`] over keys.
-pub struct KeysIter<'rg, K, V, S>
+pub struct KeysIter<'rg, K, V>
 where
     K: Ord + Clone,
     V: Eq + Hash,
-    S: BuildHasher,
 {
-    iter: crate::inner::Iter<'rg, K, V, S>,
+    iter: crate::inner::Iter<'rg, K, V>,
 }
 
-impl<'rg, K, V, S> fmt::Debug for KeysIter<'rg, K, V, S>
+impl<'rg, K, V> fmt::Debug for KeysIter<'rg, K, V>
 where
     K: Ord + Clone + fmt::Debug,
     V: Eq + Hash,
-    S: BuildHasher,
     V: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -279,11 +252,10 @@ where
     }
 }
 
-impl<'rg, K, V, S> Iterator for KeysIter<'rg, K, V, S>
+impl<'rg, K, V> Iterator for KeysIter<'rg, K, V>
 where
     K: Ord + Clone,
     V: Eq + Hash,
-    S: BuildHasher,
 {
     type Item = &'rg K;
     fn next(&mut self) -> Option<Self::Item> {
@@ -292,20 +264,18 @@ where
 }
 
 /// An [`Iterator`] over a range of keys.
-pub struct RangeIter<'rg, K, V, S>
+pub struct RangeIter<'rg, K, V>
 where
     K: Ord + Clone,
     V: Eq + Hash,
-    S: BuildHasher,
 {
-    iter: btree_map::Range<'rg, K, ValuesInner<V, S, crate::aliasing::NoDrop>>,
+    iter: btree_map::Range<'rg, K, Values<V>>,
 }
 
-impl<'rg, K, V, S> fmt::Debug for RangeIter<'rg, K, V, S>
+impl<'rg, K, V> fmt::Debug for RangeIter<'rg, K, V>
 where
     K: Ord + Clone + fmt::Debug,
     V: Eq + Hash,
-    S: BuildHasher,
     V: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -313,15 +283,14 @@ where
     }
 }
 
-impl<'rg, K, V, S> Iterator for RangeIter<'rg, K, V, S>
+impl<'rg, K, V> Iterator for RangeIter<'rg, K, V>
 where
     K: Ord + Clone,
     V: Eq + Hash,
-    S: BuildHasher,
 {
-    type Item = (&'rg K, &'rg Values<V, S>);
+    type Item = (&'rg K, &'rg Values<V>);
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|(k, v)| (k, v.as_ref()))
+        self.iter.next()
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -330,20 +299,18 @@ where
 }
 
 /// An [`Iterator`] over value sets.
-pub struct ValuesIter<'rg, K, V, S>
+pub struct ValuesIter<'rg, K, V>
 where
     K: Ord + Clone,
     V: Eq + Hash,
-    S: BuildHasher,
 {
-    iter: crate::inner::Iter<'rg, K, V, S>,
+    iter: crate::inner::Iter<'rg, K, V>,
 }
 
-impl<'rg, K, V, S> fmt::Debug for ValuesIter<'rg, K, V, S>
+impl<'rg, K, V> fmt::Debug for ValuesIter<'rg, K, V>
 where
     K: Ord + Clone + fmt::Debug,
     V: Eq + Hash,
-    S: BuildHasher,
     V: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -351,14 +318,13 @@ where
     }
 }
 
-impl<'rg, K, V, S> Iterator for ValuesIter<'rg, K, V, S>
+impl<'rg, K, V> Iterator for ValuesIter<'rg, K, V>
 where
     K: Ord + Clone,
     V: Eq + Hash,
-    S: BuildHasher,
 {
-    type Item = &'rg Values<V, S>;
+    type Item = &'rg Values<V>;
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|(_, v)| v.as_ref())
+        self.iter.next().map(|(_, v)| v)
     }
 }

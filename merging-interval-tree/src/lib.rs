@@ -42,12 +42,10 @@ pub struct IntervalTreeSet<T> {
 
 impl<T> Debug for IntervalTreeSet<T>
 where
-    T: ToOwned + Ord + Debug,
+    T: Ord + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("IntervalTreeSet")
-            .field("tree", &self.intervals().collect::<Vec<_>>())
-            .finish()
+        f.debug_list().entries(self.intervals()).finish()
     }
 }
 

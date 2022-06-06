@@ -3,6 +3,7 @@
 use std::borrow::Borrow;
 pub use std::collections::btree_map::{Iter, Keys, Range, Values, ValuesMut};
 use std::collections::{btree_map, BTreeMap};
+use std::fmt;
 use std::ops::{Bound, RangeBounds};
 
 use merging_interval_tree::IntervalTreeSet;
@@ -42,11 +43,8 @@ use merging_interval_tree::IntervalTreeSet;
 /// map.insert_range(0..=10);
 /// assert_eq!(map.get(&1), Some(&vec![]));
 /// ````
-#[derive(Debug, PartialEq)]
-pub struct PartialMap<K, V>
-where
-    K: Ord + Clone,
-{
+#[derive(PartialEq, Clone)]
+pub struct PartialMap<K, V> {
     map: BTreeMap<K, V>,
     // NOTE: duplicating the key here is unfortunate - in the future post profiling we may want to
     // use some pinning to make these self-referential pointers to the keys in the map
@@ -56,9 +54,21 @@ where
     empty_value: V,
 }
 
+impl<K, V> fmt::Debug for PartialMap<K, V>
+where
+    K: fmt::Debug + Ord,
+    V: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PartialMap")
+            .field("map", &self.map)
+            .field("interval_tree", &self.interval_tree)
+            .finish()
+    }
+}
+
 impl<K, V> Default for PartialMap<K, V>
 where
-    K: Ord + Clone,
     V: Default,
 {
     fn default() -> Self {
@@ -68,7 +78,6 @@ where
 
 impl<K, V> PartialMap<K, V>
 where
-    K: Ord + Clone,
     V: Default,
 {
     pub fn new() -> Self {
@@ -78,7 +87,50 @@ where
             empty_value: V::default(),
         }
     }
+}
 
+impl<K, V> PartialMap<K, V> {
+    /// Returns the number of keys in this map.
+    ///
+    /// Note that this does *not* consider ranges, since for certain keys (strings, etc.) that are
+    /// noncontiguous that's undecidable
+    pub fn num_keys(&self) -> usize {
+        self.map.len()
+    }
+
+    /// Returns true if this map contains no keys or ranges
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty() && self.interval_tree.is_empty()
+    }
+
+    /// Returns an iterator over the keys in this map
+    ///
+    /// Note that this does *not* consider ranges, since iteration is not well-defined for certain
+    /// types of keys (floating points, strings, etc.)
+    pub fn keys(&self) -> Keys<K, V> {
+        self.map.keys()
+    }
+
+    /// Returns an iterator over the key-value pairs in the map
+    ///
+    /// Note that this does *not* consider ranges, since iteration is not well-defined for certain
+    /// types of keys (floating points, strings, etc.)
+    pub fn iter(&self) -> Iter<K, V> {
+        self.map.iter()
+    }
+
+    /// Remove all entries and ranges in this map
+    pub fn clear(&mut self) {
+        self.interval_tree.clear();
+        self.map.clear();
+    }
+}
+
+impl<K, V> PartialMap<K, V>
+where
+    K: Ord + Clone,
+    V: Default,
+{
     /// Returns a mutable reference to the value at `key`.
     ///
     /// If that key is covered by a range of keys we know we have (due to calls to
@@ -104,7 +156,7 @@ where
 
 impl<K, V> PartialMap<K, V>
 where
-    K: Ord + Clone,
+    K: Ord,
 {
     /// Returns a reference to the value at `key`.
     ///
@@ -155,7 +207,7 @@ where
     /// Returns true if the map contains the entirety of the given range
     pub fn contains_range<R, Q>(&self, range: &R) -> bool
     where
-        R: RangeBounds<Q> + Clone,
+        R: RangeBounds<Q>,
         K: Borrow<Q>,
         Q: Ord + ?Sized,
     {
@@ -163,7 +215,10 @@ where
     }
 
     /// Insert `value` at `key`, returning the value that used to be there if any.
-    pub fn insert(&mut self, key: K, value: V) -> Option<V> {
+    pub fn insert(&mut self, key: K, value: V) -> Option<V>
+    where
+        K: Clone,
+    {
         self.interval_tree.insert_point(key.clone());
         self.map.insert(key, value)
     }
@@ -174,7 +229,8 @@ where
     /// [`default`](std::Default::default) value.
     pub fn insert_range<R>(&mut self, range: R)
     where
-        R: RangeBounds<K> + Clone,
+        K: Clone,
+        R: RangeBounds<K>,
     {
         self.interval_tree.insert_interval(range);
     }
@@ -229,27 +285,6 @@ where
         }
     }
 
-    /// Returns the number of keys in this map.
-    ///
-    /// Note that this does *not* consider ranges, since for certain keys (strings, etc.) that are
-    /// noncontiguous that's undecidable
-    pub fn num_keys(&self) -> usize {
-        self.map.len()
-    }
-
-    /// Returns true if this map contains no keys or ranges
-    pub fn is_empty(&self) -> bool {
-        self.map.is_empty() && self.interval_tree.is_empty()
-    }
-
-    /// Returns an iterator over the keys in this map
-    ///
-    /// Note that this does *not* consider ranges, since iteration is not well-defined for certain
-    /// types of keys (floating points, strings, etc.)
-    pub fn keys(&self) -> Keys<K, V> {
-        self.map.keys()
-    }
-
     /// Returns an iterator over the values in this map
     ///
     /// Note that this does *not* consider ranges, since iteration is not well-defined for certain
@@ -266,24 +301,10 @@ where
         self.map.values_mut()
     }
 
-    /// Returns an iterator over the key-value pairs in the map
-    ///
-    /// Note that this does *not* consider ranges, since iteration is not well-defined for certain
-    /// types of keys (floating points, strings, etc.)
-    pub fn iter(&self) -> Iter<K, V> {
-        self.map.iter()
-    }
-
-    /// Remove all entries and ranges in this map
-    pub fn clear(&mut self) {
-        self.interval_tree.clear();
-        self.map.clear();
-    }
-
     /// Remove the value at the given `key` from this map, returning it if it was present
     pub fn remove<Q>(&mut self, key: &Q) -> Option<V>
     where
-        K: Borrow<Q>,
+        K: Borrow<Q> + Clone,
         Q: Ord + ToOwned<Owned = K> + ?Sized,
     {
         self.interval_tree.remove_point(key);
@@ -292,21 +313,27 @@ where
 
     /// Remove the entry at the given `key` from this map, returning a tuple of the key and the
     /// value if it was present
-    pub fn remove_entry(&mut self, key: &K) -> Option<(K, V)> {
+    pub fn remove_entry(&mut self, key: &K) -> Option<(K, V)>
+    where
+        K: Clone,
+    {
         self.interval_tree.remove_point(key);
         self.map.remove_entry(key)
     }
 
     /// Remove the values corresponding to the keys covered by `range`, and return them.
-    pub fn remove_range<'a, R>(&'a mut self, range: R) -> impl Iterator<Item = (K, V)> + 'a
+    pub fn remove_range<'a, B, R>(&'a mut self, range: R) -> impl Iterator<Item = (K, V)> + 'a
     where
-        R: RangeBounds<K> + 'a,
+        K: Borrow<B> + Clone,
+        B: Ord + ?Sized + ToOwned<Owned = K>,
+        R: RangeBounds<B> + 'a,
     {
         self.interval_tree.remove_interval(&range);
         // NOTE: it is deeply unfortunate that rust's BTreeMap doesn't have a drain(range) function
         // the way Vec does. This is forcing us into an O(n) operation where we could have an
         // O(log(n)) one.
-        self.map.drain_filter(move |k, _| range.contains(k))
+        self.map
+            .drain_filter(move |k, _| range.contains(k.borrow()))
     }
 
     /// Clone the interval tree from the given partial map into our interval tree/
@@ -314,7 +341,10 @@ where
     /// WARNING: misusing this function can result in keys in self that don't exist in intervals.
     /// It's not unsafe, since it can't cause undefined behavior, but it's definitely easy to
     /// misuse!
-    pub fn clone_intervals_from<V2>(&mut self, other: &PartialMap<K, V2>) {
+    pub fn clone_intervals_from<V2>(&mut self, other: &PartialMap<K, V2>)
+    where
+        K: Clone,
+    {
         self.interval_tree.clone_from(&other.interval_tree)
     }
 }
@@ -333,7 +363,7 @@ where
 
 pub struct VacantEntry<'a, K, V>
 where
-    K: Ord + Clone,
+    K: Ord,
 {
     tree: &'a mut IntervalTreeSet<K>,
     inner: btree_map::VacantEntry<'a, K, V>,
@@ -351,7 +381,7 @@ where
 
 pub enum OccupiedEntry<'a, K, V>
 where
-    K: Ord + Clone,
+    K: Ord,
 {
     Default {
         inner: btree_map::VacantEntry<'a, K, V>,
@@ -363,7 +393,7 @@ where
 
 impl<'a, K, V> OccupiedEntry<'a, K, V>
 where
-    K: Ord + Clone,
+    K: Ord,
     V: Default,
 {
     pub fn into_mut(self) -> &'a mut V {
@@ -376,7 +406,7 @@ where
 
 pub enum Entry<'a, K, V>
 where
-    K: Ord + Clone,
+    K: Ord,
 {
     Vacant(VacantEntry<'a, K, V>),
     Occupied(OccupiedEntry<'a, K, V>),
