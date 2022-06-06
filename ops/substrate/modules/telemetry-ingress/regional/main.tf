@@ -11,6 +11,60 @@ resource "aws_s3_bucket" "bucket" {
   bucket = var.s3_bucket_name
 }
 
+data "aws_iam_policy_document" "ec2_assume_role_policy" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    effect  = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "telemetry-ingress-instance" {
+  name               = "telemetry-ingress-instance"
+  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role_policy.json
+}
+
+data "aws_iam_policy_document" "telemetry_ingress_s3_access" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:GetObjectVersion",
+      "s3:PutObject",
+      "s3:PutObjectAcl",
+    ]
+    resources = [
+      "${aws_s3_bucket.bucket.arn}/*"
+    ]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "s3:ListBucket",
+      "s3:GetBucketLocation"
+    ]
+    resources = [
+      aws_s3_bucket.bucket.arn,
+    ]
+  }
+}
+
+resource "aws_iam_instance_profile" "telemetry-ingress-instance" {
+  name = "telemetry-ingress-instance"
+  role = aws_iam_role.telemetry-ingress-instance.name
+}
+
+resource "aws_iam_role_policy" "telemetry_ingress_s3_access" {
+  name   = "TelemetryIngressS3Access"
+  role   = aws_iam_role.telemetry-ingress-instance.id
+  policy = data.aws_iam_policy_document.telemetry_ingress_s3_access.json
+}
+
 resource "aws_acm_certificate" "telemetry-ingress" {
   domain_name       = "${var.domain}.readyset.io"
   validation_method = "DNS"
@@ -77,6 +131,8 @@ module "asg" {
   security_groups = [aws_security_group.telemetry-ingress-instance.id]
   load_balancers  = [module.elb.elb_id]
   key_name        = var.key_name
+
+  iam_instance_profile_arn = aws_iam_instance_profile.telemetry-ingress-instance.arn
 
   user_data = base64encode(
     <<-EOT
