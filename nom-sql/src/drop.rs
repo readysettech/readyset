@@ -92,6 +92,7 @@ pub fn drop_cached_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], D
         Ok((i, DropCacheStatement { name }))
     }
 }
+
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DropViewStatement {
     pub views: Vec<SqlIdentifier>,
@@ -124,6 +125,24 @@ pub fn drop_view(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DropViewS
         let (i, _) = statement_terminator(i)?;
         Ok((i, DropViewStatement { views, if_exists }))
     }
+}
+
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct DropAllCachesStatement {}
+
+impl Display for DropAllCachesStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "DROP ALL CACHES")
+    }
+}
+
+pub fn drop_all_caches(i: &[u8]) -> IResult<&[u8], DropAllCachesStatement> {
+    let (i, _) = tag_no_case("drop")(i)?;
+    let (i, _) = whitespace1(i)?;
+    let (i, _) = tag_no_case("all")(i)?;
+    let (i, _) = whitespace1(i)?;
+    let (i, _) = tag_no_case("caches")(i)?;
+    Ok((i, DropAllCachesStatement {}))
 }
 
 #[cfg(test)]

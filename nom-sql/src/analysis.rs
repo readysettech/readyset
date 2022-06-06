@@ -54,7 +54,8 @@ impl ReferredTables for SqlQuery {
             | SqlQuery::Use(_)
             | SqlQuery::Show(_)
             | SqlQuery::Explain(_)
-            | SqlQuery::DropCache(_) => HashSet::new(),
+            | SqlQuery::DropCache(_)
+            | SqlQuery::DropAllCaches(_) => HashSet::new(),
         }
     }
 }

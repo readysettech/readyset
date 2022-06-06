@@ -13,8 +13,8 @@ use crate::create::{
 };
 use crate::delete::{deletion, DeleteStatement};
 use crate::drop::{
-    drop_cached_query, drop_table, drop_view, DropCacheStatement, DropTableStatement,
-    DropViewStatement,
+    drop_all_caches, drop_cached_query, drop_table, drop_view, DropCacheStatement,
+    DropTableStatement, DropViewStatement,
 };
 use crate::explain::{explain_statement, ExplainStatement};
 use crate::insert::{insertion, InsertStatement};
@@ -28,7 +28,7 @@ use crate::transaction::{
 };
 use crate::update::{updating, UpdateStatement};
 use crate::use_statement::{use_statement, UseStatement};
-use crate::{Dialect, TableKey};
+use crate::{Dialect, DropAllCachesStatement, TableKey};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
@@ -37,6 +37,7 @@ pub enum SqlQuery {
     CreateView(CreateViewStatement),
     CreateCache(CreateCacheStatement),
     DropCache(DropCacheStatement),
+    DropAllCaches(DropAllCachesStatement),
     AlterTable(AlterTableStatement),
     Insert(InsertStatement),
     CompoundSelect(CompoundSelectStatement),
@@ -64,6 +65,7 @@ impl fmt::Display for SqlQuery {
             SqlQuery::CreateView(ref create) => write!(f, "{}", create),
             SqlQuery::CreateCache(ref create) => write!(f, "{}", create),
             SqlQuery::DropCache(ref drop) => write!(f, "{}", drop),
+            SqlQuery::DropAllCaches(ref drop) => write!(f, "{}", drop),
             SqlQuery::Delete(ref delete) => write!(f, "{}", delete),
             SqlQuery::DropTable(ref drop) => write!(f, "{}", drop),
             SqlQuery::DropView(ref drop) => write!(f, "{}", drop),
@@ -100,6 +102,7 @@ impl SqlQuery {
             Self::CreateView(_) => "CREATE VIEW",
             Self::CreateCache(_) => "CREATE CACHE",
             Self::DropCache(_) => "DROP CACHE",
+            Self::DropAllCaches(_) => "DROP ALL CACHES",
             Self::Delete(_) => "DELETE",
             Self::DropTable(_) => "DROP TABLE",
             Self::DropView(_) => "DROP VIEW",
@@ -133,6 +136,7 @@ pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery>
             map(view_creation(dialect), SqlQuery::CreateView),
             map(create_cached_query(dialect), SqlQuery::CreateCache),
             map(drop_cached_query(dialect), SqlQuery::DropCache),
+            map(drop_all_caches, SqlQuery::DropAllCaches),
             map(alter_table_statement(dialect), SqlQuery::AlterTable),
             map(start_transaction(dialect), SqlQuery::StartTransaction),
             map(commit(dialect), SqlQuery::Commit),
@@ -399,6 +403,12 @@ mod tests {
         assert!(res1.is_ok());
         assert_eq!(expected0, format!("{}", res0.unwrap()));
         assert_eq!(expected1, format!("{}", res1.unwrap()));
+    }
+
+    #[test]
+    fn drop_all_caches() {
+        let res = parse_query(Dialect::MySQL, "drOP ALL    caCHEs").unwrap();
+        assert_eq!(res, SqlQuery::DropAllCaches(DropAllCachesStatement {}));
     }
 
     mod mysql {
