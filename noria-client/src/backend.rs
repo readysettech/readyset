@@ -883,6 +883,7 @@ where
             | SqlQuery::RenameTable(..)
             | SqlQuery::CreateCache(..)
             | SqlQuery::DropCache(..)
+            | SqlQuery::DropAllCaches(..)
             | SqlQuery::Explain(_) => {
                 warn!(statement = %Sensitive(&parsed_query), "Statement cannot be prepared by ReadySet");
                 PrepareMeta::Unimplemented
@@ -1451,6 +1452,9 @@ where
             SqlQuery::DropCache(DropCacheStatement { name }) => {
                 self.drop_cached_query(name.as_str()).await
             }
+            SqlQuery::DropAllCaches(_) => Err(ReadySetError::Unsupported(
+                "DROP ALL CACHES not implemented yet".into(),
+            )),
             SqlQuery::Show(ShowStatement::CachedQueries) => self.noria.verbose_outputs().await,
             SqlQuery::Show(ShowStatement::ReadySetStatus) => self.noria.readyset_status().await,
             SqlQuery::Show(ShowStatement::ProxiedQueries) => self.show_proxied_queries().await,
@@ -1835,7 +1839,10 @@ where
                             }
                         }
                     }
-                    SqlQuery::CreateCache(_) | SqlQuery::DropCache(_) | SqlQuery::Explain(_) => {
+                    SqlQuery::CreateCache(_)
+                    | SqlQuery::DropCache(_)
+                    | SqlQuery::DropAllCaches(_)
+                    | SqlQuery::Explain(_) => {
                         unreachable!("path returns prior")
                     }
                 }
