@@ -133,6 +133,11 @@ impl Recipe {
         self.registry.resolve_alias(&alias.into())
     }
 
+    /// Returns a set of all *original names* for all caches in the recipe (not including aliases)
+    pub(in crate::controller) fn cache_names(&self) -> impl Iterator<Item = &SqlIdentifier> + '_ {
+        self.registry.cache_names()
+    }
+
     /// Obtains the `NodeIndex` for the node corresponding to a named query or a write type.
     pub(in crate::controller) fn node_addr_for(
         &self,
