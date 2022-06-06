@@ -1,0 +1,14 @@
+[Unit]
+After=network.target
+Description=ReadySet Auth0 Frontend
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/bin/npm start
+WorkingDirectory=/opt/auth0-frontend
+EnvironmentFile=/etc/default/auth0-frontend
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target
