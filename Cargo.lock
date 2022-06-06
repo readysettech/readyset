@@ -6927,10 +6927,10 @@ dependencies = [
 
 [[package]]
 name = "triomphe"
-version = "0.1.5"
-source = "git+https://github.com/readysettech/triomphe?branch=vlad/from_slice#1120c6f0f6d4fceca055d5f9520f07d71f2baa98"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eda0abf5a9b5ad4a5ac1393956ae03fb57033749d3983e2cac9afbfd5ae04ec2"
 dependencies = [
- "memoffset",
  "serde",
  "stable_deref_trait",
 ]
