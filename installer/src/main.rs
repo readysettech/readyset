@@ -4,14 +4,14 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use ::console::style;
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use clap::Parser;
 use deployment::{Deployment, DeploymentData};
 use directories::ProjectDirs;
 use readyset_telemetry_reporter::{Error as TelemetryError, TelemetryReporter};
 use tokio::fs::DirBuilder;
 
-use crate::console::{password, select};
+use crate::console::select;
 
 #[macro_use]
 mod console;
@@ -205,40 +205,23 @@ impl Installer {
     }
 }
 
-async fn prompt_for_and_validate_api_key(options: &Options) -> Result<TelemetryReporter> {
-    async fn authenticate(
-        telemetry: &TelemetryReporter,
-    ) -> readyset_telemetry_reporter::Result<()> {
+async fn init_telemetry(options: &Options) -> Result<TelemetryReporter> {
+    if let Some(api_key) = &options.api_key {
+        let telemetry = TelemetryReporter::new(api_key)?;
         match telemetry.authenticate().await {
-            Ok(_) => Ok(()),
+            Ok(_) => Ok(telemetry),
             Err(e @ (TelemetryError::Unauthorized | TelemetryError::InvalidAPIKeyHeader(_))) => {
-                Err(e)
+                Err(e.into())
             }
             Err(_) => {
                 // Some sort of server error (a 500, an IO error of some sort, a timeout, etc.).
                 // For now, just keep going if this happens so people can use the installer even
                 // when the telemetry ingress is down
-                Ok(())
+                Ok(telemetry)
             }
         }
-    }
-
-    if let Some(api_key) = &options.api_key {
-        let telemetry = TelemetryReporter::new(api_key)?;
-        authenticate(&telemetry).await?;
-        Ok(telemetry)
     } else {
-        loop {
-            let api_key = password().with_prompt("API key").interact()?;
-            let telemetry = TelemetryReporter::new(api_key)?;
-            match authenticate(&telemetry).await {
-                Ok(_) => return Ok(telemetry),
-                Err(TelemetryError::InvalidAPIKeyHeader(_) | TelemetryError::Unauthorized) => {
-                    println!("Invalid API key. Let's try again.")
-                }
-                Err(e) => return Err(e).context("Validating API token"),
-            };
-        }
+        Ok(TelemetryReporter::new_no_op())
     }
 }
 
@@ -246,7 +229,7 @@ async fn prompt_for_and_validate_api_key(options: &Options) -> Result<TelemetryR
 async fn main() -> Result<()> {
     let mut options = Options::parse();
     println!("Welcome to the ReadySet orchestrator.\n");
-    let telemetry = prompt_for_and_validate_api_key(&options).await?;
+    let telemetry = init_telemetry(&options).await?;
 
     let _ = telemetry
         .send_payload(&telemetry::Payload::InstallerRun)

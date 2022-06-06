@@ -144,6 +144,11 @@ impl TelemetryReporter {
         Ok(Self { client })
     }
 
+    /// Create a new "no-op" telemetry reporter.
+    pub fn new_no_op() -> Self {
+        Self { client: None }
+    }
+
     /// Validate the configured API key for this telemetry reporter by making a request to the
     /// telemetry ingress endpoint, without actually sending a payload.
     pub async fn authenticate(&self) -> Result<()> {
