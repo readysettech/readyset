@@ -12,9 +12,3 @@ providers:
     options:
       allowUiUpdates: true
       path: /var/lib/grafana/dashboards/query_specific.json
-
-  - name: Connected
-    type: file
-    options:
-      allowUiUpdates: true
-      path: /var/lib/grafana/dashboards/connected.json

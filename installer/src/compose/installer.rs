@@ -277,11 +277,6 @@ impl<'a> ComposeInstaller<'a> {
 
     async fn create_grafana_dashboards(&mut self) -> Result<()> {
         self.write_config_file(
-            include_str!("./templates/grafana_connected.json"),
-            "compose/grafana/dashboards/connected.json",
-        )
-        .await?;
-        self.write_config_file(
             include_str!("./templates/grafana_overview.json"),
             "compose/grafana/dashboards/query_overview.json",
         )

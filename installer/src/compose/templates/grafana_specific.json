@@ -22,8 +22,7 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "id": 2,
-  "iteration": 1652129690838,
+  "iteration": 1654635251433,
   "links": [
     {
       "asDropdown": false,
@@ -78,7 +77,7 @@
                 "result": {
                   "color": "yellow",
                   "index": 0,
-                  "text": "No"
+                  "text": "Proxied"
                 },
                 "to": 0
               },
@@ -90,7 +89,7 @@
                 "result": {
                   "color": "green",
                   "index": 1,
-                  "text": "Yes"
+                  "text": "Cached"
                 },
                 "to": 10000000000000000
               },
@@ -102,7 +101,7 @@
                 "result": {
                   "color": "yellow",
                   "index": 2,
-                  "text": "No"
+                  "text": "Proxied"
                 }
               },
               "type": "special"
@@ -147,7 +146,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "(query_log_execution_time_count{deployment=\"$deployment\", database_type=\"noria\", query=\"${queryfilter:raw}\", event_type=~\"query|execute\"})",
+          "expr": "(query_log_execution_time_count{deployment=\"$deployment\", database_type=\"readyset\", query=\"${queryfilter:raw}\", event_type=~\"query|execute\"})",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -167,7 +166,7 @@
           "refId": "MySQL Count"
         }
       ],
-      "title": "Query Running in Readyset",
+      "title": "Query Status",
       "transformations": [
         {
           "id": "calculateField",
@@ -270,7 +269,7 @@
       "targets": [
         {
           "exemplar": false,
-          "expr": "query_log_execution_time{quantile=~\"0.5\",database_type=\"noria\",deployment=\"$deployment\",query=\"${queryfilter:raw}\"} * 1000",
+          "expr": "query_log_execution_time{quantile=~\"0.5\",database_type=\"readyset\",deployment=\"$deployment\",query=\"${queryfilter:raw}\"} * 1000",
           "format": "time_series",
           "hide": false,
           "instant": false,
@@ -391,7 +390,7 @@
       "targets": [
         {
           "exemplar": false,
-          "expr": "query_log_execution_time{quantile=~\"0.9\",database_type=\"noria\",deployment=\"$deployment\",query=\"${queryfilter:raw}\"} * 1000",
+          "expr": "query_log_execution_time{quantile=~\"0.9\",database_type=\"readyset\",deployment=\"$deployment\",query=\"${queryfilter:raw}\"} * 1000",
           "format": "time_series",
           "hide": false,
           "instant": false,
@@ -516,7 +515,7 @@
       "targets": [
         {
           "exemplar": false,
-          "expr": "query_log_execution_time{quantile=~\"0.99\",database_type=\"noria\",deployment=\"$deployment\",query=\"${queryfilter:raw}\"} * 1000",
+          "expr": "query_log_execution_time{quantile=~\"0.99\",database_type=\"readyset\",deployment=\"$deployment\",query=\"${queryfilter:raw}\"} * 1000",
           "format": "time_series",
           "hide": false,
           "instant": false,
@@ -677,8 +676,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "qapass",
-          "value": "qapass"
+          "text": "foo",
+          "value": "foo"
         },
         "datasource": "DS_PROMETHEUS",
         "definition": "label_values(deployment)",
@@ -704,8 +703,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "SELECT * FROM `test2` WHERE (`name` = $1)",
-          "value": "SELECT * FROM `test2` WHERE (`name` = $1)"
+          "text": "",
+          "value": ""
         },
         "datasource": "DS_PROMETHEUS",
         "definition": "label_values(query)",

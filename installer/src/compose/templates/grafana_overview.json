@@ -21,7 +21,7 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "iteration": 1654188758149,
+  "iteration": 1654627829537,
   "links": [
     {
       "asDropdown": false,
@@ -362,7 +362,7 @@
         }
       ],
       "timeShift": null,
-      "title": "Queries Proxied to Client Database",
+      "title": "Proxied Queries",
       "transformations": [
         {
           "id": "merge",
@@ -466,8 +466,8 @@
               "query": "Query Text",
               "query id": "Query ID",
               "query id results": "Query ID",
-              "readyset supported": "ReadySet Supported",
-              "readyset supported results": "ReadySet Supported?",
+              "readyset supported": "Supported By ReadySet",
+              "readyset supported results": "Supported By ReadySet",
               "{query=\"SELECT `column_name` FROM `information_schema`.`statistics` WHERE ((`index_name` = '<anonymized>') AND ((`table_schema` = database()) AND (`table_name` = '<anonymized>'))) ORDER BY `seq_in_index`\"}": "MySQL90p"
             }
           }
@@ -742,7 +742,7 @@
         }
       ],
       "timeShift": null,
-      "title": "Queries Cached by ReadySet",
+      "title": "Cached Queries",
       "transformations": [
         {
           "id": "renameByRegex",
