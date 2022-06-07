@@ -18,6 +18,10 @@ terraform {
       source  = "registry.terraform.io/chronark/vercel"
       version = ">=0.10.3"
     }
+    snowflake = {
+      source  = "snowflake-labs/snowflake"
+      version = "~> 0.34.0"
+    }
   }
   required_version = "= 1.1.6"
 }

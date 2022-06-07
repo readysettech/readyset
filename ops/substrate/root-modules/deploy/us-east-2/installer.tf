@@ -83,15 +83,6 @@ resource "aws_s3_bucket" "installer" {
   }
 }
 
-resource "aws_s3_bucket" "installer_logs" {
-  bucket = local.installer_logs_bucket_name
-}
-
-resource "aws_s3_bucket_acl" "installer_logs" {
-  bucket = aws_s3_bucket.installer_logs.id
-  acl    = "log-delivery-write"
-}
-
 resource "aws_s3_bucket_policy" "installer-bucket-policy" {
   bucket = aws_s3_bucket.installer.bucket
   policy = data.aws_iam_policy_document.readysettech-installer-policy.json
@@ -187,4 +178,62 @@ resource "vercel_dns" "installer" {
   name    = "launch"
   type    = "CNAME"
   value   = "${aws_cloudfront_distribution.installer.domain_name}."
+}
+
+#
+# Server logging, and querying with snowflake
+#
+
+resource "aws_s3_bucket" "installer_logs" {
+  bucket = local.installer_logs_bucket_name
+}
+
+resource "aws_s3_bucket_acl" "installer_logs" {
+  bucket = aws_s3_bucket.installer_logs.id
+  acl    = "log-delivery-write"
+}
+
+module "snowflake-s3-integration" {
+  source = "../../../modules/snowflake-s3-integration/regional"
+  providers = {
+    aws       = aws
+    snowflake = snowflake
+  }
+
+  s3_buckets            = [aws_s3_bucket.installer_logs]
+  snowflake_database    = "TELEMETRY" // <- created by prod/default/us-east-2
+  snowflake_external_id = "RA72744_SFCRole=3_lvyVpuq/HtxY3YJQ6u3pmE2ZLBI="
+  snowflake_iam_arn     = "arn:aws:iam::741613821325:user/sdl9-s-ohsw9987"
+}
+
+resource "snowflake_stage" "installer_logs" {
+  name                = "INSTALLER_LOGS"
+  url                 = "s3://${aws_s3_bucket.installer_logs.bucket}"
+  database            = "TELEMETRY"
+  schema              = "PUBLIC"
+  storage_integration = module.snowflake-s3-integration.storage_integration_name
+}
+
+resource "snowflake_external_table" "installer_logs" {
+  database = "TELEMETRY"
+  schema   = "PUBLIC"
+  name     = "installer_logs"
+  # $$ is required for string literals due to https://github.com/Snowflake-Labs/terraform-provider-snowflake/issues/1046
+  file_format       = "type = csv field_delimiter = $$\t$$ compression = auto skip_header = 2"
+  location          = "@TELEMETRY.PUBLIC.${snowflake_stage.installer_logs.name}"
+  auto_refresh      = true
+  copy_grants       = false
+  refresh_on_create = true
+
+  column {
+    name = "id"
+    type = "text"
+    as   = "metadata$filename"
+  }
+
+  column {
+    name = "log_data"
+    type = "variant"
+    as   = "value"
+  }
 }
