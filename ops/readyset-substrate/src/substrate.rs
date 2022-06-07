@@ -83,7 +83,7 @@ fn root_modules_path() -> Result<PathBuf> {
     Ok(path)
 }
 
-pub(crate) fn root_modules() -> Result<Vec<RootModule>> {
+pub(crate) fn root_modules(include_network: bool) -> Result<Vec<RootModule>> {
     let root = root_path()?;
     let output = Command::new("substrate")
         .arg("root-modules")
@@ -100,16 +100,18 @@ pub(crate) fn root_modules() -> Result<Vec<RootModule>> {
         )
     }
     let result: Result<Vec<String>, _> = output.stdout.lines().collect();
+    // The filter here is to make sure that we only include the networking Terraform working
+    // directories only if the include_network boolean is set.
+    // r.path.starts_with("network") | include_network | filter
+    // true                          | true            | true
+    // true                          | false           | false
+    // false                         | true            | true
+    // false                         | false           | true
     match result {
         Ok(root_modules) => Ok(root_modules
             .iter()
             .map(|s| RootModule::from_substrate_output(s))
-            // TODO(harleyk): Remove these filters once they are fixed up.
-            // network/sandbox is using modules in Github which don't work in CI.
-            // readyset/prod is in a weird half existing state.
-            .filter(|r| {
-                !(r.path.starts_with("network/sandbox") || r.path.starts_with("readyset/prod"))
-            })
+            .filter(|r| !r.path.starts_with("network") || include_network)
             .collect()),
         Err(_) => bail!("Could not parse substrate root-modules output"),
     }

@@ -9,20 +9,32 @@ mod terraform;
 
 #[derive(Parser, Debug)]
 enum Subcommand {
-    TerraformValidate { root_module: RootModule },
-    TerraformPlan { root_module: RootModule },
-    TerraformApply { root_module: RootModule },
-    BuildkiteTerraformValidate { root_module: RootModule },
-    BuildkiteTerraformPlan { root_module: RootModule },
+    TerraformValidate {
+        root_module: RootModule,
+    },
+    TerraformPlan {
+        root_module: RootModule,
+    },
+    TerraformApply {
+        root_module: RootModule,
+    },
+    // TODO: These commands should exist
+    // BuildkiteTerraformValidateAndPlan {
+    //   root_module: RootModule,
+    // },
     // BuildkiteSubstrateTerraformApply {
     //    root_module: String
     // }
-    BuildkiteTerraformGenerateValidateAllPipeline,
-    BuildkiteTerraformUploadValidateAllPipeline,
-    BuildkiteTerraformRunValidateAll,
-    BuildkiteTerraformGeneratePlanAllPipeline,
-    BuildkiteTerraformUploadPlanAllPipeline,
-    BuildkiteTerraformRunPlanAll,
+    BuildkiteTerraformRunValidateAndPlanAll {
+        #[clap(long)]
+        /// Should we run the validate and plan on the network working
+        /// directories
+        include_network: bool,
+    },
+    // TODO: This command should exist
+    // BuildkiteSubstrateTerraformApplyAll {
+    //    include_network: bool
+    // }
 }
 
 #[derive(Parser, Debug)]
@@ -46,27 +58,12 @@ fn main() -> Result<()> {
         }
         Subcommand::TerraformPlan { root_module } => commands::terraform::plan(&root_module),
         Subcommand::TerraformApply { root_module } => commands::terraform::apply(&root_module),
-        Subcommand::BuildkiteTerraformValidate { root_module } => {
-            commands::buildkite::terraform_validate(&root_module)
+        // TODO: This command should exist
+        // Subcommand::BuildkiteTerraformValidateAndPlan { root_module } => {
+        //     commands::buildkite::terraform_validate_and_plan(&root_module)
+        // }
+        Subcommand::BuildkiteTerraformRunValidateAndPlanAll { include_network } => {
+            commands::buildkite::terraform_run_validate_and_plan_all(include_network)
         }
-        Subcommand::BuildkiteTerraformPlan { root_module } => {
-            commands::buildkite::terraform_plan(&root_module).map(|_| ())
-        }
-        Subcommand::BuildkiteTerraformGenerateValidateAllPipeline => {
-            commands::buildkite::terraform_generate_validate_all_pipeline()
-        }
-        Subcommand::BuildkiteTerraformUploadValidateAllPipeline => {
-            commands::buildkite::terraform_upload_validate_all_pipeline()
-        }
-        Subcommand::BuildkiteTerraformRunValidateAll => {
-            commands::buildkite::terraform_run_validate_all()
-        }
-        Subcommand::BuildkiteTerraformGeneratePlanAllPipeline => {
-            commands::buildkite::terraform_generate_plan_all_pipeline()
-        }
-        Subcommand::BuildkiteTerraformUploadPlanAllPipeline => {
-            commands::buildkite::terraform_upload_plan_all_pipeline()
-        }
-        Subcommand::BuildkiteTerraformRunPlanAll => commands::buildkite::terraform_run_plan_all(),
     }
 }

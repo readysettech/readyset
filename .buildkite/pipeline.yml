@@ -161,12 +161,7 @@ steps:
                 - "ops/readyset-substrate/**"
                 - "ops/substrate/**"
 
-            - label: ":rust: :terraform: Run validate on all Substrate root-modules"
-              include:
-                - "ops/readyset-substrate/**"
-                - "ops/substrate/**"
-
-            - label: ":rust: :terraform: Run plan on all Substrate root-modules"
+            - label: ":rust: :terraform: Run validate and plan on all Substrate root-modules"
               include:
                 - "ops/readyset-substrate/**"
                 - "ops/substrate/**"
