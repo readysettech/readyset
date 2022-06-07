@@ -1,5 +1,4 @@
 use noria::{ControllerHandle, ReadySetResult};
-use noria_errors::internal;
 use tokio::select;
 use tracing::{info, instrument, warn};
 
@@ -43,15 +42,10 @@ impl OutputsSynchronizer {
                         Ok(outputs) => {
                             //TODO(Dan): Update so that we only request changes to output since
                             //some timestamp. Also consider using query hashes instead of SqlQuery
-                            for (_, query) in outputs {
-                                if let nom_sql::SqlQuery::CreateCache(create_cache_stmt) = query {
-                                    if let nom_sql::CacheInner::Statement(stmt) = create_cache_stmt.inner {
-                                        self.query_status_cache.update_query_migration_state(&*stmt, MigrationState::Successful);
-                                    } else {
-                                        internal!("Unexpected CacheInner::Id() in Outputs")
-                                    }
-                                }
-                            }
+                            outputs.iter().for_each(|(_, query)| {
+                                self.query_status_cache
+                                    .update_query_migration_state(query, MigrationState::Successful)
+                            });
                         }
                         Err(e) => {
                             warn!(error = %e, "Could not get outputs from Leader");

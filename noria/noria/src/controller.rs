@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::future;
 use hyper::client::HttpConnector;
-use nom_sql::SqlIdentifier;
+use nom_sql::{SelectStatement, SqlIdentifier};
 use noria_errors::{
     internal, internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult,
 };
@@ -334,7 +334,7 @@ impl ControllerHandle {
     /// Enumerate all known external views. Includes the SqlQuery that created the view
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub async fn verbose_outputs(&mut self) -> ReadySetResult<BTreeMap<String, nom_sql::SqlQuery>> {
+    pub async fn verbose_outputs(&mut self) -> ReadySetResult<BTreeMap<String, SelectStatement>> {
         let body: hyper::body::Bytes = self
             .handle
             .ready()
