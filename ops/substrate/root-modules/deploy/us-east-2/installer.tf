@@ -3,6 +3,7 @@
 
 locals {
   installer_bucket_name        = "readysettech-orchestrator-us-east-2"
+  installer_logs_bucket_name   = "readysettech-orchestrator-logs-us-east-2"
   installer_bucket_arn         = "arn:aws:s3:::${local.installer_bucket_name}"
   installer_bucket_objects_arn = "${local.installer_bucket_arn}/*"
   domain_name                  = "launch.readyset.io"
@@ -29,6 +30,7 @@ data "aws_iam_policy_document" "readysettech-installer-policy" {
       "s3:ListBucket"
     ]
   }
+
   statement {
     sid    = "AllowDeployInstallerWrite"
     effect = "Allow"
@@ -48,6 +50,7 @@ data "aws_iam_policy_document" "readysettech-installer-policy" {
       "s3:ListBucket"
     ]
   }
+
   statement {
     sid    = "AllowDeployInstallerRead"
     effect = "Allow"
@@ -78,6 +81,15 @@ resource "aws_s3_bucket" "installer" {
   website {
     index_document = "readyset-orchestrator.sh"
   }
+}
+
+resource "aws_s3_bucket" "installer_logs" {
+  bucket = local.installer_logs_bucket_name
+}
+
+resource "aws_s3_bucket_acl" "installer_logs" {
+  bucket = aws_s3_bucket.installer_logs.id
+  acl    = "log-delivery-write"
 }
 
 resource "aws_s3_bucket_policy" "installer-bucket-policy" {
@@ -160,6 +172,12 @@ resource "aws_cloudfront_distribution" "installer" {
   viewer_certificate {
     acm_certificate_arn = aws_acm_certificate_validation.installer.certificate_arn
     ssl_support_method  = "sni-only"
+  }
+
+  logging_config {
+    bucket          = aws_s3_bucket.installer_logs.bucket_domain_name
+    include_cookies = false
+    prefix          = "logs/"
   }
 }
 
