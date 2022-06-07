@@ -20,6 +20,11 @@ resource "aws_instance" "subnet-router" {
     aws_security_group.tailscale.id,
   ]
 
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
+  }
+
   root_block_device {
     volume_type           = "gp2"
     volume_size           = var.root_volume_configs["volume_size"]
