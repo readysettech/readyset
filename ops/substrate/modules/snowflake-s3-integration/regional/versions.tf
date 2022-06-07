@@ -14,6 +14,10 @@ terraform {
       source  = "snowflake-labs/snowflake"
       version = "~> 0.34.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "3.3.1"
+    }
   }
   required_version = "= 1.1.6"
 }

@@ -26,17 +26,3 @@ module "telemetry-ingress" {
   key_name       = "grfn"
   num_replicas   = 1
 }
-
-
-module "telemetry-snowflake" {
-  source = "../../../../../modules/telemetry-snowflake/regional"
-  providers = {
-    aws       = aws
-    snowflake = snowflake
-  }
-
-  s3_bucket_arn         = module.telemetry-ingress.bucket.arn
-  s3_bucket_name        = module.telemetry-ingress.bucket.bucket
-  snowflake_external_id = "RA72744_SFCRole=3_PhlEZzVQcJ3TFNR0MgjEBK74eTI="
-  snowflake_iam_arn     = "arn:aws:iam::741613821325:user/sdl9-s-ohsw9987"
-}

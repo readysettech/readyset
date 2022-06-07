@@ -1,11 +1,20 @@
-variable "s3_bucket_arn" {
-  type        = string
-  description = "ARN of the S3 bucket to query for telemetry data. Must match s3_bucket_arn"
+variable "s3_buckets" {
+  type = list(object({
+    arn    = string,
+    bucket = string
+  }))
+  description = "List of S3 buckets to grant access to"
 }
 
-variable "s3_bucket_name" {
+variable "snowflake_database" {
   type        = string
-  description = "Name of the S3 bucket to query for telemetry data. Must match s3_bucket_name"
+  description = "Snowflake database to create the S3 integration in"
+}
+
+variable "snowflake_schema" {
+  type        = string
+  description = "Schema in the snowflake database to create the S3 integration in"
+  default     = "PUBLIC"
 }
 
 variable "snowflake_external_id" {

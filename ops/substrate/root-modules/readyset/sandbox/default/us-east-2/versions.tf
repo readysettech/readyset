@@ -14,10 +14,6 @@ terraform {
       source  = "hashicorp/external"
       version = "~> 2.1"
     }
-    snowflake = {
-      source  = "snowflake-labs/snowflake"
-      version = "~> 0.34.0"
-    }
   }
   required_version = "= 1.1.6"
 }

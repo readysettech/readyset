@@ -1,4 +1,4 @@
-# Telemetry-Snowflake module
+# Snowflake S3 Integration module
 
 ## Provisioning
 
@@ -20,12 +20,14 @@ steps:
 
    ```terraform
    module "telemetry-snowflake" {
-     source = "../../../../../modules/telemetry-snowflake/regional"
-       providers = {
-         aws       = aws
-         snowflake = snowflake
-       }
-       s3_bucket_name = local.my_bucket_name
+     source = "../../../../../modules/snowflake-s3-integration/regional"
+     providers = {
+       aws         = aws
+       snowflake   = snowflake
+     }
+
+     s3_buckets         = [aws_s3_bucket.my_bucket]
+     snowflake_database = snowflake_database.my_database.id
    }
    ```
 
@@ -36,13 +38,13 @@ steps:
 
    ```terraform
    module "telemetry-snowflake" {
-     source = "../../../../../modules/telemetry-snowflake/regional"
+     source = "../../../../../modules/snowflake-s3-integration/regional"
        providers = {
          aws       = aws
          snowflake = snowflake
        }
-       s3_bucket_arn         = aws_s3_bucket.my_bucket.arn
-       s3_bucket_name        = aws_s3_bucket.my_bucket.name
+       s3_buckets            = [aws_s3_bucket.my_bucket]
+       snowflake_database    = snowflake_database.my_database.id
        snowflake_external_id = "RA72744_SFCRole=3_vw6zA7nz/Zrv0r9LsrBjfUMbPyw="
        snowflake_iam_arn     = "arn:aws:iam::741613821325:user/sdl9-s-ohsw9987"
    }
