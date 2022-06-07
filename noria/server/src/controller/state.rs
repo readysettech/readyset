@@ -31,7 +31,7 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::{FutureExt, TryStream};
 use lazy_static::lazy_static;
 use metrics::{gauge, histogram};
-use nom_sql::SqlIdentifier;
+use nom_sql::{CacheInner, CreateCacheStatement, SelectStatement, SqlIdentifier, SqlQuery};
 use noria::builders::{ReplicaShard, TableBuilder, ViewBuilder, ViewReplica};
 use noria::consensus::{Authority, AuthorityControl};
 use noria::debug::info::{DomainKey, GraphInfo};
@@ -237,11 +237,12 @@ impl DataflowState {
             .collect()
     }
 
-    /// Get a map of all known output nodes, mapping the name of the node to the `SqlQuery`
+    /// Get a map of all known output nodes created from `CREATE CACHE` statements, mapping the name
+    /// of the node to the `SelectStatement`
     ///
     /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
     /// to calling `.maintain` or `.stream` for a node during a migration
-    pub(super) fn verbose_outputs(&self) -> BTreeMap<SqlIdentifier, nom_sql::SqlQuery> {
+    pub(super) fn verbose_outputs(&self) -> BTreeMap<SqlIdentifier, SelectStatement> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -255,7 +256,16 @@ impl DataflowState {
                     // assumption
                     let name = self.recipe.resolve_alias(&name)?;
                     let query = self.recipe.expression_by_alias(name)?;
-                    Some((name.clone(), query))
+
+                    // Only return ingredients created from "CREATE CACHE"
+                    match query {
+                        // CacheInner::ID should have been expanded to CacheInner::Statement
+                        SqlQuery::CreateCache(CreateCacheStatement {
+                            inner: CacheInner::Statement(stmt),
+                            ..
+                        }) => Some((name.clone(), (*stmt).clone())),
+                        _ => None,
+                    }
                 } else {
                     None
                 }
