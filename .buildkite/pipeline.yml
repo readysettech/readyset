@@ -270,7 +270,7 @@ steps:
       - block-docker-release
       - build-builder-base-image
     command:
-      - RELEASE=true .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-mysql readyset-mysql .
+      - RELEASE=true .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-mysql-disp-literals readyset-mysql .
       - docker tag 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:release-${BUILDKITE_COMMIT} readyset-mysql:release-${BUILDKITE_COMMIT}
       - docker save readyset-mysql:release-${BUILDKITE_COMMIT} | gzip > readyset-mysql-release-${BUILDKITE_COMMIT}.tar.gz
       - buildkite-agent artifact upload readyset-mysql-release-${BUILDKITE_COMMIT}.tar.gz
