@@ -220,6 +220,7 @@ steps:
     continue_on_failure: true
 
   - command: ".buildkite/set_gerrit_status.sh"
+    key: set-gerrit-status
     agents:
       queue: t3a-small
 
@@ -236,6 +237,8 @@ steps:
 
   - input: "Build telemetry ingress"
     key: input-telemetry-ingress
+    depends_on:
+    - set-gerrit-status
 
   - label: ':pipeline: Upload telemetry ingress pipeline'
     depends_on:
@@ -246,13 +249,15 @@ steps:
       queue: t3a-small
 
   # If you update any steps below this line, please update docs/src/release-process.md
-  - block: "Build release :docker: containers"
-    key: block-docker-release
+  - input: "Build installer"
+    key: start-installer-release
+    depends_on:
+    - set-gerrit-status
 
   - label: ":docker: Build readyset-server release image"
     key: readyset-server-release-image
     depends_on:
-      - block-docker-release
+      - start-installer-release
       - build-builder-base-image
     command:
       - RELEASE=true .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-server readyset-server .
@@ -267,7 +272,7 @@ steps:
   - label: ":docker: Build readyset-mysql release image"
     key: readyset-mysql-release-image
     depends_on:
-      - block-docker-release
+      - start-installer-release
       - build-builder-base-image
     command:
       - RELEASE=true .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-mysql-disp-literals readyset-mysql .
@@ -282,7 +287,7 @@ steps:
   - label: ":docker: Build readyset-psql release image"
     key: readyset-psql-release-image
     depends_on:
-      - block-docker-release
+      - start-installer-release
       - build-builder-base-image
     command:
       - RELEASE=true .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-psql readyset-psql .
@@ -297,7 +302,7 @@ steps:
   - label: ":docker: Build readyset-adapter release image"
     key: readyset-adapter-release-image
     depends_on:
-      - block-docker-release
+      - start-installer-release
       - build-builder-base-image
     command:
       - RELEASE=true .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-adapter readyset-adapter .
@@ -312,7 +317,7 @@ steps:
   - label: ":docker: Build metrics-aggregator release image"
     key: metrics-aggregator-release-image
     depends_on:
-      - block-docker-release
+      - start-installer-release
       - build-builder-base-image
     command:
       - RELEASE=true .buildkite/build-image-with-builder.sh build/Dockerfile.metrics-aggregator metrics-aggregator .
@@ -350,7 +355,7 @@ steps:
   - label: ":tux: Build Linux ReadySet Installer Binaries"
     key: build-linux-installer
     depends_on:
-      - block-docker-release
+      - start-installer-release
     commands:
       - "echo +++ :computer: running build for Linux ReadySet Installer Binaries"
       - if buildkite-agent meta-data exists release-name; then
@@ -384,7 +389,7 @@ steps:
     env:
       PATH: /opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/administrator/.cargo/bin
     depends_on:
-      - block-docker-release
+      - start-installer-release
     commands:
       - "echo +++ :computer: running build for Apple ReadySet Installer"
       - if buildkite-agent meta-data exists release-name; then
