@@ -5,6 +5,7 @@
 # Dev Guide
 
 - [Getting Started](./getting_started.md)
+- [Hello ReadySet!](./hello_readyset.md)
 - [Docker Configuration](./docker.md)
 - [Cargo.toml and dependencies](./crate_organization.md)
 - [Dev Tools & Troubleshooting](./dev.md)
@@ -12,6 +13,7 @@
 - [Testing your code](./dev-testing.md)
 - [Debugging your code](./debugging.md)
 - [Developer Environment](./dev-env.md)
+- [Gerrit Social Conventions](./gerrit.md)
 
 # Benchmarking
 - [Macro Benchmarking](./macro_benchmarking.md)

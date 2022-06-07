@@ -7,7 +7,7 @@ number of social interactions that are not clear from the interface or
 other documentation, we have written them down for everyone to be on the
 same page.
 
-# Words
+# Glossary
 
 CL/Changelist: A unit of work being reviewed. Each Changelist maps onto
 a single Git commit.
@@ -15,6 +15,22 @@ a single Git commit.
 Attention Set: The list of people who will be notified via email and
 have the CL put back into the "Your Turn" section on the user dashboard.
 This is identified by the flag in front of the user's name.
+
+# Development with Gerrit
+
+**What is a changelist (CL)?**
+
+A CL represents a single change under review. At ReadySet this is a
+change that a developer wants to get merged into the main branch. It
+requires a myriad of continuous integration tests, resolution of all
+code review comments, and explicit +2 approval from another developer to
+get merged. Each change receives a unique Change-Id on commit using the
+Gerrit commit-msg hook. When a commit with a new Change-Id is pushed to
+Gerrit, a new CL is created.
+
+A CL may have multiple patchsets, one patchset represents one iteration
+of the CL's code. Pushing a CL that already exists creates a new
+patchset if the code has changed.
 
 # Commit Messages
 
@@ -76,34 +92,18 @@ this is not required or standardized, it can be a nice way of indicating
 how important you think the comment is to resolve.
 
 -   "nit:" short for "nitpick" - a pedantic or otherwise low-severity
-    > comment that may improve the stylistic consistency or readability
-    > of the code, but is otherwise not critical to the functionality.
-    > The implication is that nits can be ignored by the author with
-    > relatively low social cost.
+     comment that may improve the stylistic consistency or readability
+     of the code, but is otherwise not critical to the functionality.
+     The implication is that nits can be ignored by the author with
+     relatively low social cost.
 
-# Development with Gerrit
+## Best Practices
 
-**What is a changelist (CL)?**
+- If you make changes to the CL that don't have to do with open comments,
+  or are more significant in scope, remove existing +2s and put the
+  reviewers back in the attention set.
 
-A CL represents a single change under review. At ReadySet this is a
-change that a developer wants to get merged into the main branch. It
-requires a myriad of continuous integration tests, resolution of all
-code review comments, and explicit +2 approval from another developer to
-get merged. Each change receives a unique Change-Id on commit using the
-Gerrit commit-msg hook. When a commit with a new Change-Id is pushed to
-Gerrit, a new CL is created.
-
-A CL may have multiple patchsets, one patchset represents one iteration
-of the CL's code. Pushing a CL that already exists creates a new
-patchset if the code has changed.
-
-## Best Practice
-
--   If you make changes to the CL that don't have to do with open
-    > comments, or are significant, remove existing +2s and put the
-    > reviewers back in the attention set.
-
--   Don't merge another author's CL without explicit permission.
+- Don't merge another author's CL without explicit permission.
 
 # Tooling
 
