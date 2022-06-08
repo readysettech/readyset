@@ -258,11 +258,13 @@ steps:
   # If you update any steps below this line, please update docs/src/release-process.md
   - input: "Build installer"
     key: start-installer-release
+    branches: refs/heads/main
     depends_on:
     - set-gerrit-status
 
   - label: ":docker: Build readyset-server release image"
     key: readyset-server-release-image
+    branches: refs/heads/main
     depends_on:
       - start-installer-release
       - build-builder-base-image
@@ -278,6 +280,7 @@ steps:
 
   - label: ":docker: Build readyset-mysql release image"
     key: readyset-mysql-release-image
+    branches: refs/heads/main
     depends_on:
       - start-installer-release
       - build-builder-base-image
@@ -293,6 +296,7 @@ steps:
 
   - label: ":docker: Build readyset-psql release image"
     key: readyset-psql-release-image
+    branches: refs/heads/main
     depends_on:
       - start-installer-release
       - build-builder-base-image
@@ -308,6 +312,7 @@ steps:
 
   - label: ":docker: Build readyset-adapter release image"
     key: readyset-adapter-release-image
+    branches: refs/heads/main
     depends_on:
       - start-installer-release
       - build-builder-base-image
@@ -323,6 +328,7 @@ steps:
 
   - label: ":docker: Build metrics-aggregator release image"
     key: metrics-aggregator-release-image
+    branches: refs/heads/main
     depends_on:
       - start-installer-release
       - build-builder-base-image
@@ -338,6 +344,7 @@ steps:
 
   - label: ":docker: :s3: Upload docker saves to S3"
     key: upload-docker-s3
+    branches: refs/heads/main
     depends_on:
       - readyset-mysql-release-image
       - readyset-psql-release-image
@@ -361,6 +368,7 @@ steps:
 
   - label: ":tux: Build Linux ReadySet Installer Binaries"
     key: build-linux-installer
+    branches: refs/heads/main
     depends_on:
       - start-installer-release
     commands:
@@ -390,6 +398,7 @@ steps:
 
   - label: ":apple: Build Apple ReadySet Installer Binaries"
     key: build-apple-installer
+    branches: refs/heads/main
     agents:
       queue: apple
       apple: m1
@@ -413,6 +422,7 @@ steps:
 
   - label: ":s3: Deploy ReadySet Installer"
     key: deploy-installer
+    branches: refs/heads/main
     depends_on:
       - build-linux-installer
       - build-apple-installer
