@@ -1,0 +1,40 @@
+{
+  "dev": {
+    "AWSAccountID" : "069491470376",
+    "AWSProfileName": "default",
+    "AWSProfileRegion" : "us-east-2",
+
+    "App": "config-1-context",
+    "Environment": "dev",
+    "Version": "0.0.0",
+    "Build": "1",
+    "Subnets":
+    [
+      {
+        "cidrMask": 24,
+        "name": "myingress",
+        "subnet_type": "PUBLIC"
+      },
+      {
+        "cidrMask": 24,
+        "name": "private01",
+        "subnet_type": "PRIVATE_ISOLATED"
+      },
+      {
+        "cidrMask": 18,
+        "name": "PrivateEgress01",
+        "subnet_type": "PRIVATE_WITH_NAT"
+      },
+      {
+        "cidrMask": 19,
+        "name": "PrivateEgress02",
+        "subnet_type": "PRIVATE_WITH_NAT"
+      }
+    ],
+    "Parameters":
+    {
+      "LambdaInsightsLayer": "arn:aws:lambda:us-east-1:580247275435:layer:LambdaInsightsExtension:14",
+      "SomeExternalApiUrl": "https://api-dev.something-external.com"
+    }
+  }
+}
