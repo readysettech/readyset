@@ -164,14 +164,18 @@ impl<'ast, 'a> Visitor<'ast> for RemoveAliasesVisitor<'a> {
         Ok(())
     }
 
+    // TODO: This function currently ignores `Table::schema`, using only `Table::name` instead
     fn visit_column(&mut self, column: &'ast mut Column) -> Result<(), Self::Error> {
-        if let Some(table) = column
+        if let Some(remapped_table_name) = column
             .table
             .as_ref()
-            .and_then(|t| self.col_table_remap.get(t))
+            .and_then(|t| self.col_table_remap.get(&t.name))
             .cloned()
         {
-            column.table = Some(table)
+            // We know this table exists
+            if let Some(ref mut t) = column.table {
+                t.name = remapped_table_name;
+            }
         }
 
         Ok(())

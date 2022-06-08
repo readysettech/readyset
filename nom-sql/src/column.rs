@@ -13,18 +13,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::{column_identifier_no_alias, parse_comment, type_identifier, SqlType};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Double, Literal, SqlIdentifier};
+use crate::{Dialect, Double, Literal, SqlIdentifier, Table};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Column {
     pub name: SqlIdentifier,
-    pub table: Option<SqlIdentifier>,
+    pub table: Option<Table>,
 }
 
 impl fmt::Display for Column {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(ref table) = self.table {
-            write!(f, "`{}`.", table)?;
+            write!(f, "{}.", table)?;
         }
         write!(f, "`{}`", self.name)
     }
@@ -47,29 +47,16 @@ impl<'a> From<&'a str> for Column {
 
 impl Ord for Column {
     fn cmp(&self, other: &Column) -> Ordering {
-        if self.table.is_some() && other.table.is_some() {
-            match self.table.cmp(&other.table) {
-                Ordering::Equal => self.name.cmp(&other.name),
-                x => x,
-            }
-        } else {
-            self.name.cmp(&other.name)
+        match (self.table.as_ref(), other.table.as_ref()) {
+            (Some(s), Some(o)) => (s, &self.name).cmp(&(o, &other.name)),
+            _ => self.name.cmp(&other.name),
         }
     }
 }
 
 impl PartialOrd for Column {
     fn partial_cmp(&self, other: &Column) -> Option<Ordering> {
-        if self.table.is_some() && other.table.is_some() {
-            match self.table.cmp(&other.table) {
-                Ordering::Equal => Some(self.name.cmp(&other.name)),
-                x => Some(x),
-            }
-        } else if self.table.is_none() && other.table.is_none() {
-            Some(self.name.cmp(&other.name))
-        } else {
-            None
-        }
+        Some(self.cmp(other))
     }
 }
 

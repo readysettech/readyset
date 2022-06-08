@@ -1,25 +1,24 @@
 use std::collections::HashSet;
 use std::vec::Vec;
 
-use nom_sql::SqlIdentifier;
-
 use super::super::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
 use super::helpers::predicate_implication::join_predicates_are_equivalent;
 use super::ReuseType;
+use crate::controller::sql::mir::Relation;
 use crate::controller::sql::query_graph::JoinPredicate;
 use crate::ReadySetResult;
 
 #[derive(Debug, Clone)]
 struct JoinChain {
     join_order: Vec<JoinRef>,
-    tables: HashSet<SqlIdentifier>,
+    relations: HashSet<Relation>,
     stopped: bool,
 }
 
 impl JoinChain {
     fn empty() -> JoinChain {
         JoinChain {
-            tables: HashSet::new(),
+            relations: HashSet::new(),
             join_order: vec![],
             stopped: false,
         }
@@ -30,21 +29,21 @@ impl JoinChain {
     }
 
     fn add(&mut self, join_ref: JoinRef) {
-        self.tables.insert(join_ref.src.clone());
-        self.tables.insert(join_ref.dst.clone());
+        self.relations.insert(join_ref.src.clone());
+        self.relations.insert(join_ref.dst.clone());
         self.join_order.push(join_ref);
     }
 
     fn conflicts(&self, other: &JoinChain) -> bool {
-        !self.tables.is_disjoint(&other.tables)
+        !self.relations.is_disjoint(&other.relations)
     }
 
-    fn has_table(&self, table: &str) -> bool {
-        self.tables.contains(table)
+    fn has_relation(&self, rel: &Relation) -> bool {
+        self.relations.contains(rel)
     }
 
     fn merge_chain(self, other: JoinChain) -> JoinChain {
-        let tables = self.tables.union(&other.tables).cloned().collect();
+        let relations = self.relations.union(&other.relations).cloned().collect();
         let join_order = self
             .join_order
             .into_iter()
@@ -54,7 +53,7 @@ impl JoinChain {
 
         JoinChain {
             join_order,
-            tables,
+            relations,
             stopped,
         }
     }
@@ -64,12 +63,12 @@ impl JoinChain {
 /// The most recently modified chain will be at the end of
 /// the list.
 fn extend_chains(chains: &mut Vec<JoinChain>, jref: &JoinRef) {
-    let src_chain = match chains.iter().position(|c| c.has_table(&jref.src)) {
+    let src_chain = match chains.iter().position(|c| c.has_relation(&jref.src)) {
         Some(idx) => chains.swap_remove(idx),
         None => JoinChain::empty(),
     };
 
-    let dst_chain = match chains.iter().position(|c| c.has_table(&jref.dst)) {
+    let dst_chain = match chains.iter().position(|c| c.has_relation(&jref.dst)) {
         Some(idx) => chains.swap_remove(idx),
         None => JoinChain::empty(),
     };

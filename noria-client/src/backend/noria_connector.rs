@@ -610,7 +610,7 @@ impl NoriaConnector {
             .ok_or_else(|| internal_err!("Could not find schema for table {}", q.table.name))?
             .fields
             .iter()
-            .map(|cs| ColumnSchema::from_base(cs.clone(), q.table.name.clone()))
+            .map(|cs| ColumnSchema::from_base(cs.clone(), q.table.clone()))
             .collect::<Vec<_>>();
 
         if q.fields.is_none() {
@@ -777,7 +777,7 @@ impl NoriaConnector {
                     // and name - just check name here
                     .find(|f| f.column.name == c.name)
                     .cloned()
-                    .map(|cs| ColumnSchema::from_base(cs, q.table.name.clone()))
+                    .map(|cs| ColumnSchema::from_base(cs, q.table.clone()))
                     .ok_or_else(|| internal_err!("Unknown column {}", c))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -840,7 +840,7 @@ impl NoriaConnector {
                     // and name - just check name here
                     .find(|f| f.column.name == c.name)
                     .cloned()
-                    .map(|cs| ColumnSchema::from_base(cs, q.table.name.clone()))
+                    .map(|cs| ColumnSchema::from_base(cs, q.table.clone()))
                     .ok_or_else(|| internal_err!("Unknown column {}", c))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -1037,7 +1037,7 @@ impl NoriaConnector {
             .iter()
             .cloned()
             .map(|mut c| {
-                c.table = Some(q.table.name.clone());
+                c.table = Some(q.table.clone());
                 c
             })
             .collect();

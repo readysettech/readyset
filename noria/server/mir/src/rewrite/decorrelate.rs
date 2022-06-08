@@ -62,7 +62,7 @@ fn push_dependent_filter(
                         .non_dependent_columns()
                         .contains(&Column::from(col.clone()))
                     {
-                        col.table = Some(table.clone())
+                        col.table = Some(table.clone().into())
                     }
                 }
             }

@@ -58,7 +58,7 @@ pub fn is_correlated(statement: &SelectStatement) -> bool {
 
     statement
         .outermost_referred_columns()
-        .any(|col| col.table.iter().any(|tbl| !tables.contains(tbl)))
+        .any(|col| col.table.iter().any(|tbl| !tables.contains(&tbl.name)))
 }
 
 fn field_names(statement: &SelectStatement) -> impl Iterator<Item = &SqlIdentifier> {

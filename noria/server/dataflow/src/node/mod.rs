@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use nom_sql::SqlIdentifier;
+use nom_sql::{SqlIdentifier, Table};
 use noria::consistency::Timestamp;
 use noria_data::noria_type::Type;
 use serde::{Deserialize, Serialize};
@@ -39,11 +39,11 @@ pub struct Column {
     ///
     /// TODO: Use this information to lookup the column specification required for returning a
     /// resultset to the client.
-    source: Option<SqlIdentifier>,
+    source: Option<Table>,
 }
 
 impl Column {
-    pub fn new(name: SqlIdentifier, ty: Type, source: Option<SqlIdentifier>) -> Self {
+    pub fn new(name: SqlIdentifier, ty: Type, source: Option<Table>) -> Self {
         Self { name, ty, source }
     }
 
@@ -58,7 +58,7 @@ impl Column {
     }
 
     /// Originating column
-    pub fn source(&self) -> Option<&SqlIdentifier> {
+    pub fn source(&self) -> Option<&Table> {
         self.source.as_ref()
     }
 

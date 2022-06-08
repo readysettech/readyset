@@ -23,7 +23,7 @@ pub trait ImpliedTableExpansion {
 // computed columns.
 fn set_table(mut f: Column, table: &Table) -> ReadySetResult<Column> {
     f.table = match f.table {
-        None => Some(table.name.clone()),
+        None => Some(table.clone()),
         Some(x) => Some(x),
     };
     Ok(f)
@@ -146,7 +146,7 @@ impl<'ast, 'schema> Visitor<'ast> for ExpandImpliedTablesVisitor<'schema> {
         }
 
         if !(self.can_reference_aliases && self.aliases.contains(&column.name)) {
-            column.table = self.find_table(&column.name)
+            column.table = self.find_table(&column.name).map(|t| t.into());
         }
 
         Ok(())

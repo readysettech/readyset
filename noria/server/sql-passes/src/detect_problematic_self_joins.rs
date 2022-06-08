@@ -31,10 +31,11 @@ fn check_select_statement<'a>(
         stmt: &'a SelectStatement,
         cte_ctx: &HashMap<&'a str, &'a SelectStatement>,
     ) -> ReadySetResult<impl Iterator<Item = ReadySetResult<(&'a str, &'a str)>> + 'a> {
-        let table_alias = col.table.as_ref().ok_or_else(|| {
+        let table_alias = col.table.as_ref().map(|t| &t.name).ok_or_else(|| {
             internal_err!("detect_problematic_self_joins must be run after expand_implied_tables")
         })?;
 
+        // TODO: Consider `Table::schema`
         let table_matches =
             |tbl: &Table| tbl.alias.as_ref() == Some(table_alias) || tbl.name == *table_alias;
 

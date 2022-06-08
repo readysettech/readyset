@@ -309,7 +309,7 @@ impl MirNode {
             MirNodeInner::AliasTable { table } => parent_columns()
                 .iter()
                 .map(|c| Column {
-                    table: Some(table.clone()),
+                    table: Some(table.into()),
                     name: c.name.clone(),
                     aliases: vec![],
                 })

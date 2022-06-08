@@ -239,7 +239,11 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Table::from(("db1", "users")),
+                    table: Table {
+                        schema: Some("db1".into()),
+                        name: "users".into(),
+                        alias: None
+                    },
                     fields: None,
                     data: vec![vec![42.into(), "test".into()]],
                     ..Default::default()
@@ -404,7 +408,11 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Table::from(("db1", "users")),
+                    table: Table {
+                        schema: Some("db1".into()),
+                        name: "users".into(),
+                        alias: None
+                    },
                     fields: None,
                     data: vec![vec![42.into(), "test".into()]],
                     ..Default::default()

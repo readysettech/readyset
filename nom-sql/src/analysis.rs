@@ -64,10 +64,6 @@ impl ReferredTables for Expr {
     fn referred_tables(&self) -> HashSet<Table> {
         self.referred_columns()
             .filter_map(|col| col.table.clone())
-            .map(|name| Table {
-                name,
-                ..Default::default()
-            })
             .collect()
     }
 }

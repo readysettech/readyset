@@ -14,7 +14,7 @@ pub(super) fn rewrite_table_definition(
         match definition {
             AlterTableDefinition::AddColumn(c) => {
                 let mut c = c.clone();
-                c.column.table = Some(new_table.table.name.clone());
+                c.column.table = Some(new_table.table.clone());
                 new_table.fields.push(c);
             }
             AlterTableDefinition::AddKey(key) => {
@@ -36,7 +36,7 @@ pub(super) fn rewrite_table_definition(
                         ref mut columns, ..
                     } => {
                         columns.iter_mut().for_each(|c| {
-                            c.table = Some(new_table.table.name.clone());
+                            c.table = Some(new_table.table.clone());
                         });
                     }
                     TableKey::CheckConstraint { .. } => {}
@@ -85,7 +85,7 @@ pub(super) fn rewrite_table_definition(
             }
             AlterTableDefinition::ChangeColumn { name, spec } => {
                 let mut spec = spec.clone();
-                spec.column.table = Some(new_table.table.name.clone());
+                spec.column.table = Some(new_table.table.clone());
                 match new_table.fields.iter_mut().find(|f| f.column.name == name) {
                     None => {
                         return Err(ReadySetError::InvalidQuery(
@@ -159,7 +159,7 @@ mod tests {
         assert_eq!(column_spec.constraints.len(), 1);
         let constraint = &column_spec.constraints[0];
         assert!(matches!(constraint, ColumnConstraint::NotNull));
-        assert_eq!(column_spec.column.table, Some(new_table.table.name));
+        assert_eq!(column_spec.column.table, Some(new_table.table));
     }
 
     #[test]
@@ -198,10 +198,7 @@ mod tests {
                 assert_eq!(columns.len(), 1);
                 let column_spec = &columns[0];
                 assert_eq!(column_spec.name, "id");
-                assert_eq!(
-                    column_spec.table.clone().unwrap(),
-                    original_table.table.name
-                );
+                assert_eq!(column_spec.table, Some(original_table.table));
                 assert_eq!(index_type.unwrap(), nom_sql::IndexType::Hash);
             }
             _ => panic!("Expected unique key"),
@@ -232,7 +229,7 @@ mod tests {
         assert!(matches!(constraint, ColumnConstraint::NotNull));
         assert_eq!(
             original_col_spec.column.table,
-            Some(original_table.table.name.clone())
+            Some(original_table.table.clone())
         );
         let new_table = rewrite_table_definition(&alteration, original_table.clone()).unwrap();
         assert_eq!(new_table.table, original_table.table);
@@ -251,7 +248,7 @@ mod tests {
             .unwrap();
         assert_eq!(column_spec.sql_type, SqlType::Text);
         assert!(column_spec.constraints.is_empty());
-        assert_eq!(column_spec.column.table, Some(new_table.table.name));
+        assert_eq!(column_spec.column.table, Some(new_table.table));
     }
 
     #[test]
@@ -318,7 +315,7 @@ mod tests {
             }
             _ => panic!("expected DefaultValue"),
         }
-        assert_eq!(column_spec.column.table, Some(new_table.table.name));
+        assert_eq!(column_spec.column.table, Some(new_table.table));
     }
 
     #[test]

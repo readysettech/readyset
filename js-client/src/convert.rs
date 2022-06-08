@@ -31,7 +31,7 @@ where
         let js_col = cx.empty_object();
         if let Some(table) = &col.spec.column.table {
             // TODO: this table name is NOT always the expected user-friendly name....
-            utils::set_str_field(cx, &js_col, "tableName", table)?;
+            utils::set_str_field(cx, &js_col, "tableName", table.name.as_str())?;
         }
         utils::set_str_field(cx, &js_col, "columnName", &col.spec.column.name)?;
         // TODO: deal with colType and flags?

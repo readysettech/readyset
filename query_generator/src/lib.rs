@@ -2071,15 +2071,14 @@ fn query_has_aggregate(query: &SelectStatement) -> bool {
 fn column_in_query<'state>(state: &mut QueryState<'state>, query: &mut SelectStatement) -> Column {
     match query.tables.last() {
         Some(table) => {
-            let table_name = table.name.clone();
             let column = state
                 .gen
-                .table_mut(table_name.as_str())
+                .table_mut(table.name.as_str())
                 .unwrap()
                 .some_column_name();
             Column {
                 name: column.into(),
-                table: Some(table_name),
+                table: Some(table.clone()),
             }
         }
         None => {
@@ -2164,11 +2163,11 @@ impl QueryOperation {
                 let col = tbl.some_column_with_type(filter.column_type.clone());
 
                 if query.tables.is_empty() {
-                    query.tables.push(tbl.name.clone().into());
+                    query.tables.push(Table::from(tbl.name.0.as_str()));
                 }
 
                 let col_expr = Expr::Column(Column {
-                    table: Some(tbl.name.to_string().into()),
+                    table: Some(Table::from(tbl.name.0.as_str())),
                     ..col.clone().into()
                 });
 
@@ -2313,7 +2312,7 @@ impl QueryOperation {
                         ))),
                     },
                 );
-                state.add_parameter(col.table.unwrap().into(), col.name.into());
+                state.add_parameter(col.table.unwrap().name.into(), col.name.into());
             }
 
             QueryOperation::MultipleParameters => {
@@ -2371,7 +2370,7 @@ impl QueryOperation {
 
                 for idx in 0..*num_values {
                     state.add_parameter_with_index(
-                        col.table.clone().unwrap().into(),
+                        col.table.clone().unwrap().name.into(),
                         col.name.clone().into(),
                         idx as _,
                     )
@@ -2860,7 +2859,7 @@ impl Subquery {
                 op: BinaryOperator::Equal,
                 rhs: Box::new(Expr::Column(Column {
                     name: right_join_col,
-                    table: Some(subquery_name),
+                    table: Some(subquery_name.into()),
                 })),
             }),
         })
@@ -2936,11 +2935,7 @@ impl QuerySeed {
             });
 
             if query.tables.is_empty() {
-                query.tables.push(Table {
-                    name: col.table.unwrap(),
-                    alias: None,
-                    schema: None,
-                });
+                query.tables.push(col.table.unwrap());
             }
         }
 
@@ -3230,12 +3225,12 @@ mod tests {
                     (Expr::Column(left_field), Expr::Column(right_field)) => {
                         assert_eq!(
                             left_field.table.as_ref(),
-                            Some(&query.tables.first().unwrap().name)
+                            Some(query.tables.first().unwrap())
                         );
                         assert_eq!(
                             right_field.table.as_ref(),
                             Some(match &join.right {
-                                JoinRightSide::Table(table) => &table.name,
+                                JoinRightSide::Table(table) => table,
                                 _ => unreachable!(),
                             })
                         );

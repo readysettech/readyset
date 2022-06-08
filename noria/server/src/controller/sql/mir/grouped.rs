@@ -9,6 +9,7 @@ use nom_sql::{self, Expr, FieldDefinitionExpr, SelectStatement, SqlIdentifier};
 use noria_errors::{unsupported, ReadySetError};
 use noria_sql_passes::is_aggregate;
 
+use super::Relation;
 use crate::controller::sql::mir::join::make_joins_for_aggregates;
 use crate::controller::sql::mir::SqlToMirConverter;
 use crate::controller::sql::query_graph::QueryGraph;
@@ -19,7 +20,7 @@ pub(super) fn make_predicates_above_grouped<'a>(
     mir_converter: &SqlToMirConverter,
     name: &SqlIdentifier,
     qg: &QueryGraph,
-    node_for_rel: &HashMap<&SqlIdentifier, MirNodeRef>,
+    node_for_rel: &HashMap<&Relation, MirNodeRef>,
     node_count: usize,
     column_to_predicates: &HashMap<nom_sql::Column, Vec<&'a Expr>>,
     prev_node: &mut Option<MirNodeRef>,
@@ -38,7 +39,7 @@ pub(super) fn make_predicates_above_grouped<'a>(
             if column_to_predicates.contains_key(over_col) {
                 let parent = match *prev_node {
                     Some(ref p) => p.clone(),
-                    None => node_for_rel[over_table].clone(),
+                    None => node_for_rel[&Relation::from(over_table.clone())].clone(),
                 };
 
                 let new_mpns = mir_converter.predicates_above_group_by(
@@ -108,7 +109,7 @@ pub(super) fn make_grouped(
     mir_converter: &SqlToMirConverter,
     name: &SqlIdentifier,
     qg: &QueryGraph,
-    node_for_rel: &HashMap<&SqlIdentifier, MirNodeRef>,
+    node_for_rel: &HashMap<&Relation, MirNodeRef>,
     node_count: usize,
     prev_node: &mut Option<MirNodeRef>,
     projected_exprs: &HashMap<Expr, SqlIdentifier>,
@@ -131,7 +132,8 @@ pub(super) fn make_grouped(
                 // If we don't have a parent node yet, that means no joins or unions can
                 // have happened yet, which means there *must* only be one table referred in
                 // the aggregate expression. Let's just take the first.
-                node_for_rel[over_cols.peek().unwrap().table.as_ref().unwrap()].clone()
+                node_for_rel[&Relation::from(over_cols.peek().unwrap().table.clone().unwrap())]
+                    .clone()
             }
             // We have an explicit parent node (likely a projection
             // helper), so use that
@@ -194,7 +196,7 @@ pub(super) fn make_grouped(
             (parent_node, gb_and_param_cols)
         } else {
             let proj_cols_from_target_table = over_cols
-                .flat_map(|col| &qg.relations[col.table.as_ref().unwrap()].columns)
+                .flat_map(|col| &qg.relations[&Relation::from(col.table.clone().unwrap())].columns)
                 .map(Column::from)
                 .collect::<Vec<_>>();
 
@@ -216,7 +218,7 @@ pub(super) fn make_grouped(
                 agg_nodes.push(proj.clone());
                 node_count += 1;
 
-                let bogo_group_col = Column::new(None, "grp");
+                let bogo_group_col = Column::named("grp");
                 (vec![bogo_group_col], proj)
             } else {
                 (proj_cols_from_target_table, parent_node)

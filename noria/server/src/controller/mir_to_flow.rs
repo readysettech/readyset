@@ -1052,7 +1052,7 @@ fn lower_expression(
         Expr::Column(nom_sql::Column { name, table, .. }) => {
             let index = parent
                 .borrow()
-                .column_id_for_column(&Column::new(table.as_deref(), &name))?;
+                .column_id_for_column(&Column::new(table, &name))?;
             let ty = parent_cols
                 .get(index)
                 .ok_or_else(|| internal_err!("Index exceeds length of parent cols, idx={}", index))?

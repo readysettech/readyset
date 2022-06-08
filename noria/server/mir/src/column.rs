@@ -1,19 +1,23 @@
 use std::cmp::Ordering;
 use std::mem;
 
-use nom_sql::{self, SqlIdentifier};
+use nom_sql::{self, SqlIdentifier, Table};
 use serde::{Deserialize, Serialize};
 
 // FIXME: this is _not_ okay! malte knows about it
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Column {
-    pub table: Option<SqlIdentifier>,
+    pub table: Option<Table>,
     pub name: SqlIdentifier,
     pub aliases: Vec<Column>,
 }
 
 impl Column {
-    pub fn new(table: Option<&str>, name: impl Into<SqlIdentifier>) -> Self {
+    pub fn new<T, N>(table: Option<T>, name: N) -> Self
+    where
+        T: Into<Table>,
+        N: Into<SqlIdentifier>,
+    {
         Column {
             table: table.map(Into::into),
             name: name.into(),
@@ -65,7 +69,7 @@ impl Column {
     #[must_use]
     pub fn aliased_as_table<T>(mut self, table: T) -> Self
     where
-        T: Into<SqlIdentifier>,
+        T: Into<Table>,
     {
         self.aliases.push(Column {
             table: Some(table.into()),
@@ -75,15 +79,18 @@ impl Column {
         self
     }
 
+    // `Table::schema1 is not currently used/supported. `Table::alias` is not used and is intended
+    // to be removed from `Table`.
     pub(crate) fn has_table(&self, table: &SqlIdentifier) -> bool {
-        self.table.iter().any(|t| t == table) || self.aliases.iter().any(|c| c.has_table(table))
+        self.table.iter().any(|t| t.name == table)
+            || self.aliases.iter().any(|c| c.has_table(table))
     }
 }
 
 impl From<nom_sql::Column> for Column {
     fn from(c: nom_sql::Column) -> Column {
         Column {
-            table: c.table.map(Into::into),
+            table: c.table,
             aliases: vec![],
             name: c.name,
         }
@@ -93,7 +100,7 @@ impl From<nom_sql::Column> for Column {
 impl<'a> From<&'a nom_sql::Column> for Column {
     fn from(c: &'a nom_sql::Column) -> Column {
         Column {
-            table: c.table.as_deref().map(Into::into),
+            table: c.table.clone(),
             aliases: vec![],
             name: c.name.clone(),
         }
@@ -128,38 +135,27 @@ impl PartialEq for Column {
 
 impl PartialEq<nom_sql::Column> for Column {
     fn eq(&self, other: &nom_sql::Column) -> bool {
-        (self.name == other.name && self.table.as_deref() == other.table.as_deref())
+        (self.name == other.name && self.table == other.table)
             || self.aliases.iter().any(|c| c == other)
     }
 }
 
 impl Eq for Column {}
 
+// NOTE: This technically violates the transitive property. This is not the case after the
+// implied_tables rewrite pass but could get us into trouble if called before then
 impl Ord for Column {
     fn cmp(&self, other: &Column) -> Ordering {
-        if self.table.is_some() && other.table.is_some() {
-            match self.table.cmp(&other.table) {
-                Ordering::Equal => self.name.cmp(&other.name),
-                x => x,
-            }
-        } else {
-            self.name.cmp(&other.name)
+        match (self.table.as_ref(), other.table.as_ref()) {
+            (Some(s), Some(o)) => (s, &self.name).cmp(&(o, &other.name)),
+            _ => self.name.cmp(&other.name),
         }
     }
 }
 
 impl PartialOrd for Column {
     fn partial_cmp(&self, other: &Column) -> Option<Ordering> {
-        if self.table.is_some() && other.table.is_some() {
-            match self.table.cmp(&other.table) {
-                Ordering::Equal => Some(self.name.cmp(&other.name)),
-                x => Some(x),
-            }
-        } else if self.table.is_none() && other.table.is_none() {
-            Some(self.name.cmp(&other.name))
-        } else {
-            None
-        }
+        Some(self.cmp(other))
     }
 }
 
