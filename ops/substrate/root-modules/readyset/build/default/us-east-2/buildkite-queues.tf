@@ -159,7 +159,7 @@ module "buildkite_benchmark_queue" {
   min_size = 0
   max_size = 15
 
-  ssh_key_pair_name                          = "readyset-devops"
+  ssh_key_pair_name                          = "ops-20220608"
   buildkite_agent_token_parameter_store_path = module.buildkite_queue_shared.buildkite_agent_token_parameter_store_path
   extra_iam_policy_arns = concat(
     local.extra_iam_policy_arns, [
@@ -182,7 +182,7 @@ module "buildkite_k8s_queue" {
 
   min_size                                   = 0
   max_size                                   = 10
-  ssh_key_pair_name                          = "readyset-devops"
+  ssh_key_pair_name                          = "ops-20220608"
   buildkite_agent_token_parameter_store_path = module.buildkite_queue_shared.buildkite_agent_token_parameter_store_path
   extra_iam_policy_arns = concat(
     local.extra_iam_policy_arns, [

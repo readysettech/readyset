@@ -27,7 +27,7 @@ always reproduce an archive that should work on the first attempt.
 1. SSH into the Amazon Linux 2 instance using the private key you specified
    during instance launch:
 
-    `ssh ec2-user@10.3.181.24 -i ~/.ssh/readyset-devops.pem`
+    `ssh ec2-user@10.3.181.24 -i ~/.ssh/ops-20220608.pem`
 
 2. Install Docker. Reboot/logout if `ec2-user` is unable to connect to Docker
    socket, even after running the commands below.

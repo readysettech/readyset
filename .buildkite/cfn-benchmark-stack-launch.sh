@@ -109,7 +109,7 @@ CFN_STACK_PARAMS=(
   "ParameterKey=PostgreSQLSSMPathRDSDatabasePassword,ParameterValue=/rs-build-us-east-2/benchmark/postgres/rdsPassword"
   "ParameterKey=SSHSecurityGroupID,ParameterValue=sg-0c020c99aa1fb4c2d"
   "ParameterKey=VPCID,ParameterValue=vpc-0adb26542fc16ab14"
-  "ParameterKey=KeyPairName,ParameterValue=readyset-devops"
+  "ParameterKey=KeyPairName,ParameterValue=ops-20220608"
   "ParameterKey=ReadySetAdapterNodes,ParameterValue=3"
   "ParameterKey=ReadySetAdapterInstanceType,ParameterValue=m5.large"
   "ParameterKey=ReadySetMonitorInstanceType,ParameterValue=m5.large"

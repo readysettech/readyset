@@ -29,7 +29,7 @@ This is the Terraform/Substrate root module by which VPC components and ancillar
 | tailscale\_auth\_key\_secretsmanager\_arn | ARN of Secrets Manager secret within this region to authorize Tailscale subnet router instance role access to. | `string` | n/a | yes |
 | tailscale\_enabled | Toggles creation of Tailscale subnet router module's resources. | `bool` | `true` | no |
 | tailscale\_instance\_type | Instance type to apply to Tailscale subnet router EC2s. | `string` | `"t3.micro"` | no |
-| tailscale\_keypair\_name | Name of the EC2 key pair to apply to the Tailscale subnet router instances. | `string` | `"readyset-devops"` | no |
+| tailscale\_keypair\_name | Name of the EC2 key pair to apply to the Tailscale subnet router instances. | `string` | `"ops-20220608"` | no |
 | tailscale\_root\_volume\_del\_on\_term | Toggles deletion of root volume after Tailscale subnet router nodes are terminated. | `bool` | `true` | no |
 | tailscale\_root\_volume\_size | Size in GB for Root EBS volume of Tailscale subnet router instances. | `number` | `30` | no |
 | tailscale\_secretsmanager\_kms\_key\_arn | ARN of KMS key used for at-rest encryption of tailscale\_auth\_key\_secretsmanager\_arns. | `string` | `""` | no |

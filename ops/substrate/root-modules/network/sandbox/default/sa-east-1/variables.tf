@@ -56,7 +56,7 @@ variable "tailscale_root_volume_del_on_term" {
 
 variable "tailscale_keypair_name" {
   description = "Name of the EC2 key pair to apply to the Tailscale subnet router instances."
-  default     = "readyset-devops"
+  default     = "ops-20220608"
   type        = string
 }
 
