@@ -89,6 +89,13 @@ steps:
                 - Cargo.toml
                 - rust-toolchain
 
+            - label: ':docker: Build readyset-adapter debug image'
+              include:
+                - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
+
             - label: ':docker: Build metrics-aggregator debug image'
               include:
                 - "[!ops]*"
