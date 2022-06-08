@@ -4,6 +4,8 @@ import {xonokai} from 'react-syntax-highlighter/dist/cjs/styles/prism'
 import {CopyToClipboard} from "react-copy-to-clipboard";
 import {useUser} from '@auth0/nextjs-auth0';
 
+const runReadySetCommand = (user) =>
+      `RS_API_KEY=${user.access_token} bash -c "$(curl -sSL https://launch.readyset.io)"`;
 
 function Home() {
     const {user, error, isLoading} = useUser();
@@ -36,10 +38,10 @@ function Home() {
                 <>
                     <p>Hi {user.name}! Your customized command to run the Readyset Installer is:</p>
                     <SyntaxHighlighter language="bash" style={xonokai} wrapLongLines={true}>
-                        {`RS_API_KEY=${user.access_token} bash -c "$(curl -sSL https://launch.readyset.io)"`}
+                        {runReadySetCommand(user)}
                     </SyntaxHighlighter>
                     <CopyToClipboard
-                        text={`RS_API_KEY=${user.access_token} bash -c "$(curl -sSL https://launch.readyset.io)"`}>
+                        text={runReadySetCommand(user)}>
                         <button>
                             <i className="fa fa-clipboard" aria-hidden="true"/> Copy to Clipboard
                         </button>
