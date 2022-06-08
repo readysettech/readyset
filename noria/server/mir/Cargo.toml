@@ -25,6 +25,7 @@ noria = { path = "../../noria" }
 noria-errors = { path = "../../errors" }
 serde = { version = "1.0.8", features = ["rc", "derive"] }
 noria-data = { path = "../../../noria/data" }
+proptest = "1.0.0"
 
 # local deps
 common = { path = "../common", package = "noria-common" }

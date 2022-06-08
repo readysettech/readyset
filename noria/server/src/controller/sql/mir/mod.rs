@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::fmt::{Debug, Display};
+use std::hash::Hash;
 use std::vec::Vec;
 
 use ::serde::{Deserialize, Serialize};
@@ -17,13 +19,15 @@ use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableStatement, Expr,
     FieldDefinitionExpr, FieldReference, FunctionExpr, Literal, OrderClause, OrderType,
-    SelectStatement, SqlIdentifier, TableKey, UnaryOperator,
+    SelectStatement, SqlIdentifier, Table, TableKey, UnaryOperator,
 };
 use noria::ViewPlaceholder;
 use noria_data::DataType;
 use noria_errors::{internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError};
 use noria_sql_passes::is_correlated;
 use petgraph::graph::NodeIndex;
+use proptest::arbitrary::{any, Arbitrary};
+use proptest::strategy::Strategy;
 use tracing::{debug, error, trace, warn};
 
 use super::query_graph::{extract_limit_offset, JoinPredicate};
@@ -107,6 +111,121 @@ fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DataType>> {
             })
             .collect(),
     )
+}
+
+/// A relation, typically either a table or a view
+/// Implementations currently ignore `schema` since we do not currently support multiple
+/// schemas/DBs.
+#[derive(Eq, Clone, Serialize, Deserialize)]
+pub struct Relation {
+    /// The name of the relation
+    pub name: SqlIdentifier,
+    /// Postgres: The table's schema.
+    /// MySQL: The database where this table is located.
+    ///
+    /// Postgres does not support multi-DB SELECT statements, while MySQL does not support
+    /// assigning tables to schemas within a DB.
+    pub schema: Option<SqlIdentifier>,
+}
+
+impl From<Table> for Relation {
+    fn from(t: Table) -> Self {
+        Self {
+            name: t.name,
+            schema: t.schema,
+        }
+    }
+}
+
+impl From<Relation> for Table {
+    fn from(r: Relation) -> Self {
+        Table {
+            name: r.name,
+            schema: r.schema,
+            alias: None,
+        }
+    }
+}
+
+impl From<SqlIdentifier> for Relation {
+    fn from(name: SqlIdentifier) -> Self {
+        Self { name, schema: None }
+    }
+}
+
+impl From<&str> for Relation {
+    fn from(s: &str) -> Self {
+        Relation::from(SqlIdentifier::from(s))
+    }
+}
+
+// `schema` is ignored for now because multiple schemas/DBs are not supported
+impl PartialEq for Relation {
+    fn eq(&self, other: &Relation) -> bool {
+        self.name == other.name
+    }
+}
+
+// `schema` is ignored for now because multiple schemas/DBs are not supported
+impl Hash for Relation {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+    }
+}
+
+// This borrow is used to allow lookups into a `HashSet` by SqlIdentifier. This should be removed
+// once we consider `schema` in PartialEq. `schema` is ignored for now because multiple schemas/DBs
+//
+// Note that we used the qualified `std::borrow::Borrow` here because of https://github.com/rust-lang/rust/issues/41906
+impl std::borrow::Borrow<SqlIdentifier> for Relation {
+    fn borrow(&self) -> &SqlIdentifier {
+        &self.name
+    }
+}
+impl std::borrow::Borrow<SqlIdentifier> for &Relation {
+    fn borrow(&self) -> &SqlIdentifier {
+        (*self).borrow()
+    }
+}
+
+// are not supported
+impl PartialOrd for Relation {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.name.partial_cmp(&other.name)
+    }
+}
+
+// `schema` is ignored for now because multiple schemas/DBs are not supported
+impl Ord for Relation {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match self.partial_cmp(other) {
+            Some(o) => o,
+            None => self.name.cmp(&other.name),
+        }
+    }
+}
+
+impl Display for Relation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(s) = &self.schema {
+            write!(f, "{}.", s)?;
+        }
+        write!(f, "{}", &self.name)
+    }
+}
+
+impl Debug for Relation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+// `schema` is ignored for now because multiple schemas/DBs are not supported
+// `Table::alias` is ignored because it is removed in a rewrite pass.
+impl PartialEq<Table> for Relation {
+    fn eq(&self, other: &Table) -> bool {
+        self.name == other.name
+    }
 }
 
 /// Kinds of joins in MIR
@@ -663,7 +782,7 @@ impl SqlToMirConverter {
             .column
             .table
             .as_ref()
-            .map(|t| t == name)
+            .map(|t| t.name == name)
             .unwrap_or(false)));
 
         // primary keys can either be specified directly (at the end of CREATE TABLE), or inline
@@ -1542,8 +1661,8 @@ impl SqlToMirConverter {
         // Canonical operator order: B-J-F-G-P-R
         // (Base, Join, Filter, GroupBy, Project, Reader)
         {
-            let mut node_for_rel: HashMap<&SqlIdentifier, MirNodeRef> = HashMap::default();
-            let mut correlated_relations: HashSet<&SqlIdentifier> = Default::default();
+            let mut node_for_rel: HashMap<&Relation, MirNodeRef> = HashMap::default();
+            let mut correlated_relations: HashSet<&Relation> = Default::default();
 
             // Convert the query parameters to an ordered list of columns that will comprise the
             // lookup key if a leaf node is attached.
@@ -1551,26 +1670,26 @@ impl SqlToMirConverter {
 
             // 0. Base nodes (always reused)
             let mut base_nodes: Vec<MirNodeRef> = Vec::new();
-            let mut sorted_rels: Vec<&SqlIdentifier> = qg.relations.keys().collect();
+            let mut sorted_rels: Vec<&Relation> = qg.relations.keys().collect();
             sorted_rels.sort_unstable();
-            for rel_name in &sorted_rels {
-                let base_for_rel =
-                    if let Some((subgraph, subquery)) = &qg.relations[*rel_name].subgraph {
-                        let sub_nodes =
-                            self.make_nodes_for_selection(rel_name, subquery, subgraph, false)?;
-                        let leaf = sub_nodes
-                            .iter()
-                            .find(|n| n.borrow().children().is_empty())
-                            .ok_or_else(|| internal_err!("MIR query missing leaf!"))?
-                            .clone();
-                        nodes_added.extend(sub_nodes);
-                        if is_correlated(subquery) {
-                            correlated_relations.insert(rel_name);
-                        }
-                        leaf
-                    } else {
-                        self.get_view(rel_name)?
-                    };
+            for rel in &sorted_rels {
+                let base_for_rel = if let Some((subgraph, subquery)) = &qg.relations[*rel].subgraph
+                {
+                    let sub_nodes =
+                        self.make_nodes_for_selection(&rel.name, subquery, subgraph, false)?;
+                    let leaf = sub_nodes
+                        .iter()
+                        .find(|n| n.borrow().children().is_empty())
+                        .ok_or_else(|| internal_err!("MIR query missing leaf!"))?
+                        .clone();
+                    nodes_added.extend(sub_nodes);
+                    if is_correlated(subquery) {
+                        correlated_relations.insert(rel);
+                    }
+                    leaf
+                } else {
+                    self.get_view(rel.name.as_str())?
+                };
 
                 nodes_added.push(base_for_rel.clone());
 
@@ -1578,21 +1697,21 @@ impl SqlToMirConverter {
                     "q_{:x}_{}_alias_table_{}",
                     qg.signature().hash,
                     base_for_rel.borrow().name(),
-                    rel_name
+                    rel.name
                 )
                 .into();
                 let alias_table_node = MirNode::new(
                     alias_table_node_name,
                     self.schema_version,
                     MirNodeInner::AliasTable {
-                        table: (*rel_name).clone(),
+                        table: rel.name.clone(),
                     },
                     vec![MirNodeRef::downgrade(&base_for_rel)],
                     vec![],
                 );
 
                 base_nodes.push(alias_table_node.clone());
-                node_for_rel.insert(*rel_name, alias_table_node);
+                node_for_rel.insert(*rel, alias_table_node);
             }
 
             let join_nodes = make_joins(
@@ -1848,7 +1967,7 @@ impl SqlToMirConverter {
                     // paginate nodes as they will project a page number
                     bogo_in_final_projection = make_topk;
                     create_paginate = !make_topk;
-                    vec![Column::new(None, "bogokey")]
+                    vec![Column::named("bogokey")]
                 } else {
                     // view key will have the offset parameter if it exists. We must filter it out
                     // of the group by, because the column originates at this node
@@ -1910,7 +2029,7 @@ impl SqlToMirConverter {
                         if !already_computed.contains(oc) {
                             Some((ac.name.clone(), ac.expression.clone()))
                         } else {
-                            projected_columns.push(Column::new(None, &ac.name));
+                            projected_columns.push(Column::named(&ac.name));
                             None
                         }
                     }
@@ -1929,7 +2048,7 @@ impl SqlToMirConverter {
                             if !already_computed.contains(oc) {
                                 Ok(Some((lc.name.clone(), DataType::try_from(&lc.value)?)))
                             } else {
-                                projected_columns.push(Column::new(None, &lc.name));
+                                projected_columns.push(Column::named(&lc.name));
                                 Ok(None)
                             }
                         }
@@ -1942,13 +2061,13 @@ impl SqlToMirConverter {
 
             // Bogokey will not be added to post-paginate project nodes
             if bogo_in_final_projection {
-                projected_columns.push(Column::new(None, "bogokey"));
+                projected_columns.push(Column::named("bogokey"));
             }
 
             if has_leaf {
                 if qg.parameters().is_empty()
                     && !create_paginate
-                    && !projected_columns.contains(&Column::new(None, "bogokey"))
+                    && !projected_columns.contains(&Column::named("bogokey"))
                 {
                     projected_literals.push(("bogokey".into(), DataType::from(0i32)));
                 } else {
@@ -2107,4 +2226,25 @@ impl SqlToMirConverter {
     pub(super) fn upgrade_version(&mut self) {
         self.schema_version += 1;
     }
+}
+
+impl Arbitrary for Relation {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<Relation>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (any::<SqlIdentifier>(), any::<Option<SqlIdentifier>>())
+            .prop_map(|(name, schema)| Relation { name, schema })
+            .boxed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use launchpad::{eq_laws, hash_laws};
+
+    use super::Relation;
+
+    eq_laws!(Relation);
+    hash_laws!(Relation);
 }

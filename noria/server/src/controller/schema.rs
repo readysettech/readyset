@@ -61,9 +61,15 @@ fn get_base_for_column(
         if source_node.is_base() {
             if let Some(Schema::Table(ref schema)) = recipe.schema_for(source_node.name()) {
                 let col_index = cols.first().unwrap().unwrap();
+                #[allow(clippy::unwrap_used)] // occurs after implied table rewrite
                 return Ok(Some(ColumnBase {
                     column: schema.fields[col_index].column.name.clone(),
-                    table: schema.fields[col_index].column.table.clone().unwrap(),
+                    table: schema.fields[col_index]
+                        .column
+                        .table
+                        .as_ref()
+                        .unwrap()
+                        .clone(),
                 }));
             }
         }
@@ -101,7 +107,7 @@ pub(super) fn column_schema(
         let cs = ColumnSpecification::new(
             Column {
                 name: vn.columns()[column_index].name().into(),
-                table: Some(vn.name().to_owned()),
+                table: Some(vn.name().to_owned().into()),
             },
             // ? in case we found no schema for this column
             col_type,

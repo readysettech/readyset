@@ -1,16 +1,16 @@
 use std::collections::{HashMap, HashSet};
 
 use mir::MirNodeRef;
-use nom_sql::SqlIdentifier;
+use nom_sql::{SqlIdentifier, Table};
 use noria_errors::{internal, internal_err, invariant};
 
-use super::JoinKind;
+use super::{JoinKind, Relation};
 use crate::controller::sql::mir::SqlToMirConverter;
 use crate::controller::sql::query_graph::{JoinPredicate, JoinRef, QueryGraph, QueryGraphEdge};
 use crate::ReadySetResult;
 
 struct JoinChain {
-    tables: HashSet<SqlIdentifier>,
+    tables: HashSet<Table>,
     last_node: MirNodeRef,
 }
 
@@ -21,7 +21,7 @@ impl JoinChain {
         JoinChain { tables, last_node }
     }
 
-    pub(super) fn has_table(&self, table: &SqlIdentifier) -> bool {
+    pub(super) fn has_table(&self, table: &Table) -> bool {
         self.tables.contains(table)
     }
 }
@@ -38,8 +38,8 @@ pub(super) fn make_joins(
     mir_converter: &SqlToMirConverter,
     name: &SqlIdentifier,
     qg: &QueryGraph,
-    node_for_rel: &HashMap<&SqlIdentifier, MirNodeRef>,
-    correlated_nodes: &HashSet<&SqlIdentifier>,
+    node_for_rel: &HashMap<&Relation, MirNodeRef>,
+    correlated_nodes: &HashSet<&Relation>,
     node_count: usize,
 ) -> ReadySetResult<Vec<MirNodeRef>> {
     let mut join_nodes: Vec<MirNodeRef> = Vec::new();
@@ -96,7 +96,7 @@ pub(super) fn make_cross_joins(
     name: &str,
     node_count: &mut usize,
     nodes: Vec<MirNodeRef>,
-    correlated_nodes: &HashSet<&SqlIdentifier>,
+    correlated_nodes: &HashSet<&Relation>,
 ) -> ReadySetResult<Vec<MirNodeRef>> {
     let mut join_nodes = vec![];
     let mut nodes = nodes.into_iter();
@@ -169,23 +169,29 @@ fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> (JoinKind, &'a [Join
 }
 
 fn pick_join_chains(
-    src: &SqlIdentifier,
-    dst: &SqlIdentifier,
+    src: &Relation,
+    dst: &Relation,
     join_chains: &mut Vec<JoinChain>,
-    node_for_rel: &HashMap<&SqlIdentifier, MirNodeRef>,
+    node_for_rel: &HashMap<&Relation, MirNodeRef>,
 ) -> (JoinChain, JoinChain) {
-    let left_chain = match join_chains.iter().position(|chain| chain.has_table(src)) {
+    let left_chain = match join_chains
+        .iter()
+        .position(|chain| chain.has_table(&src.clone().into()))
+    {
         Some(idx) => join_chains.swap_remove(idx),
         None => JoinChain {
-            tables: std::iter::once(src.clone()).collect(),
+            tables: std::iter::once(src.clone().into()).collect(),
             last_node: node_for_rel[src].clone(),
         },
     };
 
-    let right_chain = match join_chains.iter().position(|chain| chain.has_table(dst)) {
+    let right_chain = match join_chains
+        .iter()
+        .position(|chain| chain.has_table(&dst.clone().into()))
+    {
         Some(idx) => join_chains.swap_remove(idx),
         None => JoinChain {
-            tables: std::iter::once(dst.clone()).collect(),
+            tables: std::iter::once(dst.clone().into()).collect(),
             last_node: node_for_rel[dst].clone(),
         },
     };

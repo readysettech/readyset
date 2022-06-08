@@ -2,14 +2,16 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 
 use nom_sql::analysis::ReferredColumns;
-use nom_sql::{Column, SqlIdentifier};
+use nom_sql::Column;
 
+use crate::controller::sql::mir::Relation;
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph, QueryGraphEdge};
 
 pub trait Signature {
     fn signature(&self) -> QuerySignature;
 }
 
+// TODO: Change relations to Hashset<&'a Relation>
 #[derive(Clone, Debug)]
 pub struct QuerySignature<'a> {
     pub relations: HashSet<&'a str>,
@@ -89,16 +91,12 @@ impl Signature for QueryGraph {
         use std::collections::hash_map::DefaultHasher;
 
         let mut hasher = DefaultHasher::new();
-        let rels = self
-            .relations
-            .keys()
-            .map(|r| SqlIdentifier::as_str(r))
-            .collect();
+        let rels = self.relations.keys().map(|r| r.name.as_str()).collect();
 
         // Compute relations part of hash
-        let mut r_vec: Vec<&str> = self.relations.keys().map(SqlIdentifier::as_str).collect();
+        let mut r_vec: Vec<&Relation> = self.relations.keys().collect();
         r_vec.sort_unstable();
-        for r in &r_vec {
+        for r in r_vec {
             r.hash(&mut hasher);
         }
 

@@ -29,7 +29,9 @@ fn is_unique_or_primary(
     // expand_implied_tables() pass
     // This pass should also be run after the key_def_coalition pass, beause this pass will only
     // search for primary keys in the table.keys filed (and not in column.constraints)
-    let table_name = col.table.as_ref().ok_or_else(|| {
+    //
+    // TODO: consider table.schema
+    let table_name = col.table.as_ref().map(|t| &t.name).ok_or_else(|| {
         ReadySetError::Internal(
             "All columns must have an associated table name at this point".to_string(),
         )

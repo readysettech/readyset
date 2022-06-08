@@ -962,8 +962,7 @@ pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Fun
     }
 }
 
-// Parses a SQL column identifier in the db/schema.table.column format. Currently drops the
-// db/schema field
+// Parses a SQL column identifier in the db/schema.table.column format
 pub fn column_identifier_no_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Column> {
     move |i| {
         let (i, id1) = opt(terminated(
@@ -975,24 +974,14 @@ pub fn column_identifier_no_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult
             delimited(whitespace0, tag("."), whitespace0),
         ))(i)?;
         // Do we have a 'db/schema.table.' or 'table.' qualifier?
-        // TODO: use db/schema qualifier
         let table = match (id1, id2) {
-            (Some(schema), Some(t)) => {
-                // Reject all DB/schema qualifiers except for postgresql "public"
-                //
-                // NOTE: This is a temporary stopgap to allow queries that use
-                // "public.<table>.<column>" to run in ReadySet
-                if matches!(dialect, Dialect::PostgreSQL) && schema == "public" {
-                    Some(t)
-                } else {
-                    return Err(nom::Err::Error(ParseError::from_error_kind(
-                        i,
-                        ErrorKind::Tag,
-                    )));
-                }
-            }
+            (Some(db), Some(t)) => Some(Table {
+                schema: Some(db),
+                name: t,
+                alias: None,
+            }),
             // (None, Some(t)) should be unreachable
-            (Some(t), None) | (None, Some(t)) => Some(t),
+            (Some(t), None) | (None, Some(t)) => Some(Table::from(t)),
             (None, None) => None,
         };
         let (i, name) = dialect.identifier()(i)?;
@@ -1436,6 +1425,34 @@ mod tests {
             assert!(res.is_ok());
             assert_eq!(res.unwrap().1, SqlType::Double);
         }
+
+        #[test]
+        fn table_qualifier() {
+            let res1 = test_parse!(column_identifier_no_alias(Dialect::MySQL), b"`t`.`c`");
+            let res2 = test_parse!(column_identifier_no_alias(Dialect::MySQL), b"t.c");
+            let expected = Column {
+                name: "c".into(),
+                table: Some("t".into()),
+            };
+            assert_eq!(res1, expected);
+            assert_eq!(res2, expected);
+        }
+
+        #[test]
+        fn db_table_qualifier() {
+            let res1 = test_parse!(column_identifier_no_alias(Dialect::MySQL), b"`db`.`t`.`c`");
+            let res2 = test_parse!(column_identifier_no_alias(Dialect::MySQL), b"db.t.c");
+            let expected = Column {
+                name: "c".into(),
+                table: Some(Table {
+                    schema: Some("db".into()),
+                    name: "t".into(),
+                    alias: None,
+                }),
+            };
+            assert_eq!(res1, expected);
+            assert_eq!(res2, expected);
+        }
     }
 
     mod postgres {
@@ -1668,6 +1685,40 @@ mod tests {
                 res,
                 SqlType::Array(Box::new(SqlType::Array(Box::new(SqlType::Float))))
             );
+        }
+
+        #[test]
+        fn table_qualifier() {
+            let res1 = test_parse!(
+                column_identifier_no_alias(Dialect::PostgreSQL),
+                b"\"t\".\"c\""
+            );
+            let res2 = test_parse!(column_identifier_no_alias(Dialect::PostgreSQL), b"t.c");
+            let expected = Column {
+                name: "c".into(),
+                table: Some("t".into()),
+            };
+            assert_eq!(res1, expected);
+            assert_eq!(res2, expected);
+        }
+
+        #[test]
+        fn db_table_qualifier() {
+            let res1 = test_parse!(
+                column_identifier_no_alias(Dialect::PostgreSQL),
+                b"\"db\".\"t\".\"c\""
+            );
+            let res2 = test_parse!(column_identifier_no_alias(Dialect::PostgreSQL), b"db.t.c");
+            let expected = Column {
+                name: "c".into(),
+                table: Some(Table {
+                    schema: Some("db".into()),
+                    name: "t".into(),
+                    alias: None,
+                }),
+            };
+            assert_eq!(res1, expected);
+            assert_eq!(res2, expected);
         }
     }
 }

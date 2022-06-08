@@ -76,7 +76,11 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             DeleteStatement {
-                table: Table::from(("db1", "users")),
+                table: Table {
+                    schema: Some("db1".into()),
+                    name: "users".into(),
+                    alias: None
+                },
                 ..Default::default()
             }
         );

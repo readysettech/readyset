@@ -838,7 +838,11 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
-                table: Table::from(("db1", "t")),
+                table: Table {
+                    schema: Some("db1".into()),
+                    name: "t".into(),
+                    alias: None
+                },
                 fields: vec![ColumnSpecification::new(
                     Column::from("t.x"),
                     SqlType::Int(None)

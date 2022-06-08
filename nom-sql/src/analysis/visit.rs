@@ -64,10 +64,6 @@ pub trait Visitor<'ast>: Sized {
     /// Errors that can be thrown during execution of this visitor
     type Error;
 
-    fn visit_column(&mut self, _column: &'ast mut Column) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
     fn visit_table(&mut self, _table: &'ast mut Table) -> Result<(), Self::Error> {
         Ok(())
     }
@@ -78,6 +74,10 @@ pub trait Visitor<'ast>: Sized {
 
     fn visit_sql_type(&mut self, _sql_type: &'ast mut SqlType) -> Result<(), Self::Error> {
         Ok(())
+    }
+
+    fn visit_column(&mut self, column: &'ast mut Column) -> Result<(), Self::Error> {
+        walk_column(self, column)
     }
 
     fn visit_function_expression(
@@ -350,6 +350,16 @@ pub fn walk_offset_clause<'ast, V: Visitor<'ast>>(
 ) -> Result<(), V::Error> {
     if let Some(offset) = offset_clause {
         visitor.visit_literal(offset)?;
+    }
+    Ok(())
+}
+
+pub fn walk_column<'ast, V: Visitor<'ast>>(
+    visitor: &mut V,
+    column: &'ast mut Column,
+) -> Result<(), V::Error> {
+    if let Some(table) = &mut column.table {
+        visitor.visit_table(table)?;
     }
     Ok(())
 }

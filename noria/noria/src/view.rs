@@ -19,7 +19,7 @@ use futures_util::stream::{StreamExt, TryStreamExt};
 use futures_util::{future, ready};
 use launchpad::intervals::{cmp_start_end, BoundPair};
 use launchpad::redacted::Sensitive;
-use nom_sql::{BinaryOperator, Column, ColumnSpecification, SqlIdentifier, SqlType};
+use nom_sql::{BinaryOperator, Column, ColumnSpecification, SqlIdentifier, SqlType, Table};
 use noria_data::DataType;
 use noria_errors::{internal_err, rpc_err, view_err, ReadySetError, ReadySetResult};
 use petgraph::graph::NodeIndex;
@@ -105,7 +105,7 @@ pub struct ColumnBase {
     /// The name of the column in the base table
     pub column: SqlIdentifier,
     /// The name of the base table for this column
-    pub table: SqlIdentifier,
+    pub table: Table,
 }
 
 /// Combines the specification for a columns with its base name
@@ -120,7 +120,7 @@ pub struct ColumnSchema {
 impl ColumnSchema {
     /// Create a new ColumnSchema from a ColumnSpecification representing a column directly in a
     /// base table with the given name.
-    pub fn from_base(spec: ColumnSpecification, table: SqlIdentifier) -> Self {
+    pub fn from_base(spec: ColumnSpecification, table: Table) -> Self {
         Self {
             base: Some(ColumnBase {
                 column: spec.column.name.clone(),
