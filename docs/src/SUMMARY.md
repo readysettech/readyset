@@ -29,7 +29,7 @@
 
 - [DevOps Concerns](./ops.md)
 - [Release Process](./release-process.md)
-- [Gerrit admin runbook](./gerrit-runbook)
+- [Gerrit admin runbook](./gerrit-runbook.md)
 
 # ReadySet Internals
 
