@@ -26,7 +26,7 @@ pub const READYSET_POSTGRES_POSTFIX: &str = "/readyset-psql";
 
 /// The default image tag to use for docker images in cloudformation deployments, if one isn't
 /// specified as the `READYSET_DOCKER_TAG` environment variable during a build
-pub const DEFAULT_DOCKER_TAG: &str = "release-2873f79074683714545e55386f752e78189c1883";
+pub const DEFAULT_DOCKER_TAG: &str = "release-e250e2849715725cbd0e947ce1562c1200b023e3";
 
 /// Used if there is no paired version specified.
 /// Hardcoded to the last public release template set.

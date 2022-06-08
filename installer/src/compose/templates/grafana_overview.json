@@ -21,7 +21,7 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "iteration": 1654627829537,
+  "iteration": 1654699921483,
   "links": [
     {
       "asDropdown": false,
@@ -37,6 +37,332 @@
     }
   ],
   "panels": [
+    {
+      "datasource": "-- Mixed --",
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto",
+            "filterable": false
+          },
+          "decimals": 4,
+          "links": [],
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "90p Latency"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "50p Latency"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total Duration"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Query Text"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": true,
+                    "title": "Query specific dashboard",
+                    "url": "/d/query/specific-query?Deployment=${Deployment:queryparam}&var-queryfilter=${__value.raw}&__url_time_range"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Count"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "99p Latency"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 13,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 6,
+      "options": {
+        "frameIndex": 0,
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "50p latency"
+          }
+        ]
+      },
+      "pluginVersion": "8.0.6",
+      "targets": [
+        {
+          "datasource": "DS_PROMETHEUS",
+          "exemplar": true,
+          "expr": "sum by (query)\n(rate(query_log_execution_time_count{deployment=\"$deployment\",database_type=\"readyset\",query!=\"\", event_type=~\"query|execute\"}[$__range]))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "ReadySet QPS"
+        },
+        {
+          "datasource": "DS_PROMETHEUS",
+          "exemplar": true,
+          "expr": "sum by (query)\n(query_log_execution_time_sum{deployment=\"$deployment\",database_type=\"readyset\",query!=\"\", event_type=~\"query|execute\"}) *1000",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "RS Duration"
+        },
+        {
+          "datasource": "DS_PROMETHEUS",
+          "exemplar": true,
+          "expr": "avg by (query) (query_log_execution_time{deployment=\"$deployment\",database_type=\"readyset\",query!=\"\", quantile=\"0.5\", event_type=~\"query|execute\"}) *1000",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "ReadySet 50p"
+        },
+        {
+          "datasource": "DS_PROMETHEUS",
+          "exemplar": true,
+          "expr": "avg by (query) (query_log_execution_time{deployment=\"$deployment\",database_type=\"readyset\",query!=\"\", quantile=\"0.9\", event_type=~\"query|execute\"}) *1000",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "ReadySet 90p"
+        },
+        {
+          "datasource": "DS_PROMETHEUS",
+          "exemplar": true,
+          "expr": "avg by (query) (query_log_execution_time{deployment=\"$deployment\",database_type=\"readyset\",query!=\"\", quantile=\"0.9\", event_type=~\"query|execute\"}) *1000",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "ReadySet 99p"
+        },
+        {
+          "datasource": "DS_PROMETHEUS",
+          "exemplar": false,
+          "expr": "avg by (query) (query_log_execution_time_count{deployment=\"$deployment\",database_type=\"readyset\",query!=\"\", event_type=~\"query|execute\"})",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "Count"
+        },
+        {
+          "datasource": "ReadySet_DB",
+          "format": "table",
+          "group": [],
+          "hide": false,
+          "metricColumn": "none",
+          "queryType": "randomWalk",
+          "rawQuery": true,
+          "rawSql": "SHOW CACHES;",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "id"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "table": "action_mailbox_inbound_emails",
+          "timeColumn": "created_at",
+          "timeColumnType": "timestamp",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "timeShift": null,
+      "title": "Cached Queries",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "results cached query",
+            "renamePattern": "query"
+          }
+        },
+        {
+          "id": "seriesToColumns",
+          "options": {
+            "byField": "query"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true,
+              "Time 4": true,
+              "Time 5": true,
+              "Time 6": true,
+              "Value #ReadySet QPS": true,
+              "name results": false
+            },
+            "indexByName": {
+              "Time 1": 3,
+              "Time 2": 4,
+              "Time 3": 5,
+              "Time 4": 7,
+              "Time 5": 9,
+              "Value #Count": 2,
+              "Value #RS Duration": 11,
+              "Value #ReadySet 50p": 6,
+              "Value #ReadySet 90p": 8,
+              "Value #ReadySet 99p": 10,
+              "name results": 0,
+              "query": 1
+            },
+            "renameByName": {
+              "Time 4": "",
+              "Time 5": "",
+              "Value #Count": "Count",
+              "Value #RS Duration": "Total Duration",
+              "Value #ReadySet 50p": "50p Latency",
+              "Value #ReadySet 90p": "90p Latency",
+              "Value #ReadySet 99p": "99p Latency",
+              "Value #ReadySet QPS": "ReadySet QPS",
+              "name results": "Query ID",
+              "query": "Query Text"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "desc": true,
+                "field": "Count"
+              }
+            ]
+          }
+        },
+        {
+          "id": "filterByValue",
+          "options": {
+            "filters": [
+              {
+                "config": {
+                  "id": "greater",
+                  "options": {
+                    "value": 0
+                  }
+                },
+                "fieldName": "Count"
+              }
+            ],
+            "match": "any",
+            "type": "include"
+          }
+        }
+      ],
+      "type": "table"
+    },
     {
       "datasource": "-- Mixed --",
       "description": "",
@@ -80,13 +406,9 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "90p latency"
+              "options": "90p Latency"
             },
             "properties": [
-              {
-                "id": "custom.width",
-                "value": 102
-              },
               {
                 "id": "decimals",
                 "value": 2
@@ -96,13 +418,9 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "50p latency"
+              "options": "50p Latency"
             },
             "properties": [
-              {
-                "id": "custom.width",
-                "value": 129
-              },
               {
                 "id": "decimals",
                 "value": 2
@@ -136,13 +454,9 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "99p latency"
+              "options": "99p Latency"
             },
             "properties": [
-              {
-                "id": "custom.width",
-                "value": 116
-              },
               {
                 "id": "decimals",
                 "value": 2
@@ -155,10 +469,6 @@
               "options": "Total Duration"
             },
             "properties": [
-              {
-                "id": "custom.width",
-                "value": 110
-              },
               {
                 "id": "decimals",
                 "value": 2
@@ -214,18 +524,6 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Total duration"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 197
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
               "options": "Count"
             },
             "properties": [
@@ -245,18 +543,13 @@
         "h": 13,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 13
       },
       "id": 5,
       "options": {
         "frameIndex": 0,
         "showHeader": true,
-        "sortBy": [
-          {
-            "desc": true,
-            "displayName": "99p latency"
-          }
-        ]
+        "sortBy": []
       },
       "pluginVersion": "8.0.6",
       "targets": [
@@ -504,333 +797,6 @@
         }
       ],
       "type": "table"
-    },
-    {
-      "datasource": "-- Mixed --",
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "align": "auto",
-            "displayMode": "auto",
-            "filterable": false
-          },
-          "decimals": 4,
-          "links": [],
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 0
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "90p Latency"
-            },
-            "properties": [
-              {
-                "id": "decimals",
-                "value": 2
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "50p Latency"
-            },
-            "properties": [
-              {
-                "id": "decimals",
-                "value": 2
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Total Duration"
-            },
-            "properties": [
-              {
-                "id": "decimals",
-                "value": 2
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Query Text"
-            },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "targetBlank": true,
-                    "title": "Query specific dashboard",
-                    "url": "/d/query/specific-query?Deployment=${Deployment:queryparam}&var-queryfilter=${__value.raw}&__url_time_range"
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Count"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "none"
-              },
-              {
-                "id": "decimals",
-                "value": 0
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "99p Latency"
-            },
-            "properties": [
-              {
-                "id": "decimals",
-                "value": 2
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 13,
-        "w": 24,
-        "x": 0,
-        "y": 13
-      },
-      "id": 6,
-      "options": {
-        "frameIndex": 0,
-        "showHeader": true,
-        "sortBy": [
-          {
-            "desc": false,
-            "displayName": "50p latency"
-          }
-        ]
-      },
-      "pluginVersion": "8.0.6",
-      "targets": [
-        {
-          "datasource": "DS_PROMETHEUS",
-          "exemplar": true,
-          "expr": "sum by (query)\n(rate(query_log_execution_time_count{deployment=\"$deployment\",database_type=\"readyset\",query!=\"\", event_type=~\"query|execute\"}[$__range]))",
-          "format": "table",
-          "hide": false,
-          "instant": true,
-          "interval": "",
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "ReadySet QPS"
-        },
-        {
-          "datasource": "DS_PROMETHEUS",
-          "exemplar": true,
-          "expr": "sum by (query)\n(query_log_execution_time_sum{deployment=\"$deployment\",database_type=\"readyset\",query!=\"\", event_type=~\"query|execute\"}) *1000",
-          "format": "table",
-          "hide": false,
-          "instant": true,
-          "interval": "",
-          "legendFormat": "",
-          "refId": "RS Duration"
-        },
-        {
-          "datasource": "DS_PROMETHEUS",
-          "exemplar": true,
-          "expr": "avg by (query) (query_log_execution_time{deployment=\"$deployment\",database_type=\"readyset\",query!=\"\", quantile=\"0.5\", event_type=~\"query|execute\"}) *1000",
-          "format": "table",
-          "hide": false,
-          "instant": true,
-          "interval": "",
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "ReadySet 50p"
-        },
-        {
-          "datasource": "DS_PROMETHEUS",
-          "exemplar": true,
-          "expr": "avg by (query) (query_log_execution_time{deployment=\"$deployment\",database_type=\"readyset\",query!=\"\", quantile=\"0.9\", event_type=~\"query|execute\"}) *1000",
-          "format": "table",
-          "hide": false,
-          "instant": true,
-          "interval": "",
-          "legendFormat": "",
-          "refId": "ReadySet 90p"
-        },
-        {
-          "datasource": "DS_PROMETHEUS",
-          "exemplar": true,
-          "expr": "avg by (query) (query_log_execution_time{deployment=\"$deployment\",database_type=\"readyset\",query!=\"\", quantile=\"0.9\", event_type=~\"query|execute\"}) *1000",
-          "format": "table",
-          "hide": false,
-          "instant": true,
-          "interval": "",
-          "legendFormat": "",
-          "refId": "ReadySet 99p"
-        },
-        {
-          "datasource": "DS_PROMETHEUS",
-          "exemplar": false,
-          "expr": "avg by (query) (query_log_execution_time_count{deployment=\"$deployment\",database_type=\"readyset\",query!=\"\", event_type=~\"query|execute\"})",
-          "format": "table",
-          "hide": false,
-          "instant": true,
-          "interval": "",
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "Count"
-        },
-        {
-          "datasource": "ReadySet_DB",
-          "format": "table",
-          "group": [],
-          "hide": false,
-          "metricColumn": "none",
-          "queryType": "randomWalk",
-          "rawQuery": true,
-          "rawSql": "SHOW CACHES;",
-          "refId": "A",
-          "select": [
-            [
-              {
-                "params": [
-                  "id"
-                ],
-                "type": "column"
-              }
-            ]
-          ],
-          "table": "action_mailbox_inbound_emails",
-          "timeColumn": "created_at",
-          "timeColumnType": "timestamp",
-          "where": [
-            {
-              "name": "$__timeFilter",
-              "params": [],
-              "type": "macro"
-            }
-          ]
-        }
-      ],
-      "timeShift": null,
-      "title": "Cached Queries",
-      "transformations": [
-        {
-          "id": "renameByRegex",
-          "options": {
-            "regex": "results cached query",
-            "renamePattern": "query"
-          }
-        },
-        {
-          "id": "seriesToColumns",
-          "options": {
-            "byField": "query"
-          }
-        },
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time 1": true,
-              "Time 2": true,
-              "Time 3": true,
-              "Time 4": true,
-              "Time 5": true,
-              "Time 6": true,
-              "Value #ReadySet QPS": true,
-              "name results": true
-            },
-            "indexByName": {
-              "Time 1": 2,
-              "Time 2": 4,
-              "Time 3": 5,
-              "Time 4": 7,
-              "Time 5": 9,
-              "Time 6": 12,
-              "Value #Count": 1,
-              "Value #RS Duration": 11,
-              "Value #ReadySet 50p": 6,
-              "Value #ReadySet 90p": 8,
-              "Value #ReadySet 99p": 10,
-              "Value #ReadySet QPS": 3,
-              "name results": 13,
-              "query": 0
-            },
-            "renameByName": {
-              "Time 4": "",
-              "Time 5": "",
-              "Value #Count": "Count",
-              "Value #RS Duration": "Total Duration",
-              "Value #ReadySet 50p": "50p Latency",
-              "Value #ReadySet 90p": "90p Latency",
-              "Value #ReadySet 99p": "99p Latency",
-              "Value #ReadySet QPS": "ReadySet QPS",
-              "query": "Query Text"
-            }
-          }
-        },
-        {
-          "id": "sortBy",
-          "options": {
-            "fields": {},
-            "sort": [
-              {
-                "desc": true,
-                "field": "Count"
-              }
-            ]
-          }
-        },
-        {
-          "id": "filterByValue",
-          "options": {
-            "filters": [
-              {
-                "config": {
-                  "id": "greater",
-                  "options": {
-                    "value": 0
-                  }
-                },
-                "fieldName": "Count"
-              }
-            ],
-            "match": "any",
-            "type": "include"
-          }
-        }
-      ],
-      "type": "table"
     }
   ],
   "refresh": "",
@@ -876,5 +842,5 @@
   "timezone": "",
   "title": "Workload Overview",
   "uid": "workload",
-  "version": 1
+  "version": 2
 }
