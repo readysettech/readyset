@@ -935,8 +935,9 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.59.1"
-source = "git+https://github.com/rust-lang/rust-bindgen.git?branch=master#2aed6b0216805e27228ed39988ffe1a1ffd7e940"
+version = "0.59.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bd2a9a458e8f4304c52c43ebb0cfbd520289f8379a52e329a38afda99bf8eb8"
 dependencies = [
  "bitflags",
  "cexpr 0.6.0",
@@ -3112,7 +3113,7 @@ version = "6.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c309a9d2470844aceb9a4a098cf5286154d20596868b75a6b36357d2bb9ca25d"
 dependencies = [
- "bindgen 0.59.1",
+ "bindgen 0.59.2",
  "cc",
  "glob",
  "libc",
@@ -6856,7 +6857,7 @@ version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f559b464de2e2bdabcac6a210d12e9b5a5973c251e102c44c585c71d51bd78e"
 dependencies = [
- "cfg-if 1.0.0",
+ "cfg-if 0.1.10",
  "rand 0.8.5",
  "static_assertions",
 ]
