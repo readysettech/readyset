@@ -317,6 +317,14 @@ impl ViewCache {
         });
     }
 
+    /// Clears all statements from all caches
+    fn clear(&mut self) {
+        self.local.clear();
+        tokio::task::block_in_place(|| {
+            self.global.write().unwrap().clear();
+        })
+    }
+
     /// Returns the select statement based on a provided name if it exists in either the local or
     /// global caches.
     pub fn select_statement_from_name(&self, name: &str) -> Option<SelectStatement> {
@@ -1005,6 +1013,16 @@ impl NoriaConnector {
             self.inner.get_mut().await?.noria.remove_query(name)
         )?;
         self.view_cache.remove_statement(name);
+        Ok(())
+    }
+
+    /// Make a request to Noria to drop all cached queries, and empty all internal state
+    pub async fn drop_all_caches(&mut self) -> ReadySetResult<()> {
+        noria_await!(
+            self.inner.get_mut().await?,
+            self.inner.get_mut().await?.noria.remove_all_queries()
+        )?;
+        self.view_cache.clear();
         Ok(())
     }
 
@@ -1785,28 +1803,53 @@ async fn do_read<'a>(
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_view_cache() {
-        let global = Arc::new(RwLock::new(HashMap::new()));
-        let mut view_cache = ViewCache::new(global);
+    mod view_cache {
+        use nom_sql::{parse_select_statement, Dialect};
 
-        let name = "test_statement_name";
-        let statement_str = "SELECT a_col FROM t1";
-        let statement = if let SqlQuery::Select(s) =
-            nom_sql::parse_query(nom_sql::Dialect::MySQL, statement_str).unwrap()
-        {
-            s
-        } else {
-            unreachable!();
-        };
+        use super::*;
+        #[test]
+        fn register_and_remove_statement() {
+            let global = Arc::new(RwLock::new(HashMap::new()));
+            let mut view_cache = ViewCache::new(global);
 
-        view_cache.register_statement(name, &statement);
-        let retrieved_statement = view_cache.select_statement_from_name(name);
-        assert_eq!(Some(statement), retrieved_statement);
+            let name = "test_statement_name";
+            let statement = parse_select_statement(Dialect::MySQL, "SELECT a_col FROM t1").unwrap();
 
-        view_cache.remove_statement(name);
-        let retrieved_statement = view_cache.select_statement_from_name(name);
-        assert_eq!(None, retrieved_statement);
+            view_cache.register_statement(name, &statement);
+            let retrieved_statement = view_cache.select_statement_from_name(name);
+            assert_eq!(Some(statement), retrieved_statement);
+
+            view_cache.remove_statement(name);
+            let retrieved_statement = view_cache.select_statement_from_name(name);
+            assert_eq!(None, retrieved_statement);
+        }
+
+        #[test]
+        fn clear() {
+            let global = Arc::new(RwLock::new(HashMap::new()));
+            let mut view_cache = ViewCache::new(global.clone());
+
+            let statement1 = parse_select_statement(Dialect::MySQL, "SELECT a FROM t1").unwrap();
+            let statement2 = parse_select_statement(Dialect::MySQL, "SELECT b FROM t2").unwrap();
+
+            view_cache.register_statement("q1", &statement1);
+            view_cache.register_statement("q2", &statement2);
+
+            assert_eq!(
+                view_cache.select_statement_from_name("q1"),
+                Some(statement1)
+            );
+            assert_eq!(
+                view_cache.select_statement_from_name("q2"),
+                Some(statement2)
+            );
+
+            view_cache.clear();
+
+            assert_eq!(view_cache.select_statement_from_name("q1"), None);
+            assert_eq!(view_cache.select_statement_from_name("q2"), None);
+            assert!(global.read().unwrap().is_empty());
+        }
     }
 
     mod build_view_query {

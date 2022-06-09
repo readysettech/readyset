@@ -33,6 +33,44 @@ impl QueryStatus {
             execution_info: None,
         }
     }
+
+    /// Returns true if this query status represents a [pending][] query
+    ///
+    /// [pending]: MigrationState::Pending
+    #[must_use]
+    pub fn is_pending(&self) -> bool {
+        self.migration_state == MigrationState::Pending
+    }
+
+    /// Returns true if this query status represents a [successfully migrated][] query
+    ///
+    /// [successfully migrated]: MigrationState::Successful
+    #[must_use]
+    pub fn is_successful(&self) -> bool {
+        self.migration_state == MigrationState::Successful
+    }
+
+    /// Returns true if this query status represents an [unsupported][] query
+    ///
+    /// [unsupported]: MigrationState::Unsupported
+    #[must_use]
+    pub fn is_unsupported(&self) -> bool {
+        self.migration_state == MigrationState::Unsupported
+    }
+
+    /// Returns true if this query status represents a [successfully dry-run][] query
+    ///
+    /// [successfully dry-run]: MigrationState::DryRunSucceeded
+    #[must_use]
+    pub fn is_dry_run_succeeded(&self) -> bool {
+        self.migration_state == MigrationState::DryRunSucceeded
+    }
+
+    /// Returns true if the query should be considered "denied"
+    #[must_use]
+    pub fn is_denied(&self) -> bool {
+        self.is_unsupported() || self.is_pending() || self.is_dry_run_succeeded()
+    }
 }
 
 /// Represents the current migration state of a given query. This state should be updated any time
@@ -434,12 +472,22 @@ impl QueryStatusCache {
         }
     }
 
+    /// Clear all queries currently marked as successful from the cache.
+    pub fn clear(&self) {
+        self.statuses
+            .iter_mut()
+            .filter(|v| v.is_successful())
+            .for_each(|mut v| {
+                v.migration_state = MigrationState::Pending;
+            });
+    }
+
     /// Returns a list of queries that currently need the be processed to determine
     /// if they should be allowed (are supported by Noria).
     pub fn pending_migration(&self) -> QueryList {
         self.statuses
             .iter()
-            .filter(|r| matches!(r.value().migration_state, MigrationState::Pending))
+            .filter(|r| r.is_pending())
             .map(|r| ((*(*r.key())).clone(), r.value().clone()))
             .collect::<Vec<(Query, QueryStatus)>>()
             .into()
@@ -449,7 +497,7 @@ impl QueryStatusCache {
     pub fn allow_list(&self) -> QueryList {
         self.statuses
             .iter()
-            .filter(|r| matches!(r.value().migration_state, MigrationState::Successful))
+            .filter(|r| r.is_successful())
             .map(|r| ((*(*(r.key()))).clone(), r.value().clone()))
             .collect::<Vec<(Query, QueryStatus)>>()
             .into()
@@ -463,7 +511,7 @@ impl QueryStatusCache {
                 .iter()
                 .filter_map(|r| {
                     self.statuses.get(r.value()).and_then(|s| {
-                        if matches!(s.value().migration_state, MigrationState::Unsupported) {
+                        if s.is_unsupported() {
                             Some(DeniedQuery {
                                 id: r.key().clone(),
                                 query: (*(*(r.value()))).clone(),
@@ -480,12 +528,7 @@ impl QueryStatusCache {
                 .iter()
                 .filter_map(|r| {
                     self.statuses.get(r.value()).and_then(|s| {
-                        if matches!(
-                            s.value().migration_state,
-                            MigrationState::Unsupported
-                                | MigrationState::Pending
-                                | MigrationState::DryRunSucceeded
-                        ) {
+                        if s.is_denied() {
                             Some(DeniedQuery {
                                 id: r.key().clone(),
                                 query: (*(*(r.value()))).clone(),
@@ -595,5 +638,23 @@ mod tests {
         assert_eq!(cache.pending_migration().len(), 0);
         assert_eq!(cache.allow_list().len(), 0);
         assert_eq!(cache.deny_list().len(), 1);
+    }
+
+    #[test]
+    fn clear() {
+        let cache = QueryStatusCache::with_style(MigrationStyle::Explicit);
+
+        cache.update_query_migration_state(
+            &select_statement("SELECT * FROM t1").unwrap(),
+            MigrationState::Successful,
+        );
+        cache.update_query_migration_state(
+            &select_statement("SELECT * FROM t1 WHERE id = ?").unwrap(),
+            MigrationState::Successful,
+        );
+        assert_eq!(cache.allow_list().len(), 2);
+
+        cache.clear();
+        assert_eq!(cache.allow_list().len(), 0);
     }
 }

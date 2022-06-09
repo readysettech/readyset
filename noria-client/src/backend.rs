@@ -1350,6 +1350,25 @@ where
         Ok(noria_connector::QueryResult::Empty)
     }
 
+    /// Forwards a `DROP ALL CACHES` request to noria
+    async fn drop_all_caches(&mut self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        self.noria.drop_all_caches().await?;
+        self.query_status_cache.clear();
+        self.prepared_statements.iter_mut().for_each(
+            |CachedPreparedStatement {
+                 prep,
+                 migration_state,
+                 ..
+             }| {
+                if *migration_state == MigrationState::Successful {
+                    *migration_state = MigrationState::Pending;
+                }
+                Self::invalidate_prepared_cache_entry(prep);
+            },
+        );
+        Ok(noria_connector::QueryResult::Empty)
+    }
+
     /// Responds to a `SHOW PROXIED QUERIES` query
     async fn show_proxied_queries(
         &mut self,
@@ -1452,9 +1471,7 @@ where
             SqlQuery::DropCache(DropCacheStatement { name }) => {
                 self.drop_cached_query(name.as_str()).await
             }
-            SqlQuery::DropAllCaches(_) => Err(ReadySetError::Unsupported(
-                "DROP ALL CACHES not implemented yet".into(),
-            )),
+            SqlQuery::DropAllCaches(_) => self.drop_all_caches().await,
             SqlQuery::Show(ShowStatement::CachedQueries) => self.noria.verbose_outputs().await,
             SqlQuery::Show(ShowStatement::ReadySetStatus) => self.noria.readyset_status().await,
             SqlQuery::Show(ShowStatement::ProxiedQueries) => self.show_proxied_queries().await,
