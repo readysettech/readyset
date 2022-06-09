@@ -396,3 +396,34 @@ async fn out_of_band_rewritten_query_without_fallback() {
     assert_eq!(query_status_cache.allow_list().len(), 1);
     assert_eq!(query_status_cache.deny_list().len(), 0);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn drop_all_caches() {
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
+    let (opts, _handle) = query_cache_setup(
+        query_status_cache,
+        false, // fallback disabled
+        MigrationMode::OutOfBand,
+    )
+    .await;
+
+    let mut conn = Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TABLE t (a INT, b INT)")
+        .await
+        .unwrap();
+
+    sleep().await;
+    conn.query_drop("CREATE CACHE test FROM SELECT a, b FROM t WHERE a = ? AND b = ?")
+        .await
+        .unwrap();
+    conn.query_drop("CREATE CACHE test_2 FROM SELECT a FROM t WHERE a = ?")
+        .await
+        .unwrap();
+    assert_eq!(query_status_cache.allow_list().len(), 2);
+    assert_eq!(query_status_cache.deny_list().len(), 0);
+
+    conn.query_drop("DROP ALL CACHES").await.unwrap();
+
+    assert_eq!(query_status_cache.allow_list().len(), 0);
+    assert_eq!(query_status_cache.deny_list().len(), 0);
+}
