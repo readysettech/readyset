@@ -222,7 +222,6 @@ impl ExpressionRegistry {
     }
 
     fn assign_alias(&mut self, alias: SqlIdentifier, query_id: QueryID) -> ReadySetResult<()> {
-        debug!(%alias, %query_id, "Aliasing existing query");
         match self.aliases.entry(alias.clone()) {
             Entry::Occupied(e) => {
                 if *e.get() != query_id {
@@ -232,6 +231,7 @@ impl ExpressionRegistry {
                 }
             }
             Entry::Vacant(e) => {
+                debug!(%alias, %query_id, "Aliasing existing query");
                 e.insert(query_id);
             }
         }
