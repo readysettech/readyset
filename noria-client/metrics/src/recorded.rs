@@ -23,6 +23,14 @@ pub const QUERY_LOG_EXECUTION_TIME: &str = "query-log.execution_time";
 /// | event_type | EventType, whether the query was a prepare, execute, or query.  |
 pub const QUERY_LOG_PARSE_TIME: &str = "query-log.parse_time";
 
+/// Counter: The number of individual keys read for a query. This will be greater than the number of
+/// times the query was executed in the case of `IN` queries.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | query | The query text being executed. |
+pub const QUERY_LOG_TOTAL_KEYS_READ: &str = "query-log.total_keys_read";
+
 /// Counter: The number of cache misses which occurred, potentially multiple from a single query.
 ///
 /// | Tag | Description |

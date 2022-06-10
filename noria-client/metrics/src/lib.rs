@@ -22,6 +22,9 @@ pub struct QueryExecutionEvent {
     /// SqlQuery associated with this execution event.
     pub query: Option<Arc<SqlQuery>>,
 
+    /// The number of keys that were read
+    pub num_keys: Option<u64>,
+
     /// How long the request spent in parsing.
     pub parse_duration: Option<Duration>,
 
@@ -143,6 +146,7 @@ impl QueryExecutionEvent {
             noria_error: None,
             destination: None,
             cache_misses: None,
+            num_keys: None,
         }
     }
 
