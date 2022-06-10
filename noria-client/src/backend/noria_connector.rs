@@ -1755,10 +1755,14 @@ async fn do_read<'a>(
                 .into_normal()
                 .ok_or_else(|| internal_err("Unexpected response type from reader service"))?
                 .map(|z| {
-                    z.map_results(|rows, _| {
+                    z.map_results(|rows, stats| {
                         // `rows` is Unserialized as we pass `raw_result` = true.
                         #[allow(clippy::unwrap_used)]
-                        Results::new(rows.into_unserialized().unwrap(), getter.column_slice())
+                        Results::with_stats(
+                            rows.into_unserialized().unwrap(),
+                            getter.column_slice(),
+                            stats.clone(),
+                        )
                     })
                 })?
                 .into_results()
