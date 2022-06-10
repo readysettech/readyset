@@ -22,7 +22,7 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "iteration": 1654871613242,
+  "iteration": 1654871767877,
   "links": [
     {
       "asDropdown": false,
@@ -741,14 +741,153 @@
         {
           "exemplar": true,
           "expr": "(query_log_total_keys_read{deployment=\"$deployment\", query=\"${queryfilter:raw}\"} - query_log_total_cache_misses{deployment=\"$deployment\", query=\"${queryfilter:raw}\"}) / query_log_total_keys_read{deployment=\"$deployment\", query=\"${queryfilter:raw}\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "C"
+        }
+      ],
+      "title": "Cache hit rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "DS_PROMETHEUS",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 3,
+        "x": 0,
+        "y": 31
+      },
+      "id": 35,
+      "options": {
+        "reduceOptions": {
+          "calcs": ["max"],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "text": {}
+      },
+      "pluginVersion": "8.0.6",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "rate(query_log_execution_time_count{deployment=\"$deployment\", query=\"${queryfilter:raw}\"}[$__rate_interval])",
           "instant": false,
           "interval": "",
-          "legendFormat": "Cache Hit Rate",
+          "legendFormat": "Queries Per Second",
           "queryType": "randomWalk",
           "refId": "A"
         }
       ],
-      "title": "Cache Hit Rate",
+      "title": "Max QPS",
+      "type": "gauge"
+    },
+    {
+      "datasource": "DS_PROMETHEUS",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 100,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 17,
+        "x": 3,
+        "y": 31
+      },
+      "id": 34,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "hidden",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "rate(query_log_execution_time_count{deployment=\"$deployment\", query=\"${queryfilter:raw}\"}[$__rate_interval])",
+          "interval": "",
+          "legendFormat": "Queries Per Second",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "title": "Queries Per Second",
       "type": "timeseries"
     }
   ],
@@ -822,5 +961,5 @@
   "timezone": "",
   "title": "Specific Query",
   "uid": "query",
-  "version": 4
+  "version": 5
 }
