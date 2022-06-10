@@ -844,6 +844,14 @@ async fn query_logger(
                         _ => "".to_string()
                     };
 
+                    if let Some(num_keys) = event.num_keys {
+                        metrics::counter!(
+                            noria_client_metrics::recorded::QUERY_LOG_TOTAL_KEYS_READ,
+                            num_keys,
+                            "query" => query.clone(),
+                        );
+                    }
+
                     if let Some(parse) = event.parse_duration {
                         metrics::histogram!(
                             noria_client_metrics::recorded::QUERY_LOG_PARSE_TIME,

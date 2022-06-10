@@ -1736,6 +1736,7 @@ async fn do_read<'a>(
         ticket,
         read_behavior,
     )?;
+    event.num_keys = Some(vq.key_comparisons.len() as _);
 
     let data = if let Some(rh) = read_request_handler {
         let request = noria::Tagged::from(ReadQuery::Normal {
