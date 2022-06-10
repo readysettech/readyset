@@ -890,11 +890,13 @@ async fn query_logger(
                             cache_misses,
                             "query" => query.clone(),
                         );
-                        metrics::counter!(
-                            noria_client_metrics::recorded::QUERY_LOG_QUERY_CACHE_MISSED,
-                            1,
-                            "query" => query.clone(),
-                        );
+                        if cache_misses != 0 {
+                            metrics::counter!(
+                                noria_client_metrics::recorded::QUERY_LOG_QUERY_CACHE_MISSED,
+                                1,
+                                "query" => query.clone(),
+                            );
+                        }
                     }
                 } else {
                     info!("Metrics thread shutting down after request handle dropped.");
