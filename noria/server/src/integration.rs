@@ -8947,3 +8947,27 @@ async fn drop_view() {
     let err = view_res.unwrap_err();
     assert_eq!(err, ReadySetError::ViewNotFound("t1_view".into()));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn read_from_dropped_query() {
+    let mut g = start_simple_unsharded("read_from_dropped_query").await;
+
+    g.extend_recipe(
+        "CREATE TABLE t1 (id int);
+         CREATE CACHE q FROM SELECT id FROM t1;"
+            .parse()
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let mut view = g.view("q").await.unwrap();
+
+    g.extend_recipe("DROP TABLE t1;".parse().unwrap())
+        .await
+        .unwrap();
+
+    let view_res = view.lookup_first(&[0.into()], true).await;
+    assert!(view_res.is_err());
+    assert!(view_res.err().unwrap().caused_by_view_destroyed());
+}

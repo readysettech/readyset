@@ -31,6 +31,9 @@ pub enum LookupError {
     /// The map is not ready to accept queries
     NotReady,
 
+    /// The map has been destroyed
+    Destroyed,
+
     /// Some other error occurred during the lookup
     Error(ReadySetError),
 
@@ -53,6 +56,15 @@ pub enum LookupError {
     ///
     /// Second field contains the metadata of the handle
     MissRangeMany(Vec<BoundPair<Vec<DataType>>>, i64),
+}
+
+impl From<reader_map::Error> for LookupError {
+    fn from(e: reader_map::Error) -> Self {
+        match e {
+            reader_map::Error::NotPublished => Self::NotReady,
+            reader_map::Error::Destroyed => Self::Destroyed,
+        }
+    }
 }
 
 impl From<ReadySetError> for LookupError {
@@ -89,8 +101,7 @@ impl LookupError {
     /// [`Self::NotReady`] or [`Self::Error`], the result will be empty
     pub fn into_misses(self) -> Vec<KeyComparison> {
         match self {
-            LookupError::NotReady => vec![],
-            LookupError::Error(_) => vec![],
+            LookupError::NotReady | LookupError::Destroyed | LookupError::Error(_) => vec![],
             LookupError::MissPointSingle(x, _) => vec![vec1![x].into()],
             LookupError::MissPointMany(xs, _) => vec![xs.try_into().unwrap()],
             LookupError::MissRangeSingle(ranges, _) => ranges
@@ -145,7 +156,7 @@ impl Handle {
         match *self {
             Handle::Single(ref h) => {
                 assert_eq!(key.len(), 1);
-                let map = h.enter().map_err(|_| ReadySetError::ViewNotYetAvailable)?;
+                let map = h.enter()?;
                 let m = *map.meta();
                 let v = map
                     .get(&key[0])
@@ -153,7 +164,7 @@ impl Handle {
                 Ok((then(v.iter())?, m))
             }
             Handle::Many(ref h) => {
-                let map = h.enter().map_err(|_| NotReady)?;
+                let map = h.enter()?;
                 let m = *map.meta();
                 let v = map.get(key).ok_or_else(|| MissPointMany(key.into(), m))?;
                 Ok((then(v.iter())?, m))
@@ -161,20 +172,20 @@ impl Handle {
         }
     }
 
-    /// Returns None if this handle is not ready, Some(true) if this handle contains the given
-    /// key, Some(false) if it doesn't
+    /// Returns Ok(true) if this handle contains the given key, Ok(false) if it doesn't, or an error
+    /// if the underlying reader map is not able to accept reads
     ///
     /// This is equivalent to testing if `meta_get_and` returns an Err other than `NotReady`
-    pub(super) fn contains_key(&self, key: &[DataType]) -> Option<bool> {
+    pub(super) fn contains_key(&self, key: &[DataType]) -> reader_map::Result<bool> {
         match *self {
             Handle::Single(ref h) => {
                 assert_eq!(key.len(), 1);
-                let map = h.enter().ok()?;
-                Some(map.contains_key(&key[0]))
+                let map = h.enter()?;
+                Ok(map.contains_key(&key[0]))
             }
             Handle::Many(ref h) => {
-                let map = h.enter().ok()?;
-                Some(map.contains_key(key))
+                let map = h.enter()?;
+                Ok(map.contains_key(key))
             }
         }
     }
@@ -191,11 +202,9 @@ impl Handle {
         F: Fn(ValuesIter<'_, Box<[DataType]>, RandomState>) -> ReadySetResult<T>,
         R: RangeBounds<Vec<DataType>>,
     {
-        use LookupError::*;
-
         match *self {
             Handle::Single(ref h) => {
-                let map = h.enter().map_err(|_| NotReady)?;
+                let map = h.enter()?;
                 let meta = *map.meta();
                 let start_bound = range.start_bound().map(|v| {
                     assert!(v.len() == 1);
@@ -217,7 +226,7 @@ impl Handle {
                 ))
             }
             Handle::Many(ref h) => {
-                let map = h.enter().map_err(|_| NotReady)?;
+                let map = h.enter()?;
                 let meta = *map.meta();
                 let range = (range.start_bound(), range.end_bound());
                 let records = map
@@ -233,17 +242,17 @@ impl Handle {
         }
     }
 
-    /// Returns None if this handle is not ready, Some(true) if this handle fully contains the given
-    /// key range, Some(false) if any of the keys miss
+    /// Returns Ok(true) if this handle fully contains the given key range, Ok(false) if any of the
+    /// keys miss, or an error if the underlying reader map is not able to accept reads
     ///
     /// This is equivalent to testing if `meta_get_and` returns an Err other than `NotReady`
-    pub(super) fn contains_range<R>(&self, range: &R) -> Option<bool>
+    pub(super) fn contains_range<R>(&self, range: &R) -> reader_map::Result<bool>
     where
         R: RangeBounds<Vec<DataType>>,
     {
         match *self {
             Handle::Single(ref h) => {
-                let map = h.enter().ok()?;
+                let map = h.enter()?;
                 let start_bound = range.start_bound().map(|v| {
                     assert!(v.len() == 1);
                     &v[0]
@@ -252,11 +261,11 @@ impl Handle {
                     assert!(v.len() == 1);
                     &v[0]
                 });
-                Some(map.contains_range(&(start_bound, end_bound)))
+                Ok(map.contains_range(&(start_bound, end_bound)))
             }
             Handle::Many(ref h) => {
-                let map = h.enter().ok()?;
-                Some(map.contains_range(&(range.start_bound(), range.end_bound())))
+                let map = h.enter()?;
+                Ok(map.contains_range(&(range.start_bound(), range.end_bound())))
             }
         }
     }
@@ -334,14 +343,17 @@ mod tests {
     #[test]
     fn contains_key_single() {
         let (mut w, handle) = make_single();
-        assert_eq!(handle.contains_key(&[1i32.into()]), None);
+        assert_eq!(
+            handle.contains_key(&[1i32.into()]),
+            Err(reader_map::Error::NotPublished)
+        );
 
         w.publish();
-        assert_eq!(handle.contains_key(&[1i32.into()]), Some(false));
+        assert_eq!(handle.contains_key(&[1i32.into()]), Ok(false));
 
         w.insert(1i32.into(), vec![1i32.into()].into_boxed_slice());
         w.publish();
-        assert_eq!(handle.contains_key(&[1i32.into()]), Some(true));
+        assert_eq!(handle.contains_key(&[1i32.into()]), Ok(true));
     }
 
     #[test]
