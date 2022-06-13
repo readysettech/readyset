@@ -2,8 +2,6 @@ frameworks:
   mysql:
     - name: 'go/gorm'
       expect_success: true
-    - name: 'go/skeema'
-      expect_success: false
     - name: 'haskell/mysql-simple'
       expect_success: false
     - name: 'java/jdbc'
