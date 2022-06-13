@@ -9,7 +9,7 @@ use noria::internal::IndexType;
 
 use crate::inner::Inner;
 use crate::values::Values;
-use crate::Aliased;
+use crate::{Aliased, Error, Result};
 
 mod read_ref;
 pub use read_ref::{MapReadRef, ReadGuardIter};
@@ -79,6 +79,10 @@ where
     M: Clone,
     T: Clone,
 {
+    fn enter_inner(&self) -> Result<ReadGuard<'_, Inner<K, V, M, T, S>>> {
+        self.handle.enter().ok_or(Error::Destroyed)
+    }
+
     /// Take out a guarded live reference to the read side of the map.
     ///
     /// This lets you perform more complex read operations on the map.
@@ -88,12 +92,12 @@ where
     /// If no publish has happened, or the map has been destroyed, this function returns `None`.
     ///
     /// See [`MapReadRef`].
-    pub fn enter(&self) -> Option<MapReadRef<'_, K, V, M, T, S>> {
-        let guard = self.handle.enter()?;
+    pub fn enter(&self) -> Result<MapReadRef<'_, K, V, M, T, S>> {
+        let guard = self.enter_inner()?;
         if !guard.ready {
-            return None;
+            return Err(Error::NotPublished);
         }
-        Some(MapReadRef { guard })
+        Ok(MapReadRef { guard })
     }
 
     /// Returns the number of non-empty keys present in the map.
@@ -107,28 +111,24 @@ where
     }
 
     /// Get the current meta value.
-    pub fn meta(&self) -> Option<ReadGuard<'_, M>> {
-        Some(ReadGuard::map(self.handle.enter()?, |inner| &inner.meta))
+    pub fn meta(&self) -> Result<ReadGuard<'_, M>> {
+        Ok(ReadGuard::map(self.enter_inner()?, |inner| &inner.meta))
     }
 
     /// Internal version of `get_and`
-    fn get_raw<Q: ?Sized>(&self, key: &Q) -> Option<ReadGuard<'_, Values<V, S>>>
+    fn get_raw<Q: ?Sized>(&self, key: &Q) -> Result<Option<ReadGuard<'_, Values<V, S>>>>
     where
         K: Borrow<Q>,
         Q: Ord + Hash,
     {
-        let inner = self.handle.enter()?;
-        if !inner.ready {
-            return None;
-        }
-
-        ReadGuard::try_map(inner, |inner| {
+        let MapReadRef { guard } = self.enter()?;
+        Ok(ReadGuard::try_map(guard, |inner| {
             let v = inner.data.get(key).map(AsRef::as_ref);
             if let Some(v) = v {
                 inner.eviction_strategy.on_read(v.eviction_meta());
             }
             v
-        })
+        }))
     }
 
     /// Returns a guarded reference to the values corresponding to the key.
@@ -140,9 +140,12 @@ where
     ///
     /// Note that not all writes will be included with this read -- only those that have been
     /// published by the writer. If no publish has happened, or the map has been destroyed, this
-    /// function returns `None`.
+    /// function returns an [`Error`].
     #[inline]
-    pub fn get<'rh, Q: ?Sized>(&'rh self, key: &'_ Q) -> Option<ReadGuard<'rh, Values<V, S>>>
+    pub fn get<'rh, Q: ?Sized>(
+        &'rh self,
+        key: &'_ Q,
+    ) -> Result<Option<ReadGuard<'rh, Values<V, S>>>>
     where
         K: Borrow<Q>,
         Q: Ord + Hash,
@@ -164,14 +167,19 @@ where
     ///
     /// Note that not all writes will be included with this read -- only those that have been
     /// refreshed by the writer. If no refresh has happened, or the map has been destroyed, this
-    /// function returns `None`.
+    /// function returns an [`Error`].
     #[inline]
-    pub fn get_one<'rh, Q: ?Sized>(&'rh self, key: &'_ Q) -> Option<ReadGuard<'rh, V>>
+    pub fn get_one<'rh, Q: ?Sized>(&'rh self, key: &'_ Q) -> Result<Option<ReadGuard<'rh, V>>>
     where
         K: Borrow<Q>,
         Q: Ord + Clone + Hash,
     {
-        ReadGuard::try_map(self.get_raw(key.borrow())?, |x| x.get_one())
+        let vs = if let Some(vs) = self.get_raw(key.borrow())? {
+            vs
+        } else {
+            return Ok(None);
+        };
+        Ok(ReadGuard::try_map(vs, |x| x.get_one()))
     }
 
     /// Returns a guarded reference to the values corresponding to the key along with the map
@@ -184,21 +192,18 @@ where
     ///
     /// Note that not all writes will be included with this read -- only those that have been
     /// refreshed by the writer. If no refresh has happened, or the map has been destroyed, this
-    /// function returns `None`.
+    /// function returns an [`Error`].
     ///
-    /// If no values exist for the given key, `Some(None, _)` is returned.
-    pub fn meta_get<Q: ?Sized>(&self, key: &Q) -> Option<(Option<ReadGuard<'_, Values<V, S>>>, M)>
+    /// If no values exist for the given key, `Ok(None, _)` is returned.
+    pub fn meta_get<Q: ?Sized>(&self, key: &Q) -> Result<(Option<ReadGuard<'_, Values<V, S>>>, M)>
     where
         K: Borrow<Q>,
         Q: Ord + Clone + Hash,
     {
-        let inner = self.handle.enter()?;
-        if !inner.ready {
-            return None;
-        }
-        let meta = inner.meta.clone();
-        let res = ReadGuard::try_map(inner, |inner| inner.data.get(key).map(AsRef::as_ref));
-        Some((res, meta))
+        let MapReadRef { guard } = self.enter()?;
+        let meta = guard.meta.clone();
+        let res = ReadGuard::try_map(guard, |inner| inner.data.get(key).map(AsRef::as_ref));
+        Ok((res, meta))
     }
 
     /// Returns true if the [`WriteHandle`](crate::WriteHandle) has been dropped.
@@ -222,7 +227,10 @@ where
     ///
     /// The key and value may be any borrowed form of the map's respective types, but `Hash` and
     /// `Eq` on the borrowed form *must* match.
-    pub fn contains_value<Q: ?Sized, W: ?Sized>(&self, key: &Q, value: &W) -> bool
+    ///
+    /// If no refresh has happened, or the map has been destroyed, this function returns an
+    /// [`Error`].
+    pub fn contains_value<Q: ?Sized, W: ?Sized>(&self, key: &Q, value: &W) -> Result<bool>
     where
         K: Borrow<Q>,
         Aliased<V, crate::aliasing::NoDrop>: Borrow<W>,
@@ -230,9 +238,10 @@ where
         W: Hash + Eq,
         V: Hash + Eq,
     {
-        self.get_raw(key.borrow())
+        Ok(self
+            .get_raw(key.borrow())?
             .map(|x| x.contains(value))
-            .unwrap_or(false)
+            .unwrap_or(false))
     }
 
     /// Read all values in the map, and transform them into a new collection.
@@ -250,18 +259,13 @@ where
 
     /// Returns the timestamp associated with the last write.
     ///
-    /// Note, as this function does not return a read guard, the map
-    /// may be mutated after reading the timestamp.
+    /// Note that as this function does not return a read guard, the map may be mutated after
+    /// reading the timestamp.
     ///
-    /// If a guarded reference cannot be acquired to read the timestamp,
-    /// None is returned.
-    pub fn timestamp(&self) -> Option<T> {
-        let inner = self.handle.enter()?;
-        if !inner.ready {
-            return None;
-        }
-        let t = inner.timestamp.clone();
-        Some(t)
+    /// If a guarded reference cannot be acquired to read the timestamp, an [`Error`] is returned.
+    pub fn timestamp(&self) -> Result<T> {
+        let MapReadRef { guard } = self.enter()?;
+        Ok(guard.timestamp.clone())
     }
 
     /// Returns the index type of the underlying map, or None if no writes have been performed yet
@@ -287,7 +291,7 @@ mod test {
 
         w.reserve(0, MAX).publish();
 
-        assert!(r.get_raw(&0).unwrap().capacity() >= MAX);
+        assert!(r.get_raw(&0).unwrap().unwrap().capacity() >= MAX);
 
         for i in 0..MIN {
             w.insert(0, i);
@@ -295,6 +299,6 @@ mod test {
 
         w.fit_all().publish();
 
-        assert!(r.get_raw(&0).unwrap().capacity() < MAX);
+        assert!(r.get_raw(&0).unwrap().unwrap().capacity() < MAX);
     }
 }

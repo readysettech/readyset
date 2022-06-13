@@ -117,8 +117,8 @@ pub type LookupResult<T> = Result<(T, i64), LookupError>;
 impl Handle {
     pub(super) fn timestamp(&self) -> Option<Timestamp> {
         match *self {
-            Handle::Single(ref h) => h.timestamp(),
-            Handle::Many(ref h) => h.timestamp(),
+            Handle::Single(ref h) => h.timestamp().ok(),
+            Handle::Many(ref h) => h.timestamp().ok(),
         }
     }
 
@@ -145,7 +145,7 @@ impl Handle {
         match *self {
             Handle::Single(ref h) => {
                 assert_eq!(key.len(), 1);
-                let map = h.enter().ok_or(ReadySetError::ViewNotYetAvailable)?;
+                let map = h.enter().map_err(|_| ReadySetError::ViewNotYetAvailable)?;
                 let m = *map.meta();
                 let v = map
                     .get(&key[0])
@@ -153,7 +153,7 @@ impl Handle {
                 Ok((then(v.iter())?, m))
             }
             Handle::Many(ref h) => {
-                let map = h.enter().ok_or(NotReady)?;
+                let map = h.enter().map_err(|_| NotReady)?;
                 let m = *map.meta();
                 let v = map.get(key).ok_or_else(|| MissPointMany(key.into(), m))?;
                 Ok((then(v.iter())?, m))
@@ -169,11 +169,11 @@ impl Handle {
         match *self {
             Handle::Single(ref h) => {
                 assert_eq!(key.len(), 1);
-                let map = h.enter()?;
+                let map = h.enter().ok()?;
                 Some(map.contains_key(&key[0]))
             }
             Handle::Many(ref h) => {
-                let map = h.enter()?;
+                let map = h.enter().ok()?;
                 Some(map.contains_key(key))
             }
         }
@@ -195,7 +195,7 @@ impl Handle {
 
         match *self {
             Handle::Single(ref h) => {
-                let map = h.enter().ok_or(NotReady)?;
+                let map = h.enter().map_err(|_| NotReady)?;
                 let meta = *map.meta();
                 let start_bound = range.start_bound().map(|v| {
                     assert!(v.len() == 1);
@@ -217,7 +217,7 @@ impl Handle {
                 ))
             }
             Handle::Many(ref h) => {
-                let map = h.enter().ok_or(NotReady)?;
+                let map = h.enter().map_err(|_| NotReady)?;
                 let meta = *map.meta();
                 let range = (range.start_bound(), range.end_bound());
                 let records = map
@@ -243,7 +243,7 @@ impl Handle {
     {
         match *self {
             Handle::Single(ref h) => {
-                let map = h.enter()?;
+                let map = h.enter().ok()?;
                 let start_bound = range.start_bound().map(|v| {
                     assert!(v.len() == 1);
                     &v[0]
@@ -255,7 +255,7 @@ impl Handle {
                 Some(map.contains_range(&(start_bound, end_bound)))
             }
             Handle::Many(ref h) => {
-                let map = h.enter()?;
+                let map = h.enter().ok()?;
                 Some(map.contains_range(&(range.start_bound(), range.end_bound())))
             }
         }

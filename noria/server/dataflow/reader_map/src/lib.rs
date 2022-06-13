@@ -49,9 +49,12 @@
 //! // we need to refresh first to make the writes visible
 //! book_reviews_w.publish();
 //! assert_eq!(book_reviews_r.len(), 4);
-//! // reads will now return Some() because the map has been initialized
+//! // reads will now return Ok() because the map has been initialized
 //! assert_eq!(
-//!     book_reviews_r.get("Grimms' Fairy Tales").map(|rs| rs.len()),
+//!     book_reviews_r
+//!         .get("Grimms' Fairy Tales")
+//!         .unwrap()
+//!         .map(|rs| rs.len()),
 //!     Some(1)
 //! );
 //!
@@ -61,14 +64,20 @@
 //!
 //! // but again, new writes are not yet visible
 //! assert_eq!(
-//!     book_reviews_r.get("Grimms' Fairy Tales").map(|rs| rs.len()),
+//!     book_reviews_r
+//!         .get("Grimms' Fairy Tales")
+//!         .unwrap()
+//!         .map(|rs| rs.len()),
 //!     Some(1)
 //! );
 //!
 //! // we need to refresh first
 //! book_reviews_w.publish();
 //! assert_eq!(
-//!     book_reviews_r.get("Grimms' Fairy Tales").map(|rs| rs.len()),
+//!     book_reviews_r
+//!         .get("Grimms' Fairy Tales")
+//!         .unwrap()
+//!         .map(|rs| rs.len()),
 //!     Some(2)
 //! );
 //!
@@ -79,6 +88,7 @@
 //! assert_eq!(
 //!     book_reviews_r
 //!         .get("The Adventures of Sherlock Holmes")
+//!         .unwrap()
 //!         .map(|rs| rs.len()),
 //!     Some(1)
 //! );
@@ -86,6 +96,7 @@
 //! assert_eq!(
 //!     book_reviews_r
 //!         .get("The Adventures of Sherlock Holmes")
+//!         .unwrap()
 //!         .map(|rs| rs.len()),
 //!     None
 //! );
@@ -93,7 +104,7 @@
 //! // look up the values associated with some keys.
 //! let to_find = ["Pride and Prejudice", "Alice's Adventure in Wonderland"];
 //! for book in &to_find {
-//!     if let Some(reviews) = book_reviews_r.get(book) {
+//!     if let Some(reviews) = book_reviews_r.get(book).unwrap() {
 //!         for review in &*reviews {
 //!             println!("{}: {}", book, review);
 //!         }
@@ -239,11 +250,14 @@ use crate::inner::Inner;
 use crate::read::ReadHandle;
 use crate::write::WriteHandle;
 
+mod error;
 mod eviction;
 mod inner;
 mod read;
 mod values;
 mod write;
+
+pub use error::{Error, Result};
 
 /// Handles to the read and write halves of an `reader_map`.
 pub mod handles {

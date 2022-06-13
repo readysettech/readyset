@@ -15,6 +15,7 @@ itertools = "0.10"
 unbounded-interval-tree = { path = "../../../../unbounded-interval-tree" }
 noria = { path = "../../../noria" }
 partial_map = { path = "../partial_map" }
+thiserror = "1.0.31"
 
 [dev-dependencies]
 quickcheck = "0.9"
