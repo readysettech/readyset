@@ -278,7 +278,9 @@ impl ReadRequestHandler {
             // includes consistency misses.
             let mut keys_to_replay = Vec::new();
 
-            let mut ready = true;
+            // Set to Some(err) if we encounter an error that should prevent us from trying to do
+            // any more reads (concretely, the map is not yet ready or has been destroyed)
+            let mut permanent_err = None;
 
             // First do non-blocking reads for all keys to see if we can return immediately.
             // We execute this loop even if there is RYW miss, since we still want to trigger a
@@ -287,7 +289,7 @@ impl ReadRequestHandler {
             // sufficiently up to date.
             let num_keys = key_comparisons.len();
             for (i, key) in key_comparisons.drain(..).enumerate() {
-                if !ready {
+                if permanent_err.is_some() {
                     ret.push(ServerReadReplyBatch::Empty);
                     continue;
                 }
@@ -303,8 +305,11 @@ impl ReadRequestHandler {
                         }
                     }
                     Err(NotReady) => {
-                        // map not yet ready
-                        ready = false;
+                        permanent_err = Some(ReadySetError::ViewNotYetAvailable);
+                        ret.push(ServerReadReplyBatch::Empty);
+                    }
+                    Err(Destroyed) => {
+                        permanent_err = Some(ReadySetError::ViewDestroyed);
                         ret.push(ServerReadReplyBatch::Empty);
                     }
                     Err(Error(e)) => reply_with_error!(e),
@@ -385,10 +390,10 @@ impl ReadRequestHandler {
             }
             debug_assert_eq!(ret.len(), num_keys);
 
-            if !ready {
+            if let Some(err) = permanent_err {
                 return Ok(Ok(Tagged {
                     tag,
-                    v: ReadReply::Normal(Err(ReadySetError::ViewNotYetAvailable)),
+                    v: ReadReply::Normal(Err(err)),
                 }));
             }
 

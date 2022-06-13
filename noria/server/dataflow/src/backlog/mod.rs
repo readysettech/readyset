@@ -263,7 +263,7 @@ impl WriteHandle {
         }
     }
 
-    pub(crate) fn contains(&self, key: &KeyComparison) -> Option<bool> {
+    pub(crate) fn contains(&self, key: &KeyComparison) -> reader_map::Result<bool> {
         match key {
             KeyComparison::Equal(k) => self.handle.read().contains_key(k),
             KeyComparison::Range((start, end)) => self.handle.read().contains_range(&(
@@ -424,7 +424,7 @@ impl SingleReadHandle {
 
     /// Returns None if this handle is not ready, Some(true) if this handle fully contains the given
     /// key comparison, Some(false) if any of the keys miss
-    pub fn contains(&self, key: &KeyComparison) -> Option<bool> {
+    pub fn contains(&self, key: &KeyComparison) -> reader_map::Result<bool> {
         match key {
             KeyComparison::Equal(k) => self.handle.contains_key(k),
             KeyComparison::Range((start, end)) => self.handle.contains_range(&(

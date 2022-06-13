@@ -2011,15 +2011,21 @@ impl Domain {
                 w.swap();
 
                 // don't request keys that have been filled since the request was sent
-                let mut whoopsed = false;
+                let mut whoops = None;
                 keys.retain(|key| {
-                    !w.contains(key).unwrap_or_else(|| {
-                        whoopsed = true;
+                    !w.contains(key).unwrap_or_else(|e| {
+                        whoops = Some(e);
                         true
                     })
                 });
-                if whoopsed {
-                    internal!("reader replay requested for non-ready reader")
+                if let Some(err) = whoops {
+                    internal!(
+                        "reader replay requested for {} reader",
+                        match err {
+                            reader_map::Error::NotPublished => "non-ready",
+                            reader_map::Error::Destroyed => "destroyed",
+                        }
+                    )
                 }
 
                 let reader_index_type = r.index_type().ok_or_else(|| {

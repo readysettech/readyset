@@ -217,6 +217,10 @@ pub enum ReadySetError {
     #[error("view not yet available")]
     ViewNotYetAvailable,
 
+    /// A request was made to a destroyed view
+    #[error("view destroyed")]
+    ViewDestroyed,
+
     /// A view couldn't be found.
     #[error("Could not find view '{0}'")]
     ViewNotFound(String),
@@ -613,6 +617,12 @@ impl ReadySetError {
     /// [`DataTypeConversionError`]
     pub fn caused_by_data_type_conversion(&self) -> bool {
         self.any_cause(|e| matches!(e, Self::DataTypeConversionError { .. }))
+    }
+
+    /// Returns true if the error either *is* [`ViewDestroyed`], or was *caused by*
+    /// [`ViewDestroyed`]
+    pub fn caused_by_view_destroyed(&self) -> bool {
+        self.any_cause(|e| matches!(e, Self::ViewDestroyed))
     }
 }
 
