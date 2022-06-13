@@ -34,7 +34,7 @@ fn contains(insert: Vec<u32>) -> bool {
     }
     w.publish();
 
-    insert.iter().all(|&key| r.get(&key).is_some())
+    insert.iter().all(|&key| r.get(&key).unwrap().is_some())
 }
 
 #[quickcheck]
@@ -46,7 +46,7 @@ fn contains_not(insert: Vec<u8>, not: Vec<u8>) -> bool {
     w.publish();
 
     let nots = &set(&not) - &set(&insert);
-    nots.iter().all(|&key| r.get(&key).is_none())
+    nots.iter().all(|&key| r.get(&key).unwrap().is_none())
 }
 
 #[quickcheck]
@@ -63,7 +63,7 @@ fn insert_empty(insert: Vec<u8>, remove: Vec<u8>) -> bool {
     let elements = &set(&insert) - &set(&remove);
     r.len() == elements.len()
         && r.enter().iter().flat_map(|r| r.keys()).count() == elements.len()
-        && elements.iter().all(|k| r.get(k).is_some())
+        && elements.iter().all(|k| r.get(k).unwrap().is_some())
 }
 
 use Op::*;
@@ -147,9 +147,13 @@ where
         assert!(b.contains_key(key), "b does not contain {:?}", key);
     }
     for key in b.keys() {
-        assert!(a.get(key).is_some(), "a does not contain {:?}", key);
+        assert!(
+            a.get(key).unwrap().is_some(),
+            "a does not contain {:?}",
+            key
+        );
     }
-    let guard = if let Some(guard) = a.enter() {
+    let guard = if let Ok(guard) = a.enter() {
         guard
     } else {
         // Reference was empty, ReadHandle was destroyed, so all is well. Maybe.
@@ -249,7 +253,7 @@ fn keys_values(ops: Large<Vec<Op<i8, i8>>>) -> bool {
     let mut read_ref = BTreeMap::new();
     do_ops(&ops, &mut w, &mut write_ref, &mut read_ref);
 
-    if let Some(read_guard) = r.enter() {
+    if let Ok(read_guard) = r.enter() {
         let (mut w_visit, r_visit) = reader_map::new();
         for (k, v_set) in read_guard.keys().zip(read_guard.values()) {
             assert!(read_guard[k].iter().all(|v| v_set.contains(v)));

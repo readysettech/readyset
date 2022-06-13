@@ -25,25 +25,26 @@ use crate::values::ValuesInner;
 ///
 /// let (mut w, r) = reader_map::new();
 ///
-/// // the map is uninitialized, so all lookups should return None
-/// assert_eq!(r.get(&x.0).map(|rs| rs.len()), None);
+/// // the map is uninitialized, so all lookups should return Err(NotPublished)
+/// assert_eq!(r.get(&x.0).err().unwrap(), reader_map::Error::NotPublished);
 ///
 /// w.publish();
 ///
 /// // after the first publish, it is empty, but ready
-/// assert_eq!(r.get(&x.0).map(|rs| rs.len()), None);
+/// assert!(r.get(&x.0).unwrap().is_none());
 ///
 /// w.insert(x.0, x);
 ///
 /// // it is empty even after an add (we haven't publish yet)
-/// assert_eq!(r.get(&x.0).map(|rs| rs.len()), None);
+/// assert!(r.get(&x.0).unwrap().is_none());
 ///
 /// w.publish();
 ///
 /// // but after the swap, the record is there!
-/// assert_eq!(r.get(&x.0).map(|rs| rs.len()), Some(1));
+/// assert_eq!(r.get(&x.0).unwrap().map(|rs| rs.len()), Some(1));
 /// assert_eq!(
 ///     r.get(&x.0)
+///         .unwrap()
 ///         .map(|rs| rs.iter().any(|v| v.0 == x.0 && v.1 == x.1)),
 ///     Some(true)
 /// );
