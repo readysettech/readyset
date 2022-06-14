@@ -13,6 +13,7 @@
 - [Testing your code](./dev-testing.md)
 - [Debugging your code](./debugging.md)
 - [Developer Environment](./dev-env.md)
+- [Dashboard Dev Process](./dashboard-dev.md)
 - [Gerrit Social Conventions](./gerrit.md)
 
 # Benchmarking
