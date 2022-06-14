@@ -324,7 +324,11 @@ async fn reader_replication() {
             .workers
             .values()
             .fold(HashMap::new(), |mut acc, entry| {
-                acc.extend(entry.iter().map(|e| (e.0 .0, e.1)));
+                acc.extend(
+                    entry
+                        .iter()
+                        .map(|(replica_addr, nodes)| (replica_addr.domain_index, nodes)),
+                );
                 acc
             });
 
@@ -351,8 +355,8 @@ async fn reader_replication() {
         .get(&worker_without_reader)
         .unwrap()
         .iter()
-        .fold(HashMap::new(), |mut acc, (dk, nodes)| {
-            acc.entry(dk.0)
+        .fold(HashMap::new(), |mut acc, (replica_addr, nodes)| {
+            acc.entry(replica_addr.domain_index)
                 .or_insert_with(Vec::new)
                 .extend(nodes.iter());
             acc

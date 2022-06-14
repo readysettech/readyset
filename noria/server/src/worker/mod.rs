@@ -14,11 +14,10 @@ use futures_util::sink::SinkExt;
 use futures_util::stream::StreamExt;
 use launchpad::select;
 use metrics::{counter, gauge, histogram};
-use noria::internal::DomainIndex;
+use noria::internal::ReplicaAddress;
 use noria::metrics::recorded;
 use noria::{channel, ReadySetError};
 use noria_errors::internal_err;
-use replica::ReplicaAddr;
 use serde::{Deserialize, Serialize};
 use stream_cancel::Valve;
 use tikv_jemalloc_ctl::stats::allocated_mib;
@@ -40,7 +39,7 @@ use crate::ReadySetResult;
 pub mod readers;
 mod replica;
 
-type ChannelCoordinator = channel::ChannelCoordinator<ReplicaAddr, Box<Packet>>;
+type ChannelCoordinator = channel::ChannelCoordinator<ReplicaAddress, Box<Packet>>;
 
 /// Some kind of request for a running Noria worker.
 ///
@@ -70,10 +69,8 @@ pub enum WorkerRequestKind {
     /// This actually might return something that isn't `()`; see the `DomainRequest` docs
     /// for more.
     DomainRequest {
-        /// The index of the target domain.
-        target_idx: DomainIndex,
-        /// The shard of the target domain.
-        target_shard: usize,
+        /// The address of the target domain replica
+        replica_address: ReplicaAddress,
         /// The actual request.
         request: Box<DomainRequest>, // box for perf (clippy::large-enum-variant)
     },
@@ -136,13 +133,8 @@ impl MemoryTracker {
 
 /// A helper type which is just a map of a JoinHandle, but naming it with no dyn was too hard
 pub(crate) type FinishedDomainFuture = Box<
-    dyn Future<
-            Output = (
-                Result<Result<(), anyhow::Error>, JoinError>,
-                DomainIndex,
-                usize,
-            ),
-        > + Unpin
+    dyn Future<Output = (Result<Result<(), anyhow::Error>, JoinError>, ReplicaAddress)>
+        + Unpin
         + Send,
 >;
 
@@ -151,29 +143,25 @@ pub(crate) type FinishedDomainFuture = Box<
 /// process. The future may be cancelled or gracefully complete when torndown, in these cases
 /// do not panic.
 fn handle_domain_future_completion(
-    result: (
-        Result<Result<(), anyhow::Error>, JoinError>,
-        DomainIndex,
-        usize,
-    ),
+    result: (Result<Result<(), anyhow::Error>, JoinError>, ReplicaAddress),
 ) {
-    let (handle, idx, shard) = result;
+    let (handle, replica_address) = result;
     match handle {
         Ok(Ok(())) => {
             warn!(
-                index = idx.index(),
-                shard, "domain future completed without error"
+                domain = %replica_address,
+                "domain future completed without error"
             )
         }
         Ok(Err(e)) => {
-            error!(index = idx.index(), shard, err = %e, "domain failed with an error");
+            error!(domain = %replica_address, err = %e, "domain failed with an error");
             panic!("domain failed: {}", e);
         }
         Err(e) if e.is_cancelled() => {
-            warn!(index = idx.index(), shard, err = %e, "domain future cancelled")
+            warn!(domain = %replica_address, err = %e, "domain future cancelled")
         }
         Err(e) => {
-            error!(index = idx.index(), shard, err = %e, "domain future failed");
+            error!(domain = %replica_address, err = %e, "domain future failed");
             panic!("domain future failure: {}", e);
         }
     }
@@ -196,7 +184,7 @@ pub struct Worker {
     /// The IP address to expose to other domains for domain<->domain traffic.
     pub(crate) domain_external: IpAddr,
     /// A store of the current state size of each domain, used for eviction purposes.
-    pub(crate) state_sizes: Arc<Mutex<HashMap<(DomainIndex, usize), Arc<AtomicUsize>>>>,
+    pub(crate) state_sizes: Arc<Mutex<HashMap<ReplicaAddress, Arc<AtomicUsize>>>>,
     /// Read handles.
     pub(crate) readers: Readers,
     /// Valve for shutting down; triggered by the [`Handle`] when [`Handle::shutdown`] is called.
@@ -205,7 +193,7 @@ pub struct Worker {
     /// Handles to domains currently being run by this worker.
     ///
     /// These are indexed by (domain index, shard).
-    pub(crate) domains: HashMap<(DomainIndex, usize), DomainHandle>,
+    pub(crate) domains: HashMap<ReplicaAddress, DomainHandle>,
 
     pub(crate) memory: MemoryTracker,
     pub(crate) is_evicting: Arc<AtomicBool>,
@@ -290,13 +278,17 @@ impl Worker {
                 // need to register the domain with the local channel coordinator.
                 // local first to ensure that we don't unnecessarily give away remote for a
                 // local thing if there's a race
-                self.coord.insert_local((idx, shard), local_tx)?;
-                self.coord.insert_remote((idx, shard), bind_external)?;
+                let replica_addr = ReplicaAddress {
+                    domain_index: idx,
+                    shard,
+                };
+                self.coord.insert_local(replica_addr, local_tx)?;
+                self.coord.insert_remote(replica_addr, bind_external)?;
 
                 self.state_sizes
                     .lock()
                     .await
-                    .insert((idx, shard), state_size);
+                    .insert(replica_addr, state_size);
 
                 let replica = Replica::new(domain, listener, local_rx, req_rx, self.coord.clone());
                 // Each domain is single threaded in nature, so we spawn each one in a separate
@@ -308,7 +300,11 @@ impl Worker {
                     .build()
                     .unwrap();
 
-                let jh = Box::new(runtime.spawn(replica.run()).map(move |jh| (jh, idx, shard)));
+                let jh = Box::new(
+                    runtime
+                        .spawn(replica.run())
+                        .map(move |jh| (jh, replica_addr)),
+                );
 
                 let (_domain_abort, domain_abort_rx) = oneshot::channel::<()>();
                 // Spawn the actual thread to run the domain
@@ -325,7 +321,7 @@ impl Worker {
                     })?;
 
                 self.domains.insert(
-                    (idx, shard),
+                    replica_addr,
                     DomainHandle {
                         req_tx,
                         _domain_abort,
@@ -342,27 +338,25 @@ impl Worker {
             }
             WorkerRequestKind::GossipDomainInformation(domains) => {
                 for dd in domains {
-                    let domain = dd.domain();
-                    let shard = dd.shard();
-                    let addr = dd.addr();
-                    trace!(domain_index = domain.index(), shard, ?addr, "found domain",);
-                    self.coord.insert_remote((domain, shard), addr)?;
+                    trace!(
+                        replica_address = %dd.replica_address(),
+                        addr = ?dd.socket_address(),
+                        "found domain"
+                    );
+                    self.coord
+                        .insert_remote(dd.replica_address(), dd.socket_address())?;
                 }
                 Ok(None)
             }
             WorkerRequestKind::DomainRequest {
-                target_idx,
-                target_shard,
+                replica_address,
                 request,
             } => {
                 let nsde = || ReadySetError::NoSuchDomain {
-                    domain_index: target_idx.index(),
-                    shard: target_shard,
+                    domain_index: replica_address.domain_index.index(),
+                    shard: replica_address.shard,
                 };
-                let dh = self
-                    .domains
-                    .get_mut(&(target_idx, target_shard))
-                    .ok_or_else(nsde)?;
+                let dh = self.domains.get_mut(&replica_address).ok_or_else(nsde)?;
                 let (tx, rx) = oneshot::channel();
                 let _ = dh
                     .req_tx
@@ -435,7 +429,7 @@ async fn do_eviction(
     memory_limit: Option<usize>,
     coord: Arc<ChannelCoordinator>,
     memory_tracker: MemoryTracker,
-    state_sizes: Arc<Mutex<HashMap<(DomainIndex, usize), Arc<AtomicUsize>>>>,
+    state_sizes: Arc<Mutex<HashMap<ReplicaAddress, Arc<AtomicUsize>>>>,
     is_evicting: Arc<AtomicBool>,
 ) -> ReadySetResult<()> {
     if is_evicting.swap(true, Ordering::Relaxed) {
@@ -465,18 +459,13 @@ async fn do_eviction(
                     let mut total_reported = 0;
                     let sizes = state_sizes
                         .iter()
-                        .map(|(ds, sa)| {
-                            let size = sa.load(Ordering::Acquire);
+                        .map(|(replica_addr, size_atom)| {
+                            let size = size_atom.load(Ordering::Acquire);
                             span.in_scope(|| {
-                                trace!(
-                                    "domain {}.{} state size is {} bytes",
-                                    ds.0.index(),
-                                    ds.1,
-                                    size
-                                )
+                                trace!("domain {} state size is {} bytes", replica_addr, size)
                             });
                             total_reported += size;
-                            (*ds, size)
+                            (*replica_addr, size)
                         })
                         .collect::<Vec<_>>();
                     (sizes, total_reported)
@@ -529,14 +518,14 @@ async fn do_eviction(
                             "memory footprint ({} bytes) exceeds limit ({} bytes); evicting from largest domain {}",
                             used,
                             limit,
-                            target.0.index(),
+                            target.domain_index,
                         )
                     });
 
                     counter!(
                         recorded::EVICTION_WORKER_EVICTIONS_REQUESTED,
                         1,
-                        "domain" => target.0.index().to_string(),
+                        "domain" => target.domain_index.index().to_string(),
                     );
 
                     let tx = match domain_senders.entry(target) {
@@ -559,7 +548,13 @@ async fn do_eviction(
 
                     if let Err(e) = r {
                         // probably exiting?
-                        span.in_scope(|| warn!("failed to evict from {}: {}", target.0.index(), e));
+                        span.in_scope(|| {
+                            warn!(
+                                "failed to evict from {}: {}",
+                                target.domain_index.index(),
+                                e
+                            )
+                        });
                         // remove sender so we don't try to use it again
                         domain_senders.remove(&target);
                     }
@@ -595,15 +590,20 @@ impl Drop for Worker {
         let rt = tokio::runtime::Handle::current();
         std::thread::spawn(move || {
             rt.block_on(async move {
-                while let Some((handle, idx, shard)) = domain_wait_queue.next().await {
+                while let Some((handle, replica_addr)) = domain_wait_queue.next().await {
                     match handle {
-                        Ok(Err(e)) => error!(index = idx.index(), shard, err = %e, "domain failed during drop"),
-                        Err(e) if !e.is_cancelled() => error!(index = idx.index(), shard, err = %e, "domain failed during drop"),
+                        Ok(Err(e)) => {
+                            error!(domain = %replica_addr, err = %e, "domain failed during drop")
+                        }
+                        Err(e) if !e.is_cancelled() => {
+                            error!(domain = %replica_addr, err = %e, "domain failed during drop")
+                        }
                         _ => {}
                     }
                 }
             });
         })
-        .join().expect("This thread shouldn't panic");
+        .join()
+        .expect("This thread shouldn't panic");
     }
 }

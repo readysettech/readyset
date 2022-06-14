@@ -18,7 +18,7 @@ use tokio::io::BufWriter;
 pub mod tcp;
 
 pub use self::tcp::{DualTcpStream, TcpSender};
-use crate::internal::DomainIndex;
+use crate::internal::ReplicaAddress;
 use crate::{ReadySetError, ReadySetResult};
 
 pub const CONNECTION_FROM_BASE: u8 = 1;
@@ -270,10 +270,10 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
 
     pub fn builder_for(
         &self,
-        key: &(DomainIndex, usize),
+        key: &ReplicaAddress,
     ) -> ReadySetResult<DomainConnectionBuilder<MaybeLocal, T>>
     where
-        K: Borrow<(DomainIndex, usize)>,
+        K: Borrow<ReplicaAddress>,
     {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
@@ -281,8 +281,8 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
         let guard = self.inner.read().expect("poisoned mutex");
         match guard.addrs.get(key) {
             None => Err(ReadySetError::NoSuchDomain {
-                domain_index: key.0.index(),
-                shard: key.1,
+                domain_index: key.domain_index.index(),
+                shard: key.shard,
             }),
             Some(addrs) => Ok(DomainConnectionBuilder {
                 sport: None,

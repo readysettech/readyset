@@ -11,7 +11,7 @@ use metrics::{
     register_counter, register_gauge, register_histogram, Counter, Gauge, Histogram, Label,
     SharedString,
 };
-use noria::internal::DomainIndex;
+use noria::internal::ReplicaAddress;
 use noria::metrics::recorded;
 use strum::{EnumCount, IntoEnumIterator};
 
@@ -51,9 +51,9 @@ pub(super) struct DomainMetrics {
 }
 
 impl DomainMetrics {
-    pub(super) fn new(index: DomainIndex, shard: usize) -> Self {
-        let index: SharedString = index.index().to_string().into();
-        let shard: SharedString = shard.to_string().into();
+    pub(super) fn new(replica_address: ReplicaAddress) -> Self {
+        let index: SharedString = replica_address.domain_index.index().to_string().into();
+        let shard: SharedString = replica_address.shard.to_string().into();
 
         let labels = vec![
             Label::new("domain", index.clone()),

@@ -41,22 +41,25 @@ impl DomainHandle {
 
     pub(super) async fn send_to_healthy_shard<T: DeserializeOwned>(
         &self,
-        i: usize,
+        shard: usize,
         req: DomainRequest,
         workers: &HashMap<WorkerIdentifier, Worker>,
     ) -> ReadySetResult<T> {
-        let addr = self.assignment(i)?;
+        let addr = self.assignment(shard)?;
         if let Some(worker) = workers.get(&addr) {
             let req = req.clone();
+            let replica_address = ReplicaAddress {
+                domain_index: self.idx,
+                shard,
+            };
             Ok(worker
                 .rpc(WorkerRequestKind::DomainRequest {
-                    target_idx: self.idx,
-                    target_shard: i,
+                    replica_address,
                     request: Box::new(req),
                 })
                 .await
                 .map_err(|e| {
-                    rpc_err_no_downcast(format!("domain request to {}.{}", self.idx.index(), i), e)
+                    rpc_err_no_downcast(format!("domain request to {}", replica_address), e)
                 })?)
         } else {
             error!(%addr, ?req, "tried to send domain request to failed worker");

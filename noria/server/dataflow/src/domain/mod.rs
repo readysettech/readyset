@@ -15,7 +15,7 @@ use dataflow_state::{MaterializedNodeState, RangeLookupResult};
 use failpoint_macros::failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
-pub use internal::DomainIndex;
+pub use internal::{DomainIndex, ReplicaAddress};
 use launchpad::redacted::Sensitive;
 use launchpad::Indices;
 use noria::internal::Index;
@@ -408,7 +408,10 @@ impl DomainBuilder {
             aggressively_update_state_sizes: self.config.aggressively_update_state_sizes,
             replay_completed: false,
 
-            metrics: domain_metrics::DomainMetrics::new(self.index, self.shard.unwrap_or(0)),
+            metrics: domain_metrics::DomainMetrics::new(ReplicaAddress {
+                domain_index: self.index,
+                shard: self.shard.unwrap_or(0),
+            }),
 
             eviction_kind: self.config.eviction_kind,
         }
@@ -1371,7 +1374,8 @@ impl Domain {
                         gid,
                         cols,
                         index,
-                        trigger_domain: (trigger_domain, shards),
+                        trigger_domain,
+                        num_shards,
                     } => {
                         use crate::backlog;
 
@@ -1388,12 +1392,15 @@ impl Domain {
                             });
                         }
 
-                        let txs = (0..shards)
+                        let txs = (0..num_shards)
                             .map(|shard| -> ReadySetResult<_> {
                                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
                                 let sender = self
                                     .channel_coordinator
-                                    .builder_for(&(trigger_domain, shard))?
+                                    .builder_for(&ReplicaAddress {
+                                        domain_index: trigger_domain,
+                                        shard,
+                                    })?
                                     .build_async()?;
 
                                 let cols = index.columns.clone();
@@ -1561,12 +1568,15 @@ impl Domain {
                     payload::TriggerEndpoint::None => TriggerEndpoint::None,
                     payload::TriggerEndpoint::Start(index) => TriggerEndpoint::Start(index),
                     payload::TriggerEndpoint::Local(index) => TriggerEndpoint::Local(index),
-                    payload::TriggerEndpoint::End(selection, domain) => {
-                        let shard = |shardi| -> ReadySetResult<_> {
+                    payload::TriggerEndpoint::End(selection, domain_index) => {
+                        let shard = |shard| -> ReadySetResult<_> {
                             // TODO: make async
                             Ok(self
                                 .channel_coordinator
-                                .builder_for(&(domain, shardi))?
+                                .builder_for(&ReplicaAddress {
+                                    domain_index,
+                                    shard,
+                                })?
                                 .build_sync()?)
                         };
 
@@ -1684,9 +1694,7 @@ impl Domain {
                         r
                     };
 
-                    let replay_tx_desc = self
-                        .channel_coordinator
-                        .builder_for(&(self.index, self.shard.unwrap_or(0)))?;
+                    let replay_tx_desc = self.channel_coordinator.builder_for(&self.address())?;
 
                     // Have to get metrics here so we can move them to the thread
                     let (replay_time_counter, replay_time_histogram) =
@@ -3687,8 +3695,11 @@ impl Domain {
         Ok(())
     }
 
-    pub fn id(&self) -> (DomainIndex, usize) {
-        (self.index, self.shard.unwrap_or(0))
+    pub fn address(&self) -> ReplicaAddress {
+        ReplicaAddress {
+            domain_index: self.index(),
+            shard: self.shard(),
+        }
     }
 
     pub fn update_state_sizes(&mut self) {

@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Display};
 
 use serde::{Deserialize, Serialize};
 
@@ -23,9 +23,21 @@ impl DomainIndex {
     }
 }
 
-impl fmt::Display for DomainIndex {
+impl Display for DomainIndex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Eq, PartialEq, Hash, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct ReplicaAddress {
+    pub domain_index: DomainIndex,
+    pub shard: usize,
+}
+
+impl Display for ReplicaAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}", self.domain_index, self.shard)
     }
 }
 
@@ -51,7 +63,7 @@ impl LocalNodeIndex {
     }
 }
 
-impl fmt::Display for LocalNodeIndex {
+impl Display for LocalNodeIndex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "l{}", self.id)
     }

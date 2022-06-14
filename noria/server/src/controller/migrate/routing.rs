@@ -315,13 +315,20 @@ pub(in crate::controller) fn connect(
                     // note that we don't have to check the sharding of both src and dst here,
                     // because an egress implies that no shuffle was necessary, which again means
                     // that the sharding must be the same.
-                    for i in 0..shards {
+                    for shard in 0..shards {
                         dmp.add_message_for_shard(
                             sender_node.domain(),
-                            i,
+                            shard,
                             DomainRequest::UpdateEgress {
                                 node: sender_node.local_addr(),
-                                new_tx: Some((node, n.local_addr(), (n.domain(), i))),
+                                new_tx: Some((
+                                    node,
+                                    n.local_addr(),
+                                    ReplicaAddress {
+                                        domain_index: n.domain(),
+                                        shard,
+                                    },
+                                )),
                                 new_tag: None,
                             },
                         )?;
@@ -336,7 +343,14 @@ pub(in crate::controller) fn connect(
                         sender_node.domain(),
                         DomainRequest::UpdateEgress {
                             node: sender_node.local_addr(),
-                            new_tx: Some((node, n.local_addr(), (n.domain(), 0))),
+                            new_tx: Some((
+                                node,
+                                n.local_addr(),
+                                ReplicaAddress {
+                                    domain_index: n.domain(),
+                                    shard: 0,
+                                },
+                            )),
                             new_tag: None,
                         },
                     )?;
@@ -349,7 +363,12 @@ pub(in crate::controller) fn connect(
                 );
 
                 let shards = dmp.num_shards(n.domain())?;
-                let txs = (0..shards).map(|i| (n.domain(), i)).collect();
+                let txs = (0..shards)
+                    .map(|shard| ReplicaAddress {
+                        domain_index: n.domain(),
+                        shard,
+                    })
+                    .collect();
                 dmp.add_message(
                     sender_node.domain(),
                     DomainRequest::UpdateSharder {
