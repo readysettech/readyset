@@ -151,6 +151,15 @@ impl ExecutionInfo {
         self.update_inner(ExecutionState::Unsupported)
     }
 
+    /// Update ExecutionInfo to indicate that a recent execute failed due to the view being dropped
+    pub fn execute_dropped(&mut self) {
+        if matches!(self.state, ExecutionState::Dropped) {
+            return;
+        }
+
+        self.update_inner(ExecutionState::Dropped)
+    }
+
     /// Resets the internal transition time to now. This should be used with extreme caution.
     pub fn reset_transition_time(&mut self) {
         self.last_transition_time = Instant::now();
@@ -196,6 +205,7 @@ pub enum ExecutionState {
     NetworkFailure,
     Failed,
     Unsupported,
+    Dropped,
 }
 
 #[derive(Debug, PartialEq, Eq)]

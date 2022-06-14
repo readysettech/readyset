@@ -1227,7 +1227,7 @@ where
         };
 
         if let Some(e) = event.noria_error.as_ref() {
-            if e.caused_by_view_not_found() {
+            if e.caused_by_view_not_found() || e.caused_by_view_destroyed() {
                 // This can happen during cascade execution if the noria query was removed from
                 // another connection
                 Self::invalidate_prepared_cache_entry(&mut cached_statement.prep);
@@ -1578,6 +1578,8 @@ where
                 if let Some(i) = status.execution_info.as_mut() {
                     if noria_err.is_networking_related() {
                         i.execute_network_failure();
+                    } else if noria_err.caused_by_view_destroyed() {
+                        i.execute_dropped();
                     }
                 }
 
