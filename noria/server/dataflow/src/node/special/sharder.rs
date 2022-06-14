@@ -8,7 +8,7 @@ use crate::prelude::*;
 #[derive(Serialize, Deserialize)]
 pub struct Sharder {
     #[serde(skip)]
-    txs: Vec<(LocalNodeIndex, ReplicaAddr)>,
+    txs: Vec<(LocalNodeIndex, ReplicaAddress)>,
     #[serde(skip)]
     sharded: VecMap<Box<Packet>>,
     shard_by: usize,
@@ -45,7 +45,7 @@ impl Sharder {
         }
     }
 
-    pub fn add_sharded_child(&mut self, dst: LocalNodeIndex, txs: Vec<ReplicaAddr>) {
+    pub fn add_sharded_child(&mut self, dst: LocalNodeIndex, txs: Vec<ReplicaAddress>) {
         debug_assert_eq!(self.txs.len(), 0);
         // TODO: add support for "shared" sharder?
         for tx in txs {

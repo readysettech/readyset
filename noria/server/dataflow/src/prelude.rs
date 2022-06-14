@@ -21,7 +21,6 @@ pub use crate::node_map::NodeMap;
 pub(crate) use crate::payload::ReplayPathSegment;
 pub(crate) type StateMap = NodeMap<MaterializedNodeState>;
 pub type DomainNodes = NodeMap<cell::RefCell<Node>>;
-pub(crate) type ReplicaAddr = (DomainIndex, usize);
 
 // public exports
 pub use common::*;
@@ -42,7 +41,7 @@ pub use crate::processing::{ColumnRef, ColumnSource};
 pub use crate::EvictionKind;
 
 /// Channel coordinator type specialized for domains
-pub type ChannelCoordinator = noria::channel::ChannelCoordinator<(DomainIndex, usize), Box<Packet>>;
+pub type ChannelCoordinator = noria::channel::ChannelCoordinator<ReplicaAddress, Box<Packet>>;
 pub trait Executor {
-    fn send(&mut self, dest: ReplicaAddr, m: Box<Packet>);
+    fn send(&mut self, dest: ReplicaAddress, m: Box<Packet>);
 }

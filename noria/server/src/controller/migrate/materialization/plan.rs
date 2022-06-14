@@ -858,7 +858,8 @@ impl<'a> Plan<'a> {
                     gid: self.node,
                     cols: self.graph[self.node].columns().len(),
                     index,
-                    trigger_domain: (last_domain, num_shards),
+                    trigger_domain: last_domain,
+                    num_shards,
                 }
             } else {
                 #[allow(clippy::indexing_slicing)]

@@ -34,9 +34,9 @@ use metrics::{gauge, histogram};
 use nom_sql::{CacheInner, CreateCacheStatement, SelectStatement, SqlIdentifier, SqlQuery};
 use noria::builders::{ReplicaShard, TableBuilder, ViewBuilder, ViewReplica};
 use noria::consensus::{Authority, AuthorityControl};
-use noria::debug::info::{DomainKey, GraphInfo};
+use noria::debug::info::GraphInfo;
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
-use noria::internal::MaterializationStatus;
+use noria::internal::{MaterializationStatus, ReplicaAddress};
 use noria::metrics::recorded;
 use noria::recipe::changelist::{Change, ChangeList};
 use noria::recipe::ExtendRecipeSpec;
@@ -173,11 +173,14 @@ impl DataflowState {
     pub(super) fn get_info(&self) -> ReadySetResult<GraphInfo> {
         let mut worker_info = HashMap::new();
         for (di, dh) in self.domains.iter() {
-            for (i, shard) in dh.shards.iter().enumerate() {
+            for (shard, shard_addr) in dh.shards.iter().enumerate() {
                 worker_info
-                    .entry(shard.clone())
+                    .entry(shard_addr.clone())
                     .or_insert_with(HashMap::new)
-                    .entry(DomainKey(*di, i))
+                    .entry(ReplicaAddress {
+                        domain_index: *di,
+                        shard,
+                    })
                     .or_insert_with(Vec::new)
                     .extend(
                         self.domain_nodes
@@ -499,14 +502,17 @@ impl DataflowState {
                 shard: 0,
             })?
             .shards())
-            .map(|i| {
+            .map(|shard| {
+                let replica_addr = ReplicaAddress {
+                    domain_index: node.domain(),
+                    shard,
+                };
                 self.channel_coordinator
-                    .get_addr(&(node.domain(), i))
+                    .get_addr(&replica_addr)
                     .ok_or_else(|| {
                         internal_err(format!(
-                            "failed to get channel coordinator for {}.{}",
-                            node.domain().index(),
-                            i
+                            "failed to get channel coordinator for {}",
+                            replica_addr
                         ))
                     })
             })
@@ -561,14 +567,22 @@ impl DataflowState {
         trace!("asked to get statistics");
         let workers = &self.workers;
         let mut domains = HashMap::new();
-        for (&di, s) in self.domains.iter() {
-            trace!(di = %di.index(), "requesting stats from domain");
+        for (&domain_index, s) in self.domains.iter() {
+            trace!(domain = %domain_index.index(), "requesting stats from domain");
             domains.extend(
                 s.send_to_healthy(DomainRequest::GetStatistics, workers)
                     .await?
                     .into_iter()
                     .enumerate()
-                    .map(move |(i, s)| ((di, i), s)),
+                    .map(move |(shard, stats)| {
+                        (
+                            ReplicaAddress {
+                                domain_index,
+                                shard,
+                            },
+                            stats,
+                        )
+                    }),
             );
         }
 
@@ -946,6 +960,11 @@ impl DataflowState {
 
         let num_shards = shard_workers.len();
         for (shard, worker_id) in shard_workers.iter().enumerate() {
+            let replica_address = ReplicaAddress {
+                domain_index: idx,
+                shard,
+            };
+
             let domain = DomainBuilder {
                 index: idx,
                 shard: if num_shards > 1 { Some(shard) } else { None },
@@ -1004,8 +1023,8 @@ impl DataflowState {
             info!(external_addr = %ret.external_addr, "worker booted domain");
 
             self.channel_coordinator
-                .insert_remote((idx, shard), ret.external_addr)?;
-            domain_addresses.push(DomainDescriptor::new(idx, shard, ret.external_addr));
+                .insert_remote(replica_address, ret.external_addr)?;
+            domain_addresses.push(DomainDescriptor::new(replica_address, ret.external_addr));
             assignments.push(w.uri.clone());
         }
 

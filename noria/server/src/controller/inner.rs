@@ -14,6 +14,7 @@ use std::time::Duration;
 use failpoint_macros::failpoint;
 use hyper::Method;
 use noria::consensus::Authority;
+use noria::internal::ReplicaAddress;
 use noria::recipe::ExtendRecipeSpec;
 use noria::replication::ReplicationOffset;
 use noria::status::{ReadySetStatus, SnapshotStatus};
@@ -498,17 +499,21 @@ impl Leader {
             );
 
             let mut domain_addresses = Vec::new();
-            for (index, handle) in &ds.domains {
-                for i in 0..handle.shards.len() {
-                    let socket_addr =
-                        ds.channel_coordinator
-                            .get_addr(&(*index, i))
-                            .ok_or_else(|| ReadySetError::NoSuchDomain {
-                                domain_index: index.index(),
-                                shard: i,
-                            })?;
+            for (domain_index, handle) in &ds.domains {
+                for shard in 0..handle.shards.len() {
+                    let replica_address = ReplicaAddress {
+                        domain_index: *domain_index,
+                        shard,
+                    };
+                    let socket_addr = ds
+                        .channel_coordinator
+                        .get_addr(&replica_address)
+                        .ok_or_else(|| ReadySetError::NoSuchDomain {
+                            domain_index: domain_index.index(),
+                            shard,
+                        })?;
 
-                    domain_addresses.push(DomainDescriptor::new(*index, i, socket_addr));
+                    domain_addresses.push(DomainDescriptor::new(replica_address, socket_addr));
                 }
             }
 

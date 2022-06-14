@@ -11,7 +11,7 @@ use crate::prelude::*;
 struct EgressTx {
     node: NodeIndex,
     local: LocalNodeIndex,
-    dest: ReplicaAddr,
+    dest: ReplicaAddress,
 
     #[serde(skip)]
     sent_ctr: Option<metrics::Counter>,
@@ -66,7 +66,7 @@ impl Clone for Egress {
 }
 
 impl Egress {
-    pub fn add_tx(&mut self, dst_g: NodeIndex, dst_l: LocalNodeIndex, addr: ReplicaAddr) {
+    pub fn add_tx(&mut self, dst_g: NodeIndex, dst_l: LocalNodeIndex, addr: ReplicaAddress) {
         self.txs.push(EgressTx {
             node: dst_g,
             local: dst_l,

@@ -14,7 +14,7 @@ use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::StreamExt;
 use futures_util::FutureExt;
 use noria::channel::{self, CONNECTION_FROM_BASE};
-use noria::internal::{DomainIndex, LocalOrNot};
+use noria::internal::{LocalOrNot, ReplicaAddress};
 use noria::{KeyComparison, PacketData, PacketPayload, Tagged};
 use strawpoll::Strawpoll;
 use time::Duration;
@@ -27,8 +27,6 @@ use tracing::{debug, error, info_span, instrument, warn, Span};
 use super::ChannelCoordinator;
 use crate::ReadySetResult;
 
-pub(super) type ReplicaAddr = (DomainIndex, usize);
-
 type DualTcpStream = channel::DualTcpStream<
     BufStream<TcpStream>,
     Box<Packet>,
@@ -37,7 +35,7 @@ type DualTcpStream = channel::DualTcpStream<
 >;
 
 type Outputs =
-    AHashMap<ReplicaAddr, Box<dyn Sink<Box<Packet>, Error = bincode::Error> + Send + Unpin>>;
+    AHashMap<ReplicaAddress, Box<dyn Sink<Box<Packet>, Error = bincode::Error> + Send + Unpin>>;
 
 /// Generates a monotonically incrementing u64 value to be used as a token for our connections
 fn next_token() -> u64 {
@@ -97,7 +95,7 @@ impl Replica {
 
 struct Outboxes {
     /// messages for other domains
-    domains: AHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
+    domains: AHashMap<ReplicaAddress, VecDeque<Box<Packet>>>,
 }
 
 impl Outboxes {
@@ -109,7 +107,7 @@ impl Outboxes {
 }
 
 impl Executor for Outboxes {
-    fn send(&mut self, dest: ReplicaAddr, m: Box<Packet>) {
+    fn send(&mut self, dest: ReplicaAddress, m: Box<Packet>) {
         self.domains.entry(dest).or_default().push_back(m);
     }
 }
@@ -246,7 +244,7 @@ impl Replica {
     /// packets being lost
     #[instrument(level = "debug", name = "send_packets", skip_all)]
     async fn send_packets(
-        to_send: Vec<(ReplicaAddr, VecDeque<Box<Packet>>)>,
+        to_send: Vec<(ReplicaAddress, VecDeque<Box<Packet>>)>,
         connections: &tokio::sync::Mutex<Outputs>,
         coord: &ChannelCoordinator,
         failed: &Mutex<HashSet<SocketAddr>>,

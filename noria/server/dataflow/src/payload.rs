@@ -123,7 +123,8 @@ pub enum InitialState {
         gid: petgraph::graph::NodeIndex,
         cols: usize,
         index: Index,
-        trigger_domain: (DomainIndex, usize),
+        trigger_domain: DomainIndex,
+        num_shards: usize,
     },
     Global {
         gid: petgraph::graph::NodeIndex,
@@ -179,7 +180,7 @@ pub enum DomainRequest {
     /// Update Egress node.
     UpdateEgress {
         node: LocalNodeIndex,
-        new_tx: Option<(NodeIndex, LocalNodeIndex, ReplicaAddr)>,
+        new_tx: Option<(NodeIndex, LocalNodeIndex, ReplicaAddress)>,
         new_tag: Option<(Tag, NodeIndex)>,
     },
 
@@ -196,7 +197,7 @@ pub enum DomainRequest {
     /// Note that this *must* be done *before* the sharder starts being used!
     UpdateSharder {
         node: LocalNodeIndex,
-        new_txs: (LocalNodeIndex, Vec<ReplicaAddr>),
+        new_txs: (LocalNodeIndex, Vec<ReplicaAddress>),
     },
 
     /// Set up a fresh, empty state for a node, indexed by a particular column.

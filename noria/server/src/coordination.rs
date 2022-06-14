@@ -12,25 +12,31 @@ pub struct RunDomainResponse {
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub struct DomainDescriptor {
-    id: DomainIndex,
-    shard: usize,
-    addr: SocketAddr,
+    replica_address: ReplicaAddress,
+    socket_address: SocketAddr,
 }
 
 impl DomainDescriptor {
-    pub fn new(id: DomainIndex, shard: usize, addr: SocketAddr) -> Self {
-        DomainDescriptor { id, shard, addr }
+    pub fn new(replica_address: ReplicaAddress, socket_address: SocketAddr) -> Self {
+        DomainDescriptor {
+            replica_address,
+            socket_address,
+        }
     }
 
-    pub fn domain(&self) -> DomainIndex {
-        self.id
+    pub fn socket_address(&self) -> SocketAddr {
+        self.socket_address
+    }
+
+    pub fn replica_address(&self) -> ReplicaAddress {
+        self.replica_address
+    }
+
+    pub fn domain_index(&self) -> DomainIndex {
+        self.replica_address().domain_index
     }
 
     pub fn shard(&self) -> usize {
-        self.shard
-    }
-
-    pub fn addr(&self) -> SocketAddr {
-        self.addr
+        self.replica_address().shard
     }
 }
