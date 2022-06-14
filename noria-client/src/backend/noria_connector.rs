@@ -1317,7 +1317,7 @@ impl NoriaConnector {
         )
         .await;
         if let Err(e) = res.as_ref() {
-            if e.is_networking_related() {
+            if e.is_networking_related() || e.caused_by_view_destroyed() {
                 self.failed_views.insert(qname.to_owned());
             }
         }

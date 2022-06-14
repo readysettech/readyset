@@ -2,7 +2,8 @@ use mysql_async::prelude::*;
 use noria_client::backend::noria_connector::ReadBehavior;
 use noria_client::backend::UnsupportedSetMode;
 use noria_client::BackendBuilder;
-use noria_client_test_helpers::mysql_helpers::MySQLAdapter;
+use noria_client_metrics::QueryDestination;
+use noria_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
 use noria_client_test_helpers::{self, sleep};
 use noria_server::Handle;
 use serial_test::serial;
@@ -233,5 +234,34 @@ async fn proxy_unsupported_sets() {
             .unwrap()
             .0,
         1,
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn drop_then_recreate_table_with_query() {
+    let (opts, _handle) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+
+    conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
+    conn.query_drop("CREATE CACHE q FROM SELECT x FROM t")
+        .await
+        .unwrap();
+    conn.query_drop("SELECT x FROM t").await.unwrap();
+    conn.query_drop("DROP TABLE t").await.unwrap();
+
+    sleep().await;
+
+    conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
+    conn.query_drop("CREATE CACHE q FROM SELECT x FROM t")
+        .await
+        .unwrap();
+    // Query twice to clear the cache
+    conn.query_drop("SELECT x FROM t").await.unwrap();
+    conn.query_drop("SELECT x FROM t").await.unwrap();
+
+    assert_eq!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::Readyset
     );
 }
