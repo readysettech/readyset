@@ -38,6 +38,19 @@ data "aws_iam_policy_document" "ci-benchmarking" {
     ]
     resources = [data.aws_kms_key.s3-default.arn]
   }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "ssm:GetParameter",
+      "ssm:GetParameters",
+      "ssm:GetParametersByPath",
+      "kms:Decrypt"
+      ]
+    resources = [
+      "arn:aws:ssm:us-east-2:305232526136:parameter/readyset/benchmarks/dbPassword"
+    ]
+  }
 }
 
 # Grants Buildkite queue's role access to assume benchmarking IAM role
