@@ -1438,7 +1438,6 @@ impl Domain {
                                     #[allow(clippy::indexing_slicing)] // just checked len is 1
                                     txs[0].send(misses).is_ok()
                                 } else {
-                                    // TODO: compound reader
                                     let mut per_shard = HashMap::new();
                                     for miss in misses {
                                         assert!(matches!(miss.len(), Some(1) | None));
