@@ -1,0 +1,37 @@
+[package]
+name = "mysql-srv"
+publish = false
+version = "0.8.8"
+edition = "2021"
+
+description = "Bindings for emulating a MySQL/MariaDB server"
+readme = "README.md"
+
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+
+keywords = ["api-bindings", "database", "sql", "mock"]
+categories = ["api-bindings", "network-programming", "database-implementations"]
+
+[dependencies]
+nom = "7.1"
+mysql_async = "0.29"
+mysql_common = { version = "0.28.0", features = ["chrono"] }
+byteorder = "1"
+chrono = "0.4"
+time = "0.3"
+getrandom = "0.2.2"
+async-trait = "0.1"
+tokio = { version = "1.15", features = ["io-util", "net", "macros", "rt-multi-thread"] }
+thiserror = "1.0.26"
+sha-1 = "0.10.0"
+mysql-time = { path = "../mysql-time" }
+tracing = "0.1.32"
+
+[dev-dependencies]
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
+mysql = "22.0.0"
+
+slab = "0.4.2"
+futures = "0.3"
+
+test_utils = { path = "../test_utils" }

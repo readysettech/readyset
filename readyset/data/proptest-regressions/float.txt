@@ -1,0 +1,17 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 7b8eb442a05c685ae1a250f8e18adadeb64ea5332f3eb971c47b0d872048ad5b # shrinks to input = _FloatToTinyintArgs { val: -0.0 }
+cc df5bb81f0a25d7a316a23baedaf35e954dba4b1c09f5e9d8bfc624d7abf070cd # shrinks to input = _FloatToTinyintArgs { val: -2.6776723e-20 }
+cc 325bb55297d5aa20f3181669f71ce890cdaa7cac883e19af80fc614614cc21a1 # shrinks to input = _FloatToTinyintArgs { val: -0.6874218 }
+cc 766b7781d915a1188274340d4d5613a59c2de9e4f1ef83a56a825441f1c22baf # shrinks to input = _FloatToTinyintArgs { val: 129.70474 }
+cc 1bca7e36eda930113f6a2a106958524d3bef020c179c6149d936d7ee7f2a5206 # shrinks to input = _FloatToSmallintArgs { val: 1617.2784 }
+cc 0f7cc66d47fe544384d21f436b9e10946ab336a9c28d75f80a22cbf8bdcf824f # shrinks to input = _FloatToIntArgs { val: -535135093.91545486 }
+cc 457f932f3419839a48cccbf9ca5778ffadf53cf13e215ee87eaf29c98f503bb4 # shrinks to input = _FloatToIntArgs { val: -128.32837  }
+cc 193e7cdb9563be74c64f392e446b174500c9cb3aca6aa40d15d2c0a029e0fe2a # shrinks to input = _FloatToTinyintArgs { val: -128.9039 }
+cc c593bdd92bc80c0414a0534eed310c5c13e270cb76b46afc670436bf55b52c4b # shrinks to input = _FloatToTinyintArgs { val: 255.07523 }
+cc a814bace3791d56ab21347c24848c70d75fc310bc8accb217bcd98d41e0d9f66 # shrinks to input = _FloatToBigintArgs { val: 644560.8729097991 }
+cc 31646ac01088a8c3e64a4719be3086b05fb8b40afc501268056c5aacc5f0eb56 # shrinks to input = _FloatToIntArgs { val: 7.723334864855637 }

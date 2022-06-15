@@ -1,0 +1,14 @@
+# successes
+alter table t1 add column foo int;
+alter table t1 add column foo int, add column bar text;
+alter table t1 add column foo int default 123;
+alter table t1 add column foo int default 123;
+alter table t1 drop column foo;
+alter table t1 alter column foo default 1;
+alter table t1 alter column foo set default 1;
+alter table t1 alter column foo drop default;
+
+# failures
+alter table;
+alter t1 add foo;
+alter table t1 drop column foo int;

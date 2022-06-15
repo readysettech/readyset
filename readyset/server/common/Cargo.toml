@@ -1,0 +1,30 @@
+[package]
+name = "readyset-common"
+version = "0.7.0"
+edition = "2021"
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+license-file = "../../../LICENSE"
+
+description = "Internal readyset-server crate"
+repository = "https://github.com/readysettech/readyset.git"
+homepage = "https://readyset.io/"
+
+keywords = ["internal"]
+
+[badges]
+maintenance = { status = "experimental" }
+
+[dependencies]
+chrono = { version = "0.4.0", features = ["serde"] }
+serde = { version = "1.0.8", features = ["rc", "derive"] }
+petgraph = { version = "0.5", features = ["serde-1"] }
+vec1 = "1.6.0"
+tuple = "0.5"
+triomphe = "0.1"
+proptest = "1.0"
+test-strategy = "0.2.0"
+
+# Local deps
+readyset = { path = "../../readyset" }
+readyset-data = { path = "../../data" }
+launchpad = { path = "../../../launchpad" }

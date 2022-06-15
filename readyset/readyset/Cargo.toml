@@ -1,0 +1,99 @@
+[package]
+name = "readyset"
+version = "0.7.0"
+edition = "2021"
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+license-file = "../../LICENSE"
+
+readme = "README.md"
+description = "Client bindings for ReadySet"
+repository = "https://github.com/readysettech/readyset.git"
+homepage = "https://readyset.io/"
+
+keywords = ["database", "dataflow", "backend", "storage", "sql"]
+categories = ["api-bindings", "database"]
+
+[dependencies]
+anyhow = "1.0"
+thiserror = "1.0.26"
+hyper = { version = "0.14.10", features = [ "stream", "client", "http2" ] }
+nom = "7.1"
+nom-sql = { path = "../../nom-sql" }
+serde = { version = "1.0.8", features = ["rc", "derive"] }
+serde_json = { version = "1.0.2", features = ["arbitrary_precision"] }
+serde_with = "1.9.4"
+serde_bytes = "0.11"
+rmp-serde = "1.0.0"
+tokio = { version = "1.15", features = ["full"] }
+bincode = "1.3.3"
+vec_map = { version = "0.8.0", features = ["eders"] }
+petgraph = { version = "0.5", features = ["serde-1"] }
+ahash = "0.7"
+chrono = { version = "0.4.0", features = ["serde"] }
+time = { version = "0.3", features = ["local-offset"] }
+tower-service = "0.3.1"
+tower-layer = "0.3.1"
+tokio-tower = "0.5.1"
+tower = { version = "0.4.6", features = ["limit", "balance", "buffer", "discover", "util", "timeout"] }
+tracing = { version = "0.1", features = ["release_max_level_debug"] }
+tracing-futures = "0.2.2"
+slab = "0.4"
+pin-project = "1.0"
+futures-util = "0.3.0"
+futures = "0.3"
+mysql_common ={ version = "0.28.0", features = ["chrono"] }
+vec1 = { version = "1.6.0", features = ["serde"] }
+proptest = "1.0.0"
+derive_more = "0.99.11"
+backoff = { version = "0.4.0", features = ["tokio"] }
+url = { version = "2.2", features = ["serde"] }
+mysql_async = "0.29"
+rand = "0.8.4"
+parking_lot = "0.11.2"
+cloudflare-zlib = { version = "0.2.9", features = ["arm-always"] }
+
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
+metrics = "0.19"
+metrics-util = "0.13"
+itertools = "0.10"
+bytes = "1.0.1"
+rust_decimal = { version = "1.16", features = ["db-tokio-postgres", "serde-str"] }
+eui48 = { version = "1.1", default-features = false }
+uuid = { version = "0.8", features = ["v4"] }
+bit-vec = { version = "0.6", features = ["serde"] }
+triomphe = "0.1"
+
+# consensus/
+zookeeper-async = "4.0.1"
+enum_dispatch = "0.3.7"
+async-trait = "0.1"
+consulrs = { git = "https://github.com/readysettech/consulrs.git", branch = "allow-disabling-rustls-tls-2" }
+base64 = "0.13"
+
+# channel/
+bufstream = "0.1.3"
+byteorder = "1.0.0"
+socket2 = "0.4"
+async-bincode = "0.6.1"
+test-strategy = "0.2.0"
+
+# metrics/
+reqwest = { version = "0.11.3", features = ["json"] }
+
+# Local dependencies
+launchpad = { path = "../../launchpad" }
+mysql-time = { path = "../../mysql-time" }
+readyset-errors = { path = "../errors" }
+readyset-data = { path = "../data" }
+dataflow_expression = { path = "../server/dataflow/expression" }
+readyset-tracing = { path = "../../readyset-tracing" }
+
+[dev-dependencies]
+serial_test = "0.5.1"
+
+[lib]
+path = "src/lib.rs"
+name = "readyset"
+
+[[example]]
+name = "quickstart"

@@ -1,0 +1,42 @@
+[package]
+name = "replicators"
+version = "0.1.0"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+clap = { version = "3.0", features = ["derive","env"] }
+native-tls = "0.2.7"
+tokio = { version = "1.15", features = ["full"] }
+futures = { version = "0.3" }
+bytes = "1.0"
+chrono = "0.4"
+itertools = "0.10"
+metrics = "0.19"
+tracing = { version = "0.1", features = ["release_max_level_debug"] }
+tracing-futures = "0.2.5"
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+hex = "0.4.3"
+rust_decimal = { version = "1.16" }
+bit-vec = { version = "0.6", features = ["serde"] }
+
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-serde_json-1"] }
+postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-serde_json-1"] }
+postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
+mysql_async = "0.29"
+
+mysql_common = "0.28.0"
+nom-sql = { path = "../nom-sql" }
+readyset = { path = "../readyset/readyset", package = "readyset" }
+readyset-errors = { path = "../readyset/errors" }
+launchpad = { path = "../launchpad" }
+readyset-tracing = { path = "../readyset-tracing" }
+mysql-time = { path = "../mysql-time" }
+readyset-data = { path = "../readyset/data" }
+
+[dev-dependencies]
+readyset-server = { path = "../readyset/server" }
+serial_test = "0.5.1"

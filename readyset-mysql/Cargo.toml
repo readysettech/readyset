@@ -1,0 +1,54 @@
+[package]
+name = "readyset-mysql"
+publish = false
+version = "0.4.0"
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+build = "src/build.rs"
+
+[target.'cfg(not(target_env="msvc"))'.dependencies]
+tikv-jemallocator = "0.4"
+
+[dependencies]
+clap = { version = "3.0", features = ["derive","env"] }
+async-trait = "0.1.51"
+mysql-srv = { path = "../mysql-srv" }
+mysql_async = "0.29"
+lazy_static = "1.0"
+
+readyset = { path = "../readyset/readyset" }
+readyset-errors = { path = "../readyset/errors" }
+readyset-data = { path = "../readyset/data" }
+readyset-client = { path = "../readyset-client" }
+readyset-client-adapter = { path = "../readyset-client/adapter" }
+nom-sql = { path = "../nom-sql" }
+tokio = "1.15"
+tracing = { version = "0.1", features = ["release_max_level_debug"] }
+anyhow = "1.0.42"
+derive_more = "0.99.16"
+thiserror = "1.0.26"
+mysql_common = "0.28.0"
+itertools = "0.10"
+launchpad = { path = "../launchpad" }
+
+[dev-dependencies]
+readyset-client-test-helpers = { path = "../readyset-client/test-helpers", features = ["mysql"] }
+readyset-client-metrics = { path = "../readyset-client/metrics" }
+readyset-server = { path = "../readyset/server" }
+chrono = "0.4.19"
+maplit = "1.0.2"
+mysql = "22.0.0"
+paste = "1.0.5"
+proptest = "1.0.0"
+serial_test = "0.5.1"
+test-strategy = "0.2.0"
+
+[features]
+vertical_tests = []
+display_literals = ["launchpad/display_literals"]
+
+[[example]]
+name = "basic_demo"
+
+[[example]]
+name = "ryw"

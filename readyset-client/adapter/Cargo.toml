@@ -1,0 +1,33 @@
+[package]
+name = "readyset-client-adapter"
+publish = false
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+clap = { version = "3.0", features = ["derive","env"] }
+futures-util = "0.3.0"
+maplit = "1.0.2"
+metrics = "0.19"
+metrics-exporter-prometheus = "0.10"
+tokio = { version = "1.15", features = ["signal", "rt-multi-thread", "time", "net"] }
+tokio-stream = { version = "0.1.5", features = ["net"] }
+tracing = { version = "0.1", features = ["release_max_level_debug"] }
+tracing-subscriber = "0.3.9"
+tracing-futures = "0.2.5"
+stream-cancel = "0.8.0"
+reqwest = { version = "0.11", features = ["json"] }
+
+# Local dependencies
+launchpad = { path = "../../launchpad" }
+nom-sql = { path = "../../nom-sql" }
+readyset = { path = "../../readyset/readyset/" }
+readyset-client = { path = ".." }
+readyset-client-metrics = { path = "../metrics" }
+readyset-tracing = { path = "../../readyset-tracing" }
+chrono = "0.4"
+
+readyset-dataflow = { path = "../../readyset/server/dataflow" }
+readyset-server = { path = "../../readyset/server/" }

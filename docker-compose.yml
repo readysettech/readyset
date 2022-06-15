@@ -1,0 +1,32 @@
+version: "3.8"
+services:
+  zookeeper:
+    image: zookeeper
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "2181"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+  consul-server:
+    image: consul
+    restart: always
+    volumes:
+      - ./docker/consul/server.json:/consul/config/server.json:ro
+    command: 'agent -bootstrap-expect=1'
+  mysql:
+    image: mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=readyset
+      - MYSQL_DATABASE=readyset
+  postgres:
+    image: postgres
+    environment:
+      - POSTGRES_PASSWORD=readyset
+      - POSTGRES_DB=readyset
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+  redis:
+    image: redis:6.2

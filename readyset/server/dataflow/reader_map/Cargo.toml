@@ -1,0 +1,22 @@
+[package]
+name = "reader_map"
+version = "0.1.0"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+
+[dependencies]
+smallvec = "1.0.0"
+hashbag = "0.1.2"
+rand = { version = "0.7", default-features = false, features = ["alloc"] }
+left-right = "0.9.1"
+itertools = "0.10"
+
+unbounded-interval-tree = { path = "../../../../unbounded-interval-tree" }
+readyset = { path = "../../../readyset" }
+partial_map = { path = "../partial_map" }
+
+[dev-dependencies]
+quickcheck = "0.9"
+quickcheck_macros = "0.9"
+rand = "0.7"

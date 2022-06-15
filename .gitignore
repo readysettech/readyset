@@ -1,0 +1,6 @@
+.DS_Store
+
+/target/
+/docker-compose.override.yml
+
+tags

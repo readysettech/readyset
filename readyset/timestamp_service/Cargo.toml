@@ -1,0 +1,11 @@
+[package]
+name = "timestamp_service"
+version = "0.7.0"
+publish = false
+edition = "2021"
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+
+[dependencies]
+anyhow = "1.0"
+# local deps
+readyset = { path = "../readyset" }

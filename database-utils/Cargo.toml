@@ -1,0 +1,17 @@
+[package]
+name = "database-utils"
+version = "0.1.0"
+publish = false
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+derive_more = "0.99.17"
+futures = "0.3.21"
+mysql_async = "0.29.0"
+native-tls = "0.2.8"
+thiserror = "1.0.30"
+tokio = "1.17.0"
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
+postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }

@@ -1,0 +1,17 @@
+[package]
+name = "unbounded-interval-tree"
+version = "0.2.3"
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+description = "An interval tree working with inclusive/exclusive bounds, as well as unbounded intervals. Provides helpers to fetch overlapping intervals, and difference of intervals."
+
+
+[dependencies]
+proptest = "1.0.0"
+rand = "0.7"
+launchpad = { path = "../launchpad" }
+
+[dev-dependencies]
+itertools = "0.10"
+pretty_assertions = "0.7.2"
+test-strategy = "0.2.0"

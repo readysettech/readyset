@@ -1,0 +1,6 @@
+
+SELECT * FROM employees e WHERE exists(SELECT id FROM eotm_dyn d WHERE d.employeeID = e.id)
+SELECT * FROM employees e WHERE not exists ( SELECT id FROM eotm_dyn d WHERE d.employeeID = e.id)
+SELECT * FROM employees e WHERE not (exists ( SELECT id FROM eotm_dyn d WHERE d.employeeID = e.id))
+SELECT * FROM employees e WHERE x > 3 and not exists (SELECT id FROM eotm_dyn d WHERE d.employeeID = e.id ) and y < 3
+

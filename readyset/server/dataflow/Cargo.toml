@@ -1,0 +1,75 @@
+[package]
+name = "readyset-dataflow"
+version = "0.7.0"
+edition = "2021"
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+license-file = "../../../LICENSE"
+
+description = "Internal readyset-server crate"
+repository = "https://github.com/readysettech/readyset.git"
+homepage = "https://readyset.io/"
+
+keywords = ["internal"]
+
+[badges]
+maintenance = { status = "experimental" }
+
+[dependencies]
+anyhow = "1.0"
+bincode = "1.0.0"
+hashbag = "0.1.2"
+ahash = "0.7"
+futures-util = "0.3.13"
+lazy_static = "1.0.0"
+itertools = "0.10"
+metrics = "0.19"
+nom-sql = { path = "../../../nom-sql" }
+indexmap = "1.1.0"
+rand = "0.7"
+regex = "1"
+serde_derive = "1.0.8"
+serde_with = "1.9.4"
+serde_json = "1.0.2"
+tracing = { version = "0.1", features = ["release_max_level_debug"] }
+tokio = { version = "1.15", features = ["full"] }
+tokio-stream = { version = "0.1.5", features = ["net"] }
+vec_map = { version = "0.8.0", features = ["eders"] }
+tempfile = "3.0.2"
+derive_more = "0.99.11"
+tuple = "0.5.1"
+vec1 = "1.6.0"
+maplit = "1.0.2"
+derivative = "2.2.0"
+dataflow_expression = { path = "expression" }
+criterion = { version = "0.3", features=['real_blackbox', 'async_tokio'], optional = true }
+test-strategy = "0.2.0"
+thiserror = "1.0.26"
+proptest = "1.0.0"
+fail = "0.5.0"
+strum = "0.23"
+strum_macros = "0.23"
+notify = "4.0"
+clap = { version = "3.0", features = ["derive"] }
+
+# need features
+petgraph = { version = "0.5", features = ["serde-1"] }
+serde = { version = "1.0.8", features = ["rc"] }
+timekeeper = { version = "0.3.2", default-features = false }
+rocksdb = { version = "0.17", default-features = false, features = ["lz4"] }
+
+
+# local deps
+common = { path = "../common", package = "readyset-common" }
+readyset = { path = "../../readyset" }
+unbounded-interval-tree = { path = "../../../unbounded-interval-tree" }
+launchpad = { path = "../../../launchpad" }
+readyset-errors = { path = "../../errors" }
+readyset-data = { path = "../../data" }
+reader_map = { path = "reader_map" }
+partial_map = { path = "partial_map" }
+failpoint-macros = { path = "../../../failpoint-macros" }
+dataflow_state = { path = "state" }
+
+[features]
+bench = ["criterion"]
+failure_injection = ["fail/failpoints"]

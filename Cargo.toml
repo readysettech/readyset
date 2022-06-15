@@ -1,0 +1,40 @@
+[patch.crates-io]
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
+mysql_async = { git = "https://github.com/readysettech/mysql_async", branch = "lru-fix" }
+eui48 = { git = "https://github.com/readysettech/eui48.git", branch = "master" }
+
+[workspace]
+members = [
+    "database-utils",
+    "mysql-srv",
+    "mysql-time",
+    "nom-sql",
+    "readyset-client",
+    "readyset-client/test-helpers",
+    "readyset-mysql",
+    "readyset-psql",
+    "readyset/data",
+    "readyset/errors",
+    "readyset/readyset",
+    "readyset/server",
+    "readyset/server/sql-passes",
+    "readyset/server/dataflow/partial_map",
+    "readyset/server/dataflow/reader_map",
+    "readyset/server/dataflow/state",
+    "readyset/clustertest",
+    "readyset/clustertest/macros",
+    "failpoint-macros",
+    "failpoint-macros/proc-macros",
+    "readyset/tools",
+    "readyset/timestamp_service",
+    "psql-srv",
+    "unbounded-interval-tree",
+    "maths",
+    "test_utils",
+    "readyset-tracing",
+    "readyset-tracing/proc-macros",
+]
+resolver = "2"
+
+[profile.release]
+debug=true

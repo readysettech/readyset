@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3b693a14841944b8e4294a81fc179a85339ced1fa8f6a834d7bf52db6a819d43 # shrinks to input = _EqTransitiveArgs { k1: Range((Unbounded, Unbounded)), k2: Equal([None]), k3: Range((Unbounded, Unbounded)) }

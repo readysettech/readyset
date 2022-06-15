@@ -1,0 +1,37 @@
+[package]
+name = "nom-sql"
+version = "0.0.11"
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+publish = false
+
+documentation = "https://docs.readyset.io/nom_sql/index.html"
+homepage = "https://github.com/readysettech/readyset/tree/master/nom-sql"
+repository = "https://github.com/readysettech/readyset/tree/master/nom-sql"
+
+description = "A SQL parser written using nom."
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+nom = "7.1"
+itertools = "0.10"
+derive_more = "0.99.13"
+pratt = "0.3.0"
+maplit = "1.0.2"
+proptest = "1.0.0"
+test-strategy = "0.2.0"
+launchpad = { path = "../launchpad" }
+thiserror = "1.0.26"
+hex = "0.4.3"
+rust_decimal = { version = "1.16", features = ["db-tokio-postgres"] }
+eui48 = { version = "1.1", default-features = false }
+uuid = { version = "0.8", features = ["v4"] }
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+bit-vec = { version = "0.6", features = ["serde"] }
+triomphe = "0.1"
+lazy_static = "1.4"
+
+[dev-dependencies]
+assert_approx_eq = "1.1.0"
+pretty_assertions = "0.7.2"
+bincode = "1.3"

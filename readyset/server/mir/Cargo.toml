@@ -1,0 +1,34 @@
+[package]
+name = "readyset-mir"
+version = "0.7.0"
+edition = "2021"
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+license-file = "../../../LICENSE"
+
+description = "Internal readyset-server crate"
+repository = "https://github.com/readysettech/readyset.git"
+homepage = "https://readyset.io/"
+
+keywords = ["internal"]
+
+[badges]
+maintenance = { status = "experimental" }
+
+[dependencies]
+nom-sql = { path = "../../../nom-sql" }
+regex = "1.5"
+lazy_static = "1.4"
+petgraph = { version = "0.5", features = ["serde-1"] }
+itertools = "0.10"
+tracing = { version = "0.1", features = ["release_max_level_debug"] }
+readyset = { path = "../../readyset" }
+readyset-errors = { path = "../../errors" }
+serde = { version = "1.0.8", features = ["rc", "derive"] }
+readyset-data = { path = "../../../readyset/data" }
+
+# local deps
+common = { path = "../common", package = "readyset-common" }
+dataflow = { path = "../dataflow", package = "readyset-dataflow" }
+
+[dev-dependencies]
+readyset-tracing = { path = "../../../readyset-tracing" }
