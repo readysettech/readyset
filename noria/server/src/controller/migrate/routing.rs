@@ -319,17 +319,13 @@ pub(in crate::controller) fn connect(
                         dmp.add_message_for_shard(
                             sender_node.domain(),
                             shard,
-                            DomainRequest::UpdateEgress {
-                                node: sender_node.local_addr(),
-                                new_tx: Some((
-                                    node,
-                                    n.local_addr(),
-                                    ReplicaAddress {
-                                        domain_index: n.domain(),
-                                        shard,
-                                    },
-                                )),
-                                new_tag: None,
+                            DomainRequest::AddEgressTx {
+                                egress_node: sender_node.local_addr(),
+                                ingress_node: (node, n.local_addr()),
+                                target_replica_address: ReplicaAddress {
+                                    domain_index: n.domain(),
+                                    shard,
+                                },
                             },
                         )?;
                     }
@@ -341,17 +337,13 @@ pub(in crate::controller) fn connect(
                     invariant_eq!(shards, 1);
                     dmp.add_message(
                         sender_node.domain(),
-                        DomainRequest::UpdateEgress {
-                            node: sender_node.local_addr(),
-                            new_tx: Some((
-                                node,
-                                n.local_addr(),
-                                ReplicaAddress {
-                                    domain_index: n.domain(),
-                                    shard: 0,
-                                },
-                            )),
-                            new_tag: None,
+                        DomainRequest::AddEgressTx {
+                            egress_node: sender_node.local_addr(),
+                            ingress_node: (node, n.local_addr()),
+                            target_replica_address: ReplicaAddress {
+                                domain_index: n.domain(),
+                                shard: 0,
+                            },
                         },
                     )?;
                 }

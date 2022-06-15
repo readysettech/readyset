@@ -1262,29 +1262,47 @@ impl Domain {
                     .drop_column(column)?;
                 Ok(None)
             }
-            DomainRequest::UpdateEgress {
-                node,
-                new_tx,
-                new_tag,
+            DomainRequest::AddEgressTx {
+                egress_node,
+                ingress_node: (ingress_node_global, ingress_node_local),
+                target_replica_address,
             } => {
                 let mut n = self
                     .nodes
-                    .get(node)
-                    .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
+                    .get(egress_node)
+                    .ok_or_else(|| ReadySetError::NoSuchNode(egress_node.id()))?
                     .borrow_mut();
 
                 let e = n.as_mut_egress().ok_or(ReadySetError::InvalidNodeType {
-                    node_index: node.id(),
+                    node_index: egress_node.id(),
                     expected_type: NodeType::Egress,
                 })?;
 
-                if let Some((node, local, addr)) = new_tx {
-                    e.add_tx(node, local, addr);
-                }
+                e.add_tx(
+                    ingress_node_global,
+                    ingress_node_local,
+                    target_replica_address,
+                );
 
-                if let Some(new_tag) = new_tag {
-                    e.add_tag(new_tag.0, new_tag.1);
-                }
+                Ok(None)
+            }
+            DomainRequest::AddEgressTag {
+                egress_node,
+                tag,
+                ingress_node,
+            } => {
+                let mut n = self
+                    .nodes
+                    .get(egress_node)
+                    .ok_or_else(|| ReadySetError::NoSuchNode(egress_node.id()))?
+                    .borrow_mut();
+
+                let e = n.as_mut_egress().ok_or(ReadySetError::InvalidNodeType {
+                    node_index: egress_node.id(),
+                    expected_type: NodeType::Egress,
+                })?;
+
+                e.add_tag(tag, ingress_node);
                 Ok(None)
             }
             DomainRequest::AddEgressFilter {

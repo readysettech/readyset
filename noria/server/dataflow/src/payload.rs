@@ -177,11 +177,25 @@ pub enum DomainRequest {
     /// Direct domain to remove some nodes.
     RemoveNodes { nodes: Vec<LocalNodeIndex> },
 
-    /// Update Egress node.
-    UpdateEgress {
-        node: LocalNodeIndex,
-        new_tx: Option<(NodeIndex, LocalNodeIndex, ReplicaAddress)>,
-        new_tag: Option<(Tag, NodeIndex)>,
+    /// Tell an egress node about its corresponding ingress node in the next domain
+    AddEgressTx {
+        /// The local index of the egress node we're informing about changes
+        egress_node: LocalNodeIndex,
+        /// The replica address of the domain this egress should send packets to
+        target_replica_address: ReplicaAddress,
+        /// The global and local index of the corresponding ingress node in that domain
+        ingress_node: (NodeIndex, LocalNodeIndex),
+    },
+
+    /// Tell an egress node about a new tag that will pass through it, and the ingress node in the
+    /// next domain that will receive replays along that tag
+    AddEgressTag {
+        /// The local index of the egress node we're informing about changes
+        egress_node: LocalNodeIndex,
+        /// The tag for a replay path
+        tag: Tag,
+        /// The ingress node that replays along that path should be sent to
+        ingress_node: NodeIndex,
     },
 
     /// Add the target node to the list of nodes
