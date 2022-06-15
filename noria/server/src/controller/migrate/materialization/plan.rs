@@ -784,13 +784,13 @@ impl<'a> Plan<'a> {
                         let later_domain_segments = &segments[i + 1].1;
                         invariant!(!later_domain_segments.is_empty());
                         #[allow(clippy::indexing_slicing)] // checked by invariant
-                        let later_domain_first_node_key = &later_domain_segments[0];
+                        let (ingress_node, _, _) = later_domain_segments[0];
                         self.dmp.add_message(
                             domain,
-                            DomainRequest::UpdateEgress {
-                                node: n.local_addr(),
-                                new_tx: None,
-                                new_tag: Some((tag, later_domain_first_node_key.0)),
+                            DomainRequest::AddEgressTag {
+                                egress_node: n.local_addr(),
+                                tag,
+                                ingress_node,
                             },
                         )?;
                     } else {
