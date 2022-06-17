@@ -101,18 +101,18 @@ impl<'state> Scheduler<'state> {
     pub(crate) fn schedule_domain(
         &mut self,
         domain_index: DomainIndex,
-        nodes: &[(NodeIndex, bool)],
+        nodes: &[NodeIndex],
     ) -> ReadySetResult<Vec<WorkerIdentifier>> {
-        let num_shards = self.dataflow_state.ingredients[nodes[0].0]
+        let num_shards = self.dataflow_state.ingredients[nodes[0]]
             .sharded_by()
             .shards()
             .unwrap_or(1);
         let is_reader_domain = nodes
             .iter()
-            .any(|(n, _)| self.dataflow_state.ingredients[*n].is_reader());
+            .any(|n| self.dataflow_state.ingredients[*n].is_reader());
         let is_base_table_domain = nodes
             .iter()
-            .any(|(n, _)| self.dataflow_state.ingredients[*n].is_base());
+            .any(|n| self.dataflow_state.ingredients[*n].is_base());
 
         let workers = self
             .valid_workers
@@ -125,7 +125,7 @@ impl<'state> Scheduler<'state> {
             // limit the workers they are placed upon.
             let dataflow_node_restrictions = nodes
                 .iter()
-                .filter_map(|(n, _)| {
+                .filter_map(|n| {
                     let node_name = self.dataflow_state.ingredients[*n].name();
                     self.dataflow_state
                         .node_restrictions

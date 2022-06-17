@@ -923,7 +923,7 @@ impl DataflowState {
         &mut self,
         idx: DomainIndex,
         shard_workers: Vec<WorkerIdentifier>,
-        nodes: Vec<(NodeIndex, bool)>,
+        nodes: Vec<NodeIndex>,
     ) -> ReadySetResult<DomainHandle> {
         // Reader nodes are always assigned to their own domains, so it's good enough to see
         // if any of its nodes is a reader.
@@ -931,7 +931,7 @@ impl DataflowState {
         // ingress node.
 
         // check all nodes actually exist
-        for (n, _) in nodes.iter() {
+        for n in &nodes {
             if self.ingredients.node_weight(*n).is_none() {
                 return Err(ReadySetError::NodeNotFound { index: n.index() });
             }
@@ -939,7 +939,7 @@ impl DataflowState {
 
         let domain_nodes: DomainNodes = nodes
             .iter()
-            .map(|(ni, _)| {
+            .map(|ni| {
                 #[allow(clippy::unwrap_used)] // checked above
                 let node = self
                     .ingredients
@@ -1003,7 +1003,7 @@ impl DataflowState {
 
             // Update the domain placement restrictions on nodes in the placed
             // domain if necessary.
-            for (n, _) in &nodes {
+            for n in &nodes {
                 #[allow(clippy::indexing_slicing)] // checked above
                 let node = &self.ingredients[*n];
 
@@ -1296,7 +1296,7 @@ impl DataflowState {
         let mut dmp = DomainMigrationPlan::new(self);
         let domain_nodes = domain_nodes
             .iter()
-            .map(|(idx, nm)| (*idx, nm.iter().map(|&n| (n, true)).collect::<Vec<_>>()))
+            .map(|(idx, nm)| (*idx, nm.iter().copied().collect::<Vec<_>>()))
             .collect::<HashMap<_, _>>();
         {
             let mut scheduler = Scheduler::new(self, &None)?;
@@ -1307,7 +1307,7 @@ impl DataflowState {
                 dmp.add_valid_domain(*domain, shards);
             }
         }
-        let new = domain_nodes.values().flatten().map(|(n, _)| *n).collect();
+        let new = domain_nodes.values().flatten().copied().collect();
         routing::connect(
             &self.ingredients,
             &mut dmp,
