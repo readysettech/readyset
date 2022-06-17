@@ -62,3 +62,12 @@ is required:
 6. (Optionally) rename the machine to remove the extra number suffix.
 
 [build-17636]: https://buildkite.com/readyset/readyset/builds/17636#01814408-f7d9-42b8-9bc0-6ea05949b42e
+
+## Mark a user inactive (for offboarding)
+
+To disable an offboarded user from clogging up the suggested reviewers in
+gerrit, administrators can run the following command:
+
+```console
+$ ssh -p 29418 gerrit gerrit set-account <email> --inactive
+```
