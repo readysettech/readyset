@@ -137,7 +137,12 @@ pub enum InitialState {
 pub enum ReplayPieceContext {
     Partial {
         for_keys: HashSet<KeyComparison>,
+        /// The index of the shard that originally requested the replay.
         requesting_shard: usize,
+        /// The index of the replica that originally requested the replay.
+        ///
+        /// Only this replica will receive any replay piece packets.
+        requesting_replica: usize,
         unishard: bool,
     },
     Regular {
@@ -149,6 +154,32 @@ pub enum ReplayPieceContext {
 pub struct SourceChannelIdentifier {
     pub token: u64,
     pub tag: u32,
+}
+
+/// Description for how a sender node (an [`Egress`] or a [`Sharder`]) should replicate the
+/// messages that it sends
+///
+/// Currently, we're limited to either going from n replicas to n replicas, or going from 1 replica
+/// to n replicas. If in the future that limitation is lifted, this type will have to change to
+/// accommodate the different ways we can do n-to-m replication
+///
+/// [`Egress`]: crate::node::special::Egress
+/// [`Sharder`]: crate::node::special::Sharder
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub enum SenderReplication {
+    /// Send all messages to the same replica index as the current domain.
+    ///
+    /// This is the case both when going from an unreplicated domain to an unreplicated domain, and
+    /// when going from a replicated domain to a domain with the same number of replicas
+    Same,
+
+    /// Fan-out from an unreplicated domain to `num_replicas` replicas.
+    ///
+    /// For most messages, this just consists of duplicating the message from 0 to `num_replicas`
+    /// replicas. The one exception is replay pieces, which we only want to send to the replica
+    /// that requested the replay originally (since some other replica might have requested the
+    /// same key, and we don't want to replay the same key twice to the same replica)
+    Fanout { num_replicas: usize },
 }
 
 /// A request issued to a domain through the worker RPC interface.
@@ -181,10 +212,12 @@ pub enum DomainRequest {
     AddEgressTx {
         /// The local index of the egress node we're informing about changes
         egress_node: LocalNodeIndex,
-        /// The replica address of the domain this egress should send packets to
-        target_replica_address: ReplicaAddress,
-        /// The global and local index of the corresponding ingress node in that domain
+        /// The global and local index of the corresponding ingress node in the target domain
         ingress_node: (NodeIndex, LocalNodeIndex),
+        target_domain: DomainIndex,
+        target_shard: usize,
+        /// Description for how messages should be replicated when sending to the target domain
+        replication: SenderReplication,
     },
 
     /// Tell an egress node about a new tag that will pass through it, and the ingress node in the
@@ -198,20 +231,28 @@ pub enum DomainRequest {
         ingress_node: NodeIndex,
     },
 
-    /// Add the target node to the list of nodes
-    /// that should go through the filtering process
-    /// at the given Egress node.
+    /// Add the target node to the list of nodes that should go through the filtering process at
+    /// the given Egress node.
     AddEgressFilter {
         egress_node: LocalNodeIndex,
         target_node: NodeIndex,
     },
 
-    /// Add a shard to a Sharder node.
+    /// Tell a Sharder node about its corresponding ingress node in the next domain, and how it
+    /// should shard messages when sending to shards of that domain.
     ///
     /// Note that this *must* be done *before* the sharder starts being used!
-    UpdateSharder {
-        node: LocalNodeIndex,
-        new_txs: (LocalNodeIndex, Vec<ReplicaAddress>),
+    AddSharderTx {
+        /// The local index of the sharder node to update
+        sharder_node: LocalNodeIndex,
+        /// The local index of the ingress node in the target domain
+        ingress_node: LocalNodeIndex,
+        /// The index of the target domain
+        target_domain: DomainIndex,
+        /// The number of shards to send to in the target domain
+        num_shards: usize,
+        /// Description for how messages should be replicated when sending to the target domain
+        replication: SenderReplication,
     },
 
     /// Set up a fresh, empty state for a node, indexed by a particular column.
@@ -237,6 +278,14 @@ pub enum DomainRequest {
         partial_unicast_sharder: Option<NodeIndex>,
         notify_done: bool,
         trigger: TriggerEndpoint,
+
+        /// True if the domain at the source of the replay path is unreplicated, but this domain is
+        /// replicated.
+        ///
+        /// This is used to select the replica index to send replay requests to - if this is
+        /// `true`, all replay requests will go to replica index `0`, but if it's `false`
+        /// all replay requests will go to the same replica as the requesting domain
+        replica_fanout: bool,
     },
 
     /// Instruct domain to replay the state of a particular node along an existing replay path,
@@ -334,6 +383,7 @@ pub enum Packet {
         keys: Vec<KeyComparison>,
         unishard: bool,
         requesting_shard: usize,
+        requesting_replica: usize,
     },
 
     /// Ask domain (nicely) to replay a particular set of keys into a Reader.
@@ -497,6 +547,13 @@ impl Packet {
                 timestamp: timestamp.clone(),
             },
             _ => unreachable!(),
+        }
+    }
+
+    pub(crate) fn replay_piece_context(&self) -> Option<&ReplayPieceContext> {
+        match self {
+            Packet::ReplayPiece { context, .. } => Some(context),
+            _ => None,
         }
     }
 }

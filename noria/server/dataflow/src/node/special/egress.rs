@@ -5,13 +5,16 @@ use noria_errors::{internal_err, invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 use crate::node::special::packet_filter::PacketFilter;
+use crate::payload::{ReplayPieceContext, SenderReplication};
 use crate::prelude::*;
 
 #[derive(Serialize, Deserialize)]
-struct EgressTx {
+pub struct EgressTx {
     node: NodeIndex,
     local: LocalNodeIndex,
-    dest: ReplicaAddress,
+    domain_index: DomainIndex,
+    shard: usize,
+    replication: SenderReplication,
 
     #[serde(skip)]
     sent_ctr: Option<metrics::Counter>,
@@ -20,6 +23,24 @@ struct EgressTx {
 }
 
 impl EgressTx {
+    pub fn new(
+        node: NodeIndex,
+        local: LocalNodeIndex,
+        domain_index: DomainIndex,
+        shard: usize,
+        replication: SenderReplication,
+    ) -> Self {
+        Self {
+            node,
+            local,
+            domain_index,
+            shard,
+            replication,
+            sent_ctr: None,
+            dropped_ctr: None,
+        }
+    }
+
     fn inc_sent(&mut self) {
         if let Some(ctr) = &self.sent_ctr {
             ctr.increment(1);
@@ -66,14 +87,8 @@ impl Clone for Egress {
 }
 
 impl Egress {
-    pub fn add_tx(&mut self, dst_g: NodeIndex, dst_l: LocalNodeIndex, addr: ReplicaAddress) {
-        self.txs.push(EgressTx {
-            node: dst_g,
-            local: dst_l,
-            dest: addr,
-            sent_ctr: None,
-            dropped_ctr: None,
-        });
+    pub fn add_tx(&mut self, tx: EgressTx) {
+        self.txs.push(tx);
     }
 
     pub fn add_for_filtering(&mut self, target: NodeIndex) {
@@ -86,9 +101,10 @@ impl Egress {
 
     pub fn process(
         &mut self,
-        m: &mut Option<Box<Packet>>,
+        message: &mut Option<Box<Packet>>,
         keyed_by: Option<&[usize]>,
         shard: usize,
+        replica: usize,
         output: &mut dyn Executor,
     ) -> ReadySetResult<()> {
         let Self {
@@ -104,7 +120,7 @@ impl Egress {
         // we need to find the ingress node following this egress according to the path
         // with replay.tag, and then forward this message only on the channel corresponding
         // to that ingress node.
-        let replay_to = m
+        let replay_to = message
             .as_ref()
             .unwrap()
             .tag()
@@ -127,11 +143,11 @@ impl Egress {
 
             // Avoid cloning if this is last send
             let mut m = if take {
-                m.take().unwrap()
+                message.take().unwrap()
             } else {
                 // we know this is a data (not a replay)
                 // because, a replay will force a take
-                m.as_ref().map(|m| Box::new(m.clone_data())).unwrap()
+                message.as_ref().map(|m| Box::new(m.clone_data())).unwrap()
             };
 
             // src is usually ignored and overwritten by ingress
@@ -148,7 +164,49 @@ impl Egress {
             }
             tx.inc_sent();
 
-            output.send(tx.dest, m);
+            match tx.replication {
+                SenderReplication::Same => output.send(
+                    ReplicaAddress {
+                        domain_index: tx.domain_index,
+                        shard: tx.shard,
+                        replica,
+                    },
+                    m,
+                ),
+                SenderReplication::Fanout { num_replicas } => {
+                    if let Some(ReplayPieceContext::Partial {
+                        requesting_replica, ..
+                    }) = m.replay_piece_context()
+                    {
+                        // If the message is a piece of a replay that was requested by a particular
+                        // replica, only replay to that replica
+                        invariant!(
+                            *requesting_replica < num_replicas,
+                            "Replica index for replay piece context out-of-bounds"
+                        );
+                        output.send(
+                            ReplicaAddress {
+                                domain_index: tx.domain_index,
+                                shard: tx.shard,
+                                replica: *requesting_replica,
+                            },
+                            m.clone(),
+                        )
+                    } else {
+                        // Otherwise, replay to all replicas
+                        for replica in 0..num_replicas {
+                            output.send(
+                                ReplicaAddress {
+                                    domain_index: tx.domain_index,
+                                    shard: tx.shard,
+                                    replica,
+                                },
+                                m.clone(),
+                            )
+                        }
+                    }
+                }
+            }
             if take {
                 break;
             }

@@ -33,11 +33,12 @@ impl Display for DomainIndex {
 pub struct ReplicaAddress {
     pub domain_index: DomainIndex,
     pub shard: usize,
+    pub replica: usize,
 }
 
 impl Display for ReplicaAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}", self.domain_index, self.shard)
+        write!(f, "{}.{}.{}", self.domain_index, self.shard, self.replica)
     }
 }
 

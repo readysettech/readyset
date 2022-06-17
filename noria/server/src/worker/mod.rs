@@ -241,20 +241,16 @@ impl Worker {
                 Ok(None)
             }
             WorkerRequestKind::RunDomain(builder) => {
-                let idx = builder.index;
-                let shard = builder.shard.unwrap_or(0);
-                let span = info_span!("domain", domain_index = idx.index(), shard);
+                let replica_addr = builder.address();
+                let span = info_span!("domain", address = %replica_addr);
                 span.in_scope(|| info!("received domain to run"));
 
                 let bind_on = self.domain_bind;
                 let listener = tokio::net::TcpListener::bind(&SocketAddr::new(bind_on, 0))
                     .map_err(|e| {
                         internal_err(format!(
-                            "failed to bind domain {}.{} on {}: {}",
-                            idx.index(),
-                            shard,
-                            bind_on,
-                            e
+                            "failed to bind domain {} on {}: {}",
+                            replica_addr, bind_on, e
                         ))
                     })
                     .await?;
@@ -278,10 +274,6 @@ impl Worker {
                 // need to register the domain with the local channel coordinator.
                 // local first to ensure that we don't unnecessarily give away remote for a
                 // local thing if there's a race
-                let replica_addr = ReplicaAddress {
-                    domain_index: idx,
-                    shard,
-                };
                 self.coord.insert_local(replica_addr, local_tx)?;
                 self.coord.insert_remote(replica_addr, bind_external)?;
 
@@ -309,7 +301,7 @@ impl Worker {
                 let (_domain_abort, domain_abort_rx) = oneshot::channel::<()>();
                 // Spawn the actual thread to run the domain
                 std::thread::Builder::new()
-                    .name(format!("Domain {}.{}", idx, shard))
+                    .name(format!("Domain {}", replica_addr))
                     .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
                     .spawn(move || {
                         // The runtime will run until the abort signal is sent.
@@ -355,6 +347,7 @@ impl Worker {
                 let nsde = || ReadySetError::NoSuchReplica {
                     domain_index: replica_address.domain_index.index(),
                     shard: replica_address.shard,
+                    replica: replica_address.replica,
                 };
                 let dh = self.domains.get_mut(&replica_address).ok_or_else(nsde)?;
                 let (tx, rx) = oneshot::channel();

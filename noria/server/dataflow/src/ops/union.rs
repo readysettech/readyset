@@ -145,6 +145,7 @@ pub struct BufferedReplayKey {
     tag: Tag,
     key: KeyComparison,
     requesting_shard: usize,
+    requesting_replica: usize,
 }
 
 impl Ord for BufferedReplayKey {
@@ -167,6 +168,7 @@ impl Ord for BufferedReplayKey {
                 }
             })
             .then_with(|| self.requesting_shard.cmp(&other.requesting_shard))
+            .then_with(|| self.requesting_replica.cmp(&other.requesting_replica))
     }
 }
 
@@ -194,8 +196,8 @@ pub struct Union {
     /// Stored as a btreemap so that when we iterate, we first get all the replays of one tag, then
     /// all the records of another tag, etc. This lets us avoid looking up info related to the same
     /// tag more than once. By placing the upquery key in the btreemap key, we can also effectively
-    /// check the replay pieces for all values of [`BufferedReplayKey::requesting_shard`]  if we do
-    /// find a key match for an update.
+    /// check the replay pieces for all values of [`BufferedReplayKey::requesting_shard`] and
+    /// [`BufferedReplayKey::requesting_replica`] if we do find a key match for an update.
     // We skip any state when serializing, as we will deserialize when recovering.
     #[serde(skip)]
     replay_pieces: BTreeMap<BufferedReplayKey, ReplayPieces>,
@@ -557,7 +559,8 @@ impl Ingredient for Union {
                         buffered.push(r.clone());
 
                         // it'd be nice if we could avoid doing this exact same key check multiple
-                        // times if the same key is being replayed by multiple `requesting_shard`s.
+                        // times if the same key is being replayed by multiple `(requesting_shard,
+                        // requesting_replica)`s.
                         // in theory, the btreemap could let us do this by walking forward in the
                         // iterator until we hit the next key or tag, and the rewinding back to
                         // where we were before continuing to the same record. but that won't work
@@ -709,6 +712,7 @@ impl Ingredient for Union {
                 key_cols,
                 keys,
                 requesting_shard,
+                requesting_replica,
                 unishard,
                 tag,
             } => {
@@ -800,7 +804,8 @@ impl Ingredient for Union {
                             match replay_pieces_tmp.entry(BufferedReplayKey {
                                 tag,
                                 key: key.clone(),
-                                requesting_shard
+                                requesting_shard,
+                                requesting_replica
                             }) {
                                 Entry::Occupied(e) => {
                                     if e.get().buffered.contains_key(&from) {
@@ -947,10 +952,12 @@ impl Ingredient for Union {
                     tag,
                     key: key.clone(),
                     requesting_shard: 0,
+                    requesting_replica: 0,
                 }..=BufferedReplayKey {
                     tag,
                     key: key.clone(),
                     requesting_shard: usize::max_value(),
+                    requesting_replica: usize::max_value(),
                 },
             ) {
                 if e.buffered.contains_key(&from) {
@@ -1145,6 +1152,7 @@ mod tests {
                 key_cols: &[0],
                 keys: &keys,
                 requesting_shard: 0,
+                requesting_replica: 0,
                 tag,
                 unishard: true,
             };
@@ -1210,6 +1218,7 @@ mod tests {
                 key_cols: &[0],
                 keys: &keys,
                 requesting_shard: 0,
+                requesting_replica: 0,
                 tag,
                 unishard: true,
             };

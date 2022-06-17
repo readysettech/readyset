@@ -50,6 +50,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, instrument, trace, warn};
 
+use super::migrate::DomainSettings;
 use crate::controller::domain_handle::DomainHandle;
 use crate::controller::migrate::materialization::Materializations;
 use crate::controller::migrate::scheduling::Scheduler;
@@ -169,23 +170,29 @@ impl DataflowState {
     pub(super) fn get_info(&self) -> ReadySetResult<GraphInfo> {
         let mut worker_info = HashMap::new();
         for (di, dh) in self.domains.iter() {
-            for (shard, shard_addr) in dh.shards.iter().enumerate() {
-                worker_info
-                    .entry(shard_addr.clone())
-                    .or_insert_with(HashMap::new)
-                    .entry(ReplicaAddress {
-                        domain_index: *di,
-                        shard,
-                    })
-                    .or_insert_with(Vec::new)
-                    .extend(
-                        self.domain_nodes
-                            .get(di)
-                            .ok_or_else(|| {
-                                internal_err(format!("{:?} in domains but not in domain_nodes", di))
-                            })?
-                            .values(),
-                    )
+            for (shard, replicas) in dh.shards().iter().enumerate() {
+                for (replica, url) in replicas.iter().enumerate() {
+                    worker_info
+                        .entry(url.clone())
+                        .or_insert_with(HashMap::new)
+                        .entry(ReplicaAddress {
+                            domain_index: *di,
+                            shard,
+                            replica,
+                        })
+                        .or_insert_with(Vec::new)
+                        .extend(
+                            self.domain_nodes
+                                .get(di)
+                                .ok_or_else(|| {
+                                    internal_err(format!(
+                                        "{:?} in domains but not in domain_nodes",
+                                        di
+                                    ))
+                                })?
+                                .values(),
+                        )
+                }
             }
         }
         Ok(GraphInfo {
@@ -297,7 +304,7 @@ impl DataflowState {
                         if self
                             .domains
                             .get(&domain)
-                            .map(|dh| dh.assigned_to_worker(worker))
+                            .map(|dh| dh.is_assigned_to_worker(worker))
                             .unwrap_or(false)
                         {
                             return Some(child);
@@ -341,9 +348,9 @@ impl DataflowState {
             return Ok(None);
         };
 
-        #[allow(clippy::indexing_slicing)] // `find_readers_for` returns valid indices
+        #[allow(clippy::indexing_slicing)] // `find_reader_for` returns valid indices
         let domain_index = self.ingredients[reader_node].domain();
-        #[allow(clippy::indexing_slicing)] // `find_readers_for` returns valid indices
+        #[allow(clippy::indexing_slicing)] // `find_reader_for` returns valid indices
         let reader = self.ingredients[reader_node].as_reader().ok_or_else(|| {
             ReadySetError::InvalidNodeType {
                 node_index: self.ingredients[reader_node].local_addr().id(),
@@ -373,14 +380,21 @@ impl DataflowState {
                 .ok_or_else(|| ReadySetError::UnknownDomain {
                     domain_index: domain_index.index(),
                 })?;
-        let shards = (0..domain.shards())
-            .map(|i| {
-                self.read_addrs
-                    .get(&domain.assignment(i)?)
-                    .ok_or_else(|| ReadySetError::UnmappableDomain {
-                        domain_index: domain_index.index(),
+
+        let replicas = (0..domain.num_replicas())
+            .map(|replica| {
+                (0..domain.num_shards())
+                    .map(|shard| {
+                        let worker = domain.assignment(shard, replica)?;
+
+                        self.read_addrs
+                            .get(worker)
+                            .ok_or_else(|| ReadySetError::UnmappableDomain {
+                                domain_index: domain_index.index(),
+                            })
+                            .copied()
                     })
-                    .copied()
+                    .collect::<ReadySetResult<Vec<_>>>()
             })
             .collect::<ReadySetResult<Vec<_>>>()?;
 
@@ -389,7 +403,7 @@ impl DataflowState {
             node: reader_node,
             columns: columns.into(),
             schema,
-            shards,
+            replica_shard_addrs: replicas,
             key_mapping,
             view_request_timeout: self.domain_config.view_request_timeout,
         }))
@@ -473,17 +487,25 @@ impl DataflowState {
             is_primary = true;
         }
 
-        let txs = (0..self
-            .domains
-            .get(&node.domain())
-            .ok_or_else(|| ReadySetError::UnknownDomain {
-                domain_index: node.domain().index(),
-            })?
-            .shards())
+        let domain =
+            self.domains
+                .get(&node.domain())
+                .ok_or_else(|| ReadySetError::UnknownDomain {
+                    domain_index: node.domain().index(),
+                })?;
+
+        invariant_eq!(
+            domain.num_replicas(),
+            1,
+            "Base table domains can't be replicated"
+        );
+
+        let txs = (0..domain.num_shards())
             .map(|shard| {
                 let replica_addr = ReplicaAddress {
                     domain_index: node.domain(),
                     shard,
+                    replica: 0, // Base tables can't currently be replicated
                 };
                 self.channel_coordinator
                     .get_addr(&replica_addr)
@@ -552,14 +574,20 @@ impl DataflowState {
                     .await?
                     .into_iter()
                     .enumerate()
-                    .map(move |(shard, stats)| {
-                        (
-                            ReplicaAddress {
-                                domain_index,
-                                shard,
-                            },
-                            stats,
-                        )
+                    .flat_map(move |(shard, replicas)| {
+                        replicas
+                            .into_iter()
+                            .enumerate()
+                            .map(move |(replica, stats)| {
+                                (
+                                    ReplicaAddress {
+                                        domain_index,
+                                        shard,
+                                        replica,
+                                    },
+                                    stats,
+                                )
+                            })
                     }),
             );
         }
@@ -595,7 +623,7 @@ impl DataflowState {
                 worker_opt.is_none() ||
                 // Or we need the domains that belong to the specified worker.
                 worker_opt
-                    .filter(|w| dh.assigned_to_worker(w))
+                    .filter(|w| dh.is_assigned_to_worker(w))
                     .is_some()
             })
             // Accumulate nodes by domain index.
@@ -612,7 +640,8 @@ impl DataflowState {
     }
 
     /// Issue all of `requests` to their corresponding domains asynchronously, and return a stream
-    /// of the results (potentially in a different order)
+    /// of the results, consisting of shard, then replica, then result (potentially in a different
+    /// order)
     ///
     /// # Invariants
     ///
@@ -620,7 +649,7 @@ impl DataflowState {
     fn query_domains<'a, I, R>(
         &'a self,
         requests: I,
-    ) -> impl TryStream<Ok = (DomainIndex, Vec<R>), Error = ReadySetError> + 'a
+    ) -> impl TryStream<Ok = (DomainIndex, Vec<Vec<R>>), Error = ReadySetError> + 'a
     where
         I: IntoIterator<Item = (DomainIndex, DomainRequest)>,
         I::IntoIter: 'a,
@@ -653,18 +682,20 @@ impl DataflowState {
             ReplicationOffsets::with_schema_offset(self.schema_replication_offset.clone()),
             |mut acc, (domain, domain_offs)| async move {
                 for shard in domain_offs {
-                    for (lni, offset) in shard {
-                        #[allow(clippy::indexing_slicing)] // came from self.domains
-                        let ni = self.domain_nodes[&domain].get(lni).ok_or_else(|| {
-                            internal_err(format!(
-                                "Domain {} returned nonexistent local node {}",
-                                domain, lni
-                            ))
-                        })?;
-                        #[allow(clippy::indexing_slicing)] // internal invariant
-                        let table_name = self.ingredients[*ni].name();
-                        acc.tables.insert(table_name.clone(), offset); // TODO min of all
-                                                                       // shards
+                    for replica in shard {
+                        for (lni, offset) in replica {
+                            #[allow(clippy::indexing_slicing)] // came from self.domains
+                            let ni = self.domain_nodes[&domain].get(lni).ok_or_else(|| {
+                                internal_err(format!(
+                                    "Domain {} returned nonexistent local node {}",
+                                    domain, lni
+                                ))
+                            })?;
+                            #[allow(clippy::indexing_slicing)] // internal invariant
+                            let table_name = self.ingredients[*ni].name();
+                            acc.tables.insert(table_name.clone(), offset); // TODO min of all
+                                                                           // shards
+                        }
                     }
                 }
                 Ok(acc)
@@ -688,6 +719,7 @@ impl DataflowState {
                 return Err(ReadySetError::NoSuchReplica {
                     domain_index: di.index(),
                     shard: 0,
+                    replica: 0,
                 });
             }
         }
@@ -708,6 +740,7 @@ impl DataflowState {
                 stream::iter(
                     local_indices
                         .into_iter()
+                        .flatten()
                         .flatten()
                         .map(move |li| -> ReadySetResult<_> { Ok((di, li)) }),
                 )
@@ -734,7 +767,7 @@ impl DataflowState {
     /// Return a map of node indices to key counts.
     #[allow(dead_code)]
     pub(super) async fn node_key_counts(&self) -> ReadySetResult<HashMap<NodeIndex, KeyCount>> {
-        let counts_per_domain: Vec<(DomainIndex, Vec<Vec<(NodeIndex, KeyCount)>>)> = self
+        let counts_per_domain: Vec<(DomainIndex, Vec<Vec<Vec<(NodeIndex, KeyCount)>>>)> = self
             .query_domains::<_, Vec<(NodeIndex, KeyCount)>>(
                 self.domains
                     .keys()
@@ -744,7 +777,9 @@ impl DataflowState {
             .await?;
         let flat_counts = counts_per_domain
             .into_iter()
-            .flat_map(|(_domain, per_shard_counts)| per_shard_counts.into_iter().flatten());
+            .flat_map(|(_domain, per_shard_counts)| {
+                per_shard_counts.into_iter().flatten().flatten()
+            });
         let mut res = HashMap::new();
         for (node_index, count) in flat_counts {
             // We may have multiple entries for the same node in the case of sharding, so this code
@@ -801,7 +836,7 @@ impl DataflowState {
     pub(in crate::controller) async fn place_domain(
         &mut self,
         idx: DomainIndex,
-        shard_workers: Vec<WorkerIdentifier>,
+        shard_replica_workers: Vec<Vec<WorkerIdentifier>>,
         nodes: Vec<NodeIndex>,
     ) -> ReadySetResult<DomainHandle> {
         // Reader nodes are always assigned to their own domains, so it's good enough to see
@@ -831,78 +866,81 @@ impl DataflowState {
             .map(|nd| (nd.local_addr(), cell::RefCell::new(nd)))
             .collect();
 
+        let num_shards = shard_replica_workers.len();
+
         let mut domain_addresses = vec![];
-        let mut assignments = vec![];
+        let mut assignments = Vec::with_capacity(num_shards);
         let mut new_domain_restrictions = vec![];
 
-        let num_shards = shard_workers.len();
-        for (shard, worker_id) in shard_workers.iter().enumerate() {
-            let replica_address = ReplicaAddress {
-                domain_index: idx,
-                shard,
-            };
-
-            let domain = DomainBuilder {
-                index: idx,
-                shard: if num_shards > 1 { Some(shard) } else { None },
-                nshards: num_shards,
-                config: self.domain_config.clone(),
-                nodes: domain_nodes.clone(),
-                persistence_parameters: self.persistence.clone(),
-            };
-
-            let w = self
-                .workers
-                .get(worker_id)
-                .ok_or(ReadySetError::NoAvailableWorkers {
-                    domain_index: idx.index(),
+        for (shard, replicas) in shard_replica_workers.iter().enumerate() {
+            let num_replicas = replicas.len();
+            let mut shard_assignments = Vec::with_capacity(num_replicas);
+            for (replica, worker_id) in replicas.iter().enumerate() {
+                let replica_address = ReplicaAddress {
+                    domain_index: idx,
                     shard,
-                })?;
+                    replica,
+                };
 
-            let idx = domain.index;
-            let shard = domain.shard.unwrap_or(0);
+                let domain = DomainBuilder {
+                    index: idx,
+                    shard: if num_shards > 1 { Some(shard) } else { None },
+                    replica,
+                    nshards: num_shards,
+                    config: self.domain_config.clone(),
+                    nodes: domain_nodes.clone(),
+                    persistence_parameters: self.persistence.clone(),
+                };
 
-            // send domain to worker
-            info!(
-                "sending domain {}.{} to worker {}",
-                idx.index(),
-                shard,
-                w.uri
-            );
-
-            let ret = w
-                .rpc::<RunDomainResponse>(WorkerRequestKind::RunDomain(domain))
-                .await
-                .map_err(|e| ReadySetError::DomainCreationFailed {
-                    domain_index: idx.index(),
-                    shard,
-                    worker_uri: w.uri.clone(),
-                    source: Box::new(e),
-                })?;
-
-            // Update the domain placement restrictions on nodes in the placed
-            // domain if necessary.
-            for n in &nodes {
-                #[allow(clippy::indexing_slicing)] // checked above
-                let node = &self.ingredients[*n];
-
-                if node.is_base() && w.volume_id.is_some() {
-                    new_domain_restrictions.push((
-                        node.name().to_owned(),
+                let w = self
+                    .workers
+                    .get(worker_id)
+                    .ok_or(ReadySetError::NoAvailableWorkers {
+                        domain_index: idx.index(),
                         shard,
-                        DomainPlacementRestriction {
-                            worker_volume: w.volume_id.clone(),
-                        },
-                    ));
+                    })?;
+
+                let idx = domain.index;
+
+                // send domain to worker
+                info!("sending domain {} to worker {}", replica_address, w.uri);
+
+                let ret = w
+                    .rpc::<RunDomainResponse>(WorkerRequestKind::RunDomain(domain))
+                    .await
+                    .map_err(|e| ReadySetError::DomainCreationFailed {
+                        domain_index: idx.index(),
+                        shard,
+                        replica,
+                        worker_uri: w.uri.clone(),
+                        source: Box::new(e),
+                    })?;
+
+                // Update the domain placement restrictions on nodes in the placed
+                // domain if necessary.
+                for n in &nodes {
+                    #[allow(clippy::indexing_slicing)] // checked above
+                    let node = &self.ingredients[*n];
+
+                    if node.is_base() && w.volume_id.is_some() {
+                        new_domain_restrictions.push((
+                            node.name().to_owned(),
+                            shard,
+                            DomainPlacementRestriction {
+                                worker_volume: w.volume_id.clone(),
+                            },
+                        ));
+                    }
                 }
+
+                info!(external_addr = %ret.external_addr, "worker booted domain");
+
+                self.channel_coordinator
+                    .insert_remote(replica_address, ret.external_addr)?;
+                domain_addresses.push(DomainDescriptor::new(replica_address, ret.external_addr));
+                shard_assignments.push(w.uri.clone());
             }
-
-            info!(external_addr = %ret.external_addr, "worker booted domain");
-
-            self.channel_coordinator
-                .insert_remote(replica_address, ret.external_addr)?;
-            domain_addresses.push(DomainDescriptor::new(replica_address, ret.external_addr));
-            assignments.push(w.uri.clone());
+            assignments.push(shard_assignments);
         }
 
         // Push all domain placement restrictions to the local controller state. We
@@ -943,10 +981,7 @@ impl DataflowState {
             }
         }
 
-        Ok(DomainHandle {
-            idx,
-            shards: assignments,
-        })
+        Ok(DomainHandle::new(idx, assignments))
     }
 
     pub(super) async fn remove_nodes(
@@ -981,6 +1016,7 @@ impl DataflowState {
                 .ok_or_else(|| ReadySetError::NoSuchReplica {
                     domain_index: domain.index(),
                     shard: 0,
+                    replica: 0,
                 })?
                 .send_to_healthy::<()>(DomainRequest::RemoveNodes { nodes }, &self.workers)
                 .await
@@ -1026,6 +1062,7 @@ impl DataflowState {
                 )
                 .await?
                 .into_iter()
+                .flatten()
                 .flat_map(move |(_, node_stats)| {
                     node_stats
                         .into_iter()
@@ -1181,9 +1218,16 @@ impl DataflowState {
             let mut scheduler = Scheduler::new(self, &None)?;
             for (domain, nodes) in domain_nodes.iter() {
                 let workers = scheduler.schedule_domain(*domain, &nodes[..])?;
-                let shards = workers.len();
-                dmp.add_new_domain(*domain, workers, nodes.clone());
-                dmp.add_valid_domain(*domain, shards);
+                let num_shards = workers.len();
+                let num_replicas = workers[0].len();
+                dmp.place_domain(*domain, workers, nodes.clone());
+                dmp.set_domain_settings(
+                    *domain,
+                    DomainSettings {
+                        num_shards,
+                        num_replicas,
+                    },
+                );
             }
         }
         let new = domain_nodes.values().flatten().copied().collect();

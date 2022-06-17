@@ -308,7 +308,10 @@ pub(crate) enum ReplayContext<'a> {
     Partial {
         key_cols: &'a [usize],
         keys: &'a HashSet<KeyComparison>,
+        /// The index of the shard that originally requested the replay.
         requesting_shard: usize,
+        /// The index of the replica that originally requested the replay.
+        requesting_replica: usize,
         tag: Tag,
         unishard: bool,
     },

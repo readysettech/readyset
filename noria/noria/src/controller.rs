@@ -406,7 +406,7 @@ impl ControllerHandle {
                     name: view_request.name.to_string(),
                     workers: w,
                 }),
-                None => Err(ReadySetError::ViewNotFound(view_request.name.to_string())),
+                _ => Err(ReadySetError::ViewNotFound(view_request.name.to_string())),
             },
         }
     }
@@ -416,7 +416,15 @@ impl ControllerHandle {
         view_request: ViewRequest,
     ) -> impl Future<Output = ReadySetResult<View>> + '_ {
         let views = self.views.clone();
-        async move { self.view_builder(view_request).await?.build(views) }
+        async move {
+            let replica = if let Some(ViewFilter::Replica(replica)) = &view_request.filter {
+                Some(*replica)
+            } else {
+                None
+            };
+            let view_builder = self.view_builder(view_request).await?;
+            view_builder.build(replica, views)
+        }
     }
 
     /// Obtain a `Table` that allows you to perform writes, deletes, and other operations on the

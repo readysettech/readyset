@@ -389,6 +389,9 @@ pub enum ViewFilter {
     /// Pool of worker addresses. If the pool is not empty, this will
     /// look for a view reader in the pool.
     Workers(Vec<Url>),
+    /// Request a specific replica of this view, returning an error if the given replica does not
+    /// exist
+    Replica(usize),
 }
 
 /// Represents a request for a view.

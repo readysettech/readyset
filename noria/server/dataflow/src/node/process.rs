@@ -107,6 +107,7 @@ pub(crate) struct ProcessEnv<'domain> {
     pub(crate) nodes: &'domain DomainNodes,
     pub(crate) executor: &'domain mut dyn Executor,
     pub(crate) shard: Option<usize>,
+    pub(crate) replica: usize,
 }
 
 impl Node {
@@ -208,6 +209,7 @@ impl Node {
                     m,
                     keyed_by.map(Vec::as_slice),
                     env.shard.unwrap_or(0),
+                    env.replica,
                     env.executor,
                 )?;
             }
@@ -217,6 +219,7 @@ impl Node {
                     addr,
                     env.shard.is_some(),
                     replay_path.and_then(|rp| rp.partial_unicast_sharder.map(|ni| ni == gaddr)),
+                    env.replica,
                     env.executor,
                 )?;
             }
@@ -238,6 +241,7 @@ impl Node {
                                 payload::ReplayPieceContext::Partial {
                                     ref for_keys,
                                     requesting_shard,
+                                    requesting_replica,
                                     unishard,
                                 },
                             ..
@@ -247,6 +251,7 @@ impl Node {
                                 ?data,
                                 ?for_keys,
                                 requesting_shard,
+                                requesting_replica,
                                 unishard,
                                 %tag,
                                 "received partial replay"
@@ -257,6 +262,7 @@ impl Node {
                                     key_cols: keyed_by.unwrap(),
                                     keys: for_keys,
                                     requesting_shard,
+                                    requesting_replica,
                                     unishard,
                                     tag,
                                 },
@@ -421,6 +427,7 @@ impl Node {
         Ok(Default::default())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn process_eviction(
         &mut self,
         from: LocalNodeIndex,
@@ -428,6 +435,7 @@ impl Node {
         keys: &[KeyComparison],
         tag: Tag,
         on_shard: Option<usize>,
+        on_replica: usize,
         ex: &mut dyn Executor,
     ) -> ReadySetResult<()> {
         let addr = self.local_addr();
@@ -445,11 +453,20 @@ impl Node {
                     })),
                     None,
                     on_shard.unwrap_or(0),
+                    on_replica,
                     ex,
                 )?;
             }
             NodeType::Sharder(ref mut s) => {
-                s.process_eviction(key_columns, tag, keys, addr, on_shard.is_some(), ex)?;
+                s.process_eviction(
+                    key_columns,
+                    tag,
+                    keys,
+                    addr,
+                    on_shard.is_some(),
+                    on_replica,
+                    ex,
+                )?;
             }
             NodeType::Internal(ref mut i) => {
                 i.on_eviction(from, tag, keys);
@@ -529,6 +546,8 @@ impl Node {
     pub(crate) fn process_timestamp(
         &mut self,
         m: Packet,
+        on_shard: Option<usize>,
+        on_replica: usize,
         executor: &mut dyn Executor,
     ) -> ReadySetResult<Option<Box<Packet>>> {
         // TODO: not error handling compliant!
@@ -607,9 +626,8 @@ impl Node {
                 // all parent node timestamps.
                 Ok(match self.inner {
                     NodeType::Egress(Some(ref mut e)) => {
-                        // TODO(justin): Should this use on_shard like process.
                         let p = &mut Some(p);
-                        e.process(p, None, 0, executor)?;
+                        e.process(p, None, on_shard.unwrap_or(0), on_replica, executor)?;
                         None
                     }
                     NodeType::Base(_) => Some(p),
