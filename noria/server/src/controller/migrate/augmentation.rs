@@ -22,21 +22,15 @@ use crate::controller::state::DataflowState;
 pub(super) fn inform(
     dataflow_state: &mut DataflowState,
     dmp: &mut DomainMigrationPlan,
-    nodes: HashMap<DomainIndex, Vec<(NodeIndex, bool)>>,
+    nodes: HashMap<DomainIndex, Vec<NodeIndex>>,
+    new_nodes: &HashSet<NodeIndex>,
 ) -> ReadySetResult<()> {
     for (domain, nodes) in nodes {
         let span = debug_span!("informing domain", domain = domain.index());
         let _g = span.enter();
 
-        let old_nodes: HashSet<_> = nodes
-            .iter()
-            .filter(|&&(_, new)| !new)
-            .map(|&(ni, _)| ni)
-            .collect();
-
-        invariant!(old_nodes.len() != nodes.len());
-        for (ni, new) in nodes {
-            if !new {
+        for ni in nodes {
+            if !new_nodes.contains(&ni) {
                 continue;
             }
 
@@ -52,7 +46,7 @@ pub(super) fn inform(
                 .ingredients
                 .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
                 .filter(|&ni| ni != dataflow_state.source)
-                .filter(|ni| old_nodes.contains(ni))
+                .filter(|ni| !new_nodes.contains(ni))
                 .map(|ni| &dataflow_state.ingredients[ni])
                 .filter(|n| n.domain() == domain)
                 .map(|n| n.local_addr())

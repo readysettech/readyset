@@ -142,9 +142,7 @@ pub struct PlaceRequest {
     /// onto.
     shard_workers: Vec<WorkerIdentifier>,
     /// Indices of new nodes to add.
-    ///
-    /// FIXME: what the hell is the `bool` for? It seems entirely vestigial.
-    nodes: Vec<(NodeIndex, bool)>,
+    nodes: Vec<NodeIndex>,
 }
 
 /// A store for planned migration operations (spawning domains and sending messages).
@@ -227,7 +225,7 @@ impl DomainMigrationPlan {
         &mut self,
         idx: DomainIndex,
         shard_workers: Vec<WorkerIdentifier>,
-        nodes: Vec<(NodeIndex, bool)>,
+        nodes: Vec<NodeIndex>,
     ) {
         self.place.push(PlaceRequest {
             idx,
@@ -966,11 +964,7 @@ fn plan_add_nodes(
             .iter()
             .map(|&di| {
                 #[allow(clippy::indexing_slicing)] // Domain nodes must contain di
-                let mut m = domain_nodes[&di]
-                    .values()
-                    .cloned()
-                    .map(|ni| (ni, new_nodes.contains(&ni)))
-                    .collect::<Vec<_>>();
+                let mut m = domain_nodes[&di].values().cloned().collect::<Vec<_>>();
                 m.sort();
                 (di, m)
             })
@@ -1058,7 +1052,12 @@ fn plan_add_nodes(
 
             // Add any new nodes to existing domains (they'll also ignore all updates for now)
             debug!("mutating existing domains");
-            augmentation::inform(dataflow_state, &mut dmp, uninformed_domain_nodes)?;
+            augmentation::inform(
+                dataflow_state,
+                &mut dmp,
+                uninformed_domain_nodes,
+                &new_nodes,
+            )?;
 
             // Set up inter-domain connections
             debug!("bringing up inter-domain connections");
