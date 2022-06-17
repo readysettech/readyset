@@ -8,6 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use dataflow::payload::SenderReplication;
 use dataflow::prelude::*;
 use dataflow::{node, DomainRequest};
 use noria_errors::{
@@ -289,24 +290,41 @@ pub(in crate::controller) fn connect(
     new: &HashSet<NodeIndex>,
 ) -> ReadySetResult<()> {
     // ensure all egress nodes contain the tx channel of the domains of their child ingress nodes
-    for &node in new {
-        let n = &graph[node];
-        if n.is_ingress() {
-            // check the egress or sharder connected to this ingress
-        } else {
+    for &ingress_node_index in new {
+        let ingress_node = &graph[ingress_node_index];
+        if !ingress_node.is_ingress() {
             continue;
         }
 
-        for sender in graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming) {
+        for sender in
+            graph.neighbors_directed(ingress_node_index, petgraph::EdgeDirection::Incoming)
+        {
             let sender_node = &graph[sender];
+            invariant_ne!(sender_node.domain(), ingress_node.domain());
+
+            let our_replicas = dmp.num_replicas(sender_node.domain())?;
+            let next_domain_replicas = dmp.num_replicas(ingress_node.domain())?;
+            let replication = if our_replicas == next_domain_replicas {
+                SenderReplication::Same
+            } else {
+                invariant_eq!(
+                    our_replicas,
+                    1,
+                    "Can't currently go from replicated n-ways to replicated m-ways"
+                );
+                SenderReplication::Fanout {
+                    num_replicas: next_domain_replicas,
+                }
+            };
+
             if sender_node.is_egress() {
                 trace!(
                     egress = sender.index(),
-                    ingress = node.index(),
+                    ingress = ingress_node_index.index(),
                     "connecting"
                 );
 
-                let shards = dmp.num_shards(n.domain())?;
+                let shards = dmp.num_shards(ingress_node.domain())?;
                 if shards != 1 && !sender_node.sharded_by().is_none() {
                     // we need to be a bit careful here in the particular case where we have a
                     // sharded egress that sends to another domain sharded by the same key.
@@ -321,11 +339,10 @@ pub(in crate::controller) fn connect(
                             shard,
                             DomainRequest::AddEgressTx {
                                 egress_node: sender_node.local_addr(),
-                                ingress_node: (node, n.local_addr()),
-                                target_replica_address: ReplicaAddress {
-                                    domain_index: n.domain(),
-                                    shard,
-                                },
+                                ingress_node: (ingress_node_index, ingress_node.local_addr()),
+                                target_domain: ingress_node.domain(),
+                                target_shard: shard,
+                                replication,
                             },
                         )?;
                     }
@@ -339,33 +356,28 @@ pub(in crate::controller) fn connect(
                         sender_node.domain(),
                         DomainRequest::AddEgressTx {
                             egress_node: sender_node.local_addr(),
-                            ingress_node: (node, n.local_addr()),
-                            target_replica_address: ReplicaAddress {
-                                domain_index: n.domain(),
-                                shard: 0,
-                            },
+                            ingress_node: (ingress_node_index, ingress_node.local_addr()),
+                            target_domain: ingress_node.domain(),
+                            target_shard: 0,
+                            replication,
                         },
                     )?;
                 }
             } else if sender_node.is_sharder() {
                 trace!(
                     sharder = sender.index(),
-                    ingress = node.index(),
+                    ingress = ingress_node_index.index(),
                     "connecting"
                 );
 
-                let shards = dmp.num_shards(n.domain())?;
-                let txs = (0..shards)
-                    .map(|shard| ReplicaAddress {
-                        domain_index: n.domain(),
-                        shard,
-                    })
-                    .collect();
                 dmp.add_message(
                     sender_node.domain(),
-                    DomainRequest::UpdateSharder {
-                        node: sender_node.local_addr(),
-                        new_txs: (n.local_addr(), txs),
+                    DomainRequest::AddSharderTx {
+                        sharder_node: sender_node.local_addr(),
+                        ingress_node: ingress_node.local_addr(),
+                        target_domain: ingress_node.domain(),
+                        num_shards: dmp.num_shards(ingress_node.domain())?,
+                        replication,
                     },
                 )?;
             } else if sender_node.is_source() {

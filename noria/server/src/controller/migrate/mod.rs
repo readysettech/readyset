@@ -96,7 +96,7 @@ impl StoredDomainRequest {
                         .send_to_healthy::<bool>(DomainRequest::QueryReplayDone, &mainline.workers)
                         .await?
                         .into_iter()
-                        .any(|x| x)
+                        .all(|replicas| replicas.into_iter().all(|done| done))
                     {
                         break;
                     }
@@ -138,11 +138,19 @@ impl StoredDomainRequest {
 pub struct PlaceRequest {
     /// The index the new domain will have.
     idx: DomainIndex,
-    /// A map from domain shard to the worker to schedule the domain shard
-    /// onto.
-    shard_workers: Vec<WorkerIdentifier>,
+    /// A map from domain shard, to replica index, to the worker to schedule the domain shard onto.
+    shard_replica_workers: Vec<Vec<WorkerIdentifier>>,
     /// Indices of new nodes to add.
     nodes: Vec<NodeIndex>,
+}
+
+/// Runtime configuration for a domain
+#[derive(Debug, Clone, Copy)]
+pub struct DomainSettings {
+    /// The number of times the domain is sharded
+    pub num_shards: usize,
+    /// The number of times each shard of the domain is replicated
+    pub num_replicas: usize,
 }
 
 /// A store for planned migration operations (spawning domains and sending messages).
@@ -154,10 +162,8 @@ pub struct DomainMigrationPlan {
     stored: Vec<StoredDomainRequest>,
     /// A list of domains to instantiate on application.
     place: Vec<PlaceRequest>,
-    /// A map of valid domain indices to the number of shards in that domain.
-    ///
-    /// Used to validate sent messages during the planning stage.
-    valid_domains: HashMap<DomainIndex, usize>,
+    /// A map of valid domain indices to the settings for that domain.
+    domains: HashMap<DomainIndex, DomainSettings>,
 }
 
 /// A set of stored data sufficient to apply a migration.
@@ -209,44 +215,65 @@ impl DomainMigrationPlan {
         Self {
             stored: vec![],
             place: vec![],
-            valid_domains: mainline
+            domains: mainline
                 .domains
                 .iter()
-                .map(|(idx, hdl)| (*idx, hdl.shards()))
+                .map(|(idx, hdl)| {
+                    (
+                        *idx,
+                        DomainSettings {
+                            num_shards: hdl.num_shards(),
+                            num_replicas: hdl.num_replicas(),
+                        },
+                    )
+                })
                 .collect(),
         }
+    }
+
+    pub fn set_domain_settings(&mut self, idx: DomainIndex, settings: DomainSettings) {
+        let existing = self.domains.insert(idx, settings);
+        debug_assert!(existing.is_none(), "Domain {} already exists!", idx)
     }
 
     /// Enqueues a request to add a new domain `idx` with `nodes`, running on a worker per-shard
     /// given by `shard_workers`
     ///
     /// Arguments are passed to [`Leader::place_domain`] when the plan is applied.
-    pub fn add_new_domain(
+    pub fn place_domain(
         &mut self,
         idx: DomainIndex,
-        shard_workers: Vec<WorkerIdentifier>,
+        shard_replica_workers: Vec<Vec<WorkerIdentifier>>,
         nodes: Vec<NodeIndex>,
     ) {
         self.place.push(PlaceRequest {
             idx,
-            shard_workers,
+            shard_replica_workers,
             nodes,
         });
     }
 
-    /// Adds a domain and its shards to the list of valid domains.
-    pub(in crate::controller) fn add_valid_domain(&mut self, idx: DomainIndex, shards: usize) {
-        self.valid_domains.insert(idx, shards);
-    }
-
     /// Return the number of shards a given domain has.
     pub fn num_shards(&self, domain: DomainIndex) -> ReadySetResult<usize> {
-        self.valid_domains
+        Ok(self
+            .domains
             .get(&domain)
             .copied()
             .ok_or_else(|| ReadySetError::UnknownDomain {
                 domain_index: domain.index(),
-            })
+            })?
+            .num_shards)
+    }
+
+    /// Returns the number of times each shard of a given domain is replicated
+    pub fn num_replicas(&self, domain: DomainIndex) -> ReadySetResult<usize> {
+        Ok(self
+            .domains
+            .get(&domain)
+            .ok_or_else(|| ReadySetError::UnknownDomain {
+                domain_index: domain.index(),
+            })?
+            .num_replicas)
     }
 
     /// Apply all stored changes using the given controller object, placing new domains and sending
@@ -254,7 +281,7 @@ impl DomainMigrationPlan {
     pub async fn apply(&mut self, mainline: &mut DataflowState) -> ReadySetResult<()> {
         for place in self.place.drain(..) {
             let d = mainline
-                .place_domain(place.idx, place.shard_workers, place.nodes)
+                .place_domain(place.idx, place.shard_replica_workers, place.nodes)
                 .await?;
             mainline.domains.insert(place.idx, d);
         }
@@ -264,7 +291,8 @@ impl DomainMigrationPlan {
         Ok(())
     }
 
-    /// Enqueue a message to be sent to a specific shard of a domain on plan application.
+    /// Enqueue a message to be sent to all replicas of a specific shard of a domain on plan
+    /// application.
     ///
     /// Like [`DomainHandle::send_to_healthy_shard_blocking`], but includes the `domain` to which
     /// the command should apply.
@@ -274,32 +302,35 @@ impl DomainMigrationPlan {
         shard: usize,
         req: DomainRequest,
     ) -> ReadySetResult<()> {
-        if self
-            .valid_domains
-            .get(&domain)
-            .map(|n_shards| *n_shards > shard)
-            .unwrap_or(false)
-        {
-            self.stored.push(StoredDomainRequest {
-                domain,
-                shard: Some(shard),
-                req,
-            });
-            Ok(())
-        } else {
-            Err(ReadySetError::NoSuchReplica {
-                domain_index: domain.index(),
+        let domain_settings =
+            self.domains
+                .get(&domain)
+                .ok_or_else(|| ReadySetError::UnknownDomain {
+                    domain_index: domain.index(),
+                })?;
+
+        if shard > domain_settings.num_shards {
+            return Err(ReadySetError::ShardIndexOutOfBounds {
                 shard,
-            })
+                domain_index: domain.index(),
+                num_shards: domain_settings.num_shards,
+            });
         }
+
+        self.stored.push(StoredDomainRequest {
+            domain,
+            shard: Some(shard),
+            req,
+        });
+        Ok(())
     }
 
-    /// Enqueue a message to be sent to all shards of a domain on plan application.
+    /// Enqueue a message to be sent to all replicas of all shards of a domain on plan application.
     ///
     /// Like [`DomainHandle::send_to_healthy_blocking`], but includes the `domain` to which the
     /// command should apply.
     pub fn add_message(&mut self, domain: DomainIndex, req: DomainRequest) -> ReadySetResult<()> {
-        if self.valid_domains.contains_key(&domain) {
+        if self.domains.contains_key(&domain) {
             self.stored.push(StoredDomainRequest {
                 domain,
                 shard: None,
@@ -318,7 +349,7 @@ impl DomainMigrationPlan {
     pub fn extend(&mut self, other: DomainMigrationPlan) {
         self.place.extend(other.place);
         self.stored.extend(other.stored);
-        self.valid_domains.extend(other.valid_domains);
+        self.domains.extend(other.domains);
     }
 }
 
@@ -987,8 +1018,15 @@ fn plan_add_nodes(
             let worker_shards = scheduler.schedule_domain(domain, &nodes)?;
 
             let num_shards = worker_shards.len();
-            dmp.add_new_domain(domain, worker_shards, nodes);
-            dmp.valid_domains.insert(domain, num_shards);
+            let num_replicas = worker_shards[0].len();
+            dmp.place_domain(domain, worker_shards, nodes);
+            dmp.domains.insert(
+                domain,
+                DomainSettings {
+                    num_shards,
+                    num_replicas,
+                },
+            );
         }
 
         // And now, the last piece of the puzzle -- set up materializations

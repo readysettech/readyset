@@ -42,8 +42,15 @@ fn worker_meets_restrictions(
 /// Statistics about the domains scheduled onto a worker
 #[derive(Default, Clone, Copy)]
 struct WorkerStats {
-    num_domain_shards: usize,
-    num_base_table_domain_shards: usize,
+    /// The number of replicas of domain shards that are running in this worker.
+    num_domain_shard_replicas: usize,
+    /// The number of replicas of shards of domains with base tables that are running in this
+    /// worker.
+    ///
+    /// Currently there will only be 1 replica of each base table shard (because we don't have the
+    /// ability to replicate base tables yet) but this is intended to still work once we lift that
+    /// limitation.
+    num_base_table_domain_shard_replicas: usize,
 }
 
 /// A short-lived struct holding all the information necessary to assign domain shards to workers.
@@ -71,11 +78,13 @@ impl<'state> Scheduler<'state> {
             let is_base_table_domain = dataflow_state.domain_nodes[di]
                 .values()
                 .any(|ni| dataflow_state.ingredients[*ni].is_base());
-            for wi in &dh.shards {
-                let stats = worker_stats.entry(wi).or_default();
-                stats.num_domain_shards += 1;
-                if is_base_table_domain {
-                    stats.num_base_table_domain_shards += 1;
+            for replicas in dh.shards() {
+                for wi in replicas {
+                    let stats = worker_stats.entry(wi).or_default();
+                    stats.num_domain_shard_replicas += 1;
+                    if is_base_table_domain {
+                        stats.num_base_table_domain_shard_replicas += 1;
+                    }
                 }
             }
         }
@@ -90,8 +99,8 @@ impl<'state> Scheduler<'state> {
     /// Decide which workers the shards of the given `domain` (with the given list of `nodes`)
     /// should run on
     ///
-    /// Returns a vector of `WorkerIdentifier` to schedule the domain's shards onto, where each
-    /// index is a shard index.
+    /// Returns a 2-dimensional vector of `WorkerIdentifier` to schedule the domain's shards onto,
+    /// indexed by shard index first and replica index second
     ///
     /// # Invariants
     ///
@@ -102,17 +111,23 @@ impl<'state> Scheduler<'state> {
         &mut self,
         domain_index: DomainIndex,
         nodes: &[NodeIndex],
-    ) -> ReadySetResult<Vec<WorkerIdentifier>> {
+    ) -> ReadySetResult<Vec<Vec<WorkerIdentifier>>> {
         let num_shards = self.dataflow_state.ingredients[nodes[0]]
             .sharded_by()
             .shards()
             .unwrap_or(1);
+        let num_replicas = 1; // TODO
+
         let is_reader_domain = nodes
             .iter()
             .any(|n| self.dataflow_state.ingredients[*n].is_reader());
         let is_base_table_domain = nodes
             .iter()
             .any(|n| self.dataflow_state.ingredients[*n].is_base());
+
+        if is_base_table_domain {
+            invariant_eq!(num_replicas, 1);
+        }
 
         let workers = self
             .valid_workers
@@ -121,58 +136,63 @@ impl<'state> Scheduler<'state> {
 
         let mut res = Vec::with_capacity(num_shards);
         for shard in 0..num_shards {
-            // Shards of certain dataflow nodes may have restrictions that
-            // limit the workers they are placed upon.
-            let dataflow_node_restrictions = nodes
-                .iter()
-                .filter_map(|n| {
-                    let node_name = self.dataflow_state.ingredients[*n].name();
-                    self.dataflow_state
-                        .node_restrictions
-                        .get(&NodeRestrictionKey {
-                            node_name: node_name.clone(),
-                            shard,
-                        })
-                })
-                .collect::<Vec<_>>();
+            let mut replicas = Vec::with_capacity(num_replicas);
+            for _replica in 0..num_replicas {
+                // Shards of certain dataflow nodes may have restrictions that
+                // limit the workers they are placed upon.
+                let dataflow_node_restrictions = nodes
+                    .iter()
+                    .filter_map(|n| {
+                        let node_name = self.dataflow_state.ingredients[*n].name();
+                        self.dataflow_state
+                            .node_restrictions
+                            .get(&NodeRestrictionKey {
+                                node_name: node_name.clone(),
+                                shard,
+                            })
+                    })
+                    .collect::<Vec<_>>();
 
-            let worker_id = if dataflow_node_restrictions.is_empty() {
-                // If there are no placement restrictions, pick the node based on load-balancing
-                // heuristics
-                workers.clone().min_by_key(|(wi, _)| {
-                    let stats = self.worker_stats.get(wi).copied().unwrap_or_default();
+                let worker_id = if dataflow_node_restrictions.is_empty() {
+                    // If there are no placement restrictions, pick the node based on load-balancing
+                    // heuristics
+                    workers.clone().min_by_key(|(wi, _)| {
+                        let stats = self.worker_stats.get(wi).copied().unwrap_or_default();
 
-                    if is_base_table_domain {
-                        // If there are base tables in the domain, find the worker running the
-                        // smallest number of base table domain shards
-                        stats.num_base_table_domain_shards
-                    } else {
-                        // Otherwise, find the worker running the smallest number of domain shards
-                        // overall
-                        stats.num_domain_shards
-                    }
-                })
-            } else {
-                // Otherwise, if there are placement restrictions, we select the first worker that
-                // meets the placement restrictions. This can lead to imbalance in the number of
-                // dataflow nodes placed on each server.
-                workers.clone().find(|(_, worker)| {
-                    worker_meets_restrictions(worker, &dataflow_node_restrictions)
-                })
+                        if is_base_table_domain {
+                            // If there are base tables in the domain, find the worker running the
+                            // smallest number of base table domain shards
+                            stats.num_base_table_domain_shard_replicas
+                        } else {
+                            // Otherwise, find the worker running the smallest number of domain
+                            // shards overall
+                            stats.num_domain_shard_replicas
+                        }
+                    })
+                } else {
+                    // Otherwise, if there are placement restrictions, we select the first worker
+                    // that meets the placement restrictions. This can lead to
+                    // imbalance in the number of dataflow nodes placed on each
+                    // server.
+                    workers.clone().find(|(_, worker)| {
+                        worker_meets_restrictions(worker, &dataflow_node_restrictions)
+                    })
+                }
+                .map(|(wi, _)| *wi)
+                .ok_or(ReadySetError::NoAvailableWorkers {
+                    domain_index: domain_index.index(),
+                    shard,
+                })?;
+
+                let stats = self.worker_stats.entry(worker_id).or_default();
+                stats.num_domain_shard_replicas += 1;
+                if is_base_table_domain {
+                    stats.num_base_table_domain_shard_replicas += 1;
+                }
+
+                replicas.push(worker_id.clone());
             }
-            .map(|(wi, _)| *wi)
-            .ok_or(ReadySetError::NoAvailableWorkers {
-                domain_index: domain_index.index(),
-                shard,
-            })?;
-
-            let stats = self.worker_stats.entry(worker_id).or_default();
-            stats.num_domain_shards += 1;
-            if is_base_table_domain {
-                stats.num_base_table_domain_shards += 1;
-            }
-
-            res.push(worker_id.clone());
+            res.push(replicas);
         }
 
         Ok(res)

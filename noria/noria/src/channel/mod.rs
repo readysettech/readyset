@@ -283,6 +283,7 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
             None => Err(ReadySetError::NoSuchReplica {
                 domain_index: key.domain_index.index(),
                 shard: key.shard,
+                replica: key.replica,
             }),
             Some(addrs) => Ok(DomainConnectionBuilder {
                 sport: None,

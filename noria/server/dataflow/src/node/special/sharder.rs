@@ -2,13 +2,76 @@ use noria::KeyComparison;
 use serde::{Deserialize, Serialize};
 use vec_map::VecMap;
 
-use crate::payload;
+use crate::payload::{self, ReplayPieceContext, SenderReplication};
 use crate::prelude::*;
 
 #[derive(Serialize, Deserialize)]
+pub struct SharderTx {
+    node: LocalNodeIndex,
+    domain_index: DomainIndex,
+    shard: usize,
+    replication: SenderReplication,
+}
+
+impl SharderTx {
+    fn send(
+        &self,
+        m: Box<Packet>,
+        from_replica: usize,
+        output: &mut dyn Executor,
+    ) -> ReadySetResult<()> {
+        match self.replication {
+            SenderReplication::Same => output.send(
+                ReplicaAddress {
+                    domain_index: self.domain_index,
+                    shard: self.shard,
+                    replica: from_replica,
+                },
+                m,
+            ),
+            SenderReplication::Fanout { num_replicas } => {
+                if let Some(ReplayPieceContext::Partial {
+                    requesting_replica, ..
+                }) = m.replay_piece_context()
+                {
+                    // If the message is a piece of a replay that was requested by a
+                    // particular replica, only replay to that
+                    // replica
+                    invariant!(
+                        *requesting_replica < num_replicas,
+                        "Replica index for replay piece context out-of-bounds"
+                    );
+                    output.send(
+                        ReplicaAddress {
+                            domain_index: self.domain_index,
+                            shard: self.shard,
+                            replica: from_replica,
+                        },
+                        m,
+                    );
+                } else {
+                    // Otherwise, replay to all replicas
+                    for replica in 0..num_replicas {
+                        output.send(
+                            ReplicaAddress {
+                                domain_index: self.domain_index,
+                                shard: self.shard,
+                                replica,
+                            },
+                            m.clone(),
+                        )
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct Sharder {
-    #[serde(skip)]
-    txs: Vec<(LocalNodeIndex, ReplicaAddress)>,
+    txs: Vec<SharderTx>,
     #[serde(skip)]
     sharded: VecMap<Box<Packet>>,
     shard_by: usize,
@@ -45,12 +108,21 @@ impl Sharder {
         }
     }
 
-    pub fn add_sharded_child(&mut self, dst: LocalNodeIndex, txs: Vec<ReplicaAddress>) {
+    pub fn add_sharded_child(
+        &mut self,
+        dst_domain: DomainIndex,
+        dst_node: LocalNodeIndex,
+        num_shards: usize,
+        replication: SenderReplication,
+    ) {
         debug_assert_eq!(self.txs.len(), 0);
         // TODO: add support for "shared" sharder?
-        for tx in txs {
-            self.txs.push((dst, tx));
-        }
+        self.txs.extend((0..num_shards).map(|shard| SharderTx {
+            node: dst_node,
+            domain_index: dst_domain,
+            shard,
+            replication,
+        }))
     }
 
     pub fn sharded_by(&self) -> usize {
@@ -73,6 +145,7 @@ impl Sharder {
         index: LocalNodeIndex,
         is_sharded: bool,
         is_last_sharder_for_tag: Option<bool>,
+        replica: usize,
         output: &mut dyn Executor,
     ) -> ReadySetResult<()> {
         // we need to shard the records inside `m` by their key,
@@ -156,11 +229,11 @@ impl Sharder {
             unsupported!("we don't know how to shard a shard");
         }
 
-        for (i, &mut (dst, addr)) in self.txs.iter_mut().enumerate() {
-            if let Some(mut shard) = self.sharded.remove(i) {
-                shard.link_mut().src = index;
-                shard.link_mut().dst = dst;
-                output.send(addr, shard);
+        for (i, tx) in self.txs.iter().enumerate() {
+            if let Some(mut m) = self.sharded.remove(i) {
+                m.link_mut().src = index;
+                m.link_mut().dst = tx.node;
+                tx.send(m, replica, output)?;
             }
         }
 
@@ -168,6 +241,7 @@ impl Sharder {
     }
 
     #[allow(clippy::unreachable)]
+    #[allow(clippy::too_many_arguments)]
     pub fn process_eviction(
         &mut self,
         key_columns: &[usize],
@@ -175,6 +249,7 @@ impl Sharder {
         keys: &[KeyComparison],
         src: LocalNodeIndex,
         is_sharded: bool,
+        replica: usize,
         output: &mut dyn Executor,
     ) -> ReadySetResult<()> {
         invariant!(!is_sharded);
@@ -183,7 +258,7 @@ impl Sharder {
             // Send only to the shards that must evict something.
             for key in keys {
                 for shard in key.shard_keys(self.txs.len()) {
-                    let dst = self.txs[shard].0;
+                    let dst = self.txs[shard].node;
                     let p = self.sharded.entry(shard).or_insert_with(|| {
                         Box::new(Packet::EvictKeys {
                             link: Link { src, dst },
@@ -202,9 +277,9 @@ impl Sharder {
                 }
             }
 
-            for (i, &mut (_, addr)) in self.txs.iter_mut().enumerate() {
+            for (i, tx) in self.txs.iter().enumerate() {
                 if let Some(shard) = self.sharded.remove(i) {
-                    output.send(addr, shard);
+                    tx.send(shard, replica, output)?;
                 }
             }
         } else {
@@ -212,15 +287,16 @@ impl Sharder {
             invariant!(!key_columns.contains(&self.shard_by));
 
             // send to all shards
-            for &mut (dst, addr) in self.txs.iter_mut() {
-                output.send(
-                    addr,
+            for tx in &self.txs {
+                tx.send(
                     Box::new(Packet::EvictKeys {
-                        link: Link { src, dst },
+                        link: Link { src, dst: tx.node },
                         keys: keys.to_vec(),
                         tag,
                     }),
-                )
+                    replica,
+                    output,
+                )?;
             }
         }
 

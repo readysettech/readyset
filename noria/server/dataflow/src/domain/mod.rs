@@ -32,6 +32,7 @@ use vec1::Vec1;
 
 pub(crate) use self::replay_paths::ReplayPath;
 use self::replay_paths::{Destination, ReplayPathSpec, ReplayPaths, Target};
+use crate::node::special::EgressTx;
 use crate::node::{NodeProcessingResult, ProcessEnv};
 use crate::payload::{PrettyReplayPath, ReplayPieceContext, SourceSelection};
 use crate::prelude::*;
@@ -140,10 +141,17 @@ struct ReplayDescriptor {
     lookup_columns: Vec<usize>,
     unishard: bool,
     requesting_shard: usize,
+    requesting_replica: usize,
 }
 
 impl ReplayDescriptor {
-    fn from_miss(miss: &Miss, tag: Tag, unishard: bool, requesting_shard: usize) -> Self {
+    fn from_miss(
+        miss: &Miss,
+        tag: Tag,
+        unishard: bool,
+        requesting_shard: usize,
+        requesting_replica: usize,
+    ) -> Self {
         #[allow(clippy::unwrap_used)]
         // We know this is a partial replay
         ReplayDescriptor {
@@ -154,6 +162,7 @@ impl ReplayDescriptor {
             lookup_columns: miss.lookup_idx.clone(),
             unishard,
             requesting_shard,
+            requesting_replica,
         }
     }
 
@@ -176,6 +185,7 @@ struct Redo {
     replay_key: KeyComparison,
     unishard: bool,
     requesting_shard: usize,
+    requesting_replica: usize,
 }
 
 /// Struct indicating a single hole in a partial materialization that needs to be filled to satisfy
@@ -343,6 +353,8 @@ pub struct DomainBuilder {
     pub index: DomainIndex,
     /// The shard ID represented by this `DomainBuilder`.
     pub shard: Option<usize>,
+    /// The replica index of the domain to run
+    pub replica: usize,
     /// The number of shards in the domain.
     pub nshards: usize,
     /// The nodes in the domain.
@@ -354,6 +366,18 @@ pub struct DomainBuilder {
 }
 
 impl DomainBuilder {
+    pub fn shard(&self) -> usize {
+        self.shard.unwrap_or(0)
+    }
+
+    pub fn address(&self) -> ReplicaAddress {
+        ReplicaAddress {
+            domain_index: self.index,
+            shard: self.shard(),
+            replica: self.replica,
+        }
+    }
+
     /// Starts up the domain represented by this `DomainBuilder`.
     pub fn build(
         self,
@@ -368,9 +392,11 @@ impl DomainBuilder {
             .map(|n| n.borrow().local_addr())
             .collect();
 
+        let address = self.address();
         Domain {
             index: self.index,
             shard: self.shard,
+            replica: self.replica,
             _nshards: self.nshards,
 
             persistence_parameters: self.persistence_parameters,
@@ -407,10 +433,7 @@ impl DomainBuilder {
             aggressively_update_state_sizes: self.config.aggressively_update_state_sizes,
             replay_completed: false,
 
-            metrics: domain_metrics::DomainMetrics::new(ReplicaAddress {
-                domain_index: self.index,
-                shard: self.shard.unwrap_or(0),
-            }),
+            metrics: domain_metrics::DomainMetrics::new(address),
 
             eviction_kind: self.config.eviction_kind,
         }
@@ -427,6 +450,7 @@ struct TimedPurge {
 pub struct Domain {
     index: DomainIndex,
     shard: Option<usize>,
+    replica: usize,
     _nshards: usize,
 
     /// Map of nodes managed by this domain
@@ -511,6 +535,11 @@ impl Domain {
     /// Return this domain's shard
     pub fn shard(&self) -> usize {
         self.shard.unwrap_or(0)
+    }
+
+    /// Return this domain's replica
+    pub fn replica(&self) -> usize {
+        self.replica
     }
 
     fn snapshotting_base_nodes(&self) -> Vec<LocalNodeIndex> {
@@ -599,7 +628,8 @@ impl Domain {
                         tag,
                         keys: miss_keys.clone(),
                         unishard: true, // local replays are necessarily single-shard
-                        requesting_shard: self.shard.unwrap_or(0),
+                        requesting_shard: self.shard(),
+                        requesting_replica: self.replica(),
                     }));
                 continue;
             }
@@ -621,6 +651,7 @@ impl Domain {
         missed_keys: HashSet<(KeyComparison, KeyComparison)>,
         was_single_shard: bool,
         requesting_shard: usize,
+        requesting_replica: usize,
         needed_for: Tag,
     ) -> ReadySetResult<()> {
         use std::collections::hash_map::Entry;
@@ -668,6 +699,7 @@ impl Domain {
                 replay_key,
                 unishard: was_single_shard,
                 requesting_shard,
+                requesting_replica,
             };
             for ColumnMiss {
                 node,
@@ -727,6 +759,8 @@ impl Domain {
         keys: Vec<KeyComparison>,
     ) -> ReadySetResult<()> {
         debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
+        let requesting_shard = self.shard();
+        let requesting_replica = self.replica();
 
         #[allow(clippy::unwrap_used)] // documented invariant
         if let TriggerEndpoint::End {
@@ -763,7 +797,8 @@ impl Domain {
                             tag,
                             unishard: false, // ask_all is true, so replay is sharded
                             keys: keys.clone(), // sad to clone here
-                            requesting_shard: self.shard.unwrap_or(0),
+                            requesting_shard,
+                            requesting_replica,
                         }))
                         .is_err()
                     {
@@ -789,7 +824,8 @@ impl Domain {
                         tag,
                         keys,
                         unishard: true, // only one option, so only one path
-                        requesting_shard: self.shard.unwrap_or(0),
+                        requesting_shard,
+                        requesting_replica,
                     }))
                     .is_err()
                 {
@@ -812,7 +848,8 @@ impl Domain {
                             tag,
                             keys,
                             unishard: true, // !ask_all, so only one path
-                            requesting_shard: self.shard.unwrap_or(0),
+                            requesting_shard,
+                            requesting_replica,
                         }))
                         .is_err()
                     {
@@ -980,6 +1017,7 @@ impl Domain {
                     nodes: &self.nodes,
                     executor,
                     shard: self.shard,
+                    replica: self.replica,
                 },
             )?;
             assert_eq!(captured.len(), 0);
@@ -1138,7 +1176,7 @@ impl Domain {
                 .get(me)
                 .ok_or_else(|| ReadySetError::NoSuchNode(me.id()))?
                 .borrow_mut();
-            n.process_timestamp(message, executor)?
+            n.process_timestamp(message, self.shard, self.replica, executor)?
         };
 
         let message = if let Some(m) = message {
@@ -1258,7 +1296,9 @@ impl Domain {
             DomainRequest::AddEgressTx {
                 egress_node,
                 ingress_node: (ingress_node_global, ingress_node_local),
-                target_replica_address,
+                target_domain,
+                target_shard,
+                replication,
             } => {
                 let mut n = self
                     .nodes
@@ -1271,11 +1311,13 @@ impl Domain {
                     expected_type: NodeType::Egress,
                 })?;
 
-                e.add_tx(
+                e.add_tx(EgressTx::new(
                     ingress_node_global,
                     ingress_node_local,
-                    target_replica_address,
-                );
+                    target_domain,
+                    target_shard,
+                    replication,
+                ));
 
                 Ok(None)
             }
@@ -1316,17 +1358,23 @@ impl Domain {
                     .add_for_filtering(target_node);
                 Ok(None)
             }
-            DomainRequest::UpdateSharder { node, new_txs } => {
+            DomainRequest::AddSharderTx {
+                sharder_node,
+                ingress_node,
+                target_domain,
+                num_shards,
+                replication,
+            } => {
                 self.nodes
-                    .get(node)
-                    .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
+                    .get(sharder_node)
+                    .ok_or_else(|| ReadySetError::NoSuchNode(sharder_node.id()))?
                     .borrow_mut()
                     .as_mut_sharder()
                     .ok_or(ReadySetError::InvalidNodeType {
-                        node_index: node.id(),
+                        node_index: sharder_node.id(),
                         expected_type: NodeType::Sharder,
                     })?
-                    .add_sharded_child(new_txs.0, new_txs.1);
+                    .add_sharded_child(target_domain, ingress_node, num_shards, replication);
                 Ok(None)
             }
             DomainRequest::StateSizeProbe { node } => {
@@ -1403,6 +1451,7 @@ impl Domain {
                             });
                         }
 
+                        let replica = self.replica();
                         let txs = (0..num_shards)
                             .map(|shard| -> ReadySetResult<_> {
                                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1411,6 +1460,7 @@ impl Domain {
                                     .builder_for(&ReplicaAddress {
                                         domain_index: trigger_domain,
                                         shard,
+                                        replica,
                                     })?
                                     .build_async()?;
 
@@ -1440,8 +1490,7 @@ impl Domain {
                             cols,
                             index,
                             move |misses: &mut dyn Iterator<Item = &KeyComparison>| {
-                                let n = txs.len();
-                                if n == 1 {
+                                if num_shards == 1 {
                                     let misses = misses.cloned().collect::<Vec<_>>();
                                     if misses.is_empty() {
                                         return true;
@@ -1452,7 +1501,7 @@ impl Domain {
                                     let mut per_shard = HashMap::new();
                                     for miss in misses {
                                         assert!(matches!(miss.len(), Some(1) | None));
-                                        for shard in miss.shard_keys(n) {
+                                        for shard in miss.shard_keys(num_shards) {
                                             per_shard
                                                 .entry(shard)
                                                 .or_insert_with(Vec::new)
@@ -1566,6 +1615,7 @@ impl Domain {
                 partial_unicast_sharder,
                 notify_done,
                 trigger,
+                replica_fanout,
             } => {
                 if notify_done {
                     debug!(
@@ -1593,6 +1643,8 @@ impl Domain {
                     payload::TriggerEndpoint::Start(index) => TriggerEndpoint::Start(index),
                     payload::TriggerEndpoint::Local(index) => TriggerEndpoint::Local(index),
                     payload::TriggerEndpoint::End(selection, domain_index) => {
+                        // See the documentation for DomainRequest::SetupReplayPath::replica_fanout
+                        let replica = if replica_fanout { 0 } else { self.replica() };
                         let shard = |shard| -> ReadySetResult<_> {
                             // TODO: make async
                             Ok(self
@@ -1600,6 +1652,7 @@ impl Domain {
                                 .builder_for(&ReplicaAddress {
                                     domain_index,
                                     shard,
+                                    replica,
                                 })?
                                 .build_sync()?)
                         };
@@ -2112,6 +2165,7 @@ impl Domain {
                 keys,
                 unishard,
                 requesting_shard,
+                requesting_replica,
             } => {
                 trace!(%tag, ?keys, "got replay request");
                 let start = time::Instant::now();
@@ -2119,6 +2173,7 @@ impl Domain {
                 self.seed_all(
                     tag,
                     requesting_shard,
+                    requesting_replica,
                     keys.into_iter().collect(),
                     unishard,
                     executor,
@@ -2306,6 +2361,7 @@ impl Domain {
         &mut self,
         tag: Tag,
         requesting_shard: usize,
+        requesting_replica: usize,
         keys: HashSet<KeyComparison>,
         single_shard: bool,
         ex: &mut dyn Executor,
@@ -2378,6 +2434,7 @@ impl Domain {
                 replay_keys,
                 single_shard,
                 requesting_shard,
+                requesting_replica,
                 tag,
             )?;
         }
@@ -2398,6 +2455,7 @@ impl Domain {
                         for_keys: found_keys,
                         unishard: single_shard, // if we are the only source, only one path
                         requesting_shard,
+                        requesting_replica,
                     },
                     data: records.into(),
                 },
@@ -2735,6 +2793,7 @@ impl Domain {
                                 nodes: &self.nodes,
                                 executor: ex,
                                 shard: self.shard,
+                                replica: self.replica,
                             },
                         )?;
 
@@ -2859,23 +2918,31 @@ impl Domain {
                             // we can use the value that's in m.
                             #[allow(clippy::unwrap_used)]
                             // We would have bailed earlier (break 'outer, above) if m wasn't Some
-                            let (unishard, requesting_shard) = if let Packet::ReplayPiece {
-                                context:
-                                    ReplayPieceContext::Partial {
-                                        unishard,
-                                        requesting_shard,
-                                        ..
-                                    },
-                                ..
-                            } = **m.as_mut().unwrap()
-                            {
-                                (unishard, requesting_shard)
-                            } else {
-                                internal!("backfill_keys.is_some() implies Context::Partial");
-                            };
+                            let (unishard, requesting_shard, requesting_replica) =
+                                if let Packet::ReplayPiece {
+                                    context:
+                                        ReplayPieceContext::Partial {
+                                            unishard,
+                                            requesting_shard,
+                                            requesting_replica,
+                                            ..
+                                        },
+                                    ..
+                                } = **m.as_mut().unwrap()
+                                {
+                                    (unishard, requesting_shard, requesting_replica)
+                                } else {
+                                    internal!("backfill_keys.is_some() implies Context::Partial");
+                                };
 
                             need_replay.extend(misses.iter().map(|m| {
-                                ReplayDescriptor::from_miss(m, tag, unishard, requesting_shard)
+                                ReplayDescriptor::from_miss(
+                                    m,
+                                    tag,
+                                    unishard,
+                                    requesting_shard,
+                                    requesting_replica,
+                                )
                             }));
 
                             // we should only finish the replays for keys that *didn't* miss
@@ -3161,11 +3228,7 @@ impl Domain {
                         ReplayPieceContext::Regular { .. } => {
                             debug!("batch processed");
                         }
-                        ReplayPieceContext::Partial {
-                            for_keys,
-                            unishard: _,
-                            requesting_shard: _,
-                        } => {
+                        ReplayPieceContext::Partial { for_keys, .. } => {
                             if dst_is_reader {
                                 if self
                                     .nodes
@@ -3233,6 +3296,7 @@ impl Domain {
                 misses,
                 next_replay.unishard,
                 next_replay.requesting_shard,
+                next_replay.requesting_replica,
                 next_replay.tag,
             )?;
         }
@@ -3308,23 +3372,27 @@ impl Domain {
                         replay_key,
                         unishard,
                         requesting_shard,
+                        requesting_replica,
                     } in replay
                     {
                         replay_sets
-                            .entry((tag, unishard, requesting_shard))
+                            .entry((tag, unishard, requesting_shard, requesting_replica))
                             .or_insert_with(|| Vec::new())
                             .push(replay_key);
                     }
                 }
 
                 // After we actually finished sorting the Redos into batches, issue each batch
-                for ((tag, unishard, requesting_shard), keys) in replay_sets.drain() {
+                for ((tag, unishard, requesting_shard, requesting_replica), keys) in
+                    replay_sets.drain()
+                {
                     self.delayed_for_self
                         .push_back(Box::new(Packet::RequestPartialReplay {
                             tag,
                             unishard,
                             keys,
                             requesting_shard,
+                            requesting_replica,
                         }));
                 }
 
@@ -3465,6 +3533,7 @@ impl Domain {
             not_ready: &HashSet<LocalNodeIndex>,
             replay_paths: &ReplayPaths,
             shard: Option<usize>,
+            replica: usize,
             state: &mut StateMap,
             nodes: &DomainNodes,
         ) -> Result<(), ReadySetError> {
@@ -3484,7 +3553,7 @@ impl Domain {
                         }
                     };
 
-                    walk_path(&path.path[..], keys, *tag, shard, nodes, ex)?;
+                    walk_path(&path.path[..], keys, *tag, shard, replica, nodes, ex)?;
 
                     if let TriggerEndpoint::Local(_) = path.trigger {
                         #[allow(clippy::indexing_slicing)] // tag came from replay_paths
@@ -3518,6 +3587,7 @@ impl Domain {
                             not_ready,
                             replay_paths,
                             shard,
+                            replica,
                             state,
                             nodes,
                         )?;
@@ -3532,6 +3602,7 @@ impl Domain {
             keys: &[KeyComparison],
             tag: Tag,
             shard: Option<usize>,
+            replica: usize,
             nodes: &DomainNodes,
             executor: &mut dyn Executor,
         ) -> ReadySetResult<()> {
@@ -3547,6 +3618,7 @@ impl Domain {
                     keys,
                     tag,
                     shard,
+                    replica,
                     executor,
                 )?;
                 from = segment.node;
@@ -3662,6 +3734,7 @@ impl Domain {
                                 &self.not_ready,
                                 &self.replay_paths,
                                 self.shard,
+                                self.replica,
                                 &mut self.state,
                                 &self.nodes,
                             )?;
@@ -3696,7 +3769,15 @@ impl Domain {
                     .ok_or_else(|| ReadySetError::NoSuchNode(dst.id()))?;
                 #[allow(clippy::indexing_slicing)]
                 // i is definitely in bounds, since it came from a call to position
-                walk_path(&path[i..], &keys, tag, self.shard, &self.nodes, ex)?;
+                walk_path(
+                    &path[i..],
+                    &keys,
+                    tag,
+                    self.shard,
+                    self.replica,
+                    &self.nodes,
+                    ex,
+                )?;
 
                 match trigger {
                     TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) => {
@@ -3726,6 +3807,7 @@ impl Domain {
                                 &self.not_ready,
                                 &self.replay_paths,
                                 self.shard,
+                                self.replica,
                                 &mut self.state,
                                 &self.nodes,
                             )?;
@@ -3746,6 +3828,7 @@ impl Domain {
         ReplicaAddress {
             domain_index: self.index(),
             shard: self.shard(),
+            replica: self.replica(),
         }
     }
 

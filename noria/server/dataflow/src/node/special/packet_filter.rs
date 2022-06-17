@@ -296,6 +296,7 @@ mod test {
                 context: ReplayPieceContext::Partial {
                     for_keys: hashset! { key },
                     requesting_shard: 0,
+                    requesting_replica: 0,
                     unishard: false,
                 },
             };
@@ -615,6 +616,7 @@ mod test {
                 ReplayPieceContext::Partial {
                     for_keys: k,
                     requesting_shard: 0,
+                    requesting_replica: 0,
                     unishard: false,
                 }
             } else {

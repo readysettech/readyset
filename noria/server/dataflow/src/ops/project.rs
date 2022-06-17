@@ -260,7 +260,7 @@ mod tests {
     use dataflow_state::MaterializedNodeState;
     use nom_sql::{BinaryOperator, SqlType};
     use noria_data::noria_type::Type;
-    use Expression::{Column, Literal, Op};
+    use Expression::Op;
 
     use super::*;
     use crate::ops;

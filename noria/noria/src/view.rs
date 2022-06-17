@@ -23,6 +23,8 @@ use noria_data::DataType;
 use noria_errors::{internal_err, rpc_err, view_err, ReadySetError, ReadySetResult};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
+use rand::prelude::SliceRandom;
+use rand::thread_rng;
 use readyset_tracing::presampled::instrument_if_enabled;
 use readyset_tracing::propagation::Instrumented;
 use serde::{Deserialize, Serialize};
@@ -816,10 +818,14 @@ impl<D> ReadReply<D> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ViewBuilder {
     pub name: SqlIdentifier,
+
     pub node: NodeIndex,
     pub columns: Arc<[SqlIdentifier]>,
     pub schema: Option<ViewSchema>,
-    pub shards: Vec<SocketAddr>,
+
+    /// replica -> shard index -> addr
+    pub replica_shard_addrs: Vec<Vec<SocketAddr>>,
+
     /// (view_placeholder, key_column_index) pairs according to their mapping. Contains exactly one
     /// entry for each key column at the reader.
     pub key_mapping: Vec<(ViewPlaceholder, KeyColumnIdx)>,
@@ -829,32 +835,46 @@ pub struct ViewBuilder {
 }
 
 impl ViewBuilder {
-    /// Build a `View` out of a `ViewBuilder`
+    /// Build a `View` out of a `ViewBuilder`.
+    ///
+    /// If `replica` is specified, this selects the reader replica with that index, returning an
+    /// error if the index is out of bounds. Otherwise, a replica is selected at random
     #[doc(hidden)]
     pub fn build(
         &self,
+        replica: Option<usize>,
         rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
     ) -> ReadySetResult<View> {
+        let shards = match replica {
+            Some(replica) => self.replica_shard_addrs.get(replica),
+            None if self.replica_shard_addrs.len() == 1 => Some(&self.replica_shard_addrs[0]),
+            None => self.replica_shard_addrs.choose(&mut thread_rng()),
+        }
+        .ok_or_else(|| ReadySetError::ViewReplicaOutOfBounds {
+            replica: replica.unwrap_or(0),
+            view_name: self.name.clone().into(),
+            num_replicas: self.replica_shard_addrs.len(),
+        })?;
+
         let node = self.node;
         let columns = self.columns.clone();
-        let shards = self.shards.clone();
         let schema = self.schema.clone();
         let key_mapping = self.key_mapping.clone();
 
         let mut addrs = Vec::with_capacity(shards.len());
         let mut conns = Vec::with_capacity(shards.len());
 
-        for (shardi, shard_addr) in shards.into_iter().enumerate() {
+        for (shardi, shard_addr) in shards.iter().enumerate() {
             use std::collections::hash_map::Entry;
 
-            addrs.push(shard_addr);
+            addrs.push(*shard_addr);
 
             // one entry per shard so that we can send sharded requests in parallel even if
             // they happen to be targeting the same machine.
             let mut rpcs = rpcs
                 .lock()
                 .map_err(|e| internal_err(format!("mutex was poisoned: '{}'", e)))?;
-            let s = match rpcs.entry((shard_addr, shardi)) {
+            let s = match rpcs.entry((*shard_addr, shardi)) {
                 Entry::Occupied(e) => e.get().clone(),
                 Entry::Vacant(h) => {
                     // TODO: maybe always use the same local port?
@@ -862,7 +882,7 @@ impl ViewBuilder {
                         Timeout::new(
                             ConcurrencyLimit::new(
                                 Balance::new(make_views_discover(
-                                    shard_addr,
+                                    *shard_addr,
                                     self.view_request_timeout,
                                 )),
                                 crate::PENDING_LIMIT,
@@ -1000,7 +1020,11 @@ impl Service<ViewQuery> for View {
         if self.shards.len() == 1 {
             let request = span.in_scope(|| {
                 Instrumented::from(Tagged::from(ReadQuery::Normal {
-                    target: (self.node, self.name.clone(), 0).into(),
+                    target: ReaderAddress {
+                        node: self.node,
+                        name: self.name.clone(),
+                        shard: 0,
+                    },
                     query,
                 }))
             });

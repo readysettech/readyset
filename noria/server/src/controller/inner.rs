@@ -493,20 +493,24 @@ impl Leader {
 
             let mut domain_addresses = Vec::new();
             for (domain_index, handle) in &ds.domains {
-                for shard in 0..handle.shards.len() {
-                    let replica_address = ReplicaAddress {
-                        domain_index: *domain_index,
-                        shard,
-                    };
-                    let socket_addr = ds
-                        .channel_coordinator
-                        .get_addr(&replica_address)
-                        .ok_or_else(|| ReadySetError::NoSuchReplica {
-                            domain_index: domain_index.index(),
+                for shard in 0..handle.num_shards() {
+                    for replica in 0..handle.num_replicas() {
+                        let replica_address = ReplicaAddress {
+                            domain_index: *domain_index,
                             shard,
-                        })?;
+                            replica,
+                        };
+                        let socket_addr = ds
+                            .channel_coordinator
+                            .get_addr(&replica_address)
+                            .ok_or_else(|| ReadySetError::NoSuchReplica {
+                                domain_index: domain_index.index(),
+                                shard,
+                                replica,
+                            })?;
 
-                    domain_addresses.push(DomainDescriptor::new(replica_address, socket_addr));
+                        domain_addresses.push(DomainDescriptor::new(replica_address, socket_addr));
+                    }
                 }
             }
 

@@ -116,12 +116,16 @@ pub enum ReadySetError {
     RecipeInvariantViolated(String),
 
     /// A domain couldn't be booted on the remote worker.
-    #[error("Failed to boot domain {domain_index}.{shard} on worker '{worker_uri}': {source}")]
+    #[error(
+        "Failed to boot domain {domain_index}.{shard}.{replica} on worker '{worker_uri}': {source}"
+    )]
     DomainCreationFailed {
         /// The index of the domain.
         domain_index: usize,
         /// The shard of the domain.
         shard: usize,
+        /// The replica of the domain.
+        replica: usize,
         /// The URI of the worker where the domain was to be placed.
         worker_uri: Url,
         /// The error encountered while trying to boot the domain.
@@ -425,13 +429,31 @@ pub enum ReadySetError {
     #[error("HTTP request failed: {0}")]
     HttpRequestFailed(String),
 
+    /// A shard index was used for a domain that doesn't have that many shards
+    #[error("Shard {shard} out of bounds for domain {domain_index} with {num_shards} shards")]
+    ShardIndexOutOfBounds {
+        shard: usize,
+        domain_index: usize,
+        num_shards: usize,
+    },
+
+    /// A replica index was used for a domain that doesn't have that many shards
+    #[error("Replica {replica} out of bounds for view {view_name} with {num_replicas} replicas")]
+    ViewReplicaOutOfBounds {
+        replica: usize,
+        view_name: String,
+        num_replicas: usize,
+    },
+
     /// A request for a domain replica was sent to a worker that doesn't have that domain replica.
-    #[error("Could not find domain {domain_index}.{shard} on worker")]
+    #[error("Could not find domain {domain_index}.{shard}.{replica} on worker")]
     NoSuchReplica {
         /// The index of the domain.
         domain_index: usize,
         /// The shard.
         shard: usize,
+        /// The replica.
+        replica: usize,
     },
 
     /// A request referencing a node was sent to a domain not responsible for that node.
