@@ -376,9 +376,8 @@ impl DataflowState {
             let domain =
                 self.domains
                     .get(&domain_index)
-                    .ok_or_else(|| ReadySetError::NoSuchDomain {
+                    .ok_or_else(|| ReadySetError::UnknownDomain {
                         domain_index: domain_index.index(),
-                        shard: 0,
                     })?;
             let shards = (0..domain.shards())
                 .map(|i| {
@@ -497,9 +496,8 @@ impl DataflowState {
         let txs = (0..self
             .domains
             .get(&node.domain())
-            .ok_or_else(|| ReadySetError::NoSuchDomain {
+            .ok_or_else(|| ReadySetError::UnknownDomain {
                 domain_index: node.domain().index(),
-                shard: 0,
             })?
             .shards())
             .map(|shard| {
@@ -707,7 +705,7 @@ impl DataflowState {
 
         for di in domains.iter() {
             if !self.domains.contains_key(di) {
-                return Err(ReadySetError::NoSuchDomain {
+                return Err(ReadySetError::NoSuchReplica {
                     domain_index: di.index(),
                     shard: 0,
                 });
@@ -1101,7 +1099,7 @@ impl DataflowState {
             match self
                 .domains
                 .get_mut(&domain)
-                .ok_or_else(|| ReadySetError::NoSuchDomain {
+                .ok_or_else(|| ReadySetError::NoSuchReplica {
                     domain_index: domain.index(),
                     shard: 0,
                 })?

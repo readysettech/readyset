@@ -425,9 +425,9 @@ pub enum ReadySetError {
     #[error("HTTP request failed: {0}")]
     HttpRequestFailed(String),
 
-    /// A domain request was sent to a worker that doesn't have that domain.
+    /// A request for a domain replica was sent to a worker that doesn't have that domain replica.
     #[error("Could not find domain {domain_index}.{shard} on worker")]
-    NoSuchDomain {
+    NoSuchReplica {
         /// The index of the domain.
         domain_index: usize,
         /// The shard.
@@ -460,13 +460,11 @@ pub enum ReadySetError {
         domain_index: usize,
     },
 
-    /// A migration tried to reference a domain that doesn't exist.
-    #[error("Migration tried to reference domain {domain_index}.{shard:?}")]
-    MigrationUnknownDomain {
+    /// An unknown domain was requested
+    #[error("Unknown domain {domain_index}")]
+    UnknownDomain {
         /// The index of the domain.
         domain_index: usize,
-        /// The shard, if there is one.
-        shard: Option<usize>,
     },
 
     /// The remote end isn't ready to handle requests yet, or has fallen over.

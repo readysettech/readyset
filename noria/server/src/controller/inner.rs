@@ -508,7 +508,7 @@ impl Leader {
                     let socket_addr = ds
                         .channel_coordinator
                         .get_addr(&replica_address)
-                        .ok_or_else(|| ReadySetError::NoSuchDomain {
+                        .ok_or_else(|| ReadySetError::NoSuchReplica {
                             domain_index: domain_index.index(),
                             shard,
                         })?;

@@ -74,12 +74,13 @@ pub struct StoredDomainRequest {
 impl StoredDomainRequest {
     pub async fn apply(self, mainline: &mut DataflowState) -> ReadySetResult<()> {
         trace!(req=?self, "Applying domain request");
-        let dom = mainline.domains.get_mut(&self.domain).ok_or_else(|| {
-            ReadySetError::MigrationUnknownDomain {
-                domain_index: self.domain.index(),
-                shard: self.shard,
-            }
-        })?;
+        let dom =
+            mainline
+                .domains
+                .get_mut(&self.domain)
+                .ok_or_else(|| ReadySetError::UnknownDomain {
+                    domain_index: self.domain.index(),
+                })?;
 
         match self.req {
             DomainRequest::QueryReplayDone => {
@@ -242,12 +243,12 @@ impl DomainMigrationPlan {
 
     /// Return the number of shards a given domain has.
     pub fn num_shards(&self, domain: DomainIndex) -> ReadySetResult<usize> {
-        self.valid_domains.get(&domain).copied().ok_or_else(|| {
-            ReadySetError::MigrationUnknownDomain {
+        self.valid_domains
+            .get(&domain)
+            .copied()
+            .ok_or_else(|| ReadySetError::UnknownDomain {
                 domain_index: domain.index(),
-                shard: None,
-            }
-        })
+            })
     }
 
     /// Apply all stored changes using the given controller object, placing new domains and sending
@@ -288,9 +289,9 @@ impl DomainMigrationPlan {
             });
             Ok(())
         } else {
-            Err(ReadySetError::MigrationUnknownDomain {
+            Err(ReadySetError::NoSuchReplica {
                 domain_index: domain.index(),
-                shard: Some(shard),
+                shard,
             })
         }
     }
@@ -308,9 +309,8 @@ impl DomainMigrationPlan {
             });
             Ok(())
         } else {
-            Err(ReadySetError::MigrationUnknownDomain {
+            Err(ReadySetError::UnknownDomain {
                 domain_index: domain.index(),
-                shard: None,
             })
         }
     }

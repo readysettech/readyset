@@ -28,7 +28,7 @@ impl DomainHandle {
     pub(super) fn assignment(&self, shard: usize) -> ReadySetResult<WorkerIdentifier> {
         self.shards
             .get(shard)
-            .ok_or_else(|| ReadySetError::NoSuchDomain {
+            .ok_or_else(|| ReadySetError::NoSuchReplica {
                 domain_index: self.idx.index(),
                 shard,
             })
