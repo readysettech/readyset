@@ -352,7 +352,7 @@ impl Worker {
                 replica_address,
                 request,
             } => {
-                let nsde = || ReadySetError::NoSuchDomain {
+                let nsde = || ReadySetError::NoSuchReplica {
                     domain_index: replica_address.domain_index.index(),
                     shard: replica_address.shard,
                 };

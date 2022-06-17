@@ -280,7 +280,7 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
         // so we allow to panic if that happens.
         let guard = self.inner.read().expect("poisoned mutex");
         match guard.addrs.get(key) {
-            None => Err(ReadySetError::NoSuchDomain {
+            None => Err(ReadySetError::NoSuchReplica {
                 domain_index: key.domain_index.index(),
                 shard: key.shard,
             }),
