@@ -95,6 +95,7 @@ pub async fn build_custom(
     // don't return unsupported errors for topk in queries
     builder.set_allow_topk(true);
     builder.set_allow_paginate(true);
+    builder.set_allow_mixed_comparisons(true);
 
     if reader_only {
         builder.as_reader_only();

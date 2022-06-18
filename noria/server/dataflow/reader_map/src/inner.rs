@@ -101,7 +101,10 @@ where
     }
 
     pub(crate) fn len(&self) -> usize {
-        with_map!(self, |map| map.len())
+        match self {
+            Data::BTreeMap { map } => map.num_keys(),
+            Data::HashMap { map } => map.len(),
+        }
     }
 
     /// Returns an empty version of the *same* type of index as this [`Data`]

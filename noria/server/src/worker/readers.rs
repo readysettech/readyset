@@ -307,7 +307,7 @@ impl ReadRequestHandler {
                 Err(Destroyed) => reply_with_error!(ReadySetError::ViewDestroyed),
                 Err(Error(e)) => reply_with_error!(e),
                 Err(miss) => {
-                    let misses = miss.into_misses();
+                    let mut misses = miss.into_misses();
 
                     // if we did a lookup of a range, it might be the case that part of the
                     // range *didn't* miss - we still want the results
@@ -344,9 +344,7 @@ impl ReadRequestHandler {
                             }) {
                                 Ok((rows, _)) => records.extend(rows.into_iter().flatten()),
                                 Err(LookupError::Error(e)) => reply_with_error!(e),
-                                Err(_) => {
-                                    reply_with_error!(internal_err("Reader didn't miss before"))
-                                }
+                                Err(_) => misses.push(key),
                             }
                         }
 
@@ -726,7 +724,7 @@ impl BlockingRead {
                     &self.filter,
                     // Serialize the results, avoiding a clone, unless we already have read
                     // some records for this batch
-                    read[read_i].is_empty() && !self.raw_result,
+                    read[read_i].is_empty() && !self.raw_result && !key.is_range(),
                 ) {
                     Ok(rs) => {
                         read[read_i].try_extend(rs)?;
