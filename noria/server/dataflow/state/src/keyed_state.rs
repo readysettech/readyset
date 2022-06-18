@@ -429,6 +429,8 @@ impl KeyedState {
 
     /// Remove all rows for a randomly chosen key seeded by `seed`, returning the rows along
     /// with the key. Returns `None` if map is empty.
+    // For correct eviction we care about the number of elements present in the map, not intervals,
+    // therefore have to compare len to 0
     pub(super) fn evict_with_seed(&mut self, seed: usize) -> Option<(Rows, Vec<DataType>)> {
         let (rs, key) = match *self {
             KeyedState::SingleHash(ref mut m) if !m.is_empty() => {
@@ -464,42 +466,42 @@ impl KeyedState {
             // we have to iterate the sequence of keys, *and* we have to clone out the
             // keys themselves! we should find a better way to do that.
             // https://app.clubhouse.io/readysettech/story/154
-            KeyedState::SingleBTree(ref mut m) if !m.is_empty() => {
-                let index = seed % m.len();
+            KeyedState::SingleBTree(ref mut m) if m.num_keys() > 0 => {
+                let index = seed % m.num_keys();
                 let key = m.keys().nth(index).unwrap().clone();
                 m.remove_entry(&key).map(|(k, rs)| (rs, vec![k]))
             }
-            KeyedState::DoubleBTree(ref mut m) if !m.is_empty() => {
-                let index = seed % m.len();
+            KeyedState::DoubleBTree(ref mut m) if m.num_keys() > 0 => {
+                let index = seed % m.num_keys();
                 let key = m.keys().nth(index).unwrap().clone();
                 m.remove_entry(&key).map(|(k, rs)| (rs, vec![k.0, k.1]))
             }
-            KeyedState::TriBTree(ref mut m) if !m.is_empty() => {
-                let index = seed % m.len();
+            KeyedState::TriBTree(ref mut m) if m.num_keys() > 0 => {
+                let index = seed % m.num_keys();
                 let key = m.keys().nth(index).unwrap().clone();
                 m.remove_entry(&key)
                     .map(|(k, rs)| (rs, vec![k.0, k.1, k.2]))
             }
-            KeyedState::QuadBTree(ref mut m) if !m.is_empty() => {
-                let index = seed % m.len();
+            KeyedState::QuadBTree(ref mut m) if m.num_keys() > 0 => {
+                let index = seed % m.num_keys();
                 let key = m.keys().nth(index).unwrap().clone();
                 m.remove_entry(&key)
                     .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3]))
             }
-            KeyedState::QuinBTree(ref mut m) if !m.is_empty() => {
-                let index = seed % m.len();
+            KeyedState::QuinBTree(ref mut m) if m.num_keys() > 0 => {
+                let index = seed % m.num_keys();
                 let key = m.keys().nth(index).unwrap().clone();
                 m.remove_entry(&key)
                     .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3, k.4]))
             }
-            KeyedState::SexBTree(ref mut m) if !m.is_empty() => {
-                let index = seed % m.len();
+            KeyedState::SexBTree(ref mut m) if m.num_keys() > 0 => {
+                let index = seed % m.num_keys();
                 let key = m.keys().nth(index).unwrap().clone();
                 m.remove_entry(&key)
                     .map(|(k, rs)| (rs, vec![k.0, k.1, k.2, k.3, k.4, k.5]))
             }
-            KeyedState::MultiBTree(ref mut m, _) if !m.is_empty() => {
-                let index = seed % m.len();
+            KeyedState::MultiBTree(ref mut m, _) if m.num_keys() > 0 => {
+                let index = seed % m.num_keys();
                 let key = m.keys().nth(index).unwrap().clone();
                 m.remove_entry(&key).map(|(k, rs)| (rs, k))
             }

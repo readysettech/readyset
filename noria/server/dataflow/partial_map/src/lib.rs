@@ -233,7 +233,7 @@ where
     ///
     /// Note that this does *not* consider ranges, since for certain keys (strings, etc.) that are
     /// noncontiguous that's undecidable
-    pub fn len(&self) -> usize {
+    pub fn num_keys(&self) -> usize {
         self.map.len()
     }
 

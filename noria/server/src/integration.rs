@@ -7780,7 +7780,7 @@ async fn partial_join_on_one_parent() {
     assert_eq!(res2.len(), 20);
 }
 
-async fn aggressive_eviction_impl() {
+async fn aggressive_eviction_setup() -> crate::Handle {
     let mut g = build(
         "aggressive_eviction",
         None,
@@ -7807,7 +7807,9 @@ async fn aggressive_eviction_impl() {
             `article_id` int(11) NOT NULL
         );
 
-         CREATE CACHE w FROM SELECT A.id, A.title, A.keywords, A.creation_time, A.short_text, A.url FROM articles AS A, recommendations AS R WHERE ((A.id = R.article_id) AND (R.user_id = ?)) LIMIT 10;
+        CREATE CACHE w FROM SELECT A.id, A.title, A.keywords, A.creation_time, A.short_text, A.url FROM articles AS A, recommendations AS R WHERE ((A.id = R.article_id) AND (R.user_id = ?)) LIMIT 10;
+
+        CREATE CACHE v FROM SELECT A.id, A.title, A.keywords, A.creation_time, A.short_text, A.url FROM articles AS A, recommendations AS R WHERE ((A.id = R.article_id) AND (R.user_id > ?)) LIMIT 10;
         ".parse().unwrap(),
     )
     .await
@@ -7843,6 +7845,11 @@ async fn aggressive_eviction_impl() {
         .await
         .unwrap();
 
+    g
+}
+
+async fn aggressive_eviction_impl() {
+    let mut g = aggressive_eviction_setup().await;
     let mut view = g.view("w").await.unwrap();
 
     for i in 0..500 {
@@ -7863,6 +7870,28 @@ async fn aggressive_eviction_impl() {
     }
 }
 
+async fn aggressive_eviction_range_impl() {
+    let mut g = aggressive_eviction_setup().await;
+
+    let mut view = g.view("v").await.unwrap();
+
+    for i in (0..500).rev() {
+        let offset = i % 10;
+        let vq = ViewQuery {
+            key_comparisons: vec![KeyComparison::Range((
+                Bound::Included(vec1![DataType::Int(offset)]),
+                Bound::Included(vec1![DataType::Int(offset + 20)]),
+            ))],
+            block: true,
+            filter: None,
+            timestamp: None,
+        };
+
+        let r = view.raw_lookup(vq).await.unwrap().into_results().unwrap();
+        assert_eq!(r.len(), 1);
+    }
+}
+
 rusty_fork_test! {
     #[test]
     fn aggressive_eviction() {
@@ -7876,6 +7905,20 @@ rusty_fork_test! {
             .build()
             .unwrap();
         rt.block_on(aggressive_eviction_impl());
+    }
+
+    #[test]
+    fn aggressive_eviction_range() {
+        if skip_with_flaky_finder() {
+            return;
+        }
+
+        // #[tokio::test] doesn't play well with rusty_fork_test, so have to do this manually
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(aggressive_eviction_range_impl());
     }
 }
 
