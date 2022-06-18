@@ -3,6 +3,8 @@
 use nom_sql::{self, ColumnConstraint, SqlType};
 use noria_errors::{unsupported, ReadySetResult};
 
+use crate::constants::DEFAULT_CHARACTER_SET;
+
 /// Checks if `c1` is a subtype of `c2`.
 pub(crate) fn is_subtype(c1: mysql_srv::ColumnType, c2: mysql_srv::ColumnType) -> bool {
     use mysql_srv::ColumnType::*;
@@ -149,6 +151,7 @@ pub(crate) fn convert_column(
         column: col.column.name.to_string(),
         coltype,
         colflags,
+        character_set: DEFAULT_CHARACTER_SET,
     })
 }
 

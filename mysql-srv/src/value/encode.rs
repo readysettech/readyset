@@ -835,6 +835,7 @@ mod tests {
                         column: String::new(),
                         coltype: $ct,
                         colflags: ColumnFlags::empty(),
+                        character_set: 33,
                     };
 
                     if !$sig {

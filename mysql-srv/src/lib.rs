@@ -64,6 +64,7 @@
 //!                         column: "@@max_allowed_packet".to_owned(),
 //!                         coltype: myc::constants::ColumnType::MYSQL_TYPE_LONG,
 //!                         colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
+//!                         character_set: myc::constants::UTF8_GENERAL_CI,
 //!                     }];
 //!                     let mut w = results.start(cols).await?;
 //!                     w.write_row(iter::once(67108864u32))?;
@@ -78,12 +79,14 @@
 //!                     column: "a".to_string(),
 //!                     coltype: ColumnType::MYSQL_TYPE_LONGLONG,
 //!                     colflags: ColumnFlags::empty(),
+//!                     character_set: myc::constants::UTF8_GENERAL_CI,
 //!                 },
 //!                 Column {
 //!                     table: "foo".to_string(),
 //!                     column: "b".to_string(),
 //!                     coltype: ColumnType::MYSQL_TYPE_STRING,
 //!                     colflags: ColumnFlags::empty(),
+//!                     character_set: myc::constants::UTF8_GENERAL_CI,
 //!                 },
 //!             ];
 //!
@@ -193,6 +196,8 @@ pub struct Column {
     pub column: String,
     /// This column's type>
     pub coltype: ColumnType,
+    /// Holds the character set for this column.
+    pub character_set: u16,
     /// Any flags associated with this column.
     ///
     /// Of particular interest are `ColumnFlags::UNSIGNED_FLAG` and `ColumnFlags::NOT_NULL_FLAG`.
@@ -205,6 +210,7 @@ impl From<&mysql_async::Column> for Column {
             table: c.table_str().to_string(),
             column: c.name_str().to_string(),
             coltype: c.column_type(),
+            character_set: c.character_set(),
             colflags: c.flags(),
         }
     }
