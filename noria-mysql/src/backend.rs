@@ -18,6 +18,7 @@ use tokio::io::{self, AsyncWrite};
 use tracing::{error, trace};
 use upstream::StatementMeta;
 
+use crate::constants::DEFAULT_CHARACTER_SET;
 use crate::schema::convert_column;
 use crate::upstream::{self, MySqlUpstream};
 use crate::value::mysql_value_to_datatype;
@@ -120,6 +121,7 @@ async fn write_meta_table<W: AsyncWrite + Unpin>(
             column: v.name.to_string(),
             coltype: ColumnType::MYSQL_TYPE_STRING,
             colflags: ColumnFlags::empty(),
+            character_set: DEFAULT_CHARACTER_SET,
         })
         .collect::<Vec<_>>();
 
@@ -146,12 +148,14 @@ async fn write_meta_variables<W: AsyncWrite + Unpin>(
             column: "Variable_name".to_string(),
             coltype: ColumnType::MYSQL_TYPE_STRING,
             colflags: ColumnFlags::empty(),
+            character_set: DEFAULT_CHARACTER_SET,
         },
         Column {
             table: "".to_owned(),
             column: "Value".to_string(),
             coltype: ColumnType::MYSQL_TYPE_STRING,
             colflags: ColumnFlags::empty(),
+            character_set: DEFAULT_CHARACTER_SET,
         },
     ];
     let mut writer = results.start(&cols).await?;

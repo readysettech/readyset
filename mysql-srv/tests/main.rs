@@ -23,6 +23,8 @@ use mysql_srv::{
 use tokio::io::AsyncWrite;
 use tokio::net::tcp::OwnedWriteHalf;
 
+static DEFAULT_CHARACTER_SET: u16 = myc::constants::UTF8_GENERAL_CI;
+
 struct TestingShim<Q, P, E, I, W> {
     columns: Vec<Column>,
     params: Vec<Column>,
@@ -96,6 +98,7 @@ where
                         column: "@@max_allowed_packet".to_owned(),
                         coltype: myc::constants::ColumnType::MYSQL_TYPE_LONG,
                         colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
+                        character_set: DEFAULT_CHARACTER_SET,
                     }];
                     let mut w = results.start(cols).await?;
                     w.write_row(iter::once(67108864u32))?;
@@ -294,6 +297,7 @@ fn no_rows() {
         column: "a".to_owned(),
         coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
         colflags: myc::constants::ColumnFlags::empty(),
+        character_set: DEFAULT_CHARACTER_SET,
     }];
     TestingShim::new(
         move |_, w| {
@@ -376,6 +380,7 @@ fn it_queries_nulls() {
                 column: "a".to_owned(),
                 coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
                 colflags: myc::constants::ColumnFlags::empty(),
+                character_set: DEFAULT_CHARACTER_SET,
             }];
             Box::pin(async move {
                 let mut w = w.start(&cols).await?;
@@ -403,6 +408,7 @@ fn it_queries() {
                 column: "a".to_owned(),
                 coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
                 colflags: myc::constants::ColumnFlags::empty(),
+                character_set: DEFAULT_CHARACTER_SET,
             }];
             Box::pin(async move {
                 let mut w = w.start(&cols).await?;
@@ -430,6 +436,7 @@ fn multi_result() {
                 column: "a".to_owned(),
                 coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
                 colflags: myc::constants::ColumnFlags::empty(),
+                character_set: DEFAULT_CHARACTER_SET,
             }];
             Box::pin(async move {
                 let mut row = w.start(&cols).await?;
@@ -468,12 +475,14 @@ fn it_queries_many_rows() {
                     column: "a".to_owned(),
                     coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
                     colflags: myc::constants::ColumnFlags::empty(),
+                    character_set: DEFAULT_CHARACTER_SET,
                 },
                 Column {
                     table: String::new(),
                     column: "b".to_owned(),
                     coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
                     colflags: myc::constants::ColumnFlags::empty(),
+                    character_set: DEFAULT_CHARACTER_SET,
                 },
             ];
             Box::pin(async move {
@@ -508,6 +517,7 @@ fn it_prepares() {
         column: "a".to_owned(),
         coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
         colflags: myc::constants::ColumnFlags::empty(),
+        character_set: DEFAULT_CHARACTER_SET,
     }];
     let cols2 = cols.clone();
     let params = vec![Column {
@@ -515,6 +525,7 @@ fn it_prepares() {
         column: "c".to_owned(),
         coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
         colflags: myc::constants::ColumnFlags::empty(),
+        character_set: DEFAULT_CHARACTER_SET,
     }];
 
     TestingShim::new(
@@ -565,42 +576,49 @@ fn insert_exec() {
             column: "username".to_owned(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_VARCHAR,
             colflags: myc::constants::ColumnFlags::empty(),
+            character_set: DEFAULT_CHARACTER_SET,
         },
         Column {
             table: String::new(),
             column: "email".to_owned(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_VARCHAR,
             colflags: myc::constants::ColumnFlags::empty(),
+            character_set: DEFAULT_CHARACTER_SET,
         },
         Column {
             table: String::new(),
             column: "pw".to_owned(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_VARCHAR,
             colflags: myc::constants::ColumnFlags::empty(),
+            character_set: DEFAULT_CHARACTER_SET,
         },
         Column {
             table: String::new(),
             column: "created".to_owned(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_DATETIME,
             colflags: myc::constants::ColumnFlags::empty(),
+            character_set: DEFAULT_CHARACTER_SET,
         },
         Column {
             table: String::new(),
             column: "session".to_owned(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_VARCHAR,
             colflags: myc::constants::ColumnFlags::empty(),
+            character_set: DEFAULT_CHARACTER_SET,
         },
         Column {
             table: String::new(),
             column: "rss".to_owned(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_VARCHAR,
             colflags: myc::constants::ColumnFlags::empty(),
+            character_set: DEFAULT_CHARACTER_SET,
         },
         Column {
             table: String::new(),
             column: "mail".to_owned(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_VARCHAR,
             colflags: myc::constants::ColumnFlags::empty(),
+            character_set: DEFAULT_CHARACTER_SET,
         },
     ];
 
@@ -707,6 +725,7 @@ fn send_long() {
         column: "a".to_owned(),
         coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
         colflags: myc::constants::ColumnFlags::empty(),
+        character_set: DEFAULT_CHARACTER_SET,
     }];
     let cols2 = cols.clone();
     let params = vec![Column {
@@ -714,6 +733,7 @@ fn send_long() {
         column: "c".to_owned(),
         coltype: myc::constants::ColumnType::MYSQL_TYPE_BLOB,
         colflags: myc::constants::ColumnFlags::empty(),
+        character_set: DEFAULT_CHARACTER_SET,
     }];
 
     TestingShim::new(
@@ -764,12 +784,14 @@ fn it_prepares_many() {
             column: "a".to_owned(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
             colflags: myc::constants::ColumnFlags::empty(),
+            character_set: DEFAULT_CHARACTER_SET,
         },
         Column {
             table: String::new(),
             column: "b".to_owned(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
             colflags: myc::constants::ColumnFlags::empty(),
+            character_set: DEFAULT_CHARACTER_SET,
         },
     ];
     let cols2 = cols.clone();
@@ -816,6 +838,7 @@ fn prepared_empty() {
         column: "a".to_owned(),
         coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
         colflags: myc::constants::ColumnFlags::empty(),
+        character_set: DEFAULT_CHARACTER_SET,
     }];
     let cols2 = cols;
     let params = vec![Column {
@@ -823,6 +846,7 @@ fn prepared_empty() {
         column: "c".to_owned(),
         coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
         colflags: myc::constants::ColumnFlags::empty(),
+        character_set: DEFAULT_CHARACTER_SET,
     }];
 
     TestingShim::new(
@@ -853,6 +877,7 @@ fn prepared_no_params() {
         column: "a".to_owned(),
         coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
         colflags: myc::constants::ColumnFlags::empty(),
+        character_set: DEFAULT_CHARACTER_SET,
     }];
     let cols2 = cols.clone();
     let params = vec![];
@@ -888,12 +913,14 @@ fn prepared_nulls() {
             column: "a".to_owned(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
             colflags: myc::constants::ColumnFlags::empty(),
+            character_set: DEFAULT_CHARACTER_SET,
         },
         Column {
             table: String::new(),
             column: "b".to_owned(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
             colflags: myc::constants::ColumnFlags::empty(),
+            character_set: DEFAULT_CHARACTER_SET,
         },
     ];
     let cols2 = cols.clone();
@@ -903,12 +930,14 @@ fn prepared_nulls() {
             column: "c".to_owned(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
             colflags: myc::constants::ColumnFlags::empty(),
+            character_set: DEFAULT_CHARACTER_SET,
         },
         Column {
             table: String::new(),
             column: "d".to_owned(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
             colflags: myc::constants::ColumnFlags::empty(),
+            character_set: DEFAULT_CHARACTER_SET,
         },
     ];
 
@@ -965,6 +994,7 @@ fn prepared_no_rows() {
         column: "a".to_owned(),
         coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
         colflags: myc::constants::ColumnFlags::empty(),
+        character_set: DEFAULT_CHARACTER_SET,
     }];
     let cols2 = cols.clone();
     TestingShim::new(

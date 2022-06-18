@@ -4,7 +4,7 @@ use std::sync::Arc;
 use byteorder::{LittleEndian, WriteBytesExt};
 use tokio::io::AsyncWrite;
 
-use crate::myc::constants::{StatusFlags, UTF8_GENERAL_CI};
+use crate::myc::constants::StatusFlags;
 use crate::myc::io::WriteMysqlExt;
 use crate::packet::PacketWriter;
 use crate::{Column, ErrorKind};
@@ -115,7 +115,7 @@ fn write_column_defintion(c: &Column, buf: &mut Vec<u8>) {
     buf.write_lenenc_str(c.column.as_bytes()).unwrap();
     buf.write_lenenc_str(b"").unwrap();
     buf.write_lenenc_int(0xC).unwrap();
-    buf.write_u16::<LittleEndian>(UTF8_GENERAL_CI).unwrap();
+    buf.write_u16::<LittleEndian>(c.character_set).unwrap();
     buf.write_u32::<LittleEndian>(1024).unwrap();
     buf.write_u8(c.coltype as u8).unwrap();
     buf.write_u16::<LittleEndian>(c.colflags.bits()).unwrap();
