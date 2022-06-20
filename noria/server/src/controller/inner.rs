@@ -141,7 +141,6 @@ impl Leader {
         }));
     }
 
-    #[allow(unused_variables)] // `query` is not used unless debug_assertions is enabled
     #[failpoint("controller-request")]
     pub(super) fn external_request(
         &self,
@@ -206,7 +205,6 @@ impl Leader {
                     return_serialized!(ds.get_instances());
                 }
                 (&Method::GET | &Method::POST, "/controller_uri") => {
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
                     return_serialized!(self.controller_uri);
                 }
                 (&Method::GET, "/workers") | (&Method::POST, "/workers") => {
