@@ -162,6 +162,10 @@ impl Protocol {
                             parameter_value: "UTC".to_owned(),
                         },
                         BackendMessage::ParameterStatus {
+                            parameter_name: "standard_conforming_strings".to_owned(),
+                            parameter_value: "on".to_owned(),
+                        },
+                        BackendMessage::ParameterStatus {
                             parameter_name: "server_version".to_owned(),
                             parameter_value: B::SERVER_VERSION.to_owned(),
                         },
@@ -728,6 +732,10 @@ mod tests {
                 BackendMessage::ParameterStatus {
                     parameter_name: "TimeZone".to_owned(),
                     parameter_value: "UTC".to_owned(),
+                },
+                BackendMessage::ParameterStatus {
+                    parameter_name: "standard_conforming_strings".to_owned(),
+                    parameter_value: "on".to_owned(),
                 },
                 BackendMessage::ParameterStatus {
                     parameter_name: "server_version".to_owned(),
