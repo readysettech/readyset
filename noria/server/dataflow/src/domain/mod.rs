@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::{cell, cmp, mem, time};
 
 use ahash::RandomState;
-use dataflow_state::{MaterializedNodeState, RangeLookupResult};
+use dataflow_state::{KeyCount, MaterializedNodeState, RangeLookupResult};
 use failpoint_macros::failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
@@ -1945,6 +1945,28 @@ impl Domain {
             }
             DomainRequest::RequestSnapshottingTables => {
                 Ok(Some(bincode::serialize(&self.snapshotting_base_nodes())?))
+            }
+            DomainRequest::RequestNodeKeyCounts => {
+                let mut res = Vec::new();
+                for (local_index, node_ref) in self.nodes.iter() {
+                    let node = node_ref.borrow();
+                    if node.is_internal() || node.is_base() {
+                        if let Some(state) = self.state.get(local_index) {
+                            res.push((node.global_addr(), state.key_count()))
+                        }
+                    } else if node.is_reader() {
+                        let reader_addr = (node.global_addr(), node.name().clone(), 0).into();
+                        #[allow(clippy::unwrap_used)] // lock poisoning is unrecoverable
+                        let key_count = self
+                            .readers
+                            .lock()
+                            .unwrap()
+                            .get(&reader_addr)
+                            .map_or(0, |handle| handle.len());
+                        res.push((node.global_addr(), KeyCount::ExactKeyCount(key_count)))
+                    }
+                }
+                Ok(Some(bincode::serialize(&res)?))
             }
             DomainRequest::Packet(pkt) => {
                 self.handle_packet(Box::new(pkt), executor)?;
