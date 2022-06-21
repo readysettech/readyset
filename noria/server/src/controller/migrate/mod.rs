@@ -36,7 +36,7 @@ use std::time::{Duration, Instant};
 
 use array2::Array2;
 use dataflow::node::Column;
-use dataflow::post_lookup::PostLookup;
+use dataflow::post_lookup::ReaderProcessing;
 use dataflow::prelude::*;
 use dataflow::{node, DomainRequest};
 use metrics::{counter, histogram};
@@ -605,14 +605,14 @@ impl<'dataflow> Migration<'dataflow> {
         &mut self,
         n: NodeIndex,
         name: Option<String>,
-        post_lookup: PostLookup,
+        reader_processing: ReaderProcessing,
     ) -> NodeIndex {
         use std::collections::hash_map::Entry;
         match self.readers.entry(n) {
             Entry::Occupied(ni) => *ni.into_mut(),
             Entry::Vacant(e) => {
                 // make a reader
-                let r = node::special::Reader::new(n, post_lookup);
+                let r = node::special::Reader::new(n, reader_processing);
 
                 #[allow(clippy::indexing_slicing)] // NodeIndex must exist in ingredients
                 let mut r = if let Some(name) = name {
@@ -648,16 +648,16 @@ impl<'dataflow> Migration<'dataflow> {
     }
 
     /// Set up the given node such that its output can be efficiently queried, with the given
-    /// [`PostLookup`] operations to be performed on the results of all lookups
+    /// [`ReaderProcessing`] operations to be performed on the results of all lookups
     ///
     /// To query into the maintained state, use `Leader::get_getter`.
-    pub fn maintain_anonymous_with_post_lookup(
+    pub fn maintain_anonymous_with_reader_processing(
         &mut self,
         n: NodeIndex,
         index: &Index,
-        post_lookup: PostLookup,
+        reader_processing: ReaderProcessing,
     ) -> NodeIndex {
-        let ri = self.ensure_reader_for(n, None, post_lookup);
+        let ri = self.ensure_reader_for(n, None, reader_processing);
 
         // we know it's a reader - we just made it!
         #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
@@ -677,10 +677,10 @@ impl<'dataflow> Migration<'dataflow> {
         name: SqlIdentifier,
         n: NodeIndex,
         index: &Index,
-        post_lookup: PostLookup,
+        reader_processing: ReaderProcessing,
         placeholder_map: Vec<(ViewPlaceholder, KeyColumnIdx)>,
     ) {
-        let ri = self.ensure_reader_for(n, Some(name.to_string()), post_lookup);
+        let ri = self.ensure_reader_for(n, Some(name.to_string()), reader_processing);
 
         // we know it's a reader - we just made it!
         #[allow(clippy::indexing_slicing, clippy::unwrap_used)]

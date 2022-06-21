@@ -3,7 +3,7 @@ use std::hash::Hash;
 
 use reader_map::handles::{ReadHandle, WriteHandle};
 use reader_map::Error::*;
-use reader_map::Options;
+use reader_map::{DefaultInsertionOrder, Options};
 
 macro_rules! assert_match {
     ($x:expr, $p:pat) => {
@@ -21,8 +21,8 @@ fn with_meta_and_timestamp<K, V, M, T>(
     meta: M,
     timestamp: T,
 ) -> (
-    WriteHandle<K, V, M, T, RandomState>,
-    ReadHandle<K, V, M, T, RandomState>,
+    WriteHandle<K, V, DefaultInsertionOrder, M, T, RandomState>,
+    ReadHandle<K, V, DefaultInsertionOrder, M, T, RandomState>,
 )
 where
     K: Ord + Clone + Hash,

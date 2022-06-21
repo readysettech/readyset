@@ -9,7 +9,7 @@ use noria::{KeyColumnIdx, ViewPlaceholder};
 use serde::{Deserialize, Serialize};
 use tracing::{trace, warn};
 
-use self::post_lookup::PostLookup;
+use self::post_lookup::ReaderProcessing;
 use crate::prelude::*;
 use crate::{backlog, LookupError};
 
@@ -19,7 +19,7 @@ pub struct Reader {
     index: Option<Index>,
 
     /// Operations to perform on the result set after the rows are returned from the lookup
-    post_lookup: PostLookup,
+    reader_processing: ReaderProcessing,
 
     /// Vector of (placeholder_number, key_column_index). The placeholder_number corresponds to
     /// where the placeholder appears in the SQL query and the key_column_index corresponds to the
@@ -33,7 +33,7 @@ impl Clone for Reader {
     fn clone(&self) -> Self {
         Reader {
             for_node: self.for_node,
-            post_lookup: self.post_lookup.clone(),
+            reader_processing: self.reader_processing.clone(),
             index: self.index.clone(),
             placeholder_map: self.placeholder_map.clone(),
         }
@@ -41,10 +41,10 @@ impl Clone for Reader {
 }
 
 impl Reader {
-    pub fn new(for_node: NodeIndex, post_lookup: PostLookup) -> Self {
+    pub fn new(for_node: NodeIndex, reader_processing: ReaderProcessing) -> Self {
         Reader {
             for_node,
-            post_lookup,
+            reader_processing,
             index: None,
             placeholder_map: Default::default(),
         }
@@ -59,7 +59,7 @@ impl Reader {
     pub(in crate::node) fn take(&mut self) -> Self {
         Self {
             for_node: self.for_node,
-            post_lookup: self.post_lookup.clone(),
+            reader_processing: self.reader_processing.clone(),
             index: self.index.clone(),
             placeholder_map: self.placeholder_map.clone(),
         }
@@ -215,7 +215,7 @@ impl Reader {
     }
 
     /// Get a reference to the reader's post lookup.
-    pub fn post_lookup(&self) -> &PostLookup {
-        &self.post_lookup
+    pub fn reader_processing(&self) -> &ReaderProcessing {
+        &self.reader_processing
     }
 }

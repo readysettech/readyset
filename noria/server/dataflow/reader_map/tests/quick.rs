@@ -4,6 +4,7 @@
 extern crate reader_map;
 
 use reader_map::handles::{ReadHandle, WriteHandle};
+use reader_map::DefaultInsertionOrder;
 
 extern crate quickcheck;
 #[macro_use(quickcheck)]
@@ -113,7 +114,7 @@ where
 
 fn do_ops<K, V, S>(
     ops: &[Op<K, V>],
-    reader_map: &mut WriteHandle<K, V, (), (), S>,
+    reader_map: &mut WriteHandle<K, V, DefaultInsertionOrder, (), (), S>,
     write_ref: &mut BTreeMap<K, Vec<V>>,
     read_ref: &mut BTreeMap<K, Vec<V>>,
 ) where
@@ -155,7 +156,10 @@ fn do_ops<K, V, S>(
     }
 }
 
-fn assert_maps_equivalent<K, V, S>(a: &ReadHandle<K, V, (), (), S>, b: &BTreeMap<K, Vec<V>>) -> bool
+fn assert_maps_equivalent<K, V, S>(
+    a: &ReadHandle<K, V, DefaultInsertionOrder, (), (), S>,
+    b: &BTreeMap<K, Vec<V>>,
+) -> bool
 where
     K: Clone + Ord + Debug + Hash,
     V: Hash + Eq + Debug + Ord + Copy,

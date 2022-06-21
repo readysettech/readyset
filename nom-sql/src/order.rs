@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::{fmt, str};
 
 use itertools::Itertools;
@@ -18,6 +19,18 @@ use crate::{Dialect, FieldReference};
 pub enum OrderType {
     OrderAscending,
     OrderDescending,
+}
+
+impl OrderType {
+    /// Reverse the provided [`Ordering`] if this [`OrderType`] if of type
+    /// [`OrderType::OrderDescending`], otherwise do nothing
+    #[inline(always)]
+    pub fn apply(&self, ord: Ordering) -> Ordering {
+        match self {
+            OrderType::OrderAscending => ord,
+            OrderType::OrderDescending => ord.reverse(),
+        }
+    }
 }
 
 impl fmt::Display for OrderType {

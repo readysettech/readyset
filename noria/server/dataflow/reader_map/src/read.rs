@@ -21,16 +21,16 @@ pub use crate::inner::Miss;
 /// Note that any changes made to the map will not be made visible until the writer calls
 /// [`publish`](crate::WriteHandle::publish). In other words, all operations performed on a
 /// `ReadHandle` will *only* see writes to the map that preceeded the last call to `publish`.
-pub struct ReadHandle<K, V, M = (), T = (), S = RandomState>
+pub struct ReadHandle<K, V, I, M = (), T = (), S = RandomState>
 where
     K: Ord + Clone,
     S: BuildHasher,
     T: Clone,
 {
-    pub(crate) handle: left_right::ReadHandle<Inner<K, V, M, T, S>>,
+    pub(crate) handle: left_right::ReadHandle<Inner<K, V, M, T, S, I>>,
 }
 
-impl<K, V, M, T, S> fmt::Debug for ReadHandle<K, V, M, T, S>
+impl<K, V, I, M, T, S> fmt::Debug for ReadHandle<K, V, I, M, T, S>
 where
     K: Ord + Clone + fmt::Debug,
     S: BuildHasher,
@@ -44,7 +44,7 @@ where
     }
 }
 
-impl<K, V, M, T, S> Clone for ReadHandle<K, V, M, T, S>
+impl<K, V, I, M, T, S> Clone for ReadHandle<K, V, I, M, T, S>
 where
     K: Ord + Clone,
     S: BuildHasher,
@@ -57,18 +57,18 @@ where
     }
 }
 
-impl<K, V, M, T, S> ReadHandle<K, V, M, T, S>
+impl<K, V, I, M, T, S> ReadHandle<K, V, I, M, T, S>
 where
     K: Ord + Clone,
     S: BuildHasher,
     T: Clone,
 {
-    pub(crate) fn new(handle: left_right::ReadHandle<Inner<K, V, M, T, S>>) -> Self {
+    pub(crate) fn new(handle: left_right::ReadHandle<Inner<K, V, M, T, S, I>>) -> Self {
         Self { handle }
     }
 }
 
-impl<K, V, M, T, S> ReadHandle<K, V, M, T, S>
+impl<K, V, I, M, T, S> ReadHandle<K, V, I, M, T, S>
 where
     K: Ord + Clone + Hash,
     V: Eq + Hash,
@@ -76,7 +76,7 @@ where
     M: Clone,
     T: Clone,
 {
-    fn enter_inner(&self) -> Result<ReadGuard<'_, Inner<K, V, M, T, S>>> {
+    fn enter_inner(&self) -> Result<ReadGuard<'_, Inner<K, V, M, T, S, I>>> {
         self.handle.enter().ok_or(Error::Destroyed)
     }
 
@@ -89,7 +89,7 @@ where
     /// If no publish has happened, or the map has been destroyed, this function returns `None`.
     ///
     /// See [`MapReadRef`].
-    pub fn enter(&self) -> Result<MapReadRef<'_, K, V, M, T, S>> {
+    pub fn enter(&self) -> Result<MapReadRef<'_, K, V, I, M, T, S>> {
         let guard = self.enter_inner()?;
         if !guard.ready {
             return Err(Error::NotPublished);

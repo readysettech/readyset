@@ -267,30 +267,33 @@ pub mod refs {
 /// In particular, the options dictate the hashing function, meta type, and initial capacity of the
 /// map.
 #[must_use]
-pub struct Options<M, T, S> {
+pub struct Options<M, T, S, I> {
     meta: M,
     timestamp: T,
     hasher: S,
     index_type: IndexType,
     capacity: Option<usize>,
     eviction_strategy: EvictionStrategy,
+    insertion_order: Option<I>,
 }
 
-impl<M, T, S> fmt::Debug for Options<M, T, S>
+impl<M, T, S, I> fmt::Debug for Options<M, T, S, I>
 where
     M: fmt::Debug,
     T: fmt::Debug,
+    I: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Options")
             .field("meta", &self.meta)
             .field("timestamp", &self.timestamp)
             .field("capacity", &self.capacity)
+            .field("order", &self.insertion_order)
             .finish()
     }
 }
 
-impl Default for Options<(), (), RandomState> {
+impl Default for Options<(), (), RandomState, DefaultInsertionOrder> {
     fn default() -> Self {
         Options {
             meta: (),
@@ -299,13 +302,14 @@ impl Default for Options<(), (), RandomState> {
             index_type: IndexType::BTreeMap,
             capacity: None,
             eviction_strategy: Default::default(),
+            insertion_order: None,
         }
     }
 }
 
-impl<M, T, S> Options<M, T, S> {
+impl<M, T, S, I> Options<M, T, S, I> {
     /// Set the initial meta value for the map.
-    pub fn with_meta<M2>(self, meta: M2) -> Options<M2, T, S> {
+    pub fn with_meta<M2>(self, meta: M2) -> Options<M2, T, S, I> {
         Options {
             meta,
             timestamp: self.timestamp,
@@ -313,11 +317,12 @@ impl<M, T, S> Options<M, T, S> {
             hasher: self.hasher,
             capacity: self.capacity,
             eviction_strategy: self.eviction_strategy,
+            insertion_order: self.insertion_order,
         }
     }
 
     /// Set the hasher used for the map.
-    pub fn with_hasher<S2>(self, hash_builder: S2) -> Options<M, T, S2> {
+    pub fn with_hasher<S2>(self, hash_builder: S2) -> Options<M, T, S2, I> {
         Options {
             meta: self.meta,
             timestamp: self.timestamp,
@@ -325,11 +330,12 @@ impl<M, T, S> Options<M, T, S> {
             hasher: hash_builder,
             capacity: self.capacity,
             eviction_strategy: self.eviction_strategy,
+            insertion_order: self.insertion_order,
         }
     }
 
     /// Set the initial capacity for the map.
-    pub fn with_capacity(self, capacity: usize) -> Options<M, T, S> {
+    pub fn with_capacity(self, capacity: usize) -> Options<M, T, S, I> {
         Options {
             meta: self.meta,
             timestamp: self.timestamp,
@@ -337,11 +343,12 @@ impl<M, T, S> Options<M, T, S> {
             hasher: self.hasher,
             capacity: Some(capacity),
             eviction_strategy: self.eviction_strategy,
+            insertion_order: self.insertion_order,
         }
     }
 
     /// Sets the initial timestamp of the map.
-    pub fn with_timestamp<T2>(self, timestamp: T2) -> Options<M, T2, S> {
+    pub fn with_timestamp<T2>(self, timestamp: T2) -> Options<M, T2, S, I> {
         Options {
             meta: self.meta,
             timestamp,
@@ -349,6 +356,20 @@ impl<M, T, S> Options<M, T, S> {
             hasher: self.hasher,
             capacity: self.capacity,
             eviction_strategy: self.eviction_strategy,
+            insertion_order: self.insertion_order,
+        }
+    }
+
+    /// Sets the desired [`InsertionOrder`] for the map
+    pub fn with_insertion_order<I2>(self, insertion_order: Option<I2>) -> Options<M, T, S, I2> {
+        Options {
+            meta: self.meta,
+            timestamp: self.timestamp,
+            index_type: self.index_type,
+            hasher: self.hasher,
+            capacity: self.capacity,
+            eviction_strategy: self.eviction_strategy,
+            insertion_order,
         }
     }
 
@@ -366,13 +387,14 @@ impl<M, T, S> Options<M, T, S> {
 
     /// Create the map, and construct the read and write handles used to access it.
     #[allow(clippy::type_complexity)]
-    pub fn construct<K, V>(self) -> (WriteHandle<K, V, M, T, S>, ReadHandle<K, V, M, T, S>)
+    pub fn construct<K, V>(self) -> (WriteHandle<K, V, I, M, T, S>, ReadHandle<K, V, I, M, T, S>)
     where
         K: Ord + Clone + Hash,
         S: BuildHasher + Clone,
         V: Ord + Clone,
         M: 'static + Clone,
         T: Clone,
+        I: InsertionOrder<V> + Clone,
     {
         let inner = Inner::with_index_type_and_hasher(
             self.index_type,
@@ -380,6 +402,7 @@ impl<M, T, S> Options<M, T, S> {
             self.timestamp,
             self.hasher,
             self.eviction_strategy,
+            self.insertion_order,
         );
 
         let (mut w, r) = left_right::new_from_empty(inner);
@@ -389,13 +412,34 @@ impl<M, T, S> Options<M, T, S> {
     }
 }
 
+/// A trait that is required to keep the inner values in the correct order
+pub trait InsertionOrder<V> {
+    /// Return the position of the element in the list of elements, or the position where it can be
+    /// inserted in order
+    fn get_insertion_order(&self, values: &[V], elem: &V) -> std::result::Result<usize, usize>;
+}
+
+/// The default order of rows in the reader is the default order as defined by
+/// [`slice::binary_search`]
+#[derive(Clone, Debug)]
+pub struct DefaultInsertionOrder {}
+
+impl<V> InsertionOrder<V> for DefaultInsertionOrder
+where
+    V: Ord,
+{
+    fn get_insertion_order(&self, values: &[V], elem: &V) -> std::result::Result<usize, usize> {
+        values.binary_search(elem)
+    }
+}
+
 /// Create an empty eventually consistent map.
 ///
 /// Use the [`Options`](./struct.Options.html) builder for more control over initialization.
 #[allow(clippy::type_complexity)]
 pub fn new<K, V>() -> (
-    WriteHandle<K, V, (), (), RandomState>,
-    ReadHandle<K, V, (), (), RandomState>,
+    WriteHandle<K, V, DefaultInsertionOrder, (), (), RandomState>,
+    ReadHandle<K, V, DefaultInsertionOrder, (), (), RandomState>,
 )
 where
     K: Ord + Clone + Hash,

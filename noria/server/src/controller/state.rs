@@ -365,7 +365,8 @@ impl DataflowState {
         })?;
         #[allow(clippy::indexing_slicing)] // `find_readers_for` returns valid indices
         let returned_cols = reader
-            .post_lookup()
+            .reader_processing()
+            .post_processing
             .returned_cols
             .clone()
             .unwrap_or_else(|| (0..self.ingredients[reader_node].columns().len()).collect());
@@ -432,7 +433,8 @@ impl DataflowState {
                 expected_type: NodeType::Reader,
             })?;
         let returned_cols = reader
-            .post_lookup()
+            .reader_processing()
+            .post_processing
             .returned_cols
             .clone()
             .unwrap_or_else(|| (0..n.columns().len()).collect());
