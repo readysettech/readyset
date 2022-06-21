@@ -334,7 +334,10 @@ lazy_static! {
                 PostgresParameterValue::literal("UTF8"),
             ])),
             ("timezone", AllowedParameterValue::literal("UTC")),
-            ("datestyle", AllowedParameterValue::literal("ISO")),
+            ("datestyle", AllowedParameterValue::one_of([
+                PostgresParameterValue::literal("ISO"),
+                PostgresParameterValue::identifier("iso"),
+            ])),
             ("extra_float_digits", AllowedParameterValue::literal(1)),
             ("TimeZone",  AllowedParameterValue::literal("Etc/UTC")),
             ("bytea_output",  AllowedParameterValue::literal("hex")),
