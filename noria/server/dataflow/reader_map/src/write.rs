@@ -9,6 +9,7 @@ use crate::eviction::EvictionMeta;
 use crate::inner::Inner;
 use crate::read::ReadHandle;
 use crate::values::Values;
+use crate::InsertionOrder;
 
 /// A handle that may be used to modify the eventually consistent map.
 ///
@@ -48,25 +49,27 @@ use crate::values::Values;
 ///     Some(true)
 /// );
 /// ```
-pub struct WriteHandle<K, V, M = (), T = (), S = RandomState>
+pub struct WriteHandle<K, V, I, M = (), T = (), S = RandomState>
 where
     K: Ord + Hash + Clone,
     S: BuildHasher + Clone,
     V: Ord + Clone,
     M: 'static + Clone,
     T: Clone,
+    I: InsertionOrder<V>,
 {
-    handle: left_right::WriteHandle<Inner<K, V, M, T, S>, Operation<K, V, M, T>>,
-    r_handle: ReadHandle<K, V, M, T, S>,
+    handle: left_right::WriteHandle<Inner<K, V, M, T, S, I>, Operation<K, V, M, T>>,
+    r_handle: ReadHandle<K, V, I, M, T, S>,
 }
 
-impl<K, V, M, T, S> fmt::Debug for WriteHandle<K, V, M, T, S>
+impl<K, V, I, M, T, S> fmt::Debug for WriteHandle<K, V, I, M, T, S>
 where
     K: Ord + Hash + Clone + fmt::Debug,
     S: BuildHasher + Clone + fmt::Debug,
     V: Ord + Clone + fmt::Debug,
     M: 'static + Clone + fmt::Debug,
     T: Clone + fmt::Debug,
+    I: InsertionOrder<V>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WriteHandle")
@@ -75,16 +78,17 @@ where
     }
 }
 
-impl<K, V, M, T, S> WriteHandle<K, V, M, T, S>
+impl<K, V, I, M, T, S> WriteHandle<K, V, I, M, T, S>
 where
     K: Ord + Hash + Clone,
     S: BuildHasher + Clone,
     V: Ord + Clone,
     M: 'static + Clone,
     T: Clone,
+    I: InsertionOrder<V>,
 {
     pub(crate) fn new(
-        handle: left_right::WriteHandle<Inner<K, V, M, T, S>, Operation<K, V, M, T>>,
+        handle: left_right::WriteHandle<Inner<K, V, M, T, S, I>, Operation<K, V, M, T>>,
     ) -> Self {
         let r_handle = ReadHandle::new(left_right::ReadHandle::clone(&*handle));
         Self { handle, r_handle }
@@ -123,9 +127,9 @@ where
         self.add_op(Operation::SetTimestamp(timestamp));
     }
 
-    fn add_ops<I>(&mut self, ops: I) -> &mut Self
+    fn add_ops<IT>(&mut self, ops: IT) -> &mut Self
     where
-        I: IntoIterator<Item = Operation<K, V, M, T>>,
+        IT: IntoIterator<Item = Operation<K, V, M, T>>,
     {
         // TODO(grfn): Once https://github.com/jonhoo/rust-evmap/pull/86 is merged this can use
         // `extend`
@@ -254,8 +258,8 @@ where
             .expect("WriteHandle has not been dropped");
         // safety: the writer cannot publish until 'a ends, so we know that reading from the read
         // map is safe for the duration of 'a.
-        let inner: &'a Inner<K, V, M, T, S> =
-            unsafe { std::mem::transmute::<&Inner<K, V, M, T, S>, _>(inner.as_ref()) };
+        let inner: &'a Inner<K, V, M, T, S, I> =
+            unsafe { std::mem::transmute::<&Inner<K, V, M, T, S, I>, _>(inner.as_ref()) };
 
         let nkeys_to_evict = ((inner.data.len() as f64 * ratio) as usize).min(inner.data.len());
         let kvs = inner
@@ -269,22 +273,28 @@ where
     }
 }
 
-impl<K, V, M, T, S> Absorb<Operation<K, V, M, T>> for Inner<K, V, M, T, S>
+impl<K, V, M, T, S, I> Absorb<Operation<K, V, M, T>> for Inner<K, V, M, T, S, I>
 where
     K: Ord + Hash + Clone,
     S: BuildHasher + Clone,
     V: Ord + Clone,
     M: 'static + Clone,
     T: Clone,
+    I: InsertionOrder<V>,
 {
     /// Apply ops in such a way that no values are dropped, only forgotten
-    fn absorb_first(&mut self, op: &mut Operation<K, V, M, T>, _: &Self) {
+    fn absorb_first(&mut self, op: &mut Operation<K, V, M, T>, other: &Self) {
         match op {
             Operation::Add(key, value, eviction_meta, idx) => {
                 let values = self.data_entry(key.clone(), eviction_meta);
                 // Always insert values in sorted order, even if no ordering method is provided,
                 // otherwise it will require a linear scan to remove a value
-                let insert_idx = values.binary_search(value).unwrap_or_else(|i| i);
+                let insert_idx = if let Some(insertion_order) = &other.insertion_order {
+                    insertion_order.get_insertion_order(values, value)
+                } else {
+                    values.binary_search(value)
+                }
+                .unwrap_or_else(|i| i);
                 values.insert(insert_idx, value.clone());
                 *idx = Some(insert_idx);
             }
@@ -292,7 +302,12 @@ where
                 // Because elements are always in sorted order, it is possible to remove the element
                 // using binary search
                 if let Some(e) = self.data.get_mut(key) {
-                    if let Ok(remove_idx) = e.binary_search(value) {
+                    let remove_idx = if let Some(insertion_order) = &other.insertion_order {
+                        insertion_order.get_insertion_order(e, value)
+                    } else {
+                        e.binary_search(value)
+                    };
+                    if let Ok(remove_idx) = remove_idx {
                         e.remove(remove_idx);
                         *idx = Some(remove_idx);
                     }
@@ -330,7 +345,7 @@ where
     }
 
     /// Apply operations while allowing dropping of values
-    fn absorb_second(&mut self, op: Operation<K, V, M, T>, _: &Self) {
+    fn absorb_second(&mut self, op: Operation<K, V, M, T>, other: &Self) {
         match op {
             Operation::Add(key, value, mut eviction_meta, idx) => {
                 let values = self.data_entry(key, &mut eviction_meta);
@@ -339,7 +354,11 @@ where
                     // already passed over by `absorb_first`
                     Some(idx) => idx,
                     // This only happens before the initial publish
-                    None => values.binary_search(&value).unwrap_or_else(|i| i),
+                    None => match &other.insertion_order {
+                        Some(order) => order.get_insertion_order(values, &value),
+                        None => values.binary_search(&value),
+                    }
+                    .unwrap_or_else(|i| i),
                 };
                 values.insert(insert_idx, value);
             }
@@ -348,15 +367,17 @@ where
                     let remove_idx = match idx {
                         // In `absorb_second` there is no need to do binary search again if it was
                         // already passed over by `absorb_first`
-                        Some(idx) => idx,
+                        Some(idx) => Ok(idx),
                         // This only happens before the initial publish or if value is not present,
                         // but in real world usage value is always present
-                        None => match e.binary_search(&value) {
-                            Ok(idx) => idx,
-                            Err(_) => return,
+                        None => match &other.insertion_order {
+                            Some(order) => order.get_insertion_order(e, &value),
+                            None => e.binary_search(&value),
                         },
                     };
-                    e.remove(remove_idx);
+                    if let Ok(remove_idx) = remove_idx {
+                        e.remove(remove_idx);
+                    }
                 }
             }
             Operation::AddRange(range) => self.data.add_range(range),
@@ -398,15 +419,16 @@ where
 
 // allow using write handle for reads
 use std::ops::Deref;
-impl<K, V, M, T, S> Deref for WriteHandle<K, V, M, T, S>
+impl<K, V, I, M, T, S> Deref for WriteHandle<K, V, I, M, T, S>
 where
     K: Ord + Clone + Hash,
     S: BuildHasher + Clone,
     V: Ord + Clone,
     M: 'static + Clone,
     T: Clone,
+    I: InsertionOrder<V>,
 {
-    type Target = ReadHandle<K, V, M, T, S>;
+    type Target = ReadHandle<K, V, I, M, T, S>;
     fn deref(&self) -> &Self::Target {
         &self.r_handle
     }

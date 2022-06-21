@@ -20,16 +20,16 @@ use crate::WriteHandle;
 ///
 /// Since the map remains immutable while this lives, the methods on this type all give you
 /// unguarded references to types contained in the map.
-pub struct MapReadRef<'rh, K, V, M = (), T = (), S = RandomState>
+pub struct MapReadRef<'rh, K, V, I, M = (), T = (), S = RandomState>
 where
     K: Ord + Clone,
     V: Eq + Hash,
     T: Clone,
 {
-    pub(super) guard: ReadGuard<'rh, Inner<K, V, M, T, S>>,
+    pub(super) guard: ReadGuard<'rh, Inner<K, V, M, T, S, I>>,
 }
 
-impl<'rh, K, V, M, T, S> fmt::Debug for MapReadRef<'rh, K, V, M, T, S>
+impl<'rh, K, V, I, M, T, S> fmt::Debug for MapReadRef<'rh, K, V, I, M, T, S>
 where
     K: Ord + Clone,
     V: Eq + Hash,
@@ -46,7 +46,7 @@ where
     }
 }
 
-impl<'rh, K, V, M, T, S> MapReadRef<'rh, K, V, M, T, S>
+impl<'rh, K, V, I, M, T, S> MapReadRef<'rh, K, V, I, M, T, S>
 where
     K: Ord + Clone + Hash,
     V: Eq + Hash,
@@ -173,7 +173,7 @@ where
     }
 }
 
-impl<'rh, K, Q, V, M, T, S> std::ops::Index<&'_ Q> for MapReadRef<'rh, K, V, M, T, S>
+impl<'rh, K, Q, V, M, T, S, I> std::ops::Index<&'_ Q> for MapReadRef<'rh, K, V, I, M, T, S>
 where
     K: Ord + Clone + Borrow<Q> + Hash,
     V: Eq + Hash + Default,
@@ -187,7 +187,7 @@ where
     }
 }
 
-impl<'rg, 'rh, K, V, M, T, S> IntoIterator for &'rg MapReadRef<'rh, K, V, M, T, S>
+impl<'rg, 'rh, K, V, M, T, S, I> IntoIterator for &'rg MapReadRef<'rh, K, V, I, M, T, S>
 where
     K: Ord + Clone + Hash,
     V: Eq + Hash,

@@ -11,13 +11,25 @@ use reader_map::refs::{Miss, ValuesIter};
 use serde::{Deserialize, Serialize};
 use vec1::{vec1, Vec1};
 
+use crate::post_lookup::PreInsertion;
+
 #[derive(Clone, Debug)]
 pub(super) enum Handle {
-    Single(reader_map::handles::ReadHandle<DataType, Box<[DataType]>, i64, Timestamp, RandomState>),
+    Single(
+        reader_map::handles::ReadHandle<
+            DataType,
+            Box<[DataType]>,
+            PreInsertion,
+            i64,
+            Timestamp,
+            RandomState,
+        >,
+    ),
     Many(
         reader_map::handles::ReadHandle<
             Vec<DataType>,
             Box<[DataType]>,
+            PreInsertion,
             i64,
             Timestamp,
             RandomState,
@@ -279,25 +291,27 @@ mod tests {
     use super::*;
 
     fn make_single() -> (
-        WriteHandle<DataType, Box<[DataType]>, i64, Timestamp, RandomState>,
+        WriteHandle<DataType, Box<[DataType]>, PreInsertion, i64, Timestamp, RandomState>,
         Handle,
     ) {
         let (w, r) = reader_map::Options::default()
             .with_meta(-1)
             .with_timestamp(Timestamp::default())
             .with_hasher(RandomState::default())
+            .with_insertion_order(None)
             .construct();
         (w, Handle::Single(r))
     }
 
     fn make_many() -> (
-        WriteHandle<Vec<DataType>, Box<[DataType]>, i64, Timestamp, RandomState>,
+        WriteHandle<Vec<DataType>, Box<[DataType]>, PreInsertion, i64, Timestamp, RandomState>,
         Handle,
     ) {
         let (w, r) = reader_map::Options::default()
             .with_meta(-1)
             .with_timestamp(Timestamp::default())
             .with_hasher(RandomState::default())
+            .with_insertion_order(None)
             .construct();
         (w, Handle::Many(r))
     }

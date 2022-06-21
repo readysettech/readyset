@@ -4,16 +4,25 @@ use ahash::RandomState;
 use noria::consistency::Timestamp;
 
 use super::{key_to_single, Key};
+use crate::post_lookup::PreInsertion;
 use crate::prelude::*;
 
 pub(super) enum Handle {
     Single(
-        reader_map::handles::WriteHandle<DataType, Box<[DataType]>, i64, Timestamp, RandomState>,
+        reader_map::handles::WriteHandle<
+            DataType,
+            Box<[DataType]>,
+            PreInsertion,
+            i64,
+            Timestamp,
+            RandomState,
+        >,
     ),
     Many(
         reader_map::handles::WriteHandle<
             Vec<DataType>,
             Box<[DataType]>,
+            PreInsertion,
             i64,
             Timestamp,
             RandomState,
@@ -133,18 +142,16 @@ impl Handle {
                     debug_assert!(r.len() >= cols);
                     match r {
                         Record::Positive(r) => {
-                            let r = r.into_boxed_slice();
                             memory_delta += r.deep_size_of() as isize;
-                            h.insert(r[key[0]].clone(), r);
+                            h.insert(r[key[0]].clone(), r.into_boxed_slice());
                         }
                         Record::Negative(r) => {
                             // TODO: reader_map will remove the empty vec for a key if we remove the
                             // last record. this means that future lookups will fail, and cause a
                             // replay, which will produce an empty result. this will work, but is
                             // somewhat inefficient.
-                            let r = r.into_boxed_slice();
                             memory_delta -= r.deep_size_of() as isize;
-                            h.remove_value(r[key[0]].clone(), r);
+                            h.remove_value(r[key[0]].clone(), r.into_boxed_slice());
                         }
                     }
                 }
@@ -155,14 +162,12 @@ impl Handle {
                     let key = key.iter().map(|&k| &r[k]).cloned().collect();
                     match r {
                         Record::Positive(r) => {
-                            let r = r.into_boxed_slice();
                             memory_delta += r.deep_size_of() as isize;
-                            h.insert(key, r);
+                            h.insert(key, r.into_boxed_slice());
                         }
                         Record::Negative(r) => {
-                            let r = r.into_boxed_slice();
                             memory_delta -= r.deep_size_of() as isize;
-                            h.remove_value(key, r);
+                            h.remove_value(key, r.into_boxed_slice());
                         }
                     }
                 }

@@ -1498,7 +1498,14 @@ impl Domain {
                                 Ok(tx)
                             })
                             .collect::<ReadySetResult<Vec<_>>>()?;
-                        let (mut r_part, w_part) = backlog::new_partial(
+
+                        #[allow(clippy::indexing_slicing)] // checked node exists above
+                        let mut n = self.nodes[node].borrow_mut();
+                        let name = n.name().clone();
+                        #[allow(clippy::unwrap_used)] // checked it was a reader above
+                        let r = n.as_mut_reader().unwrap();
+
+                        let (r_part, w_part) = backlog::new_partial(
                             cols,
                             index,
                             move |misses: &mut dyn Iterator<Item = &KeyComparison>| {
@@ -1531,14 +1538,8 @@ impl Domain {
                                 }
                             },
                             self.eviction_kind,
+                            r.reader_processing().clone(),
                         );
-
-                        #[allow(clippy::indexing_slicing)] // checked node exists above
-                        let mut n = self.nodes[node].borrow_mut();
-                        let name = n.name().clone();
-                        #[allow(clippy::unwrap_used)] // checked it was a reader above
-                        let r = n.as_mut_reader().unwrap();
-                        r_part.post_lookup = r.post_lookup().clone();
 
                         let shard = *self.shard.as_ref().unwrap_or(&0);
                         // TODO(ENG-838): Don't recreate every single node on leader failure.
@@ -1564,21 +1565,6 @@ impl Domain {
                         self.reader_write_handles.insert(node, w_part);
                     }
                     InitialState::Global { gid, cols, index } => {
-                        let (mut r_part, w_part) = backlog::new(cols, index);
-
-                        if !self
-                            .nodes
-                            .get(node)
-                            .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
-                            .borrow()
-                            .is_reader()
-                        {
-                            return Err(ReadySetError::InvalidNodeType {
-                                node_index: node.id(),
-                                expected_type: NodeType::Reader,
-                            });
-                        }
-
                         let mut n = self
                             .nodes
                             .get(node)
@@ -1586,9 +1572,15 @@ impl Domain {
                             .borrow_mut();
                         let name = n.name().clone();
 
-                        #[allow(clippy::unwrap_used)] // checked it was a reader above
-                        let r = n.as_mut_reader().unwrap();
-                        r_part.post_lookup = r.post_lookup().clone();
+                        let r =
+                            n.as_mut_reader()
+                                .ok_or_else(|| ReadySetError::InvalidNodeType {
+                                    node_index: node.id(),
+                                    expected_type: NodeType::Reader,
+                                })?;
+
+                        let (r_part, w_part) =
+                            backlog::new(cols, index, r.reader_processing().clone());
 
                         let shard = *self.shard.as_ref().unwrap_or(&0);
                         // TODO(ENG-838): Don't recreate every single node on leader failure.

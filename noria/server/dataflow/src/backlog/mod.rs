@@ -12,7 +12,7 @@ use reader_map::EvictionStrategy;
 use vec1::Vec1;
 
 pub use self::multir::{LookupError, LookupResult};
-use crate::post_lookup::PostLookup;
+use crate::post_lookup::{PostLookup, ReaderProcessing};
 use crate::prelude::*;
 
 pub(crate) trait Trigger =
@@ -23,8 +23,12 @@ pub(crate) trait Trigger =
 /// # Invariants:
 ///
 /// * index must be non-empty, or we hit an unimplemented!
-pub(crate) fn new(cols: usize, index: Index) -> (SingleReadHandle, WriteHandle) {
-    new_inner(cols, index, None, EvictionKind::Random)
+pub(crate) fn new(
+    cols: usize,
+    index: Index,
+    reader_proccessing: ReaderProcessing,
+) -> (SingleReadHandle, WriteHandle) {
+    new_inner(cols, index, None, EvictionKind::Random, reader_proccessing)
 }
 
 /// Allocate a new partially materialized end-user facing result table.
@@ -45,11 +49,18 @@ pub(crate) fn new_partial<F>(
     index: Index,
     trigger: F,
     eviction_kind: EvictionKind,
+    reader_proccessing: ReaderProcessing,
 ) -> (SingleReadHandle, WriteHandle)
 where
     F: Trigger,
 {
-    new_inner(cols, index, Some(Arc::new(trigger)), eviction_kind)
+    new_inner(
+        cols,
+        index,
+        Some(Arc::new(trigger)),
+        eviction_kind,
+        reader_proccessing,
+    )
 }
 
 // # Invariants:
@@ -60,6 +71,7 @@ fn new_inner(
     index: Index,
     trigger: Option<Arc<dyn Trigger>>,
     eviction_kind: EvictionKind,
+    reader_proccessing: ReaderProcessing,
 ) -> (SingleReadHandle, WriteHandle) {
     let contiguous = {
         let mut contiguous = true;
@@ -82,6 +94,11 @@ fn new_inner(
         EvictionKind::Generational => EvictionStrategy::new_generational(),
     };
 
+    let ReaderProcessing {
+        pre_processing,
+        post_processing,
+    } = reader_proccessing;
+
     macro_rules! make {
         ($variant:tt) => {{
             use reader_map;
@@ -91,6 +108,7 @@ fn new_inner(
                 .with_hasher(RandomState::default())
                 .with_index_type(index.index_type)
                 .with_eviction_strategy(eviction_strategy)
+                .with_insertion_order(Some(pre_processing.clone()))
                 .construct();
             // If we're fully materialized, we never miss, so we can insert a single interval to
             // cover the full range of keys
@@ -124,7 +142,7 @@ fn new_inner(
         handle: r,
         trigger,
         index,
-        post_lookup: Default::default(),
+        post_lookup: post_processing,
     };
 
     (r, w)
@@ -497,7 +515,7 @@ mod tests {
     fn store_works() {
         let a = vec![1i32.into(), "a".into()].into_boxed_slice();
 
-        let (r, mut w) = new(2, Index::hash_map(vec![0]));
+        let (r, mut w) = new(2, Index::hash_map(vec![0]), ReaderProcessing::default());
 
         w.swap();
 
@@ -533,7 +551,7 @@ mod tests {
         use std::thread;
 
         let n = 1_000;
-        let (r, mut w) = new(1, Index::hash_map(vec![0]));
+        let (r, mut w) = new(1, Index::hash_map(vec![0]), ReaderProcessing::default());
         let jh = thread::spawn(move || {
             for i in 0..n {
                 w.add(vec![Record::Positive(vec![i.into()])]);
@@ -562,7 +580,7 @@ mod tests {
         let a = vec![1i32.into(), "a".into()].into_boxed_slice();
         let b = vec![1i32.into(), "b".into()].into_boxed_slice();
 
-        let (r, mut w) = new(2, Index::hash_map(vec![0]));
+        let (r, mut w) = new(2, Index::hash_map(vec![0]), ReaderProcessing::default());
         w.add(vec![Record::Positive(a.to_vec())]);
         w.swap();
         w.add(vec![Record::Positive(b.to_vec())]);
@@ -583,7 +601,7 @@ mod tests {
         let b = vec![1i32.into(), "b".into()].into_boxed_slice();
         let c = vec![1i32.into(), "c".into()].into_boxed_slice();
 
-        let (r, mut w) = new(2, Index::hash_map(vec![0]));
+        let (r, mut w) = new(2, Index::hash_map(vec![0]), ReaderProcessing::default());
         w.add(vec![Record::Positive(a.to_vec())]);
         w.add(vec![Record::Positive(b.to_vec())]);
         w.swap();
@@ -611,7 +629,7 @@ mod tests {
         let a = vec![1i32.into(), "a".into()].into_boxed_slice();
         let b = vec![1i32.into(), "b".into()].into_boxed_slice();
 
-        let (r, mut w) = new(2, Index::hash_map(vec![0]));
+        let (r, mut w) = new(2, Index::hash_map(vec![0]), ReaderProcessing::default());
         w.add(vec![Record::Positive(a.to_vec())]);
         w.add(vec![Record::Positive(b.to_vec())]);
         w.add(vec![Record::Negative(a.to_vec())]);
@@ -632,7 +650,7 @@ mod tests {
         let a = vec![1i32.into(), "a".into()].into_boxed_slice();
         let b = vec![1i32.into(), "b".into()].into_boxed_slice();
 
-        let (r, mut w) = new(2, Index::hash_map(vec![0]));
+        let (r, mut w) = new(2, Index::hash_map(vec![0]), ReaderProcessing::default());
         w.add(vec![Record::Positive(a.to_vec())]);
         w.add(vec![Record::Positive(b.to_vec())]);
         w.swap();
@@ -655,7 +673,7 @@ mod tests {
         let b = vec![1i32.into(), "b".into()].into_boxed_slice();
         let c = vec![1i32.into(), "c".into()].into_boxed_slice();
 
-        let (r, mut w) = new(2, Index::hash_map(vec![0]));
+        let (r, mut w) = new(2, Index::hash_map(vec![0]), ReaderProcessing::default());
         w.add(vec![
             Record::Positive(a.to_vec()),
             Record::Positive(b.to_vec()),
@@ -702,6 +720,7 @@ mod tests {
             Index::hash_map(vec![0]),
             |_: &mut dyn Iterator<Item = &KeyComparison>| true,
             EvictionKind::Random,
+            ReaderProcessing::default(),
         );
         w.swap();
 
@@ -723,6 +742,7 @@ mod tests {
                 Index::hash_map(vec![0]),
                 |_: &mut dyn Iterator<Item = &KeyComparison>| true,
                 EvictionKind::Random,
+                ReaderProcessing::default(),
             );
             w.swap();
 
@@ -741,6 +761,7 @@ mod tests {
                 Index::btree_map(vec![0]),
                 |_: &mut dyn Iterator<Item = &KeyComparison>| true,
                 EvictionKind::Random,
+                ReaderProcessing::default(),
             );
             w.swap();
 
@@ -772,6 +793,7 @@ mod tests {
                 Index::btree_map(vec![0]),
                 |_: &mut dyn Iterator<Item = &KeyComparison>| true,
                 EvictionKind::Random,
+                ReaderProcessing::default(),
             );
             w.swap();
 
@@ -792,6 +814,7 @@ mod tests {
                 Index::btree_map(vec![0]),
                 |_: &mut dyn Iterator<Item = &KeyComparison>| true,
                 EvictionKind::Random,
+                ReaderProcessing::default(),
             );
             w.swap();
 

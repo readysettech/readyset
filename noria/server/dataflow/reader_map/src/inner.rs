@@ -295,22 +295,23 @@ where
     }
 }
 
-pub(crate) struct Inner<K, V, M, T, S> {
+pub(crate) struct Inner<K, V, M, T, S, I> {
     pub(crate) data: Data<K, V, S>,
     pub(crate) meta: M,
     pub(crate) timestamp: T,
     pub(crate) ready: bool,
     pub(crate) hasher: S,
     pub(crate) eviction_strategy: EvictionStrategy,
+    pub(crate) insertion_order: Option<I>,
 }
 
-impl<K, V, M, T, S> fmt::Debug for Inner<K, V, M, T, S>
+impl<K, V, M, T, S, I> fmt::Debug for Inner<K, V, M, T, S, I>
 where
     K: Ord + Clone + fmt::Debug,
     S: BuildHasher,
     V: fmt::Debug,
     M: fmt::Debug,
-    T: Clone + fmt::Debug,
+    T: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Inner")
@@ -322,12 +323,13 @@ where
     }
 }
 
-impl<K, V, M, T, S> Clone for Inner<K, V, M, T, S>
+impl<K, V, M, T, S, I> Clone for Inner<K, V, M, T, S, I>
 where
     K: Ord + Clone,
     S: BuildHasher + Clone,
     M: Clone,
     T: Clone,
+    I: Clone,
 {
     fn clone(&self) -> Self {
         assert!(self.data.is_empty());
@@ -338,11 +340,12 @@ where
             ready: self.ready,
             hasher: self.hasher.clone(),
             eviction_strategy: self.eviction_strategy.clone(),
+            insertion_order: self.insertion_order.clone(),
         }
     }
 }
 
-impl<K, V, M, T, S> Inner<K, V, M, T, S>
+impl<K, V, M, T, S, I> Inner<K, V, M, T, S, I>
 where
     K: Ord + Clone + Hash,
     S: BuildHasher + Clone,
@@ -354,6 +357,7 @@ where
         timestamp: T,
         hasher: S,
         eviction_strategy: EvictionStrategy,
+        insertion_order: Option<I>,
     ) -> Self {
         Inner {
             data: Data::with_index_type_and_hasher(index_type, hasher.clone()),
@@ -362,6 +366,7 @@ where
             ready: false,
             hasher,
             eviction_strategy,
+            insertion_order,
         }
     }
 

@@ -76,7 +76,7 @@ impl ServerReadReplyBatch {
     where
         I: IntoIterator<Item = R>,
         I::IntoIter: ExactSizeIterator,
-        R: Serialize + AsRef<Vec<DT>>,
+        R: Serialize + AsRef<[DT]>,
     {
         let rs = rs.into_iter();
         if rs.len() == 0 {
@@ -337,7 +337,7 @@ impl ReadRequestHandler {
                                     .post_lookup
                                     .process(r, &filter)?
                                     .into_iter()
-                                    .map(|r| r.into_iter().map(Cow::into_owned).collect::<Vec<_>>())
+                                    .map(Cow::into_owned)
                                     .collect::<Vec<_>>())
                             }) {
                                 Ok((rows, _)) => records.extend(rows.into_iter().flatten()),
@@ -584,17 +584,13 @@ fn do_lookup<'a>(
 ) -> Result<ServerReadReplyBatch, dataflow::LookupError> {
     fn maybe_serialize<'a, I>(rs: I, serialize_results: bool) -> ServerReadReplyBatch
     where
-        I: IntoIterator<Item = Vec<Cow<'a, DataType>>>,
+        I: IntoIterator<Item = Cow<'a, [DataType]>>,
         I::IntoIter: ExactSizeIterator,
     {
         if serialize_results {
             ServerReadReplyBatch::serialize(rs)
         } else {
-            ServerReadReplyBatch::Unserialized(
-                rs.into_iter()
-                    .map(|row| row.into_iter().map(Cow::into_owned).collect())
-                    .collect(),
-            )
+            ServerReadReplyBatch::Unserialized(rs.into_iter().map(Cow::into_owned).collect())
         }
     }
 

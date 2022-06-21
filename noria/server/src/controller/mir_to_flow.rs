@@ -16,7 +16,7 @@ use dataflow::ops::grouped::concat::GroupConcat;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::project::Project;
-use dataflow::post_lookup::{PostLookup, PostLookupAggregates};
+use dataflow::post_lookup::{PostLookupAggregates, ReaderProcessing};
 use dataflow::{node, ops, BuiltinFunction, Expr as DataflowExpr};
 use launchpad::redacted::Sensitive;
 use mir::node::node_inner::MirNodeInner;
@@ -252,7 +252,7 @@ fn mir_node_to_flow_parts(
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     #[allow(clippy::unwrap_used)] // checked by above invariant
                     let parent = mir_node.first_ancestor().unwrap();
-                    let post_lookup = make_post_lookup(
+                    let reader_processing = make_reader_processing(
                         &parent,
                         order_by,
                         limit,
@@ -260,7 +260,7 @@ fn mir_node_to_flow_parts(
                         default_row.clone(),
                         aggregates,
                     )?;
-                    materialize_leaf_node(&parent, name, keys, index_type, post_lookup, mig)?;
+                    materialize_leaf_node(&parent, name, keys, index_type, reader_processing, mig)?;
                     // TODO(malte): below is yucky, but required to satisfy the type system:
                     // each match arm must return a `FlowNode`, so we use the parent's one
                     // here.
@@ -1433,14 +1433,14 @@ fn make_paginate_or_topk_node(
     Ok(FlowNode::New(na))
 }
 
-fn make_post_lookup(
+fn make_reader_processing(
     parent: &MirNodeRef,
     order_by: &Option<Vec<(Column, OrderType)>>,
     limit: Option<usize>,
     returned_cols: &Option<Vec<Column>>,
     default_row: Option<Vec<DataType>>,
     aggregates: &Option<PostLookupAggregates<Column>>,
-) -> ReadySetResult<PostLookup> {
+) -> ReadySetResult<ReaderProcessing> {
     let order_by = if let Some(order) = order_by.as_ref() {
         Some(
             order
@@ -1476,13 +1476,7 @@ fn make_post_lookup(
         .map(|aggs| aggs.map_columns(|col| parent.borrow().column_id_for_column(&col)))
         .transpose()?;
 
-    Ok(PostLookup {
-        order_by,
-        limit,
-        returned_cols,
-        default_row,
-        aggregates,
-    })
+    ReaderProcessing::new(order_by, limit, returned_cols, default_row, aggregates)
 }
 
 fn materialize_leaf_node(
@@ -1490,7 +1484,7 @@ fn materialize_leaf_node(
     name: SqlIdentifier,
     key_cols: &[(Column, ViewPlaceholder)],
     index_type: IndexType,
-    post_lookup: PostLookup,
+    reader_processing: ReaderProcessing,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<()> {
     let na = parent.borrow().flow_node_addr()?;
@@ -1518,7 +1512,7 @@ fn materialize_leaf_node(
             name,
             na,
             &Index::new(index_type, columns),
-            post_lookup,
+            reader_processing,
             placeholder_map,
         );
     } else {
@@ -1527,7 +1521,7 @@ fn materialize_leaf_node(
             name,
             na,
             &Index::new(index_type, vec![0]),
-            post_lookup,
+            reader_processing,
             Vec::default(),
         );
     }
