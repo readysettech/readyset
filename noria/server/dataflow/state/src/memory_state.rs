@@ -146,8 +146,8 @@ impl State for MemoryState {
         self.replication_offset = replication_offset;
     }
 
-    fn rows(&self) -> usize {
-        self.state.iter().map(SingleState::rows).sum()
+    fn row_count(&self) -> usize {
+        self.state.iter().map(SingleState::row_count).sum()
     }
 
     fn mark_filled(&mut self, key: KeyComparison, tag: Tag) {

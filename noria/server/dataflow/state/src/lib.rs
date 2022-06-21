@@ -179,7 +179,7 @@ pub trait State: SizeOf + Send {
 
     /// Return (a potentially inaccurate estimate of) the number of rows materialized into this
     /// state
-    fn rows(&self) -> usize;
+    fn row_count(&self) -> usize;
 
     /// Return a copy of all records. Panics if the state is only partially materialized.
     fn cloned_records(&self) -> Vec<Vec<DataType>>;
@@ -325,10 +325,10 @@ impl State for MaterializedNodeState {
         }
     }
 
-    fn rows(&self) -> usize {
+    fn row_count(&self) -> usize {
         match self {
-            MaterializedNodeState::Memory(ms) => ms.rows(),
-            MaterializedNodeState::Persistent(ps) => ps.rows(),
+            MaterializedNodeState::Memory(ms) => ms.row_count(),
+            MaterializedNodeState::Persistent(ps) => ps.row_count(),
         }
     }
 

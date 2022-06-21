@@ -1336,7 +1336,7 @@ impl Domain {
                 Ok(None)
             }
             DomainRequest::StateSizeProbe { node } => {
-                let row_count = self.state.get(node).map(|r| r.rows()).unwrap_or(0);
+                let row_count = self.state.get(node).map(|r| r.row_count()).unwrap_or(0);
                 let mem_size = self.state.get(node).map(|s| s.deep_size_of()).unwrap_or(0);
                 let ret = (row_count, mem_size);
                 Ok(Some(bincode::serialize(&ret)?))

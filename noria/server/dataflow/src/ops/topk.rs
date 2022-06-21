@@ -498,11 +498,11 @@ mod tests {
         g.narrow_one_row(r5, true);
         g.narrow_one_row(r10b, true);
         g.narrow_one_row(r10c, true);
-        assert_eq!(g.states[ni].rows(), 3);
+        assert_eq!(g.states[ni].row_count(), 3);
 
         g.narrow_one_row(r15, true);
         g.narrow_one_row(r10, true);
-        assert_eq!(g.states[ni].rows(), 3);
+        assert_eq!(g.states[ni].row_count(), 3);
     }
 
     #[test]
@@ -731,7 +731,7 @@ mod tests {
         // a positive for a row not in the Top-K should not change the Top-K and shouldn't emit
         // anything
         let emit = g.narrow_one_row(r4.clone(), true);
-        assert_eq!(g.states[ni].rows(), 3);
+        assert_eq!(g.states[ni].row_count(), 3);
         assert_eq!(emit, Vec::<Record>::new().into());
 
         // should now have 3 rows in Top-K
@@ -750,7 +750,7 @@ mod tests {
 
         // now [4, z, 11] is in, BUT we still only keep 3 elements
         // and have to remove one of the existing ones
-        assert_eq!(g.states[ni].rows(), 3);
+        assert_eq!(g.states[ni].row_count(), 3);
         assert_eq!(emit.len(), 2); // 1 pos, 1 neg
         assert!(emit.iter().any(|r| !r.is_positive() && r[2] == 10.into()));
         assert!(emit.iter().any(|r| r.is_positive() && r[2] == 11.into()));
@@ -781,7 +781,7 @@ mod tests {
         g.narrow_one_row(rb4.clone(), true);
         g.narrow_one_row(rb5.clone(), true);
 
-        assert_eq!(g.states[ni].rows(), 6);
+        assert_eq!(g.states[ni].row_count(), 6);
 
         let mut emit = g.narrow_one(
             vec![
@@ -792,7 +792,7 @@ mod tests {
             ],
             true,
         );
-        assert_eq!(g.states[ni].rows(), 6);
+        assert_eq!(g.states[ni].row_count(), 6);
         emit.sort();
         assert_eq!(
             emit,
