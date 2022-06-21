@@ -39,7 +39,7 @@ pub(super) struct SingleState {
     partial: bool,
 
     /// Denormalized cache of the number of rows stored in this index
-    rows: usize,
+    row_count: usize,
 }
 
 impl SingleState {
@@ -55,7 +55,7 @@ impl SingleState {
             index,
             state,
             partial,
-            rows: 0,
+            row_count: 0,
         }
     }
 
@@ -64,7 +64,7 @@ impl SingleState {
     pub(super) fn insert_row(&mut self, row: Row) -> bool {
         let added = self.state.insert(&self.index.columns, row, self.partial);
         if added {
-            self.rows += 1;
+            self.row_count += 1;
         }
         added
     }
@@ -73,7 +73,7 @@ impl SingleState {
     pub(super) fn remove_row(&mut self, r: &[DataType], hit: &mut bool) -> Option<Row> {
         let row = self.state.remove(&self.index.columns, r, Some(hit));
         if row.is_some() {
-            self.rows = self.rows.saturating_sub(1);
+            self.row_count = self.row_count.saturating_sub(1);
         }
         row
     }
@@ -333,7 +333,7 @@ impl SingleState {
     }
 
     pub(super) fn clear(&mut self) {
-        self.rows = 0;
+        self.row_count = 0;
         match self.state {
             KeyedState::SingleBTree(ref mut map) => map.clear(),
             KeyedState::DoubleBTree(ref mut map) => map.clear(),
@@ -356,7 +356,7 @@ impl SingleState {
     /// removed rows
     pub(super) fn evict_random(&mut self, rng: &mut ThreadRng) -> Option<(Vec<DataType>, Rows)> {
         self.state.evict_with_seed(rng.gen()).map(|(rows, key)| {
-            self.rows = self.rows.saturating_sub(1);
+            self.row_count = self.row_count.saturating_sub(1);
             (key, rows)
         })
     }
@@ -417,12 +417,12 @@ impl SingleState {
         self.partial
     }
 
-    pub(super) fn rows(&self) -> usize {
-        self.rows
+    pub(super) fn row_count(&self) -> usize {
+        self.row_count
     }
 
     pub(super) fn is_empty(&self) -> bool {
-        self.rows == 0
+        self.row_count == 0
     }
 
     pub(super) fn lookup<'a>(&'a self, key: &KeyType) -> LookupResult<'a> {

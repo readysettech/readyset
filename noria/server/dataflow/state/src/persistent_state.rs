@@ -537,7 +537,7 @@ impl State for PersistentState {
     }
 
     /// Returns a row count estimate from RocksDB.
-    fn rows(&self) -> usize {
+    fn row_count(&self) -> usize {
         let db = &self.db;
         let cf = db.cf_handle(PK_CF).unwrap();
         db.property_int_value_cf(cf, "rocksdb.estimate-num-keys")
@@ -1148,7 +1148,7 @@ impl PersistentState {
         let (tx, rx) = std::sync::mpsc::channel();
         let mut log_watcher = raw_watcher(tx)?;
         let table = self.name.clone();
-        let rows = self.rows();
+        let row_count = self.row_count();
         let mut log_file = File::options().read(true).open(&log_path)?;
         log_file.seek(SeekFrom::End(0))?;
 
@@ -1211,10 +1211,14 @@ impl PersistentState {
                     }
 
                     if last_report.elapsed() > REPORT_INTERVAL {
-                        let first_stage =
-                            format!("{:.2}%", (first_stage_keys as f64 / rows as f64) * 100.0);
-                        let second_stage =
-                            format!("{:.2}%", (second_stage_keys as f64 / rows as f64) * 100.0);
+                        let first_stage = format!(
+                            "{:.2}%",
+                            (first_stage_keys as f64 / row_count as f64) * 100.0
+                        );
+                        let second_stage = format!(
+                            "{:.2}%",
+                            (second_stage_keys as f64 / row_count as f64) * 100.0
+                        );
                         info!(%table, %first_stage, %second_stage, "Compaction");
                         last_report = Instant::now();
                     }
@@ -2169,7 +2173,7 @@ mod tests {
             insert(&mut state, row);
         }
 
-        let count = state.rows();
+        let count = state.row_count();
         // rows() is estimated, but we want to make sure we at least don't return
         // self.indices.len() * rows.len() here.
         assert!(count > 0 && count < rows.len() * 2);
