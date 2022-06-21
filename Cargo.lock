@@ -1707,6 +1707,7 @@ dependencies = [
  "regex",
  "rust_decimal",
  "serde",
+ "serde_json",
  "test-strategy",
 ]
 
