@@ -34,8 +34,6 @@ frameworks:
       expect_success: false
     - name: 'ruby/rails6'
       expect_success: false
-    - name: 'rust/diesel'
-      expect_success: false
     - name: 'rust/mysql'
       expect_success: false
     - name: 'rust/mysql_async'
