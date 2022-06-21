@@ -49,3 +49,15 @@ pub fn make_call(func: BuiltinFunction) -> Expression {
         ty: Type::Unknown,
     }
 }
+
+/// Returns the type of data stored in a JSON value as a string.
+pub fn get_json_value_type(json: &serde_json::Value) -> &'static str {
+    match json {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}

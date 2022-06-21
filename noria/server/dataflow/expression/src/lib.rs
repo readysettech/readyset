@@ -6,9 +6,11 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Formatter;
 use std::ops::{Add, Sub};
+use std::str::FromStr;
 
 use chrono::{Datelike, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
+use launchpad::redacted::Sensitive;
 use maths::int::integer_rnd;
 use mysql_time::MysqlTime;
 use nom_sql::{BinaryOperator, SqlType};
@@ -36,6 +38,8 @@ pub enum BuiltinFunction {
     Addtime(Box<Expression>, Box<Expression>),
     /// round(expr, prec)
     Round(Box<Expression>, Box<Expression>),
+    /// json_typeof(expr)
+    JsonTypeof(Box<Expression>),
 }
 
 impl BuiltinFunction {
@@ -170,6 +174,12 @@ impl BuiltinFunction {
                 };
                 Ok((Self::Round(expr, prec), ty))
             }
+            "json_typeof" => {
+                Ok((
+                    Self::JsonTypeof(Box::new(args.next().ok_or_else(arity_error)?)),
+                    Type::Sql(SqlType::Text), // Always returns text containing the JSON type
+                ))
+            }
             _ => Err(ReadySetError::NoSuchFunction(name.to_owned())),
         }
     }
@@ -200,6 +210,9 @@ impl fmt::Display for BuiltinFunction {
             }
             Round(arg1, precision) => {
                 write!(f, "round({}, {})", arg1, precision)
+            }
+            JsonTypeof(arg) => {
+                write!(f, "json_typeof({})", arg)
             }
         }
     }
@@ -547,6 +560,21 @@ impl Expression {
                                 .to_string(),
                         }),
                     }
+                }
+                BuiltinFunction::JsonTypeof(expr) => {
+                    // TODO: Change this to coerce to `SqlType::Jsonb` and have it return a
+                    // `DataType` actually representing JSON.
+                    let val = try_cast_or_none!(non_null!(&expr.eval(record)?), &SqlType::Text);
+                    let json_str = <&str>::try_from(&val)?;
+
+                    let json = serde_json::Value::from_str(json_str).map_err(|e| {
+                        ReadySetError::ProjectExpressionBuiltInFunctionError {
+                            function: "json_typeof".into(),
+                            message: format!("parsing JSON expression failed: {}", Sensitive(&e)),
+                        }
+                    })?;
+
+                    Ok(utils::get_json_value_type(&json).into())
                 }
             },
             CaseWhen {
@@ -1262,6 +1290,26 @@ mod tests {
         let number: f64 = 52.12345;
         let param1 = DataType::try_from(number).unwrap();
         assert_eq!(expr.eval::<DataType>(&[param1, param2]).unwrap(), want,);
+    }
+
+    #[test]
+    fn eval_call_json_typeof() {
+        let examples = [
+            ("null", "null"),
+            ("true", "boolean"),
+            ("false", "boolean"),
+            ("123", "number"),
+            (r#""hello""#, "string"),
+            (r#"["hello", 123]"#, "array"),
+            (r#"{ "hello": "world", "abc": 123 }"#, "object"),
+        ];
+
+        let expr = make_call(BuiltinFunction::JsonTypeof(Box::new(make_column(0))));
+
+        for (json, expected_type) in examples {
+            let json_type = expr.eval::<DataType>(&[json.into()]).unwrap();
+            assert_eq!(json_type, DataType::from(expected_type));
+        }
     }
 
     #[test]
