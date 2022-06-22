@@ -96,10 +96,11 @@ impl BuiltinFunction {
             }
         }
 
+        let arity_error = || ReadySetError::ArityError(name.to_owned());
+
         let mut args = args.into_iter();
         match name {
             "convert_tz" => {
-                let arity_error = || ReadySetError::ArityError("convert_tz".to_owned());
                 // Type is inferred from input argument
                 let input = Box::new(args.next().ok_or_else(arity_error)?);
                 let ty = input.ty().clone();
@@ -113,14 +114,12 @@ impl BuiltinFunction {
                 ))
             }
             "dayofweek" => {
-                let arity_error = || ReadySetError::ArityError("dayofweek".to_owned());
                 Ok((
                     Self::DayOfWeek(Box::new(args.next().ok_or_else(arity_error)?)),
                     Type::Sql(SqlType::Int(None)), // Day of week is always an int
                 ))
             }
             "ifnull" => {
-                let arity_error = || ReadySetError::ArityError("ifnull".to_owned());
                 let expr = Box::new(args.next().ok_or_else(arity_error)?);
                 let val = Box::new(args.next().ok_or_else(arity_error)?);
                 // Type is inferred from the value provided
@@ -128,14 +127,12 @@ impl BuiltinFunction {
                 Ok((Self::IfNull(expr, val), ty))
             }
             "month" => {
-                let arity_error = || ReadySetError::ArityError("month".to_owned());
                 Ok((
                     Self::Month(Box::new(args.next().ok_or_else(arity_error)?)),
                     Type::Sql(SqlType::Int(None)), // Month is always an int
                 ))
             }
             "timediff" => {
-                let arity_error = || ReadySetError::ArityError("timediff".to_owned());
                 Ok((
                     Self::Timediff(
                         Box::new(args.next().ok_or_else(arity_error)?),
@@ -145,7 +142,6 @@ impl BuiltinFunction {
                 ))
             }
             "addtime" => {
-                let arity_error = || ReadySetError::ArityError("addtime".to_owned());
                 let base_time = Box::new(args.next().ok_or_else(arity_error)?);
                 let ty = base_time.ty().clone();
                 Ok((
@@ -154,7 +150,6 @@ impl BuiltinFunction {
                 ))
             }
             "round" => {
-                let arity_error = || ReadySetError::ArityError("round".to_owned());
                 let expr = Box::new(args.next().ok_or_else(arity_error)?);
                 let prec = Box::new(args.next().unwrap_or(Expression::Literal {
                     val: DataType::Int(0),
