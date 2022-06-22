@@ -145,14 +145,6 @@ struct Opts {
     #[clap(long, default_value = "1024")]
     metrics_queue_len: usize,
 
-    /// The region where the controller is hosted
-    #[clap(long, env = "NORIA_PRIMARY_REGION")]
-    primary_region: Option<String>,
-
-    /// The region the worker is hosted in. Required to route view requests to specific regions.
-    #[clap(long, env = "NORIA_REGION")]
-    region: Option<String>,
-
     /// A URL identifying a MySQL or PostgreSQL primary server to replicate from. Should include
     /// username and password if necessary.
     #[clap(long, env = "REPLICATION_URL")]
@@ -161,6 +153,10 @@ struct Opts {
     /// Whether this server should only run reader domains
     #[clap(long)]
     reader_only: bool,
+
+    /// Prevent this instance from ever being elected as the leader
+    #[clap(long)]
+    cannot_become_leader: bool,
 
     /// Output prometheus metrics
     #[clap(long, env = "PROMETHEUS_METRICS")]
@@ -286,17 +282,13 @@ fn main() -> anyhow::Result<()> {
     builder.set_allow_paginate(opts.enable_experimental_paginate_support);
     builder.set_allow_mixed_comparisons(opts.enable_experimental_mixed_comparisons);
 
-    if let Some(r) = opts.region {
-        builder.set_region(r);
-    }
-
     if let Some(volume_id) = opts.volume_id {
         info!(%volume_id);
         builder.set_volume_id(volume_id);
     }
 
-    if let Some(pr) = opts.primary_region {
-        builder.set_primary_region(pr);
+    if opts.cannot_become_leader {
+        builder.cannot_become_leader();
     }
 
     if let Some(r) = opts.max_concurrent_replays {

@@ -144,9 +144,9 @@ async fn start_controller(
     worker_tx: Sender<WorkerRequest>,
     handle_rx: Receiver<HandleRequest>,
     controller_rx: Receiver<ControllerRequest>,
-    region: Option<String>,
     abort_on_task_failure: bool,
     reader_only: bool,
+    leader_eligible: bool,
     volume_id: Option<VolumeId>,
     valve: Valve,
 ) -> Result<ControllerDescriptor, anyhow::Error> {
@@ -158,8 +158,8 @@ async fn start_controller(
     let worker_descriptor = WorkerDescriptor {
         worker_uri: http_uri,
         reader_addr,
-        region,
         reader_only,
+        leader_eligible,
         volume_id,
     };
 
@@ -226,8 +226,8 @@ pub async fn start_instance_inner(
     config: Config,
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
-    region: Option<String>,
     reader_only: bool,
+    leader_eligible: bool,
     volume_id: Option<VolumeId>,
     readers: Readers,
     reader_addr: SocketAddr,
@@ -274,9 +274,9 @@ pub async fn start_instance_inner(
         worker_tx,
         handle_rx,
         controller_rx,
-        region,
         abort_on_task_failure,
         reader_only,
+        leader_eligible,
         volume_id,
         valve,
     )
@@ -294,8 +294,8 @@ pub(super) async fn start_instance(
     config: Config,
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
-    region: Option<String>,
     reader_only: bool,
+    leader_eligible: bool,
     volume_id: Option<VolumeId>,
 ) -> Result<Handle, anyhow::Error> {
     let (trigger, valve) = Valve::new();
@@ -323,8 +323,8 @@ pub(super) async fn start_instance(
         config,
         memory_limit,
         memory_check_frequency,
-        region,
         reader_only,
+        leader_eligible,
         volume_id,
         readers,
         reader_addr,

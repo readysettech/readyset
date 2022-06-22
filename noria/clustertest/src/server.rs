@@ -52,14 +52,6 @@ impl NoriaServerBuilder {
         self
     }
 
-    pub fn region(self, region: &str) -> Self {
-        self.push_arg("--region", region)
-    }
-
-    pub fn primary_region(self, primary_region: &str) -> Self {
-        self.push_arg("--primary-region", primary_region)
-    }
-
     pub fn volume_id(self, id: &str) -> Self {
         self.push_arg("--volume-id", id)
     }

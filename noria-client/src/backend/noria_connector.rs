@@ -129,17 +129,13 @@ impl NoriaBackendInner {
     async fn get_noria_view<'a>(
         &'a mut self,
         view: &str,
-        region: Option<&str>,
         invalidate_cache: bool,
     ) -> ReadySetResult<&'a mut View> {
         if invalidate_cache {
             self.outputs.remove(view);
         }
         if !self.outputs.contains_key(view) {
-            let vh = match region {
-                None => noria_await!(self, self.noria.view(view))?,
-                Some(r) => noria_await!(self, self.noria.view_from_region(view, r))?,
-            };
+            let vh = noria_await!(self, self.noria.view(view))?;
             self.outputs.insert(view.to_owned(), vh);
         }
         Ok(self.outputs.get_mut(view).unwrap())
@@ -383,8 +379,6 @@ pub struct NoriaConnector {
     view_cache: ViewCache,
 
     prepared_statement_cache: HashMap<StatementID, PreparedStatement>,
-    /// The region to pass to noria for replica selection.
-    region: Option<String>,
 
     /// Set of views that have failed on previous requests. Separate from the backend
     /// to allow returning references to schemas from views all the way to mysql-srv,
@@ -466,7 +460,6 @@ impl Clone for NoriaConnector {
             auto_increments: self.auto_increments.clone(),
             view_cache: self.view_cache.clone(),
             prepared_statement_cache: self.prepared_statement_cache.clone(),
-            region: self.region.clone(),
             failed_views: self.failed_views.clone(),
             read_behavior: self.read_behavior,
             read_request_handler: self.read_request_handler.clone(),
@@ -479,25 +472,16 @@ impl NoriaConnector {
         ch: ControllerHandle,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
-        region: Option<String>,
         read_behavior: ReadBehavior,
     ) -> Self {
-        NoriaConnector::new_with_local_reads(
-            ch,
-            auto_increments,
-            query_cache,
-            region,
-            read_behavior,
-            None,
-        )
-        .await
+        NoriaConnector::new_with_local_reads(ch, auto_increments, query_cache, read_behavior, None)
+            .await
     }
 
     pub async fn new_with_local_reads(
         ch: ControllerHandle,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
-        region: Option<String>,
         read_behavior: ReadBehavior,
         read_request_handler: Option<ReadRequestHandler>,
     ) -> Self {
@@ -513,7 +497,6 @@ impl NoriaConnector {
             auto_increments,
             view_cache: ViewCache::new(query_cache),
             prepared_statement_cache: HashMap::new(),
-            region,
             failed_views: HashSet::new(),
             read_behavior,
             read_request_handler: request_handler::LocalReadHandler::new(read_request_handler),
@@ -1328,7 +1311,7 @@ impl NoriaConnector {
             .inner
             .get_mut()
             .await?
-            .get_noria_view(&qname, self.region.as_deref(), view_failed)
+            .get_noria_view(&qname, view_failed)
             .await?;
 
         let keys = processed.make_keys(&[])?;
@@ -1396,7 +1379,7 @@ impl NoriaConnector {
             .inner
             .get_mut()
             .await?
-            .get_noria_view(&qname, self.region.as_deref(), view_failed)
+            .get_noria_view(&qname, view_failed)
             .await?;
 
         let getter_schema = getter
@@ -1440,7 +1423,6 @@ impl NoriaConnector {
     ) -> ReadySetResult<QueryResult<'_>> {
         let NoriaConnector {
             prepared_statement_cache,
-            region,
             failed_views,
             ..
         } = self;
@@ -1465,7 +1447,7 @@ impl NoriaConnector {
                 .inner
                 .get_mut()
                 .await?
-                .get_noria_view(name, region.as_deref(), view_failed)
+                .get_noria_view(name, view_failed)
                 .await?;
 
             if (matches!(limit, Some(DataType::Int(1)))

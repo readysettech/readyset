@@ -17,8 +17,8 @@ pub struct Builder {
     memory_check_frequency: Option<time::Duration>,
     listen_addr: IpAddr,
     external_addr: SocketAddr,
-    region: Option<String>,
     reader_only: bool,
+    leader_eligible: bool,
     volume_id: Option<VolumeId>,
 }
 
@@ -31,8 +31,8 @@ impl Default for Builder {
             external_addr: "127.0.0.1:6033".parse().unwrap(),
             memory_limit: None,
             memory_check_frequency: None,
-            region: None,
             reader_only: false,
+            leader_eligible: true,
             volume_id: None,
         }
     }
@@ -145,16 +145,6 @@ impl Builder {
         self.config.domain_config.aggressively_update_state_sizes = value;
     }
 
-    /// Sets the region that the work is located in.
-    pub fn set_region(&mut self, region: String) {
-        self.region = Some(region);
-    }
-
-    /// Sets the primary region for Noria.
-    pub fn set_primary_region(&mut self, region: String) {
-        self.config.primary_region = Some(region);
-    }
-
     /// Sets the primary MySQL/PostgreSQL server to replicate from.
     pub fn set_replicator_url(&mut self, url: String) {
         self.config.replication_url = Some(url);
@@ -175,6 +165,11 @@ impl Builder {
     /// Configures this Noria server to accept only reader domains.
     pub fn as_reader_only(&mut self) {
         self.reader_only = true;
+    }
+
+    /// Configures this Noria server to be unable to become the leader
+    pub fn cannot_become_leader(&mut self) {
+        self.leader_eligible = false;
     }
 
     /// Configures the volume id associated with this server.
@@ -229,8 +224,8 @@ impl Builder {
             ref config,
             memory_limit,
             memory_check_frequency,
-            region,
             reader_only,
+            leader_eligible,
             volume_id,
         } = self;
 
@@ -243,8 +238,8 @@ impl Builder {
             config,
             memory_limit,
             memory_check_frequency,
-            region,
             reader_only,
+            leader_eligible,
             volume_id,
         )
     }
@@ -264,8 +259,8 @@ impl Builder {
             ref config,
             memory_limit,
             memory_check_frequency,
-            region,
             reader_only,
+            leader_eligible,
             volume_id,
         } = self;
 
@@ -278,8 +273,8 @@ impl Builder {
             config,
             memory_limit,
             memory_check_frequency,
-            region,
             reader_only,
+            leader_eligible,
             volume_id,
             readers,
             reader_addr,

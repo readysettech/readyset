@@ -32,9 +32,7 @@ use nom_sql::{
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::consistency::Timestamp;
 use noria::internal::LocalNodeIndex;
-use noria::{
-    KeyComparison, LookupResult, Modification, SchemaType, ViewPlaceholder, ViewQuery, ViewRequest,
-};
+use noria::{KeyComparison, LookupResult, Modification, SchemaType, ViewPlaceholder, ViewQuery};
 use noria_data::noria_type::Type;
 use noria_data::DataType;
 use noria_errors::ReadySetError::{MigrationPlanFailed, RpcFailed, SelectQueryCreationFailed};
@@ -5238,124 +5236,6 @@ async fn left_join_null() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_view_includes_replicas() {
-    let authority_store = Arc::new(LocalAuthorityStore::new());
-    let w1_authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
-        authority_store.clone(),
-    )));
-    let w2_authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
-        authority_store,
-    )));
-    let cluster_name = "view_includes_replicas";
-
-    println!("building w1");
-    let mut w1 = build_custom(
-        cluster_name,
-        Some(DEFAULT_SHARDING),
-        true,
-        w1_authority,
-        Some("r1".try_into().unwrap()),
-        false,
-        None,
-    )
-    .await;
-
-    let instances_standalone = w1.get_instances().await.unwrap();
-    assert_eq!(1usize, instances_standalone.len());
-
-    let w1_addr = instances_standalone[0].0.clone();
-
-    println!("Building w2");
-    let _w2 = build_custom(
-        "view_includes_replicas",
-        Some(DEFAULT_SHARDING),
-        false,
-        w2_authority,
-        Some("r2".try_into().unwrap()),
-        false,
-        None,
-    )
-    .await;
-
-    while w1.get_instances().await.unwrap().len() < 2 {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-
-    let instances_cluster = w1.get_instances().await.unwrap();
-
-    let w2_addr = instances_cluster
-        .iter()
-        .map(|(addr, _)| addr)
-        .find(|&addr| addr != &w1_addr)
-        .unwrap()
-        .clone();
-
-    w1.extend_recipe(
-        "
-      CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
-      CREATE CACHE q FROM
-        SELECT *
-        FROM t1;"
-            .parse()
-            .unwrap(),
-    )
-    .await
-    .unwrap();
-
-    // No replication, verify that only one replica is returned in
-    // the view_builder.
-    let request = ViewRequest {
-        name: "q".try_into().unwrap(),
-        filter: None,
-    };
-    let q = w1.view_builder(request).await.unwrap();
-    assert_eq!(q.replicas.len(), 1);
-
-    let shards = &q.replicas[0].shards;
-    assert_eq!(shards.len(), 1);
-
-    // Replicate into the region it is currently not in.
-    let dst_addr = if shards[0].region == Some("r1".to_string()) {
-        w2_addr
-    } else {
-        w1_addr
-    };
-
-    // Replicate the reader for `q`.
-    let repl_result = w1
-        .replicate_readers(vec!["q".to_owned()], Some(dst_addr))
-        .await
-        .unwrap();
-
-    let readers = repl_result.new_readers;
-    assert!(readers.contains_key("q"));
-
-    // Check that two replicas are returned in the view_builder.
-    let request = ViewRequest {
-        name: "q".try_into().unwrap(),
-        filter: None,
-    };
-    let q = w1.view_builder(request).await.unwrap();
-    assert_eq!(q.replicas.len(), 2);
-
-    // Get the replica that is in r2. We later check that this node
-    // is indeed the node returned by the view.
-    let mut r2_node: Option<_> = None;
-    for r in &q.replicas {
-        if r.shards[0].region == Some("r2".to_string()) {
-            r2_node = Some(r.node);
-            break;
-        }
-    }
-    assert!(r2_node.is_some());
-
-    // Verify this selects reader nodes with the correct region.
-    let result = w1.view_from_region("q", "r2").await;
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap().node().index(), r2_node.unwrap().index());
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn overlapping_indices() {
     let mut g = start_simple("overlapping_indices").await;
 
@@ -6938,7 +6818,6 @@ async fn assign_nonreader_domains_to_nonreader_workers() {
         Some(DEFAULT_SHARDING),
         true,
         w1_authority,
-        None,
         true,
         None,
     )
@@ -6963,7 +6842,6 @@ async fn assign_nonreader_domains_to_nonreader_workers() {
         Some(DEFAULT_SHARDING),
         false,
         w2_authority,
-        None,
         false,
         None,
     )
@@ -7391,93 +7269,6 @@ async fn mixed_inclusive_range_and_equality() {
     assert_eq!(
         res,
         vec![(1, 2, 3, 4), (1, 2, 4, 4), (2, 2, 3, 4), (2, 2, 4, 4)]
-    );
-}
-
-// FIXME(fran): This test is ignored because the Controller
-//  is not noticing that the Worker it is trying to replicate domains to
-//  is no longer available.
-//  Even with a low heartbeat/healthcheck interval, the test fails in
-//  our CICD pipeline, but not locally.
-//  We need a better fix.
-#[tokio::test(flavor = "multi_thread")]
-#[ignore]
-async fn replicate_to_unavailable_worker() {
-    let authority_store = Arc::new(LocalAuthorityStore::new());
-    let w1_authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
-        authority_store.clone(),
-    )));
-    let w2_authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
-        authority_store,
-    )));
-    let cluster_name = "replicate_to_non_existent_worker";
-
-    let mut builder = Builder::for_tests();
-    builder.set_sharding(Some(DEFAULT_SHARDING));
-    builder.set_persistence(get_persistence_params(cluster_name));
-
-    let mut w1 = builder
-        .clone()
-        .start_local_custom(w1_authority)
-        .await
-        .unwrap();
-
-    w1.extend_recipe(
-        "CREATE TABLE test (id INT, name TEXT);
-         CREATE VIEW q1 AS SELECT * FROM test;"
-            .parse()
-            .unwrap(),
-    )
-    .await
-    .unwrap();
-
-    let w2 = builder.start(w2_authority).await.unwrap();
-
-    sleep().await;
-
-    let instances_cluster = w1.get_instances().await.unwrap();
-    assert_eq!(
-        2,
-        instances_cluster.len(),
-        "There should be 2 noria servers running"
-    );
-
-    let w2_addr = w2.get_address().clone();
-
-    // Kill the worker
-    std::mem::drop(w2);
-
-    // Wait a couple of heartbeats, so the controller has
-    // time to realize the worker is dead and mark it as not healthy.
-    let mut retries = 10;
-    while retries > 0
-        && w1
-            .get_instances()
-            .await
-            .unwrap()
-            .iter()
-            .filter(|(_, healthy)| *healthy)
-            .count()
-            < 2
-    {
-        sleep().await;
-        retries -= 1;
-    }
-
-    let result = w1
-        .replicate_readers(vec!["q1".to_owned()], Some(w2_addr))
-        .await;
-
-    assert!(
-        matches!(
-            result,
-            Err(ReadySetError::RpcFailed {
-                during: _,
-                source: box ReadySetError::MigrationPlanFailed { .. }
-            })
-        ),
-        "The migration should've failed. Actual result: {:?}",
-        result
     );
 }
 

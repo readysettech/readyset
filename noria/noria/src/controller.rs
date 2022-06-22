@@ -31,10 +31,7 @@ use crate::replication::ReplicationOffsets;
 use crate::status::ReadySetStatus;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
-use crate::{
-    ActivationResult, KeyCount, ReaderReplicationResult, ReaderReplicationSpec, ReplicationOffset,
-    ViewFilter, ViewRequest,
-};
+use crate::{ActivationResult, KeyCount, ReplicationOffset, ViewFilter, ViewRequest};
 
 mod rpc;
 
@@ -381,23 +378,6 @@ impl ControllerHandle {
         self.request_view(request)
     }
 
-    /// Obtain a `View` from a named region, that allows you to query the given external view.
-    /// If there is no worker with a replica in the region, a `View` from the first replica
-    /// found is returned.
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn view_from_region<'a, I: Into<SqlIdentifier>>(
-        &'a mut self,
-        name: I,
-        region: &str,
-    ) -> impl Future<Output = ReadySetResult<View>> + 'a {
-        let request = ViewRequest {
-            name: name.into(),
-            filter: Some(ViewFilter::Region(region.to_string())),
-        };
-        self.request_view(request)
-    }
-
     /// Obtain a 'ViewBuilder' for a specific view that allows you to build a view.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
@@ -422,15 +402,10 @@ impl ControllerHandle {
         {
             Some(vb) => Ok(vb),
             None => match view_request.filter {
-                Some(f) => match f {
-                    ViewFilter::Workers(w) => Err(ReadySetError::ViewNotFoundInWorkers {
-                        name: view_request.name.to_string(),
-                        workers: w,
-                    }),
-                    ViewFilter::Region(_) => {
-                        Err(ReadySetError::ViewNotFound(view_request.name.to_string()))
-                    }
-                },
+                Some(ViewFilter::Workers(w)) => Err(ReadySetError::ViewNotFoundInWorkers {
+                    name: view_request.name.to_string(),
+                    workers: w,
+                }),
                 None => Err(ReadySetError::ViewNotFound(view_request.name.to_string())),
             },
         }
@@ -441,16 +416,7 @@ impl ControllerHandle {
         view_request: ViewRequest,
     ) -> impl Future<Output = ReadySetResult<View>> + '_ {
         let views = self.views.clone();
-        async move {
-            let region: Option<String> =
-                if let Some(ViewFilter::Region(region)) = &view_request.filter {
-                    Some(region.clone())
-                } else {
-                    None
-                };
-            let view_builder = self.view_builder(view_request).await?;
-            view_builder.build(region, views)
-        }
+        async move { self.view_builder(view_request).await?.build(views) }
     }
 
     /// Obtain a `Table` that allows you to perform writes, deletes, and other operations on the
@@ -608,24 +574,6 @@ impl ControllerHandle {
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn get_instances(&mut self) -> impl Future<Output = ReadySetResult<Vec<(Url, bool)>>> + '_ {
         self.rpc("instances", (), self.request_timeout)
-    }
-
-    /// Replicate the readers associated with the list of queries to the given worker.
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn replicate_readers(
-        &mut self,
-        queries: Vec<String>,
-        worker_uri: Option<Url>,
-    ) -> impl Future<Output = ReadySetResult<ReaderReplicationResult>> + '_ {
-        let request = ReaderReplicationSpec {
-            queries: queries
-                .into_iter()
-                .map(nom_sql::SqlIdentifier::from)
-                .collect(),
-            worker_uri,
-        };
-        self.rpc("replicate_readers", request, self.migration_timeout)
     }
 
     /// Query the controller for information about the graph.

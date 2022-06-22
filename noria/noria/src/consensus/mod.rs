@@ -56,8 +56,8 @@ pub struct WorkerDescriptor {
     pub worker_uri: Url,
     /// Socket address the worker listens on for data-plane read queries.
     pub reader_addr: SocketAddr,
-    /// The region the worker is located in.
-    pub region: Option<String>,
+    /// True if this worker may become a leader
+    pub leader_eligible: bool,
     /// Whether or not this worker is used only to hold reader domains.
     pub reader_only: bool,
     /// The volume associated with this server.
