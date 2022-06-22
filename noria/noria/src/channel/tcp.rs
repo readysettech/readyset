@@ -14,7 +14,8 @@ use futures_util::sink::Sink;
 use futures_util::stream::Stream;
 use noria_errors::ReadySetError;
 use pin_project::pin_project;
-use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -229,8 +230,8 @@ where
 
 impl<S, T, T2, D> Stream for DualTcpStream<S, T, T2, D>
 where
-    for<'a> T: Deserialize<'a>,
-    for<'a> T2: Deserialize<'a>,
+    T: DeserializeOwned,
+    T2: DeserializeOwned,
     S: AsyncRead,
     AsyncBincodeStream<S, T, Tagged<()>, D>: Stream<Item = Result<T, bincode::Error>>,
     AsyncBincodeStream<S, T2, Tagged<()>, D>: Stream<Item = Result<T2, bincode::Error>>,
