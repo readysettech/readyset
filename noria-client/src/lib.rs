@@ -1,5 +1,4 @@
 #![feature(box_syntax, box_patterns)]
-#![feature(nll)]
 #![feature(drain_filter)]
 #![feature(async_closure)]
 #![feature(never_type)]
