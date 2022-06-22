@@ -33,7 +33,7 @@ pub use crate::payload::Packet;
 pub use crate::Sharding;
 pub type Graph = petgraph::Graph<Node, Edge>;
 use dataflow_state::MaterializedNodeState;
-pub use dataflow_state::{DurabilityMode, PersistenceParameters};
+pub use dataflow_state::{DurabilityMode, KeyCount, PersistenceParameters};
 pub use noria_errors::*;
 pub use vec1::vec1;
 

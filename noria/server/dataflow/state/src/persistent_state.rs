@@ -85,7 +85,7 @@ use test_strategy::Arbitrary;
 use thiserror::Error;
 use tracing::{error, info, warn};
 
-use crate::{LookupResult, RangeLookupResult, RecordResult, State};
+use crate::{KeyCount, LookupResult, RangeLookupResult, RecordResult, State};
 
 // Incremented on each PersistentState initialization so that IndexSeq
 // can be used to create unique identifiers for rows.
@@ -539,8 +539,8 @@ impl State for PersistentState {
     /// Returns a *row* count estimate from RocksDB (not a key count as the function name would
     /// suggest), since getting a key count could be quite expensive, and we care less about the
     /// key count of persistent nodes anyway.
-    fn key_count(&self) -> usize {
-        self.row_count()
+    fn key_count(&self) -> KeyCount {
+        KeyCount::EstimatedRowCount(self.row_count())
     }
 
     /// Returns a row count estimate from RocksDB.
