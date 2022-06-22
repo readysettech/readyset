@@ -816,91 +816,45 @@ impl<D> ReadReply<D> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ViewBuilder {
     pub name: SqlIdentifier,
-    /// Set of replicas for a view, this will only include one element
-    /// if there is no reader replication.
-    pub replicas: Vec1<ViewReplica>,
+    pub node: NodeIndex,
+    pub columns: Arc<[SqlIdentifier]>,
+    pub schema: Option<ViewSchema>,
+    pub shards: Vec<SocketAddr>,
+    /// (view_placeholder, key_column_index) pairs according to their mapping. Contains exactly one
+    /// entry for each key column at the reader.
+    pub key_mapping: Vec<(ViewPlaceholder, KeyColumnIdx)>,
 
     /// The amount of time before a view request RPC is terminated.
     pub view_request_timeout: Duration,
 }
 
-/// A reader replica for a view.
-#[doc(hidden)]
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ViewReplica {
-    pub node: NodeIndex,
-    pub columns: Arc<[SqlIdentifier]>,
-    pub schema: Option<ViewSchema>,
-    pub shards: Vec<ReplicaShard>,
-    /// (view_placeholder, key_column_index) pairs according to their mapping. Contains exactly one
-    /// entry for each key column at the reader.
-    pub key_mapping: Vec<(ViewPlaceholder, KeyColumnIdx)>,
-}
-
-/// A shard of a reader replica.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ReplicaShard {
-    /// The address of the worker where the shard lives in.
-    pub addr: SocketAddr,
-    /// The region of a shard, as specified by the argument `region`
-    /// by the noria-server, where the shard lives in.
-    pub region: Option<String>,
-}
-
 impl ViewBuilder {
-    /// Selects the replica from `replicas` that has the highest fraction of replica
-    /// shards in `region`.
-    /// Build a `View` out of a `ViewBuilder`. If `region` is specified,
-    /// this selects the reader replica with the most shards in the requested
-    /// region.
+    /// Build a `View` out of a `ViewBuilder`
     #[doc(hidden)]
     pub fn build(
         &self,
-        region: Option<String>,
         rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
     ) -> ReadySetResult<View> {
-        let replica = if let Some(region) = region {
-            #[allow(clippy::unwrap_used)]
-            self.replicas
-                .iter()
-                .map(|vr| {
-                    // Map each replica to a pair of <ViewReplica, percent of shards in region>.
-                    let num_replicas = vr
-                        .shards
-                        .iter()
-                        .filter(|s| s.region == Some(region.clone()))
-                        .count();
-                    (vr, num_replicas as u32 * 100 / vr.shards.len() as u32)
-                })
-                .max_by_key(|p| p.1) // Take replica with the highest percent.
-                // We know there is at least one element in the iterator, so this `unwrap()` is
-                // safe.
-                .unwrap()
-                .0
-        } else {
-            self.replicas.first()
-        };
-
-        let node = replica.node;
-        let columns = replica.columns.clone();
-        let shards = replica.shards.clone();
-        let schema = replica.schema.clone();
-        let key_mapping = replica.key_mapping.clone();
+        let node = self.node;
+        let columns = self.columns.clone();
+        let shards = self.shards.clone();
+        let schema = self.schema.clone();
+        let key_mapping = self.key_mapping.clone();
 
         let mut addrs = Vec::with_capacity(shards.len());
         let mut conns = Vec::with_capacity(shards.len());
 
-        for (shardi, shard) in shards.iter().enumerate() {
+        for (shardi, shard_addr) in shards.into_iter().enumerate() {
             use std::collections::hash_map::Entry;
 
-            addrs.push(shard.addr);
+            addrs.push(shard_addr);
 
             // one entry per shard so that we can send sharded requests in parallel even if
             // they happen to be targeting the same machine.
             let mut rpcs = rpcs
                 .lock()
                 .map_err(|e| internal_err(format!("mutex was poisoned: '{}'", e)))?;
-            let s = match rpcs.entry((shard.addr, shardi)) {
+            let s = match rpcs.entry((shard_addr, shardi)) {
                 Entry::Occupied(e) => e.get().clone(),
                 Entry::Vacant(h) => {
                     // TODO: maybe always use the same local port?
@@ -908,7 +862,7 @@ impl ViewBuilder {
                         Timeout::new(
                             ConcurrencyLimit::new(
                                 Balance::new(make_views_discover(
-                                    shard.addr,
+                                    shard_addr,
                                     self.view_request_timeout,
                                 )),
                                 crate::PENDING_LIMIT,
@@ -919,7 +873,7 @@ impl ViewBuilder {
                     );
                     tokio::spawn(w.instrument(tracing::debug_span!(
                         "view_worker",
-                        addr = %shard.addr,
+                        addr = %shard_addr,
                         shard = shardi
                     )));
                     h.insert(c.clone());

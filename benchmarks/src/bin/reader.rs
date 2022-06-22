@@ -44,10 +44,6 @@ struct NoriaClientOpts {
     )]
     deployment: Option<String>,
 
-    /// The region used when requesting a view.
-    #[clap(long)]
-    target_region: Option<String>,
-
     /// The amount of time to batch a set of requests for in ms. If
     /// `batch_duration_ms` is 0, no batching is performed. Only
     /// valid for some database types.
@@ -281,13 +277,7 @@ impl NoriaExecutor {
         let mut handle: ControllerHandle = ControllerHandle::new(authority).await;
         handle.ready().await.unwrap();
 
-        // Retrieve or create a view for a reader node in a random region, or
-        // `self.target_region` if it is specified.
-        let view = match &opts.target_region {
-            None => handle.view("w").await.unwrap(),
-            Some(r) => handle.view_from_region("w", r).await.unwrap(),
-        };
-
+        let view = handle.view("w").await.unwrap();
         Self {
             view,
             query_batcher: QueryBatcher::new(

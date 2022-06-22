@@ -450,17 +450,6 @@ impl Leader {
                 })?;
                 return_serialized!(ret);
             }
-            (Method::POST, "/replicate_readers") => {
-                let body = bincode::deserialize(&body)?;
-                let ret = futures::executor::block_on(async move {
-                    let mut writer = self.dataflow_state_handle.write().await;
-                    check_quorum!(writer.as_ref());
-                    let r = writer.as_mut().replicate_readers(body).await?;
-                    self.dataflow_state_handle.commit(writer, authority).await?;
-                    Ok(r)
-                })?;
-                return_serialized!(ret);
-            }
             (Method::POST, "/remove_node") => {
                 require_leader_ready()?;
                 let body = bincode::deserialize(&body)?;
@@ -488,16 +477,15 @@ impl Leader {
             let WorkerDescriptor {
                 worker_uri,
                 reader_addr,
-                region,
                 reader_only,
                 volume_id,
+                ..
             } = desc;
 
             info!(%worker_uri, %reader_addr, "received registration payload from worker");
 
             let ws = Worker::new(
                 worker_uri.clone(),
-                region,
                 reader_only,
                 volume_id,
                 self.worker_request_timeout,

@@ -27,14 +27,7 @@ async fn main() -> Result<()> {
     let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
 
     let upstream: Option<MySqlUpstream> = None;
-    let noria = NoriaConnector::new(
-        ch,
-        auto_increments,
-        query_cache,
-        None,
-        ReadBehavior::Blocking,
-    )
-    .await;
+    let noria = NoriaConnector::new(ch, auto_increments, query_cache, ReadBehavior::Blocking).await;
     let slowlog = false;
     let users: &'static HashMap<String, String> = Box::leak(Box::new(hashmap! {
         "user".to_owned() => "pw".to_owned()

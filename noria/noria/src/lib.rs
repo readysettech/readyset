@@ -363,7 +363,7 @@ pub use crate::view::{
 #[doc(hidden)]
 pub mod builders {
     pub use super::table::TableBuilder;
-    pub use super::view::{ReplicaShard, ViewBuilder, ViewReplica};
+    pub use super::view::ViewBuilder;
 }
 
 /// Types used when debugging Noria.
@@ -382,22 +382,6 @@ pub struct ActivationResult {
     pub expressions_removed: usize,
 }
 
-/// Represents a request to replicate readers for the given queries into the given worker.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ReaderReplicationSpec {
-    /// Name of the queries that will have their reader nodes replicated.
-    pub queries: Vec<SqlIdentifier>,
-    /// Worker URI.
-    pub worker_uri: Option<Url>,
-}
-
-/// Represents the result of a reader replication.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ReaderReplicationResult {
-    /// Map of query names to the new `DomainIndex`es and their `NodeIndex`es.
-    pub new_readers: HashMap<SqlIdentifier, HashMap<DomainIndex, Vec<NodeIndex>>>,
-}
-
 /// Filters that can be used to filter the type of
 /// view returned.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -405,10 +389,6 @@ pub enum ViewFilter {
     /// Pool of worker addresses. If the pool is not empty, this will
     /// look for a view reader in the pool.
     Workers(Vec<Url>),
-    /// Region to request the view from.
-    // TODO(justin): This parameter is currently not supported and
-    // is a no-op.
-    Region(String),
 }
 
 /// Represents a request for a view.

@@ -204,10 +204,6 @@ pub struct Options {
     #[clap(long, env = "UPSTREAM_DB_URL")]
     upstream_db_url: Option<RedactedString>,
 
-    /// The region the worker is hosted in. Required to route view requests to specific regions.
-    #[clap(long, env = "NORIA_REGION")]
-    region: Option<String>,
-
     /// Enable recording and exposing Prometheus metrics
     #[clap(long, env = "PROMETHEUS_METRICS")]
     prometheus_metrics: bool,
@@ -499,7 +495,6 @@ where
                         ch.clone(),
                         auto_increments.clone(),
                         query_cache.clone(),
-                        None,
                         noria_read_behavior,
                     )
                     .instrument(connection.in_scope(|| {
@@ -636,7 +631,6 @@ where
             let ch = ch.clone();
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
             let mut connection_handler = self.connection_handler.clone();
-            let region = options.region.clone();
             let upstream_db_url = options.upstream_db_url.clone();
             let upstream_config = self.upstream_config.clone();
             let backend_builder = BackendBuilder::new()
@@ -685,7 +679,6 @@ where
                     ch.clone(),
                     auto_increments.clone(),
                     query_cache.clone(),
-                    region.clone(),
                     noria_read_behavior,
                     r,
                 )

@@ -78,10 +78,6 @@ struct Writer {
     /// If `None` is provided, the experiment will run until it is interrupted.
     #[clap(long)]
     run_for: Option<u32>,
-
-    /// The region used when requesting a view.
-    #[clap(long)]
-    target_region: Option<String>,
 }
 
 #[derive(Clone)]
@@ -115,7 +111,6 @@ impl Writer {
             ch.clone(),
             auto_increments,
             query_cache,
-            None,
             ReadBehavior::Blocking,
         )
         .await;
@@ -125,11 +120,7 @@ impl Writer {
             .enable_ryw(true)
             .build(noria, upstream, query_status_cache);
 
-        let mut view = if let Some(region) = self.target_region.as_deref() {
-            ch.view_from_region("w", region).await.unwrap()
-        } else {
-            ch.view("w").await.unwrap()
-        };
+        let mut view = ch.view("w").await.unwrap();
 
         let mut interval = self
             .target_qps

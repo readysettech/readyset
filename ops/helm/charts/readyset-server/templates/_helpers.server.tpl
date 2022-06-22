@@ -194,11 +194,6 @@ ReadySet server, main configuration envionment variables.
 # ReadySet Deployment Name (Unique per Consul Cluster)
 - name: NORIA_DEPLOYMENT
   value: {{ template "readyset.generic.deploymentName" .config.deploymentName | quote }}
-# Cloud Provider Region
-- name: NORIA_REGION
-  value: {{ .config.region | quote }}
-- name: NORIA_PRIMARY_REGION
-  value: {{ .config.primaryRegion | quote }}
 # ReadySet Server Configs
 - name: NORIA_QUORUM
   value: {{ .config.quorum | quote }}

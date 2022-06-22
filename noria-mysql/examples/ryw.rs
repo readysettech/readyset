@@ -42,7 +42,6 @@ async fn main() {
         ch.clone(),
         auto_increments,
         query_cache,
-        None,
         ReadBehavior::Blocking,
     )
     .await;

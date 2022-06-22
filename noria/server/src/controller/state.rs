@@ -21,18 +21,16 @@ use std::time::Instant;
 use std::{cell, time};
 
 use common::IndexPair;
-use dataflow::node::Node;
 use dataflow::prelude::{ChannelCoordinator, DomainIndex, DomainNodes, Graph, NodeIndex};
 use dataflow::{
-    node, DomainBuilder, DomainConfig, DomainRequest, NodeMap, Packet, PersistenceParameters,
-    Sharding,
+    DomainBuilder, DomainConfig, DomainRequest, NodeMap, Packet, PersistenceParameters, Sharding,
 };
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::{FutureExt, TryStream};
 use lazy_static::lazy_static;
 use metrics::{gauge, histogram};
 use nom_sql::{CacheInner, CreateCacheStatement, SelectStatement, SqlIdentifier, SqlQuery};
-use noria::builders::{ReplicaShard, TableBuilder, ViewBuilder, ViewReplica};
+use noria::builders::{TableBuilder, ViewBuilder};
 use noria::consensus::{Authority, AuthorityControl};
 use noria::debug::info::GraphInfo;
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
@@ -42,17 +40,15 @@ use noria::recipe::changelist::{Change, ChangeList};
 use noria::recipe::ExtendRecipeSpec;
 use noria::replication::{ReplicationOffset, ReplicationOffsets};
 use noria::{
-    ActivationResult, KeyCount, ReaderReplicationResult, ReaderReplicationSpec, ReadySetError,
-    ReadySetResult, ViewFilter, ViewRequest, ViewSchema,
+    ActivationResult, KeyCount, ReadySetError, ReadySetResult, ViewFilter, ViewRequest, ViewSchema,
 };
-use noria_errors::{bad_request_err, internal, internal_err, invariant_eq, NodeType};
+use noria_errors::{internal, internal_err, invariant_eq, NodeType};
 use petgraph::visit::Bfs;
 use regex::Regex;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, instrument, trace, warn};
-use vec1::Vec1;
 
 use crate::controller::domain_handle::DomainHandle;
 use crate::controller::migrate::materialization::Materializations;
@@ -276,18 +272,17 @@ impl DataflowState {
             .collect()
     }
 
-    pub(super) fn find_readers_for(
+    pub(super) fn find_reader_for(
         &self,
         node: NodeIndex,
         name: &SqlIdentifier,
         filter: &Option<ViewFilter>,
-    ) -> Vec<NodeIndex> {
+    ) -> Option<NodeIndex> {
         // reader should be a child of the given node. however, due to sharding, it may not be an
         // *immediate* child. furthermore, once we go beyond depth 1, we may accidentally hit an
         // *unrelated* reader node. to account for this, readers keep track of what node they are
         // "for", and we simply search for the appropriate reader by that metric. since we know
         // that the reader must be relatively close, a BFS search is the way to go.
-        let mut nodes: Vec<NodeIndex> = Vec::new();
         let mut bfs = Bfs::new(&self.ingredients, node);
         while let Some(child) = bfs.next(&self.ingredients) {
             #[allow(clippy::indexing_slicing)] // just came from self.ingredients
@@ -305,15 +300,15 @@ impl DataflowState {
                             .map(|dh| dh.assigned_to_worker(worker))
                             .unwrap_or(false)
                         {
-                            nodes.push(child);
+                            return Some(child);
                         }
                     }
                 } else {
-                    nodes.push(child);
+                    return Some(child);
                 }
             }
         }
-        nodes
+        None
     }
 
     /// Obtain a `ViewBuilder` that can be sent to a client and then used to query a given
@@ -340,77 +335,62 @@ impl DataflowState {
 
         let name = self.recipe.resolve_alias(&name).unwrap_or(&name);
 
-        let readers = self.find_readers_for(node, name, &view_req.filter);
-        if readers.is_empty() {
+        let reader_node = if let Some(r) = self.find_reader_for(node, name, &view_req.filter) {
+            r
+        } else {
             return Ok(None);
-        }
-        let mut replicas: Vec<ViewReplica> = Vec::new();
-        for r in readers {
-            #[allow(clippy::indexing_slicing)] // `find_readers_for` returns valid indices
-            let domain_index = self.ingredients[r].domain();
-            #[allow(clippy::indexing_slicing)] // `find_readers_for` returns valid indices
-            let reader =
-                self.ingredients[r]
-                    .as_reader()
-                    .ok_or_else(|| ReadySetError::InvalidNodeType {
-                        node_index: self.ingredients[r].local_addr().id(),
-                        expected_type: NodeType::Reader,
-                    })?;
-            #[allow(clippy::indexing_slicing)] // `find_readers_for` returns valid indices
-            let returned_cols = reader
-                .post_lookup()
-                .returned_cols
-                .clone()
-                .unwrap_or_else(|| (0..self.ingredients[r].columns().len()).collect());
-            #[allow(clippy::indexing_slicing)] // just came from self
-            let columns = self.ingredients[r].columns();
-            let columns = returned_cols
-                .iter()
-                .map(|idx| columns.get(*idx).map(|c| c.name().into()))
-                .collect::<Option<Vec<_>>>()
-                .ok_or_else(|| internal_err("Schema expects valid column indices"))?;
+        };
 
-            let key_mapping = Vec::from(reader.mapping());
+        #[allow(clippy::indexing_slicing)] // `find_readers_for` returns valid indices
+        let domain_index = self.ingredients[reader_node].domain();
+        #[allow(clippy::indexing_slicing)] // `find_readers_for` returns valid indices
+        let reader = self.ingredients[reader_node].as_reader().ok_or_else(|| {
+            ReadySetError::InvalidNodeType {
+                node_index: self.ingredients[reader_node].local_addr().id(),
+                expected_type: NodeType::Reader,
+            }
+        })?;
+        #[allow(clippy::indexing_slicing)] // `find_readers_for` returns valid indices
+        let returned_cols = reader
+            .post_lookup()
+            .returned_cols
+            .clone()
+            .unwrap_or_else(|| (0..self.ingredients[reader_node].columns().len()).collect());
+        #[allow(clippy::indexing_slicing)] // just came from self
+        let columns = self.ingredients[reader_node].columns();
+        let columns = returned_cols
+            .iter()
+            .map(|idx| columns.get(*idx).map(|c| c.name().into()))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| internal_err("Schema expects valid column indices"))?;
 
-            let schema = self.view_schema(r)?;
-            let domain =
-                self.domains
-                    .get(&domain_index)
-                    .ok_or_else(|| ReadySetError::UnknownDomain {
+        let key_mapping = Vec::from(reader.mapping());
+
+        let schema = self.view_schema(reader_node)?;
+        let domain =
+            self.domains
+                .get(&domain_index)
+                .ok_or_else(|| ReadySetError::UnknownDomain {
+                    domain_index: domain_index.index(),
+                })?;
+        let shards = (0..domain.shards())
+            .map(|i| {
+                self.read_addrs
+                    .get(&domain.assignment(i)?)
+                    .ok_or_else(|| ReadySetError::UnmappableDomain {
                         domain_index: domain_index.index(),
-                    })?;
-            let shards = (0..domain.shards())
-                .map(|i| {
-                    Ok(ReplicaShard {
-                        addr: *self.read_addrs.get(&domain.assignment(i)?).ok_or_else(|| {
-                            ReadySetError::UnmappableDomain {
-                                domain_index: domain_index.index(),
-                            }
-                        })?,
-                        region: self
-                            .workers
-                            .get(&domain.assignment(i)?)
-                            .ok_or_else(|| ReadySetError::UnmappableDomain {
-                                domain_index: domain_index.index(),
-                            })?
-                            .region
-                            .clone(),
                     })
-                })
-                .collect::<ReadySetResult<Vec<_>>>()?;
-            replicas.push(ViewReplica {
-                node: r,
-                columns: columns.into(),
-                schema,
-                shards,
-                key_mapping,
-            });
-        }
+                    .copied()
+            })
+            .collect::<ReadySetResult<Vec<_>>>()?;
 
         Ok(Some(ViewBuilder {
             name: name.clone(),
-            replicas: Vec1::try_from_vec(replicas)
-                .map_err(|_| ReadySetError::ViewNotFound(name.to_string()))?,
+            node: reader_node,
+            columns: columns.into(),
+            schema,
+            shards,
+            key_mapping,
             view_request_timeout: self.domain_config.view_request_timeout,
         }))
     }
@@ -799,132 +779,6 @@ impl DataflowState {
         info!("finished migration");
         gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS, 0.0);
         Ok(r)
-    }
-
-    pub(super) async fn replicate_readers(
-        &mut self,
-        spec: ReaderReplicationSpec,
-    ) -> ReadySetResult<ReaderReplicationResult> {
-        let mut reader_nodes = Vec::new();
-        let worker_addr = spec.worker_uri;
-
-        if let Some(ref worker_addr) = worker_addr {
-            // If we've been specified to replicate readers into a specific worker,
-            // we must then check that the worker is registered in the Controller.
-            if !self.workers.contains_key(worker_addr) {
-                return Err(ReadySetError::ReplicationUnknownWorker {
-                    unknown_uri: worker_addr.clone(),
-                });
-            }
-        }
-
-        // We then proceed to retrieve the node indexes of each
-        // query.
-        let mut node_indexes = Vec::new();
-        for query_name in &spec.queries {
-            node_indexes.push((
-                query_name,
-                self.recipe.node_addr_for(query_name).map_err(|e| {
-                    warn!(
-                        error = %e,
-                        %query_name,
-                        "Reader replication failed: no node was found for query",
-                    );
-                    bad_request_err(format!(
-                        "Reader replication failed: no node was found for query '{:?}'",
-                        query_name
-                    ))
-                })?,
-            ));
-        }
-
-        // Now we look for the reader nodes of each of the query nodes.
-        let mut new_readers = HashMap::new();
-        for (query_name, node_index) in node_indexes {
-            // The logic to find the reader nodes is the same as
-            // [`self::find_view_for(NodeIndex,&str)`], but we perform some extra
-            // operations here. TODO(Fran): In the future we should try to find a good
-            // abstraction to avoid duplicating the logic.
-            let mut bfs = Bfs::new(&self.ingredients, node_index);
-            while let Some(child_index) = bfs.next(&self.ingredients) {
-                #[allow(clippy::indexing_slicing)] // just came out of self.ingredients
-                let child: &Node = &self.ingredients[child_index];
-                if let Some(r) = child.as_reader() {
-                    if r.is_for() == node_index && *query_name == child.name() {
-                        // Now the child is the reader node of the query we are looking at.
-                        // Here, we extract its [`PostLookup`] and use it to create a new
-                        // mirror node.
-                        let post_lookup = r.post_lookup().clone();
-                        #[allow(clippy::indexing_slicing)] // just came from self.ingredients
-                        let mut reader_node = self.ingredients[node_index].named_mirror(
-                            node::special::Reader::new(node_index, post_lookup),
-                            child.name().to_string(),
-                        );
-                        // We also take the index of the original reader node.
-                        if let Some(index) = child.as_reader().and_then(|r| r.index()) {
-                            // And set the index on the replicated reader.
-                            #[allow(clippy::unwrap_used)] // it must be a reader if it has a key
-                            reader_node.as_mut_reader().unwrap().set_index(index);
-                        }
-                        if let Some(mapping) = child.as_reader().map(|r| r.mapping()) {
-                            // And set the mapping on the replicated reader.
-                            #[allow(clippy::unwrap_used)] // it must be a reader if it has a key
-                            reader_node
-                                .as_mut_reader()
-                                .unwrap()
-                                .set_mapping(mapping.to_vec());
-                        }
-                        // We add the replicated reader to the graph.
-                        let reader_index = self.ingredients.add_node(reader_node);
-                        self.ingredients.add_edge(node_index, reader_index, ());
-                        // We keep track of the replicated reader and query node indexes, so
-                        // we can use them to run a migration.
-                        reader_nodes.push((node_index, reader_index));
-                        // We store the reader indexes by query, to use as a reply
-                        // to the user.
-                        new_readers
-                            .entry(query_name)
-                            .or_insert_with(Vec::new)
-                            .push(reader_index);
-                        break;
-                    }
-                }
-            }
-        }
-
-        // We run a migration with the new reader nodes.
-        // The migration will take care of creating the domains and
-        // sending them to the specified worker (or distribute them along all
-        // workers if no worker was specified).
-        self.migrate(false, move |mig| {
-            mig.worker = worker_addr;
-            for (node_index, reader_index) in reader_nodes {
-                mig.changes.add_node(reader_index);
-                mig.readers.insert(node_index, reader_index);
-            }
-        })
-        .await?;
-
-        // We retrieve the domain of the replicated readers.
-        let mut query_information = HashMap::new();
-        for (query_name, reader_indexes) in new_readers {
-            let mut domain_mappings = HashMap::new();
-            for reader_index in reader_indexes {
-                #[allow(clippy::indexing_slicing)] // we just got the index from self
-                let reader = &self.ingredients[reader_index];
-                domain_mappings
-                    .entry(reader.domain())
-                    .or_insert_with(|| Vec::new())
-                    .push(reader_index)
-            }
-            query_information.insert(query_name.clone(), domain_mappings);
-        }
-
-        // We return information about which replicated readers got in which domain,
-        // for which query.
-        Ok(ReaderReplicationResult {
-            new_readers: query_information,
-        })
     }
 
     /// Controls the persistence mode, and parameters related to persistence.

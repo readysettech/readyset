@@ -506,8 +506,8 @@ mod tests {
         let worker = WorkerDescriptor {
             worker_uri: Url::parse("http://127.0.0.1").unwrap(),
             reader_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1234),
-            region: None,
             reader_only: false,
+            leader_eligible: true,
             volume_id: None,
         };
 

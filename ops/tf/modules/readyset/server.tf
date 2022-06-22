@@ -10,9 +10,7 @@ resource "aws_instance" "server" {
     MYSQL_URL         = local.mysql_url
     DEPLOYMENT        = var.deployment
     MEMORY_BYTES      = var.server_memory_bytes
-    PRIMARY_REGION    = var.peer_region == "" ? data.aws_region.current.name : var.peer_region
     QUORUM            = var.server_quorum
-    REGION            = data.aws_region.current.name
     SETUP_DATA_VOLUME = file("${path.module}/files/setup-data-volume.sh")
     SHARDS            = var.server_shards
     AUTHORITY_ADDRESS = join(",", formatlist("%s:2181", aws_instance.zookeeper.*.private_ip))

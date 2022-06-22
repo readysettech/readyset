@@ -71,7 +71,6 @@ pub async fn build(
         Arc::new(Authority::from(LocalAuthority::new_with_store(
             authority_store,
         ))),
-        None,
         false,
         eviction,
     )
@@ -84,7 +83,6 @@ pub async fn build_custom(
     sharding: Option<usize>,
     controller: bool,
     authority: Arc<Authority>,
-    region: Option<String>,
     reader_only: bool,
     eviction: Option<(usize, Duration)>,
 ) -> Handle {
@@ -99,10 +97,6 @@ pub async fn build_custom(
 
     if reader_only {
         builder.as_reader_only();
-    }
-
-    if region.is_some() {
-        builder.set_region(region.unwrap());
     }
 
     if let Some((limit, period)) = eviction {

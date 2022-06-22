@@ -474,7 +474,6 @@ pub struct Config {
     pub(crate) persistence: PersistenceParameters,
     pub(crate) quorum: usize,
     pub(crate) reuse: Option<ReuseConfigType>,
-    pub(crate) primary_region: Option<String>,
     /// If set to true (the default), failing tokio tasks will cause a full-process abort.
     pub(crate) abort_on_task_failure: bool,
     /// Configuration for converting SQL to MIR
@@ -512,7 +511,6 @@ impl Default for Config {
             persistence: Default::default(),
             quorum: 1,
             reuse: None,
-            primary_region: None,
             abort_on_task_failure: true,
             mir_config: Default::default(),
             replication_url: None,

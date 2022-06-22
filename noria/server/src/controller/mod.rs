@@ -97,7 +97,6 @@ pub struct Worker {
     healthy: bool,
     uri: Url,
     http: reqwest::Client,
-    region: Option<String>,
     reader_only: bool,
     /// Volume associated with this worker's server.
     volume_id: Option<VolumeId>,
@@ -107,7 +106,6 @@ pub struct Worker {
 impl Worker {
     pub fn new(
         instance_uri: Url,
-        region: Option<String>,
         reader_only: bool,
         volume_id: Option<VolumeId>,
         request_timeout: Duration,
@@ -116,7 +114,6 @@ impl Worker {
             healthy: true,
             uri: instance_uri,
             http: reqwest::Client::new(),
-            region,
             reader_only,
             volume_id,
             request_timeout,
@@ -602,21 +599,14 @@ impl AuthorityLeaderElectionState {
         authority: Arc<Authority>,
         descriptor: ControllerDescriptor,
         config: Config,
-        region: Option<String>,
+        leader_eligible: bool,
     ) -> Self {
-        // We are eligible to be a leader if we are in the primary region.
-        let can_be_leader = if let Some(pr) = &config.primary_region {
-            matches!(&region, Some(r) if pr == r)
-        } else {
-            true
-        };
-
         Self {
             event_tx,
             authority,
             descriptor,
             config,
-            leader_eligible: can_be_leader,
+            leader_eligible,
             is_leader: false,
         }
     }
@@ -864,7 +854,7 @@ async fn authority_inner(
         authority.clone(),
         descriptor,
         config,
-        worker_descriptor.region.clone(),
+        worker_descriptor.leader_eligible,
     );
 
     let mut worker_state =

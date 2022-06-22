@@ -175,8 +175,7 @@ where
             let authority = authority.clone();
 
             let ch = ControllerHandle::new(authority).await;
-            let noria =
-                NoriaConnector::new(ch, auto_increments, query_cache, None, read_behavior).await;
+            let noria = NoriaConnector::new(ch, auto_increments, query_cache, read_behavior).await;
             // backend either has upstream or noria writer
             let upstream = if let Some(f) = fallback.as_ref() {
                 Some(A::make_upstream(f.clone()).await)

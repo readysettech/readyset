@@ -109,12 +109,6 @@ variable "mysql_adapter_instance_type" {
   default     = "t3.small"
 }
 
-variable "peer_region" {
-  description = "Peer region name"
-  type        = string
-  default     = ""
-}
-
 variable "peer_zookeeper_ips" {
   description = "List of peer region Zookeeper IPs"
   type        = list(string)

@@ -192,7 +192,6 @@ data:
           create_missing_stream: true
           group_name: "${LOG_GROUP_NAME}"
           compression: "none"
-          region: "${AWS_REGION}"
           # Equates to the name of the pod
           stream_name: "{{ "{{ host }}" }}"
           encoding:
@@ -342,8 +341,6 @@ Shared set of environment variables for Readyset Vector containers, including ag
   value: {{ .common.config.deploymentName | quote }}
 - name: LOG_GROUP_NAME
   value: {{ .common.config.cwLogGroupName | quote }}
-- name: AWS_REGION
-  value: {{ .common.config.primaryRegion | quote }}
 {{- if .common.secrets.vectorIamCredentials.secretName }}
 - name: AWS_ACCESS_KEY_ID
   valueFrom:

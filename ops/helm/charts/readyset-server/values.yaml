@@ -108,12 +108,6 @@ readyset:
       # by default, as indicated by a value of 0.
       memoryLimitBytes: 0
 
-      # -- Required to route view requests to specific regions.
-      region: "us-east-2"
-
-      # -- The region where the ReadySet controller is hosted.
-      primaryRegion: "us-east-2"
-
       # -- Format for ReadySet logs to be emitted to STDOUT/STDERR.
       logFormat: json
 

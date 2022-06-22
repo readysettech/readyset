@@ -156,12 +156,13 @@
 //!
 //! ```rust
 //! use clustertest::*;
-//! // Deploy a three server deployment with two servers in region, r1,
-//! // one server in region, r2, with a mysql adapter and upstream database.
+//! // Deploy a three server deployment with different volume IDs for each server, a mysql adapter,
+//! // and upstream database.
 //! async fn build_deployment() {
 //!     let mut deployment = DeploymentBuilder::new("ct_example")
-//!         .with_servers(2, ServerParams::default().with_region("r1"))
-//!         .add_server(ServerParams::default().with_region("r2"))
+//!         .add_server(ServerParams::default().with_volume("v1"))
+//!         .add_server(ServerParams::default().with_volume("v2"))
+//!         .add_server(ServerParams::default().with_volume("v3"))
 //!         .quorum(3)
 //!         .deploy_mysql()
 //!         .deploy_mysql_adapter()
@@ -291,24 +292,13 @@ pub(crate) struct NoriaBinarySource {
 #[must_use]
 #[derive(Clone)]
 pub struct ServerParams {
-    /// A server's region string, passed in via --region.
-    region: Option<String>,
-    /// THe volume id of the server, passed in via --volume-id.
+    /// The volume id of the server, passed in via --volume-id.
     volume_id: Option<String>,
 }
 
 impl ServerParams {
     pub fn default() -> Self {
-        Self {
-            region: None,
-            volume_id: None,
-        }
-    }
-
-    /// Sets a server's region string, passed in via --region.
-    pub fn with_region(mut self, region: &str) -> Self {
-        self.region = Some(region.to_string());
-        self
+        Self { volume_id: None }
     }
 
     /// Sets a server's --volume-id string, passed in via --volume-id.
@@ -330,8 +320,6 @@ pub struct DeploymentBuilder {
     shards: Option<usize>,
     /// Number of workers to wait for before starting.
     quorum: usize,
-    /// The primary region of the noria cluster.
-    primary_region: Option<String>,
     /// Parameters for the set of noria-server instances in the deployment.
     servers: Vec<ServerParams>,
     /// Deploy the mysql adapter.
@@ -392,7 +380,6 @@ impl DeploymentBuilder {
             },
             shards: None,
             quorum: 1,
-            primary_region: None,
             servers: vec![],
             mysql_adapter: false,
             mysql: false,
@@ -421,12 +408,6 @@ impl DeploymentBuilder {
     /// accepting queries and performing migrations.
     pub fn quorum(mut self, quorum: usize) -> Self {
         self.quorum = quorum;
-        self
-    }
-
-    /// The region where the leader should be hosted.
-    pub fn primary_region(mut self, region: &str) -> Self {
-        self.primary_region = Some(region.to_string());
         self
     }
 
@@ -507,36 +488,6 @@ impl DeploymentBuilder {
         self
     }
 
-    /// Checks the set of deployment params for invalid configurations
-    fn check_deployment_params(&self) -> anyhow::Result<()> {
-        match &self.primary_region {
-            Some(pr) => {
-                // If the primary region is set, at least one server should match that
-                // region.
-                if self
-                    .servers
-                    .iter()
-                    .all(|s| s.region.as_ref().filter(|region| region == &pr).is_none())
-                {
-                    return Err(anyhow!(
-                        "Primary region specified, but no servers match
-                    the region."
-                    ));
-                }
-            }
-            None => {
-                // If the primary region is not set, servers should not include a `region`
-                // parameter. Otherwise, a controller will not be elected.
-                if self.servers.iter().any(|s| s.region.is_some()) {
-                    return Err(anyhow!(
-                        "Servers have region without a deployment primary region"
-                    ));
-                }
-            }
-        }
-        Ok(())
-    }
-
     /// Starts the local multi-process deployment after running a set of commands in the
     /// upstream database. This can be useful for checking snapshotting properties. This also
     /// includes the `leader_timeout` parameter, how long to wait for the leader to be ready,
@@ -549,7 +500,6 @@ impl DeploymentBuilder {
     where
         Q: AsRef<str> + Send + Sync + 'a,
     {
-        self.check_deployment_params()?;
         let mut port = get_next_good_port(None);
         // If this deployment includes binlog replication and a mysql instance.
         let mut upstream_mysql_addr = None;
@@ -602,7 +552,6 @@ impl DeploymentBuilder {
                 &self.name,
                 self.shards,
                 self.quorum,
-                self.primary_region.as_ref(),
                 &self.authority_address,
                 &self.authority.to_string(),
                 port,
@@ -668,7 +617,6 @@ impl DeploymentBuilder {
             noria_binaries: self.noria_binaries,
             shards: self.shards,
             quorum: self.quorum,
-            primary_region: self.primary_region,
             port,
             mysql_adapter: mysql_adapter_handle,
             replicator_restart_timeout: self.replicator_restart_timeout,
@@ -759,8 +707,6 @@ pub struct DeploymentHandle {
     shards: Option<usize>,
     /// Number of workers to wait for before starting.
     quorum: usize,
-    /// The primary region of the deployment.
-    primary_region: Option<String>,
     /// Next new server port.
     port: u16,
     /// Holds a handle to the mysql adapter if this deployment includes
@@ -866,7 +812,6 @@ impl DeploymentHandle {
             &self.name,
             self.shards,
             self.quorum,
-            self.primary_region.as_ref(),
             &self.authority_addr,
             &self.authority.to_string(),
             port,
@@ -1004,7 +949,6 @@ fn start_server(
     deployment_name: &str,
     shards: Option<usize>,
     quorum: usize,
-    primary_region: Option<&String>,
     authority_addr: &str,
     authority: &str,
     port: u16,
@@ -1022,13 +966,6 @@ fn start_server(
         builder = builder.shards(shard);
     }
 
-    let region = server_params.region.as_ref();
-    if let Some(region) = region {
-        builder = builder.region(region);
-    }
-    if let Some(region) = primary_region.as_ref() {
-        builder = builder.primary_region(region);
-    }
     if let Some(volume) = server_params.volume_id.as_ref() {
         builder = builder.volume_id(volume);
     }
@@ -1152,82 +1089,6 @@ mod tests {
             .await
             .unwrap();
         deployment.teardown().await.unwrap();
-    }
-
-    #[clustertest]
-    async fn clustertest_multiregion() {
-        let mut deployment = DeploymentBuilder::new("ct_multiregion")
-            .primary_region("r1")
-            .add_server(ServerParams::default().with_region("r1"))
-            .add_server(ServerParams::default().with_region("r2"))
-            .start()
-            .await
-            .unwrap();
-        deployment.teardown().await.unwrap();
-    }
-
-    #[clustertest]
-    async fn clustertest_server_management() {
-        let mut deployment = DeploymentBuilder::new("ct_server_management")
-            .primary_region("r1")
-            .add_server(ServerParams::default().with_region("r1"))
-            .add_server(ServerParams::default().with_region("r2"))
-            .start()
-            .await
-            .unwrap();
-
-        // Check that we currently have two workers.
-        assert_eq!(
-            deployment
-                .leader_handle()
-                .healthy_workers()
-                .await
-                .unwrap()
-                .len(),
-            2
-        );
-
-        // Start up a new server.
-        let server_handle = deployment
-            .start_server(ServerParams::default().with_region("r3"), true)
-            .await
-            .unwrap();
-        assert_eq!(
-            deployment
-                .leader_handle()
-                .healthy_workers()
-                .await
-                .unwrap()
-                .len(),
-            3
-        );
-
-        // Now kill that server we started up.
-        deployment.kill_server(&server_handle, true).await.unwrap();
-        assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 2);
-
-        deployment.teardown().await.unwrap();
-    }
-
-    #[clustertest]
-    async fn clustertest_no_server_in_primary_region_test() {
-        assert!(DeploymentBuilder::new("fake_cluster")
-            .primary_region("r1")
-            .add_server(ServerParams::default().with_region("r2"))
-            .add_server(ServerParams::default().with_region("r3"))
-            .start()
-            .await
-            .is_err());
-    }
-
-    #[clustertest]
-    async fn clustertest_server_region_without_primary_region() {
-        assert!(DeploymentBuilder::new("fake_cluster_2")
-            .add_server(ServerParams::default().with_region("r1"))
-            .add_server(ServerParams::default().with_region("r2"))
-            .start()
-            .await
-            .is_err());
     }
 
     #[clustertest]

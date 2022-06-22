@@ -67,7 +67,6 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
     let mysql_address = parse_arg!("mySQLAddress", "".to_string(), JsString);
     let slowlog = parse_arg!("slowLog", false, JsBoolean);
     let read_your_write = parse_arg!("readYourWrite", false, JsBoolean);
-    let region = parse_arg!("region", "".to_string(), JsString);
     let dialect_name = parse_arg!("dialect", "mysql".to_string(), JsString);
     let dialect = match Dialect::from_str(&dialect_name) {
         Ok(dialect) => dialect,
@@ -92,7 +91,6 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
         ch,
         auto_increments,
         query_cache,
-        Some(region),
         ReadBehavior::Blocking,
     ));
     let upstream = if !mysql_address.is_empty() {

@@ -149,9 +149,7 @@ Kubernetes: `>=1.18.0-0`
 | readyset.common.config.engine | string | `"mysql"` | Flag to instruct entrypoint script which adapter binary to use. Supported values: mysql, psql |
 | readyset.common.config.logFormat | string | `"json"` | Format for ReadySet logs to be emitted to STDOUT/STDERR. |
 | readyset.common.config.memoryLimitBytes | int | `0` | Maximum memory (in bytes) each ReadySet server can consume. Unlimited by default, as indicated by a value of 0. |
-| readyset.common.config.primaryRegion | string | `"us-east-2"` | The region where the ReadySet controller is hosted. |
 | readyset.common.config.quorum | int | `1` | Number of ReadySet server nodes in the cluster. Should match number of server replicas in deploymentConfig.replicas |
-| readyset.common.config.region | string | `"us-east-2"` | Required to route view requests to specific regions. |
 | readyset.common.config.shards | int | `0` | Number of data shards in the cluster. Not advised to be changed unless you know what you are doing. |
 | readyset.common.secrets | object | Truncated due to length. | Secrets shared amongst ReadySet containers deployed in this chart. |
 | readyset.common.secrets.replicationUrl | object | `{"pwdSecretKey":"password","secretName":"readyset-db-url","urlSecretKey":"url","userSecretKey":"username"}` | your RDS instance. |

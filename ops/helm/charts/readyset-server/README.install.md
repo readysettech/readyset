@@ -148,10 +148,6 @@ readyset:
     config:
       # -- Name of the ReadySet deployment
       deploymentName: "myapp-1"
-      # -- Required to route view requests to specific regions
-      region: "us-east-2"
-      # -- The region where the ReadySet controller is hosted
-      primaryRegion: "us-east-2"
       # -- Flag to instruct entrypoint script which adapter binary to use
       # Supported values: mysql,psql
       engine: "mysql"
