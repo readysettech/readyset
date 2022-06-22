@@ -290,17 +290,13 @@ pub(crate) struct NoriaBinarySource {
 
 /// Parameters for a single noria-server instance.
 #[must_use]
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct ServerParams {
     /// The volume id of the server, passed in via --volume-id.
     volume_id: Option<String>,
 }
 
 impl ServerParams {
-    pub fn default() -> Self {
-        Self { volume_id: None }
-    }
-
     /// Sets a server's --volume-id string, passed in via --volume-id.
     pub fn with_volume(mut self, volume: &str) -> Self {
         self.volume_id = Some(volume.to_string());
@@ -355,6 +351,8 @@ pub struct DeploymentBuilder {
     mysql_pass: Option<String>,
     /// Replicator restart timeout in seconds.
     replicator_restart_timeout: Option<u64>,
+    /// Number of times to replicate reader domains
+    reader_replicas: Option<usize>,
 }
 
 impl DeploymentBuilder {
@@ -395,6 +393,7 @@ impl DeploymentBuilder {
             mysql_user: None,
             mysql_pass: None,
             replicator_restart_timeout: None,
+            reader_replicas: None,
         }
     }
 
@@ -488,6 +487,12 @@ impl DeploymentBuilder {
         self
     }
 
+    /// Sets the number of times to replicate reader domains
+    pub fn reader_replicas(mut self, replicas: usize) -> Self {
+        self.reader_replicas = Some(replicas);
+        self
+    }
+
     /// Starts the local multi-process deployment after running a set of commands in the
     /// upstream database. This can be useful for checking snapshotting properties. This also
     /// includes the `leader_timeout` parameter, how long to wait for the leader to be ready,
@@ -557,6 +562,7 @@ impl DeploymentBuilder {
                 port,
                 server_upstream.as_ref(),
                 self.replicator_restart_timeout,
+                self.reader_replicas,
             )?;
 
             handles.insert(handle.addr.clone(), handle);
@@ -620,6 +626,7 @@ impl DeploymentBuilder {
             port,
             mysql_adapter: mysql_adapter_handle,
             replicator_restart_timeout: self.replicator_restart_timeout,
+            reader_replicas: self.reader_replicas,
         };
 
         handle.wait_for_workers(Duration::from_secs(90)).await?;
@@ -714,6 +721,8 @@ pub struct DeploymentHandle {
     mysql_adapter: Option<AdapterHandle>,
     /// Replicator restart timeout in seconds.
     replicator_restart_timeout: Option<u64>,
+    /// Number of times to replicate reader domains
+    reader_replicas: Option<usize>,
 }
 
 impl DeploymentHandle {
@@ -817,6 +826,7 @@ impl DeploymentHandle {
             port,
             self.upstream_mysql_addr.as_ref(),
             self.replicator_restart_timeout,
+            self.reader_replicas,
         )?;
         let server_addr = handle.addr.clone();
         self.noria_server_handles
@@ -954,6 +964,7 @@ fn start_server(
     port: u16,
     mysql: Option<&String>,
     replicator_restart_timeout: Option<u64>,
+    reader_replicas: Option<usize>,
 ) -> Result<ServerHandle> {
     let mut builder = NoriaServerBuilder::new(noria_server_path)
         .deployment(deployment_name)
@@ -974,6 +985,9 @@ fn start_server(
     }
     if let Some(t) = replicator_restart_timeout {
         builder = builder.replicator_restart_timeout(t);
+    }
+    if let Some(rs) = reader_replicas {
+        builder = builder.reader_replicas(rs);
     }
     let addr = Url::parse(&format!("http://127.0.0.1:{}", port)).unwrap();
     Ok(ServerHandle {

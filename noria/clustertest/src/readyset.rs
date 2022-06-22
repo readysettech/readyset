@@ -1,3 +1,4 @@
+use launchpad::eventually;
 use noria::get_metric;
 use noria::metrics::{recorded, DumpedMetricValue};
 use noria_data::DataType;
@@ -218,4 +219,161 @@ async fn ensure_startup_timestamp_metric() {
     }
 
     deployment.teardown().await.unwrap();
+}
+
+#[clustertest]
+async fn replicated_readers() {
+    let mut deployment = DeploymentBuilder::new("ct_replicated_readers")
+        .with_servers(2, ServerParams::default())
+        .reader_replicas(2)
+        .start()
+        .await
+        .unwrap();
+    let lh = deployment.leader_handle();
+
+    lh.extend_recipe(
+        "CREATE TABLE t (id int, val int);
+         CREATE CACHE q FROM SELECT id, sum(val) FROM t WHERE id = ? GROUP BY id;"
+            .parse()
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    eprintln!("{}", lh.graphviz().await.unwrap());
+
+    let mut t = lh.table("t").await.unwrap();
+    t.insert_many(vec![
+        vec![DataType::from(1), DataType::from(1)],
+        vec![DataType::from(1), DataType::from(2)],
+        vec![DataType::from(2), DataType::from(3)],
+        vec![DataType::from(2), DataType::from(4)],
+    ])
+    .await
+    .unwrap();
+
+    let mut view_0 = lh.view_with_replica("q", 0).await.unwrap();
+    let mut view_1 = lh.view_with_replica("q", 1).await.unwrap();
+
+    let view_0_key_1 = view_0
+        .lookup_first(&[1.into()], true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(view_0_key_1, vec![DataType::from(1), DataType::from(3)]);
+
+    let view_1_key_2 = view_1
+        .lookup_first(&[2.into()], true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(view_1_key_2, vec![DataType::from(2), DataType::from(7)]);
+
+    t.insert_many(vec![
+        vec![DataType::from(1), DataType::from(3)],
+        vec![DataType::from(2), DataType::from(2)],
+    ])
+    .await
+    .unwrap();
+
+    eventually! {
+        let view_0_key_1 = view_0
+            .lookup_first(&[1.into()], true)
+            .await
+            .unwrap()
+            .unwrap();
+        view_0_key_1 == vec![DataType::from(1), DataType::from(6)]
+    }
+
+    let view_1_key_2 = view_1
+        .lookup_first(&[2.into()], true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(view_1_key_2, vec![DataType::from(2), DataType::from(9)]);
+
+    let view_0_key_2 = view_0
+        .lookup_first(&[2.into()], true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(view_0_key_2, vec![DataType::from(2), DataType::from(9)]);
+
+    let view_1_key_1 = view_1
+        .lookup_first(&[1.into()], true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(view_1_key_1, vec![DataType::from(1), DataType::from(6)]);
+}
+
+#[clustertest]
+async fn replicated_readers_with_unions() {
+    let mut deployment = DeploymentBuilder::new("ct_replicated_readers_with_unions")
+        .with_servers(2, ServerParams::default())
+        .reader_replicas(2)
+        .start()
+        .await
+        .unwrap();
+    let lh = deployment.leader_handle();
+
+    lh.extend_recipe(
+        "CREATE TABLE t (id int, val1 int, val2 int);
+         CREATE CACHE q FROM
+         SELECT count(*) FROM t
+         WHERE id = ?
+           AND (val1 = 1 OR val1 = 2)
+           AND (val2 = 1 OR val2 = 2);"
+            .parse()
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    eprintln!("{}", lh.graphviz().await.unwrap());
+
+    let mut t = lh.table("t").await.unwrap();
+    t.insert_many(vec![
+        vec![DataType::from(1), DataType::from(1), DataType::from(1)],
+        vec![DataType::from(1), DataType::from(1), DataType::from(2)],
+        vec![DataType::from(1), DataType::from(2), DataType::from(1)],
+        vec![DataType::from(1), DataType::from(2), DataType::from(2)],
+        vec![DataType::from(1), DataType::from(2), DataType::from(3)],
+        vec![DataType::from(2), DataType::from(1), DataType::from(1)],
+        vec![DataType::from(2), DataType::from(1), DataType::from(2)],
+        vec![DataType::from(2), DataType::from(3), DataType::from(2)],
+    ])
+    .await
+    .unwrap();
+
+    let mut view_0 = lh.view_with_replica("q", 0).await.unwrap();
+    let mut view_1 = lh.view_with_replica("q", 1).await.unwrap();
+
+    let view_0_key_1 = view_0
+        .lookup_first(&[1.into()], true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(view_0_key_1, vec![DataType::from(4)]);
+
+    let view_1_key_2 = view_1
+        .lookup_first(&[2.into()], true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(view_1_key_2, vec![DataType::from(2)]);
+
+    let view_1_key_1 = view_1
+        .lookup_first(&[1.into()], true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(view_1_key_1, vec![DataType::from(4)]);
+
+    let view_0_key_2 = view_0
+        .lookup_first(&[2.into()], true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(view_0_key_2, vec![DataType::from(2)]);
 }

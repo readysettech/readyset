@@ -84,8 +84,12 @@ impl NoriaServerBuilder {
         self.push_arg("--replication-url", addr)
     }
 
-    pub fn replicator_restart_timeout(self, addr: u64) -> Self {
-        self.push_arg("--replicator-restart-timeout", &addr.to_string())
+    pub fn replicator_restart_timeout(self, timeout: u64) -> Self {
+        self.push_arg("--replicator-restart-timeout", &timeout.to_string())
+    }
+
+    pub fn reader_replicas(self, num_replicas: usize) -> Self {
+        self.push_arg("--reader-replicas", &num_replicas.to_string())
     }
 }
 

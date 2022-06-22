@@ -378,6 +378,20 @@ impl ControllerHandle {
         self.request_view(request)
     }
 
+    /// Obtain the replica of a `View` with the given replica index
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn view_with_replica<I: Into<SqlIdentifier>>(
+        &mut self,
+        name: I,
+        replica: usize,
+    ) -> impl Future<Output = ReadySetResult<View>> + '_ {
+        self.request_view(ViewRequest {
+            name: name.into(),
+            filter: Some(ViewFilter::Replica(replica)),
+        })
+    }
+
     /// Obtain a 'ViewBuilder' for a specific view that allows you to build a view.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
