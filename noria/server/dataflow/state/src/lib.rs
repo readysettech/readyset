@@ -7,7 +7,7 @@ mod persistent_state;
 mod single_state;
 
 use std::borrow::Cow;
-use std::fmt::{self, Debug};
+use std::fmt::{self, Debug, Display};
 use std::iter::FromIterator;
 use std::ops::{Bound, Deref};
 use std::rc::Rc;
@@ -23,6 +23,7 @@ use noria::KeyComparison;
 use noria_data::DataType;
 use noria_errors::ReadySetResult;
 pub use partial_map::PartialMap;
+use serde::{Deserialize, Serialize};
 
 pub use self::memory_state::MemoryState;
 pub use self::persistent_state::{
@@ -178,7 +179,7 @@ pub trait State: SizeOf + Send {
     fn as_persistent_mut(&mut self) -> Option<&mut PersistentState>;
 
     /// Return (a potentially inaccurate estimate of) the number of keys stored in this state
-    fn key_count(&self) -> usize;
+    fn key_count(&self) -> KeyCount;
 
     /// Return (a potentially inaccurate estimate of) the number of rows materialized into this
     /// state
@@ -328,7 +329,7 @@ impl State for MaterializedNodeState {
         }
     }
 
-    fn key_count(&self) -> usize {
+    fn key_count(&self) -> KeyCount {
         match self {
             MaterializedNodeState::Memory(ms) => ms.key_count(),
             MaterializedNodeState::Persistent(ps) => ps.key_count(),
@@ -436,6 +437,24 @@ impl SizeOf for Row {
     }
     fn is_empty(&self) -> bool {
         false
+    }
+}
+
+/// Used to wrap key counts since we use row count estimates as a rough correlate of the key count
+/// in the case of RocksDB nodes, and we want to keep track of when we do that so as to avoid any
+/// confusion in other parts of the code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum KeyCount {
+    ExactKeyCount(usize),
+    EstimatedRowCount(usize),
+}
+
+impl Display for KeyCount {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            KeyCount::ExactKeyCount(count) => write!(f, "{}", count),
+            KeyCount::EstimatedRowCount(count) => write!(f, "~{}", count),
+        }
     }
 }
 
@@ -628,5 +647,16 @@ impl<'a> RangeLookupResult<'a> {
             Self::Some(records) => Ok(records),
             Self::Missing(misses) => Err(misses),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_count_formatting() {
+        assert_eq!("42", KeyCount::ExactKeyCount(42).to_string());
+        assert_eq!("~42", KeyCount::EstimatedRowCount(42).to_string());
     }
 }

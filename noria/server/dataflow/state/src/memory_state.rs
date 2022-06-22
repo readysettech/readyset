@@ -13,7 +13,8 @@ use tracing::trace;
 use crate::keyed_state::KeyedState;
 use crate::single_state::SingleState;
 use crate::{
-    LookupResult, PersistentState, RangeLookupResult, RecordResult, Row, Rows, State, StateEvicted,
+    KeyCount, LookupResult, PersistentState, RangeLookupResult, RecordResult, Row, Rows, State,
+    StateEvicted,
 };
 
 #[derive(Default)]
@@ -146,8 +147,9 @@ impl State for MemoryState {
         self.replication_offset = replication_offset;
     }
 
-    fn key_count(&self) -> usize {
-        self.state.iter().map(SingleState::key_count).sum()
+    fn key_count(&self) -> KeyCount {
+        let count = self.state.iter().map(SingleState::key_count).sum();
+        KeyCount::ExactKeyCount(count)
     }
 
     fn row_count(&self) -> usize {
@@ -484,7 +486,7 @@ mod tests {
         insert(&mut state, vec![1.into(), 20.into()]);
         insert(&mut state, vec![2.into(), 30.into()]);
 
-        assert_eq!(2, state.key_count());
+        assert_eq!(KeyCount::ExactKeyCount(2), state.key_count());
         assert_eq!(3, state.row_count());
     }
 
