@@ -255,6 +255,11 @@ async fn replicated_readers() {
     let mut view_0 = lh.view_with_replica("q", 0).await.unwrap();
     let mut view_1 = lh.view_with_replica("q", 1).await.unwrap();
 
+    // We should schedule the readers onto different workers (with different addresses)
+    assert_eq!(view_0.shard_addrs().len(), 1);
+    assert_eq!(view_1.shard_addrs().len(), 1);
+    assert_ne!(view_0.shard_addrs(), view_1.shard_addrs());
+
     let view_0_key_1 = view_0
         .lookup_first(&[1.into()], true)
         .await
@@ -348,6 +353,10 @@ async fn replicated_readers_with_unions() {
 
     let mut view_0 = lh.view_with_replica("q", 0).await.unwrap();
     let mut view_1 = lh.view_with_replica("q", 1).await.unwrap();
+
+    assert_eq!(view_0.shard_addrs().len(), 1);
+    assert_eq!(view_1.shard_addrs().len(), 1);
+    assert_ne!(view_0.shard_addrs(), view_1.shard_addrs());
 
     let view_0_key_1 = view_0
         .lookup_first(&[1.into()], true)

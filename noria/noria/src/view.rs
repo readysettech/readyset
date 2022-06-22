@@ -1178,6 +1178,12 @@ impl View {
         self.name.clone()
     }
 
+    /// Returns a reference to the list of socket addresses for the view's shards
+    #[must_use]
+    pub fn shard_addrs(&self) -> &[SocketAddr] {
+        self.shard_addrs.as_ref()
+    }
+
     /// Get the current size of this view.
     ///
     /// Note that you must also continue to poll this `View` for the returned future to resolve.
