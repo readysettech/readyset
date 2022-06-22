@@ -104,6 +104,9 @@ services:
       # Metrics
       PROMETHEUS_PUSH_GATEWAY: "https://benchmark-pushgw.build.readyset.name"
       PROMETHEUS_SERVER: "https://benchmark-prometheus.build.readyset.name"
+      BENCHDB_PASSWORD: "${BENCHDB_PASSWORD}"
+      BUILDKITE_COMMIT: "${BUILDKITE_COMMIT}"
+      BUILDKITE_BRANCH: "${BUILDKITE_BRANCH}"
     volumes:
       - ${HOST_ARTIFACT_PATH}:/tmp/artifacts:rw
     links:

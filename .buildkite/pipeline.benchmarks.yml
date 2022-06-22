@@ -66,6 +66,7 @@ steps:
     commands:
       - 'echo +++ :wrench: Benchmark Env File Setup'
       - echo "ENVIRONMENT=ci" >> ./.buildkite/benchmark.env
+      - echo "BUILDKITE_BRANCH=${BUILDKITE_BRANCH}" >> ./.buildkite/benchmark.env
       - echo "BUILDKITE_COMMIT=${BUILDKITE_COMMIT}" >> ./.buildkite/benchmark.env
       - echo "PROM_INSTANCE_LABEL=ci-benchmark-${BUILDKITE_BUILD_NUMBER}-${BUILDKITE_COMMIT:0:7}" >> ./.buildkite/benchmark.env
       - echo "DOCKER_TAG=${BUILDKITE_COMMIT}" >> ./.buildkite/benchmark.env

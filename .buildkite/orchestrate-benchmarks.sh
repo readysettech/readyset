@@ -13,6 +13,10 @@ BENCHMARK_DC_ENV_PATH=${BENCHMARK_DC_ENV_PATH:-"./.buildkite/benchmark.env"}
 
 if [ -e "${BENCHMARK_DC_ENV_PATH}" ]; then
   set +e
+  # Share regression DB credentials. Tempoarily disable printing
+  set +x
+  echo "BENCHDB_PASSWORD=\"$(aws ssm get-parameter --region us-east-2 --name /readyset/benchmarks/dbPassword --with-decryption --output text --query Parameter.Value)\"" >> ./.buildkite/benchmark.env
+  set -x
   . ./.buildkite/benchmark.env
   ec=$?
   set -e

@@ -28,6 +28,21 @@ BENCHMARK_START_TIME=$(date +%s)
 # Location to pass to benchmark binary as --results-file
 REPORT_SAVE_DIR=${REPORT_SAVE_DIR:-/tmp/artifacts}
 REPORT_JSON_ENABLED="${REPORT_JSON_ENABLED:-'disabled'}"
+BUILDKITE_BRANCH="${BUILDKITE_BRANCH:-}"
+export BUILDKITE_COMMIT="${BUILDKITE_COMMIT:-}"
+BENCHDB_PASSWORD="${BENCHDB_PASSWORD:-}"
+if [ -n "$BENCHDB_PASSWORD" ]; then
+    BENCHDB_HOST="benchmarks.c3gkl30tsqmh.us-east-2.rds.amazonaws.com"
+    # Don't log the target, since it contains sensitive information
+    set +x
+    export REPORT_TARGET="postgres://postgres:${BENCHDB_PASSWORD}@${BENCHDB_HOST}"
+    set -x
+    if [ "$BUILDKITE_BRANCH" = "refs/heads/main" ]; then
+        export REPORT_MODE="store-and-validate"
+    else
+        export REPORT_MODE="validate-only"
+    fi
+fi
 
 # ----------- [Functions] ----------------------------------- #
 
@@ -100,10 +115,17 @@ bench_file='read_benchmark_irl_small.yaml'
 project='irl'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
 
+if [ -n "$REPORT_MODE" ]; then
+    REPORT_PROFILE="--report-profile=$bench_file"
+else
+    REPORT_PROFILE=""
+fi
+
 benchmarks \
     --skip-setup \
     --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
-    --results-file "${REPORT_SAVE_DIR}/$project.log"
+    --results-file "${REPORT_SAVE_DIR}/$project.log" \
+    $REPORT_PROFILE
 ec=$?
 
 append_json_output_file_b64 "${project}.log" "${REPORT_SAVE_DIR}/$project.log"
@@ -129,11 +151,17 @@ for bench_path in $benchmark_files; do
     echo "Bench Name: $bench_name"
     echo "Bench Path: $bench_path"
     log_benchmark "${project}" "${bench_name}" "${BENCH_LOG_START_MSG}" "1"
+    if [ -n "$REPORT_MODE" ]; then
+        REPORT_PROFILE="--report-profile=minimal-$bench_name"
+    else
+        REPORT_PROFILE=""
+    fi
 
     benchmarks \
         --benchmark $bench_path \
         ${setup_str} \
-        --results-file "${REPORT_SAVE_DIR}/$project.log"
+        --results-file "${REPORT_SAVE_DIR}/$project.log" \
+        $REPORT_PROFILE
     ec=$?
     # Skip on every minimal benchmark after the first.
     setup_str='--skip-setup'
@@ -148,10 +176,16 @@ bench_subdir='test'
 bench_file='cache_hit_fastly_small.yaml'
 project='fastly'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
+if [ -n "$REPORT_MODE" ]; then
+    REPORT_PROFILE="--report-profile=-$bench_file"
+else
+    REPORT_PROFILE=""
+fi
 
 benchmarks \
     --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
-    --results-file "${REPORT_SAVE_DIR}/$project.log"
+    --results-file "${REPORT_SAVE_DIR}/$project.log" \
+    $REPORT_PROFILE
 ec=$?
 
 append_json_output_file_b64 "${project}.log" "${REPORT_SAVE_DIR}/$project.log"
@@ -164,11 +198,17 @@ bench_subdir='test'
 bench_file='read_benchmark_fastly_small.yaml'
 project='fastly'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
+if [ -n "$REPORT_MODE" ]; then
+    REPORT_PROFILE="--report-profile=$bench_file"
+else
+    REPORT_PROFILE=""
+fi
 
 benchmarks \
     --skip-setup \
     --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
-    --results-file "${REPORT_SAVE_DIR}/$project.log"
+    --results-file "${REPORT_SAVE_DIR}/$project.log" \
+    $REPORT_PROFILE
 ec=$?
 
 append_json_output_file_b64 "${project}.log" "${REPORT_SAVE_DIR}/$project.log"
@@ -181,10 +221,16 @@ bench_subdir='test'
 bench_file="scale_connections_small.yaml"
 project='internal'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}"  "1"
+if [ -n "$REPORT_MODE" ]; then
+    REPORT_PROFILE="--report-profile=$bench_file"
+else
+    REPORT_PROFILE=""
+fi
 
 benchmarks \
     --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
-    --results-file "${REPORT_SAVE_DIR}/$project.log"
+    --results-file "${REPORT_SAVE_DIR}/$project.log" \
+    $REPORT_PROFILE
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
 
@@ -194,10 +240,16 @@ bench_subdir='test'
 bench_file='scale_views_small.yaml'
 project='internal'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
+if [ -n "$REPORT_MODE" ]; then
+    REPORT_PROFILE="--report-profile=$bench_file"
+else
+    REPORT_PROFILE=""
+fi
 
 benchmarks \
     --benchmark "$BENCHMARK_TEST_DIR/$bench_subdir/$bench_file" \
-    --results-file "${REPORT_SAVE_DIR}/$project.log"
+    --results-file "${REPORT_SAVE_DIR}/$project.log" \
+    $REPORT_PROFILE
 ec=$?
 
 append_json_output_file_b64 "${project}.log" "${REPORT_SAVE_DIR}/$project.log"
