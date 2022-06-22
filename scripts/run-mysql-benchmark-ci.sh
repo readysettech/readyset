@@ -119,7 +119,7 @@ sleep "${REPL_AWAIT_SLEEP_DURATION}"
 echo "Dynamically identifying minimal benchmarks to be executed."
 bench_subdir='minimal'
 project='minimal'
-benchmark_files=`find $BENCHMARK_TEST_DIR/minimal -mindepth 1`
+benchmark_files=`find $BENCHMARK_TEST_DIR/minimal -mindepth 1 -type f -name "*.yaml"`
 setup_str=''
 
 echo "Preparing to execute Minimal benchmarks."
