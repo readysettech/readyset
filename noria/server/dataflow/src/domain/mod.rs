@@ -1108,13 +1108,10 @@ impl Domain {
 
             #[allow(clippy::indexing_slicing)] // see NOTE above
             let childi = self.nodes[me].borrow().children()[i];
-            let child_is_merger = {
-                // XXX: shouldn't NLL make this unnecessary?
-                #[allow(clippy::indexing_slicing)]
-                // we got the node from the children of the other node
-                let c = self.nodes[childi].borrow();
-                c.is_shard_merger()
-            };
+
+            // we got the node from the children of the other node
+            #[allow(clippy::indexing_slicing)]
+            let child_is_merger = self.nodes[childi].borrow().is_shard_merger();
 
             if child_is_merger {
                 // we need to preserve the egress src (which includes shard identifier)
@@ -1160,13 +1157,10 @@ impl Domain {
             // Already checked the node exists, and we're iterating through nchildren so we know i
             // is in-bounds
             let childi = self.nodes[me].borrow().children()[i];
-            let child_is_merger = {
-                // XXX: shouldn't NLL make this unnecessary?
-                #[allow(clippy::indexing_slicing)]
-                // we know the child exists since we got it from the node
-                let c = self.nodes[childi].borrow();
-                c.is_shard_merger()
-            };
+
+            // we know the child exists since we got it from the node
+            #[allow(clippy::indexing_slicing)]
+            let child_is_merger = self.nodes[childi].borrow().is_shard_merger();
 
             // The packet `m` must have a link by this point as `link_mut` calls
             // unwrap on the option.
