@@ -116,7 +116,10 @@ impl<'state> Scheduler<'state> {
             .sharded_by()
             .shards()
             .unwrap_or(1);
-        let num_replicas = 1; // TODO
+        let num_replicas = self
+            .dataflow_state
+            .replication_strategy
+            .replicate_domain(&self.dataflow_state.ingredients, nodes);
 
         let is_reader_domain = nodes
             .iter()

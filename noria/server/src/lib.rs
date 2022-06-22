@@ -434,6 +434,7 @@ pub enum ReuseConfigType {
 
 use controller::migrate::materialization;
 pub use controller::migrate::materialization::FrontierStrategy;
+pub use controller::replication::{ReplicationOptions, ReplicationStrategy};
 use controller::sql;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
 pub use noria::consensus::{Authority, LocalAuthority};
@@ -481,6 +482,8 @@ pub struct Config {
     pub(crate) replication_url: Option<String>,
     pub(crate) replication_server_id: Option<u32>,
     pub(crate) keep_prior_recipes: bool,
+    #[serde(default)]
+    pub(crate) replication_strategy: ReplicationStrategy,
     /// The duration to wait before canceling the task waiting on an upquery.
     pub(crate) upquery_timeout: Duration,
     /// The duration to wait before canceling a task waiting on a worker request. Worker requests
@@ -516,6 +519,7 @@ impl Default for Config {
             replication_url: None,
             replication_server_id: None,
             keep_prior_recipes: true,
+            replication_strategy: Default::default(),
             upquery_timeout: Duration::from_millis(5000),
             worker_request_timeout: Duration::from_millis(1800000),
             replicator_restart_timeout: Duration::from_secs(30),
