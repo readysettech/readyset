@@ -135,7 +135,8 @@
     stmt_expr_attributes,
     bound_map,
     bound_as_ref,
-    box_into_inner
+    box_into_inner,
+    is_sorted
 )]
 #![deny(missing_docs, macro_use_extern_crate)]
 #![deny(unused_extern_crates)]
@@ -282,7 +283,7 @@ pub mod prelude {
 
 /// Wrapper types for Noria query results.
 pub mod results {
-    pub use super::view::results::{ResultIterator, Results};
+    pub use super::view::results::{Key, ResultIterator, Results, Row, SharedResults, SharedRows};
 }
 
 task_local! {

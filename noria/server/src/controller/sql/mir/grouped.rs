@@ -1,8 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use dataflow::post_lookup::{
-    PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates,
-};
+use dataflow::{PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates};
 use mir::node::node_inner::MirNodeInner;
 use mir::{Column, MirNodeRef};
 use nom_sql::analysis::ReferredColumns;

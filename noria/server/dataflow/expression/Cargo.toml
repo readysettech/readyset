@@ -23,6 +23,7 @@ mysql-time = { path = "../../../../mysql-time" }
 nom-sql = { path = "../../../../nom-sql" }
 noria-data = { path = "../../../data" }
 noria-errors = { path = "../../../errors" }
+partial_map = { path = "../partial_map" }
 
 [dev-dependencies]
 test-strategy = "0.2.0"

@@ -1,23 +1,23 @@
 #![allow(missing_docs)]
 
 use core::task::Context;
-use std::borrow::Cow;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::future::Future;
 use std::task::Poll;
+use std::time;
 use std::time::Duration;
-use std::{iter, mem, time};
 
 use async_bincode::AsyncBincodeStream;
-use dataflow::prelude::{DataType, *};
+use bincode::Options;
+use dataflow::prelude::*;
 use dataflow::{Expr as DataflowExpr, LookupError, ReaderMap, Readers, SingleReadHandle};
-use derive_more::From;
 use failpoint_macros::set_failpoint;
 use futures_util::future::TryFutureExt;
 use futures_util::stream::{StreamExt, TryStreamExt};
 use launchpad::intervals;
 use noria::consistency::Timestamp;
 use noria::metrics::recorded;
+use noria::results::{ResultIterator, SharedResults};
 use noria::{
     KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyStats, ReaderAddress, Tagged,
     ViewQuery,
@@ -27,6 +27,7 @@ use pin_project::pin_project;
 use serde::ser::Serializer;
 use serde::Serialize;
 use stream_cancel::Valve;
+use streaming_iterator::StreamingIterator;
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_tower::multiplex::server;
@@ -41,115 +42,58 @@ const RETRY_TIMEOUT: Duration = Duration::from_micros(100);
 /// while, waiting readers will use exponential backoff on this delay if they continue to miss.
 const TRIGGER_TIMEOUT_MS: u64 = 20;
 
-/// An in-progress batch of records that are the result of the lookup of a single key within a read
-///
-/// This type exists to optimally support three cases in the read path, corresponding to the three
-/// enum variants:
-///
-/// * We missed on the lookup for a key initially and initiated an upquery for it, in which case we
-///   store [`Empty`] in the batch of responses to a read, then overwrite it with the actual results
-///   once the replay completes
-/// * We found no holes in the lookup for a key initially - this means we want to serialize
-///   immediately (within the scope of data owned by a [`reader_map`] handle) to avoid cloning - we
-///   store these serialized records in [`Serialized`].
-/// * Our lookup key was a range, a subset of which missed while another subset didn't miss - we
-///   can't serialize the results for the subset of the range that *didn't* miss, since that data is
-///   owned by the `reader_map` handle which we need to release so the replay can process - instead,
-///   we clone those results and store them in [`Unserialized`]. Once the replays for the subranges
-///   that missed complete, they can be added to the [`Unserialized`] batch with [`try_extend`].
-///
-/// [`Empty`]: ServerReadReplyBatch::Empty
-/// [`Serialized`]: ServerReadReplyBatch::Serialized
-/// [`Unserialized`]: ServerReadReplyBatch::Unserialized
-/// [`try_extend`]: ServerReadReplyBatch::try_extend
-#[derive(Debug, From)]
+/// A batch of records either intended for local consumption only via the
+/// [`ServerReadReplyBatch::Unserialized`] variant, that avoids cloning entirely or for remote
+/// serialization using the [`ServerReadReplyBatch: :Serialized`] variant.
+#[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum ServerReadReplyBatch {
-    Empty,
-    Serialized(Box<[u8]>),
-    Unserialized(Vec<Vec<DataType>>),
+    Serialized {
+        /// The serialized data as a bytes slice
+        serialized_data: Box<[u8]>,
+        /// The number of bytes to skip in [`serialized_data`] before the actual data begins
+        skip_bytes: usize,
+    },
+    Unserialized(ResultIterator),
 }
 
 impl ServerReadReplyBatch {
     /// Construct a [`ServerReadReplyBatch`] by serializing a result set, and storing the serialized
     /// bytes.
-    fn serialize<I, R, DT>(rs: I) -> Self
-    where
-        I: IntoIterator<Item = R>,
-        I::IntoIter: ExactSizeIterator,
-        R: Serialize + AsRef<[DT]>,
-    {
-        let rs = rs.into_iter();
-        if rs.len() == 0 {
-            return Self::Empty;
-        }
-        let mut it = rs.peekable();
-        let ln = it.len();
-        let fst = it.peek();
-        let mut v = Vec::with_capacity(
-            fst.as_ref()
-                .map(|fst| {
-                    // assume all rows are the same length
-                    ln * fst.as_ref().len() * std::mem::size_of::<DataType>()
-                })
-                .unwrap_or(0)
-                + std::mem::size_of::<u64>(/* seq.len */),
-        );
+    fn serialize(mut rs: ResultIterator) -> Self {
+        let mut v = Vec::with_capacity(16 * 1024);
 
-        let mut ser = bincode::Serializer::new(&mut v, bincode::DefaultOptions::default());
-        ser.collect_seq(it).unwrap();
-        Self::Serialized(v.into())
-    }
+        let options = bincode::DefaultOptions::default();
 
-    /// If `self` and `rs` are variants of [`ServerReadReplyBatch`] which can be appended (either
-    /// [`Empty`] or [`Unserialized`]), mutate `self` in-place by extending it with the records in
-    /// `rs`. Otherwise, returns an error
-    ///
-    /// [`Empty`]: ServerReadReplyBatch::Empty
-    /// [`Unserialized`]: ServerReadReplyBatch::Unserialized
-    fn try_extend(&mut self, rs: ServerReadReplyBatch) -> ReadySetResult<()> {
-        if self.is_empty() {
-            *self = rs;
-            return Ok(());
+        let mut ser = bincode::Serializer::new(&mut v, options);
+
+        usize::MAX.serialize(&mut ser).unwrap(); // Prepend the maximum possible room for length encoding
+
+        let mut n = 0usize;
+        while let Some(row) = rs.next() {
+            row.serialize(&mut ser).unwrap();
+            n += 1;
         }
 
-        match (self, rs) {
-            (ServerReadReplyBatch::Empty, _) => unreachable!("Matched on is_empty abov"),
-            (_, ServerReadReplyBatch::Empty) => {}
-            (ServerReadReplyBatch::Serialized(_), _) => {
-                internal!("Tried to overwite existing serialized read batch")
-            }
-            (_, ServerReadReplyBatch::Serialized(_)) => {
-                internal!("Can't extend existing read batch with serialized batch",)
-            }
-            (ServerReadReplyBatch::Unserialized(rows), ServerReadReplyBatch::Unserialized(rs)) => {
-                rows.extend(rs)
-            }
-        }
+        let max_len_enc = options.serialized_size(&usize::MAX).unwrap();
+        let len_enc = options.serialized_size(&n).unwrap();
+        let skip_bytes = (max_len_enc - len_enc) as usize;
 
-        Ok(())
-    }
+        let mut ser = bincode::Serializer::new(&mut v[skip_bytes..], options);
+        // Now encode the proper length
+        n.serialize(&mut ser).unwrap();
 
-    /// Is this [`ServerReadReplyBatch`] *verifiably* empty?
-    ///
-    /// This is true if `self` is [`Empty`], or [`Unserialized`] with no rows, but *not* true if
-    /// `self` is [`Serialized`] with no rows (currently serialized result sets are opaque).
-    ///
-    /// [`Empty`]: ServerReadReplyBatch::Empty
-    /// [`Unserialized`]: ServerReadReplyBatch::Unserialized
-    /// [`Serialized`]: ServerReadReplyBatch::Serialized
-    fn is_empty(&self) -> bool {
-        match self {
-            ServerReadReplyBatch::Empty => true,
-            ServerReadReplyBatch::Unserialized(rs) if rs.is_empty() => true,
-            _ => false,
+        Self::Serialized {
+            serialized_data: v.into(),
+            skip_bytes,
         }
     }
 
-    /// Return this [`ServerReadReplyBatch`] as its unserialized Vec<Vec<DataType>> if it is
+    /// Return this [`ServerReadReplyBatch`] as its unserialized [`ResultIterator`] if it is
     /// [`Unserialized`], otherwise, consume the object and return None.
     ///
     /// This should only be used in cases when we expect the result to be [`Unserialized`].
-    pub fn into_unserialized(self) -> Option<Vec<Vec<DataType>>> {
+    pub fn into_unserialized(self) -> Option<ResultIterator> {
         if let ServerReadReplyBatch::Unserialized(d) = self {
             Some(d)
         } else {
@@ -158,31 +102,27 @@ impl ServerReadReplyBatch {
     }
 }
 
-/// Ensures all variants are fungible - a [`ServerReadReplyBatch::Unserialized`] serializes
-/// identically to a [`ServerReadReplyBatch::Serialized`] constructed with the same rows, and a
-/// [`ServerReadReplyBatch::Empty`] serializes identically to both `Unserialized` and `Serialized`
-/// constructed with an empty result set.
 impl serde::Serialize for ServerReadReplyBatch {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         match self {
-            ServerReadReplyBatch::Empty => {
-                let mut bytes = Vec::with_capacity(std::mem::size_of::<u64>());
-                bincode::Serializer::new(&mut bytes, bincode::DefaultOptions::default())
-                    .collect_seq(iter::empty::<Vec<DataType>>())
-                    .unwrap();
-                ServerReadReplyBatch::Serialized(bytes.into()).serialize(serializer)
-            }
-            ServerReadReplyBatch::Serialized(bytes) => serializer.serialize_bytes(bytes),
-            ServerReadReplyBatch::Unserialized(rows) => Self::serialize(rows).serialize(serializer),
+            ServerReadReplyBatch::Serialized {
+                serialized_data,
+                skip_bytes,
+            } => serializer.serialize_bytes(&serialized_data[*skip_bytes..]),
+            ServerReadReplyBatch::Unserialized(_) => unreachable!(
+                "Unserialized should not be constructed where serialization is expected"
+            ),
         }
     }
 }
 
+type Reply = ReadySetResult<Tagged<ReadReply<ServerReadReplyBatch>>>;
+
 /// An Ack to resolve a blocking read.
-pub type Ack = oneshot::Sender<Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>>;
+pub type Ack = oneshot::Sender<Reply>;
 
 /// Creates a handler that can be used to perform read queries against a set of
 /// Readers.
@@ -197,9 +137,9 @@ pub struct ReadRequestHandler {
 }
 
 /// Represents either a result that was resolved synchronously or one that has to await on a channel
-pub enum CallResult<F: Future<Output = ReadySetResult<Tagged<ReadReply<ServerReadReplyBatch>>>>> {
+pub enum CallResult<F: Future<Output = Reply>> {
     /// The call was resolved immediately
-    Immediate(ReadySetResult<Tagged<ReadReply<ServerReadReplyBatch>>>),
+    Immediate(Reply),
     /// The call will be resolved by polling the provided future
     Async(F),
 }
@@ -229,8 +169,7 @@ impl ReadRequestHandler {
         target: ReaderAddress,
         query: ViewQuery,
         raw_result: bool,
-    ) -> CallResult<impl Future<Output = ReadySetResult<Tagged<ReadReply<ServerReadReplyBatch>>>>>
-    {
+    ) -> CallResult<impl Future<Output = Reply>> {
         let ViewQuery {
             mut key_comparisons,
             block,
@@ -267,38 +206,29 @@ impl ReadRequestHandler {
             }
         };
 
-        let mut ret = Vec::with_capacity(key_comparisons.len());
+        let mut ret = SharedResults::default();
         let consistency_miss = !has_sufficient_timestamp(reader, &timestamp);
 
         // A miss is either a RYW consistency miss or a key that is not materialized.
         // In the case of a RYW consistency miss, all keys will be added to `missed_keys`
         let mut miss_keys = Vec::new();
 
-        // To keep track of the index within the output vector that each entry in `missed_keys`
-        // corresponds to. This is needed when only a subset of the keys are missing due to not
-        // being materialized.
-        let mut miss_indices = Vec::new();
-
         // A key needs to be replayed only in the case of a materialization miss.
         // `keys_to_replay` is separate from `miss_keys` because `miss_keys` also
         // includes consistency misses.
         let mut keys_to_replay = Vec::new();
 
-        // First do non-blocking reads for all keys to see if we can return immediately.
-        // We execute this loop even if there is RYW miss, since we still want to trigger a
-        // partial replay if the key has been evicted. However, if there is RYW
-        // miss, a successful lookup is actually still a miss since the row is not
-        // sufficiently up to date.
-        let num_keys = key_comparisons.len();
-        for (i, key) in key_comparisons.drain(..).enumerate() {
+        // First do non-blocking reads for all keys to see if we can return immediately. We execute
+        // this loop even if there is RYW miss, since we still want to trigger a
+        // partial replay if the key has been evicted. However, if there is RYW  miss, a successful
+        // lookup is actually still a miss since the row is not∂ sufficiently up to date.
+        for key in key_comparisons.drain(..) {
             use dataflow::LookupError::*;
-            match do_lookup(reader, &key, &filter, !raw_result) {
+            match do_lookup(reader, &key) {
                 Ok(rs) => {
-                    if consistency_miss {
-                        ret.push(ServerReadReplyBatch::Empty);
-                    } else {
+                    if !consistency_miss {
                         // immediate hit!
-                        ret.push(rs);
+                        ret.extend(rs);
                     }
                 }
                 Err(NotReady) => reply_with_error!(ReadySetError::ViewNotYetAvailable),
@@ -330,27 +260,13 @@ impl ReadRequestHandler {
                                 .collect()
                         });
 
-                        let mut records = vec![];
                         for key in non_miss_ranges {
-                            match reader.try_find_range_and(&key, |r| {
-                                Ok(reader
-                                    .post_lookup
-                                    .process(r, &filter)?
-                                    .into_iter()
-                                    .map(Cow::into_owned)
-                                    .collect::<Vec<_>>())
-                            }) {
-                                Ok((rows, _)) => records.extend(rows.into_iter().flatten()),
+                            match reader.range(&key) {
+                                Ok(rowset) => ret.extend(rowset),
                                 Err(LookupError::Error(e)) => reply_with_error!(e),
                                 Err(_) => misses.push(key),
                             }
                         }
-
-                        // Store the records *unserialized* in the result, so we can add the
-                        // results for the subranges that missed once their replays complete.
-                        ret.push(ServerReadReplyBatch::Unserialized(records))
-                    } else {
-                        ret.push(ServerReadReplyBatch::Empty);
                     }
 
                     for key in misses {
@@ -360,7 +276,6 @@ impl ReadRequestHandler {
                         // no matter if it is materialized or not.
                         if !consistency_miss {
                             miss_keys.push(key.clone());
-                            miss_indices.push(i as usize);
                         }
                         keys_to_replay.push(key);
                     }
@@ -371,15 +286,25 @@ impl ReadRequestHandler {
             // not sufficiently up to date.
             if consistency_miss {
                 miss_keys.push(key);
-                miss_indices.push(i as usize);
             }
         }
-        debug_assert_eq!(ret.len(), num_keys);
 
         // Hit on all the keys and were RYW consistent
         if !consistency_miss && miss_keys.is_empty() {
             self.hit_ctr.increment(1);
-            reply_with_ok!(LookupResult::Results(ret, ReadReplyStats::default()));
+
+            let results = ResultIterator::new(ret, &reader.post_lookup, filter);
+
+            let results = if raw_result {
+                ServerReadReplyBatch::Unserialized(results)
+            } else {
+                ServerReadReplyBatch::serialize(results)
+            };
+
+            reply_with_ok!(LookupResult::Results(
+                vec![results],
+                ReadReplyStats::default()
+            ));
         }
         self.miss_ctr.increment(1);
 
@@ -400,7 +325,6 @@ impl ReadRequestHandler {
                     tag,
                     target,
                     pending_keys: miss_keys,
-                    pending_indices: miss_indices,
                     read: ret,
                     truth: self.global_readers.clone(),
                     trigger_timeout: trigger,
@@ -424,11 +348,7 @@ impl ReadRequestHandler {
         }
     }
 
-    fn handle_size_query(
-        &mut self,
-        tag: u32,
-        target: ReaderAddress,
-    ) -> ReadySetResult<Tagged<ReadReply<ServerReadReplyBatch>>> {
+    fn handle_size_query(&mut self, tag: u32, target: ReaderAddress) -> Reply {
         let reader = match self.readers_cache.entry(target.clone()) {
             Occupied(v) => v.into_mut(),
             Vacant(v) => {
@@ -446,11 +366,7 @@ impl ReadRequestHandler {
         })
     }
 
-    fn handle_keys_query(
-        &mut self,
-        tag: u32,
-        target: ReaderAddress,
-    ) -> ReadySetResult<Tagged<ReadReply<ServerReadReplyBatch>>> {
+    fn handle_keys_query(&mut self, tag: u32, target: ReaderAddress) -> Reply {
         let reader = match self.readers_cache.entry(target.clone()) {
             Occupied(v) => v.into_mut(),
             Vacant(v) => {
@@ -576,49 +492,19 @@ pub(crate) async fn listen(
     }
 }
 
-fn do_lookup<'a>(
-    reader: &'a SingleReadHandle,
+fn do_lookup(
+    reader: &SingleReadHandle,
     key: &KeyComparison,
-    filter: &Option<DataflowExpr>,
-    serialize_results: bool,
-) -> Result<ServerReadReplyBatch, dataflow::LookupError> {
-    fn maybe_serialize<'a, I>(rs: I, serialize_results: bool) -> ServerReadReplyBatch
-    where
-        I: IntoIterator<Item = Cow<'a, [DataType]>>,
-        I::IntoIter: ExactSizeIterator,
-    {
-        if serialize_results {
-            ServerReadReplyBatch::serialize(rs)
-        } else {
-            ServerReadReplyBatch::Unserialized(rs.into_iter().map(Cow::into_owned).collect())
-        }
-    }
-
-    if let Some(equal) = &key.equal() {
-        reader
-            .try_find_and(*equal, |rs| {
-                Ok(maybe_serialize(
-                    reader.post_lookup.process(rs, filter)?,
-                    serialize_results,
-                ))
-            })
-            .map(|r| r.0)
+) -> Result<SharedResults, dataflow::LookupError> {
+    if let Some(equal) = key.equal() {
+        reader.get(equal).map(|rows| [rows].into())
     } else {
         if key.is_reversed_range() {
             warn!("Reader received lookup for range with start bound above end bound; returning empty result set");
-            return Ok(ServerReadReplyBatch::Empty);
+            return Ok(SharedResults::default());
         }
 
-        reader
-            .try_find_range_and(&key, |r| Ok(r.into_iter().cloned().collect::<Vec<_>>()))
-            .and_then(|(rs, _)| {
-                Ok(maybe_serialize(
-                    reader
-                        .post_lookup
-                        .process(rs.into_iter().flatten().collect::<Vec<_>>().iter(), filter)?,
-                    serialize_results,
-                ))
-            })
+        reader.range(key)
     }
 }
 
@@ -647,10 +533,9 @@ pub struct BlockingRead {
     tag: u32,
     target: ReaderAddress,
     // results for keys we have already read
-    read: Vec<ServerReadReplyBatch>,
+    read: SharedResults,
     // keys we have yet to read and their corresponding indices in the reader
     pending_keys: Vec<KeyComparison>,
-    pending_indices: Vec<usize>,
     truth: Readers,
     filter: Option<DataflowExpr>,
     trigger_timeout: Duration,
@@ -669,7 +554,6 @@ impl std::fmt::Debug for BlockingRead {
             .field("target", &self.target)
             .field("read", &self.read)
             .field("pending_keys", &self.pending_keys)
-            .field("pending_indices", &self.pending_indices)
             .field("trigger_timeout", &self.trigger_timeout)
             .field("next_trigger", &self.next_trigger)
             .field("first", &self.first)
@@ -680,10 +564,7 @@ impl std::fmt::Debug for BlockingRead {
 
 impl BlockingRead {
     /// Check if we have the results for this blocking read.
-    pub fn check(
-        &mut self,
-        reader_cache: &mut ReaderMap,
-    ) -> Poll<Result<Tagged<ReadReply<ServerReadReplyBatch>>, ReadySetError>> {
+    pub fn check(&mut self, reader_cache: &mut ReaderMap) -> Poll<Reply> {
         let s = &self.truth;
         let target = &self.target;
         let reader = reader_cache.entry(self.target.clone()).or_insert_with(|| {
@@ -700,38 +581,21 @@ impl BlockingRead {
         // If the map is sufficiently up to date to serve the query, we start looking up
         // keys.
         if !consistency_miss {
-            // here's the trick we're going to play:
-            // we're going to re-try the lookups starting with the _last_ key.
-            // if it hits, we move on to the second-to-last, and so on.
-            // the moment we miss again, we yield immediately, rather than continue.
-            // this avoids shuffling around self.pending_indices and self.pending_keys, and
-            // probably doesn't really cost us anything -- we couldn't return ready anyway!
-            while let Some(read_i) = self.pending_indices.pop() {
-                let key = self
-                    .pending_keys
-                    .pop()
-                    .expect("pending.len() == keys.len()");
-
-                match do_lookup(
-                    reader,
-                    &key,
-                    &self.filter,
-                    // Serialize the results, avoiding a clone, unless we already have read
-                    // some records for this batch
-                    read[read_i].is_empty() && !self.raw_result && !key.is_range(),
-                ) {
-                    Ok(rs) => {
-                        read[read_i].try_extend(rs)?;
-                    }
+            // here's the trick we're going to play: we're going to re-try the lookups starting with
+            // the _last_ key. if it hits, we move on to the second-to-last, and so on. the moment
+            // we miss again, we yield immediately, rather than continue. this avoids shuffling
+            // around self.pending_keys, and probably doesn't really cost us anything --
+            // we couldn't return ready anyway!
+            while let Some(key) = self.pending_keys.pop() {
+                match do_lookup(reader, &key) {
+                    Ok(rs) => read.extend(rs),
                     Err(e) => {
                         if e.is_miss() {
                             // we still missed! restore key + pending
-                            self.pending_indices.push(read_i);
                             self.pending_keys.push(key);
                             break;
                         } else {
                             // map has been deleted, so server is shutting down
-                            self.pending_indices.clear();
                             self.pending_keys.clear();
                             return Poll::Ready(Err(ReadySetError::ServerShuttingDown));
                         }
@@ -778,11 +642,28 @@ impl BlockingRead {
             }
         }
 
+        if !self.pending_keys.is_empty() {
+            // Got unfinished keys, wait again
+            return Poll::Pending;
+        }
+
+        let results = ResultIterator::new(
+            std::mem::take(read),
+            &reader.post_lookup,
+            self.filter.take(),
+        );
+
+        let results = if self.raw_result {
+            ServerReadReplyBatch::Unserialized(results)
+        } else {
+            ServerReadReplyBatch::serialize(results)
+        };
+
         if self.pending_keys.is_empty() {
             Poll::Ready(Ok(Tagged {
                 tag: self.tag,
                 v: ReadReply::Normal(Ok(LookupResult::Results(
-                    mem::take(&mut self.read),
+                    vec![results],
                     ReadReplyStats { cache_misses: 1 },
                 ))),
             }))
@@ -794,33 +675,24 @@ impl BlockingRead {
 
 #[cfg(test)]
 mod readreply {
-    use std::borrow::Cow;
-
     use noria::{LookupResult, ReadReply, ReadReplyStats, ReadySetError, Tagged};
     use noria_data::DataType;
-    use test_strategy::proptest;
 
     use super::*;
 
-    #[proptest(cases = 5)]
-    fn server_read_reply_batch_fungibility(rows: Vec<Vec<DataType>>) {
-        assert_eq!(
-            bincode::serialize(&ServerReadReplyBatch::Unserialized(rows.clone())).unwrap(),
-            bincode::serialize(&ServerReadReplyBatch::serialize(rows)).unwrap()
-        );
-    }
-
-    fn rtt_ok(data: Vec<Vec<Vec<DataType>>>) {
+    fn rtt_ok(data: SharedResults) {
         let got: Tagged<ReadReply> = bincode::deserialize(
             &bincode::serialize(&Tagged {
                 tag: 32,
                 v: ReadReply::Normal::<ServerReadReplyBatch>(Ok(LookupResult::Results(
                     data.iter()
+                        .cloned()
                         .map(|d| {
-                            ServerReadReplyBatch::serialize(
-                                d.iter()
-                                    .map(|v| v.iter().map(Cow::Borrowed).collect::<Vec<_>>()),
-                            )
+                            ServerReadReplyBatch::serialize(ResultIterator::new(
+                                [d].into(),
+                                &Default::default(),
+                                None,
+                            ))
                         })
                         .collect(),
                     ReadReplyStats::default(),
@@ -836,8 +708,12 @@ mod readreply {
                 tag: 32,
             } => {
                 assert_eq!(got.len(), data.len());
-                for (got, expected) in got.into_iter().zip(data.into_iter()) {
-                    assert_eq!(&*got, &expected);
+                for (got, expected) in got
+                    .into_iter()
+                    .flatten()
+                    .zip(data.iter().map(|r| r.iter()).flatten())
+                {
+                    assert_eq!(got.as_slice(), &expected[..]);
                 }
             }
             r => panic!("{:?}", r),
@@ -869,44 +745,55 @@ mod readreply {
         }
     }
 
+    fn rows_vec<III, II, I>(data: III) -> SharedResults
+    where
+        III: IntoIterator<Item = II>,
+        II: IntoIterator<Item = I>,
+        I: IntoIterator<Item = DataType>,
+    {
+        data.into_iter()
+            .map(|rows| {
+                triomphe::Arc::new(
+                    rows.into_iter()
+                        .map(|row| row.into_iter().collect())
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+
     #[test]
     fn rtt_normal_one() {
-        rtt_ok(vec![vec![vec![DataType::from(1)]]]);
+        rtt_ok(rows_vec([[[DataType::from(1)]]]));
     }
 
     #[test]
     fn rtt_normal_multifield() {
-        rtt_ok(vec![vec![vec![DataType::from(1), DataType::from(42)]]]);
+        rtt_ok(rows_vec([[[DataType::from(1), DataType::from(42)]]]));
     }
 
     #[test]
     fn rtt_normal_multirow() {
-        rtt_ok(vec![vec![
-            vec![DataType::from(1)],
-            vec![DataType::from(42)],
-        ]]);
+        rtt_ok(rows_vec([[[DataType::from(1)], [DataType::from(42)]]]));
     }
 
     #[test]
     fn rtt_normal_multibatch() {
-        rtt_ok(vec![
-            vec![vec![DataType::from(1)]],
-            vec![vec![DataType::from(42)]],
-        ]);
+        rtt_ok(rows_vec([[[DataType::from(1)]], [[DataType::from(42)]]]));
     }
 
     #[test]
     fn rtt_normal_multi() {
-        rtt_ok(vec![
-            vec![
-                vec![DataType::from(1), DataType::from(42)],
-                vec![DataType::from(43), DataType::from(2)],
+        rtt_ok(rows_vec([
+            [
+                [DataType::from(1), DataType::from(42)],
+                [DataType::from(43), DataType::from(2)],
             ],
-            vec![
-                vec![DataType::from(2), DataType::from(43)],
-                vec![DataType::from(44), DataType::from(3)],
+            [
+                [DataType::from(2), DataType::from(43)],
+                [DataType::from(44), DataType::from(3)],
             ],
-        ]);
+        ]));
     }
 
     #[test]
@@ -950,7 +837,7 @@ mod readreply {
         ));
     }
 
-    async fn async_bincode_rtt_ok(data: Vec<Vec<Vec<DataType>>>) {
+    async fn async_bincode_rtt_ok(data: SharedResults) {
         use futures_util::SinkExt;
 
         let mut z = Vec::new();
@@ -961,7 +848,14 @@ mod readreply {
                 tag,
                 v: ReadReply::Normal::<ServerReadReplyBatch>(Ok(LookupResult::Results(
                     data.iter()
-                        .map(|d| ServerReadReplyBatch::serialize(d))
+                        .cloned()
+                        .map(|d| {
+                            ServerReadReplyBatch::serialize(ResultIterator::new(
+                                [d].into(),
+                                &Default::default(),
+                                None,
+                            ))
+                        })
                         .collect(),
                     ReadReplyStats::default(),
                 ))),
@@ -984,8 +878,12 @@ mod readreply {
                 } => {
                     assert_eq!(tag, t);
                     assert_eq!(got.len(), data.len());
-                    for (got, expected) in got.into_iter().zip(data.iter()) {
-                        assert_eq!(&*got, expected);
+                    for (got, expected) in got
+                        .into_iter()
+                        .flatten()
+                        .zip(data.iter().map(|r| r.iter()).flatten())
+                    {
+                        assert_eq!(got.as_slice(), &expected[..]);
                     }
                 }
                 r => panic!("{:?}", r),
@@ -995,22 +893,22 @@ mod readreply {
 
     #[tokio::test]
     async fn async_bincode_rtt_empty() {
-        async_bincode_rtt_ok(vec![]).await;
+        async_bincode_rtt_ok(rows_vec::<[[[DataType; 0]; 0]; 0], _, _>([])).await;
     }
 
     #[tokio::test]
     async fn async_bincode_rtt_one_empty() {
-        async_bincode_rtt_ok(vec![vec![]]).await;
+        async_bincode_rtt_ok(rows_vec::<[[[DataType; 0]; 0]; 1], _, _>([[]])).await;
     }
 
     #[tokio::test]
     async fn async_bincode_rtt_one_one_empty() {
-        async_bincode_rtt_ok(vec![vec![vec![]]]).await;
+        async_bincode_rtt_ok(rows_vec([[[]]])).await;
     }
 
     #[tokio::test]
     async fn async_bincode_rtt_multi() {
-        async_bincode_rtt_ok(vec![
+        async_bincode_rtt_ok(rows_vec([
             vec![
                 vec![DataType::from(1), DataType::from(42)],
                 vec![DataType::from(43), DataType::from(2)],
@@ -1021,7 +919,7 @@ mod readreply {
             ],
             vec![vec![]],
             vec![],
-        ])
+        ]))
         .await;
     }
 }

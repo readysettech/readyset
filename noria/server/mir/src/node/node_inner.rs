@@ -4,7 +4,7 @@ use common::{DataType, IndexType};
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::grouped::extremum::Extremum;
 use dataflow::ops::union;
-use dataflow::post_lookup::PostLookupAggregates;
+use dataflow::PostLookupAggregates;
 use itertools::Itertools;
 use nom_sql::{ColumnSpecification, Expr, OrderType, SqlIdentifier};
 use noria::ViewPlaceholder;

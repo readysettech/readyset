@@ -3,15 +3,15 @@ use std::ops::RangeBounds;
 
 use ahash::RandomState;
 use common::DataType;
+use dataflow_expression::PreInsertion;
 use launchpad::intervals::BoundPair;
 use noria::consistency::Timestamp;
-use noria::{KeyComparison, ReadySetResult};
+use noria::results::{SharedResults, SharedRows};
+use noria::KeyComparison;
 use noria_errors::ReadySetError;
-use reader_map::refs::{Miss, ValuesIter};
+use reader_map::refs::Miss;
 use serde::{Deserialize, Serialize};
 use vec1::{vec1, Vec1};
-
-use crate::post_lookup::PreInsertion;
 
 #[derive(Clone, Debug)]
 pub(super) enum Handle {
@@ -134,9 +134,6 @@ impl LookupError {
     }
 }
 
-/// The result of an equality or range lookup to the reader node.
-pub type LookupResult<T> = Result<(T, i64), LookupError>;
-
 impl Handle {
     pub(super) fn timestamp(&self) -> Option<Timestamp> {
         match *self {
@@ -159,27 +156,53 @@ impl Handle {
         }
     }
 
-    pub(super) fn meta_get_and<F, T>(&self, key: &[DataType], then: F) -> LookupResult<T>
-    where
-        F: FnOnce(ValuesIter<'_, Box<[DataType]>>) -> ReadySetResult<T>,
-    {
-        use LookupError::*;
-
-        match *self {
-            Handle::Single(ref h) => {
-                assert_eq!(key.len(), 1);
+    pub(super) fn get(&self, key: &[DataType]) -> Result<SharedRows, LookupError> {
+        match self {
+            Handle::Single(h) => {
                 let map = h.enter()?;
-                let m = *map.meta();
                 let v = map
                     .get(&key[0])
-                    .ok_or_else(|| MissPointSingle(key[0].clone(), m))?;
-                Ok((then(v.iter())?, m))
+                    .ok_or_else(|| LookupError::MissPointSingle(key[0].clone(), 0))?;
+                Ok(v.as_ref().clone())
             }
-            Handle::Many(ref h) => {
+            Handle::Many(h) => {
                 let map = h.enter()?;
-                let m = *map.meta();
-                let v = map.get(key).ok_or_else(|| MissPointMany(key.into(), m))?;
-                Ok((then(v.iter())?, m))
+                let v = map
+                    .get(key)
+                    .ok_or_else(|| LookupError::MissPointMany(key.into(), 0))?;
+                Ok(v.as_ref().clone())
+            }
+        }
+    }
+
+    pub(super) fn range<R>(&self, range: &R) -> Result<SharedResults, LookupError>
+    where
+        R: RangeBounds<Vec<DataType>>,
+    {
+        match self {
+            Handle::Single(h) => {
+                let map = h.enter()?;
+                let start_bound = range.start_bound().map(|v| {
+                    assert_eq!(v.len(), 1);
+                    &v[0]
+                });
+                let end_bound = range.end_bound().map(|v| {
+                    assert_eq!(v.len(), 1);
+                    &v[0]
+                });
+                let range = (start_bound, end_bound);
+                let records = map
+                    .range(&range)
+                    .map_err(|Miss(misses)| LookupError::MissRangeSingle(misses, 0))?;
+                Ok(records.map(|(_, row)| row.as_ref().clone()).collect())
+            }
+            Handle::Many(h) => {
+                let map = h.enter()?;
+                let range = (range.start_bound(), range.end_bound());
+                let records = map
+                    .range(&range)
+                    .map_err(|Miss(misses)| LookupError::MissRangeMany(misses, 0))?;
+                Ok(records.map(|(_, row)| row.as_ref().clone()).collect())
             }
         }
     }
@@ -187,7 +210,7 @@ impl Handle {
     /// Returns Ok(true) if this handle contains the given key, Ok(false) if it doesn't, or an error
     /// if the underlying reader map is not able to accept reads
     ///
-    /// This is equivalent to testing if `meta_get_and` returns an Err other than `NotReady`
+    /// This is equivalent to testing if `get` returns an Err other than `NotReady`
     pub(super) fn contains_key(&self, key: &[DataType]) -> reader_map::Result<bool> {
         match *self {
             Handle::Single(ref h) => {
@@ -202,62 +225,10 @@ impl Handle {
         }
     }
 
-    /// Retrieve the values corresponding to the given range of keys, apply `then` to them, and
-    /// return the results, along with the metadata
-    ///
-    /// # Panics
-    ///
-    /// Panics if the vectors in the bounds of `range` are a different size than the length of our
-    /// keys.
-    pub(super) fn meta_get_range_and<F, T, R>(&self, range: &R, then: F) -> LookupResult<Vec<T>>
-    where
-        F: Fn(ValuesIter<'_, Box<[DataType]>>) -> ReadySetResult<T>,
-        R: RangeBounds<Vec<DataType>>,
-    {
-        match *self {
-            Handle::Single(ref h) => {
-                let map = h.enter()?;
-                let meta = *map.meta();
-                let start_bound = range.start_bound().map(|v| {
-                    assert!(v.len() == 1);
-                    &v[0]
-                });
-                let end_bound = range.end_bound().map(|v| {
-                    assert!(v.len() == 1);
-                    &v[0]
-                });
-                let range = (start_bound, end_bound);
-                let records = map
-                    .range(&range)
-                    .map_err(|Miss(misses)| LookupError::MissRangeSingle(misses, meta))?;
-                Ok((
-                    records
-                        .map(|(_, row)| then(row.iter()))
-                        .collect::<Result<_, _>>()?,
-                    meta,
-                ))
-            }
-            Handle::Many(ref h) => {
-                let map = h.enter()?;
-                let meta = *map.meta();
-                let range = (range.start_bound(), range.end_bound());
-                let records = map
-                    .range(&range)
-                    .map_err(|Miss(misses)| LookupError::MissRangeMany(misses, meta))?;
-                Ok((
-                    records
-                        .map(|(_, row)| then(row.iter()))
-                        .collect::<Result<_, _>>()?,
-                    meta,
-                ))
-            }
-        }
-    }
-
     /// Returns Ok(true) if this handle fully contains the given key range, Ok(false) if any of the
     /// keys miss, or an error if the underlying reader map is not able to accept reads
     ///
-    /// This is equivalent to testing if `meta_get_and` returns an Err other than `NotReady`
+    /// This is equivalent to testing if `get` returns an Err other than `NotReady`
     pub(super) fn contains_range<R>(&self, range: &R) -> reader_map::Result<bool>
     where
         R: RangeBounds<Vec<DataType>>,
@@ -322,10 +293,7 @@ mod tests {
             let (mut w, handle) = make_many();
             w.insert(key.to_vec(), val.clone());
             w.publish();
-            handle.meta_get_and(&key[..], |result| {
-                assert!(result.eq([&val]));
-                Ok(())
-            }).unwrap();
+            assert_eq!(handle.get(&key[..]).unwrap()[0], val);
         }
     }
 
@@ -342,18 +310,19 @@ mod tests {
         w.insert_range((DataType::from(0i32))..(DataType::from(10i32)));
         w.publish();
 
-        let (res, meta) = handle
-            .meta_get_range_and(&(vec![2i32.into()]..=vec![3i32.into()]), |vals| {
-                Ok(vals.into_iter().cloned().collect::<Vec<_>>())
-            })
+        let res = handle
+            .range(&(vec![2i32.into()]..=vec![3i32.into()]))
             .unwrap();
         assert_eq!(
-            res,
+            res.iter()
+                .map(|rs| rs.iter())
+                .flatten()
+                .cloned()
+                .collect::<Vec<_>>(),
             (2i32..=3)
-                .map(|n| vec![vec![DataType::from(n), DataType::from(n)].into_boxed_slice()])
+                .map(|n| vec![DataType::from(n), DataType::from(n)].into_boxed_slice())
                 .collect::<Vec<_>>()
         );
-        assert_eq!(meta, -1);
     }
 
     #[test]
@@ -388,18 +357,18 @@ mod tests {
         w.insert_range(vec![0i32.into(), 0i32.into()]..vec![10i32.into(), 10i32.into()]);
         w.publish();
 
-        let (res, meta) = handle
-            .meta_get_range_and(
-                &(vec![2i32.into(), 2i32.into()]..=vec![3i32.into(), 3i32.into()]),
-                |vals| Ok(vals.into_iter().cloned().collect::<Vec<_>>()),
-            )
+        let res = handle
+            .range(&(vec![2i32.into(), 2i32.into()]..=vec![3i32.into(), 3i32.into()]))
             .unwrap();
         assert_eq!(
-            res,
+            res.iter()
+                .map(|rs| rs.iter())
+                .flatten()
+                .cloned()
+                .collect::<Vec<_>>(),
             (2i32..=3)
-                .map(|n: i32| vec![vec![DataType::from(n), DataType::from(n)].into_boxed_slice()])
+                .map(|n: i32| vec![DataType::from(n), DataType::from(n)].into_boxed_slice())
                 .collect::<Vec<_>>()
         );
-        assert_eq!(meta, -1);
     }
 }

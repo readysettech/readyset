@@ -739,7 +739,7 @@ async fn multiple_in() {
 
     let names: Vec<(String,)> = conn
         .exec(
-            "SELECT name from Cats where id in (?, ?) and name in (?, ?)",
+            "SELECT name from Cats where id in (?, ?) and name in (?, ?) ORDER BY name",
             (1, 2, "Bob", "Jane"),
         )
         .await
@@ -1041,7 +1041,7 @@ async fn ad_hoc_unparametrized_where_in() {
     sleep().await;
 
     let rows: Vec<(i32, i32)> = conn
-        .query("SELECT x, y FROM test WHERE x IN (1, 2)")
+        .query("SELECT x, y FROM test WHERE x IN (1, 2) ORDER BY x")
         .await
         .unwrap();
     assert_eq!(rows, vec![(1, 3), (2, 4)]);

@@ -63,6 +63,12 @@ impl<T> Deref for Values<T> {
     }
 }
 
+impl<T> AsRef<Arc<SmallVec<[T; 1]>>> for Values<T> {
+    fn as_ref(&self) -> &Arc<SmallVec<[T; 1]>> {
+        &self.values.0
+    }
+}
+
 impl<T> Values<T> {
     pub(crate) fn new(eviction_meta: EvictionMeta) -> Self {
         Values {

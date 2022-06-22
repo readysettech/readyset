@@ -1,7 +1,6 @@
-pub mod post_lookup;
-
 use std::time::SystemTime;
 
+use dataflow_expression::ReaderProcessing;
 use failpoint_macros::failpoint;
 use metrics::histogram;
 use noria::metrics::recorded;
@@ -9,9 +8,8 @@ use noria::{KeyColumnIdx, ViewPlaceholder};
 use serde::{Deserialize, Serialize};
 use tracing::{trace, warn};
 
-use self::post_lookup::ReaderProcessing;
+use crate::backlog;
 use crate::prelude::*;
-use crate::{backlog, LookupError};
 
 #[derive(Serialize, Deserialize)]
 pub struct Reader {
@@ -145,19 +143,19 @@ impl Reader {
             m.map_data(|data| {
                 trace!(?data, "reader received regular message");
                 data.retain(|row| {
-                    match state.entry_from_record(&row[..]).try_find_and(|_| Ok(())) {
-                        Err(e) if e.is_miss() => {
+                    match state.entry_from_record(&row[..]).exists() {
+                        Ok(false) => {
                             // row would miss in partial state.
                             // leave it blank so later lookup triggers replay.
                             trace!(?row, "dropping row that hit partial hole");
                             false
                         }
-                        Ok(_) => {
+                        Ok(true) => {
                             // state is already present,
                             // so we can safely keep it up to date.
                             true
                         }
-                        Err(LookupError::NotReady) => {
+                        Err(reader_map::Error::NotPublished) => {
                             // If we got here it means we got a `NotReady` error type. This is
                             // impossible, because when readers are instantiated we issue a
                             // commit to the underlying map, which makes it Ready.
@@ -166,11 +164,10 @@ impl Reader {
                                     already initialized it with a commit"
                             )
                         }
-                        Err(_) => {
-                            // The remaining error case here is LookupError::Error, which only
-                            // ever gets constructed from errors returned by the callback passed
-                            // to try_find_and
-                            unreachable!("Callback passed to try_find_and can only return Ok()")
+                        Err(reader_map::Error::Destroyed) => {
+                            unreachable!(
+                                "somehow map was destroyed but we hold a mutable reference"
+                            )
                         }
                     }
                 });
@@ -184,12 +181,12 @@ impl Reader {
             m.map_data(|data| {
                 trace!(?data, "reader received replay");
                 data.retain(|row| {
-                    match state.entry_from_record(&row[..]).try_find_and(|_| Ok(())) {
-                        Err(e) if e.is_miss() => {
+                    match state.entry_from_record(&row[..]).exists() {
+                        Ok(false) => {
                             // filling a hole with replay -- ok
                             true
                         }
-                        Ok(_) => {
+                        Ok(true) => {
                             trace!(?row, "reader dropping row that hit already-filled hole");
                             // a given key should only be replayed to once!
                             false

@@ -184,6 +184,7 @@ impl<N: Into<SqlIdentifier>, V: Into<String>> From<(N, V)> for MetaVariable {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum QueryResult<'a> {
     Empty,
     Insert {
@@ -1745,21 +1746,16 @@ async fn do_read<'a>(
                 CallResult::Async(chan) => chan.await?,
             };
 
-            ResultIterator::owned(
-                result
-                    .v
-                    .into_normal()
-                    .ok_or_else(|| internal_err("Unexpected response type from reader service"))?
-                    .map(|z| {
-                        z.map_results(|rows, stats| {
-                            // `rows` is Unserialized as we pass `raw_result` = true.
-                            #[allow(clippy::unwrap_used)]
-                            Results::with_stats(rows.into_unserialized().unwrap(), stats.clone())
-                        })
-                    })?
-                    .into_results()
-                    .ok_or(ReadySetError::ReaderMissingKey)?,
-            )
+            result
+                .v
+                .into_normal()
+                .ok_or_else(|| internal_err("Unexpected response type from reader service"))??
+                .into_results()
+                .ok_or(ReadySetError::ReaderMissingKey)?
+                .pop()
+                .ok_or_else(|| internal_err("Expected a single result set for local reader"))?
+                .into_unserialized()
+                .expect("Requested raw result")
         } else {
             getter.raw_lookup(vq).await?
         }
