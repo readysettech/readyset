@@ -43,6 +43,7 @@ mod keys;
 pub(crate) mod migrate; // crate viz for tests
 mod mir_to_flow;
 pub(crate) mod recipe; // crate viz for tests
+pub(crate) mod replication;
 pub(crate) mod schema;
 pub(crate) mod sql;
 mod state;
@@ -691,6 +692,7 @@ impl AuthorityLeaderElectionState {
                                     HashMap::new(),
                                     cc,
                                     self.config.keep_prior_recipes,
+                                    self.config.replication_strategy,
                                 );
                                 Ok(ControllerState {
                                     config: self.config.clone(),
@@ -708,6 +710,7 @@ impl AuthorityLeaderElectionState {
                                 );
                                 }
                                 state.dataflow_state.domain_config = self.config.domain_config.clone();
+                                state.dataflow_state.replication_strategy = self.config.replication_strategy;
                                 state.config = self.config.clone();
                                 Ok(state)
                             }

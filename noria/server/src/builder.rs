@@ -6,6 +6,7 @@ use std::time;
 use dataflow::PersistenceParameters;
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 
+use crate::controller::replication::ReplicationStrategy;
 use crate::handle::Handle;
 use crate::{Config, FrontierStrategy, ReuseConfigType, VolumeId};
 
@@ -160,6 +161,11 @@ impl Builder {
     /// used with caution. It is currently only used in test environments.
     pub fn set_keep_prior_recipes(&mut self, value: bool) {
         self.config.keep_prior_recipes = value;
+    }
+
+    /// Sets the strategy to use to determine how many times to replicate domains
+    pub fn set_replication_strategy(&mut self, replication_strategy: ReplicationStrategy) {
+        self.config.replication_strategy = replication_strategy
     }
 
     /// Configures this Noria server to accept only reader domains.

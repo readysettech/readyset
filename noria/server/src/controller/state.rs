@@ -51,6 +51,7 @@ use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use super::migrate::DomainSettings;
+use super::replication::ReplicationStrategy;
 use crate::controller::domain_handle::DomainHandle;
 use crate::controller::migrate::materialization::Materializations;
 use crate::controller::migrate::scheduling::Scheduler;
@@ -81,6 +82,8 @@ pub struct DataflowState {
     pub(super) sharding: Option<usize>,
 
     pub(super) domain_config: DomainConfig,
+
+    pub(super) replication_strategy: ReplicationStrategy,
 
     /// Controls the persistence mode, and parameters related to persistence.
     ///
@@ -141,6 +144,7 @@ impl DataflowState {
         node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
         channel_coordinator: Arc<ChannelCoordinator>,
         keep_prior_recipes: bool,
+        replication_strategy: ReplicationStrategy,
     ) -> Self {
         Self {
             ingredients,
@@ -160,6 +164,7 @@ impl DataflowState {
             workers: Default::default(),
             remap: Default::default(),
             keep_prior_recipes,
+            replication_strategy,
         }
     }
 

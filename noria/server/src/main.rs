@@ -12,7 +12,7 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use noria::metrics::recorded;
 use noria_server::consensus::AuthorityType;
 use noria_server::metrics::{install_global_recorder, CompositeMetricsRecorder, MetricsRecorder};
-use noria_server::{Builder, DurabilityMode, NoriaMetricsRecorder, VolumeId};
+use noria_server::{Builder, DurabilityMode, NoriaMetricsRecorder, ReplicationOptions, VolumeId};
 use tracing::{error, info};
 
 #[cfg(not(target_env = "msvc"))]
@@ -202,6 +202,9 @@ struct Opts {
     /// The time to wait before restarting the replicator in seconds.
     #[clap(long, hide = true)]
     replicator_restart_timeout: Option<u64>,
+
+    #[clap(flatten)]
+    replication_options: ReplicationOptions,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -281,6 +284,8 @@ fn main() -> anyhow::Result<()> {
     builder.set_allow_topk(opts.enable_experimental_topk_support);
     builder.set_allow_paginate(opts.enable_experimental_paginate_support);
     builder.set_allow_mixed_comparisons(opts.enable_experimental_mixed_comparisons);
+
+    builder.set_replication_strategy(opts.replication_options.into());
 
     if let Some(volume_id) = opts.volume_id {
         info!(%volume_id);
