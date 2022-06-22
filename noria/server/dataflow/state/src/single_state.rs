@@ -417,6 +417,10 @@ impl SingleState {
         self.partial
     }
 
+    pub(super) fn key_count(&self) -> usize {
+        self.state.key_count()
+    }
+
     pub(super) fn row_count(&self) -> usize {
         self.row_count
     }

@@ -177,6 +177,9 @@ pub trait State: SizeOf + Send {
     /// If the internal type is a `PersistentState` return a mutable reference to itself
     fn as_persistent_mut(&mut self) -> Option<&mut PersistentState>;
 
+    /// Return (a potentially inaccurate estimate of) the number of keys stored in this state
+    fn key_count(&self) -> usize;
+
     /// Return (a potentially inaccurate estimate of) the number of rows materialized into this
     /// state
     fn row_count(&self) -> usize;
@@ -322,6 +325,13 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.as_persistent_mut(),
             MaterializedNodeState::Persistent(ps) => ps.as_persistent_mut(),
+        }
+    }
+
+    fn key_count(&self) -> usize {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.key_count(),
+            MaterializedNodeState::Persistent(ps) => ps.key_count(),
         }
     }
 
