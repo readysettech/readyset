@@ -22,7 +22,7 @@
 //! [worker]: Migration::worker
 //! [placement restrictions]: DomainPlacementRestriction
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use dataflow::prelude::*;
 use noria::internal::DomainIndex;
@@ -60,6 +60,7 @@ struct WorkerStats {
 pub(crate) struct Scheduler<'state> {
     valid_workers: Vec<(&'state WorkerIdentifier, &'state Worker)>,
     worker_stats: HashMap<&'state WorkerIdentifier, WorkerStats>,
+    scheduled_shards: HashMap<&'state WorkerIdentifier, HashSet<(DomainIndex, usize)>>,
     dataflow_state: &'state DataflowState,
 }
 
@@ -77,17 +78,22 @@ impl<'state> Scheduler<'state> {
             .collect();
 
         let mut worker_stats: HashMap<&WorkerIdentifier, WorkerStats> = HashMap::new();
+        let mut scheduled_shards: HashMap<&WorkerIdentifier, HashSet<(DomainIndex, usize)>> =
+            HashMap::new();
+
         for (di, dh) in &dataflow_state.domains {
             let is_base_table_domain = dataflow_state.domain_nodes[di]
                 .values()
                 .any(|ni| dataflow_state.ingredients[*ni].is_base());
-            for replicas in dh.shards() {
+            for (shard, replicas) in dh.shards().iter().enumerate() {
                 for wi in replicas {
                     let stats = worker_stats.entry(wi).or_default();
                     stats.num_domain_shard_replicas += 1;
                     if is_base_table_domain {
                         stats.num_base_table_domain_shard_replicas += 1;
                     }
+
+                    scheduled_shards.entry(wi).or_default().insert((*di, shard));
                 }
             }
         }
@@ -95,6 +101,7 @@ impl<'state> Scheduler<'state> {
         Ok(Self {
             valid_workers,
             worker_stats,
+            scheduled_shards,
             dataflow_state,
         })
     }
@@ -143,6 +150,16 @@ impl<'state> Scheduler<'state> {
         let mut res = Vec::with_capacity(num_shards);
         for shard in 0..num_shards {
             let mut replicas = Vec::with_capacity(num_replicas);
+            // Filter out any workers that have a different replica of the same domain shard, to
+            // avoid scheduling two replicas of the same shard onto the same worker
+            let available_workers = workers
+                .clone()
+                .filter(|(wi, _)| {
+                    self.scheduled_shards
+                        .get(wi)
+                        .map_or(true, |shards| !shards.contains(&(domain_index, shard)))
+                })
+                .collect::<Vec<_>>();
             for _replica in 0..num_replicas {
                 // Shards of certain dataflow nodes may have restrictions that
                 // limit the workers they are placed upon.
@@ -162,7 +179,7 @@ impl<'state> Scheduler<'state> {
                 let worker_id = if dataflow_node_restrictions.is_empty() {
                     // If there are no placement restrictions, pick the node based on load-balancing
                     // heuristics
-                    workers.clone().min_by_key(|(wi, _)| {
+                    available_workers.iter().min_by_key(|(wi, _)| {
                         let stats = self.worker_stats.get(wi).copied().unwrap_or_default();
 
                         if is_base_table_domain {
@@ -180,7 +197,7 @@ impl<'state> Scheduler<'state> {
                     // that meets the placement restrictions. This can lead to
                     // imbalance in the number of dataflow nodes placed on each
                     // server.
-                    workers.clone().find(|(_, worker)| {
+                    available_workers.iter().find(|(_, worker)| {
                         worker_meets_restrictions(worker, &dataflow_node_restrictions)
                     })
                 }
@@ -190,13 +207,18 @@ impl<'state> Scheduler<'state> {
                     shard,
                 })?;
 
+                replicas.push(worker_id.clone());
+
+                self.scheduled_shards
+                    .entry(worker_id)
+                    .or_default()
+                    .insert((domain_index, shard));
+
                 let stats = self.worker_stats.entry(worker_id).or_default();
                 stats.num_domain_shard_replicas += 1;
                 if is_base_table_domain {
                     stats.num_base_table_domain_shard_replicas += 1;
                 }
-
-                replicas.push(worker_id.clone());
             }
             res.push(replicas);
         }
