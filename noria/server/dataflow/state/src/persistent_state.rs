@@ -536,6 +536,13 @@ impl State for PersistentState {
             .collect()
     }
 
+    /// Returns a *row* count estimate from RocksDB (not a key count as the function name would
+    /// suggest), since getting a key count could be quite expensive, and we care less about the
+    /// key count of persistent nodes anyway.
+    fn key_count(&self) -> usize {
+        self.row_count()
+    }
+
     /// Returns a row count estimate from RocksDB.
     fn row_count(&self) -> usize {
         let db = &self.db;

@@ -146,6 +146,10 @@ impl State for MemoryState {
         self.replication_offset = replication_offset;
     }
 
+    fn key_count(&self) -> usize {
+        self.state.iter().map(SingleState::key_count).sum()
+    }
+
     fn row_count(&self) -> usize {
         self.state.iter().map(SingleState::row_count).sum()
     }
@@ -470,6 +474,18 @@ mod tests {
     fn insert<S: State>(state: &mut S, row: Vec<DataType>) {
         let record: Record = row.into();
         state.process_records(&mut record.into(), None, None);
+    }
+
+    #[test]
+    fn memory_state_key_count_vs_row_count() {
+        let mut state = MemoryState::default();
+        state.add_key(Index::hash_map(vec![0]), None);
+        insert(&mut state, vec![1.into(), 10.into()]);
+        insert(&mut state, vec![1.into(), 20.into()]);
+        insert(&mut state, vec![2.into(), 30.into()]);
+
+        assert_eq!(2, state.key_count());
+        assert_eq!(3, state.row_count());
     }
 
     #[test]

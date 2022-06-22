@@ -65,6 +65,26 @@ impl KeyedState {
         }
     }
 
+    /// Returns the number of keys stored in this keyed state
+    pub(super) fn key_count(&self) -> usize {
+        match self {
+            KeyedState::SingleBTree(partial_map) => partial_map.num_keys(),
+            KeyedState::DoubleBTree(partial_map) => partial_map.num_keys(),
+            KeyedState::TriBTree(partial_map) => partial_map.num_keys(),
+            KeyedState::QuadBTree(partial_map) => partial_map.num_keys(),
+            KeyedState::QuinBTree(partial_map) => partial_map.num_keys(),
+            KeyedState::SexBTree(partial_map) => partial_map.num_keys(),
+            KeyedState::MultiBTree(partial_map, _) => partial_map.num_keys(),
+            KeyedState::SingleHash(index_map) => index_map.len(),
+            KeyedState::DoubleHash(index_map) => index_map.len(),
+            KeyedState::TriHash(index_map) => index_map.len(),
+            KeyedState::QuadHash(index_map) => index_map.len(),
+            KeyedState::QuinHash(index_map) => index_map.len(),
+            KeyedState::SexHash(index_map) => index_map.len(),
+            KeyedState::MultiHash(index_map, _) => index_map.len(),
+        }
+    }
+
     /// Look up all the rows corresponding to the given `key` and return them, or return None if no
     /// rows exist for the given key
     ///
