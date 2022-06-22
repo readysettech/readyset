@@ -6,7 +6,8 @@ use std::time::Duration;
 use futures::Future;
 use futures_util::future::Either;
 use noria_errors::{rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult};
-use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use tower::ServiceExt;
 use tower_service::Service;
 
@@ -27,8 +28,7 @@ impl ControllerHandle {
         timeout: Option<Duration>,
     ) -> RpcFuture<'a, R>
     where
-        for<'de> R: Deserialize<'de>,
-        R: Send + 'static,
+        R: DeserializeOwned + Send + 'static,
         Q: Serialize,
     {
         // Needed b/c of https://github.com/rust-lang/rust/issues/65442
@@ -38,7 +38,7 @@ impl ControllerHandle {
             path: &'static str,
         ) -> ReadySetResult<R>
         where
-            for<'de> R: Deserialize<'de>,
+            R: DeserializeOwned,
         {
             let body: hyper::body::Bytes = ch
                 .handle
