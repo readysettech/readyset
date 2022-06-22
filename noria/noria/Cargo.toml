@@ -55,6 +55,7 @@ mysql_async = "0.29"
 rand = "0.8.4"
 parking_lot = "0.11.2"
 cloudflare-zlib = { version = "0.2.9", features = ["arm-always"] }
+smallvec = "1.8"
 
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
 metrics = "0.19"
@@ -67,6 +68,7 @@ uuid = { version = "0.8", features = ["v4"] }
 bit-vec = { version = "0.6", features = ["serde"] }
 triomphe = "0.1"
 streaming-iterator = "0.1"
+tournament-kway = { path = "../../tournament-kway" }
 
 # consensus/
 zookeeper-async = "4.0.1"

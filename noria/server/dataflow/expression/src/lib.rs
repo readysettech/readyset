@@ -1,4 +1,7 @@
+#![feature(box_patterns)]
+
 mod like;
+mod post_lookup;
 pub mod utils;
 
 use std::borrow::Borrow;
@@ -17,6 +20,10 @@ use nom_sql::{BinaryOperator, SqlType};
 use noria_data::noria_type::Type;
 use noria_data::DataType;
 use noria_errors::{ReadySetError, ReadySetResult};
+pub use post_lookup::{
+    PostLookup, PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates,
+    PreInsertion, ReaderProcessing,
+};
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};

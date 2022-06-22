@@ -4,7 +4,7 @@ use std::fmt::{self, Display};
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
 use dataflow::ops::union;
-use dataflow::post_lookup::PostLookupAggregateFunction;
+use dataflow::PostLookupAggregateFunction;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use regex::Regex;

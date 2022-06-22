@@ -231,6 +231,7 @@ use std::hash::{BuildHasher, Hash};
 
 pub use eviction::EvictionStrategy;
 use noria::internal::IndexType;
+use partial_map::InsertionOrder;
 
 use crate::inner::Inner;
 use crate::read::ReadHandle;
@@ -394,7 +395,7 @@ impl<M, T, S, I> Options<M, T, S, I> {
         V: Ord + Clone,
         M: 'static + Clone,
         T: Clone,
-        I: InsertionOrder<V> + Clone,
+        I: partial_map::InsertionOrder<V> + Clone,
     {
         let inner = Inner::with_index_type_and_hasher(
             self.index_type,
@@ -410,13 +411,6 @@ impl<M, T, S, I> Options<M, T, S, I> {
 
         (WriteHandle::new(w), ReadHandle::new(r))
     }
-}
-
-/// A trait that is required to keep the inner values in the correct order
-pub trait InsertionOrder<V> {
-    /// Return the position of the element in the list of elements, or the position where it can be
-    /// inserted in order
-    fn get_insertion_order(&self, values: &[V], elem: &V) -> std::result::Result<usize, usize>;
 }
 
 /// The default order of rows in the reader is the default order as defined by

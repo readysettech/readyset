@@ -36,9 +36,8 @@ use std::time::{Duration, Instant};
 
 use array2::Array2;
 use dataflow::node::Column;
-use dataflow::post_lookup::ReaderProcessing;
 use dataflow::prelude::*;
-use dataflow::{node, DomainRequest};
+use dataflow::{node, DomainRequest, ReaderProcessing};
 use metrics::{counter, histogram};
 use nom_sql::SqlIdentifier;
 use noria::metrics::recorded;

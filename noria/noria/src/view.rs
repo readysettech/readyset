@@ -1342,12 +1342,6 @@ impl View {
 #[repr(transparent)]
 pub struct ReadReplyBatch(pub Vec<Vec<DataType>>);
 
-impl ReadReplyBatch {
-    pub fn empty() -> Self {
-        Self(Vec::new())
-    }
-}
-
 use serde::de::{self, DeserializeSeed, Deserializer, Visitor};
 impl<'de> Deserialize<'de> for ReadReplyBatch {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

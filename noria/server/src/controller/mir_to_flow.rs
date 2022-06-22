@@ -16,8 +16,9 @@ use dataflow::ops::grouped::concat::GroupConcat;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::project::Project;
-use dataflow::post_lookup::{PostLookupAggregates, ReaderProcessing};
-use dataflow::{node, ops, BuiltinFunction, Expr as DataflowExpr};
+use dataflow::{
+    node, ops, BuiltinFunction, Expr as DataflowExpr, PostLookupAggregates, ReaderProcessing,
+};
 use launchpad::redacted::Sensitive;
 use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};

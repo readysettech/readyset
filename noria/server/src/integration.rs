@@ -21,9 +21,8 @@ use dataflow::ops::join::JoinSource::*;
 use dataflow::ops::join::{Join, JoinSource, JoinType};
 use dataflow::ops::project::Project;
 use dataflow::ops::union::{self, Union};
-use dataflow::post_lookup::ReaderProcessing;
 use dataflow::utils::{dataflow_column, make_columns};
-use dataflow::{DurabilityMode, Expr as DataflowExpr, PersistenceParameters};
+use dataflow::{DurabilityMode, Expr as DataflowExpr, PersistenceParameters, ReaderProcessing};
 use futures::StreamExt;
 use itertools::Itertools;
 use nom_sql::{
@@ -4931,7 +4930,6 @@ async fn view_reuse_aliases() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "TODO(vlad): finish post lookup optimization"]
 async fn post_read_ilike() {
     readyset_tracing::init_test_logging();
 
@@ -7906,7 +7904,7 @@ async fn aggressive_eviction_impl() {
         };
 
         let r = view.raw_lookup(vq).await.unwrap().into_vec();
-        assert_eq!(r.len(), keys.len() * LIMIT);
+        assert_eq!(r.len(), LIMIT);
     }
 }
 
@@ -7927,9 +7925,8 @@ async fn aggressive_eviction_range_impl() {
             timestamp: None,
         };
 
-        let _r = view.raw_lookup(vq).await.unwrap().into_vec();
-        // TODO(vlad): fix post lookup for partially hit ranges
-        // assert_eq!(r.len(), LIMIT);
+        let r = view.raw_lookup(vq).await.unwrap().into_vec();
+        assert_eq!(r.len(), LIMIT);
     }
 }
 

@@ -5,14 +5,14 @@ use std::sync::Arc;
 
 use ahash::RandomState;
 use common::SizeOf;
+use dataflow_expression::{PostLookup, ReaderProcessing};
 use noria::consistency::Timestamp;
+use noria::results::{SharedResults, SharedRows};
 use noria::KeyComparison;
-use reader_map::refs::{Values, ValuesIter};
 use reader_map::EvictionStrategy;
 use vec1::Vec1;
 
-pub use self::multir::{LookupError, LookupResult};
-use crate::post_lookup::{PostLookup, ReaderProcessing};
+pub use self::multir::LookupError;
 use crate::prelude::*;
 
 pub(crate) trait Trigger =
@@ -26,9 +26,9 @@ pub(crate) trait Trigger =
 pub(crate) fn new(
     cols: usize,
     index: Index,
-    reader_proccessing: ReaderProcessing,
+    reader_processing: ReaderProcessing,
 ) -> (SingleReadHandle, WriteHandle) {
-    new_inner(cols, index, None, EvictionKind::Random, reader_proccessing)
+    new_inner(cols, index, None, EvictionKind::Random, reader_processing)
 }
 
 /// Allocate a new partially materialized end-user facing result table.
@@ -49,7 +49,7 @@ pub(crate) fn new_partial<F>(
     index: Index,
     trigger: F,
     eviction_kind: EvictionKind,
-    reader_proccessing: ReaderProcessing,
+    reader_processing: ReaderProcessing,
 ) -> (SingleReadHandle, WriteHandle)
 where
     F: Trigger,
@@ -59,7 +59,7 @@ where
         index,
         Some(Arc::new(trigger)),
         eviction_kind,
-        reader_proccessing,
+        reader_processing,
     )
 }
 
@@ -71,7 +71,7 @@ fn new_inner(
     index: Index,
     trigger: Option<Arc<dyn Trigger>>,
     eviction_kind: EvictionKind,
-    reader_proccessing: ReaderProcessing,
+    reader_processing: ReaderProcessing,
 ) -> (SingleReadHandle, WriteHandle) {
     let contiguous = {
         let mut contiguous = true;
@@ -97,7 +97,7 @@ fn new_inner(
     let ReaderProcessing {
         pre_processing,
         post_processing,
-    } = reader_proccessing;
+    } = reader_processing;
 
     macro_rules! make {
         ($variant:tt) => {{
@@ -178,19 +178,19 @@ pub(crate) struct WriteHandleEntry<'a> {
     key: Key<'a>,
 }
 
-impl<'a> WriteHandleEntry<'a> {
-    pub(crate) fn try_find_and<F, T>(self, then: F) -> LookupResult<T>
-    where
-        F: Fn(ValuesIter<'_, Box<[DataType]>>) -> ReadySetResult<T>,
-    {
-        self.handle.handle.read().meta_get_and(&self.key, then)
-    }
-}
-
 impl<'a> MutWriteHandleEntry<'a> {
     pub(crate) fn key_value_size(&self, key: &Key) -> usize {
         self.handle.handle.base_value_size()
             + key.iter().map(SizeOf::deep_size_of).sum::<u64>() as usize
+    }
+}
+
+impl<'a> WriteHandleEntry<'a> {
+    /// Check if the underlying [`WriteHandle`] contains the key associated with this
+    /// [`WriteHandleEntry`]. Will return and error if the map was destroyed, or not yet published,
+    /// otherwise a boolean stating if the key exists.
+    pub(crate) fn exists(self) -> reader_map::Result<bool> {
+        self.handle.handle.read().contains_key(&self.key)
     }
 }
 
@@ -200,7 +200,8 @@ impl<'a> MutWriteHandleEntry<'a> {
             .handle
             .handle
             .read()
-            .meta_get_and(&self.key, |rs| Ok(rs.len() == 0))
+            .get(&self.key)
+            .map(|rs| rs.is_empty())
             .err()
             .iter()
             .any(LookupError::is_miss)
@@ -221,8 +222,8 @@ impl<'a> MutWriteHandleEntry<'a> {
             .handle
             .handle
             .read()
-            .meta_get_and(&self.key, |rs| Ok(rs.map(SizeOf::deep_size_of).sum()))
-            .map(|(size, _)| size)
+            .get(&self.key)
+            .map(|rs| rs.iter().map(SizeOf::deep_size_of).sum())
             .unwrap_or(0);
         self.handle.mem_size = self
             .handle
@@ -367,8 +368,12 @@ impl WriteHandle {
                 let size = self
                     .handle
                     .read()
-                    .meta_get_range_and(&range, |rs| Ok(rs.map(SizeOf::deep_size_of).sum::<u64>()))
-                    .map(|(sizes, _)| sizes.iter().sum())
+                    .range(&range)
+                    .map(|rs| {
+                        rs.iter()
+                            .flat_map(|rs| rs.iter().map(SizeOf::deep_size_of))
+                            .sum::<u64>()
+                    })
                     .unwrap_or(0);
                 self.mem_size = self.mem_size.saturating_sub(size as usize);
                 self.handle.empty_range(range)
@@ -452,40 +457,21 @@ impl SingleReadHandle {
         }
     }
 
-    /// Find all entries that matched the given conditions.
-    ///
-    /// Returned records are passed to `then` before being returned.
-    ///
-    /// Note that not all writes will be included with this read -- only those that have been
-    /// swapped in by the writer.
-    ///
-    /// Holes in partially materialized state are returned as `Ok((None, _))`.
-    pub fn try_find_and<F, T>(&self, key: &[DataType], then: F) -> Result<(T, i64), LookupError>
-    where
-        F: Fn(ValuesIter<'_, Box<[DataType]>>) -> ReadySetResult<T>,
-    {
-        match self.handle.meta_get_and(key, &then) {
-            Err(e) if e.is_miss() && self.trigger.is_none() => {
-                Ok((then(Values::default().iter())?, e.meta().unwrap()))
-            }
+    /// Find the rows for a given single key
+    pub fn get(&self, key: &[DataType]) -> Result<SharedRows, LookupError> {
+        match self.handle.get(key) {
+            Err(e) if e.is_miss() && self.trigger.is_none() => Ok(SharedRows::default()),
             r => r,
         }
     }
 
-    /// Look up the entries whose keys are in `range`, pass each to `then`, and return them
-    pub fn try_find_range_and<F, T, R>(
-        &self,
-        range: &R,
-        then: F,
-    ) -> Result<(Vec<T>, i64), LookupError>
+    /// Find the sets of rows for a given range of keys
+    pub fn range<R>(&self, range: &R) -> Result<SharedResults, LookupError>
     where
-        F: Fn(ValuesIter<'_, Box<[DataType]>>) -> ReadySetResult<T>,
-        R: RangeBounds<Vec<common::DataType>>,
+        R: RangeBounds<Vec<DataType>>,
     {
-        match self.handle.meta_get_range_and(range, &then) {
-            Err(e) if e.is_miss() && self.trigger.is_none() => {
-                Ok((vec![then(Values::default().iter())?], e.meta().unwrap()))
-            }
+        match self.handle.range(range) {
+            Err(e) if e.is_miss() && self.trigger.is_none() => Ok(SharedResults::default()),
             r => r,
         }
     }
@@ -520,30 +506,18 @@ mod tests {
         w.swap();
 
         // after first swap, it is empty, but ready
-        assert_eq!(
-            r.try_find_and(&a[0..1], |rs| Ok(rs.len())).unwrap(),
-            (0, -1)
-        );
+        assert_eq!(r.get(&a[0..1]).unwrap().len(), 0);
 
         w.add(vec![Record::Positive(a.to_vec())]);
 
         // it is empty even after an add (we haven't swapped yet)
-        assert_eq!(
-            r.try_find_and(&a[0..1], |rs| Ok(rs.len())).unwrap(),
-            (0, -1)
-        );
+        assert_eq!(r.get(&a[0..1]).unwrap().len(), 0);
 
         w.swap();
 
         // but after the swap, the record is there!
-        assert_eq!(r.try_find_and(&a[0..1], |rs| Ok(rs.len())).unwrap().0, 1);
-        assert!(
-            r.try_find_and(&a[0..1], |mut rs| Ok(
-                rs.any(|r| r[0] == a[0] && r[1] == a[1])
-            ))
-            .unwrap()
-            .0
-        );
+        assert_eq!(r.get(&a[0..1]).unwrap().len(), 1);
+        assert_eq!(r.get(&a[0..1]).unwrap()[0], a);
     }
 
     #[test]
@@ -564,9 +538,9 @@ mod tests {
         for i in 0..n {
             let i = &[i.into()];
             loop {
-                match r.try_find_and(i, |rs| Ok(rs.len())) {
-                    Ok((1, _)) => break,
-                    Ok((i, _)) => assert_ne!(i, 1),
+                match r.get(i) {
+                    Ok(rs) if rs.len() == 1 => break,
+                    Ok(rs) => assert_ne!(rs.len(), 1),
                     Err(_) => continue,
                 }
             }
@@ -585,14 +559,8 @@ mod tests {
         w.swap();
         w.add(vec![Record::Positive(b.to_vec())]);
 
-        assert_eq!(r.try_find_and(&a[0..1], |rs| Ok(rs.len())).unwrap().0, 1);
-        assert!(
-            r.try_find_and(&a[0..1], |mut rs| Ok(
-                rs.any(|r| r[0] == a[0] && r[1] == a[1])
-            ))
-            .unwrap()
-            .0
-        );
+        assert_eq!(r.get(&a[0..1]).unwrap().len(), 1);
+        assert_eq!(r.get(&a[0..1]).unwrap()[0], a);
     }
 
     #[test]
@@ -607,21 +575,9 @@ mod tests {
         w.swap();
         w.add(vec![Record::Positive(c.to_vec())]);
 
-        assert_eq!(r.try_find_and(&a[0..1], |rs| Ok(rs.len())).unwrap().0, 2);
-        assert!(
-            r.try_find_and(&a[0..1], |mut rs| Ok(
-                rs.any(|r| r[0] == a[0] && r[1] == a[1])
-            ))
-            .unwrap()
-            .0
-        );
-        assert!(
-            r.try_find_and(&a[0..1], |mut rs| Ok(
-                rs.any(|r| r[0] == b[0] && r[1] == b[1])
-            ))
-            .unwrap()
-            .0
-        );
+        assert_eq!(r.get(&a[0..1]).unwrap().len(), 2);
+        assert_eq!(r.get(&a[0..1]).unwrap()[0], a);
+        assert_eq!(r.get(&a[0..1]).unwrap()[1], b);
     }
 
     #[test]
@@ -635,14 +591,8 @@ mod tests {
         w.add(vec![Record::Negative(a.to_vec())]);
         w.swap();
 
-        assert_eq!(r.try_find_and(&a[0..1], |rs| Ok(rs.len())).unwrap().0, 1);
-        assert!(
-            r.try_find_and(&a[0..1], |mut rs| Ok(
-                rs.any(|r| r[0] == b[0] && r[1] == b[1])
-            ))
-            .unwrap()
-            .0
-        );
+        assert_eq!(r.get(&a[0..1]).unwrap().len(), 1);
+        assert_eq!(r.get(&a[0..1]).unwrap()[0], b);
     }
 
     #[test]
@@ -657,14 +607,8 @@ mod tests {
         w.add(vec![Record::Negative(a.to_vec())]);
         w.swap();
 
-        assert_eq!(r.try_find_and(&a[0..1], |rs| Ok(rs.len())).unwrap().0, 1);
-        assert!(
-            r.try_find_and(&a[0..1], |mut rs| Ok(
-                rs.any(|r| r[0] == b[0] && r[1] == b[1])
-            ))
-            .unwrap()
-            .0
-        );
+        assert_eq!(r.get(&a[0..1]).unwrap().len(), 1);
+        assert_eq!(r.get(&a[0..1]).unwrap()[0], b);
     }
 
     #[test]
@@ -680,21 +624,9 @@ mod tests {
         ]);
         w.swap();
 
-        assert_eq!(r.try_find_and(&a[0..1], |rs| Ok(rs.len())).unwrap().0, 2);
-        assert!(
-            r.try_find_and(&a[0..1], |mut rs| Ok(
-                rs.any(|r| r[0] == a[0] && r[1] == a[1])
-            ))
-            .unwrap()
-            .0
-        );
-        assert!(
-            r.try_find_and(&a[0..1], |mut rs| Ok(
-                rs.any(|r| r[0] == b[0] && r[1] == b[1])
-            ))
-            .unwrap()
-            .0
-        );
+        assert_eq!(r.get(&a[0..1]).unwrap().len(), 2);
+        assert_eq!(r.get(&a[0..1]).unwrap()[0], a);
+        assert_eq!(r.get(&a[0..1]).unwrap()[1], b);
 
         w.add(vec![
             Record::Negative(a.to_vec()),
@@ -703,14 +635,8 @@ mod tests {
         ]);
         w.swap();
 
-        assert_eq!(r.try_find_and(&a[0..1], |rs| Ok(rs.len())).unwrap().0, 1);
-        assert!(
-            r.try_find_and(&a[0..1], |mut rs| Ok(
-                rs.any(|r| r[0] == b[0] && r[1] == b[1])
-            ))
-            .unwrap()
-            .0
-        );
+        assert_eq!(r.get(&a[0..1]).unwrap().len(), 1);
+        assert_eq!(r.get(&a[0..1]).unwrap()[0], b);
     }
 
     #[test]
@@ -725,8 +651,8 @@ mod tests {
         w.swap();
 
         assert_eq!(
-            r.try_find_and(&[1.into()], |rs| Ok(rs.len())),
-            Err(LookupError::MissPointSingle(1.into(), -1))
+            r.get(&[1.into()]),
+            Err(LookupError::MissPointSingle(1.into(), 0))
         );
     }
 
@@ -747,11 +673,11 @@ mod tests {
             w.swap();
 
             let key = vec1![DataType::from(0)];
-            assert!(r.try_find_and(&key, |_| Ok(())).err().unwrap().is_miss());
+            assert!(r.get(&key).err().unwrap().is_miss());
 
             w.mark_filled(key.clone().into()).unwrap();
             w.swap();
-            assert!(r.try_find_and(&key, |_| Ok(())).is_ok());
+            assert!(r.get(&key).is_ok());
         }
 
         #[test]
@@ -766,18 +692,14 @@ mod tests {
             w.swap();
 
             let range = vec![DataType::from(0)]..vec![DataType::from(10)];
-            assert!(r
-                .try_find_range_and(&range, |_| Ok(()))
-                .err()
-                .unwrap()
-                .is_miss());
+            assert!(r.range(&range).err().unwrap().is_miss());
 
             w.mark_filled(KeyComparison::from_range(
                 &(vec1![DataType::from(0)]..vec1![DataType::from(10)]),
             ))
             .unwrap();
             w.swap();
-            assert!(r.try_find_range_and(&range, |_| Ok(())).is_ok());
+            assert!(r.range(&range).is_ok());
         }
     }
 
@@ -800,11 +722,11 @@ mod tests {
             let key = vec1![DataType::from(0)];
             w.mark_filled(key.clone().into()).unwrap();
             w.swap();
-            assert!(r.try_find_and(&key, |_| Ok(())).is_ok());
+            assert!(r.get(&key).is_ok());
 
             w.mark_hole(&key.clone().into());
             w.swap();
-            assert!(r.try_find_and(&key, |_| Ok(())).err().unwrap().is_miss());
+            assert!(r.get(&key).err().unwrap().is_miss());
         }
 
         #[test]
@@ -824,17 +746,13 @@ mod tests {
             ))
             .unwrap();
             w.swap();
-            assert!(r.try_find_range_and(&range, |_| Ok(())).is_ok());
+            assert!(r.range(&range).is_ok());
 
             w.mark_hole(&KeyComparison::from_range(
                 &(vec1![DataType::from(0)]..vec1![DataType::from(10)]),
             ));
             w.swap();
-            assert!(r
-                .try_find_range_and(&range, |_| Ok(()))
-                .err()
-                .unwrap()
-                .is_miss());
+            assert!(r.range(&range).err().unwrap().is_miss());
         }
     }
 }
