@@ -54,7 +54,7 @@ use std::{process, time};
 use dataflow::Readers;
 use futures_util::future::{Either, TryFutureExt};
 use launchpad::futures::abort_on_panic;
-use noria::consensus::Authority;
+use noria::consensus::{Authority, WorkerSchedulingConfig};
 use noria::{ControllerDescriptor, WorkerDescriptor};
 use stream_cancel::{Trigger, Valve};
 use tokio::net::TcpListener;
@@ -66,7 +66,7 @@ use crate::controller::{Controller, ControllerRequest, HandleRequest};
 use crate::handle::Handle;
 use crate::http_router::NoriaServerHttpRouter;
 use crate::worker::{MemoryTracker, Worker, WorkerRequest};
-use crate::{Config, VolumeId};
+use crate::Config;
 
 macro_rules! maybe_abort_on_panic {
     ($abort_on_task_failure: expr, $fut: expr) => {{
@@ -145,9 +145,8 @@ async fn start_controller(
     handle_rx: Receiver<HandleRequest>,
     controller_rx: Receiver<ControllerRequest>,
     abort_on_task_failure: bool,
-    reader_only: bool,
+    domain_scheduling_config: WorkerSchedulingConfig,
     leader_eligible: bool,
-    volume_id: Option<VolumeId>,
     valve: Valve,
 ) -> Result<ControllerDescriptor, anyhow::Error> {
     let our_descriptor = ControllerDescriptor {
@@ -158,9 +157,8 @@ async fn start_controller(
     let worker_descriptor = WorkerDescriptor {
         worker_uri: http_uri,
         reader_addr,
-        reader_only,
+        domain_scheduling_config,
         leader_eligible,
-        volume_id,
     };
 
     let controller = Controller::new(
@@ -226,9 +224,8 @@ pub async fn start_instance_inner(
     config: Config,
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
-    reader_only: bool,
+    domain_scheduling_config: WorkerSchedulingConfig,
     leader_eligible: bool,
-    volume_id: Option<VolumeId>,
     readers: Readers,
     reader_addr: SocketAddr,
     valve: Valve,
@@ -275,9 +272,8 @@ pub async fn start_instance_inner(
         handle_rx,
         controller_rx,
         abort_on_task_failure,
-        reader_only,
+        domain_scheduling_config,
         leader_eligible,
-        volume_id,
         valve,
     )
     .await?;
@@ -294,9 +290,8 @@ pub(super) async fn start_instance(
     config: Config,
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
-    reader_only: bool,
+    domain_scheduling_config: WorkerSchedulingConfig,
     leader_eligible: bool,
-    volume_id: Option<VolumeId>,
 ) -> Result<Handle, anyhow::Error> {
     let (trigger, valve) = Valve::new();
     let Config {
@@ -323,9 +318,8 @@ pub(super) async fn start_instance(
         config,
         memory_limit,
         memory_check_frequency,
-        reader_only,
+        domain_scheduling_config,
         leader_eligible,
-        volume_id,
         readers,
         reader_addr,
         valve,

@@ -148,8 +148,12 @@ struct Opts {
     metrics_queue_len: usize,
 
     /// Whether this server should only run reader domains
-    #[clap(long)]
+    #[clap(long, conflicts_with = "no-readers")]
     reader_only: bool,
+
+    /// If set, this server will never run domains containing reader nodes
+    #[clap(long, conflicts_with = "reader-only")]
+    no_readers: bool,
 
     /// Prevent this instance from ever being elected as the leader
     #[clap(long)]
@@ -294,6 +298,9 @@ fn main() -> anyhow::Result<()> {
 
     if opts.reader_only {
         builder.as_reader_only()
+    }
+    if opts.no_readers {
+        builder.no_readers()
     }
 
     let persistence_params = noria_server::PersistenceParameters::new(

@@ -46,50 +46,63 @@ impl NoriaServerBuilder {
         })
     }
 
-    fn push_arg(mut self, arg_name: &str, arg_value: &str) -> Self {
+    fn push_arg(mut self, arg_name: &str) -> Self {
+        self.args.push(arg_name.to_string());
+        self
+    }
+
+    fn push_arg_kv(mut self, arg_name: &str, arg_value: &str) -> Self {
         self.args.push(arg_name.to_string());
         self.args.push(arg_value.to_string());
         self
     }
 
     pub fn volume_id(self, id: &str) -> Self {
-        self.push_arg("--volume-id", id)
+        self.push_arg_kv("--volume-id", id)
+    }
+
+    pub fn reader_only(self) -> Self {
+        self.push_arg("--reader-only")
+    }
+
+    pub fn no_readers(self) -> Self {
+        self.push_arg("--no-readers")
     }
 
     pub fn authority_addr(self, authority_addr: &str) -> Self {
-        self.push_arg("--authority-address", authority_addr)
+        self.push_arg_kv("--authority-address", authority_addr)
     }
 
     pub fn authority(self, authority: &str) -> Self {
-        self.push_arg("--authority", authority)
+        self.push_arg_kv("--authority", authority)
     }
 
     pub fn deployment(self, deployment: &str) -> Self {
-        self.push_arg("--deployment", deployment)
+        self.push_arg_kv("--deployment", deployment)
     }
 
     pub fn shards(self, shards: usize) -> Self {
-        self.push_arg("--shards", &shards.to_string())
+        self.push_arg_kv("--shards", &shards.to_string())
     }
 
     pub fn quorum(self, quorum: usize) -> Self {
-        self.push_arg("--quorum", &quorum.to_string())
+        self.push_arg_kv("--quorum", &quorum.to_string())
     }
 
     pub fn external_port(self, external_port: u16) -> Self {
-        self.push_arg("--external-port", &external_port.to_string())
+        self.push_arg_kv("--external-port", &external_port.to_string())
     }
 
     pub fn mysql(self, addr: &str) -> Self {
-        self.push_arg("--replication-url", addr)
+        self.push_arg_kv("--replication-url", addr)
     }
 
     pub fn replicator_restart_timeout(self, timeout: u64) -> Self {
-        self.push_arg("--replicator-restart-timeout", &timeout.to_string())
+        self.push_arg_kv("--replicator-restart-timeout", &timeout.to_string())
     }
 
     pub fn reader_replicas(self, num_replicas: usize) -> Self {
-        self.push_arg("--reader-replicas", &num_replicas.to_string())
+        self.push_arg_kv("--reader-replicas", &num_replicas.to_string())
     }
 }
 

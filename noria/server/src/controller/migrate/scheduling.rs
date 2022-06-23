@@ -26,7 +26,9 @@ use std::collections::{HashMap, HashSet};
 
 use array2::Array2;
 use dataflow::prelude::*;
+use noria::consensus::NodeTypeSchedulingRestriction;
 use noria::internal::DomainIndex;
+use tracing::{instrument, trace};
 
 use crate::controller::state::DataflowState;
 use crate::controller::{DomainPlacementRestriction, NodeRestrictionKey, Worker, WorkerIdentifier};
@@ -40,7 +42,7 @@ fn worker_meets_restrictions(
 ) -> bool {
     restrictions
         .iter()
-        .all(|r| r.worker_volume == worker.volume_id)
+        .all(|r| r.worker_volume == worker.domain_scheduling_config.volume_id)
 }
 
 /// Statistics about the domains scheduled onto a worker
@@ -118,6 +120,7 @@ impl<'state> Scheduler<'state> {
     /// * `nodes` cannot be empty
     /// * All the nodes in `nodes` must exist in `self.dataflow_state.ingredients`
     #[allow(clippy::indexing_slicing)] // documented invariant
+    #[instrument(level = "trace", skip(self, nodes))]
     pub(crate) fn schedule_domain(
         &mut self,
         domain_index: DomainIndex,
@@ -138,15 +141,19 @@ impl<'state> Scheduler<'state> {
         let is_base_table_domain = nodes
             .iter()
             .any(|n| self.dataflow_state.ingredients[*n].is_base());
+        trace!(is_reader_domain, is_base_table_domain);
 
         if is_base_table_domain {
             invariant_eq!(num_replicas, 1);
         }
 
-        let workers = self
-            .valid_workers
-            .iter()
-            .filter(|(_, worker)| !worker.reader_only || is_reader_domain);
+        let workers = self.valid_workers.iter().filter(|(_, worker)| {
+            match worker.domain_scheduling_config.reader_nodes {
+                NodeTypeSchedulingRestriction::None => true,
+                NodeTypeSchedulingRestriction::OnlyWithNodeType => is_reader_domain,
+                NodeTypeSchedulingRestriction::NeverWithNodeType => !is_reader_domain,
+            }
+        });
 
         let mut res = Vec::with_capacity(num_shards);
         for shard in 0..num_shards {
@@ -161,7 +168,7 @@ impl<'state> Scheduler<'state> {
                         .map_or(true, |shards| !shards.contains(&(domain_index, shard)))
                 })
                 .collect::<Vec<_>>();
-            for _replica in 0..num_replicas {
+            for replica in 0..num_replicas {
                 // Shards of certain dataflow nodes may have restrictions that
                 // limit the workers they are placed upon.
                 let dataflow_node_restrictions = nodes
@@ -208,6 +215,7 @@ impl<'state> Scheduler<'state> {
                     shard,
                 })?;
 
+                trace!(%shard, %replica, %worker_id, "Scheduled replica");
                 replicas.push(worker_id.clone());
 
                 self.scheduled_shards

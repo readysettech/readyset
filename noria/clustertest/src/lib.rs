@@ -292,14 +292,32 @@ pub(crate) struct NoriaBinarySource {
 #[must_use]
 #[derive(Clone, Default)]
 pub struct ServerParams {
-    /// The volume id of the server, passed in via --volume-id.
+    /// The volume id of the server, passed in via `--volume-id`.
     volume_id: Option<String>,
+    /// Prevent this server from running domains containing readers. Corresponds to the
+    /// `--no-readers` flag to the noria server binary
+    no_readers: bool,
+    /// Only allow domains containing readers to run on this server. Corresponds to the
+    /// [`--reader-only`] flag to the noria server binary
+    reader_only: bool,
 }
 
 impl ServerParams {
     /// Sets a server's --volume-id string, passed in via --volume-id.
     pub fn with_volume(mut self, volume: &str) -> Self {
         self.volume_id = Some(volume.to_string());
+        self
+    }
+
+    /// Configure this server to never run domains containing reader nodes
+    pub fn no_readers(mut self) -> Self {
+        self.no_readers = true;
+        self
+    }
+
+    /// Configure this server to only run domains containing reader nodes
+    pub fn reader_only(mut self) -> Self {
+        self.reader_only = true;
         self
     }
 }
@@ -979,6 +997,12 @@ fn start_server(
 
     if let Some(volume) = server_params.volume_id.as_ref() {
         builder = builder.volume_id(volume);
+    }
+    if server_params.reader_only {
+        builder = builder.reader_only();
+    }
+    if server_params.no_readers {
+        builder = builder.no_readers();
     }
     if let Some(mysql) = mysql {
         builder = builder.mysql(mysql);

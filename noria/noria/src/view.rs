@@ -1185,6 +1185,12 @@ impl View {
         self.shard_addrs.as_ref()
     }
 
+    /// Returns the number of times this view is sharded
+    #[must_use]
+    pub fn num_shards(&self) -> usize {
+        self.shard_addrs.len()
+    }
+
     /// Get the current size of this view.
     ///
     /// Note that you must also continue to poll this `View` for the returned future to resolve.

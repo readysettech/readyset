@@ -469,8 +469,7 @@ impl Leader {
             let WorkerDescriptor {
                 worker_uri,
                 reader_addr,
-                reader_only,
-                volume_id,
+                domain_scheduling_config,
                 ..
             } = desc;
 
@@ -478,8 +477,7 @@ impl Leader {
 
             let ws = Worker::new(
                 worker_uri.clone(),
-                reader_only,
-                volume_id,
+                domain_scheduling_config,
                 self.worker_request_timeout,
             );
 

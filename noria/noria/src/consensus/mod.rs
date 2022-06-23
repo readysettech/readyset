@@ -47,6 +47,39 @@ pub enum GetLeaderResult {
     NoLeader,
 }
 
+/// Restriction for how domains containing a particular kind of node can be scheduled onto a
+/// particular worker.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+pub enum NodeTypeSchedulingRestriction {
+    /// No restrictions: all domains with or without this node type may be scheduled onto this
+    /// worker
+    None,
+    /// Only domains containing this node type may be scheduled onto this worker
+    OnlyWithNodeType,
+    /// Domains containing this node type may never be scheduled onto this worker
+    NeverWithNodeType,
+}
+
+impl Default for NodeTypeSchedulingRestriction {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+/// Configuration for how domains should be scheduled onto a particular worker.
+///
+/// The [`Default`] value for this struct allows any domain to be scheduled onto any worker.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Default)]
+pub struct WorkerSchedulingConfig {
+    /// Identifier for the persistent volume associated with this worker, if any. This is used to
+    /// make sure that once a domain with a particular base table is scheduled onto a worker, that
+    /// domain will always be scheduled onto a worker with the same persistent volume.
+    pub volume_id: Option<VolumeId>,
+    /// Configuration for how domains containing or not containing reader nodes may be scheduled
+    /// onto this worker
+    pub reader_nodes: NodeTypeSchedulingRestriction,
+}
+
 /// Initial registration request body, sent from workers to controllers.
 /// ///
 /// (used for the `/worker_rx/register` route)
@@ -58,10 +91,8 @@ pub struct WorkerDescriptor {
     pub reader_addr: SocketAddr,
     /// True if this worker may become a leader
     pub leader_eligible: bool,
-    /// Whether or not this worker is used only to hold reader domains.
-    pub reader_only: bool,
-    /// The volume associated with this server.
-    pub volume_id: Option<VolumeId>,
+    /// Configuration for how domains should be scheduled onto this worker
+    pub domain_scheduling_config: WorkerSchedulingConfig,
 }
 
 #[async_trait]
