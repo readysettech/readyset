@@ -492,9 +492,8 @@ mod tests {
         let worker = WorkerDescriptor {
             worker_uri: Url::parse("http://127.0.0.1").unwrap(),
             reader_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1234),
-            reader_only: false,
+            domain_scheduling_config: Default::default(),
             leader_eligible: true,
-            volume_id: None,
         };
 
         let workers = authority.get_workers().await.unwrap();
@@ -534,9 +533,8 @@ mod tests {
         let worker = WorkerDescriptor {
             worker_uri: Url::parse("http://127.0.0.1").unwrap(),
             reader_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1234),
-            reader_only: false,
+            domain_scheduling_config: Default::default(),
             leader_eligible: true,
-            volume_id: None,
         };
         authority
             .register_worker(worker.clone())

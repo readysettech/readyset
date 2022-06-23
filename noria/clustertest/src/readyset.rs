@@ -258,8 +258,8 @@ async fn replicated_readers() {
     let mut view_1 = lh.view_with_replica("q", 1).await.unwrap();
 
     // We should schedule the readers onto different workers (with different addresses)
-    assert_eq!(view_0.shard_addrs().len(), 1);
-    assert_eq!(view_1.shard_addrs().len(), 1);
+    assert_eq!(view_0.num_shards(), 1);
+    assert_eq!(view_1.num_shards(), 1);
     assert_ne!(view_0.shard_addrs(), view_1.shard_addrs());
 
     let view_0_key_1 = view_0
@@ -371,8 +371,8 @@ async fn replicated_readers_with_unions() {
     let mut view_0 = lh.view_with_replica("q", 0).await.unwrap();
     let mut view_1 = lh.view_with_replica("q", 1).await.unwrap();
 
-    assert_eq!(view_0.shard_addrs().len(), 1);
-    assert_eq!(view_1.shard_addrs().len(), 1);
+    assert_eq!(view_0.num_shards(), 1);
+    assert_eq!(view_1.num_shards(), 1);
     assert_ne!(view_0.shard_addrs(), view_1.shard_addrs());
 
     let view_0_key_1 = view_0
@@ -402,4 +402,42 @@ async fn replicated_readers_with_unions() {
         .unwrap()
         .unwrap();
     assert_eq!(view_0_key_2, vec![DataType::from(2)]);
+}
+
+#[clustertest]
+async fn no_readers_worker_doesnt_get_readers() {
+    let mut deployment = DeploymentBuilder::new("ct_no_readers_worker_doesnt_get_readers")
+        .add_server(ServerParams::default().no_readers())
+        .add_server(ServerParams::default())
+        .start()
+        .await
+        .unwrap();
+    let lh = deployment.leader_handle();
+
+    lh.extend_recipe(
+        "CREATE TABLE t (id int, val1 int, val2 int);
+         CREATE CACHE q0 FROM SELECT id FROM t WHERE id = ?;
+         CREATE CACHE q1 FROM SELECT val1 FROM t WHERE id = ?;
+         CREATE CACHE q2 FROM SELECT val2 FROM t WHERE id = ?;
+         CREATE CACHE q3 FROM SELECT id, val1, val2 FROM t WHERE id = ?;"
+            .parse()
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    eprintln!("{}", lh.graphviz().await.unwrap());
+
+    let view_0 = lh.view("q0").await.unwrap();
+    let view_1 = lh.view("q1").await.unwrap();
+    let view_2 = lh.view("q2").await.unwrap();
+    let view_3 = lh.view("q3").await.unwrap();
+
+    // All views should be scheduled onto the same worker, regardless of balance
+    //
+    // Sadly we can't check *which* worker here, since we can't (currently) tell the workers apart.
+    for view in [&view_0, &view_1, &view_2, &view_3] {
+        assert_eq!(view.num_shards(), 1);
+        assert_eq!(view.shard_addrs(), view_0.shard_addrs());
+    }
 }

@@ -15,7 +15,7 @@ use metrics::{counter, gauge, histogram};
 use nom_sql::SqlIdentifier;
 use noria::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult,
-    WorkerDescriptor, WorkerId,
+    WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
 };
 use noria::metrics::recorded;
 use noria::ControllerDescriptor;
@@ -98,25 +98,22 @@ pub struct Worker {
     healthy: bool,
     uri: Url,
     http: reqwest::Client,
-    reader_only: bool,
-    /// Volume associated with this worker's server.
-    volume_id: Option<VolumeId>,
+    /// Configuration for how domains should be scheduled onto this worker
+    domain_scheduling_config: WorkerSchedulingConfig,
     request_timeout: Duration,
 }
 
 impl Worker {
     pub fn new(
         instance_uri: Url,
-        reader_only: bool,
-        volume_id: Option<VolumeId>,
+        domain_scheduling_config: WorkerSchedulingConfig,
         request_timeout: Duration,
     ) -> Self {
         Worker {
             healthy: true,
             uri: instance_uri,
             http: reqwest::Client::new(),
-            reader_only,
-            volume_id,
+            domain_scheduling_config,
             request_timeout,
         }
     }

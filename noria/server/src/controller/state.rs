@@ -928,12 +928,12 @@ impl DataflowState {
                     #[allow(clippy::indexing_slicing)] // checked above
                     let node = &self.ingredients[*n];
 
-                    if node.is_base() && w.volume_id.is_some() {
+                    if node.is_base() && w.domain_scheduling_config.volume_id.is_some() {
                         new_domain_restrictions.push((
                             node.name().to_owned(),
                             shard,
                             DomainPlacementRestriction {
-                                worker_volume: w.volume_id.clone(),
+                                worker_volume: w.domain_scheduling_config.volume_id.clone(),
                             },
                         ));
                     }

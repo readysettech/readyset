@@ -4,7 +4,10 @@ use std::sync::Arc;
 use std::time;
 
 use dataflow::PersistenceParameters;
-use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
+use noria::consensus::{
+    Authority, LocalAuthority, LocalAuthorityStore, NodeTypeSchedulingRestriction,
+    WorkerSchedulingConfig,
+};
 
 use crate::controller::replication::ReplicationStrategy;
 use crate::handle::Handle;
@@ -18,9 +21,8 @@ pub struct Builder {
     memory_check_frequency: Option<time::Duration>,
     listen_addr: IpAddr,
     external_addr: SocketAddr,
-    reader_only: bool,
     leader_eligible: bool,
-    volume_id: Option<VolumeId>,
+    domain_scheduling_config: WorkerSchedulingConfig,
 }
 
 impl Default for Builder {
@@ -32,9 +34,8 @@ impl Default for Builder {
             external_addr: "127.0.0.1:6033".parse().unwrap(),
             memory_limit: None,
             memory_check_frequency: None,
-            reader_only: false,
             leader_eligible: true,
-            volume_id: None,
+            domain_scheduling_config: Default::default(),
         }
     }
 }
@@ -175,9 +176,20 @@ impl Builder {
         self.config.replication_strategy = replication_strategy
     }
 
-    /// Configures this Noria server to accept only reader domains.
+    /// Configures this Noria server to accept only domains that contain reader nodes.
+    ///
+    /// Overwrites any previous call to [`no_readers`]
     pub fn as_reader_only(&mut self) {
-        self.reader_only = true;
+        self.domain_scheduling_config.reader_nodes =
+            NodeTypeSchedulingRestriction::OnlyWithNodeType;
+    }
+
+    /// Configures this Noria server to never run domains that contain reader nodes
+    ///
+    /// Overwrites any previous call to [`as_reader_only`]
+    pub fn no_readers(&mut self) {
+        self.domain_scheduling_config.reader_nodes =
+            NodeTypeSchedulingRestriction::NeverWithNodeType;
     }
 
     /// Configures this Noria server to be unable to become the leader
@@ -187,7 +199,7 @@ impl Builder {
 
     /// Configures the volume id associated with this server.
     pub fn set_volume_id(&mut self, volume_id: VolumeId) {
-        self.volume_id = Some(volume_id);
+        self.domain_scheduling_config.volume_id = Some(volume_id);
     }
 
     /// Set the value of [`Config::abort_on_task_failure`]. See the documentation of that field for
@@ -237,9 +249,8 @@ impl Builder {
             ref config,
             memory_limit,
             memory_check_frequency,
-            reader_only,
+            domain_scheduling_config,
             leader_eligible,
-            volume_id,
         } = self;
 
         let config = config.clone();
@@ -251,9 +262,8 @@ impl Builder {
             config,
             memory_limit,
             memory_check_frequency,
-            reader_only,
+            domain_scheduling_config,
             leader_eligible,
-            volume_id,
         )
     }
 
@@ -272,9 +282,8 @@ impl Builder {
             ref config,
             memory_limit,
             memory_check_frequency,
-            reader_only,
+            domain_scheduling_config,
             leader_eligible,
-            volume_id,
         } = self;
 
         let config = config.clone();
@@ -286,9 +295,8 @@ impl Builder {
             config,
             memory_limit,
             memory_check_frequency,
-            reader_only,
+            domain_scheduling_config,
             leader_eligible,
-            volume_id,
             readers,
             reader_addr,
             valve,
