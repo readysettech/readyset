@@ -9,7 +9,7 @@ mod single_state;
 use std::borrow::Cow;
 use std::fmt::{self, Debug, Display};
 use std::iter::FromIterator;
-use std::ops::{Bound, Deref};
+use std::ops::{AddAssign, Bound, Deref};
 use std::rc::Rc;
 use std::vec;
 
@@ -458,6 +458,30 @@ impl Display for KeyCount {
     }
 }
 
+impl AddAssign for KeyCount {
+    /// Adds the key count for the rhs KeyCount to ourselves.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the caller attempts to add an `ExactKeyCount` to an `EstimatedRowCount` or vice
+    /// versa.
+    #[track_caller]
+    fn add_assign(&mut self, rhs: Self) {
+        match (&self, rhs) {
+            (KeyCount::ExactKeyCount(self_count), KeyCount::ExactKeyCount(rhs_count)) => {
+                *self = KeyCount::ExactKeyCount(*self_count + rhs_count)
+            }
+            (KeyCount::EstimatedRowCount(self_count), KeyCount::EstimatedRowCount(rhs_count)) => {
+                *self = KeyCount::EstimatedRowCount(*self_count + rhs_count)
+            }
+            _ => panic!(
+                "Cannot add mismatched KeyCount types for values {}/{}",
+                self, rhs
+            ),
+        };
+    }
+}
+
 /// An std::borrow::Cow-like wrapper around a collection of rows.
 #[derive(From)]
 pub enum RecordResult<'a> {
@@ -658,5 +682,19 @@ mod tests {
     fn key_count_formatting() {
         assert_eq!("42", KeyCount::ExactKeyCount(42).to_string());
         assert_eq!("~42", KeyCount::EstimatedRowCount(42).to_string());
+    }
+
+    #[test]
+    fn key_count_add_assign() {
+        let mut kc = KeyCount::ExactKeyCount(1);
+        kc += KeyCount::ExactKeyCount(99);
+        assert_eq!(KeyCount::ExactKeyCount(100), kc);
+    }
+
+    #[test]
+    #[should_panic]
+    fn key_count_add_assign_panic() {
+        let mut kc = KeyCount::ExactKeyCount(1);
+        kc += KeyCount::EstimatedRowCount(1);
     }
 }
