@@ -42,7 +42,7 @@ use noria::recipe::changelist::{Change, ChangeList};
 use noria::recipe::ExtendRecipeSpec;
 use noria::replication::{ReplicationOffset, ReplicationOffsets};
 use noria::{
-    ActivationResult, ReaderReplicationResult, ReaderReplicationSpec, ReadySetError,
+    ActivationResult, KeyCount, ReaderReplicationResult, ReaderReplicationSpec, ReadySetError,
     ReadySetResult, ViewFilter, ViewRequest, ViewSchema,
 };
 use noria_errors::{bad_request_err, internal, internal_err, invariant_eq, NodeType};
@@ -749,6 +749,31 @@ impl DataflowState {
                 Ok(node.name().clone())
             })
             .collect()
+    }
+
+    /// Return a map of node indices to key counts.
+    #[allow(dead_code)]
+    pub(super) async fn node_key_counts(&self) -> ReadySetResult<HashMap<NodeIndex, KeyCount>> {
+        let counts_per_domain: Vec<(DomainIndex, Vec<Vec<(NodeIndex, KeyCount)>>)> = self
+            .query_domains::<_, Vec<(NodeIndex, KeyCount)>>(
+                self.domains
+                    .keys()
+                    .map(|di| (*di, DomainRequest::RequestNodeKeyCounts)),
+            )
+            .try_collect()
+            .await?;
+        let flat_counts = counts_per_domain
+            .into_iter()
+            .flat_map(|(_domain, per_shard_counts)| per_shard_counts.into_iter().flatten());
+        let mut res = HashMap::new();
+        for (node_index, count) in flat_counts {
+            // We may have multiple entries for the same node in the case of sharding, so this code
+            // adds together the key counts for any duplicate nodes we come across:
+            res.entry(node_index)
+                .and_modify(|e| *e += count)
+                .or_insert(count);
+        }
+        Ok(res)
     }
 
     // ** Modify operations **
