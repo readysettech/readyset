@@ -487,6 +487,7 @@ async fn dry_run_evaluates_support() {
 /// of the servers. After the failure, we verify that we can still perform the
 /// query on Noria and we return the correct results.
 #[clustertest]
+#[ignore = "flaky (ENG-1383)"]
 async fn correct_data_after_restart() {
     let mut deployment = readyset_mysql("ct_correct_data_after_restart")
         .quorum(2)
