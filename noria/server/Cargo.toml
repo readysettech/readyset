@@ -72,6 +72,7 @@ tikv-jemalloc-ctl = "0.4"
 scopeguard = "1.1.0"
 fail = "0.5.0"
 sha1 = "0.10"
+derive_more = "0.99"
 
 timekeeper = { version = "0.3.2", default-features = false }
 vec_map = { version = "0.8.0", features = ["eders"] }
@@ -93,7 +94,7 @@ launchpad = { path = "../../launchpad" }
 replicators = { path = "../../replicators" }
 readyset-tracing = { path = "../../readyset-tracing" }
 noria-sql-passes = { path = "sql-passes" }
-derive_more = "0.99"
+array2 = { path = "../../array2" }
 
 [dev-dependencies]
 test_utils = { path = "../../test_utils" }

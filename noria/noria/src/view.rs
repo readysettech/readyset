@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+use array2::Array2;
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use dataflow_expression::Expression as DataflowExpression;
 use futures_util::future::TryFutureExt;
@@ -23,7 +24,7 @@ use noria_data::DataType;
 use noria_errors::{internal_err, rpc_err, view_err, ReadySetError, ReadySetResult};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
-use rand::prelude::SliceRandom;
+use rand::prelude::IteratorRandom;
 use rand::thread_rng;
 use readyset_tracing::presampled::instrument_if_enabled;
 use readyset_tracing::propagation::Instrumented;
@@ -824,7 +825,7 @@ pub struct ViewBuilder {
     pub schema: Option<ViewSchema>,
 
     /// replica -> shard index -> addr
-    pub replica_shard_addrs: Vec<Vec<SocketAddr>>,
+    pub replica_shard_addrs: Array2<SocketAddr>,
 
     /// (view_placeholder, key_column_index) pairs according to their mapping. Contains exactly one
     /// entry for each key column at the reader.
@@ -847,13 +848,13 @@ impl ViewBuilder {
     ) -> ReadySetResult<View> {
         let shards = match replica {
             Some(replica) => self.replica_shard_addrs.get(replica),
-            None if self.replica_shard_addrs.len() == 1 => Some(&self.replica_shard_addrs[0]),
-            None => self.replica_shard_addrs.choose(&mut thread_rng()),
+            None if self.replica_shard_addrs.num_rows() == 1 => Some(&self.replica_shard_addrs[0]),
+            None => self.replica_shard_addrs.rows().choose(&mut thread_rng()),
         }
         .ok_or_else(|| ReadySetError::ViewReplicaOutOfBounds {
             replica: replica.unwrap_or(0),
             view_name: self.name.clone().into(),
-            num_replicas: self.replica_shard_addrs.len(),
+            num_replicas: self.replica_shard_addrs.num_rows(),
         })?;
 
         let node = self.node;
