@@ -1955,7 +1955,8 @@ impl Domain {
                             res.push((node.global_addr(), state.key_count()))
                         }
                     } else if node.is_reader() {
-                        let reader_addr = (node.global_addr(), node.name().clone(), 0).into();
+                        let reader_addr =
+                            (node.global_addr(), node.name().clone(), self.shard()).into();
                         #[allow(clippy::unwrap_used)] // lock poisoning is unrecoverable
                         let key_count = self
                             .readers
