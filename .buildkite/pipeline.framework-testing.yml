@@ -6,10 +6,18 @@ steps:
       ecr#v2.5.0:
         login: true
         retries: 3
+  - label: ":docker: Build readyset-psql image"
+    key: readyset-psql-image
+    command: .buildkite/build-image.sh build/Dockerfile.readyset-psql readyset-psql .
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
   - key: list-frameworks
     label: "List frameworks"
     depends_on:
     - readyset-mysql-image
+    - readyset-psql-image
     plugins:
       - docker#v3.8.0:
           image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/python:3
