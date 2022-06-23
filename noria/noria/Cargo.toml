@@ -91,6 +91,7 @@ noria-errors = { path = "../errors" }
 noria-data = { path = "../data" }
 dataflow_expression = { path = "../server/dataflow/expression" }
 readyset-tracing = { path = "../../readyset-tracing" }
+array2 = { path = "../../array2" }
 
 [dev-dependencies]
 serial_test = "0.5.1"

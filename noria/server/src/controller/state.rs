@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use std::{cell, time};
 
+use array2::Array2;
 use common::IndexPair;
 use dataflow::prelude::{ChannelCoordinator, DomainIndex, DomainNodes, Graph, NodeIndex};
 use dataflow::{
@@ -175,7 +176,7 @@ impl DataflowState {
     pub(super) fn get_info(&self) -> ReadySetResult<GraphInfo> {
         let mut worker_info = HashMap::new();
         for (di, dh) in self.domains.iter() {
-            for (shard, replicas) in dh.shards().iter().enumerate() {
+            for (shard, replicas) in dh.shards().enumerate() {
                 for (replica, url) in replicas.iter().enumerate() {
                     worker_info
                         .entry(url.clone())
@@ -408,7 +409,7 @@ impl DataflowState {
             node: reader_node,
             columns: columns.into(),
             schema,
-            replica_shard_addrs: replicas,
+            replica_shard_addrs: Array2::from_rows(replicas),
             key_mapping,
             view_request_timeout: self.domain_config.view_request_timeout,
         }))
@@ -841,7 +842,7 @@ impl DataflowState {
     pub(in crate::controller) async fn place_domain(
         &mut self,
         idx: DomainIndex,
-        shard_replica_workers: Vec<Vec<WorkerIdentifier>>,
+        shard_replica_workers: Array2<WorkerIdentifier>,
         nodes: Vec<NodeIndex>,
     ) -> ReadySetResult<DomainHandle> {
         // Reader nodes are always assigned to their own domains, so it's good enough to see
@@ -871,13 +872,13 @@ impl DataflowState {
             .map(|nd| (nd.local_addr(), cell::RefCell::new(nd)))
             .collect();
 
-        let num_shards = shard_replica_workers.len();
+        let num_shards = shard_replica_workers.num_rows();
 
         let mut domain_addresses = vec![];
         let mut assignments = Vec::with_capacity(num_shards);
         let mut new_domain_restrictions = vec![];
 
-        for (shard, replicas) in shard_replica_workers.iter().enumerate() {
+        for (shard, replicas) in shard_replica_workers.rows().enumerate() {
             let num_replicas = replicas.len();
             let mut shard_assignments = Vec::with_capacity(num_replicas);
             for (replica, worker_id) in replicas.iter().enumerate() {
@@ -986,7 +987,7 @@ impl DataflowState {
             }
         }
 
-        Ok(DomainHandle::new(idx, assignments))
+        Ok(DomainHandle::new(idx, Array2::from_rows(assignments)))
     }
 
     pub(super) async fn remove_nodes(
@@ -1223,7 +1224,7 @@ impl DataflowState {
             let mut scheduler = Scheduler::new(self, &None)?;
             for (domain, nodes) in domain_nodes.iter() {
                 let workers = scheduler.schedule_domain(*domain, &nodes[..])?;
-                let num_shards = workers.len();
+                let num_shards = workers.num_rows();
                 let num_replicas = workers[0].len();
                 dmp.place_domain(*domain, workers, nodes.clone());
                 dmp.set_domain_settings(

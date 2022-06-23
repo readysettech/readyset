@@ -53,6 +53,7 @@ members = [
     "readyset-repl",
     "telemetry-ingress",
     "telemetry-reporter",
+    "array2",
 ]
 resolver = "2"
 

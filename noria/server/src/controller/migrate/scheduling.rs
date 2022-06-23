@@ -24,6 +24,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use array2::Array2;
 use dataflow::prelude::*;
 use noria::internal::DomainIndex;
 
@@ -85,7 +86,7 @@ impl<'state> Scheduler<'state> {
             let is_base_table_domain = dataflow_state.domain_nodes[di]
                 .values()
                 .any(|ni| dataflow_state.ingredients[*ni].is_base());
-            for (shard, replicas) in dh.shards().iter().enumerate() {
+            for (shard, replicas) in dh.shards().enumerate() {
                 for wi in replicas {
                     let stats = worker_stats.entry(wi).or_default();
                     stats.num_domain_shard_replicas += 1;
@@ -121,7 +122,7 @@ impl<'state> Scheduler<'state> {
         &mut self,
         domain_index: DomainIndex,
         nodes: &[NodeIndex],
-    ) -> ReadySetResult<Vec<Vec<WorkerIdentifier>>> {
+    ) -> ReadySetResult<Array2<WorkerIdentifier>> {
         let num_shards = self.dataflow_state.ingredients[nodes[0]]
             .sharded_by()
             .shards()
@@ -223,6 +224,6 @@ impl<'state> Scheduler<'state> {
             res.push(replicas);
         }
 
-        Ok(res)
+        Ok(Array2::from_rows(res))
     }
 }

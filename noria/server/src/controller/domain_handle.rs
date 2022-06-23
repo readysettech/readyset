@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use array2::Array2;
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use futures::{stream, StreamExt, TryStreamExt};
@@ -16,39 +17,30 @@ pub(super) struct DomainHandle {
     idx: DomainIndex,
     /// Maps from shard index, to replica index, to address of the worker running that replica of
     /// that shard of the domain
-    shards: Vec<Vec<WorkerIdentifier>>,
+    shards: Array2<WorkerIdentifier>,
 }
 
 impl DomainHandle {
-    pub fn new(idx: DomainIndex, shards: Vec<Vec<WorkerIdentifier>>) -> Self {
-        let dh = Self { idx, shards };
-        debug_assert!(dh
-            .shards
-            .iter()
-            .all(|shard| shard.len() == dh.num_replicas()));
-        dh
+    pub fn new(idx: DomainIndex, shards: Array2<WorkerIdentifier>) -> Self {
+        Self { idx, shards }
     }
 
     pub(super) fn index(&self) -> DomainIndex {
         self.idx
     }
 
-    #[must_use]
-    pub(super) fn shards(&self) -> &[Vec<WorkerIdentifier>] {
-        self.shards.as_ref()
+    pub(super) fn shards(&self) -> impl Iterator<Item = &[WorkerIdentifier]> {
+        self.shards.rows()
     }
 
     /// Returns the number of times this domain is sharded
     pub(super) fn num_shards(&self) -> usize {
-        self.shards.len()
+        self.shards.num_rows()
     }
 
     /// Returns the number of times this domain is replicated
     pub(super) fn num_replicas(&self) -> usize {
-        self.shards
-            .get(0)
-            .expect("Domain must have at least 1 shard")
-            .len()
+        self.shards.row_size()
     }
 
     /// Look up which worker the given shard/replica pair is assigned to
@@ -60,8 +52,7 @@ impl DomainHandle {
         replica: usize,
     ) -> ReadySetResult<&WorkerIdentifier> {
         self.shards
-            .get(shard)
-            .and_then(|replicas| replicas.get(replica))
+            .get((shard, replica))
             .ok_or_else(|| ReadySetError::NoSuchReplica {
                 domain_index: self.idx.index(),
                 shard,
@@ -70,9 +61,7 @@ impl DomainHandle {
     }
 
     pub(super) fn is_assigned_to_worker(&self, worker: &WorkerIdentifier) -> bool {
-        self.shards
-            .iter()
-            .any(|replicas| replicas.iter().any(|s| s == worker))
+        self.shards.cells().iter().any(|s| s == worker)
     }
 
     pub(super) async fn send_to_healthy_shard_replica<R>(

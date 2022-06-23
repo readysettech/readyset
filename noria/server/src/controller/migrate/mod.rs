@@ -34,6 +34,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
+use array2::Array2;
 use dataflow::node::Column;
 use dataflow::post_lookup::PostLookup;
 use dataflow::prelude::*;
@@ -139,7 +140,7 @@ pub struct PlaceRequest {
     /// The index the new domain will have.
     idx: DomainIndex,
     /// A map from domain shard, to replica index, to the worker to schedule the domain shard onto.
-    shard_replica_workers: Vec<Vec<WorkerIdentifier>>,
+    shard_replica_workers: Array2<WorkerIdentifier>,
     /// Indices of new nodes to add.
     nodes: Vec<NodeIndex>,
 }
@@ -237,13 +238,13 @@ impl DomainMigrationPlan {
     }
 
     /// Enqueues a request to add a new domain `idx` with `nodes`, running on a worker per-shard
-    /// given by `shard_workers`
+    /// given by `shard_replica_workers`
     ///
     /// Arguments are passed to [`Leader::place_domain`] when the plan is applied.
     pub fn place_domain(
         &mut self,
         idx: DomainIndex,
-        shard_replica_workers: Vec<Vec<WorkerIdentifier>>,
+        shard_replica_workers: Array2<WorkerIdentifier>,
         nodes: Vec<NodeIndex>,
     ) {
         self.place.push(PlaceRequest {
@@ -1017,8 +1018,8 @@ fn plan_add_nodes(
             let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
             let worker_shards = scheduler.schedule_domain(domain, &nodes)?;
 
-            let num_shards = worker_shards.len();
-            let num_replicas = worker_shards[0].len();
+            let num_shards = worker_shards.num_rows();
+            let num_replicas = worker_shards.row_size();
             dmp.place_domain(domain, worker_shards, nodes);
             dmp.domains.insert(
                 domain,

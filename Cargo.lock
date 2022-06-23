@@ -238,6 +238,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4361135be9122e0870de935d7c439aef945b9f9ddd4199a553b5270b49c82a27"
 
 [[package]]
+name = "array2"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3747,6 +3755,7 @@ version = "0.7.0"
 dependencies = [
  "ahash",
  "anyhow",
+ "array2",
  "async-bincode",
  "async-trait",
  "backoff",
@@ -4225,6 +4234,7 @@ version = "0.7.0"
 dependencies = [
  "ahash",
  "anyhow",
+ "array2",
  "assert_approx_eq",
  "async-bincode",
  "backtrace",

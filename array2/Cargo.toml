@@ -1,0 +1,10 @@
+[package]
+name = "array2"
+version = "0.0.1"
+publish = false
+authors = ["Readyset"]
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0.137", features = ["derive"] }
+thiserror = "1.0.31"
