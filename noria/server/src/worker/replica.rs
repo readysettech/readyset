@@ -138,11 +138,10 @@ impl Replica {
     fn span(&self) -> Span {
         info_span!(
             // Target noria_dataflow::domain rather than noria_server::worker::replica so that a log
-            // level of `noria_dataflow=trace` still logs the domain index
+            // level of `noria_dataflow=trace` still logs the domain address
             target: "noria_dataflow::domain",
             "domain",
-            domain_index = self.domain.index().index(),
-            shard = self.domain.shard()
+            address = %self.domain.address(),
         )
     }
 
