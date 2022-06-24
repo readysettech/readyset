@@ -29,6 +29,7 @@ images=(
     "php:7-apache"
     "python:3"
     "python:3.9-alpine3.12"
+    "python:3.9-alpine3.14"
     "ruby:2.6.5-alpine"
     "ruby:2.6.3"
 
