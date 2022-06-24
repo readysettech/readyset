@@ -1719,6 +1719,7 @@ impl<'a> FromSql<'a> for DataType {
         FLOAT8,
         NUMERIC,
         TEXT,
+        UUID,
         VARCHAR,
         DATE,
         TIME,
