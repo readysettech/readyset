@@ -34,7 +34,6 @@ use noria_client::{Backend, BackendBuilder, QueryHandler, UpstreamDatabase};
 use noria_client_metrics::QueryExecutionEvent;
 use noria_dataflow::Readers;
 use noria_server::worker::readers::{Ack, BlockingRead, ReadRequestHandler};
-use noria_server::Builder;
 use stream_cancel::Valve;
 use tokio::net::UdpSocket;
 use tokio::sync::broadcast;
@@ -302,8 +301,16 @@ pub struct Options {
 
     /// Run ReadySet in standalone mode, running a noria-server and noria-mysql instance within
     /// this adapter.
-    #[clap(long, env = "STANDALONE")]
+    #[clap(long, env = "STANDALONE", conflicts_with = "embedded-readers")]
     standalone: bool,
+
+    /// Run ReadySet in embedded readers mode, running reader replicas (and only reader replicas)
+    /// in the same process as the adapter
+    ///
+    /// Should be combined with passing `--no-readers` and `--reader-replicas` with the number of
+    /// adapter instances to each server process.
+    #[clap(long, env = "EMBEDDED_READERS", conflicts_with = "standalone")]
+    embedded_readers: bool,
 
     /// Enable experimental support for TopK in dataflow
     #[clap(long, env = "EXPERIMENTAL_TOPK_SUPPORT")]
@@ -593,11 +600,11 @@ where
         let readers: Readers = Arc::new(Mutex::new(Default::default()));
 
         // Run a noria-server instance within this adapter.
-        let _handle = if options.standalone {
+        let _handle = if options.standalone || options.embedded_readers {
             let (handle, valve) = Valve::new();
             let authority = options.authority.clone();
             let deployment = options.deployment.clone();
-            let mut builder = Builder::default();
+            let mut builder = noria_server::Builder::default();
             let r = readers.clone();
             let auth_address = options.authority_address.clone();
 
@@ -615,6 +622,11 @@ where
                 None,
             );
             builder.set_persistence(persistence_params);
+
+            if options.embedded_readers {
+                builder.as_reader_only();
+                builder.cannot_become_leader();
+            }
 
             builder.set_allow_topk(options.enable_experimental_topk_support);
             builder.set_allow_paginate(options.enable_experimental_paginate_support);
@@ -669,7 +681,7 @@ where
                 .fallback_recovery_seconds(options.fallback_recovery_seconds);
 
             // Initialize the reader layer for the adapter.
-            let r = options.standalone.then(|| {
+            let r = (options.standalone || options.embedded_readers).then(|| {
                 // Create a thread that repeatedly polls BlockingRead's every `RETRY_TIMEOUT`.
                 // When the `BlockingRead` completes, tell the future to resolve with ack.
                 let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
