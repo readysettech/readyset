@@ -79,15 +79,17 @@ mod types {
                 .get::<_, i64>(0);
             assert_eq!(count_where_result, 1);
         }
-        // check parameter passing and value returning when going through fallback
-        // TODO(DAN): below statement fails for UUID and JSON
-        /*
-        let fallback_result = client
-            .query_one("SELECT x FROM (SELECT x FROM t WHERE x = $1) sq", &[&val])
-            .unwrap()
-            .get::<_, V>(0);
-        assert_eq!(fallback_result, val);
-        */
+
+        // Can't compare JSON for equality in postgres
+        if type_name.to_string() != "json" {
+            // check parameter passing and value returning when going through fallback
+            let fallback_result = client
+                .query_one("SELECT x FROM (SELECT x FROM t WHERE x = $1) sq", &[&val])
+                .await
+                .unwrap()
+                .get::<_, V>(0);
+            assert_eq!(fallback_result, val);
+        }
     }
 
     macro_rules! test_types {
