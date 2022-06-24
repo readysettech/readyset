@@ -573,7 +573,7 @@ impl Leader {
         // first, translate from the affected workers to affected data-flow nodes
         let mut affected_nodes = HashMap::new();
         for wi in failed {
-            warn!(worker = ?wi, "handling failure of worker");
+            warn!(worker = %wi, "handling failure of worker");
             let mut domain_nodes_on_worker = ds.nodes_on_worker(Some(&wi));
             for (domain_index, node_indices) in domain_nodes_on_worker.drain() {
                 ds.domains.remove(&domain_index);

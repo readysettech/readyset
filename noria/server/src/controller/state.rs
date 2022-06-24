@@ -1056,7 +1056,7 @@ impl DataflowState {
                     // TODO(Fran): We need better error handling for workers
                     //   that failed before the controller noticed.
                     error!(
-                        ?address,
+                        %address,
                         error = ?e,
                         "Worker could not be reached and will be ignored",
                     );
