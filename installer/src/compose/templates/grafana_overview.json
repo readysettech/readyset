@@ -21,7 +21,7 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "iteration": 1654699921483,
+  "iteration": 1656090401487,
   "links": [
     {
       "asDropdown": false,
@@ -150,6 +150,64 @@
                 "value": 2
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Cache Hit Rate"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "rgba(19, 196, 46, 0)",
+                      "value": null
+                    },
+                    {
+                      "color": "semi-dark-red",
+                      "value": 0
+                    },
+                    {
+                      "color": "semi-dark-yellow",
+                      "value": 0.6
+                    },
+                    {
+                      "color": "semi-dark-green",
+                      "value": 0.8
+                    }
+                  ]
+                }
+              }
+            ]
           }
         ]
       },
@@ -242,6 +300,18 @@
           "refId": "Count"
         },
         {
+          "datasource": "DS_PROMETHEUS",
+          "exemplar": true,
+          "expr": "avg by (query) ((query_log_total_keys_read{deployment=\"$deployment\", query!=\"\"} - query_log_total_cache_misses{deployment=\"$deployment\", query!=\"\"}) / query_log_total_keys_read{deployment=\"$deployment\", query!=\"\"})",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "Cache Hit Rate"
+        },
+        {
           "datasource": "ReadySet_DB",
           "format": "table",
           "group": [],
@@ -299,26 +369,33 @@
               "Time 4": true,
               "Time 5": true,
               "Time 6": true,
+              "Time 7": true,
               "Value #ReadySet QPS": true,
               "name results": false
             },
             "indexByName": {
-              "Time 1": 3,
-              "Time 2": 4,
-              "Time 3": 5,
-              "Time 4": 7,
-              "Time 5": 9,
+              "Time 1": 4,
+              "Time 2": 5,
+              "Time 3": 6,
+              "Time 4": 8,
+              "Time 5": 10,
+              "Time 6": 14,
+              "Time 7": 15,
+              "Value #Cache Hit Rate": 3,
               "Value #Count": 2,
-              "Value #RS Duration": 11,
-              "Value #ReadySet 50p": 6,
-              "Value #ReadySet 90p": 8,
-              "Value #ReadySet 99p": 10,
+              "Value #RS Duration": 12,
+              "Value #ReadySet 50p": 7,
+              "Value #ReadySet 90p": 9,
+              "Value #ReadySet 99p": 11,
+              "Value #ReadySet QPS": 13,
               "name results": 0,
               "query": 1
             },
             "renameByName": {
               "Time 4": "",
               "Time 5": "",
+              "Time 7": "",
+              "Value #Cache Hit Rate": "Cache Hit Rate",
               "Value #Count": "Count",
               "Value #RS Duration": "Total Duration",
               "Value #ReadySet 50p": "50p Latency",
@@ -842,5 +919,5 @@
   "timezone": "",
   "title": "Workload Overview",
   "uid": "workload",
-  "version": 2
+  "version": 1
 }
