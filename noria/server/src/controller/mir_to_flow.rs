@@ -1031,7 +1031,10 @@ fn lower_expression(
                 .map(|arg| lower_expression(parent, arg, parent_cols))
                 .collect::<Result<Vec<_>, _>>()?;
             let (func, ty) = BuiltinFunction::from_name_and_args(&fname, args)?;
-            Ok(DataflowExpression::Call { func, ty })
+            Ok(DataflowExpression::Call {
+                func: Box::new(func),
+                ty,
+            })
         }
         Expression::Call(call) => internal!(
             "Unexpected (aggregate?) call node in project expression: {:?}",

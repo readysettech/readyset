@@ -45,7 +45,7 @@ pub fn make_literal(val: DataType) -> Expression {
 /// Not intended for use outside of tests
 pub fn make_call(func: BuiltinFunction) -> Expression {
     Expression::Call {
-        func,
+        func: Box::new(func),
         ty: Type::Unknown,
     }
 }

@@ -25,21 +25,21 @@ use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BuiltinFunction {
     /// convert_tz(expr, expr, expr)
-    ConvertTZ(Box<Expression>, Box<Expression>, Box<Expression>),
+    ConvertTZ(Expression, Expression, Expression),
     /// dayofweek(expr)
-    DayOfWeek(Box<Expression>),
+    DayOfWeek(Expression),
     /// ifnull(expr, expr)
-    IfNull(Box<Expression>, Box<Expression>),
+    IfNull(Expression, Expression),
     /// month(expr)
-    Month(Box<Expression>),
+    Month(Expression),
     /// timediff(expr, expr)
-    Timediff(Box<Expression>, Box<Expression>),
+    Timediff(Expression, Expression),
     /// addtime(expr, expr)
-    Addtime(Box<Expression>, Box<Expression>),
+    Addtime(Expression, Expression),
     /// round(expr, prec)
-    Round(Box<Expression>, Box<Expression>),
+    Round(Expression, Expression),
     /// json_typeof(expr)
-    JsonTypeof(Box<Expression>),
+    JsonTypeof(Expression),
 }
 
 impl BuiltinFunction {
@@ -106,69 +106,69 @@ impl BuiltinFunction {
         match name {
             "convert_tz" => {
                 // Type is inferred from input argument
-                let input = Box::new(args.next().ok_or_else(arity_error)?);
+                let input = args.next().ok_or_else(arity_error)?;
                 let ty = input.ty().clone();
                 Ok((
                     Self::ConvertTZ(
                         input,
-                        Box::new(args.next().ok_or_else(arity_error)?),
-                        Box::new(args.next().ok_or_else(arity_error)?),
+                        args.next().ok_or_else(arity_error)?,
+                        args.next().ok_or_else(arity_error)?,
                     ),
                     ty,
                 ))
             }
             "dayofweek" => {
                 Ok((
-                    Self::DayOfWeek(Box::new(args.next().ok_or_else(arity_error)?)),
+                    Self::DayOfWeek(args.next().ok_or_else(arity_error)?),
                     Type::Sql(SqlType::Int(None)), // Day of week is always an int
                 ))
             }
             "ifnull" => {
-                let expr = Box::new(args.next().ok_or_else(arity_error)?);
-                let val = Box::new(args.next().ok_or_else(arity_error)?);
+                let expr = args.next().ok_or_else(arity_error)?;
+                let val = args.next().ok_or_else(arity_error)?;
                 // Type is inferred from the value provided
                 let ty = val.ty().clone();
                 Ok((Self::IfNull(expr, val), ty))
             }
             "month" => {
                 Ok((
-                    Self::Month(Box::new(args.next().ok_or_else(arity_error)?)),
+                    Self::Month(args.next().ok_or_else(arity_error)?),
                     Type::Sql(SqlType::Int(None)), // Month is always an int
                 ))
             }
             "timediff" => {
                 Ok((
                     Self::Timediff(
-                        Box::new(args.next().ok_or_else(arity_error)?),
-                        Box::new(args.next().ok_or_else(arity_error)?),
+                        args.next().ok_or_else(arity_error)?,
+                        args.next().ok_or_else(arity_error)?,
                     ),
                     Type::Sql(SqlType::Time), // type is always time
                 ))
             }
             "addtime" => {
-                let base_time = Box::new(args.next().ok_or_else(arity_error)?);
+                let base_time = args.next().ok_or_else(arity_error)?;
                 let ty = base_time.ty().clone();
                 Ok((
-                    Self::Addtime(base_time, Box::new(args.next().ok_or_else(arity_error)?)),
+                    Self::Addtime(base_time, args.next().ok_or_else(arity_error)?),
                     ty,
                 ))
             }
             "round" => {
-                let expr = Box::new(args.next().ok_or_else(arity_error)?);
-                let prec = Box::new(args.next().unwrap_or(Expression::Literal {
+                let expr = args.next().ok_or_else(arity_error)?;
+                let prec = args.next().unwrap_or(Expression::Literal {
                     val: DataType::Int(0),
                     ty: Type::Sql(SqlType::Int(None)),
-                }));
+                });
                 let expr_type = expr.ty().clone();
-                let ty = match *expr {
+                let ty = match &expr {
                     Expression::Literal {
                         val: DataType::Float(_),
                         ..
-                    } => type_for_round(&*expr, &*prec),
+                    } => type_for_round(&expr, &prec),
                     Expression::Literal {
                         val: DataType::Double(_),
                         ..
-                    } => type_for_round(&*expr, &*prec),
+                    } => type_for_round(&expr, &prec),
                     // For all other numeric types, the type does not change
                     _ => expr_type,
                 };
@@ -176,7 +176,7 @@ impl BuiltinFunction {
             }
             "json_typeof" => {
                 Ok((
-                    Self::JsonTypeof(Box::new(args.next().ok_or_else(arity_error)?)),
+                    Self::JsonTypeof(args.next().ok_or_else(arity_error)?),
                     Type::Sql(SqlType::Text), // Always returns text containing the JSON type
                 ))
             }
@@ -235,16 +235,10 @@ impl fmt::Display for BuiltinFunction {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Expression {
     /// A reference to a column, by index, in the parent node
-    Column {
-        index: usize,
-        ty: Type,
-    },
+    Column { index: usize, ty: Type },
 
     /// A literal DataType value
-    Literal {
-        val: DataType,
-        ty: Type,
-    },
+    Literal { val: DataType, ty: Type },
 
     /// A binary operation
     Op {
@@ -267,7 +261,7 @@ pub enum Expression {
     },
 
     Call {
-        func: BuiltinFunction,
+        func: Box<BuiltinFunction>,
         ty: Type,
     },
 
@@ -408,7 +402,7 @@ impl Expression {
                 let res = expr.eval(record)?;
                 Ok(res.coerce_to(to_type)?)
             }
-            Call { func, .. } => match func {
+            Call { func, .. } => match &**func {
                 BuiltinFunction::ConvertTZ(arg1, arg2, arg3) => {
                     let param1 = arg1.eval(record)?;
                     let param2 = arg2.eval(record)?;
@@ -768,9 +762,9 @@ mod tests {
     #[test]
     fn eval_call_convert_tz() {
         let expr = make_call(BuiltinFunction::ConvertTZ(
-            Box::new(make_column(0)),
-            Box::new(make_column(1)),
-            Box::new(make_column(2)),
+            make_column(0),
+            make_column(1),
+            make_column(2),
         ));
         let datetime = NaiveDateTime::new(
             NaiveDate::from_ymd(2003, 10, 12),
@@ -843,7 +837,7 @@ mod tests {
 
     #[test]
     fn eval_call_day_of_week() {
-        let expr = make_call(BuiltinFunction::DayOfWeek(Box::new(make_column(0))));
+        let expr = make_call(BuiltinFunction::DayOfWeek(make_column(0)));
         let expected = DataType::Int(2);
 
         let date = NaiveDate::from_ymd(2021, 3, 22); // Monday
@@ -869,10 +863,7 @@ mod tests {
 
     #[test]
     fn eval_call_if_null() {
-        let expr = make_call(BuiltinFunction::IfNull(
-            Box::new(make_column(0)),
-            Box::new(make_column(1)),
-        ));
+        let expr = make_call(BuiltinFunction::IfNull(make_column(0), make_column(1)));
         let value = DataType::Int(2);
 
         assert_eq!(
@@ -885,21 +876,21 @@ mod tests {
         );
 
         let expr2 = make_call(BuiltinFunction::IfNull(
-            Box::new(make_literal(DataType::None)),
-            Box::new(make_column(0)),
+            make_literal(DataType::None),
+            make_column(0),
         ));
         assert_eq!(expr2.eval::<DataType>(&[2.into()]).unwrap(), value);
 
         let expr3 = make_call(BuiltinFunction::IfNull(
-            Box::new(make_column(0)),
-            Box::new(make_literal(DataType::Int(2))),
+            make_column(0),
+            make_literal(DataType::Int(2)),
         ));
         assert_eq!(expr3.eval(&[DataType::None]).unwrap(), value);
     }
 
     #[test]
     fn eval_call_month() {
-        let expr = make_call(BuiltinFunction::Month(Box::new(make_column(0))));
+        let expr = make_call(BuiltinFunction::Month(make_column(0)));
         let datetime = NaiveDateTime::new(
             NaiveDate::from_ymd(2003, 10, 12),
             NaiveTime::from_hms(5, 13, 33),
@@ -932,10 +923,7 @@ mod tests {
 
     #[test]
     fn eval_call_timediff() {
-        let expr = make_call(BuiltinFunction::Timediff(
-            Box::new(make_column(0)),
-            Box::new(make_column(1)),
-        ));
+        let expr = make_call(BuiltinFunction::Timediff(make_column(0), make_column(1)));
         let param1 = NaiveDateTime::new(
             NaiveDate::from_ymd(2003, 10, 12),
             NaiveTime::from_hms(5, 13, 33),
@@ -1058,10 +1046,7 @@ mod tests {
 
     #[test]
     fn eval_call_addtime() {
-        let expr = make_call(BuiltinFunction::Addtime(
-            Box::new(make_column(0)),
-            Box::new(make_column(1)),
-        ));
+        let expr = make_call(BuiltinFunction::Addtime(make_column(0), make_column(1)));
         let param1 = NaiveDateTime::new(
             NaiveDate::from_ymd(2003, 10, 12),
             NaiveTime::from_hms(5, 13, 33),
@@ -1201,10 +1186,7 @@ mod tests {
 
     #[test]
     fn eval_call_round() {
-        let expr = make_call(BuiltinFunction::Round(
-            Box::new(make_column(0)),
-            Box::new(make_column(1)),
-        ));
+        let expr = make_call(BuiltinFunction::Round(make_column(0), make_column(1)));
         let number: f64 = 4.12345;
         let precision = 3;
         let param1 = DataType::try_from(number).unwrap();
@@ -1223,10 +1205,7 @@ mod tests {
 
     #[test]
     fn eval_call_round_with_negative_precision() {
-        let expr = make_call(BuiltinFunction::Round(
-            Box::new(make_column(0)),
-            Box::new(make_column(1)),
-        ));
+        let expr = make_call(BuiltinFunction::Round(make_column(0), make_column(1)));
         let number: f64 = 52.12345;
         let precision = -1;
         let param1 = DataType::try_from(number).unwrap();
@@ -1244,10 +1223,7 @@ mod tests {
 
     #[test]
     fn eval_call_round_with_float_precision() {
-        let expr = make_call(BuiltinFunction::Round(
-            Box::new(make_column(0)),
-            Box::new(make_column(1)),
-        ));
+        let expr = make_call(BuiltinFunction::Round(make_column(0), make_column(1)));
         let number: f32 = 52.12345;
         let precision = -1.0_f64;
         let param1 = DataType::try_from(number).unwrap();
@@ -1273,10 +1249,7 @@ mod tests {
     // 1 row in set, 2 warnings (0.00 sec)
     #[test]
     fn eval_call_round_with_banana() {
-        let expr = make_call(BuiltinFunction::Round(
-            Box::new(make_column(0)),
-            Box::new(make_column(1)),
-        ));
+        let expr = make_call(BuiltinFunction::Round(make_column(0), make_column(1)));
         let number: f32 = 52.12345;
         let precision = "banana";
         let param1 = DataType::try_from(number).unwrap();
@@ -1304,7 +1277,7 @@ mod tests {
             (r#"{ "hello": "world", "abc": 123 }"#, "object"),
         ];
 
-        let expr = make_call(BuiltinFunction::JsonTypeof(Box::new(make_column(0))));
+        let expr = make_call(BuiltinFunction::JsonTypeof(make_column(0)));
 
         for (json, expected_type) in examples {
             let json_type = expr.eval::<DataType>(&[json.into()]).unwrap();
@@ -1314,7 +1287,7 @@ mod tests {
 
     #[test]
     fn month_null() {
-        let expr = make_call(BuiltinFunction::Month(Box::new(make_column(0))));
+        let expr = make_call(BuiltinFunction::Month(make_column(0)));
         assert_eq!(
             expr.eval::<DataType>(&[DataType::None]).unwrap(),
             DataType::None
