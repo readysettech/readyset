@@ -36,7 +36,7 @@ async fn main() {
 
     // Construct the Writer (to an underlying DB)
     let mysql_url = String::from(mysql_url);
-    let upstream = Some(MySqlUpstream::connect(mysql_url.clone()).await.unwrap());
+    let upstream = Some(MySqlUpstream::connect(mysql_url.clone(), ()).await.unwrap());
 
     let noria = NoriaConnector::new(
         ch.clone(),

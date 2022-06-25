@@ -539,9 +539,12 @@ impl TestScript {
                     #[allow(clippy::manual_map)]
                     let upstream = match replication_url.clone() {
                         Some(url) => Some(
-                            <$upstream as UpstreamDatabase>::connect(url.clone())
-                                .await
-                                .unwrap(),
+                            <$upstream as UpstreamDatabase>::connect(
+                                url.clone(),
+                                Default::default(),
+                            )
+                            .await
+                            .unwrap(),
                         ),
                         None => None,
                     };

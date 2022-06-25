@@ -96,7 +96,10 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
         ReadBehavior::Blocking,
     ));
     let upstream = if !mysql_address.is_empty() {
-        Some(rt.block_on(MySqlUpstream::connect(mysql_address)).unwrap())
+        Some(
+            rt.block_on(MySqlUpstream::connect(mysql_address, ()))
+                .unwrap(),
+        )
     } else {
         None
     };

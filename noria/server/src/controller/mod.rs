@@ -442,7 +442,7 @@ impl Controller {
             }
             AuthorityUpdate::AuthorityError(e) => {
                 // the authority won't be restarted, so the controller should hard-exit
-                internal!("controller's authority thread failed: {}", e);
+                internal!("controller's authority thread failed: {:#}", e);
             }
         }
         Ok(())

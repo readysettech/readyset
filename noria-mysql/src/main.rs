@@ -72,6 +72,7 @@ fn main() -> anyhow::Result<()> {
         connection_handler: MysqlHandler,
         database_type: DatabaseType::Mysql,
         dialect: Dialect::MySQL,
+        upstream_config: (),
     };
 
     adapter.run(options.adapter_options)

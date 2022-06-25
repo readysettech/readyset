@@ -12,7 +12,7 @@ use noria_data::DataType;
 use noria_errors::{unsupported, ReadySetError};
 use pgsql::config::Host;
 use pgsql::types::Type;
-use pgsql::{Config, GenericResult, Row};
+use pgsql::{GenericResult, Row};
 use psql_srv::Column;
 use tokio::process::Command;
 use tokio_postgres as pgsql;
@@ -20,7 +20,7 @@ use tracing::{info, info_span};
 use tracing_futures::Instrument;
 
 use crate::schema::type_to_pgsql;
-use crate::Error;
+use crate::{Config, Error};
 
 /// A connector to an underlying PostgreSQL database
 pub struct PostgreSqlUpstream {
@@ -34,6 +34,8 @@ pub struct PostgreSqlUpstream {
     statement_id_counter: u32,
     /// The original URL used to create the connection
     url: String,
+    /// Connection-specific configuration
+    config: Config,
 }
 
 #[derive(Debug)]
@@ -97,21 +99,28 @@ impl NoriaCompare for StatementMeta {
 
 #[async_trait]
 impl UpstreamDatabase for PostgreSqlUpstream {
+    type Config = Config;
     type StatementMeta = StatementMeta;
     type QueryResult = QueryResult;
     type Error = Error;
 
-    async fn connect(url: String) -> Result<Self, Error> {
-        let config = Config::from_str(&url)?;
-        let connector = native_tls::TlsConnector::builder().build().unwrap(); // Never returns an error
+    async fn connect(url: String, config: Config) -> Result<Self, Error> {
+        let pg_config = pgsql::Config::from_str(&url)?;
+        let connector = {
+            let mut builder = native_tls::TlsConnector::builder();
+            if config.disable_upstream_ssl_verification {
+                builder.danger_accept_invalid_certs(true);
+            }
+            builder.build().unwrap() // Never returns an error
+        };
         let tls = postgres_native_tls::MakeTlsConnector::new(connector);
         let span = info_span!(
             "Connecting to PostgreSQL upstream",
-            host = ?config.get_hosts(),
-            port = ?config.get_ports()
+            host = ?pg_config.get_hosts(),
+            port = ?pg_config.get_ports()
         );
         span.in_scope(|| info!("Establishing connection"));
-        let (client, connection) = config.connect(tls).instrument(span.clone()).await?;
+        let (client, connection) = pg_config.connect(tls).instrument(span.clone()).await?;
         let _connection_handle = tokio::spawn(connection);
         span.in_scope(|| info!("Established connection to upstream"));
 
@@ -121,6 +130,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             prepared_statements: Default::default(),
             statement_id_counter: 0,
             url,
+            config,
         })
     }
 
@@ -130,7 +140,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
 
     async fn reset(&mut self) -> Result<(), Error> {
         let url = self.url.clone();
-        let old_self = std::mem::replace(self, Self::connect(url).await?);
+        let old_self = std::mem::replace(self, Self::connect(url, self.config).await?);
         drop(old_self);
         Ok(())
     }
@@ -252,7 +262,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     }
 
     async fn schema_dump(&mut self) -> Result<Vec<u8>, anyhow::Error> {
-        let config = Config::from_str(&self.url)?;
+        let config = pgsql::Config::from_str(&self.url)?;
         let mut pg_dump = Command::new("pg_dump");
         pg_dump.arg("--schema-only");
         if let Some(host) = config
