@@ -10,7 +10,9 @@ use crate::packet::PacketWriter;
 use crate::value::ToMysqlValue;
 use crate::{writers, Column, ErrorKind, StatementData};
 
-const DEFAULT_ROW_CAPACITY: usize = 4096;
+pub(crate) const DEFAULT_ROW_CAPACITY: usize = 4096;
+pub(crate) const MAX_POOL_ROW_CAPACITY: usize = DEFAULT_ROW_CAPACITY * 4;
+pub(crate) const MAX_POOL_ROWS: usize = 2048;
 
 /// Convenience type for responding to a client `USE <db>` command.
 pub struct InitWriter<'a, W: AsyncWrite + Unpin> {
@@ -278,7 +280,7 @@ pub struct RowWriter<'a, W: AsyncWrite + Unpin> {
     // received from communicating with mysql over fallback.
     last_status_flags: Option<StatusFlags>,
     /// A buffer to hold row data
-    row_data: Vec<u8>,
+    row_data: Option<Vec<u8>>,
 }
 
 impl<'a, W> RowWriter<'a, W>
@@ -303,7 +305,7 @@ where
             finished: false,
             last_status_flags: None,
 
-            row_data: Vec::new(),
+            row_data: None,
         };
         rw.start().await?;
         Ok(rw)
@@ -342,25 +344,22 @@ where
             return Ok(());
         }
 
-        if self.col == 0 {
+        let row_data = self.row_data.get_or_insert_with(|| {
+            let mut row_data = self.result.writer.get_buffer();
             // We want to preallocate at least *some* capacity for the row, otherwise the
             // incremental writes cause a whole lot of reallocations. Since Vec usually
             // reallocates with exponential growth even small responses require at least
-            // a few reallocs unless we reserve some capacity. The specific size chosen
-            // seem safe enough for most rows, and in the worst case will require
-            // significantly fewer reallocations.
-            // NOTE: we could reserver an exact number of bytes if desired in the future by
-            // computing a bound on each column size
-            self.row_data.reserve(DEFAULT_ROW_CAPACITY);
-        }
+            // a few reallocs unless we reserve some capacity.
+            row_data.reserve(DEFAULT_ROW_CAPACITY);
+            row_data
+        });
 
         if self.result.is_bin {
             if self.col == 0 {
-                self.row_data.push(0x00);
+                row_data.push(0x00);
                 // leave space for nullmap
-                self.bitmap_idx = self.row_data.len();
-                self.row_data
-                    .resize(self.row_data.len() + self.bitmap_len, 0);
+                self.bitmap_idx = row_data.len();
+                row_data.resize(row_data.len() + self.bitmap_len, 0);
             }
 
             let c = self
@@ -386,13 +385,13 @@ where
                     // NULL-bitmap-bit  = ((field-pos + offset) % 8)
                     let idx = self.bitmap_idx + (self.col + 2) / 8;
                     // Always safe to access `idx` because we allocate sufficient space in advance
-                    self.row_data[idx] |= 1u8 << ((self.col + 2) % 8);
+                    row_data[idx] |= 1u8 << ((self.col + 2) % 8);
                 }
             } else {
-                v.to_mysql_bin(&mut self.row_data, c)?;
+                v.to_mysql_bin(row_data, c)?;
             }
         } else {
-            v.to_mysql_text(&mut self.row_data)?;
+            v.to_mysql_text(row_data)?;
         }
         self.col += 1;
         Ok(())
@@ -412,9 +411,9 @@ where
             ));
         }
 
-        self.result
-            .writer
-            .enqueue_packet(std::mem::take(&mut self.row_data));
+        if let Some(packet) = self.row_data.take() {
+            self.result.writer.enqueue_packet(packet);
+        }
 
         self.col = 0;
 
