@@ -119,13 +119,18 @@ impl From<UnsupportedSetMode> for noria_client::backend::UnsupportedSetMode {
     }
 }
 
-pub struct NoriaAdapter<H> {
+pub struct NoriaAdapter<H>
+where
+    H: ConnectionHandler,
+{
     pub description: &'static str,
     pub default_address: SocketAddr,
     pub connection_handler: H,
     pub database_type: DatabaseType,
     /// SQL dialect to use when parsing queries
     pub dialect: Dialect,
+    /// Configuration for the connection handler's upstream database
+    pub upstream_config: <<H as ConnectionHandler>::UpstreamDatabase as UpstreamDatabase>::Config,
 }
 
 #[derive(Parser, Debug)]
@@ -451,6 +456,7 @@ where
 
         if options.async_migrations || options.explicit_migrations {
             let upstream_db_url = options.upstream_db_url.as_ref().map(|u| u.0.clone());
+            let upstream_config = self.upstream_config.clone();
             let ch = ch.clone();
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
             let shutdown_recv = shutdown_sender.subscribe();
@@ -464,7 +470,7 @@ where
                 let upstream =
                     match upstream_db_url {
                         Some(url) if !dry_run => Some(
-                            H::UpstreamDatabase::connect(url.clone())
+                            H::UpstreamDatabase::connect(url.clone(), upstream_config)
                                 .instrument(connection.in_scope(|| {
                                     span!(Level::INFO, "Connecting to upstream database")
                                 }))
@@ -615,6 +621,7 @@ where
             let mut connection_handler = self.connection_handler.clone();
             let region = options.region.clone();
             let upstream_db_url = options.upstream_db_url.clone();
+            let upstream_config = self.upstream_config.clone();
             let backend_builder = BackendBuilder::new()
                 .slowlog(options.log_slow)
                 .users(users.clone())
@@ -671,7 +678,10 @@ where
                 let upstream_res = if let Some(upstream_db_url) = &upstream_db_url {
                     timeout(
                         UPSTREAM_CONNECTION_TIMEOUT,
-                        H::UpstreamDatabase::connect(upstream_db_url.0.clone()),
+                        H::UpstreamDatabase::connect(
+                            upstream_db_url.0.clone(),
+                            upstream_config.clone(),
+                        ),
                     )
                     .instrument(debug_span!("Connecting to upstream database"))
                     .await

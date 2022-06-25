@@ -93,11 +93,12 @@ impl NoriaCompare for StatementMeta {
 
 #[async_trait]
 impl UpstreamDatabase for MySqlUpstream {
+    type Config = ();
     type QueryResult = QueryResult;
     type StatementMeta = StatementMeta;
     type Error = Error;
 
-    async fn connect(url: String) -> Result<Self, Error> {
+    async fn connect(url: String, _: Self::Config) -> Result<Self, Error> {
         // CLIENT_SESSION_TRACK is required for GTID information to be sent in OK packets on commits
         // GTID information is used for RYW
         // Currently this causes rows affected to return an incorrect result, so this is feature

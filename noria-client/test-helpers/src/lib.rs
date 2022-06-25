@@ -37,7 +37,9 @@ pub trait Adapter: Send {
     fn url() -> String;
 
     async fn make_upstream(addr: String) -> Self::Upstream {
-        Self::Upstream::connect(addr).await.unwrap()
+        Self::Upstream::connect(addr, Default::default())
+            .await
+            .unwrap()
     }
 
     async fn recreate_database();
