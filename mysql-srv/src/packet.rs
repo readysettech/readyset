@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::error::{other_error, OtherErrorKind};
+use crate::resultset::{MAX_POOL_ROWS, MAX_POOL_ROW_CAPACITY};
 
 const U24_MAX: usize = 16_777_215;
 
@@ -11,6 +12,9 @@ pub struct PacketWriter<W> {
     pub seq: u8,
     w: W,
     queue: Vec<QueuedPacket>,
+
+    /// Reusable packets
+    preallocated: Vec<QueuedPacket>,
 }
 
 /// Type for packets being enqueued in the packet writer.
@@ -77,6 +81,7 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
             seq: 0,
             w,
             queue: Vec::new(),
+            preallocated: Vec::new(),
         }
     }
 
@@ -93,6 +98,10 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
 
     /// Push a new packet to the outgoing packet list
     pub fn enqueue_packet(&mut self, mut packet: Vec<u8>) {
+        // Lazily shrink large buffers before processing them further, as after that they will go to
+        // the buffer pool
+        packet.shrink_to(MAX_POOL_ROW_CAPACITY);
+
         while packet.len() >= U24_MAX {
             let rest = packet.split_off(U24_MAX);
             let mut hdr = (U24_MAX as u32).to_le_bytes();
@@ -119,7 +128,7 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         let mut slices = queued_packet_slices(&self.queue);
         if !slices.is_empty() {
             write_all_vectored(&mut self.w, &mut slices).await?;
-            self.queue.clear();
+            self.return_queued_to_pool();
         }
 
         Ok(())
@@ -160,9 +169,23 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         }
 
         write_all_vectored(&mut self.w, &mut slices).await?;
-        self.queue.clear();
+        self.return_queued_to_pool();
 
         Ok(())
+    }
+
+    /// Clear the queued packets and return them to the pool of preallocated packets
+    fn return_queued_to_pool(&mut self) {
+        // Prefer to merge the shorter vector into the longer vector, thus minimizing the amount of
+        // copying neccessary. i.e. if `queue` already contains all the allocated vectors, no action
+        // is needed.
+        if self.queue.len() > self.preallocated.len() {
+            std::mem::swap(&mut self.queue, &mut self.preallocated);
+        }
+        // Limit the number of pre allocated buffers to `MAX_POOL_ROWS`
+        self.preallocated.truncate(MAX_POOL_ROWS);
+        self.queue.truncate(MAX_POOL_ROWS - self.preallocated.len());
+        self.preallocated.append(&mut self.queue);
     }
 
     /// Send a packet without queueing, flushes any queued packets beforehand
@@ -184,6 +207,19 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
 
         self.seq = self.seq.wrapping_add(1);
         Ok(())
+    }
+
+    pub fn get_buffer(&mut self) -> Vec<u8> {
+        while let Some(p) = self.preallocated.pop() {
+            match p {
+                QueuedPacket::Raw(_) => {}
+                QueuedPacket::WithHeader(_, mut vec) => {
+                    vec.clear();
+                    return vec;
+                }
+            }
+        }
+        Vec::new()
     }
 }
 
