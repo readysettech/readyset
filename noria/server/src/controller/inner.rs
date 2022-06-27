@@ -348,6 +348,13 @@ impl Leader {
                     })?;
                     return_serialized!(res);
                 }
+                (&Method::POST, "/node_key_counts") => {
+                    let res = futures::executor::block_on(async move {
+                        let ds = self.dataflow_state_handle.read().await;
+                        ds.node_key_counts().await
+                    })?;
+                    return_serialized!(res);
+                }
                 (&Method::POST, "/leader_ready") => {
                     return_serialized!(leader_ready);
                 }

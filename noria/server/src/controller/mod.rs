@@ -1059,6 +1059,7 @@ async fn handle_controller_request(
 #[cfg(test)]
 mod tests {
     use noria::replication::ReplicationOffset;
+    use noria::KeyCount;
 
     use crate::integration_utils::start_simple;
 
@@ -1155,5 +1156,37 @@ mod tests {
         assert_eq!(offsets.tables["t1"].as_ref().unwrap().offset, 2);
         assert_eq!(offsets.tables["t2"].as_ref().unwrap().offset, 3);
         assert_eq!(offsets.tables["t3"], None);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn key_count_rpc() {
+        let mut noria = start_simple("all_tables").await;
+
+        noria
+            .extend_recipe(
+                "CREATE TABLE key_count_test (id INT PRIMARY KEY, stuff TEXT);
+                 CREATE CACHE q1 FROM SELECT * FROM key_count_test;"
+                    .parse()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let key_counts = noria.node_key_counts().await.unwrap();
+
+        let mut table = noria.table("key_count_test").await.unwrap();
+        // The table only contains the local index, so we use `inputs()` to get the global index
+        let table_idx = noria.inputs().await.unwrap()["key_count_test"];
+        let view_idx = noria.view("q1").await.unwrap().node().clone();
+
+        assert_eq!(key_counts[&table_idx], KeyCount::EstimatedRowCount(0));
+        assert_eq!(key_counts[&view_idx], KeyCount::ExactKeyCount(0));
+
+        table.insert(vec![1.into(), "abc".into()]).await.unwrap();
+
+        let key_counts = noria.node_key_counts().await.unwrap();
+
+        assert_eq!(key_counts[&table_idx], KeyCount::EstimatedRowCount(1));
+        assert_eq!(key_counts[&view_idx], KeyCount::ExactKeyCount(1));
     }
 }
