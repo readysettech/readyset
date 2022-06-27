@@ -4,7 +4,7 @@ use std::rc::Rc;
 use common::{IndexType, KeyType, RangeKey, Record, Records, SizeOf, Tag};
 use noria::internal::Index;
 use noria::replication::ReplicationOffset;
-use noria::KeyComparison;
+use noria::{KeyComparison, KeyCount};
 use noria_data::DataType;
 use noria_errors::ReadySetResult;
 use rand::{self, Rng};
@@ -13,8 +13,7 @@ use tracing::trace;
 use crate::keyed_state::KeyedState;
 use crate::single_state::SingleState;
 use crate::{
-    KeyCount, LookupResult, PersistentState, RangeLookupResult, RecordResult, Row, Rows, State,
-    StateEvicted,
+    LookupResult, PersistentState, RangeLookupResult, RecordResult, Row, Rows, State, StateEvicted,
 };
 
 #[derive(Default)]

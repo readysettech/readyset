@@ -228,6 +228,8 @@ pub(crate) const VIEW_POOL_SIZE: usize = 16;
 pub(crate) const PENDING_LIMIT: usize = 8192;
 
 use std::collections::{HashMap, HashSet};
+use std::fmt::{self, Display};
+use std::ops::AddAssign;
 
 use nom_sql::SqlType;
 use petgraph::graph::NodeIndex;
@@ -436,6 +438,50 @@ impl From<(petgraph::graph::NodeIndex, SqlIdentifier, usize)> for ReaderAddress 
     }
 }
 
+/// Used to wrap key counts since we use row count estimates as a rough correlate of the key count
+/// in the case of RocksDB nodes, and we want to keep track of when we do that so as to avoid any
+/// confusion in other parts of the code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum KeyCount {
+    /// An exact key count, pulled from a memory node
+    ExactKeyCount(usize),
+    /// An estimate of the row count, pulled from a persistent storage node
+    EstimatedRowCount(usize),
+}
+
+impl Display for KeyCount {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            KeyCount::ExactKeyCount(count) => write!(f, "{}", count),
+            KeyCount::EstimatedRowCount(count) => write!(f, "~{}", count),
+        }
+    }
+}
+
+impl AddAssign for KeyCount {
+    /// Adds the key count for the rhs KeyCount to ourselves.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the caller attempts to add an `ExactKeyCount` to an `EstimatedRowCount` or vice
+    /// versa.
+    #[track_caller]
+    fn add_assign(&mut self, rhs: Self) {
+        match (&self, rhs) {
+            (KeyCount::ExactKeyCount(self_count), KeyCount::ExactKeyCount(rhs_count)) => {
+                *self = KeyCount::ExactKeyCount(*self_count + rhs_count)
+            }
+            (KeyCount::EstimatedRowCount(self_count), KeyCount::EstimatedRowCount(rhs_count)) => {
+                *self = KeyCount::EstimatedRowCount(*self_count + rhs_count)
+            }
+            _ => panic!(
+                "Cannot add mismatched KeyCount types for values {}/{}",
+                self, rhs
+            ),
+        };
+    }
+}
+
 #[doc(hidden)]
 #[inline]
 pub fn shard_by(dt: &DataType, shards: usize) -> usize {
@@ -468,5 +514,30 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
             dt.hash(&mut hasher);
             hasher.finish() as usize % shards
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_count_formatting() {
+        assert_eq!("42", KeyCount::ExactKeyCount(42).to_string());
+        assert_eq!("~42", KeyCount::EstimatedRowCount(42).to_string());
+    }
+
+    #[test]
+    fn key_count_add_assign() {
+        let mut kc = KeyCount::ExactKeyCount(1);
+        kc += KeyCount::ExactKeyCount(99);
+        assert_eq!(KeyCount::ExactKeyCount(100), kc);
+    }
+
+    #[test]
+    #[should_panic]
+    fn key_count_add_assign_panic() {
+        let mut kc = KeyCount::ExactKeyCount(1);
+        kc += KeyCount::EstimatedRowCount(1);
     }
 }

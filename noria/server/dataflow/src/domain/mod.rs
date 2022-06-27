@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::{cell, cmp, mem, time};
 
 use ahash::RandomState;
-use dataflow_state::{KeyCount, MaterializedNodeState, RangeLookupResult};
+use dataflow_state::{MaterializedNodeState, RangeLookupResult};
 use failpoint_macros::failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
@@ -21,7 +21,7 @@ use launchpad::Indices;
 use merging_interval_tree::IntervalTreeSet;
 use noria::internal::Index;
 use noria::replication::ReplicationOffset;
-use noria::{channel, internal, KeyComparison, ReaderAddress, ReadySetError};
+use noria::{channel, internal, KeyComparison, KeyCount, ReaderAddress, ReadySetError};
 use noria_errors::{internal, internal_err, ReadySetResult};
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
