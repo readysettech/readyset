@@ -174,13 +174,18 @@ struct Opts {
     #[clap(long, env = "VOLUME_ID")]
     volume_id: Option<VolumeId>,
 
-    /// Enable (experimental, currently broken) support for TopK in dataflow
+    /// Enable experimental support for TopK in dataflow
     #[clap(long, env = "EXPERIMENTAL_TOPK_SUPPORT", hide = true)]
     enable_experimental_topk_support: bool,
 
-    /// Enable (experimental, currently unimplemented) support for Paginate in dataflow
+    /// Enable experimental support for Paginate in dataflow
     #[clap(long, env = "EXPERIMENTAL_PAGINATE_SUPPORT", hide = true)]
     enable_experimental_paginate_support: bool,
+
+    /// Enable experimental support for mixing equality and inequality comparisons on query
+    /// parameters
+    #[clap(long, env = "EXPERIMENTAL_MIXED_COMPARISONS_SUPPORT", hide = true)]
+    enable_experimental_mixed_comparisons: bool,
 
     #[clap(flatten)]
     tracing: readyset_tracing::Options,
@@ -279,6 +284,7 @@ fn main() -> anyhow::Result<()> {
 
     builder.set_allow_topk(opts.enable_experimental_topk_support);
     builder.set_allow_paginate(opts.enable_experimental_paginate_support);
+    builder.set_allow_mixed_comparisons(opts.enable_experimental_mixed_comparisons);
 
     if let Some(r) = opts.region {
         builder.set_region(r);
