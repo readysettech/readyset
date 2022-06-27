@@ -267,7 +267,6 @@ async fn main() -> Result<()> {
             println!("{}", *compose::template::DOCKER_TAG);
         }
         None => {
-            println!("Welcome to the ReadySet orchestrator.\n");
             DirBuilder::new()
                 .recursive(true)
                 .create(options.state_directory()?)
