@@ -116,9 +116,8 @@ async fn it_completes() {
 
 fn timestamp(pairs: Vec<(u32, u64)>) -> Timestamp {
     let mut t = Timestamp::default();
-    // SAFETY: For performance, LocalNodeIndex must be contiguous and 0 indexed.
     for p in pairs {
-        t.map.insert(unsafe { LocalNodeIndex::make(p.0) }, p.1);
+        t.map.insert(LocalNodeIndex::make(p.0), p.1);
     }
 
     t

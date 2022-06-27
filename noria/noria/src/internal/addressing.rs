@@ -43,6 +43,12 @@ impl Display for ReplicaAddress {
 }
 
 /// A domain-local node identifier.
+///
+/// After migration is complete, every node in the dataflow graph gets two IDs, one
+/// ([`petgraph::graph::NodeIndex`]) which is globally unique across the entire dataflow graph, and
+/// one (this type) that's local to a particular domain. Having these local indices allows us to
+/// efficiently store node-specific information within a domain in efficient sparse vectors called
+/// [`NodeMap`]s.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug, Serialize, Deserialize)]
 #[repr(transparent)]
 pub struct LocalNodeIndex {
@@ -50,12 +56,12 @@ pub struct LocalNodeIndex {
 }
 
 impl LocalNodeIndex {
-    /// # Safety
+    /// Create a new [`LocalNodeIndex`] from a `u32` node ID.
     ///
-    /// This function is not _memory_ unsafe, but users of this method should show an abundance of
-    /// caution so they do not cause hard-to-debug runtime errors. Local node indices **must** be
-    /// 0-indexed, contiguous, and distinct within each domain, otherwise bad things will happen.
-    pub unsafe fn make(id: u32) -> LocalNodeIndex {
+    /// Users of this method should show an abundance of caution so they do not cause hard-to-debug
+    /// runtime errors. Local node indices **must** be 0-indexed, contiguous, and distinct within
+    /// each domain, otherwise bad things will happen.
+    pub fn make(id: u32) -> LocalNodeIndex {
         LocalNodeIndex { id }
     }
 

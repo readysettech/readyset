@@ -492,7 +492,7 @@ mod tests {
     ) -> (Project, StateMap) {
         let global = NodeIndex::new(0);
         let mut index: IndexPair = global.into();
-        let local = unsafe { LocalNodeIndex::make(0) };
+        let local = LocalNodeIndex::make(0);
         index.set_local(local);
 
         let mut states = StateMap::default();

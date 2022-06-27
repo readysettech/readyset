@@ -903,7 +903,7 @@ fn plan_add_nodes(
                     );
                 }
                 let mut ip: IndexPair = ni.into();
-                ip.set_local(unsafe { LocalNodeIndex::make(nnodes as u32) });
+                ip.set_local(LocalNodeIndex::make(nnodes as u32));
                 #[allow(clippy::indexing_slicing)] // Ingredients must contain NodeIndex
                 dataflow_state.ingredients[ni].set_finalized_addr(ip);
                 dataflow_state

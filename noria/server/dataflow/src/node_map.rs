@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 /// use noria::internal::LocalNodeIndex;
 /// use noria_dataflow::NodeMap;
 ///
-/// let node_1 = unsafe { LocalNodeIndex::make(1u32) };
+/// let node_1 = LocalNodeIndex::make(1u32);
 ///
 /// let mut map = NodeMap::new();
 /// map.insert(node_1, "node 1".to_owned());
@@ -200,7 +200,7 @@ impl<T> NodeMap<T> {
 
     /// Construct an iterator over all keys in the map
     pub fn keys(&self) -> impl Iterator<Item = LocalNodeIndex> + '_ {
-        (0..self.len).map(|i| (unsafe { LocalNodeIndex::make(i as u32) }))
+        (0..self.len).map(|i| (LocalNodeIndex::make(i as u32)))
     }
 
     /// Construct an iterator over all values in the map
@@ -299,7 +299,7 @@ impl<T> Iterator for IntoIter<T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
-            .find_map(|(i, v)| v.map(|v| (unsafe { LocalNodeIndex::make(i as u32) }, v)))
+            .find_map(|(i, v)| v.map(|v| (LocalNodeIndex::make(i as u32), v)))
     }
 }
 
@@ -326,10 +326,8 @@ impl<'a, T: 'a> Iterator for Iter<'a, T> {
     type Item = (LocalNodeIndex, &'a T);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.find_map(|(i, v)| {
-            v.as_ref()
-                .map(|v| (unsafe { LocalNodeIndex::make(i as u32) }, v))
-        })
+        self.inner
+            .find_map(|(i, v)| v.as_ref().map(|v| (LocalNodeIndex::make(i as u32), v)))
     }
 }
 
@@ -355,10 +353,8 @@ impl<'a, T: 'a> Iterator for IterMut<'a, T> {
     type Item = (LocalNodeIndex, &'a mut T);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.find_map(|(i, v)| {
-            v.as_mut()
-                .map(|v| (unsafe { LocalNodeIndex::make(i as u32) }, v))
-        })
+        self.inner
+            .find_map(|(i, v)| v.as_mut().map(|v| (LocalNodeIndex::make(i as u32), v)))
     }
 }
 
