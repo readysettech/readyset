@@ -308,6 +308,19 @@ pub struct Options {
     /// this adapter.
     #[clap(long, env = "STANDALONE")]
     standalone: bool,
+
+    /// Enable experimental support for TopK in dataflow
+    #[clap(long, env = "EXPERIMENTAL_TOPK_SUPPORT")]
+    enable_experimental_topk_support: bool,
+
+    /// Enable experimental support for Paginate in dataflow
+    #[clap(long, env = "EXPERIMENTAL_PAGINATE_SUPPORT")]
+    enable_experimental_paginate_support: bool,
+
+    /// Enable experimental support for mixing equality and inequality comparisons on query
+    /// parameters
+    #[clap(long, env = "EXPERIMENTAL_MIXED_COMPARISONS_SUPPORT")]
+    enable_experimental_mixed_comparisons: bool,
 }
 
 impl<H> NoriaAdapter<H>
@@ -588,6 +601,10 @@ where
                 None,
             );
             builder.set_persistence(persistence_params);
+
+            builder.set_allow_topk(options.enable_experimental_topk_support);
+            builder.set_allow_paginate(options.enable_experimental_paginate_support);
+            builder.set_allow_mixed_comparisons(options.enable_experimental_mixed_comparisons);
 
             let server_handle = rt.block_on(async move {
                 let authority = Arc::new(authority.to_authority(&auth_address, &deployment).await);
