@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 
 use super::template::generate_base_template;
-use crate::deployment::{Deployment, DeploymentData, Engine, MigrationMode};
+use crate::deployment::{AdvancedSettings, Deployment, DeploymentData, Engine};
 
 /// `READYSET_STANDALONE_MODE` should be true when using the docker-compose to spin up a
 /// deployment with an adapter/server combined.
@@ -36,9 +36,8 @@ impl TryFrom<&Deployment> for Compose {
             &compose.mysql_db_name,
             &compose.mysql_db_root_pass,
             &compose.adapter_port,
-            &compose.migration_mode,
         ) {
-            (Some(db_name), Some(db_pass), Some(adapter_port), Some(migration_mode)) => {
+            (Some(db_name), Some(db_pass), Some(adapter_port)) => {
                 let mut default = generate_base_template(&value.db_type, READYSET_STANDALONE_MODE);
                 default.fill_deployment(name, READYSET_STANDALONE_MODE);
                 default.fill_credentials(
@@ -49,11 +48,12 @@ impl TryFrom<&Deployment> for Compose {
                     &compose.db_connection_string,
                 );
                 default.fill_adapter_port(&value.db_type, *adapter_port);
-                default.fill_migration_mode(migration_mode);
+                default.fill_advanced_settings(&value.advanced_settings);
+
                 Ok(default)
             }
             _ => {
-                bail!("Tried to convert to a Compose type, but missing one of mysql_db_name, mysql_db_root_pass, adapter_port, or migration_mode");
+                bail!("Tried to convert to a Compose type, but missing one of mysql_db_name, mysql_db_root_pass, or adapter_port");
             }
         }
     }
@@ -130,16 +130,10 @@ impl Compose {
         }
     }
 
-    /// Sets the desired migration mode for the ReadySet adapter.
-    pub fn fill_migration_mode(&mut self, mode: &MigrationMode) {
-        if let Some(ref mut services) = self.services {
-            match mode {
-                MigrationMode::Async => {
-                    services.set_service_env_var("readyset-adapter", "ASYNC_MIGRATIONS", "1");
-                }
-                MigrationMode::Explicit => {
-                    services.set_service_env_var("readyset-adapter", "EXPLICIT_MIGRATIONS", "1");
-                }
+    fn fill_advanced_settings(&mut self, settings: &AdvancedSettings) {
+        if let Some(services) = &mut self.services {
+            for (env_var, value) in settings.as_adapter_environment_variables() {
+                services.set_service_env_var("readyset-adapter", env_var, value);
             }
         }
     }

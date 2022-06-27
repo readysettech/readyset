@@ -13,13 +13,13 @@ use tokio::process::Command;
 use super::docker_compose::Compose;
 use super::template::{mysql_adapter_img, postgres_adapter_img, server_img, DOCKER_TAG};
 use super::utils::{check_command_installed, run_docker_compose};
-use crate::console::spinner;
+use crate::console::{select, spinner};
 use crate::constants::{
     READYSET_MYSQL_ADAPTER_FILE_PREFIX, READYSET_PSQL_ADAPTER_FILE_PREFIX,
     READYSET_SERVER_FILE_PREFIX, READYSET_URL_PREFIX,
 };
 use crate::deployment::{
-    Deployment, DeploymentData, DeploymentStatus, DockerComposeDeployment, Engine, MigrationMode,
+    Deployment, DeploymentData, DeploymentStatus, DockerComposeDeployment, Engine,
 };
 use crate::Options;
 
@@ -55,6 +55,9 @@ impl<'a> ComposeInstaller<'a> {
 
         self.download_and_load_docker_images(self.deployment.db_type)
             .await?;
+
+        self.prompt_for_advanced_settings()?;
+        self.save().await?;
 
         let compose = Compose::try_from(&*self.deployment)?;
 
@@ -375,10 +378,32 @@ impl<'a> ComposeInstaller<'a> {
         self.compose_deployment()?
             .set_db_name(deployment_name)?
             .set_db_password()?
-            .set_migration_mode(MigrationMode::Explicit)?
             .set_adapter_port(db_type)?
             .set_db_connection_string(db_type)?;
         Ok(())
+    }
+
+    fn prompt_for_advanced_settings(&mut self) -> Result<()> {
+        loop {
+            println!("\n{}\n", style("Current installation options:").bold());
+            self.deployment
+                .advanced_settings
+                .print(self.deployment.db_type);
+
+            match select()
+                .items(&["Proceed with installation", "Customize installation"])
+                .default(0)
+                .interact()?
+            {
+                0 => return Ok(()),
+                1 => {
+                    self.deployment
+                        .advanced_settings
+                        .prompt_to_change(self.deployment.db_type)?;
+                }
+                _ => unreachable!(),
+            }
+        }
     }
 
     /// Returns a DockerComposeDeployment if the inner deployment type matches, otherwise returns an

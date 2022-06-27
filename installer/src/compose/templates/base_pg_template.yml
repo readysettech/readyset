@@ -39,7 +39,6 @@ services:
       NORIA_DEPLOYMENT: noria
       REPLICATION_URL: mysql://root:noria@mysql/noria
       PROMETHEUS_METRICS: 1
-      EXPERIMENTAL_TOPK_SUPPORT: 1
       FORBID_FULL_MATERIALIZATION: 1
       DB_DIR: /state
     links:
@@ -90,7 +89,7 @@ services:
       interval: 10s
       timeout: 2s
       retries: 5
-      start_period: 5s 
+      start_period: 5s
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

@@ -170,6 +170,115 @@ pub(crate) struct DatabaseCredentials {
     pub(crate) password: DatabasePasswordParameter,
 }
 
+/// "Advanced" configuration for a deployment, folded away behind an extra layer of prompts
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub(crate) struct AdvancedSettings {
+    verify_upstream_ssl_certs: bool,
+    explicit_migrations: bool,
+    experimental_queries: bool,
+}
+
+impl Default for AdvancedSettings {
+    fn default() -> Self {
+        Self {
+            verify_upstream_ssl_certs: true,
+            explicit_migrations: true,
+            experimental_queries: false,
+        }
+    }
+}
+
+impl AdvancedSettings {
+    pub(crate) fn print(&self, engine: Engine) {
+        let print_kv = |k, v| println!("    {}: {}", k, style(v).blue());
+        let enabled_disabled = |b| if b { "enabled" } else { "disabled" };
+
+        if engine == Engine::PostgreSQL {
+            print_kv(
+                "Verify upstream database SSL certificates",
+                enabled_disabled(self.verify_upstream_ssl_certs),
+            );
+        }
+
+        print_kv(
+            "Caching",
+            if self.explicit_migrations {
+                "explicit"
+            } else {
+                "implicit"
+            },
+        );
+
+        print_kv(
+            "Experimental query support",
+            enabled_disabled(self.experimental_queries),
+        );
+    }
+
+    pub(crate) fn as_adapter_environment_variables(&self) -> Vec<(&'static str, &'static str)> {
+        let mut vars = vec![];
+
+        if !self.verify_upstream_ssl_certs {
+            vars.push(("DISABLE_UPSTREAM_SSL_VERIFICATION", "1"));
+        }
+
+        if self.explicit_migrations {
+            vars.push(("EXPLICIT_MIGRATIONS", "1"));
+        } else {
+            vars.push(("ASYNC_MIGRATIONS", "1"));
+        }
+
+        if self.experimental_queries {
+            vars.extend([
+                ("EXPERIMENTAL_TOPK_SUPPORT", "1"),
+                ("EXPERIMENTAL_PAGINATE_SUPPORT", "1"),
+                ("EXPERIMENTAL_MIXED_COMPARISONS_SUPPORT", "1"),
+            ]);
+        }
+
+        vars
+    }
+
+    pub(crate) fn prompt_to_change(&mut self, engine: Engine) -> Result<()> {
+        if engine == Engine::PostgreSQL {
+            match select()
+                .with_prompt("Verify upstream database SSL certificates")
+                .items(&["enabled", "disabled"])
+                .default(if self.verify_upstream_ssl_certs { 0 } else { 1 })
+                .interact()?
+            {
+                0 => self.verify_upstream_ssl_certs = true,
+                1 => self.verify_upstream_ssl_certs = false,
+                _ => unreachable!(),
+            };
+        }
+
+        match select()
+            .with_prompt("Caching")
+            .items(&["explicit", "implicit"])
+            .default(if self.explicit_migrations { 0 } else { 1 })
+            .interact()?
+        {
+            0 => self.explicit_migrations = true,
+            1 => self.explicit_migrations = false,
+            _ => unreachable!(),
+        };
+
+        match select()
+            .with_prompt("Experimental query support")
+            .items(&["enabled", "disabled"])
+            .default(if self.experimental_queries { 0 } else { 1 })
+            .interact()?
+        {
+            0 => self.experimental_queries = true,
+            1 => self.experimental_queries = false,
+            _ => unreachable!(),
+        };
+
+        Ok(())
+    }
+}
+
 /// The status of a deployment
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum DeploymentStatus {
@@ -192,6 +301,7 @@ impl Default for DeploymentStatus {
 pub struct Deployment {
     pub(crate) name: String,
     pub(crate) db_type: Engine,
+    pub(crate) advanced_settings: AdvancedSettings,
     pub(crate) inner: DeploymentData,
     pub(crate) status: DeploymentStatus,
 }
@@ -208,8 +318,6 @@ pub enum DeploymentData {
 pub struct DockerComposeDeployment {
     pub(crate) name: Option<String>,
 
-    pub(crate) migration_mode: Option<MigrationMode>,
-
     pub(crate) db_connection_string: Option<String>,
 
     pub(crate) mysql_db_name: Option<String>,
@@ -217,13 +325,6 @@ pub struct DockerComposeDeployment {
     pub(crate) mysql_db_root_pass: Option<String>,
 
     pub(crate) adapter_port: Option<u16>,
-}
-
-/// Whether the user wants to use the async migration feature, or the explicit migration feature.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub enum MigrationMode {
-    Async,
-    Explicit,
 }
 
 /// A (potentially partially-completed) deployment of a readyset CFN cluster.
@@ -287,6 +388,7 @@ impl CloudformationDeployment {
         Deployment {
             name: name.into(),
             db_type,
+            advanced_settings: Default::default(),
             inner: DeploymentData::Cloudformation(Box::new(CloudformationDeployment {
                 ..Default::default()
             })),
@@ -320,6 +422,7 @@ impl DockerComposeDeployment {
         Deployment {
             name: name.into(),
             db_type,
+            advanced_settings: Default::default(),
             inner: DeploymentData::Compose(DockerComposeDeployment {
                 ..Default::default()
             }),
@@ -390,17 +493,6 @@ impl DockerComposeDeployment {
                 .with_confirmation("Confirm password", "Passwords mismatching")
                 .interact()?,
         );
-        Ok(self)
-    }
-
-    pub fn set_migration_mode(
-        &mut self,
-        mode: MigrationMode,
-    ) -> Result<&mut DockerComposeDeployment> {
-        if self.migration_mode.is_some() {
-            return Ok(self);
-        }
-        self.migration_mode = Some(mode);
         Ok(self)
     }
 

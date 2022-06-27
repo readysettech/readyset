@@ -1,3 +1,7 @@
+//! NOTE: This test assumes that the installer process it spawns is running in a fresh state - eg
+//! that no existing deployment exists and port 3307 is available. If it's failing for you during
+//! local development, check to see that all of those conditions are satisfied
+
 use std::iter;
 use std::path::Path;
 use std::process::Command;
@@ -114,6 +118,10 @@ fn installer_smoke_test() -> Result<(), Error> {
     p.send_line("")?;
 
     p.exp_regex("Downloading Docker images")?;
+
+    p.exp_regex("Proceed with installation")?;
+    p.send_line("")?;
+
     p.exp_regex("Docker Compose file was saved to")?;
     p.exp_regex("Deploying with Docker Compose now")?;
     p.exp_regex("ReadySet should be available in a few seconds.")?;
