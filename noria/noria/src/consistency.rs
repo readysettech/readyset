@@ -32,7 +32,7 @@ impl Arbitrary for Timestamp {
                 for (i, t) in ts.into_iter().enumerate() {
                     timestamp
                         .map
-                        .insert(unsafe { LocalNodeIndex::make(i as u32) }, t as u64);
+                        .insert(LocalNodeIndex::make(i as u32), t as u64);
                 }
                 timestamp
             })
@@ -129,10 +129,8 @@ mod tests {
 
     #[test]
     fn timestamp_equal_satisfies() {
-        // SAFETY: The local node indices are safe as they are 0-indexed
-        // and contiguous.
-        let b1 = unsafe { LocalNodeIndex::make(0) };
-        let b2 = unsafe { LocalNodeIndex::make(1) };
+        let b1 = LocalNodeIndex::make(0);
+        let b2 = LocalNodeIndex::make(1);
         let t1 = create_timestamp(vec![(b1, 2), (b2, 2)]);
 
         let t2 = create_timestamp(vec![(b1, 2), (b2, 2)]);
@@ -141,11 +139,9 @@ mod tests {
 
     #[test]
     fn timestamp_table_greater_satisfies() {
-        // SAFETY: The local node indices are safe as they are 0-indexed
-        // and contiguous.
-        let b1 = unsafe { LocalNodeIndex::make(0) };
-        let b2 = unsafe { LocalNodeIndex::make(1) };
-        let b3 = unsafe { LocalNodeIndex::make(2) };
+        let b1 = LocalNodeIndex::make(0);
+        let b2 = LocalNodeIndex::make(1);
+        let b3 = LocalNodeIndex::make(2);
         let t1 = create_timestamp(vec![(b1, 2), (b2, 2)]);
 
         let t2 = create_timestamp(vec![(b1, 3), (b2, 2), (b3, 1)]);
@@ -154,11 +150,9 @@ mod tests {
 
     #[test]
     fn timestamp_table_less_not_satisfies() {
-        // SAFETY: The local node indices are safe as they are 0-indexed
-        // and contiguous.
-        let b1 = unsafe { LocalNodeIndex::make(0) };
-        let b2 = unsafe { LocalNodeIndex::make(1) };
-        let b3 = unsafe { LocalNodeIndex::make(2) };
+        let b1 = LocalNodeIndex::make(0);
+        let b2 = LocalNodeIndex::make(1);
+        let b3 = LocalNodeIndex::make(2);
         let t1 = create_timestamp(vec![(b1, 2), (b2, 2)]);
 
         let t2 = create_timestamp(vec![(b1, 1), (b2, 2), (b3, 1)]);
@@ -167,10 +161,8 @@ mod tests {
 
     #[test]
     fn timestamp_table_missing_not_satisfies() {
-        // SAFETY: The local node indices are safe as they are 0-indexed
-        // and contiguous.
-        let b1 = unsafe { LocalNodeIndex::make(0) };
-        let b2 = unsafe { LocalNodeIndex::make(1) };
+        let b1 = LocalNodeIndex::make(0);
+        let b2 = LocalNodeIndex::make(1);
         let t1 = create_timestamp(vec![(b1, 2), (b2, 2)]);
 
         let t2 = create_timestamp(vec![(b2, 2)]);
@@ -202,10 +194,8 @@ mod tests {
 
     #[test]
     fn min_multiple_vectors() {
-        // SAFETY: The local node indices are safe as they are 0-indexed
-        // and contiguous.
-        let b1 = unsafe { LocalNodeIndex::make(0) };
-        let b2 = unsafe { LocalNodeIndex::make(1) };
+        let b1 = LocalNodeIndex::make(0);
+        let b2 = LocalNodeIndex::make(1);
 
         let t1 = create_timestamp(vec![(b1, 1), (b2, 2)]);
         let t2 = create_timestamp(vec![(b1, 2), (b2, 1)]);
@@ -240,10 +230,8 @@ mod tests {
 
     #[test]
     fn join_calculates_max() {
-        // SAFETY: The local node indices are safe as they are 0-indexed
-        // and contiguous.
-        let b1 = unsafe { LocalNodeIndex::make(0) };
-        let b2 = unsafe { LocalNodeIndex::make(1) };
+        let b1 = LocalNodeIndex::make(0);
+        let b2 = LocalNodeIndex::make(1);
 
         let t1 = create_timestamp(vec![(b1, 2), (b2, 1)]);
         let t2 = create_timestamp(vec![(b1, 1), (b2, 2)]);

@@ -261,7 +261,7 @@ pub mod test {
                 .add_node(Node::new(name, make_columns(fields), i));
             self.graph.add_edge(self.source, global, ());
             let mut remap = HashMap::new();
-            let local = unsafe { LocalNodeIndex::make(self.remap.len() as u32) };
+            let local = LocalNodeIndex::make(self.remap.len() as u32);
             let mut ip: IndexPair = global.into();
             ip.set_local(local);
             self.graph
@@ -293,7 +293,7 @@ pub mod test {
             let global = self
                 .graph
                 .add_node(Node::new(name, make_columns(fields), i));
-            let local = unsafe { LocalNodeIndex::make(self.remap.len() as u32) };
+            let local = LocalNodeIndex::make(self.remap.len() as u32);
             if materialized {
                 self.states
                     .insert(local, MaterializedNodeState::Memory(MemoryState::default()));

@@ -153,7 +153,7 @@ impl Egress {
             // src is usually ignored and overwritten by ingress
             // *except* if the ingress is marked as a shard merger
             // in which case it wants to know about the shard
-            m.link_mut().src = unsafe { LocalNodeIndex::make(shard as u32) };
+            m.link_mut().src = LocalNodeIndex::make(shard as u32);
             m.link_mut().dst = tx.local;
 
             // Take the packet through the filter. The filter will make any necessary modifications

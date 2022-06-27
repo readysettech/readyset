@@ -594,7 +594,7 @@ mod tests {
                 b,
             ));
             graph.add_edge(source, global, ());
-            let local = unsafe { LocalNodeIndex::make(0_u32) };
+            let local = LocalNodeIndex::make(0_u32);
             let mut ip: IndexPair = global.into();
             ip.set_local(local);
             graph
@@ -706,7 +706,7 @@ mod tests {
         fn delete_row_unkeyed() {
             let mut b = Base::new();
 
-            let ni = unsafe { LocalNodeIndex::make(0u32) };
+            let ni = LocalNodeIndex::make(0u32);
 
             let state = MaterializedNodeState::Persistent(PersistentState::new(
                 String::from("delete_row_not_in_batch"),
@@ -746,7 +746,7 @@ mod tests {
         fn delete_row_not_in_batch_keyed() {
             let mut b = Base::new().with_primary_key([0]);
 
-            let ni = unsafe { LocalNodeIndex::make(0u32) };
+            let ni = LocalNodeIndex::make(0u32);
 
             let mut state = MaterializedNodeState::Persistent(PersistentState::new(
                 String::from("delete_row_not_in_batch_keyed"),
@@ -791,7 +791,7 @@ mod tests {
         fn delete_after_key_update() {
             let mut b = Base::new().with_primary_key([0]);
 
-            let ni = unsafe { LocalNodeIndex::make(0u32) };
+            let ni = LocalNodeIndex::make(0u32);
 
             let mut state = MaterializedNodeState::Persistent(PersistentState::new(
                 String::from("delete_after_key_update"),

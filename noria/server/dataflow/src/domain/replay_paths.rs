@@ -314,10 +314,10 @@ mod tests {
         paths
             .insert(ReplayPathSpec {
                 tag: Tag::new(1),
-                source: Some(unsafe { LocalNodeIndex::make(0) }),
+                source: Some(LocalNodeIndex::make(0)),
                 source_index: Some(Index::hash_map(vec![0])),
                 path: vec1![ReplayPathSegment {
-                    node: unsafe { LocalNodeIndex::make(1) },
+                    node: LocalNodeIndex::make(1),
                     force_tag_to: None,
                     partial_index: Some(Index::hash_map(vec![0])),
                     is_target: true
@@ -329,8 +329,8 @@ mod tests {
             .unwrap();
 
         let resolved_tags = paths.tags_for_index(
-            Destination(unsafe { LocalNodeIndex::make(1) }),
-            Target(unsafe { LocalNodeIndex::make(1) }),
+            Destination(LocalNodeIndex::make(1)),
+            Target(LocalNodeIndex::make(1)),
             &Index::hash_map(vec![0]),
         );
 
@@ -343,10 +343,10 @@ mod tests {
         paths
             .insert(ReplayPathSpec {
                 tag: Tag::new(1),
-                source: Some(unsafe { LocalNodeIndex::make(0) }),
+                source: Some(LocalNodeIndex::make(0)),
                 source_index: Some(Index::hash_map(vec![0])),
                 path: vec1![ReplayPathSegment {
-                    node: unsafe { LocalNodeIndex::make(1) },
+                    node: LocalNodeIndex::make(1),
                     force_tag_to: None,
                     partial_index: Some(Index::hash_map(vec![1, 2])),
                     is_target: false
@@ -358,8 +358,8 @@ mod tests {
             .unwrap();
 
         let resolved_tags = paths.tags_for_index(
-            Destination(unsafe { LocalNodeIndex::make(1) }),
-            Target(unsafe { LocalNodeIndex::make(0) }),
+            Destination(LocalNodeIndex::make(1)),
+            Target(LocalNodeIndex::make(0)),
             &Index::hash_map(vec![0]),
         );
 

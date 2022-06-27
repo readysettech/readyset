@@ -807,8 +807,8 @@ mod test {
 
     fn create_link() -> Link {
         Link {
-            src: unsafe { LocalNodeIndex::make(1) },
-            dst: unsafe { LocalNodeIndex::make(2) },
+            src: LocalNodeIndex::make(1),
+            dst: LocalNodeIndex::make(2),
         }
     }
 }
