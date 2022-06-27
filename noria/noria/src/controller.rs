@@ -32,7 +32,7 @@ use crate::status::ReadySetStatus;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::{
-    ActivationResult, ReaderReplicationResult, ReaderReplicationSpec, ReplicationOffset,
+    ActivationResult, KeyCount, ReaderReplicationResult, ReaderReplicationSpec, ReplicationOffset,
     ViewFilter, ViewRequest,
 };
 
@@ -689,6 +689,13 @@ impl ControllerHandle {
         &mut self,
     ) -> impl Future<Output = ReadySetResult<Vec<String>>> + '_ {
         self.rpc("snapshotting_tables", (), self.request_timeout)
+    }
+
+    /// Return a map of node indices to key counts.
+    pub fn node_key_counts(
+        &mut self,
+    ) -> impl Future<Output = ReadySetResult<HashMap<NodeIndex, KeyCount>>> + '_ {
+        self.rpc("node_key_counts", (), self.request_timeout)
     }
 
     /// Return whether the leader is ready or not.
