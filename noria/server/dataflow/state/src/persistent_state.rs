@@ -74,7 +74,7 @@ use bincode::Options;
 use common::{IndexType, KeyType, RangeKey, Record, Records, SizeOf, Tag};
 use noria::internal::Index;
 use noria::replication::ReplicationOffset;
-use noria::KeyComparison;
+use noria::{KeyComparison, KeyCount};
 use noria_data::DataType;
 use noria_errors::{ReadySetError, ReadySetResult};
 use rocksdb::{self, PlainTableFactoryOptions, SliceTransform, WriteBatch};
@@ -85,7 +85,7 @@ use test_strategy::Arbitrary;
 use thiserror::Error;
 use tracing::{error, info, warn};
 
-use crate::{KeyCount, LookupResult, RangeLookupResult, RecordResult, State};
+use crate::{LookupResult, RangeLookupResult, RecordResult, State};
 
 // Incremented on each PersistentState initialization so that IndexSeq
 // can be used to create unique identifiers for rows.
