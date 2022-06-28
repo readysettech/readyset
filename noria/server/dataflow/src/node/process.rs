@@ -11,9 +11,9 @@ use tracing::{debug_span, trace};
 
 use crate::node::special::base::{BaseWrite, SetSnapshotMode};
 use crate::node::NodeType;
-use crate::payload;
 use crate::prelude::*;
 use crate::processing::{MissLookupKey, MissReplayKey};
+use crate::{backlog, payload};
 
 /// The results of running a forward pass on a node
 #[derive(Debug, PartialEq, Eq, Default)]
@@ -104,6 +104,7 @@ impl NodeProcessingResult {
 /// Information about the domain required by [`Node::process`].
 pub(crate) struct ProcessEnv<'domain> {
     pub(crate) state: &'domain mut StateMap,
+    pub(crate) reader_write_handles: &'domain mut NodeMap<backlog::WriteHandle>,
     pub(crate) nodes: &'domain DomainNodes,
     pub(crate) executor: &'domain mut dyn Executor,
     pub(crate) shard: Option<usize>,
@@ -201,7 +202,9 @@ impl Node {
                 }
             }
             NodeType::Reader(ref mut r) => {
-                r.process(m, swap_reader);
+                if let Some(state) = env.reader_write_handles.get_mut(addr) {
+                    r.process(m, swap_reader, state);
+                }
             }
             NodeType::Egress(None) => internal!("tried to process through taken egress"),
             NodeType::Egress(Some(ref mut e)) => {
@@ -436,6 +439,7 @@ impl Node {
         tag: Tag,
         on_shard: Option<usize>,
         on_replica: usize,
+        reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
         ex: &mut dyn Executor,
     ) -> ReadySetResult<()> {
         let addr = self.local_addr();
@@ -471,8 +475,13 @@ impl Node {
             NodeType::Internal(ref mut i) => {
                 i.on_eviction(from, tag, keys);
             }
-            NodeType::Reader(ref mut r) => {
-                r.on_eviction(keys);
+            NodeType::Reader(_) => {
+                if let Some(state) = reader_write_handles.get_mut(addr) {
+                    for k in keys {
+                        state.mark_hole(k);
+                    }
+                    state.swap();
+                }
             }
             NodeType::Ingress => {}
             NodeType::Dropped => {}
@@ -548,10 +557,12 @@ impl Node {
         m: Packet,
         on_shard: Option<usize>,
         on_replica: usize,
+        reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
         executor: &mut dyn Executor,
     ) -> ReadySetResult<Option<Box<Packet>>> {
         // TODO: not error handling compliant!
         let src_node = m.src();
+        let addr = self.local_addr();
         match m {
             Packet::Timestamp {
                 link,
@@ -600,8 +611,13 @@ impl Node {
                     Timestamp::min(&parent_timestamps[..])
                 };
 
-                if let NodeType::Reader(ref mut r) = self.inner {
-                    r.process_timestamp(timestamp);
+                if self.is_reader() {
+                    if let Some(state) = reader_write_handles.get_mut(addr) {
+                        state.set_timestamp(timestamp);
+
+                        // Ensure the write is published.
+                        state.swap();
+                    }
                     return Ok(None);
                 }
 
