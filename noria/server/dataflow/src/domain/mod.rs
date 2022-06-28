@@ -37,7 +37,7 @@ use crate::node::{NodeProcessingResult, ProcessEnv};
 use crate::payload::{PrettyReplayPath, ReplayPieceContext, SourceSelection};
 use crate::prelude::*;
 use crate::processing::ColumnMiss;
-use crate::{DomainRequest, Readers};
+use crate::{backlog, DomainRequest, Readers};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Config {
@@ -402,6 +402,7 @@ impl DomainBuilder {
             persistence_parameters: self.persistence_parameters,
             nodes: self.nodes,
             state: StateMap::default(),
+            reader_write_handles: Default::default(),
             not_ready,
             mode: DomainMode::Forwarding,
             waiting: Default::default(),
@@ -463,10 +464,15 @@ pub struct Domain {
     /// * `nodes` cannot be empty
     nodes: DomainNodes,
 
-    /// State for all materialized nodes managed by this domain
+    /// State for all materialized non-reader nodes managed by this domain
     ///
     /// Invariant: All keys of `self.state` must also be keys in `self.nodes`
     state: StateMap,
+
+    /// State for all reader nodes managed by this domain
+    ///
+    /// Invariant: All keys of `self.reader_write_handles` must also be keys in `self.nodes`
+    reader_write_handles: NodeMap<backlog::WriteHandle>,
 
     not_ready: HashSet<LocalNodeIndex>,
 
@@ -1014,6 +1020,7 @@ impl Domain {
                 true,
                 ProcessEnv {
                     state: &mut self.state,
+                    reader_write_handles: &mut self.reader_write_handles,
                     nodes: &self.nodes,
                     executor,
                     shard: self.shard,
@@ -1176,7 +1183,13 @@ impl Domain {
                 .get(me)
                 .ok_or_else(|| ReadySetError::NoSuchNode(me.id()))?
                 .borrow_mut();
-            n.process_timestamp(message, self.shard, self.replica, executor)?
+            n.process_timestamp(
+                message,
+                self.shard,
+                self.replica,
+                &mut self.reader_write_handles,
+                executor,
+            )?
         };
 
         let message = if let Some(m) = message {
@@ -1245,6 +1258,7 @@ impl Domain {
                     if let Some(state) = self.state.remove(node) {
                         state.tear_down()?;
                     };
+                    self.reader_write_handles.remove(node);
                     self.metrics.set_node_state_size(node, 0);
                     trace!(local = node.id(), "node removed");
                 }
@@ -1436,8 +1450,6 @@ impl Domain {
                         trigger_domain,
                         num_shards,
                     } => {
-                        use crate::backlog;
-
                         if !self
                             .nodes
                             .get(node)
@@ -1549,11 +1561,9 @@ impl Domain {
                             warn!(?gid, %name, %shard, "Overwrote existing reader at worker");
                         }
 
-                        // make sure Reader is actually prepared to receive state
-                        r.set_write_handle(w_part)
+                        self.reader_write_handles.insert(node, w_part);
                     }
                     InitialState::Global { gid, cols, index } => {
-                        use crate::backlog;
                         let (mut r_part, w_part) = backlog::new(cols, index);
 
                         if !self
@@ -1602,7 +1612,7 @@ impl Domain {
                         }
 
                         // make sure Reader is actually prepared to receive state
-                        r.set_write_handle(w_part)
+                        self.reader_write_handles.insert(node, w_part);
                     }
                 }
                 Ok(None)
@@ -1896,12 +1906,10 @@ impl Domain {
                 }
 
                 // swap replayed reader nodes to expose new state
-                if let Some(r) = node_ref.borrow_mut().as_mut_reader() {
-                    if let Some(ref mut state) = r.writer_mut() {
-                        trace!(local = node.id(), "swapping state");
-                        state.swap();
-                        trace!(local = node.id(), "state swapped");
-                    }
+                if let Some(state) = self.reader_write_handles.get_mut(node) {
+                    trace!(local = %node, "swapping state");
+                    state.swap();
+                    trace!(local = %node, "state swapped");
                 }
 
                 Ok(None)
@@ -1928,9 +1936,10 @@ impl Domain {
 
                         let time = self.process_times.num_nanoseconds(local_index);
                         let ptime = self.process_ptimes.num_nanoseconds(local_index);
-                        let mem_size = n
-                            .as_reader()
-                            .map(|r| r.state_size().unwrap_or(0))
+                        let mem_size = self
+                            .reader_write_handles
+                            .get(local_index)
+                            .map(|wh| wh.deep_size_of())
                             .unwrap_or_else(|| {
                                 self.state
                                     .get(local_index)
@@ -1938,10 +1947,11 @@ impl Domain {
                                     .unwrap_or(0)
                             });
 
-                        let mat_state = n
-                            .as_reader()
-                            .map(|r| {
-                                if r.is_partial() {
+                        let mat_state = self
+                            .reader_write_handles
+                            .get(local_index)
+                            .map(|wh| {
+                                if wh.is_partial() {
                                     MaterializationStatus::Partial {
                                         beyond_materialization_frontier: n.purge,
                                     }
@@ -2112,7 +2122,7 @@ impl Domain {
                 // the reader could have raced with us filling in the key after some
                 // *other* reader requested it, so let's double check that it indeed still
                 // misses!
-                let w = r.writer_mut().ok_or_else(|| {
+                let w = self.reader_write_handles.get_mut(node).ok_or_else(|| {
                     internal_err("reader replay requested for non-materialized reader")
                 })?;
                 // ensure that all writes have been applied
@@ -2208,14 +2218,12 @@ impl Domain {
                 let tp = self.timed_purges.pop_front().unwrap();
                 #[allow(clippy::indexing_slicing)]
                 // nodes in tp.view must reference nodes in self
-                let mut node = self.nodes[tp.view].borrow_mut();
+                let node = self.nodes[tp.view].borrow_mut();
                 trace!(
                     node = node.global_addr().index(),
                     "eagerly purging state from reader"
                 );
-                #[allow(clippy::unwrap_used)] // nodes in tp.view must reference readers
-                let r = node.as_mut_reader().unwrap();
-                if let Some(wh) = r.writer_mut() {
+                if let Some(wh) = self.reader_write_handles.get_mut(tp.view) {
                     for key in tp.keys {
                         wh.mark_hole(&key);
                     }
@@ -2226,13 +2234,8 @@ impl Domain {
             }
         }
 
-        for n in swap {
-            #[allow(clippy::indexing_slicing)]
-            // nodes in tp.view must reference nodes in self
-            let mut n = self.nodes[n].borrow_mut();
-            #[allow(clippy::unwrap_used)] // nodes in tp.view must reference readers
-            let r = n.as_mut_reader().unwrap();
-            if let Some(wh) = r.writer_mut() {
+        for node in swap {
+            if let Some(wh) = self.reader_write_handles.get_mut(node) {
                 wh.swap();
             }
         }
@@ -2709,13 +2712,12 @@ impl Domain {
                                         state.mark_filled(key.clone(), tag);
                                     }
                                 } else {
-                                    let r = n.as_mut_reader().ok_or_else(|| {
-                                        internal_err("Trying to fill hole in non-materialized node")
-                                    })?;
                                     // we must be filling a hole in a Reader. we need to ensure
                                     // that the hole for the key we're replaying ends up being
                                     // filled, even if that hole is empty!
-                                    if let Some(wh) = r.writer_mut() {
+                                    if let Some(wh) =
+                                        self.reader_write_handles.get_mut(segment.node)
+                                    {
                                         for key in backfill_keys.iter() {
                                             trace!(?key, local = %segment.node, "Marking filled in reader");
                                             wh.mark_filled(key.clone())?;
@@ -2790,6 +2792,7 @@ impl Domain {
                             false,
                             ProcessEnv {
                                 state: &mut self.state,
+                                reader_write_handles: &mut self.reader_write_handles,
                                 nodes: &self.nodes,
                                 executor: ex,
                                 shard: self.shard,
@@ -2819,16 +2822,16 @@ impl Domain {
                                     for miss in &missed_on {
                                         state.mark_hole(miss, tag);
                                     }
-                                } else if let Some(r) = n.as_mut_reader() {
-                                    if let Some(wh) = r.writer_mut() {
-                                        for miss in &missed_on {
-                                            wh.mark_hole(miss);
-                                        }
+                                } else if let Some(wh) =
+                                    self.reader_write_handles.get_mut(segment.node)
+                                {
+                                    for miss in &missed_on {
+                                        wh.mark_hole(miss);
                                     }
                                 }
-                            } else if let Some(r) = n.as_mut_reader() {
+                            } else if n.is_reader() {
                                 // we filled a hole! swap the reader.
-                                if let Some(wh) = r.writer_mut() {
+                                if let Some(wh) = self.reader_write_handles.get_mut(segment.node) {
                                     wh.swap();
                                 }
 
@@ -2852,8 +2855,8 @@ impl Domain {
                                 for key in &process_result.captured {
                                     state.mark_hole(key, tag);
                                 }
-                            } else if let Some(r) = n.as_mut_reader() {
-                                if let Some(wh) = r.writer_mut() {
+                            } else if n.is_reader() {
+                                if let Some(wh) = self.reader_write_handles.get_mut(segment.node) {
                                     for key in &process_result.captured {
                                         wh.mark_hole(key);
                                     }
@@ -3535,6 +3538,7 @@ impl Domain {
             shard: Option<usize>,
             replica: usize,
             state: &mut StateMap,
+            reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
             nodes: &DomainNodes,
         ) -> Result<(), ReadySetError> {
             // TODO: this is a linear walk of replay paths -- we should make that not linear
@@ -3553,7 +3557,16 @@ impl Domain {
                         }
                     };
 
-                    walk_path(&path.path[..], keys, *tag, shard, replica, nodes, ex)?;
+                    walk_path(
+                        &path.path[..],
+                        keys,
+                        *tag,
+                        shard,
+                        replica,
+                        nodes,
+                        reader_write_handles,
+                        ex,
+                    )?;
 
                     if let TriggerEndpoint::Local(_) = path.trigger {
                         #[allow(clippy::indexing_slicing)] // tag came from replay_paths
@@ -3589,6 +3602,7 @@ impl Domain {
                             shard,
                             replica,
                             state,
+                            reader_write_handles,
                             nodes,
                         )?;
                     }
@@ -3597,6 +3611,7 @@ impl Domain {
             Ok(())
         }
 
+        #[allow(clippy::too_many_arguments)]
         fn walk_path(
             path: &[ReplayPathSegment],
             keys: &[KeyComparison],
@@ -3604,6 +3619,7 @@ impl Domain {
             shard: Option<usize>,
             replica: usize,
             nodes: &DomainNodes,
+            reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
             executor: &mut dyn Executor,
         ) -> ReadySetResult<()> {
             #[allow(clippy::indexing_slicing)] // replay paths can't be empty
@@ -3619,6 +3635,7 @@ impl Domain {
                     tag,
                     shard,
                     replica,
+                    reader_write_handles,
                     executor,
                 )?;
                 from = segment.node;
@@ -3645,9 +3662,9 @@ impl Domain {
                             let n = &*nd.borrow();
                             let local_index = n.local_addr();
 
-                            if let Some(r) = n.as_reader() {
-                                if r.is_partial() {
-                                    r.state_size()
+                            if let Some(wh) = self.reader_write_handles.get(local_index) {
+                                if wh.is_partial() {
+                                    Some(wh.deep_size_of())
                                 } else {
                                     None
                                 }
@@ -3706,12 +3723,13 @@ impl Domain {
                 for (node, num_bytes) in nodes {
                     let mut freed = 0u64;
                     #[allow(clippy::indexing_slicing)] // we got the node from self.nodes
-                    let mut n = self.nodes[node].borrow_mut();
+                    let n = self.nodes[node].borrow_mut();
 
                     if n.is_dropped() {
                         continue; // Node was dropped. Skip.
-                    } else if let Some(r) = n.as_mut_reader() {
-                        freed += r.evict_bytes(num_bytes as usize);
+                    } else if let Some(state) = self.reader_write_handles.get_mut(node) {
+                        freed += state.evict_bytes(num_bytes as usize);
+                        state.swap();
                     } else if let Some(evicted) = self.state[node].evict_bytes(num_bytes as usize) {
                         let keys = evicted
                             .keys_evicted
@@ -3736,6 +3754,7 @@ impl Domain {
                                 self.shard,
                                 self.replica,
                                 &mut self.state,
+                                &mut self.reader_write_handles,
                                 &self.nodes,
                             )?;
                         }
@@ -3776,6 +3795,7 @@ impl Domain {
                     self.shard,
                     self.replica,
                     &self.nodes,
+                    &mut self.reader_write_handles,
                     ex,
                 )?;
 
@@ -3809,6 +3829,7 @@ impl Domain {
                                 self.shard,
                                 self.replica,
                                 &mut self.state,
+                                &mut self.reader_write_handles,
                                 &self.nodes,
                             )?;
                         }
@@ -3841,12 +3862,14 @@ impl Domain {
                 let n = &*nd.borrow();
                 let local_index = n.local_addr();
 
-                if let Some(r) = n.as_reader() {
+                if n.is_reader() {
                     // We are a reader, which has its own kind of state
                     let mut size = 0;
-                    if r.is_partial() {
-                        size = r.state_size().unwrap_or(0);
-                        reader_size += size;
+                    if let Some(wh) = self.reader_write_handles.get(local_index) {
+                        if wh.is_partial() {
+                            size = wh.deep_size_of();
+                            reader_size += size;
+                        }
                     }
                     size
                 } else {
