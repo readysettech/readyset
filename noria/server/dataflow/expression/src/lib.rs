@@ -150,7 +150,7 @@ impl fmt::Display for BuiltinFunction {
 
         match self {
             ConvertTZ(arg1, arg2, arg3) => {
-                write!(f, "convert_tz({},{},{})", arg1, arg2, arg3)
+                write!(f, "convert_tz({}, {}, {})", arg1, arg2, arg3)
             }
             DayOfWeek(arg) => {
                 write!(f, "dayofweek({})", arg)
