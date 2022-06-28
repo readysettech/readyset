@@ -22,7 +22,7 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "iteration": 1654871767877,
+  "iteration": 1656426628245,
   "links": [
     {
       "asDropdown": false,
@@ -777,9 +777,9 @@
       },
       "gridPos": {
         "h": 11,
-        "w": 3,
+        "w": 4,
         "x": 0,
-        "y": 31
+        "y": 29
       },
       "id": 35,
       "options": {
@@ -799,7 +799,7 @@
           "expr": "rate(query_log_execution_time_count{deployment=\"$deployment\", query=\"${queryfilter:raw}\"}[$__rate_interval])",
           "instant": false,
           "interval": "",
-          "legendFormat": "Queries Per Second",
+          "legendFormat": "Queries Per Second ({{database_type}})",
           "queryType": "randomWalk",
           "refId": "A"
         }
@@ -862,15 +862,15 @@
       },
       "gridPos": {
         "h": 11,
-        "w": 17,
-        "x": 3,
-        "y": 31
+        "w": 16,
+        "x": 4,
+        "y": 29
       },
       "id": 34,
       "options": {
         "legend": {
           "calcs": [],
-          "displayMode": "hidden",
+          "displayMode": "list",
           "placement": "bottom"
         },
         "tooltip": {
@@ -882,7 +882,7 @@
           "exemplar": true,
           "expr": "rate(query_log_execution_time_count{deployment=\"$deployment\", query=\"${queryfilter:raw}\"}[$__rate_interval])",
           "interval": "",
-          "legendFormat": "Queries Per Second",
+          "legendFormat": "Queries Per Second ({{database_type}})",
           "queryType": "randomWalk",
           "refId": "A"
         }
