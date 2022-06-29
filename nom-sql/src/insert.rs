@@ -10,11 +10,11 @@ use serde::{Deserialize, Serialize};
 use crate::column::Column;
 use crate::common::{
     assignment_expr_list, field_list, schema_table_reference_no_alias, statement_terminator,
-    value_list, ws_sep_comma, Literal,
+    value_list, ws_sep_comma,
 };
 use crate::table::Table;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expression};
+use crate::{Dialect, Expression, Literal};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct InsertStatement {
@@ -132,7 +132,7 @@ pub fn insertion(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], InsertSta
 mod tests {
     use super::*;
     use crate::column::Column;
-    use crate::common::ItemPlaceholder;
+    use crate::literal::ItemPlaceholder;
     use crate::table::Table;
 
     #[test]
@@ -157,7 +157,7 @@ mod tests {
     mod mysql {
         use super::*;
         use crate::column::Column;
-        use crate::common::ItemPlaceholder;
+        use crate::literal::ItemPlaceholder;
         use crate::table::Table;
         use crate::BinaryOperator;
 
@@ -323,7 +323,6 @@ mod tests {
     mod postgres {
         use super::*;
         use crate::column::Column;
-        use crate::common::ItemPlaceholder;
         use crate::table::Table;
         use crate::BinaryOperator;
 

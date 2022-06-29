@@ -13,12 +13,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::column::{column_specification, ColumnSpecification};
 use crate::common::{
-    literal, schema_table_reference_no_alias, statement_terminator, ws_sep_comma, Literal, TableKey,
+    schema_table_reference_no_alias, statement_terminator, ws_sep_comma, TableKey,
 };
 use crate::create::key_specification;
+use crate::literal::literal;
 use crate::table::Table;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, SqlIdentifier};
+use crate::{Dialect, Literal, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum AlterColumnOperation {

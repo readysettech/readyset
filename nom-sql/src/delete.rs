@@ -53,9 +53,8 @@ pub fn deletion(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DeleteStat
 mod tests {
     use super::*;
     use crate::column::Column;
-    use crate::common::Literal;
     use crate::table::Table;
-    use crate::BinaryOperator;
+    use crate::{BinaryOperator, Literal};
 
     #[test]
     fn simple_delete() {

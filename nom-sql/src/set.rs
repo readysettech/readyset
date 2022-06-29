@@ -10,8 +10,9 @@ use nom::sequence::{terminated, tuple};
 use nom::{IResult, Parser};
 use serde::{Deserialize, Serialize};
 
-use crate::common::{literal, statement_terminator};
+use crate::common::statement_terminator;
 use crate::expression::expression;
+use crate::literal::literal;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Expression, Literal, SqlIdentifier};
 

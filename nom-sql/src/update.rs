@@ -70,9 +70,8 @@ pub fn updating(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], UpdateStat
 mod tests {
     use super::*;
     use crate::column::Column;
-    use crate::common::{ItemPlaceholder, Literal};
     use crate::table::Table;
-    use crate::BinaryOperator;
+    use crate::{BinaryOperator, ItemPlaceholder, Literal};
 
     #[test]
     fn simple_update() {
@@ -159,10 +158,9 @@ mod tests {
     mod mysql {
         use super::*;
         use crate::column::Column;
-        use crate::common::{ItemPlaceholder, Literal};
         use crate::table::Table;
         use crate::Expression::UnaryOp;
-        use crate::{BinaryOperator, Double, FunctionExpression, UnaryOperator};
+        use crate::{BinaryOperator, Double, FunctionExpression, ItemPlaceholder, UnaryOperator};
 
         #[test]
         fn updated_with_neg_float() {
@@ -255,7 +253,6 @@ mod tests {
     mod postgres {
         use super::*;
         use crate::column::Column;
-        use crate::common::{ItemPlaceholder, Literal};
         use crate::table::Table;
         use crate::Expression::UnaryOp;
         use crate::{BinaryOperator, Double, UnaryOperator};

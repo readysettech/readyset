@@ -12,9 +12,10 @@ use nom::sequence::tuple;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 
-use crate::common::{integer_literal, ws_sep_comma, ws_sep_equals, Literal};
+use crate::common::{ws_sep_comma, ws_sep_equals};
+use crate::literal::integer_literal;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::Dialect;
+use crate::{Dialect, Literal};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub enum CreateTableOption {

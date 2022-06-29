@@ -11,12 +11,12 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
-    as_alias, field_definition_expr, field_list, field_reference_list, literal,
-    schema_table_reference, table_list, terminated_with_statement_terminator, ws_sep_comma,
-    FieldDefinitionExpression,
+    as_alias, field_definition_expr, field_list, field_reference_list, schema_table_reference,
+    table_list, terminated_with_statement_terminator, ws_sep_comma, FieldDefinitionExpression,
 };
 use crate::expression::expression;
 use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
+use crate::literal::literal;
 use crate::order::{order_clause, OrderClause};
 use crate::table::Table;
 use crate::whitespace::{whitespace0, whitespace1};
@@ -520,9 +520,9 @@ pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Se
 mod tests {
     use super::*;
     use crate::column::Column;
-    use crate::common::{FieldDefinitionExpression, ItemPlaceholder, Literal, SqlType};
+    use crate::common::{FieldDefinitionExpression, SqlType};
     use crate::table::Table;
-    use crate::{BinaryOperator, Expression, FunctionExpression, InValue};
+    use crate::{BinaryOperator, Expression, FunctionExpression, InValue, ItemPlaceholder};
 
     fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpression> {
         cols.iter()
@@ -1642,7 +1642,7 @@ mod tests {
     mod mysql {
         use super::*;
         use crate::column::Column;
-        use crate::common::{FieldDefinitionExpression, Literal};
+        use crate::common::FieldDefinitionExpression;
         use crate::table::Table;
         use crate::{BinaryOperator, Expression, FunctionExpression, InValue};
 
@@ -1699,8 +1699,6 @@ mod tests {
 
         #[test]
         fn select_literals() {
-            use crate::common::Literal;
-
             let qstring = "SELECT NULL, 1, \"foo\", CURRENT_TIME FROM users;";
             // TODO: doesn't support selecting literals without a FROM clause, which is still valid
             // SQL        let qstring = "SELECT NULL, 1, \"foo\";";
@@ -1795,7 +1793,7 @@ mod tests {
     mod postgres {
         use super::*;
         use crate::column::Column;
-        use crate::common::{FieldDefinitionExpression, Literal};
+        use crate::common::FieldDefinitionExpression;
         use crate::table::Table;
         use crate::{BinaryOperator, Expression, FunctionExpression, InValue};
 
@@ -1852,8 +1850,6 @@ mod tests {
 
         #[test]
         fn select_literals() {
-            use crate::common::Literal;
-
             let qstring = "SELECT NULL, 1, 'foo', CURRENT_TIME FROM users;";
             // TODO: doesn't support selecting literals without a FROM clause, which is still valid
             // SQL        let qstring = "SELECT NULL, 1, \"foo\";";

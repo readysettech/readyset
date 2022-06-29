@@ -15,9 +15,8 @@ use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::case::case_when;
-use crate::common::{
-    column_function, column_identifier_no_alias, literal, type_identifier, ws_sep_comma,
-};
+use crate::common::{column_function, column_identifier_no_alias, type_identifier, ws_sep_comma};
+use crate::literal::literal;
 use crate::select::nested_selection;
 use crate::set::{variable_scope_prefix, Variable};
 use crate::whitespace::{whitespace0, whitespace1};
@@ -1200,8 +1199,6 @@ mod tests {
         fn parenthesis() {
             let cond = "(foo = ? or bar = 12) and foobar = 'a'";
 
-            use crate::common::Literal;
-
             let a = Expression::BinaryOp {
                 op: BinaryOperator::Equal,
                 lhs: Box::new(Expression::Column("foo".into())),
@@ -1241,8 +1238,6 @@ mod tests {
         #[test]
         fn order_of_operations() {
             let cond = "foo = ? and bar = 12 or foobar = 'a'";
-
-            use crate::common::Literal;
 
             let a = Expression::BinaryOp {
                 op: BinaryOperator::Equal,
@@ -1284,21 +1279,19 @@ mod tests {
         fn negation() {
             let cond = "not bar = 12 or foobar = 'a'";
 
-            use crate::common::Literal::*;
-
             let left = Expression::UnaryOp {
                 op: UnaryOperator::Not,
                 rhs: Box::new(Expression::BinaryOp {
                     op: BinaryOperator::Equal,
                     lhs: Box::new(Expression::Column("bar".into())),
-                    rhs: Box::new(Expression::Literal(Integer(12.into()))),
+                    rhs: Box::new(Expression::Literal(Literal::Integer(12.into()))),
                 }),
             };
 
             let right = Expression::BinaryOp {
                 op: BinaryOperator::Equal,
                 lhs: Box::new(Expression::Column("foobar".into())),
-                rhs: Box::new(Expression::Literal(String("a".into()))),
+                rhs: Box::new(Expression::Literal(Literal::String("a".into()))),
             };
 
             let complete = Expression::BinaryOp {
@@ -1687,8 +1680,6 @@ mod tests {
 
             #[test]
             fn complex_bracketing() {
-                use crate::common::Literal;
-
                 let cond = "`read_ribbons`.`is_following` = 1 \
                     AND `comments`.`user_id` <> `read_ribbons`.`user_id` \
                     AND `saldo` >= 0 \
@@ -1845,8 +1836,6 @@ mod tests {
 
             #[test]
             fn complex_bracketing() {
-                use crate::common::Literal;
-
                 let cond = "\"read_ribbons\".\"is_following\" = 1 \
                     AND \"comments\".\"user_id\" <> \"read_ribbons\".\"user_id\" \
                     AND \"saldo\" >= 0 \
