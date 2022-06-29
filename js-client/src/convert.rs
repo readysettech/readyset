@@ -136,6 +136,9 @@ where
             )),
         },
         DataType::BitVector(_) => cx.throw_error("Cannot convert bit vector to JS type"),
+        DataType::Array(_) => {
+            unimplemented!("Array conversion to JS")
+        }
     }
 }
 

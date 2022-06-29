@@ -696,7 +696,7 @@ impl Arbitrary for KeyComparison {
         use proptest::strategy::Strategy;
 
         let bound = || {
-            any_with::<Bound<Vec<DataType>>>(((1..100).into(), ())).prop_map(|bound| {
+            any_with::<Bound<Vec<DataType>>>(((1..100).into(), None)).prop_map(|bound| {
                 #[allow(clippy::unwrap_used)]
                 // This is only used for testing, so we allow calling `unwrap()`, and because we
                 // know we are generating vectors of length 1 and beyond.
@@ -705,7 +705,7 @@ impl Arbitrary for KeyComparison {
         };
 
         prop_oneof![
-            any_with::<Vec<DataType>>(((1..100).into(), ())).prop_map(|k| {
+            any_with::<Vec<DataType>>(((1..100).into(), None)).prop_map(|k| {
                 #[allow(clippy::unwrap_used)]
                 // This is only used for testing, so we allow calling `unwrap()`, and because we
                 // know we are generating vectors of length 1 and beyond.

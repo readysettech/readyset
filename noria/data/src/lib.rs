@@ -9,11 +9,14 @@ use bytes::BytesMut;
 use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
 use enum_kinds::EnumKind;
 use itertools::Itertools;
+use launchpad::arbitrary::arbitrary_duration;
 use nom_sql::{Double, Float, Literal, SqlType};
-use noria_errors::{internal, ReadySetError, ReadySetResult};
+use noria_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use proptest::prelude::{prop_oneof, Arbitrary};
+use test_strategy::Arbitrary;
 use tokio_postgres::types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 
+mod array;
 mod float;
 mod integer;
 pub mod noria_type;
@@ -21,6 +24,7 @@ mod serde;
 mod text;
 mod timestamp;
 
+pub use crate::array::Array;
 pub use crate::text::{Text, TinyText};
 pub use crate::timestamp::{TimestampTz, TIMESTAMP_FORMAT};
 
@@ -39,7 +43,7 @@ const MAX_SECONDS_DATETIME_OFFSET: i32 = 85_940;
 /// clone the *value* of a `DataType` without danger of contention.
 #[warn(variant_size_differences)]
 #[derive(Clone, Debug, EnumKind)]
-#[enum_kind(DataTypeKind, derive(Ord, PartialOrd, Hash))]
+#[enum_kind(DataTypeKind, derive(Ord, PartialOrd, Hash, Arbitrary))]
 pub enum DataType {
     /// An empty value.
     None,
@@ -68,6 +72,8 @@ pub enum DataType {
     Numeric(Arc<Decimal>),
     /// A bit or varbit value.
     BitVector(Arc<BitVec>),
+    /// An array of [`DataType`]s.
+    Array(Arc<Array>),
     /// A sentinel maximal value.
     ///
     /// This value is always greater than all other [`DataType`]s, except itself.
@@ -111,6 +117,7 @@ impl fmt::Display for DataType {
                     b.iter().map(|bit| if bit { "1" } else { "0" }).join("")
                 )
             }
+            DataType::Array(ref arr) => write!(f, "{}", arr),
             DataType::Max => f.write_str("MAX"),
         }
     }
@@ -120,6 +127,12 @@ impl fmt::Display for DataType {
 pub const TIME_FORMAT: &str = "%H:%M:%S";
 
 impl DataType {
+    /// Construct a new [`DataType::Array`] containing an empty array
+    pub fn empty_array() -> Self {
+        // TODO: static singleton empty array?
+        DataType::from(Vec::<DataType>::new())
+    }
+
     /// Generates the minimum DataType corresponding to the type of a given DataType.
     pub fn min_value(other: &Self) -> Self {
         match other {
@@ -138,6 +151,7 @@ impl DataType {
             DataType::ByteArray(_) => DataType::ByteArray(Arc::new(Vec::new())),
             DataType::Numeric(_) => DataType::from(Decimal::MIN),
             DataType::BitVector(_) => DataType::from(BitVec::new()),
+            DataType::Array(_) => DataType::empty_array(),
             DataType::Max => DataType::None,
         }
     }
@@ -161,6 +175,7 @@ impl DataType {
             | DataType::Text(_)
             | DataType::ByteArray(_)
             | DataType::BitVector(_)
+            | DataType::Array(_)
             | DataType::Max => DataType::Max,
         }
     }
@@ -243,6 +258,10 @@ impl DataType {
             DataType::ByteArray(ref array) => !array.is_empty(),
             DataType::Numeric(ref d) => !d.is_zero(),
             DataType::BitVector(ref bits) => !bits.is_empty(),
+            // Truthiness only matters for mysql, and mysql doesn't have arrays, so we can kind of
+            // pick whatever we want here - but it makes the most sense to try to limit falsiness to
+            // only the things that mysql considers falsey
+            DataType::Array(_) => true,
         }
     }
 
@@ -303,6 +322,11 @@ impl DataType {
             Self::ByteArray(_) => Some(ByteArray),
             Self::Numeric(_) => Some(Numeric(None)),
             Self::BitVector(_) => Some(Varbit(None)),
+            // TODO: Once this returns NoriaType instead of SqlType, an empty array and an array of
+            // null should be Array(Unknown) not Unknown
+            Self::Array(vs) => Some(SqlType::Array(Box::new(
+                vs.values().find_map(|v| v.sql_type())?,
+            ))),
         }
     }
 
@@ -384,7 +408,9 @@ impl DataType {
                 },
                 _ => Err(mk_err()),
             },
-            DataType::Time(_) | DataType::ByteArray(_) | DataType::Max => Err(mk_err()),
+            DataType::Time(_) | DataType::ByteArray(_) | DataType::Array(_) | DataType::Max => {
+                Err(mk_err())
+            }
         }
     }
 
@@ -529,6 +555,7 @@ impl PartialEq for DataType {
             (&DataType::BitVector(ref bits_a), &DataType::BitVector(ref bits_b)) => {
                 bits_a.as_ref() == bits_b.as_ref()
             }
+            (&DataType::Array(ref vs_a), &DataType::Array(ref vs_b)) => vs_a == vs_b,
             (&DataType::None, &DataType::None) => true,
             (&DataType::Max, &DataType::Max) => true,
             _ => false,
@@ -700,6 +727,7 @@ impl Ord for DataType {
             (&DataType::BitVector(ref bits_a), &DataType::BitVector(ref bits_b)) => {
                 bits_a.cmp(bits_b)
             }
+            (&DataType::Array(ref vs_a), &DataType::Array(ref vs_b)) => vs_a.cmp(vs_b),
 
             // for all other kinds of data types, just compare the variants in order
             (_, _) => DataTypeKind::from(self).cmp(&DataTypeKind::from(other)),
@@ -731,6 +759,7 @@ impl Hash for DataType {
             DataType::ByteArray(ref array) => array.hash(state),
             DataType::Numeric(ref d) => d.hash(state),
             DataType::BitVector(ref bits) => bits.hash(state),
+            DataType::Array(ref vs) => vs.hash(state),
         }
     }
 }
@@ -1010,6 +1039,7 @@ impl TryFrom<DataType> for Literal {
             DataType::ByteArray(ref array) => Ok(Literal::ByteArray(array.as_ref().clone())),
             DataType::Numeric(ref d) => Ok(Literal::Numeric(d.mantissa(), d.scale())),
             DataType::BitVector(ref bits) => Ok(Literal::BitVector(bits.as_ref().to_bytes())),
+            DataType::Array(_) => unsupported!("Arrays not implemented yet"),
             DataType::Max => internal!("MAX has no representation as a literal"),
         }
     }
@@ -1457,6 +1487,18 @@ impl From<&[u8]> for DataType {
     }
 }
 
+impl From<Array> for DataType {
+    fn from(arr: Array) -> Self {
+        Self::Array(Arc::new(arr))
+    }
+}
+
+impl From<Vec<DataType>> for DataType {
+    fn from(vs: Vec<DataType>) -> Self {
+        Self::from(Array::from(vs))
+    }
+}
+
 impl TryFrom<mysql_common::value::Value> for DataType {
     type Error = ReadySetError;
 
@@ -1590,6 +1632,9 @@ impl ToSql for DataType {
             (Self::Time(x), _) => NaiveTime::from(*x).to_sql(ty, out),
             (Self::ByteArray(ref array), _) => array.as_ref().to_sql(ty, out),
             (Self::BitVector(ref bits), _) => bits.as_ref().to_sql(ty, out),
+            (Self::Array(_), _) => Err(Box::<dyn Error + Send + Sync>::from(
+                "Array to SQL not implemented yet",
+            )),
         }
     }
 
@@ -1768,6 +1813,7 @@ impl TryFrom<&DataType> for mysql_common::value::Value {
             )),
             DataType::ByteArray(array) => Ok(Value::Bytes(array.as_ref().clone())),
             DataType::BitVector(_) => internal!("MySQL does not support bit vector types"),
+            DataType::Array(_) => internal!("MySQL does not support array types"),
         }
     }
 }
@@ -1902,29 +1948,55 @@ impl<'a, 'b> Div<&'b DataType> for &'a DataType {
 }
 
 impl Arbitrary for DataType {
-    type Parameters = ();
+    type Parameters = Option<DataTypeKind>;
     type Strategy = proptest::strategy::BoxedStrategy<DataType>;
 
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use launchpad::arbitrary::arbitrary_duration;
-        use proptest::arbitrary::any;
+    fn arbitrary_with(opt_kind: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
-        use DataType::*;
 
-        prop_oneof![
-            Just(None),
-            Just(Max),
-            any::<i64>().prop_map(Int),
-            any::<u64>().prop_map(UnsignedInt),
-            any::<f32>().prop_map(Float),
-            any::<f64>().prop_map(Double),
-            any::<String>().prop_map(|s| DataType::from(s.replace('\0', ""))),
-            any::<crate::TimestampTz>().prop_map(DataType::TimestampTz),
-            arbitrary_duration().prop_map(MysqlTime::new).prop_map(Time),
-            any::<Vec<u8>>().prop_map(|b| DataType::ByteArray(Arc::new(b))),
-            arbitrary_decimal().prop_map(DataType::from),
-        ]
-        .boxed()
+        match opt_kind {
+            Some(DataTypeKind::None) => Just(DataType::None).boxed(),
+            Some(DataTypeKind::Max) => Just(DataType::Max).boxed(),
+            Some(DataTypeKind::Int) => any::<i64>().prop_map(DataType::Int).boxed(),
+            Some(DataTypeKind::UnsignedInt) => any::<u64>().prop_map(DataType::UnsignedInt).boxed(),
+            Some(DataTypeKind::Float) => any::<f32>().prop_map(DataType::Float).boxed(),
+            Some(DataTypeKind::Double) => any::<f64>().prop_map(DataType::Double).boxed(),
+            Some(DataTypeKind::Text | DataTypeKind::TinyText) => any::<String>()
+                .prop_map(|s| DataType::from(s.replace('\0', "")))
+                .boxed(),
+            Some(DataTypeKind::TimestampTz) => any::<crate::TimestampTz>()
+                .prop_map(DataType::TimestampTz)
+                .boxed(),
+            Some(DataTypeKind::Time) => arbitrary_duration()
+                .prop_map(MysqlTime::new)
+                .prop_map(DataType::Time)
+                .boxed(),
+            Some(DataTypeKind::ByteArray) => any::<Vec<u8>>()
+                .prop_map(|b| DataType::ByteArray(Arc::new(b)))
+                .boxed(),
+            Some(DataTypeKind::Numeric) => arbitrary_decimal().prop_map(DataType::from).boxed(),
+            Some(DataTypeKind::BitVector) => any::<Vec<u8>>()
+                .prop_map(|bs| DataType::BitVector(Arc::new(BitVec::from_bytes(&bs))))
+                .boxed(),
+            Some(DataTypeKind::Array) => any::<Array>().prop_map(DataType::from).boxed(),
+            None => prop_oneof![
+                Just(DataType::None),
+                Just(DataType::Max),
+                any::<i64>().prop_map(DataType::Int),
+                any::<u64>().prop_map(DataType::UnsignedInt),
+                any::<f32>().prop_map(DataType::Float),
+                any::<f64>().prop_map(DataType::Double),
+                any::<String>().prop_map(|s| DataType::from(s.replace('\0', ""))),
+                any::<crate::TimestampTz>().prop_map(DataType::TimestampTz),
+                arbitrary_duration()
+                    .prop_map(MysqlTime::new)
+                    .prop_map(DataType::Time),
+                any::<Vec<u8>>().prop_map(|b| DataType::ByteArray(Arc::new(b))),
+                arbitrary_decimal().prop_map(DataType::from),
+                any::<Array>().prop_map(DataType::from)
+            ]
+            .boxed(),
+        }
     }
 }
 
@@ -2053,6 +2125,7 @@ mod tests {
             DataType::ByteArray(_)
             | DataType::Numeric(_)
             | DataType::BitVector(_)
+            | DataType::Array(_)
             | DataType::Max => false,
             _ => true,
         });
@@ -3034,6 +3107,15 @@ mod tests {
         assert_eq!(numeric.cmp(&txt1), Ordering::Greater);
         assert_eq!(numeric1.cmp(&int1), Ordering::Greater);
         assert_eq!(numeric2.cmp(&int1), Ordering::Less);
+    }
+
+    #[test]
+    fn array_sql_type() {
+        let arr = DataType::from(vec![DataType::None, DataType::from(1)]);
+        assert_eq!(
+            arr.sql_type(),
+            Some(SqlType::Array(Box::new(SqlType::Bigint(None))))
+        );
     }
 
     mod coerce_to {
