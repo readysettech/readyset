@@ -415,7 +415,8 @@ impl TimestampTz {
             | SqlType::Inet
             | SqlType::Uuid
             | SqlType::Bit(_)
-            | SqlType::Varbit(_) => Err(ReadySetError::DataTypeConversionError {
+            | SqlType::Varbit(_)
+            | SqlType::Array(_) => Err(ReadySetError::DataTypeConversionError {
                 src_type: "DataType::TimestampTz".to_string(),
                 target_type: format!("{:?}", sql_type),
                 details: "Not allowed".to_string(),

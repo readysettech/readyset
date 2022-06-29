@@ -183,7 +183,8 @@ where
         | SqlType::Inet
         | SqlType::Uuid
         | SqlType::Bit(_)
-        | SqlType::Varbit(_) => Err(ReadySetError::DataTypeConversionError {
+        | SqlType::Varbit(_)
+        | SqlType::Array(_) => Err(ReadySetError::DataTypeConversionError {
             src_type: src_type_name.to_string(),
             target_type: sql_type.to_string(),
             details: "Not allowed".to_string(),

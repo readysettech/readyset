@@ -8,7 +8,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 
 use nom_sql::SqlType;
-use noria_errors::{ReadySetError, ReadySetResult};
+use noria_errors::{unsupported, ReadySetError, ReadySetResult};
 
 use crate::DataType;
 
@@ -411,6 +411,8 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DataType> {
                 .parse::<rust_decimal::Decimal>()
                 .map_err(|e| Self::coerce_err(sql_type, e))?
                 .into()),
+
+            SqlType::Array(_) => unsupported!("Coercion to array not implemented yet"),
 
             SqlType::Enum(_) | SqlType::Bit(_) | SqlType::Varbit(_) => {
                 Err(Self::coerce_err(sql_type, "Not allowed"))

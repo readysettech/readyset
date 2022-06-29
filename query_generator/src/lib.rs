@@ -168,6 +168,7 @@ fn value_of_type(typ: &SqlType) -> DataType {
             DataType::from(BitVec::with_capacity(size_opt.unwrap_or(1) as usize))
         }
         SqlType::Varbit(_) => DataType::from(BitVec::new()),
+        SqlType::Array(_) => unimplemented!(),
     }
 }
 
@@ -308,6 +309,7 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
         }
         SqlType::Serial => (rng.gen::<u32>() + 1).into(),
         SqlType::BigSerial => (rng.gen::<u64>() + 1).into(),
+        SqlType::Array(_) => unimplemented!(),
     }
 }
 
@@ -420,6 +422,7 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
         }
         SqlType::Serial => (idx + 1).into(),
         SqlType::BigSerial => ((idx + 1) as u64).into(),
+        SqlType::Array(_) => unimplemented!(),
     }
 }
 

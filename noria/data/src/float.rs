@@ -164,7 +164,8 @@ pub(crate) fn coerce_f64(val: f64, sql_type: &SqlType) -> ReadySetResult<DataTyp
         | SqlType::Inet
         | SqlType::Uuid
         | SqlType::Bit(_)
-        | SqlType::Varbit(_) => Err(err("not allowed")),
+        | SqlType::Varbit(_)
+        | SqlType::Array(_) => Err(err("not allowed")),
     }
 }
 
@@ -256,7 +257,8 @@ pub(crate) fn coerce_decimal(val: &Decimal, sql_type: &SqlType) -> ReadySetResul
         | SqlType::Inet
         | SqlType::Uuid
         | SqlType::Bit(_)
-        | SqlType::Varbit(_) => Err(ReadySetError::DataTypeConversionError {
+        | SqlType::Varbit(_)
+        | SqlType::Array(_) => Err(ReadySetError::DataTypeConversionError {
             src_type: "Decimal".to_string(),
             target_type: sql_type.to_string(),
             details: "Not allowed".to_string(),

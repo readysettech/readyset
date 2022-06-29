@@ -17,7 +17,7 @@ use nom::bytes::complete::{tag, tag_no_case, take_until};
 use nom::character::complete::{digit1, line_ending};
 use nom::combinator::{map, map_parser, map_res, opt, peek, recognize};
 use nom::error::{ErrorKind, ParseError};
-use nom::multi::{separated_list0, separated_list1};
+use nom::multi::{fold_many0, separated_list0, separated_list1};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
 use nom::{IResult, InputLength};
 use proptest::strategy::Strategy;
@@ -85,6 +85,7 @@ pub enum SqlType {
     Varbit(Option<u16>),
     Serial,
     BigSerial,
+    Array(Box<SqlType>),
 }
 
 impl SqlType {
@@ -185,6 +186,7 @@ impl fmt::Display for SqlType {
             SqlType::Varbit(n) => write_with_len(f, "VARBIT", n),
             SqlType::Serial => write!(f, "SERIAL"),
             SqlType::BigSerial => write!(f, "BIGSERIAL"),
+            SqlType::Array(ref t) => write!(f, "{}[]", t),
         }
     }
 }
@@ -471,6 +473,7 @@ impl Literal {
             }
             SqlType::Serial => any::<i32>().prop_map(Self::from).boxed(),
             SqlType::BigSerial => any::<i64>().prop_map(Self::from).boxed(),
+            SqlType::Array(_) => unimplemented!("Arrays aren't implemented yet"),
         }
     }
 }
@@ -1096,13 +1099,36 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
     ))(i)
 }
 
-// A SQL type specifier.
-pub fn type_identifier(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
+fn array_suffix(i: &[u8]) -> IResult<&[u8], ()> {
+    let (i, _) = tag("[")(i)?;
+    let (i, _) = opt(whitespace0)(i)?;
+    let (i, _len) = opt(digit1)(i)?;
+    let (i, _) = opt(whitespace0)(i)?;
+    let (i, _) = tag("]")(i)?;
+    Ok((i, ()))
+}
+
+fn type_identifier_no_arrays(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
     move |i| {
         alt((
             type_identifier_first_half(dialect),
             type_identifier_second_half,
         ))(i)
+    }
+}
+
+// A SQL type specifier.
+pub fn type_identifier(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
+    move |i| {
+        // need to pull a bit of a trick here to properly recursive-descent arrays since they're a
+        // suffix. First, we parse the type, then we parse any number of `[]` or `[<n>]` suffixes,
+        // and use those to construct the multiple levels of `SqlType::Array`
+        let (i, ty) = type_identifier_no_arrays(dialect)(i)?;
+        fold_many0(
+            array_suffix,
+            move || ty.clone(),
+            |t, _| SqlType::Array(Box::new(t)),
+        )(i)
     }
 }
 
@@ -2097,6 +2123,30 @@ mod tests {
                 b"time without time zone"
             );
             assert_eq!(res, SqlType::Time);
+        }
+
+        #[test]
+        fn int_array() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"int[]");
+            assert_eq!(res, SqlType::Array(Box::new(SqlType::Int(None))));
+        }
+
+        #[test]
+        fn double_nested_array() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"text[][]");
+            assert_eq!(
+                res,
+                SqlType::Array(Box::new(SqlType::Array(Box::new(SqlType::Text))))
+            );
+        }
+
+        #[test]
+        fn arrays_with_length() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"float[4][5]");
+            assert_eq!(
+                res,
+                SqlType::Array(Box::new(SqlType::Array(Box::new(SqlType::Float))))
+            );
         }
     }
 }
