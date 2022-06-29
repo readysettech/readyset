@@ -15,7 +15,7 @@ use strum_macros::{EnumString, EnumVariantNames, FromRepr};
 use crate::{DataType, Text, TimestampTz, TinyText};
 
 #[derive(EnumVariantNames, EnumString, FromRepr, Clone, Copy)]
-enum Field {
+enum Variant {
     None,
     Int,
     Double,
@@ -26,6 +26,7 @@ enum Field {
     Numeric,
     BitVector,
     TimestampTz,
+    Array,
     Max,
 }
 
@@ -35,14 +36,14 @@ enum TextOrTinyText {
 }
 
 #[inline(always)]
-fn serialize_variant<S, T>(serializer: S, variant: Field, value: &T) -> Result<S::Ok, S::Error>
+fn serialize_variant<S, T>(serializer: S, variant: Variant, value: &T) -> Result<S::Ok, S::Error>
 where
     S: serde::ser::Serializer,
     T: ?Sized + serde::Serialize,
 {
     // The compiler should be able to inline the constant name here, so no lookups are done
     // at runtime
-    let variant_name = Field::VARIANTS[variant as usize];
+    let variant_name = Variant::VARIANTS[variant as usize];
     serializer.serialize_newtype_variant("DataType", variant as _, variant_name, value)
 }
 
@@ -54,36 +55,39 @@ impl serde::ser::Serialize for DataType {
         match &self {
             DataType::None => serializer.serialize_unit_variant(
                 "DataType",
-                Field::None as _,
-                Field::VARIANTS[Field::None as usize],
+                Variant::None as _,
+                Variant::VARIANTS[Variant::None as usize],
             ),
-            DataType::Int(v) => serialize_variant(serializer, Field::Int, &i128::from(*v)),
-            DataType::UnsignedInt(v) => serialize_variant(serializer, Field::Int, &i128::from(*v)),
-            DataType::Float(f) => serialize_variant(serializer, Field::Float, &f.to_bits()),
-            DataType::Double(f) => serialize_variant(serializer, Field::Double, &f.to_bits()),
+            DataType::Int(v) => serialize_variant(serializer, Variant::Int, &i128::from(*v)),
+            DataType::UnsignedInt(v) => {
+                serialize_variant(serializer, Variant::Int, &i128::from(*v))
+            }
+            DataType::Float(f) => serialize_variant(serializer, Variant::Float, &f.to_bits()),
+            DataType::Double(f) => serialize_variant(serializer, Variant::Double, &f.to_bits()),
             DataType::Text(v) => {
-                serialize_variant(serializer, Field::Text, Bytes::new(v.as_bytes()))
+                serialize_variant(serializer, Variant::Text, Bytes::new(v.as_bytes()))
             }
             DataType::TinyText(v) => {
-                serialize_variant(serializer, Field::Text, Bytes::new(v.as_bytes()))
+                serialize_variant(serializer, Variant::Text, Bytes::new(v.as_bytes()))
             }
-            DataType::Time(v) => serialize_variant(serializer, Field::Time, &v),
+            DataType::Time(v) => serialize_variant(serializer, Variant::Time, &v),
             DataType::ByteArray(a) => {
-                serialize_variant(serializer, Field::ByteArray, Bytes::new(a.as_ref()))
+                serialize_variant(serializer, Variant::ByteArray, Bytes::new(a.as_ref()))
             }
-            DataType::Numeric(d) => serialize_variant(serializer, Field::Numeric, &d),
-            DataType::BitVector(bits) => serialize_variant(serializer, Field::BitVector, &bits),
+            DataType::Numeric(d) => serialize_variant(serializer, Variant::Numeric, &d),
+            DataType::BitVector(bits) => serialize_variant(serializer, Variant::BitVector, &bits),
             DataType::TimestampTz(ts) => {
                 let extra = ts.extra;
                 let nt = ts.to_chrono();
                 let ts = nt.naive_utc().timestamp() as u64 as u128
                     + ((nt.naive_utc().timestamp_subsec_nanos() as u128) << 64);
-                serialize_variant(serializer, Field::TimestampTz, &(ts, extra))
+                serialize_variant(serializer, Variant::TimestampTz, &(ts, extra))
             }
+            DataType::Array(vs) => serialize_variant(serializer, Variant::Array, &vs),
             DataType::Max => serializer.serialize_unit_variant(
                 "DataType",
-                Field::Max as _,
-                Field::VARIANTS[Field::Max as usize],
+                Variant::Max as _,
+                Variant::VARIANTS[Variant::Max as usize],
             ),
         }
     }
@@ -96,7 +100,7 @@ impl<'de> Deserialize<'de> for DataType {
     {
         struct FieldVisitor;
         impl<'de> serde::de::Visitor<'de> for FieldVisitor {
-            type Value = Field;
+            type Value = Variant;
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str("variant identifier")
             }
@@ -105,7 +109,7 @@ impl<'de> Deserialize<'de> for DataType {
             where
                 E: serde::de::Error,
             {
-                if let Some(f) = Field::from_repr(val as _) {
+                if let Some(f) = Variant::from_repr(val as _) {
                     Ok(f)
                 } else {
                     Err(serde::de::Error::invalid_value(
@@ -120,7 +124,7 @@ impl<'de> Deserialize<'de> for DataType {
                 E: serde::de::Error,
             {
                 val.parse()
-                    .map_err(|_| serde::de::Error::unknown_variant(val, Field::VARIANTS))
+                    .map_err(|_| serde::de::Error::unknown_variant(val, Variant::VARIANTS))
             }
 
             fn visit_bytes<E>(self, val: &[u8]) -> Result<Self::Value, E>
@@ -131,13 +135,13 @@ impl<'de> Deserialize<'de> for DataType {
                     Ok(Ok(field)) => Ok(field),
                     _ => Err(serde::de::Error::unknown_variant(
                         &String::from_utf8_lossy(val),
-                        Field::VARIANTS,
+                        Variant::VARIANTS,
                     )),
                 }
             }
         }
 
-        impl<'de> serde::Deserialize<'de> for Field {
+        impl<'de> serde::Deserialize<'de> for Variant {
             #[inline]
             fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
             where
@@ -159,10 +163,10 @@ impl<'de> Deserialize<'de> for DataType {
                 A: EnumAccess<'de>,
             {
                 match EnumAccess::variant(data)? {
-                    (Field::None, variant) => {
+                    (Variant::None, variant) => {
                         VariantAccess::unit_variant(variant).map(|_| DataType::None)
                     }
-                    (Field::Int, variant) => VariantAccess::newtype_variant::<i128>(variant)
+                    (Variant::Int, variant) => VariantAccess::newtype_variant::<i128>(variant)
                         .and_then(|x| {
                             DataType::try_from(x).map_err(|_| {
                                 serde::de::Error::invalid_value(
@@ -171,31 +175,33 @@ impl<'de> Deserialize<'de> for DataType {
                                 )
                             })
                         }),
-                    (Field::Float, variant) => VariantAccess::newtype_variant::<u32>(variant)
+                    (Variant::Float, variant) => VariantAccess::newtype_variant::<u32>(variant)
                         .map(|b| DataType::Float(f32::from_bits(b))),
-                    (Field::Double, variant) => VariantAccess::newtype_variant::<u64>(variant)
+                    (Variant::Double, variant) => VariantAccess::newtype_variant::<u64>(variant)
                         .map(|b| DataType::Double(f64::from_bits(b))),
-                    (Field::Numeric, variant) => VariantAccess::newtype_variant::<Decimal>(variant)
-                        .map(|d| DataType::Numeric(Arc::new(d))),
-                    (Field::Text, variant) => {
+                    (Variant::Numeric, variant) => {
+                        VariantAccess::newtype_variant::<Decimal>(variant)
+                            .map(|d| DataType::Numeric(Arc::new(d)))
+                    }
+                    (Variant::Text, variant) => {
                         VariantAccess::newtype_variant::<TextOrTinyText>(variant).map(|tt| match tt
                         {
                             TextOrTinyText::TinyText(tt) => DataType::TinyText(tt),
                             TextOrTinyText::Text(t) => DataType::Text(t),
                         })
                     }
-                    (Field::Time, variant) => {
+                    (Variant::Time, variant) => {
                         VariantAccess::newtype_variant::<MysqlTime>(variant).map(DataType::Time)
                     }
-                    (Field::ByteArray, variant) => {
+                    (Variant::ByteArray, variant) => {
                         VariantAccess::newtype_variant::<ByteBuf>(variant)
                             .map(|v| DataType::ByteArray(Arc::new(v.into_vec())))
                     }
-                    (Field::BitVector, variant) => {
+                    (Variant::BitVector, variant) => {
                         VariantAccess::newtype_variant::<BitVec>(variant)
                             .map(|bits| DataType::BitVector(Arc::new(bits)))
                     }
-                    (Field::TimestampTz, variant) => VariantAccess::newtype_variant::<(
+                    (Variant::TimestampTz, variant) => VariantAccess::newtype_variant::<(
                         u128,
                         [u8; 3],
                     )>(variant)
@@ -205,14 +211,17 @@ impl<'de> Deserialize<'de> for DataType {
                         let datetime = NaiveDateTime::from_timestamp(ts as _, (ts >> 64) as _);
                         DataType::TimestampTz(TimestampTz { datetime, extra })
                     }),
-                    (Field::Max, variant) => {
+                    (Variant::Array, variant) => {
+                        VariantAccess::newtype_variant(variant).map(DataType::Array)
+                    }
+                    (Variant::Max, variant) => {
                         VariantAccess::unit_variant(variant).map(|_| DataType::Max)
                     }
                 }
             }
         }
 
-        deserializer.deserialize_enum("DataType", Field::VARIANTS, Visitor)
+        deserializer.deserialize_enum("DataType", Variant::VARIANTS, Visitor)
     }
 }
 

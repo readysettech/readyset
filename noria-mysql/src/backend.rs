@@ -103,6 +103,9 @@ async fn write_column<W: AsyncWrite + Unpin>(
         DataType::Time(ref t) => rw.write_col(t),
         DataType::ByteArray(ref bytes) => rw.write_col(bytes.as_ref()),
         // These types are PostgreSQL specific
+        DataType::Array(_) => {
+            internal!("Cannot write MySQL column: MySQL does not support arrays")
+        }
         DataType::BitVector(_) => {
             internal!("Cannot write MySQL column: MySQL does not support bit vectors")
         }

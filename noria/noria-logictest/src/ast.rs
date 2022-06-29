@@ -394,6 +394,7 @@ impl TryFrom<DataType> for Value {
             DataType::ByteArray(t) => Ok(Value::ByteArray(t.as_ref().clone())),
             DataType::Numeric(ref d) => Ok(Value::Numeric(*d.as_ref())),
             DataType::BitVector(ref b) => Ok(Value::BitVector(b.as_ref().clone())),
+            DataType::Array(_) => bail!("Arrays not supported"),
         }
     }
 }

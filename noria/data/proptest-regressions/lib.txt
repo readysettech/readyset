@@ -1,0 +1,32 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5c15ca099f45a7cf2cdc120a34a278a041feeab77ed3a3c0fb856dafe3f4b0e4 # shrinks to input = _GtTransitiveArgs { x: Int(0), y: None, z: Numeric(0) }
+cc 6ab256cd819dc998bac983bbfca51ee0edac234e8269a3356c48d644cd1b834f # shrinks to input = _GtTransitiveArgs { x: Numeric(0), y: Timestamp(0000-01-01T00:00:00), z: Int(0) }
+cc 4f50278662372e3392d004e0670bc9ed54727a299a451b3b7c03bacd79336327 # shrinks to input = _LeTransitiveArgs { x: Time(00:00:00), y: Numeric(0), z: Time(00:00:00) }
+cc 5f0cb9159a2b988ad9f2033ceb266b6ba838e88dbf26c292b05e9c4bfbdb2234 # shrinks to input = _GtTransitiveArgs { x: Numeric(0), y: Int(-1), z: Timestamp(0000-01-01T00:00:00) }
+cc eb21c94bc6298e8b213d08c7ee75daf72f1fbc661ea6a2f367550f2ae51d91e5 # shrinks to input = _DualArgs { x: None, y: Timestamp(0000-01-01T00:00:00) }
+cc 3d7900ffe29bfd33c8a051bafb94d157d0874be0a7d7818fe02b0f3cf431db41 # shrinks to input = _GtTransitiveArgs { x: ByteArray([0]), y: Int(0), z: ByteArray([0]) }
+cc 3187115202f19ed08bbbab4d7c8465da9f41857b9a0ee24094d84a69e72cdde5 # shrinks to input = _LeTransitiveArgs { x: None, y: Timestamp(0000-01-01T00:00:00), z: None }
+cc fd0d8c29b59e486e64cc89d872c13206df23b76401337b10c89423f933cb4218 # shrinks to input = _DualArgs { x: Timestamp(0000-01-01T00:00:00), y: Time(00:00:00) }
+cc 1caf2c39572f12f843a40ced5e0ff36a2666cba9d3b2a3e43745602504888424 # shrinks to input = _LeTransitiveArgs { x: Numeric(0), y: UnsignedBigInt(1), z: Timestamp(0000-01-01T00:00:00) }
+cc 413a1922bbe886141ef37197194106bf9c8b94592a012ce8398c5c7ed3e91091 # shrinks to input = _TrichotomyArgs { x: None, y: None }
+cc 9c5c646d9e26b864df3ab3e626cfeb3512f21c8be71a2a9082ae77cd1782bb71 # shrinks to input = _LeTransitiveArgs { x: Timestamp(0000-01-01T00:00:00), y: Time(00:00:00), z: Timestamp(-0001-01-01T00:00:00) }
+cc c6d01e78dd4f67d7389f36758b00c506b08d741219944064c464344f5746dbd8 # shrinks to input = _DualArgs { x: TinyText(""), y: ByteArray([]) }
+cc 2ce97de03804b3bf9a01a7ed998e8953c6414b6406bd13038ce2505d14c212ad # shrinks to input = _LeTransitiveArgs { x: TinyText("0"), y: ByteArray([]), z: TinyText(" ") }
+cc b84fe58dd316c1051d2e805a94bb021b8468d949b7316a7d0dddd825a6013ea0 # shrinks to input = _DualArgs { x: Double(-3.62723322865956e-100, 0), y: Float(-0.0, 0) }
+cc a9bfa6a0c5d4e1b911c723a5d9a4ddf4a093b0d665cb6208b3aab0d0152ff3c2 # shrinks to input = _DualArgs { x: Float(0.0, 0), y: Numeric(0) }
+cc d9a8a4a3d0d215a47e05f4685a653445309038deeab6f626b43780a60e9b6d53 # shrinks to input = _LeTransitiveArgs { x: Numeric(108965643128060833200), y: Float(0.0, 0), z: UnsignedBigInt(1) }
+cc 3b1d5aa7937a10f844e1bdf836a8d680bf5ee99ed35bfbd339a4054e94d8d9b9 # shrinks to input = _GtTransitiveArgs { x: Float(0.0, 0), y: Numeric(-1), z: Numeric(-9223372036854775808) }
+cc f4e5b2c391fd8daea8b4939fe3de57e0441a04c5302b8be6132760e0945b6751 # shrinks to input = _LeTransitiveArgs { x: Numeric(-9223372036854775808), y: Int(0), z: Float(1.7967945e-19, 0) }
+cc 4da71033bde8254c25b53e3396af3bbec5b25781c54be1bc3c3c5e39ff3627d7 # shrinks to input = _LeTransitiveArgs { x: Numeric(0), y: UnsignedBigInt(1), z: Float(1.1769156e31, 0) }
+cc e1ea040e33dd9b8a77eefbe42c31f0cf4d4f6999aa03491b1cf9e9ebc001aee8 # shrinks to input = _GtTransitiveArgs { x: Float(3.2947116e37, 0), y: UnsignedInt(8593453), z: Numeric(0) }
+cc b04dabb8fdec40b933a0c69c765835f2efac00d7b54496a1c7c8662933173909 # shrinks to input = _GtTransitiveArgs { x: Numeric(0), y: Double(1.1359784972847664e87, 0), z: UnsignedInt(0) }
+cc e4b5ed4f5f7af14477e48de9b25db5c96d9076c2d0456ec80a314f387f5f11dd # shrinks to input = _LeTransitiveArgs { x: Double(3.716719178102559e161, 0), y: Numeric(0), z: Int(1) }
+cc d55e1c7e303cca5b804d94ff5852ad1469d2fffa6bda8e519b4434ae2116301e # shrinks to input = _LeTransitiveArgs { x: Int(0), y: Numeric(9223372036854775808), z: Double(-3.7878946860604323e257, 0) }
+cc e9957cf4c60f7616baa9472fe9d0f80cb3549d10497e648bfbfeaae8e02fd2b0 # shrinks to input = _GtTransitiveArgs { x: Int(0), y: Double(-1.4349343569398359e237, 0), z: Numeric(9223372036854775808) }
+cc 393b504d56573e2bf87d3241bcdc012ed597497fbd61a62008555c1d32c1798b # shrinks to input = _MatchesEqArgs { x: None, y: Max }
+cc 8435c0ede858eda337ff5755eac4f4b3a6e84cce57660c509b4e94966eb32674

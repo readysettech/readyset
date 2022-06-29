@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 7a57486e2cea57e056c23d369922be8ff2d77a1aadd928e9755de97d1e212e82 # shrinks to input = _LeTransitiveArgs { x: Array { lower_bounds: [], contents: Numeric(0), shape=[], strides=[], layout=CFcf (0xf), dynamic ndim=0 }, y: Array { lower_bounds: [], contents: Int(1), shape=[], strides=[], layout=CFcf (0xf), dynamic ndim=0 }, z: Array { lower_bounds: [], contents: TinyText(""), shape=[], strides=[], layout=CFcf (0xf), dynamic ndim=0 } }

@@ -26,12 +26,14 @@ tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", fe
 triomphe = "0.1"
 uuid = { version = "0.8", features = ["v4"] }
 enum-kinds = "0.5.1"
+ndarray = { version = "0.15.4", features = ["serde"] }
 
 # Local dependencies
 nom-sql = { path = "../../nom-sql" }
 launchpad = { path = "../../launchpad" }
 noria-errors = { path = "../errors" }
 mysql-time = { path = "../../mysql-time" }
+smallvec = { version = "1.9.0", features = ["union", "const_generics", "serde"] }
 
 [dev-dependencies]
 derive_more = "0.99.11"
