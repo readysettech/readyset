@@ -1223,13 +1223,26 @@ pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Fun
     }
 }
 
-// Parses a SQL column identifier in the table.column format
+// Parses a SQL column identifier in the db/schema.table.column format. Currently drops the
+// db/schema field
 pub fn column_identifier_no_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Column> {
     move |i| {
-        let (i, table) = opt(terminated(
+        let (i, id1) = opt(terminated(
             dialect.identifier(),
             delimited(whitespace0, tag("."), whitespace0),
         ))(i)?;
+        let (i, id2) = opt(terminated(
+            dialect.identifier(),
+            delimited(whitespace0, tag("."), whitespace0),
+        ))(i)?;
+        // Do we have a 'db/schema.table.' or 'table.' qualifier?
+        // TODO: use db/schema qualifier
+        let table = match (id1, id2) {
+            (Some(_), Some(t)) => Some(t),
+            // (None, Some(t)) should be unreachable
+            (Some(t), None) | (None, Some(t)) => Some(t),
+            (None, None) => None,
+        };
         let (i, name) = dialect.identifier()(i)?;
         Ok((i, Column { name, table }))
     }
