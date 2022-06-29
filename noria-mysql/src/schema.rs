@@ -126,6 +126,7 @@ pub(crate) fn convert_column(
         SqlType::Varbit(_) => unsupported!("MySQL does not support the bit varying type"),
         SqlType::Serial => MYSQL_TYPE_LONG,
         SqlType::BigSerial => MYSQL_TYPE_LONGLONG,
+        SqlType::Array(_) => unsupported!("MySQL does not support arrays"),
     };
 
     for c in &col.constraints {
