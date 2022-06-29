@@ -71,7 +71,7 @@ cargo run --bin readyset-mysql --features display_literals --release -- --upstre
 **Postgres**
 ```
 cargo run --bin readyset-psql --features display_literals --release -- --upstream-db-url postgresql://postgres:readyset@127.1/readyset  --allow-unauthenticated-connections 
-  --address 0.0.0.0:5433 --deployment <deployment name> --release --prometheus-metrics --query-log --query-log-ad-hoc
+  --address 0.0.0.0:5433 --deployment <deployment name> --prometheus-metrics --query-log --query-log-ad-hoc
 ```
 
 The adapter listens for connections at the address specified in the `address` flag. 
