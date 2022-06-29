@@ -24,6 +24,7 @@ source "amazon-ebs" "readyset-bastion" {
   }
   ami_virtualization_type = local.ami_virtualization_type
   ssh_username            = local.ssh_username
+  ssh_timeout             = local.ssh_timeout
 
   ami_name                  = local.readyset_bastion_ami_name
   ssh_clear_authorized_keys = true

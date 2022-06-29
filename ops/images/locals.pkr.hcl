@@ -11,6 +11,7 @@ locals {
 
   ami_virtualization_type = "hvm"
   ssh_username            = "ubuntu"
+  ssh_timeout             = "10m"
 
   source_region     = "us-east-2"
   ami_regions       = ["us-east-2", "us-east-1", "us-west-2"]

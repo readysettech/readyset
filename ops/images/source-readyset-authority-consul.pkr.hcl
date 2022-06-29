@@ -25,6 +25,7 @@ source "amazon-ebs" "readyset-authority-consul" {
   }
   ami_virtualization_type = local.ami_virtualization_type
   ssh_username            = local.ssh_username
+  ssh_timeout             = local.ssh_timeout
 
   ami_name                  = local.readyset_authority_consul_ami_name
   ssh_clear_authorized_keys = true
