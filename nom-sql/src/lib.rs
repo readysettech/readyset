@@ -10,10 +10,7 @@ pub use sql_identifier::SqlIdentifier;
 
 pub use self::alter::{AlterColumnOperation, AlterTableDefinition, AlterTableStatement};
 pub use self::column::{Column, ColumnConstraint, ColumnSpecification};
-pub use self::common::{
-    Double, FieldDefinitionExpression, FieldReference, Float, IndexType, ItemPlaceholder, Literal,
-    SqlType, TableKey,
-};
+pub use self::common::{FieldDefinitionExpression, FieldReference, IndexType, SqlType, TableKey};
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 pub use self::create::{
     CacheInner, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
@@ -30,6 +27,7 @@ pub use self::expression::{
 };
 pub use self::insert::InsertStatement;
 pub use self::join::{JoinConstraint, JoinOperator, JoinRightSide};
+pub use self::literal::{literal, Double, Float, ItemPlaceholder, Literal};
 pub use self::order::{OrderClause, OrderType};
 pub use self::parser::*;
 pub use self::select::{
@@ -66,6 +64,7 @@ mod expression;
 mod insert;
 mod join;
 mod keywords;
+mod literal;
 mod order;
 mod rename;
 mod select;

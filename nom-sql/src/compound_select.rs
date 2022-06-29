@@ -149,9 +149,9 @@ mod tests {
 
     use super::*;
     use crate::column::Column;
-    use crate::common::{FieldDefinitionExpression, Literal};
+    use crate::common::FieldDefinitionExpression;
     use crate::table::Table;
-    use crate::Expression;
+    use crate::{Expression, Literal};
 
     #[test]
     fn union() {
