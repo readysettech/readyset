@@ -2,17 +2,18 @@ use std::str::{self, FromStr};
 
 use bit_vec::BitVec;
 use nom::branch::alt;
-use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_while1};
+use nom::bytes::complete::{tag, tag_no_case, take, take_while1};
 use nom::character::complete::char;
 use nom::character::is_alphanumeric;
 use nom::combinator::{map, map_res, not, opt, peek};
-use nom::error::{ErrorKind, ParseError};
+use nom::error::ErrorKind;
 use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded};
 use nom::IResult;
 use thiserror::Error;
 
 use crate::keywords::{sql_keyword, sql_keyword_or_builtin_function, POSTGRES_NOT_RESERVED};
+use crate::literal::{raw_string_literal, QuotingStyle};
 use crate::SqlIdentifier;
 
 #[inline]
@@ -55,51 +56,6 @@ fn bits(input: &[u8]) -> IResult<&[u8], BitVec> {
             acc
         },
     )(input)
-}
-
-/// String literal value
-fn raw_string_quoted(input: &[u8], is_single_quote: bool) -> IResult<&[u8], Vec<u8>> {
-    // TODO: clean up these assignments. lifetimes and temporary values made it difficult
-    let quote_slice: &[u8] = if is_single_quote { b"\'" } else { b"\"" };
-    let double_quote_slice: &[u8] = if is_single_quote { b"\'\'" } else { b"\"\"" };
-    let backslash_quote: &[u8] = if is_single_quote { b"\\\'" } else { b"\\\"" };
-    delimited(
-        tag(quote_slice),
-        fold_many0(
-            alt((
-                is_not(backslash_quote),
-                map(tag(double_quote_slice), |_| -> &[u8] {
-                    if is_single_quote {
-                        b"\'"
-                    } else {
-                        b"\""
-                    }
-                }),
-                map(tag("\\\\"), |_| &b"\\"[..]),
-                map(tag("\\b"), |_| &b"\x7f"[..]),
-                map(tag("\\r"), |_| &b"\r"[..]),
-                map(tag("\\n"), |_| &b"\n"[..]),
-                map(tag("\\t"), |_| &b"\t"[..]),
-                map(tag("\\0"), |_| &b"\0"[..]),
-                map(tag("\\Z"), |_| &b"\x1A"[..]),
-                preceded(tag("\\"), take(1usize)),
-            )),
-            Vec::new,
-            |mut acc: Vec<u8>, bytes: &[u8]| {
-                acc.extend(bytes);
-                acc
-            },
-        ),
-        tag(quote_slice),
-    )(input)
-}
-
-fn raw_string_single_quoted(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
-    raw_string_quoted(i, true)
-}
-
-fn raw_string_double_quoted(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
-    raw_string_quoted(i, false)
 }
 
 /// Specification for a SQL dialect to use when parsing
@@ -198,26 +154,31 @@ impl Dialect {
         }
     }
 
+    /// Returns the [`QuotingStyle`] for this dialect
+    pub fn quoting_style(self) -> QuotingStyle {
+        match self {
+            Dialect::PostgreSQL => QuotingStyle::Single,
+            Dialect::MySQL => QuotingStyle::SingleOrDouble,
+        }
+    }
+
     /// Parse the raw (byte) content of a string literal using this Dialect
     pub fn string_literal(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], Vec<u8>> {
         move |i| match self {
-            Dialect::PostgreSQL => raw_string_single_quoted(i),
+            Dialect::PostgreSQL => raw_string_literal(self.quoting_style())(i),
             Dialect::MySQL => preceded(
                 opt(alt((tag("_utf8mb4"), tag("_utf8"), tag("_binary")))),
-                alt((raw_string_single_quoted, raw_string_double_quoted)),
+                raw_string_literal(self.quoting_style()),
             )(i),
         }
     }
 
-    pub fn utf8_string_literal(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], String> {
+    pub fn utf8_string_literal(self) -> impl Fn(&[u8]) -> IResult<&[u8], String> {
         move |i| {
-            let (remaining, bytes) = self.string_literal()(i)?;
-            Ok((
-                remaining,
-                String::from_utf8(bytes).map_err(|_| {
-                    nom::Err::Error(ParseError::from_error_kind(i, ErrorKind::Many0))
-                })?,
-            ))
+            map_res(self.string_literal(), |bytes| {
+                String::from_utf8(bytes)
+                    .map_err(|_| nom::Err::Error(nom::error::Error::new(i, ErrorKind::Fail)))
+            })(i)
         }
     }
 

@@ -12,10 +12,12 @@ use launchpad::arbitrary::{
     arbitrary_positive_naive_date, arbitrary_timestamp_naive_date_time, arbitrary_uuid,
 };
 use nom::branch::alt;
-use nom::bytes::complete::{tag, tag_no_case};
+use nom::bytes::complete::{is_not, tag, tag_no_case, take};
 use nom::character::complete::digit1;
-use nom::combinator::{map, map_res, opt, peek, recognize};
-use nom::sequence::{pair, preceded, tuple};
+use nom::combinator::{map, map_parser, map_res, opt, peek, recognize};
+use nom::error::ErrorKind;
+use nom::multi::fold_many0;
+use nom::sequence::{delimited, pair, preceded, tuple};
 use nom::IResult;
 use proptest::strategy::Strategy;
 use rust_decimal::Decimal;
@@ -303,19 +305,10 @@ impl Literal {
 
 // Integer literal value
 pub fn integer_literal(i: &[u8]) -> IResult<&[u8], Literal> {
-    map(
-        pair(
-            opt(tag("-")),
-            map_res(map_res(digit1, str::from_utf8), i64::from_str),
-        ),
-        |tup| {
-            let mut intval = tup.1;
-            if (tup.0).is_some() {
-                intval *= -1;
-            }
-            Literal::Integer(intval)
-        },
-    )(i)
+    let (i, sign) = opt(tag("-"))(i)?;
+    let (i, num) = map_parser(digit1, nom::character::complete::u64)(i)?;
+    let num = num as i64;
+    Ok((i, Literal::Integer(if sign.is_some() { -num } else { num })))
 }
 
 #[allow(clippy::type_complexity)]
@@ -348,18 +341,88 @@ fn boolean_literal(i: &[u8]) -> IResult<&[u8], Literal> {
     ))(i)
 }
 
-// Any literal value.
-pub fn literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
+/// String literal value
+fn raw_string_quoted(
+    quote: &'static [u8],
+    escape_quote: &'static [u8],
+) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<u8>> {
+    move |i| {
+        delimited(
+            tag(quote),
+            fold_many0(
+                alt((
+                    is_not(escape_quote),
+                    map(pair(tag(quote), tag(quote)), |_| quote),
+                    map(tag("\\\\"), |_| &b"\\"[..]),
+                    map(tag("\\b"), |_| &b"\x7f"[..]),
+                    map(tag("\\r"), |_| &b"\r"[..]),
+                    map(tag("\\n"), |_| &b"\n"[..]),
+                    map(tag("\\t"), |_| &b"\t"[..]),
+                    map(tag("\\0"), |_| &b"\0"[..]),
+                    map(tag("\\Z"), |_| &b"\x1A"[..]),
+                    preceded(tag("\\"), take(1usize)),
+                )),
+                Vec::new,
+                |mut acc: Vec<u8>, bytes: &[u8]| {
+                    acc.extend(bytes);
+                    acc
+                },
+            ),
+            tag(quote),
+        )(i)
+    }
+}
+
+fn raw_string_single_quoted(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
+    raw_string_quoted(b"'", b"\\'")(i)
+}
+
+fn raw_string_double_quoted(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
+    raw_string_quoted(b"\"", b"\\\"")(i)
+}
+
+/// Specification for how string literals may be quoted
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuotingStyle {
+    /// String literals are quoted with single quotes (`'`)
+    Single,
+    /// String literals are quoted with double quotes (`"`)
+    Double,
+    /// String literals may be quoted with either single quotes (`'`) or double quotes (`"`)
+    SingleOrDouble,
+}
+
+/// Parse a raw (binary) string literal using the given [`QuotingStyle`]
+pub fn raw_string_literal(
+    quoting_style: QuotingStyle,
+) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<u8>> {
+    move |i| match quoting_style {
+        QuotingStyle::Single => raw_string_single_quoted(i),
+        QuotingStyle::Double => raw_string_double_quoted(i),
+        QuotingStyle::SingleOrDouble => {
+            alt((raw_string_single_quoted, raw_string_double_quoted))(i)
+        }
+    }
+}
+
+/// Parse a utf8 string literal using the given [`QuotingStyle`]
+pub fn utf8_string_literal(
+    quoting_style: QuotingStyle,
+) -> impl Fn(&[u8]) -> IResult<&[u8], String> {
+    move |i| {
+        map_res(raw_string_literal(quoting_style), |bytes| {
+            String::from_utf8(bytes)
+                .map_err(|_| nom::Err::Error(nom::error::Error::new(i, ErrorKind::Fail)))
+        })(i)
+    }
+}
+
+fn simple_literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
     move |i| {
         alt((
             float_literal,
             integer_literal,
-            map(dialect.string_literal(), |bytes| {
-                match String::from_utf8(bytes) {
-                    Ok(s) => Literal::String(s),
-                    Err(err) => Literal::Blob(err.into_bytes()),
-                }
-            }),
+            boolean_literal,
             map(dialect.bytes_literal(), Literal::ByteArray),
             map(dialect.bitvec_literal(), |bits| {
                 Literal::BitVector(bits.to_bytes())
@@ -370,6 +433,21 @@ pub fn literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
             }),
             map(tag_no_case("current_date"), |_| Literal::CurrentDate),
             map(tag_no_case("current_time"), |_| Literal::CurrentTime),
+        ))(i)
+    }
+}
+
+/// Parser for any literal value, including placeholders
+pub fn literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
+    move |i| {
+        alt((
+            simple_literal(dialect),
+            map(dialect.string_literal(), |bytes| {
+                match String::from_utf8(bytes) {
+                    Ok(s) => Literal::String(s),
+                    Err(err) => Literal::Blob(err.into_bytes()),
+                }
+            }),
             map(tag("?"), |_| {
                 Literal::Placeholder(ItemPlaceholder::QuestionMark)
             }),
@@ -388,6 +466,27 @@ pub fn literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
                 |num| Literal::Placeholder(ItemPlaceholder::DollarNumber(num)),
             ),
             boolean_literal,
+        ))(i)
+    }
+}
+
+/// Parser for a literal value which may be embedded inside of syntactic constructs within another
+/// string literal, such as within the string literal syntax for postgresql arrays, jsonpath
+/// expressions, etc.
+pub fn embedded_literal(
+    dialect: Dialect,
+    quoting_style: QuotingStyle,
+) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
+    move |i| {
+        alt((
+            simple_literal(dialect),
+            map(
+                raw_string_literal(quoting_style),
+                |bytes| match String::from_utf8(bytes) {
+                    Ok(s) => Literal::String(s),
+                    Err(err) => Literal::Blob(err.into_bytes()),
+                },
+            ),
         ))(i)
     }
 }

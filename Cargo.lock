@@ -4018,6 +4018,7 @@ dependencies = [
  "mysql-time",
  "mysql_common",
  "ndarray",
+ "nom 7.1.1",
  "nom-sql",
  "noria-errors",
  "proptest",

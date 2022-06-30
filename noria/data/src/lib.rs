@@ -381,6 +381,11 @@ impl DataType {
 
         match self {
             DataType::None => Ok(DataType::None),
+            DataType::Array(arr) => match ty {
+                SqlType::Array(t) => Ok(DataType::from(arr.clone().coerce_to(t)?)),
+                SqlType::Text => Ok(DataType::from(arr.to_string())),
+                _ => Err(mk_err()),
+            },
             dt if dt.sql_type().as_ref() == Some(ty) => Ok(self.clone()),
             DataType::Text(t) => t.coerce_to(ty),
             DataType::TinyText(tt) => tt.coerce_to(ty),
@@ -408,9 +413,7 @@ impl DataType {
                 },
                 _ => Err(mk_err()),
             },
-            DataType::Time(_) | DataType::ByteArray(_) | DataType::Array(_) | DataType::Max => {
-                Err(mk_err())
-            }
+            DataType::Time(_) | DataType::ByteArray(_) | DataType::Max => Err(mk_err()),
         }
     }
 
@@ -3122,6 +3125,7 @@ mod tests {
         use launchpad::arbitrary::{
             arbitrary_naive_date, arbitrary_naive_date_time, arbitrary_naive_time,
         };
+        use ndarray::{ArrayD, IxDyn};
         use test_strategy::proptest;
         use SqlType::*;
 
@@ -3374,5 +3378,64 @@ mod tests {
         bool_conversion!(u32_to_bool, u32);
         bool_conversion!(i64_to_bool, i64);
         bool_conversion!(u64_to_bool, u64);
+
+        #[test]
+        fn string_to_array() {
+            let input = DataType::from(r#"{"a", "b", "c"}"#);
+            let res = input
+                .coerce_to(&SqlType::Array(Box::new(SqlType::Text)))
+                .unwrap();
+            assert_eq!(
+                res,
+                DataType::from(vec![
+                    DataType::from("a"),
+                    DataType::from("b"),
+                    DataType::from("c"),
+                ])
+            )
+        }
+
+        #[test]
+        fn array_coercing_values() {
+            let input = DataType::from(r#"{1, 2, 3}"#);
+            let res = input
+                .coerce_to(&SqlType::Array(Box::new(SqlType::Text)))
+                .unwrap();
+            assert_eq!(
+                res,
+                DataType::from(vec![
+                    DataType::from("1"),
+                    DataType::from("2"),
+                    DataType::from("3"),
+                ])
+            )
+        }
+
+        #[test]
+        fn two_d_array_coercing_values() {
+            let input = DataType::from(r#"[0:1][0:1]={{1, 2}, {3, 4}}"#);
+            let res = input
+                .coerce_to(&SqlType::Array(Box::new(SqlType::Text)))
+                .unwrap();
+            assert_eq!(
+                res,
+                DataType::from(
+                    crate::Array::from_lower_bounds_and_contents(
+                        vec![0, 0],
+                        ArrayD::from_shape_vec(
+                            IxDyn(&[2, 2]),
+                            vec![
+                                DataType::from("1"),
+                                DataType::from("2"),
+                                DataType::from("3"),
+                                DataType::from("4"),
+                            ]
+                        )
+                        .unwrap()
+                    )
+                    .unwrap()
+                )
+            )
+        }
     }
 }

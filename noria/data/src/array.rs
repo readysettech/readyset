@@ -1,7 +1,10 @@
 use std::cmp::Ordering;
 use std::fmt::{self, Display};
+use std::str::FromStr;
 
 use ndarray::{ArrayBase, ArrayD, Data, IxDyn, RawData};
+use nom_sql::SqlType;
+use noria_errors::{invalid_err, ReadySetError, ReadySetResult};
 use proptest::arbitrary::Arbitrary;
 use proptest::prop_oneof;
 use serde::{Deserialize, Serialize};
@@ -32,6 +35,31 @@ pub struct Array {
 }
 
 impl Array {
+    /// Construct an [`Array`] from the given contents, and list of lower bounds for each of the
+    /// dimensions in contents.
+    ///
+    /// If `lower_bounds` does not have the same length as the number of contents, returns an error
+    #[inline]
+    pub fn from_lower_bounds_and_contents<L>(
+        lower_bounds: L,
+        contents: ArrayD<DataType>,
+    ) -> ReadySetResult<Self>
+    where
+        L: Into<SmallVec<[i32; 2]>>,
+    {
+        let lower_bounds = lower_bounds.into();
+        if lower_bounds.len() != contents.ndim() {
+            return Err(invalid_err(
+                "Specified array dimensions do not match array contents",
+            ));
+        }
+
+        Ok(Self {
+            lower_bounds,
+            contents,
+        })
+    }
+
     /// Returns the number of dimensions in the array.
     ///
     /// This function will never return 0
@@ -57,10 +85,42 @@ impl Array {
         self.contents.get(ixs.as_slice())
     }
 
-    /// Returns an iterator over all the values in the array, iterating the innermost dimension
-    /// first.
+    /// Returns an iterator over references to all the values in the array, iterating the innermost
+    /// dimension first.
     pub fn values(&self) -> impl Iterator<Item = &DataType> + '_ {
         self.contents.iter()
+    }
+
+    /// Returns an iterator over mutable references to all the values in the array, iterating the
+    /// innermost dimension first
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut DataType> + '_ {
+        self.contents.iter_mut()
+    }
+
+    /// Coerce the values within this array to the given new member type, which can either be an
+    /// arbitrarily-nested array type or a scalar type
+    pub(crate) fn coerce_to(&self, new_member_type: &SqlType) -> ReadySetResult<Self> {
+        // Postgresql doesn't validate array nesting levels in type cast expressions:
+        //
+        // localhost/postgres=# select '[-1:0][3:4]={{1,2},{3,4}}'::int[][][];
+        //            int4
+        // ---------------------------
+        //  [-1:0][3:4]={{1,2},{3,4}}
+        // (1 row)
+
+        fn innermost_array_type(ty: &SqlType) -> &SqlType {
+            match ty {
+                SqlType::Array(t) => innermost_array_type(t),
+                t => t,
+            }
+        }
+
+        let mut arr = self.clone();
+        let new_member_type = innermost_array_type(new_member_type);
+        for v in arr.values_mut() {
+            *v = v.coerce_to(new_member_type)?;
+        }
+        Ok(arr)
     }
 }
 
@@ -123,6 +183,32 @@ impl Display for Array {
     }
 }
 
+impl FromStr for Array {
+    type Err = ReadySetError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mk_err = |message| ReadySetError::ArrayParseError {
+            input: s.to_owned(),
+            message,
+        };
+
+        let (rem, res) = parse::array(s.as_bytes()).map_err(|e| {
+            mk_err(match e {
+                nom::Err::Incomplete(n) => format!("Incomplete input; needed {:?}", n),
+                nom::Err::Error(nom::error::Error { input, code })
+                | nom::Err::Failure(nom::error::Error { input, code }) => {
+                    format!("{:?}: at {}", code, String::from_utf8_lossy(input))
+                }
+            })
+        })?;
+        if !rem.is_empty() {
+            return Err(mk_err("Junk after closing right brace".to_string()));
+        }
+
+        Ok(res)
+    }
+}
+
 impl Arbitrary for Array {
     type Parameters = ();
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
@@ -172,9 +258,178 @@ impl From<ArrayD<DataType>> for Array {
     }
 }
 
+mod parse {
+    use std::iter;
+
+    use ndarray::{ArrayD, IxDyn};
+    use nom::branch::alt;
+    use nom::bytes::complete::tag;
+    use nom::character::complete::{digit1, multispace0};
+    use nom::combinator::{map, map_parser, opt, peek};
+    use nom::error::ErrorKind;
+    use nom::multi::{many1, separated_list1};
+    use nom::sequence::{delimited, preceded, terminated, tuple};
+    use nom::IResult;
+    use nom_sql::{embedded_literal, Dialect, QuotingStyle};
+
+    use super::Array;
+    use crate::DataType;
+
+    enum ArrayOrNested {
+        Array(Vec<DataType>),
+        Nested(Vec<ArrayOrNested>),
+    }
+
+    struct Bounds(Vec<(i32, i32)>);
+
+    impl ArrayOrNested {
+        fn shape(&self) -> Result<Vec<usize>, &'static str> {
+            match self {
+                ArrayOrNested::Array(vs) => Ok(vec![vs.len()]),
+                ArrayOrNested::Nested(n) => {
+                    let mut n_iter = n.iter();
+                    let dims = match n_iter.next() {
+                        Some(next) => next.shape()?,
+                        None => return Ok(vec![0]),
+                    };
+
+                    for next in n_iter {
+                        if next.shape()? != dims {
+                            return Err(
+                                "Multidimensional arrays must have sub-arrays with matching \
+                                 dimensions.",
+                            );
+                        }
+                    }
+
+                    Ok(iter::once(n.len()).chain(dims).collect())
+                }
+            }
+        }
+
+        fn flatten(self) -> Vec<DataType> {
+            let mut out = vec![];
+            fn flatten_inner(aon: ArrayOrNested, out: &mut Vec<DataType>) {
+                match aon {
+                    ArrayOrNested::Array(vs) => out.extend(vs),
+                    ArrayOrNested::Nested(ns) => {
+                        for nested in ns {
+                            flatten_inner(nested, out)
+                        }
+                    }
+                }
+            }
+            flatten_inner(self, &mut out);
+            out
+        }
+    }
+
+    pub(super) fn array(i: &[u8]) -> IResult<&[u8], Array> {
+        let fail = || nom::Err::Error(nom::error::Error::new(i, ErrorKind::Fail));
+
+        let (i, _) = multispace0(i)?;
+        let (i, bounds) = opt(terminated(
+            bounds,
+            delimited(multispace0, tag("="), multispace0),
+        ))(i)?;
+        let (i, aon) = array_or_nested(i)?;
+        let (i, _) = multispace0(i)?;
+
+        let shape = aon.shape().map_err(|_e| fail())?;
+
+        let lower_bounds = if let Some(Bounds(bounds)) = bounds {
+            if bounds.len() != shape.len() {
+                return Err(fail());
+            }
+
+            for ((lower, upper), actual_length) in bounds.iter().zip(&shape) {
+                if *upper < *lower {
+                    return Err(fail());
+                }
+
+                if ((*upper - *lower) as usize + 1) != *actual_length {
+                    return Err(fail());
+                }
+            }
+
+            bounds.iter().map(|(lb, _)| *lb).collect()
+        } else {
+            vec![1; shape.len()]
+        };
+
+        let vals = aon.flatten();
+
+        Ok((
+            i,
+            Array::from_lower_bounds_and_contents(
+                lower_bounds,
+                ArrayD::from_shape_vec(IxDyn(&shape), vals).expect("Already validated shape"),
+            )
+            .expect("Already validated lower bounds"),
+        ))
+    }
+
+    fn bounds(i: &[u8]) -> IResult<&[u8], Bounds> {
+        map(
+            many1(delimited(multispace0, single_dimension_bounds, multispace0)),
+            Bounds,
+        )(i)
+    }
+
+    fn single_dimension_bounds(i: &[u8]) -> IResult<&[u8], (i32, i32)> {
+        // intentionally no spaces here, as postgresql doesn't allow spaces within bounds
+        let (i, _) = tag("[")(i)?;
+        let (i, lower) = bound_value(i)?;
+        let (i, _) = tag(":")(i)?;
+        let (i, upper) = bound_value(i)?;
+        let (i, _) = tag("]")(i)?;
+        Ok((i, (lower, upper)))
+    }
+
+    fn bound_value(i: &[u8]) -> IResult<&[u8], i32> {
+        let (i, sign) = opt(tag("-"))(i)?;
+        let (i, num) = map_parser(digit1, nom::character::complete::i32)(i)?;
+        Ok((i, if sign.is_some() { -num } else { num }))
+    }
+
+    fn array_or_nested(i: &[u8]) -> IResult<&[u8], ArrayOrNested> {
+        let (i, _) = multispace0(i)?;
+        let (i, _) = tag("{")(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, res) = alt((
+            map(
+                separated_list1(tuple((multispace0, tag(","), multispace0)), literal),
+                ArrayOrNested::Array,
+            ),
+            map(
+                separated_list1(tuple((multispace0, tag(","), multispace0)), array_or_nested),
+                ArrayOrNested::Nested,
+            ),
+            map(peek(preceded(multispace0, tag("}"))), |_| {
+                ArrayOrNested::Array(vec![])
+            }),
+        ))(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, _) = tag("}")(i)?;
+        let (i, _) = multispace0(i)?;
+        Ok((i, res))
+    }
+
+    fn literal(i: &[u8]) -> IResult<&[u8], DataType> {
+        map(
+            embedded_literal(Dialect::PostgreSQL, QuotingStyle::Double),
+            |lit| {
+                DataType::try_from(lit)
+                    .expect("Only parsing literals that can be converted to DataType")
+            },
+        )(i)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use launchpad::ord_laws;
+    use test_strategy::proptest;
 
     use super::*;
 
@@ -278,5 +533,98 @@ mod tests {
         };
 
         assert_eq!(arr.to_string(), "[-5:-4][4:6]={{1,2,3},{4,5,6}}");
+    }
+
+    #[test]
+    fn parse_1d_int_array() {
+        let arr = Array::from_str("{1,2 , 3} ").unwrap();
+        assert_eq!(
+            arr,
+            Array::from(vec![
+                DataType::from(1),
+                DataType::from(2),
+                DataType::from(3)
+            ])
+        );
+    }
+
+    #[test]
+    #[ignore = "ENG-1416"]
+    fn parse_array_big_int() {
+        let arr = Array::from_str("{9223372036854775808}").unwrap();
+        assert_eq!(
+            arr,
+            Array::from(vec![DataType::from(9223372036854775808_u64)])
+        );
+    }
+
+    #[test]
+    fn parse_2d_int_array() {
+        let arr = Array::from_str("{{1,2} , {3, 4 }} ").unwrap();
+        assert_eq!(
+            arr,
+            Array::from(
+                ArrayD::from_shape_vec(
+                    IxDyn(&[2, 2]),
+                    vec![
+                        DataType::from(1),
+                        DataType::from(2),
+                        DataType::from(3),
+                        DataType::from(4),
+                    ]
+                )
+                .unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn parse_2d_string_array() {
+        let arr = Array::from_str(r#"{{"a","b"},  { "c" ,  "d"}}"#).unwrap();
+        assert_eq!(
+            arr,
+            Array::from(
+                ArrayD::from_shape_vec(
+                    IxDyn(&[2, 2]),
+                    vec![
+                        DataType::from("a"),
+                        DataType::from("b"),
+                        DataType::from("c"),
+                        DataType::from("d"),
+                    ]
+                )
+                .unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn parse_2d_int_array_with_alt_lower_bounds() {
+        let arr = Array::from_str("[-1:0][3:4]={{1,2} , {3, 4 }} ").unwrap();
+        assert_eq!(
+            arr,
+            Array::from_lower_bounds_and_contents(
+                vec![-1, 3],
+                ArrayD::from_shape_vec(
+                    IxDyn(&[2, 2]),
+                    vec![
+                        DataType::from(1),
+                        DataType::from(2),
+                        DataType::from(3),
+                        DataType::from(4),
+                    ]
+                )
+                .unwrap()
+            )
+            .unwrap()
+        );
+    }
+
+    #[proptest]
+    #[ignore = "DataType <-> Literal doesn't round trip (ENG-1416)"]
+    fn display_parse_round_trip(arr: Array) {
+        let s = arr.to_string();
+        let res = Array::from_str(&s).unwrap();
+        assert_eq!(res, arr);
     }
 }

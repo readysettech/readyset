@@ -27,6 +27,7 @@ triomphe = "0.1"
 uuid = { version = "0.8", features = ["v4"] }
 enum-kinds = "0.5.1"
 ndarray = { version = "0.15.4", features = ["serde"] }
+nom = "7.1"
 
 # Local dependencies
 nom-sql = { path = "../../nom-sql" }
