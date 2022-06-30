@@ -1280,3 +1280,11 @@ async fn show_readyset_status() {
     let conn = connect(opts).await;
     assert!(conn.simple_query("SHOW READYSET STATUS;").await.is_ok())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn schema_qualifier() {
+    let (opts, _handle) = setup(true).await;
+    let conn = connect(opts).await;
+    conn.simple_query("CREATE TABLE t (a int)").await.unwrap();
+    assert!(conn.simple_query("SELECT public.t.a from t").await.is_ok());
+}
