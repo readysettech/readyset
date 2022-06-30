@@ -561,6 +561,10 @@ pub enum ReadySetError {
     /// Error when calling a [`jemalloc_ctl`] API
     #[error("Error from jemalloc_ctl: {0}")]
     JemallocCtlError(String),
+
+    /// Error when parsing a string as a literal for an array value
+    #[error("Malformed array literal '{}': {}", Sensitive(&input), message)]
+    ArrayParseError { input: String, message: String },
 }
 
 impl ReadySetError {

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 /// Wraps a type that implements Display and Debug, overriding both implementations if the
 /// `redact_literals` feature is enabled
-pub struct Sensitive<'a, T>(pub &'a T);
+pub struct Sensitive<'a, T: ?Sized>(pub &'a T);
 
 impl<'a, T> Display for Sensitive<'a, T>
 where

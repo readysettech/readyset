@@ -27,7 +27,10 @@ pub use self::expression::{
 };
 pub use self::insert::InsertStatement;
 pub use self::join::{JoinConstraint, JoinOperator, JoinRightSide};
-pub use self::literal::{literal, Double, Float, ItemPlaceholder, Literal};
+pub use self::literal::{
+    embedded_literal, literal, raw_string_literal, utf8_string_literal, Double, Float,
+    ItemPlaceholder, Literal, QuotingStyle,
+};
 pub use self::order::{OrderClause, OrderType};
 pub use self::parser::*;
 pub use self::select::{
