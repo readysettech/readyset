@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 pub use nom_sql::{BinaryOperator, Literal, SqlType};
+use noria_data::noria_type::Type;
 use noria_errors::{invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
@@ -39,7 +40,26 @@ impl Aggregation {
         src: NodeIndex,
         over: usize,
         group_by: &[usize],
+        over_col_ty: &Type,
     ) -> ReadySetResult<GroupedOperator<Aggregator>> {
+        let out_ty = match &self {
+            Aggregation::Count { .. } => Some(SqlType::Bigint(None)),
+            // The SUM() and AVG() functions return a DECIMAL value for exact-value arguments
+            // (integer or DECIMAL), and a DOUBLE value for approximate-value arguments (FLOAT or
+            // DOUBLE).
+            Aggregation::Sum | Aggregation::Avg => {
+                if matches!(
+                    over_col_ty,
+                    Type::Sql(SqlType::Float) | Type::Sql(SqlType::Double)
+                ) {
+                    Some(SqlType::Double)
+                } else {
+                    Some(SqlType::Decimal(64, 64))
+                }
+            }
+            Aggregation::GroupConcat { .. } => Some(SqlType::Text),
+        };
+
         Ok(GroupedOperator::new(
             src,
             Aggregator {
@@ -48,6 +68,7 @@ impl Aggregation {
                 group: group_by.into(),
                 count_sum_map: RefCell::new(Default::default()),
                 over_else: None,
+                out_ty,
             },
         ))
     }
@@ -90,6 +111,8 @@ pub struct Aggregator {
     #[serde(skip)]
     count_sum_map: RefCell<HashMap<GroupHash, AverageDataPair>>,
     over_else: Option<Literal>,
+    // Output type of this column
+    out_ty: Option<SqlType>,
 }
 
 /// Diff type for numerical aggregations.
@@ -142,6 +165,16 @@ impl Aggregator {
         }
         hasher.finish()
     }
+
+    fn new_data(&self) -> ReadySetResult<DataType> {
+        match &self.out_ty {
+            Some(SqlType::Bigint(_)) => Ok(DataType::Int(0)),
+            Some(SqlType::Double) => Ok(DataType::Double(0.)),
+            Some(SqlType::Decimal(_, _)) => Ok(DataType::Numeric(Default::default())),
+            Some(SqlType::Text) => Ok(DataType::from("")),
+            _ => internal!(),
+        }
+    }
 }
 
 impl GroupedOperation for Aggregator {
@@ -152,6 +185,7 @@ impl GroupedOperation for Aggregator {
             self.over < parent.columns().len(),
             "cannot aggregate over non-existing column"
         );
+
         Ok(())
     }
 
@@ -222,7 +256,7 @@ impl GroupedOperation for Aggregator {
 
         diffs
             .fold(
-                Ok(current.unwrap_or(&DataType::Int(0)).deep_clone()),
+                Ok(current.unwrap_or(&self.new_data()?).deep_clone()),
                 apply_diff,
             )
             .map(Some)
@@ -259,13 +293,8 @@ impl GroupedOperation for Aggregator {
         self.over
     }
 
-    fn output_col_type(&self) -> Option<nom_sql::SqlType> {
-        match self.op {
-            Aggregation::Count { .. } => Some(SqlType::Bigint(None)),
-            // (atsakiris) not sure if this is the right type? float?
-            Aggregation::Avg => Some(SqlType::Decimal(64, 64)),
-            _ => None, // Sum can be either an int or float.
-        }
+    fn output_col_type(&self) -> Option<SqlType> {
+        self.out_ty.clone()
     }
 
     fn empty_value(&self) -> Option<DataType> {
@@ -300,7 +329,9 @@ mod tests {
         g.set_op(
             "identity",
             &["x", "ys"],
-            aggregation.over(s.as_global(), 1, &[0]).unwrap(),
+            aggregation
+                .over(s.as_global(), 1, &[0], &Type::Sql(SqlType::Double))
+                .unwrap(),
             mat,
         );
         g
@@ -312,7 +343,9 @@ mod tests {
         g.set_op(
             "identity",
             &["x", "z", "ys"],
-            aggregation.over(s.as_global(), 1, &[0, 2]).unwrap(),
+            aggregation
+                .over(s.as_global(), 1, &[0, 2], &Type::Sql(SqlType::Double))
+                .unwrap(),
             mat,
         );
         g
@@ -323,14 +356,18 @@ mod tests {
         let src = 0.into();
 
         let c = Aggregation::Count { count_nulls: false }
-            .over(src, 1, &[0, 2])
+            .over(src, 1, &[0, 2], &Type::Unknown)
             .unwrap();
         assert_eq!(c.description(true), "|*| γ[0, 2]");
 
-        let s = Aggregation::Sum.over(src, 1, &[2, 0]).unwrap();
+        let s = Aggregation::Sum
+            .over(src, 1, &[2, 0], &Type::Unknown)
+            .unwrap();
         assert_eq!(s.description(true), "𝛴(1) γ[2, 0]");
 
-        let a = Aggregation::Avg.over(src, 1, &[2, 0]).unwrap();
+        let a = Aggregation::Avg
+            .over(src, 1, &[2, 0], &Type::Unknown)
+            .unwrap();
         assert_eq!(a.description(true), "Avg(1) γ[2, 0]");
     }
 
@@ -496,7 +533,7 @@ mod tests {
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], 2.into());
+                assert_eq!(r[1], (2.).try_into().unwrap());
             }
             _ => unreachable!(),
         }
@@ -511,7 +548,7 @@ mod tests {
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 2.into());
-                assert_eq!(r[1], 5.into());
+                assert_eq!(r[1], (5.).try_into().unwrap());
             }
             _ => unreachable!(),
         }
@@ -526,14 +563,14 @@ mod tests {
         match rs.next().unwrap() {
             Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], 2.into());
+                assert_eq!(r[1], (2.).try_into().unwrap());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], 5.into());
+                assert_eq!(r[1], (5.).try_into().unwrap());
             }
             _ => unreachable!(),
         }
@@ -548,14 +585,14 @@ mod tests {
         match rs.next().unwrap() {
             Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], 5.into());
+                assert_eq!(r[1], (5.).try_into().unwrap());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], 3.into());
+                assert_eq!(r[1], (3.).try_into().unwrap());
             }
             _ => unreachable!(),
         }
@@ -583,27 +620,27 @@ mod tests {
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 5);
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-            r[0] == 1.into() && r[1] == 3.into()
+            r[0] == 1.into() && r[1] == (3.).try_into().unwrap()
         } else {
             false
         }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-            r[0] == 1.into() && r[1] == 8.into()
+            r[0] == 1.into() && r[1] == (8.).try_into().unwrap()
         } else {
             false
         }));
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
-            r[0] == 2.into() && r[1] == 5.into()
+            r[0] == 2.into() && r[1] == (5.).try_into().unwrap()
         } else {
             false
         }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-            r[0] == 2.into() && r[1] == 4.into()
+            r[0] == 2.into() && r[1] == (4.).try_into().unwrap()
         } else {
             false
         }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-            r[0] == 3.into() && r[1] == 3.into()
+            r[0] == 3.into() && r[1] == (3.).try_into().unwrap()
         } else {
             false
         }));

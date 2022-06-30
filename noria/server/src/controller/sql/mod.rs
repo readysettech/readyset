@@ -3163,8 +3163,8 @@ mod tests {
             g.node_indices().for_each(|idx| {
                 if matches!(g[idx].as_internal(), Some(NodeOperator::Aggregation(_))) {
                     let truth = vec![
-                        &Type::Sql(SqlType::Bigint(None)), // bogokey
-                        &Type::Sql(SqlType::Int(None)),    // sum(t1.a)
+                        &Type::Sql(SqlType::Bigint(None)),    // bogokey
+                        &Type::Sql(SqlType::Decimal(64, 64)), // sum(t1.a)
                     ];
                     let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
                     assert_eq!(truth, types);

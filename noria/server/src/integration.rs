@@ -38,6 +38,7 @@ use noria::{
 use noria_data::noria_type::Type;
 use noria_data::DataType;
 use noria_errors::ReadySetError::{MigrationPlanFailed, RpcFailed, SelectQueryCreationFailed};
+use rust_decimal::prelude::ToPrimitive;
 use rusty_fork::rusty_fork_test;
 use tempfile::TempDir;
 use test_utils::skip_with_flaky_finder;
@@ -1354,7 +1355,7 @@ async fn mutator_churn() {
                 "votecount",
                 make_columns(&["id", "votes"]),
                 Aggregation::Count { count_nulls: false }
-                    .over(vote, 0, &[1])
+                    .over(vote, 0, &[1], &Type::Unknown)
                     .unwrap(),
             );
 
@@ -1796,7 +1797,7 @@ async fn votes() {
                 "vc",
                 make_columns(&["id", "votes"]),
                 Aggregation::Count { count_nulls: false }
-                    .over(vote, 0, &[1])
+                    .over(vote, 0, &[1], &Type::Unknown)
                     .unwrap(),
             );
             mig.maintain_anonymous(vc, &Index::hash_map(vec![0]));
@@ -2417,7 +2418,7 @@ async fn cascading_replays_with_sharding() {
             // aggregate over the join. this will force a shard merger to be inserted because the
             // group-by column ("f2") isn't the same as the join's output sharding column ("f1"/"u")
             let a = Aggregation::Count { count_nulls: false }
-                .over(j, 0, &[2])
+                .over(j, 0, &[2], &Type::Unknown)
                 .unwrap();
             let end = mig.add_ingredient("end", make_columns(&["u", "c"]), a);
             mig.maintain_anonymous(end, &Index::hash_map(vec![0]));
@@ -2536,7 +2537,7 @@ async fn full_aggregation_with_bogokey() {
                 "agg",
                 make_columns(&["bogo", "count"]),
                 Aggregation::Count { count_nulls: false }
-                    .over(bogo, 0, &[1])
+                    .over(bogo, 0, &[1], &Type::Unknown)
                     .unwrap(),
             );
             mig.maintain_anonymous(agg, &Index::hash_map(vec![0]));
@@ -2647,7 +2648,7 @@ async fn materialization_frontier() {
             "votecount",
             make_columns(&["id", "votes"]),
             Aggregation::Count { count_nulls: false }
-                .over(vote, 0, &[1])
+                .over(vote, 0, &[1], &Type::Unknown)
                 .unwrap(),
         );
         mig.mark_shallow(vc);
@@ -2957,7 +2958,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
                 "votecount",
                 make_columns(&["id", "votes"]),
                 Aggregation::Count { count_nulls: false }
-                    .over(vote, 0, &[1])
+                    .over(vote, 0, &[1], &Type::Unknown)
                     .unwrap(),
             );
 
@@ -3013,7 +3014,9 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
             let rs = mig.add_ingredient(
                 "rsum",
                 make_columns(&["id", "total"]),
-                Aggregation::Sum.over(rating, 2, &[1]).unwrap(),
+                Aggregation::Sum
+                    .over(rating, 2, &[1], &Type::Unknown)
+                    .unwrap(),
             );
 
             // join vote count and rsum (and in theory, sum them)
@@ -3057,7 +3060,11 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
             "each article result should have the right id"
         );
         assert_eq!(row[1], title, "all articles should have title 'foo'");
-        assert_eq!(row[2], raten, "all articles should have one 5-star rating");
+        assert_eq!(
+            row[2],
+            DataType::Numeric(Arc::new(5.into())),
+            "all articles should have one 5-star rating"
+        );
         if old_puts_after {
             assert_eq!(row[3], 2.into(), "all articles should have two votes");
         } else {
@@ -3096,7 +3103,7 @@ async fn live_writes() {
                 "votecount",
                 make_columns(&["id", "votes"]),
                 Aggregation::Count { count_nulls: false }
-                    .over(vote, 0, &[1])
+                    .over(vote, 0, &[1], &Type::Unknown)
                     .unwrap(),
             );
 
@@ -3130,7 +3137,7 @@ async fn live_writes() {
             let vc2 = mig.add_ingredient(
                 "votecount2",
                 make_columns(&["id", "votes"]),
-                Aggregation::Sum.over(vc, 1, &[0]).unwrap(),
+                Aggregation::Sum.over(vc, 1, &[0], &Type::Unknown).unwrap(),
             );
             mig.maintain_anonymous(vc2, &Index::hash_map(vec![0]));
             vc2
@@ -3155,7 +3162,7 @@ async fn live_writes() {
         );
         assert_eq!(
             vc2_state.lookup(&[i.into()], true).await.unwrap(),
-            vec![vec![i.into(), votes.into()]]
+            vec![vec![i.into(), DataType::Numeric(Arc::new(votes.into()))]]
         );
     }
 }
@@ -5344,7 +5351,12 @@ async fn overlapping_indices() {
 
     let res = rows
         .into_iter()
-        .map(|r| (get_col!(r, "s", i32), get_col!(r, "id", i32)))
+        .map(|r| {
+            (
+                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "id", i32),
+            )
+        })
         .sorted()
         .collect::<Vec<(i32, i32)>>();
 
@@ -5384,7 +5396,7 @@ async fn aggregate_after_filter_non_equality() {
         .await
         .unwrap()
         .into_iter()
-        .map(|r| get_col!(r, "s", i32))
+        .map(|r| get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap())
         .collect::<Vec<i32>>();
 
     assert_eq!(res, vec![13]);
@@ -5488,7 +5500,12 @@ async fn multiple_aggregate_sum() {
 
     let res = rows
         .into_iter()
-        .map(|r| (get_col!(r, "s1", i32), get_col!(r, "s2", i32)))
+        .map(|r| {
+            (
+                get_col!(r, "s1", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "s2", rust_decimal::Decimal).to_i32().unwrap(),
+            )
+        })
         .sorted()
         .collect::<Vec<(i32, i32)>>();
 
@@ -5529,7 +5546,12 @@ async fn multiple_aggregate_same_col() {
 
     let res = rows
         .into_iter()
-        .map(|r| (get_col!(r, "s", i32), get_col!(r, "a", f64)))
+        .map(|r| {
+            (
+                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "a", f64),
+            )
+        })
         .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
         .collect::<Vec<(i32, f64)>>();
 
@@ -5586,7 +5608,12 @@ async fn multiple_aggregate_sum_sharded() {
 
     let res = rows
         .into_iter()
-        .map(|r| (get_col!(r, "s1", i32), get_col!(r, "s2", i32)))
+        .map(|r| {
+            (
+                get_col!(r, "s1", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "s2", rust_decimal::Decimal).to_i32().unwrap(),
+            )
+        })
         .sorted()
         .collect::<Vec<(i32, i32)>>();
 
@@ -5623,7 +5650,12 @@ async fn multiple_aggregate_same_col_sharded() {
 
     let res = rows
         .into_iter()
-        .map(|r| (get_col!(r, "s", i32), get_col!(r, "a", f64)))
+        .map(|r| {
+            (
+                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "a", f64),
+            )
+        })
         .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
         .collect::<Vec<(i32, f64)>>();
 
@@ -5663,7 +5695,7 @@ async fn multiple_aggregate_over_two() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(r, "s", i32),
+                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
                 get_col!(r, "a", f64),
                 get_col!(r, "c", i32),
                 get_col!(r, "m", i32),
@@ -5709,7 +5741,7 @@ async fn multiple_aggregate_over_two_sharded() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(r, "s", i32),
+                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
                 get_col!(r, "a", f64),
                 get_col!(r, "c", i32),
                 get_col!(r, "m", i32),
@@ -5752,7 +5784,12 @@ async fn multiple_aggregate_with_expressions() {
 
     let res = rows
         .into_iter()
-        .map(|r| (get_col!(r, "s", i32), get_col!(r, "a", f64)))
+        .map(|r| {
+            (
+                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "a", f64),
+            )
+        })
         .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
         .collect::<Vec<(i32, f64)>>();
 
@@ -5790,7 +5827,12 @@ async fn multiple_aggregate_with_expressions_sharded() {
 
     let res = rows
         .into_iter()
-        .map(|r| (get_col!(r, "s", i32), get_col!(r, "a", f64)))
+        .map(|r| {
+            (
+                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "a", f64),
+            )
+        })
         .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
         .collect::<Vec<(i32, f64)>>();
 
@@ -5828,7 +5870,12 @@ async fn multiple_aggregate_reuse() {
 
     let res = rows
         .into_iter()
-        .map(|r| (get_col!(r, "s", i32), get_col!(r, "a", f64)))
+        .map(|r| {
+            (
+                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "a", f64),
+            )
+        })
         .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
         .collect::<Vec<(i32, f64)>>();
 
@@ -5850,7 +5897,12 @@ async fn multiple_aggregate_reuse() {
 
     let res = rows
         .into_iter()
-        .map(|r| (get_col!(r, "s", i32), get_col!(r, "a", i32)))
+        .map(|r| {
+            (
+                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "a", i32),
+            )
+        })
         .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
         .collect::<Vec<(i32, i32)>>();
 
@@ -6298,7 +6350,12 @@ async fn partial_distinct_multi() {
     let rows = q.lookup(&[(0_i32).into()], true).await.unwrap();
     let res = rows
         .into_iter()
-        .map(|r| (get_col!(r, "value", i32), get_col!(r, "s", i32)))
+        .map(|r| {
+            (
+                get_col!(r, "value", i32),
+                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
+            )
+        })
         .sorted()
         .collect::<Vec<(i32, i32)>>();
 
@@ -7509,7 +7566,7 @@ async fn group_by_agg_col_sum() {
 
     let res = rows
         .into_iter()
-        .map(|r| get_col!(r, "s", i32))
+        .map(|r| get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap())
         .sorted()
         .collect::<Vec<i32>>();
 
@@ -7726,7 +7783,11 @@ async fn count_emit_zero() {
         .collect::<Vec<Vec<DataType>>>();
     assert_eq!(
         res,
-        vec![vec![DataType::Int(3), DataType::Int(0), DataType::Int(0)]]
+        vec![vec![
+            DataType::Int(3),
+            DataType::Numeric(Default::default()),
+            DataType::Int(0)
+        ]]
     );
 }
 
