@@ -255,10 +255,7 @@ impl GroupedOperation for Aggregator {
             };
 
         diffs
-            .fold(
-                Ok(current.unwrap_or(&self.new_data()?).deep_clone()),
-                apply_diff,
-            )
+            .fold(Ok(current.cloned().unwrap_or(self.new_data()?)), apply_diff)
             .map(Some)
     }
 
@@ -505,13 +502,16 @@ mod tests {
 
         let u = Record::from(vec![1.into(), 1.into()]);
         let rs = c.narrow_one(u, true);
-        assert_eq!(rs, vec![Record::Positive(vec![1.into(), 1.into()])].into());
+        assert_eq!(
+            rs,
+            vec![Record::Positive(vec![1.into(), 1.into(), 1.into()])].into()
+        );
 
         let del = Record::Negative(vec![1.into(), 1.into()]);
         let del_res = c.narrow_one(del, true);
         assert_eq!(
             del_res,
-            vec![Record::Negative(vec![1.into(), 1.into()])].into()
+            vec![Record::Negative(vec![1.into(), 1.into(), 1.into()])].into()
         );
     }
 
@@ -608,7 +608,7 @@ mod tests {
             (vec![2.into(), 5.into()], false),
             (vec![2.into(), 2.into()], true),
             (vec![2.into(), 2.into()], false),
-            (vec![2.into(), 1.into()], false), // Group 2 gains -1
+            (vec![2.into(), 5.into()], false), // Group 2 loses last row and dissapears
             (vec![3.into(), 3.into()], true),  // Group 3 is new, +3
         ];
 
@@ -618,7 +618,7 @@ mod tests {
 
         // multiple positives and negatives should update aggregation value by appropriate amount
         let rs = c.narrow_one(u, true);
-        assert_eq!(rs.len(), 5);
+        assert_eq!(rs.len(), 4);
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
             r[0] == 1.into() && r[1] == (3.).try_into().unwrap()
         } else {
@@ -631,11 +631,6 @@ mod tests {
         }));
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
             r[0] == 2.into() && r[1] == (5.).try_into().unwrap()
-        } else {
-            false
-        }));
-        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
-            r[0] == 2.into() && r[1] == (4.).try_into().unwrap()
         } else {
             false
         }));

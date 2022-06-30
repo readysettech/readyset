@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -226,7 +225,8 @@ where
         {
             let mut handle_group = |this: &mut Self,
                                     group_rs: ::std::vec::Drain<Record>,
-                                    mut diffs: ::std::vec::Drain<_>|
+                                    mut diffs: ::std::vec::Drain<_>,
+                                    pos_neg_delta: i64|
              -> ReadySetResult<()> {
                 let mut group_rs = group_rs.peekable();
 
@@ -265,15 +265,23 @@ where
                 };
 
                 let old = rs.into_iter().next();
-                // current value is in the last output column
-                // or "" if there is no current group
-                let current = old.as_ref().map(|rows| match rows {
-                    Cow::Borrowed(rs) => Cow::Borrowed(&rs[rs.len() - 1]),
-                    Cow::Owned(rs) => Cow::Owned(rs[rs.len() - 1].clone()),
-                });
+
+                // current value is in the second to last output column  or None if there is no
+                // current group
+                let current = old
+                    .as_ref()
+                    .and_then(|rows| rows.get(rows.len() - 2))
+                    .cloned();
+
+                // current row count for a group is in the last output column or 0 if there is no
+                // current group
+                let rows_in_group: i64 = old
+                    .as_ref()
+                    .and_then(|rows| rows.last().and_then(|v| v.try_into().ok()))
+                    .unwrap_or(0);
 
                 // new is the result of applying all diffs for the group to the current value
-                let new = match this.inner.apply(current.as_deref(), &mut diffs as &mut _)? {
+                let new = match this.inner.apply(current.as_ref(), &mut diffs as &mut _)? {
                     Some(v) => v,
                     None => {
                         // we lost the grouped state, so we need to start afresh.
@@ -339,8 +347,11 @@ where
                             .unwrap_or_else(|| this.inner.empty_value().unwrap_or(DataType::None))
                     }
                 };
+
+                let rows_in_group_new = rows_in_group + pos_neg_delta;
+
                 match current {
-                    Some(ref current) if new == **current => {
+                    Some(ref current) if new == *current && rows_in_group_new > 0 => {
                         // no change
                     }
                     _ => {
@@ -349,13 +360,16 @@ where
                             debug_assert!(current.is_some());
                             out.push(Record::Negative(old.into_owned()));
                         }
-
                         // emit positive, which is group + new, unless it's the empty value
                         // For some aggregates, if there is no group by then we should still
                         // emit the zero value rather than ignore it.
-                        if this.inner.emit_empty() || !this.inner.empty_value().contains(&new) {
+                        if rows_in_group_new > 0 || this.inner.emit_empty() {
+                            // A record for a grouped node consists of the group itself, followed by
+                            // the value of the aggregate for that group, followed by the number of
+                            // rows in that group
                             let mut rec = group;
                             rec.push(new);
+                            rec.push((rows_in_group_new).into());
                             out.push(Record::Positive(rec));
                         }
                     }
@@ -365,14 +379,21 @@ where
 
             let mut diffs = Vec::new();
             let mut group_rs = Vec::new();
+            let mut pos_neg_delta = 0i64;
             for r in rs {
                 if !group_rs.is_empty() && cmp(&group_rs[0], &r) != Ordering::Equal {
-                    handle_group(self, group_rs.drain(..), diffs.drain(..))?;
+                    handle_group(
+                        self,
+                        group_rs.drain(..),
+                        diffs.drain(..),
+                        std::mem::take(&mut pos_neg_delta),
+                    )?;
                 }
                 diffs.push(self.inner.to_diff(&r[..], r.is_positive())?);
+                pos_neg_delta += if r.is_positive() { 1 } else { -1 };
                 group_rs.push(r);
             }
-            handle_group(self, group_rs.drain(..), diffs.drain(..))?;
+            handle_group(self, group_rs.drain(..), diffs.drain(..), pos_neg_delta)?;
         }
 
         Ok(ProcessingResult {
