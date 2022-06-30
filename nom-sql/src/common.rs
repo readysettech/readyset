@@ -1238,7 +1238,20 @@ pub fn column_identifier_no_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult
         // Do we have a 'db/schema.table.' or 'table.' qualifier?
         // TODO: use db/schema qualifier
         let table = match (id1, id2) {
-            (Some(_), Some(t)) => Some(t),
+            (Some(schema), Some(t)) => {
+                // Reject all DB/schema qualifiers except for postgresql "public"
+                //
+                // NOTE: This is a temporary stopgap to allow queries that use
+                // "public.<table>.<column>" to run in ReadySet
+                if matches!(dialect, Dialect::PostgreSQL) && schema == "public" {
+                    Some(t)
+                } else {
+                    return Err(nom::Err::Error(ParseError::from_error_kind(
+                        i,
+                        ErrorKind::Tag,
+                    )));
+                }
+            }
             // (None, Some(t)) should be unreachable
             (Some(t), None) | (None, Some(t)) => Some(t),
             (None, None) => None,
