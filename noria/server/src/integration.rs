@@ -39,6 +39,7 @@ use noria_data::noria_type::Type;
 use noria_data::DataType;
 use noria_errors::ReadySetError::{MigrationPlanFailed, RpcFailed, SelectQueryCreationFailed};
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use rusty_fork::rusty_fork_test;
 use tempfile::TempDir;
 use test_utils::skip_with_flaky_finder;
@@ -1359,7 +1360,14 @@ async fn mutator_churn() {
                     .unwrap(),
             );
 
-            mig.maintain_anonymous(vc, &Index::hash_map(vec![0]));
+            mig.maintain_anonymous_with_post_lookup(
+                vc,
+                &Index::hash_map(vec![0]),
+                PostLookup {
+                    returned_cols: Some(vec![0, 1]),
+                    ..Default::default()
+                },
+            );
             (vote, vc)
         })
         .await;
@@ -2421,7 +2429,14 @@ async fn cascading_replays_with_sharding() {
                 .over(j, 0, &[2], &Type::Unknown)
                 .unwrap();
             let end = mig.add_ingredient("end", make_columns(&["u", "c"]), a);
-            mig.maintain_anonymous(end, &Index::hash_map(vec![0]));
+            mig.maintain_anonymous_with_post_lookup(
+                end,
+                &Index::hash_map(vec![0]),
+                PostLookup {
+                    returned_cols: Some(vec![0, 1]),
+                    ..Default::default()
+                },
+            );
             (j, end)
         })
         .await;
@@ -2540,7 +2555,14 @@ async fn full_aggregation_with_bogokey() {
                     .over(bogo, 0, &[1], &Type::Unknown)
                     .unwrap(),
             );
-            mig.maintain_anonymous(agg, &Index::hash_map(vec![0]));
+            mig.maintain_anonymous_with_post_lookup(
+                agg,
+                &Index::hash_map(vec![0]),
+                PostLookup {
+                    returned_cols: Some(vec![0, 1]),
+                    ..Default::default()
+                },
+            );
             agg
         })
         .await;
@@ -3062,7 +3084,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
         assert_eq!(row[1], title, "all articles should have title 'foo'");
         assert_eq!(
             row[2],
-            DataType::Numeric(Arc::new(5.into())),
+            Decimal::from(5).into(),
             "all articles should have one 5-star rating"
         );
         if old_puts_after {
@@ -3090,6 +3112,7 @@ async fn full_vote_migration_new_and_old_unsharded() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn live_writes() {
+    readyset_tracing::init_test_logging();
     let mut g = start_simple("live_writes").await;
     let (_vote, vc) = g
         .migrate(|mig| {
@@ -3107,7 +3130,14 @@ async fn live_writes() {
                     .unwrap(),
             );
 
-            mig.maintain_anonymous(vc, &Index::hash_map(vec![0]));
+            mig.maintain_anonymous_with_post_lookup(
+                vc,
+                &Index::hash_map(vec![0]),
+                PostLookup {
+                    returned_cols: Some(vec![0, 1]),
+                    ..Default::default()
+                },
+            );
             (vote, vc)
         })
         .await;
@@ -3139,7 +3169,14 @@ async fn live_writes() {
                 make_columns(&["id", "votes"]),
                 Aggregation::Sum.over(vc, 1, &[0], &Type::Unknown).unwrap(),
             );
-            mig.maintain_anonymous(vc2, &Index::hash_map(vec![0]));
+            mig.maintain_anonymous_with_post_lookup(
+                vc2,
+                &Index::hash_map(vec![0]),
+                PostLookup {
+                    returned_cols: Some(vec![0, 1]),
+                    ..Default::default()
+                },
+            );
             vc2
         })
         .await;
@@ -3162,7 +3199,7 @@ async fn live_writes() {
         );
         assert_eq!(
             vc2_state.lookup(&[i.into()], true).await.unwrap(),
-            vec![vec![i.into(), DataType::Numeric(Arc::new(votes.into()))]]
+            vec![vec![i.into(), Decimal::from(votes).into()]]
         );
     }
 }
@@ -5353,7 +5390,7 @@ async fn overlapping_indices() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "s", Decimal).to_i32().unwrap(),
                 get_col!(r, "id", i32),
             )
         })
@@ -5396,7 +5433,7 @@ async fn aggregate_after_filter_non_equality() {
         .await
         .unwrap()
         .into_iter()
-        .map(|r| get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap())
+        .map(|r| get_col!(r, "s", Decimal).to_i32().unwrap())
         .collect::<Vec<i32>>();
 
     assert_eq!(res, vec![13]);
@@ -5502,8 +5539,8 @@ async fn multiple_aggregate_sum() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(r, "s1", rust_decimal::Decimal).to_i32().unwrap(),
-                get_col!(r, "s2", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "s1", Decimal).to_i32().unwrap(),
+                get_col!(r, "s2", Decimal).to_i32().unwrap(),
             )
         })
         .sorted()
@@ -5548,7 +5585,7 @@ async fn multiple_aggregate_same_col() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "s", Decimal).to_i32().unwrap(),
                 get_col!(r, "a", f64),
             )
         })
@@ -5610,8 +5647,8 @@ async fn multiple_aggregate_sum_sharded() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(r, "s1", rust_decimal::Decimal).to_i32().unwrap(),
-                get_col!(r, "s2", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "s1", Decimal).to_i32().unwrap(),
+                get_col!(r, "s2", Decimal).to_i32().unwrap(),
             )
         })
         .sorted()
@@ -5652,7 +5689,7 @@ async fn multiple_aggregate_same_col_sharded() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "s", Decimal).to_i32().unwrap(),
                 get_col!(r, "a", f64),
             )
         })
@@ -5695,7 +5732,7 @@ async fn multiple_aggregate_over_two() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "s", Decimal).to_i32().unwrap(),
                 get_col!(r, "a", f64),
                 get_col!(r, "c", i32),
                 get_col!(r, "m", i32),
@@ -5741,7 +5778,7 @@ async fn multiple_aggregate_over_two_sharded() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "s", Decimal).to_i32().unwrap(),
                 get_col!(r, "a", f64),
                 get_col!(r, "c", i32),
                 get_col!(r, "m", i32),
@@ -5786,7 +5823,7 @@ async fn multiple_aggregate_with_expressions() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "s", Decimal).to_i32().unwrap(),
                 get_col!(r, "a", f64),
             )
         })
@@ -5829,7 +5866,7 @@ async fn multiple_aggregate_with_expressions_sharded() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "s", Decimal).to_i32().unwrap(),
                 get_col!(r, "a", f64),
             )
         })
@@ -5872,7 +5909,7 @@ async fn multiple_aggregate_reuse() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "s", Decimal).to_i32().unwrap(),
                 get_col!(r, "a", f64),
             )
         })
@@ -5899,7 +5936,7 @@ async fn multiple_aggregate_reuse() {
         .into_iter()
         .map(|r| {
             (
-                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "s", Decimal).to_i32().unwrap(),
                 get_col!(r, "a", i32),
             )
         })
@@ -6353,7 +6390,7 @@ async fn partial_distinct_multi() {
         .map(|r| {
             (
                 get_col!(r, "value", i32),
-                get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap(),
+                get_col!(r, "s", Decimal).to_i32().unwrap(),
             )
         })
         .sorted()
@@ -7566,7 +7603,7 @@ async fn group_by_agg_col_sum() {
 
     let res = rows
         .into_iter()
-        .map(|r| get_col!(r, "s", rust_decimal::Decimal).to_i32().unwrap())
+        .map(|r| get_col!(r, "s", Decimal).to_i32().unwrap())
         .sorted()
         .collect::<Vec<i32>>();
 
@@ -7785,7 +7822,7 @@ async fn count_emit_zero() {
         res,
         vec![vec![
             DataType::Int(3),
-            DataType::Numeric(Default::default()),
+            Decimal::from(0).into(),
             DataType::Int(0)
         ]]
     );
