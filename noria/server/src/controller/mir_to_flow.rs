@@ -656,7 +656,12 @@ fn make_grouped_node(
             mig.add_ingredient(name, cols, gc)
         }
         GroupedNodeType::Aggregation(agg) => {
-            let grouped = agg.over(parent_na, over_col_indx, group_col_indx.as_slice())?;
+            let grouped = agg.over(
+                parent_na,
+                over_col_indx,
+                group_col_indx.as_slice(),
+                over_col_ty,
+            )?;
             let agg_col = grouped
                 .output_col_type()
                 .map(|ty| DataflowColumn::new(over_col_name.clone(), ty.into(), Some(name.into())))
@@ -1340,7 +1345,12 @@ fn make_distinct_node(
         // We use 0 as a placeholder. The over column is ignored with Count entirely. This should
         // be refactored so Count doesn't take an over column at all.
         // Issue: https://readysettech.atlassian.net/browse/ENG-310
-        Aggregation::Count { count_nulls: false }.over(parent_na, 0, &group_by_indx)?,
+        Aggregation::Count { count_nulls: false }.over(
+            parent_na,
+            0,
+            &group_by_indx,
+            &Type::Unknown,
+        )?,
     );
     Ok(FlowNode::New(na))
 }

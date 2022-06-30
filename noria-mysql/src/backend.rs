@@ -6,13 +6,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use launchpad::redacted::Sensitive;
 use mysql_async::consts::StatusFlags;
+use mysql_common::bigdecimal03::ToPrimitive;
 use mysql_srv::{
     Column, ColumnFlags, ColumnType, InitWriter, MsqlSrvError, MysqlShim, QueryResultWriter,
     RowWriter, StatementMetaWriter,
 };
 use noria_client::backend::noria_connector::MetaVariable;
 use noria_client::backend::{noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare};
-use noria_data::DataType;
+use noria_data::{DataType, DataTypeKind};
 use noria_errors::{internal, internal_err, ReadySetError};
 use tokio::io::{self, AsyncWrite};
 use tracing::{error, trace};
@@ -29,6 +30,12 @@ async fn write_column<W: AsyncWrite + Unpin>(
     c: &DataType,
     cs: &mysql_srv::Column,
 ) -> Result<(), Error> {
+    let conv_error = || ReadySetError::DataTypeConversionError {
+        src_type: format!("{:?}", DataTypeKind::from(c)),
+        target_type: format!("{:?}", cs.coltype),
+        details: "Unhandled type conversion in `write_column`".to_string(),
+    };
+
     let written = match *c {
         DataType::None | DataType::Max => rw.write_col(None::<i32>),
         // NOTE(malte): the code repetition here is unfortunate, but it's hard to factor
@@ -64,10 +71,25 @@ async fn write_column<W: AsyncWrite + Unpin>(
                 let f: f32 = <f32>::try_from(dt)?;
                 rw.write_col(f)
             }
-            _ => {
-                internal!()
-            }
+            _ => return Err(conv_error())?,
         },
+        DataType::Numeric(ref v) => match cs.coltype {
+            mysql_srv::ColumnType::MYSQL_TYPE_DECIMAL
+            | mysql_srv::ColumnType::MYSQL_TYPE_NEWDECIMAL => {
+                let f = v.to_string();
+                rw.write_col(f)
+            }
+            mysql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {
+                let f = v.to_f64().ok_or_else(conv_error)?;
+                rw.write_col(f)
+            }
+            mysql_srv::ColumnType::MYSQL_TYPE_FLOAT => {
+                let f = v.to_f64().ok_or_else(conv_error)?;
+                rw.write_col(f)
+            }
+            _ => return Err(conv_error())?,
+        },
+
         DataType::TimestampTz(ts) => match cs.coltype {
             mysql_srv::ColumnType::MYSQL_TYPE_DATETIME
             | mysql_srv::ColumnType::MYSQL_TYPE_DATETIME2
@@ -76,11 +98,10 @@ async fn write_column<W: AsyncWrite + Unpin>(
                 rw.write_col(ts.to_chrono().naive_local())
             }
             ColumnType::MYSQL_TYPE_DATE => rw.write_col(ts.to_chrono().naive_local().date()),
-            _ => internal!("Expecing a timestamp-like type, got {:?}", cs.coltype),
+            _ => return Err(conv_error())?,
         },
         DataType::Time(ref t) => rw.write_col(t),
         DataType::ByteArray(ref bytes) => rw.write_col(bytes.as_ref()),
-        DataType::Numeric(_) => unimplemented!("MySQL does not implement the type NUMERIC"),
         // These types are PostgreSQL specific
         DataType::BitVector(_) => {
             internal!("Cannot write MySQL column: MySQL does not support bit vectors")
