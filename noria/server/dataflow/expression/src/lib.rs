@@ -5,7 +5,7 @@ use std::borrow::Borrow;
 use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Formatter;
-use std::ops::{Add, Sub};
+use std::ops::{Add, Div, Mul, Sub};
 use std::str::FromStr;
 
 use chrono::{Datelike, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
@@ -17,7 +17,8 @@ use nom_sql::{BinaryOperator, SqlType};
 use noria_data::noria_type::Type;
 use noria_data::DataType;
 use noria_errors::{ReadySetError, ReadySetResult};
-use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
@@ -47,56 +48,26 @@ impl BuiltinFunction {
     where
         A: IntoIterator<Item = Expression>,
     {
-        fn type_for_round(expr: &Expression, precision: &Expression) -> Type {
-            match precision {
-                // Precision should always be coercable to a DataType::Int.
-                Expression::Literal {
-                    val: DataType::Int(p),
-                    ..
-                } => {
-                    if *p < 0 {
-                        // Precision is negative, which means that we will be returning a
-                        // rounded Int.
-                        Type::Sql(SqlType::Int(None))
-                    } else {
-                        // Precision is positive so we will continue to return a Real.
-                        expr.ty().clone()
-                    }
-                }
-                Expression::Literal {
-                    val: DataType::UnsignedInt(_),
-                    ..
-                } => {
-                    // Precision is positive so we will continue to return a Real.
-                    expr.ty().clone()
-                }
-                Expression::Literal {
-                    val: DataType::Double(f),
-                    ..
-                } => {
-                    if f.is_sign_negative() {
-                        // Precision is negative, which means that we will be returning a
-                        // rounded Int.
-                        Type::Sql(SqlType::Int(None))
-                    } else {
-                        // Precision is positive so we will continue to return a Real.
-                        expr.ty().clone()
-                    }
-                }
-                Expression::Literal {
-                    val: DataType::Float(f),
-                    ..
-                } => {
-                    if f.is_sign_negative() {
-                        // Precision is negative, which means that we will be returning a
-                        // rounded Int.
-                        Type::Sql(SqlType::Int(None))
-                    } else {
-                        // Precision is positive so we will continue to return a Real.
-                        expr.ty().clone()
-                    }
-                }
-                _ => expr.ty().clone(),
+        fn type_for_round(expr: &Expression, _precision: &Expression) -> Type {
+            match expr.ty() {
+                Type::Sql(ty) => match ty {
+                    // When the first argument is of any integer type, the return type is always
+                    // BIGINT.
+                    SqlType::Tinyint(_)
+                    | SqlType::UnsignedTinyint(_)
+                    | SqlType::Smallint(_)
+                    | SqlType::UnsignedSmallint(_)
+                    | SqlType::Int(_)
+                    | SqlType::UnsignedInt(_)
+                    | SqlType::Bigint(_)
+                    | SqlType::UnsignedBigint(_) => Type::Sql(SqlType::Bigint(None)),
+                    // When the first argument is a DECIMAL value, the return type is also DECIMAL.
+                    SqlType::Decimal(_, _) => expr.ty().clone(),
+                    // When the first argument is of any floating-point type or of any non-numeric
+                    // type, the return type is always DOUBLE.
+                    _ => Type::Sql(SqlType::Double),
+                },
+                Type::Unknown => Type::Unknown,
             }
         }
 
@@ -159,19 +130,7 @@ impl BuiltinFunction {
                     val: DataType::Int(0),
                     ty: Type::Sql(SqlType::Int(None)),
                 });
-                let expr_type = expr.ty().clone();
-                let ty = match &expr {
-                    Expression::Literal {
-                        val: DataType::Float(_),
-                        ..
-                    } => type_for_round(&expr, &prec),
-                    Expression::Literal {
-                        val: DataType::Double(_),
-                        ..
-                    } => type_for_round(&expr, &prec),
-                    // For all other numeric types, the type does not change
-                    _ => expr_type,
-                };
+                let ty = type_for_round(&expr, &prec);
                 Ok((Self::Round(expr, prec), ty))
             }
             "json_typeof" => {
@@ -527,12 +486,13 @@ impl Expression {
                                 let real = DataType::try_from(rounded_float).unwrap();
                                 Ok(real)
                             } else {
-                                // Rounding precision is negative, so we need to convert to a
-                                // rounded int.
-                                let rounded = (($real / base.powf(-rnd_prec as $real_type)).round()
-                                    * base.powf(-rnd_prec as $real_type))
-                                    as i64;
-                                Ok(DataType::Int(rounded))
+                                // Rounding precision is negative, so we need to zero out some
+                                // digits.
+                                let rounded_float = (($real / base.powf(-rnd_prec as $real_type))
+                                    .round()
+                                    * base.powf(-rnd_prec as $real_type));
+                                let real = DataType::try_from(rounded_float).unwrap();
+                                Ok(real)
                             }
                         }};
                     }
@@ -541,18 +501,56 @@ impl Expression {
                         DataType::Float(float) => round!(float, f32),
                         DataType::Double(double) => round!(double, f64),
                         DataType::Int(val) => {
-                            let rounded = integer_rnd(*val as i128, rnd_prec) as i64;
-                            Ok(DataType::Int(rounded))
+                            let rounded = integer_rnd(*val as i128, rnd_prec);
+                            Ok(DataType::Int(rounded as _))
                         }
                         DataType::UnsignedInt(val) => {
-                            let rounded = integer_rnd(*val as i128, rnd_prec) as u64;
-                            Ok(DataType::UnsignedInt(rounded))
+                            let rounded = integer_rnd(*val as i128, rnd_prec);
+                            Ok(DataType::Int(rounded as _))
                         }
-                        _ => Err(ReadySetError::ProjectExpressionBuiltInFunctionError {
-                            function: "round".to_string(),
-                            message: "expression does not result in a type that can be rounded."
-                                .to_string(),
-                        }),
+                        DataType::Numeric(d) => {
+                            let rounded_dec = if rnd_prec >= 0 {
+                                d.round_dp_with_strategy(
+                                    rnd_prec as _,
+                                    rust_decimal::RoundingStrategy::MidpointAwayFromZero,
+                                )
+                            } else {
+                                let factor =
+                                    Decimal::from_f64(10.0f64.powf(-rnd_prec as _)).unwrap();
+
+                                d.div(factor)
+                                    .round_dp_with_strategy(
+                                        0,
+                                        rust_decimal::RoundingStrategy::MidpointAwayFromZero,
+                                    )
+                                    .mul(factor)
+                            };
+
+                            Ok(DataType::Numeric(rounded_dec.into()))
+                        }
+                        dt => {
+                            let dt_str = dt.to_string();
+                            // MySQL will parse as many characters as it possibly can from a string
+                            // as double
+                            let mut double = 0f64;
+                            let mut chars = 1;
+                            if dt_str.starts_with('-') {
+                                chars += 1;
+                            }
+                            while chars < dt_str.len() {
+                                // This is very sad that Rust doesn't tell us how many characters of
+                                // a string it was able to parse, but for now we just try to parse
+                                // incrementally more characters until we fail
+                                match dt_str[..chars].parse() {
+                                    Ok(v) => {
+                                        double = v;
+                                        chars += 1;
+                                    }
+                                    Err(_) => break,
+                                }
+                            }
+                            round!(double, f64)
+                        }
                     }
                 }
                 BuiltinFunction::JsonTypeof(expr) => {
@@ -665,6 +663,8 @@ mod tests {
     use std::convert::TryInto;
 
     use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+    use rust_decimal::prelude::FromPrimitive;
+    use rust_decimal::Decimal;
     use test_strategy::proptest;
     use Expression::*;
 
@@ -1210,7 +1210,7 @@ mod tests {
         let precision = -1;
         let param1 = DataType::try_from(number).unwrap();
         let param2 = DataType::Int(precision);
-        let want = DataType::try_from(50).unwrap();
+        let want = DataType::try_from(50.0).unwrap();
         assert_eq!(
             expr.eval::<DataType>(&[param1, param2.clone()]).unwrap(),
             want
@@ -1228,7 +1228,7 @@ mod tests {
         let precision = -1.0_f64;
         let param1 = DataType::try_from(number).unwrap();
         let param2 = DataType::try_from(precision).unwrap();
-        let want = DataType::try_from(50).unwrap();
+        let want = DataType::try_from(50.0).unwrap();
         assert_eq!(
             expr.eval::<DataType>(&[param1, param2.clone()]).unwrap(),
             want,
@@ -1254,7 +1254,7 @@ mod tests {
         let precision = "banana";
         let param1 = DataType::try_from(number).unwrap();
         let param2 = DataType::try_from(precision).unwrap();
-        let want = DataType::try_from(52).unwrap();
+        let want = DataType::try_from(52.).unwrap();
         assert_eq!(
             expr.eval::<DataType>(&[param1, param2.clone()]).unwrap(),
             want,
@@ -1263,6 +1263,59 @@ mod tests {
         let number: f64 = 52.12345;
         let param1 = DataType::try_from(number).unwrap();
         assert_eq!(expr.eval::<DataType>(&[param1, param2]).unwrap(), want,);
+    }
+
+    #[test]
+    fn eval_call_round_with_decimal() {
+        let expr = make_call(BuiltinFunction::Round(make_column(0), make_column(1)));
+        assert_eq!(
+            expr.eval::<DataType>(&[
+                DataType::from(Decimal::from_f64(52.123).unwrap()),
+                DataType::from(1)
+            ])
+            .unwrap(),
+            DataType::from(Decimal::from_f64(52.1)),
+        );
+
+        assert_eq!(
+            expr.eval::<DataType>(&[
+                DataType::from(Decimal::from_f64(-52.666).unwrap()),
+                DataType::from(2)
+            ])
+            .unwrap(),
+            DataType::from(Decimal::from_f64(-52.67)),
+        );
+
+        assert_eq!(
+            expr.eval::<DataType>(&[
+                DataType::from(Decimal::from_f64(-52.666).unwrap()),
+                DataType::from(-1)
+            ])
+            .unwrap(),
+            DataType::from(Decimal::from_f64(-50.)),
+        );
+    }
+
+    #[test]
+    fn eval_call_round_with_strings() {
+        let expr = make_call(BuiltinFunction::Round(make_column(0), make_column(1)));
+        assert_eq!(
+            expr.eval::<DataType>(&[DataType::from("52.123"), DataType::from(1)])
+                .unwrap(),
+            DataType::try_from(52.1).unwrap(),
+        );
+
+        assert_eq!(
+            expr.eval::<DataType>(&[DataType::from("-52.666banana"), DataType::from(2)])
+                .unwrap(),
+            DataType::try_from(-52.67).unwrap(),
+        );
+
+        assert_eq!(
+            expr.eval::<DataType>(&[DataType::from("-52.666banana"), DataType::from(-1)])
+                .unwrap(),
+            DataType::try_from(-50.).unwrap(),
+        );
     }
 
     #[test]
