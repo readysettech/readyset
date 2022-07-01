@@ -17,6 +17,7 @@ export default initAuth0({
     authorizationParams: {
         response_type: 'code',
         scope: process.env.NEXT_PUBLIC_AUTH0_SCOPE,
+        audience: process.env.NEXT_PUBLIC_AUTH0_AUDIENCE,
     },
     session: {
         absoluteDuration: process.env.SESSION_COOKIE_LIFETIME,

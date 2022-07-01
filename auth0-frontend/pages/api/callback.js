@@ -1,7 +1,9 @@
 import auth0 from '../../lib/auth0'
+import {getAccessToken} from '@auth0/nextjs-auth0';
 
-const afterCallback = (req, res, session, state) => {
-    session.user.access_token = session.accessToken;
+const afterCallback = async (req, res, session, state) => {
+    const {accessToken} = await getAccessToken(req, res);
+    session.user.access_token = accessToken;
     return session;
 };
 
