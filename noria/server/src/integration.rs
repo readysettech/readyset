@@ -6057,12 +6057,12 @@ async fn round_float_to_float() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn round_float_to_int() {
-    let mut g = start_simple_unsharded("round_float_to_int").await;
+async fn round_float() {
+    let mut g = start_simple_unsharded("round_float").await;
 
     g.extend_recipe(
         "CREATE TABLE test (value double);
-         CREATE VIEW roundfloattoint AS SELECT round(value, 0) as r FROM test;"
+         CREATE VIEW roundfloat AS SELECT round(value, 0) as r FROM test;"
             .parse()
             .unwrap(),
     )
@@ -6070,7 +6070,7 @@ async fn round_float_to_int() {
     .unwrap();
 
     let mut t = g.table("test").await.unwrap();
-    let mut q = g.view("roundfloattoint").await.unwrap();
+    let mut q = g.view("roundfloat").await.unwrap();
 
     t.insert(vec![DataType::try_from(2.2222_f64).unwrap()])
         .await
@@ -6082,10 +6082,10 @@ async fn round_float_to_int() {
 
     let res = rows
         .into_iter()
-        .map(|r| get_col!(r, "r", i32))
-        .collect::<Vec<i32>>();
+        .map(|r| get_col!(r, "r", f64))
+        .collect::<Vec<f64>>();
 
-    assert_eq!(res, vec![2]);
+    assert_eq!(res, vec![2.]);
 }
 
 // This test checks a behavior that MySQL has of coercing floats into ints if the expected field
@@ -6117,10 +6117,10 @@ async fn round_with_precision_float() {
 
     let res = rows
         .into_iter()
-        .map(|r| get_col!(r, "r", i32))
-        .collect::<Vec<i32>>();
+        .map(|r| get_col!(r, "r", f64))
+        .collect::<Vec<f64>>();
 
-    assert_eq!(res, vec![120]);
+    assert_eq!(res, vec![120.]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -6244,10 +6244,10 @@ async fn round_with_no_precision() {
 
     let res = rows
         .into_iter()
-        .map(|r| get_col!(r, "r", i32))
-        .collect::<Vec<i32>>();
+        .map(|r| get_col!(r, "r", f64))
+        .collect::<Vec<f64>>();
 
-    assert_eq!(res, vec![56]);
+    assert_eq!(res, vec![56.]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
