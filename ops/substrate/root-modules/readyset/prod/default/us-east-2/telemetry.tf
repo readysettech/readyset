@@ -1,7 +1,6 @@
 locals {
-  telemetry_ingress_ami_id = "ami-086a31ffe32cc1c7b"
-  # XXX: replace this with the actual JWT authority once we have a real one
-  telemetry_ingress_jwt_authority = "https://dev-4dkvue5b.us.auth0.com/"
+  telemetry_ingress_ami_id        = "ami-086a31ffe32cc1c7b"
+  telemetry_ingress_jwt_authority = "https://readyset.us.auth0.com"
 }
 
 module "telemetry-ingress-vpc" {
