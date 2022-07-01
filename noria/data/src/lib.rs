@@ -14,7 +14,7 @@ use nom_sql::{Double, Float, Literal, SqlType};
 use noria_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use proptest::prelude::{prop_oneof, Arbitrary};
 use test_strategy::Arbitrary;
-use tokio_postgres::types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
+use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
 
 mod array;
 mod float;
@@ -1635,50 +1635,53 @@ impl ToSql for DataType {
             (Self::Time(x), _) => NaiveTime::from(*x).to_sql(ty, out),
             (Self::ByteArray(ref array), _) => array.as_ref().to_sql(ty, out),
             (Self::BitVector(ref bits), _) => bits.as_ref().to_sql(ty, out),
-            (Self::Array(_), _) => Err(Box::<dyn Error + Send + Sync>::from(
-                "Array to SQL not implemented yet",
-            )),
+            (Self::Array(ref array), _) => array.as_ref().to_sql(ty, out),
         }
     }
 
-    accepts!(
-        BOOL,
-        BYTEA,
-        CHAR,
-        NAME,
-        INT2,
-        INT4,
-        INT8,
-        OID,
-        REGCLASS,
-        REGCOLLATION,
-        REGCONFIG,
-        REGDICTIONARY,
-        REGNAMESPACE,
-        REGOPER,
-        REGOPERATOR,
-        REGPROC,
-        REGPROCEDURE,
-        REGROLE,
-        REGTYPE,
-        FLOAT4,
-        FLOAT8,
-        NUMERIC,
-        TEXT,
-        VARCHAR,
-        DATE,
-        TIME,
-        TIMESTAMP,
-        TIMESTAMPTZ,
-        MACADDR,
-        INET,
-        UUID,
-        JSON,
-        JSONB,
-        BIT,
-        VARBIT
-    );
-
+    fn accepts(ty: &Type) -> bool {
+        match ty.kind() {
+            Kind::Array(member) => <Self as ToSql>::accepts(member),
+            _ => matches!(
+                *ty,
+                Type::BOOL
+                    | Type::BYTEA
+                    | Type::CHAR
+                    | Type::NAME
+                    | Type::INT2
+                    | Type::INT4
+                    | Type::INT8
+                    | Type::OID
+                    | Type::REGCLASS
+                    | Type::REGCOLLATION
+                    | Type::REGCONFIG
+                    | Type::REGDICTIONARY
+                    | Type::REGNAMESPACE
+                    | Type::REGOPER
+                    | Type::REGOPERATOR
+                    | Type::REGPROC
+                    | Type::REGPROCEDURE
+                    | Type::REGROLE
+                    | Type::REGTYPE
+                    | Type::FLOAT4
+                    | Type::FLOAT8
+                    | Type::NUMERIC
+                    | Type::TEXT
+                    | Type::VARCHAR
+                    | Type::DATE
+                    | Type::TIME
+                    | Type::TIMESTAMP
+                    | Type::TIMESTAMPTZ
+                    | Type::MACADDR
+                    | Type::INET
+                    | Type::UUID
+                    | Type::JSON
+                    | Type::JSONB
+                    | Type::BIT
+                    | Type::VARBIT
+            ),
+        }
+    }
     to_sql_checked!();
 }
 
@@ -1695,47 +1698,50 @@ impl<'a> FromSql<'a> for DataType {
                 })
             };
         }
-        match *ty {
-            Type::BOOL => mk_from_sql!(bool),
-            Type::CHAR => mk_from_sql!(i8),
-            Type::INT2 => mk_from_sql!(i16),
-            Type::INT4 => mk_from_sql!(i32),
-            Type::INT8 => mk_from_sql!(i64),
-            Type::OID
-            | Type::REGCLASS
-            | Type::REGCOLLATION
-            | Type::REGCONFIG
-            | Type::REGDICTIONARY
-            | Type::REGNAMESPACE
-            | Type::REGOPER
-            | Type::REGOPERATOR
-            | Type::REGPROC
-            | Type::REGPROCEDURE
-            | Type::REGROLE
-            | Type::REGTYPE => mk_from_sql!(u32),
-            Type::TEXT | Type::VARCHAR | Type::NAME => mk_from_sql!(&str),
-            Type::FLOAT4 => mk_from_sql!(f32),
-            Type::FLOAT8 => mk_from_sql!(f64),
-            Type::DATE => mk_from_sql!(NaiveDate),
-            Type::TIME => mk_from_sql!(NaiveTime),
-            Type::BYTEA => mk_from_sql!(Vec<u8>),
-            Type::NUMERIC => mk_from_sql!(Decimal),
-            Type::TIMESTAMP => mk_from_sql!(NaiveDateTime),
-            Type::TIMESTAMPTZ => mk_from_sql!(chrono::DateTime<chrono::FixedOffset>),
-            Type::MACADDR => Ok(DataType::from(
-                MacAddress::from_sql(ty, raw)?.to_string(MacAddressFormat::HexString),
-            )),
-            Type::INET => Ok(DataType::from(IpAddr::from_sql(ty, raw)?.to_string())),
-            Type::UUID => Ok(DataType::from(Uuid::from_sql(ty, raw)?.to_string())),
-            Type::JSON | Type::JSONB => Ok(DataType::from(
-                serde_json::Value::from_sql(ty, raw)?.to_string(),
-            )),
-            Type::BIT | Type::VARBIT => mk_from_sql!(BitVec),
-            _ => Err(format!(
-                "Conversion from Postgres type '{}' to DataType is not implemented.",
-                ty
-            )
-            .into()),
+        match ty.kind() {
+            Kind::Array(_) => mk_from_sql!(Array),
+            _ => match *ty {
+                Type::BOOL => mk_from_sql!(bool),
+                Type::CHAR => mk_from_sql!(i8),
+                Type::INT2 => mk_from_sql!(i16),
+                Type::INT4 => mk_from_sql!(i32),
+                Type::INT8 => mk_from_sql!(i64),
+                Type::OID
+                | Type::REGCLASS
+                | Type::REGCOLLATION
+                | Type::REGCONFIG
+                | Type::REGDICTIONARY
+                | Type::REGNAMESPACE
+                | Type::REGOPER
+                | Type::REGOPERATOR
+                | Type::REGPROC
+                | Type::REGPROCEDURE
+                | Type::REGROLE
+                | Type::REGTYPE => mk_from_sql!(u32),
+                Type::TEXT | Type::VARCHAR | Type::NAME => mk_from_sql!(&str),
+                Type::FLOAT4 => mk_from_sql!(f32),
+                Type::FLOAT8 => mk_from_sql!(f64),
+                Type::DATE => mk_from_sql!(NaiveDate),
+                Type::TIME => mk_from_sql!(NaiveTime),
+                Type::BYTEA => mk_from_sql!(Vec<u8>),
+                Type::NUMERIC => mk_from_sql!(Decimal),
+                Type::TIMESTAMP => mk_from_sql!(NaiveDateTime),
+                Type::TIMESTAMPTZ => mk_from_sql!(chrono::DateTime<chrono::FixedOffset>),
+                Type::MACADDR => Ok(DataType::from(
+                    MacAddress::from_sql(ty, raw)?.to_string(MacAddressFormat::HexString),
+                )),
+                Type::INET => Ok(DataType::from(IpAddr::from_sql(ty, raw)?.to_string())),
+                Type::UUID => Ok(DataType::from(Uuid::from_sql(ty, raw)?.to_string())),
+                Type::JSON | Type::JSONB => Ok(DataType::from(
+                    serde_json::Value::from_sql(ty, raw)?.to_string(),
+                )),
+                Type::BIT | Type::VARBIT => mk_from_sql!(BitVec),
+                _ => Err(format!(
+                    "Conversion from Postgres type '{}' to DataType is not implemented.",
+                    ty
+                )
+                .into()),
+            },
         }
     }
 
@@ -1743,43 +1749,49 @@ impl<'a> FromSql<'a> for DataType {
         Ok(DataType::None)
     }
 
-    accepts!(
-        BOOL,
-        BYTEA,
-        CHAR,
-        NAME,
-        INT2,
-        INT4,
-        INT8,
-        OID,
-        REGCLASS,
-        REGCOLLATION,
-        REGCONFIG,
-        REGDICTIONARY,
-        REGNAMESPACE,
-        REGOPER,
-        REGOPERATOR,
-        REGPROC,
-        REGPROCEDURE,
-        REGROLE,
-        REGTYPE,
-        FLOAT4,
-        FLOAT8,
-        NUMERIC,
-        TEXT,
-        UUID,
-        VARCHAR,
-        DATE,
-        TIME,
-        TIMESTAMP,
-        TIMESTAMPTZ,
-        MACADDR,
-        INET,
-        JSON,
-        JSONB,
-        BIT,
-        VARBIT
-    );
+    fn accepts(ty: &Type) -> bool {
+        match ty.kind() {
+            Kind::Array(member) => <Self as ToSql>::accepts(member),
+            _ => matches!(
+                *ty,
+                Type::BOOL
+                    | Type::BYTEA
+                    | Type::CHAR
+                    | Type::NAME
+                    | Type::INT2
+                    | Type::INT4
+                    | Type::INT8
+                    | Type::OID
+                    | Type::REGCLASS
+                    | Type::REGCOLLATION
+                    | Type::REGCONFIG
+                    | Type::REGDICTIONARY
+                    | Type::REGNAMESPACE
+                    | Type::REGOPER
+                    | Type::REGOPERATOR
+                    | Type::REGPROC
+                    | Type::REGPROCEDURE
+                    | Type::REGROLE
+                    | Type::REGTYPE
+                    | Type::FLOAT4
+                    | Type::FLOAT8
+                    | Type::NUMERIC
+                    | Type::TEXT
+                    | Type::UUID
+                    | Type::VARCHAR
+                    | Type::DATE
+                    | Type::TIME
+                    | Type::TIMESTAMP
+                    | Type::TIMESTAMPTZ
+                    | Type::MACADDR
+                    | Type::INET
+                    | Type::JSON
+                    | Type::JSONB
+                    | Type::BIT
+                    | Type::VARBIT
+            ),
+        }
+    }
 }
 
 impl TryFrom<DataType> for mysql_common::value::Value {
