@@ -2,13 +2,16 @@ use std::cmp::Ordering;
 use std::fmt::{self, Display};
 use std::str::FromStr;
 
+use fallible_iterator::FallibleIterator;
 use ndarray::{ArrayBase, ArrayD, Data, IxDyn, RawData};
 use nom_sql::SqlType;
 use noria_errors::{invalid_err, ReadySetError, ReadySetResult};
+use postgres_protocol::types::ArrayDimension;
 use proptest::arbitrary::Arbitrary;
 use proptest::prop_oneof;
 use serde::{Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
+use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql};
 
 use crate::{DataType, DataTypeKind};
 
@@ -256,6 +259,91 @@ impl From<ArrayD<DataType>> for Array {
             contents,
         }
     }
+}
+
+impl<'a> FromSql<'a> for Array {
+    fn from_sql(
+        ty: &tokio_postgres::types::Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let member_type = match ty.kind() {
+            Kind::Array(member) => member,
+            _ => panic!("Expected array type"),
+        };
+
+        let arr = postgres_protocol::types::array_from_sql(raw)?;
+        let mut lower_bounds = vec![];
+        let mut lengths = vec![];
+        arr.dimensions().for_each(|dim| {
+            lower_bounds.push(dim.lower_bound);
+            lengths.push(dim.len as usize);
+            Ok(())
+        })?;
+
+        let values = arr
+            .values()
+            .map(|v| DataType::from_sql_nullable(member_type, v))
+            .collect::<Vec<_>>()?;
+
+        Ok(Array {
+            lower_bounds: lower_bounds.into(),
+            contents: ArrayD::from_shape_vec(IxDyn(lengths.as_slice()), values)?,
+        })
+    }
+
+    fn accepts(ty: &tokio_postgres::types::Type) -> bool {
+        match ty.kind() {
+            Kind::Array(member) => <DataType as FromSql>::accepts(member),
+            _ => false,
+        }
+    }
+}
+
+impl ToSql for Array {
+    fn to_sql(
+        &self,
+        ty: &tokio_postgres::types::Type,
+        out: &mut bytes::BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        let member_type = match ty.kind() {
+            Kind::Array(member) => member,
+            _ => panic!("Expected array type"),
+        };
+
+        postgres_protocol::types::array_to_sql(
+            self.lower_bounds
+                .iter()
+                .zip(self.contents.shape())
+                .map(|(lower_bound, length)| ArrayDimension {
+                    len: *length as _,
+                    lower_bound: *lower_bound,
+                }),
+            member_type.oid(),
+            self.values(),
+            |e, o| match e.to_sql(member_type, o)? {
+                IsNull::Yes => Ok(postgres_protocol::IsNull::Yes),
+                IsNull::No => Ok(postgres_protocol::IsNull::No),
+            },
+            out,
+        )?;
+
+        Ok(IsNull::No)
+    }
+
+    fn accepts(ty: &tokio_postgres::types::Type) -> bool
+    where
+        Self: Sized,
+    {
+        match ty.kind() {
+            Kind::Array(member) => <DataType as ToSql>::accepts(member),
+            _ => false,
+        }
+    }
+
+    to_sql_checked!();
 }
 
 mod parse {

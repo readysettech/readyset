@@ -4013,6 +4013,7 @@ dependencies = [
  "derive_more",
  "enum-kinds",
  "eui48",
+ "fallible-iterator",
  "itertools",
  "launchpad",
  "mysql-time",
@@ -4021,16 +4022,19 @@ dependencies = [
  "nom 7.1.1",
  "nom-sql",
  "noria-errors",
+ "postgres-protocol",
  "proptest",
  "rust_decimal",
  "serde",
  "serde_bytes",
  "serde_json",
+ "serial_test",
  "smallvec",
  "strum",
  "strum_macros",
  "test-strategy",
  "time 0.3.6",
+ "tokio",
  "tokio-postgres",
  "triomphe",
  "uuid 0.8.2",
@@ -6616,9 +6620,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.18.2"
+version = "1.19.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4903bf0427cf68dddd5aa6a93220756f8be0c34fcfa9f5e6191e103e15a31395"
+checksum = "c51a52ed6686dd62c320f9b89299e9dfb46f730c7a48e635c19f21d116cb1439"
 dependencies = [
  "bytes 1.1.0",
  "libc",
