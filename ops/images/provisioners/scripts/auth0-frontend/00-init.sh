@@ -7,14 +7,13 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
 sudo cp -r \
     /tmp/auth0-frontend-source \
     /opt/auth0-frontend
-sudo rm -f /opt/auth0-frontend/.env
 sudo chown -R root:root /opt/auth0-frontend
 
 test -f /opt/auth0-frontend/package.json
 
 pushd /opt/auth0-frontend
 sudo npm install
-sudo node_modules/.bin/next build
+sudo npm run build
 popd
 
 sudo install -o root -g root -m 644 \

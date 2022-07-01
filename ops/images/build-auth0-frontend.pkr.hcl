@@ -29,7 +29,6 @@ build {
       "provisioners/scripts/internal-base/99-tailscale.sh",
       "provisioners/scripts/auth0-frontend/00-init.sh",
       "provisioners/scripts/auth0-frontend/01-nginx.sh",
-      "provisioners/scripts/auth0-frontend/10-aws.sh",
       "provisioners/scripts/reset-cloud-init.sh",
     ]
   }
