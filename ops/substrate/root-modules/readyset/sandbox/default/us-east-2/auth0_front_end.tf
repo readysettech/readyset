@@ -1,0 +1,20 @@
+module "readyset_console" {
+  source                                     = "../../../../../modules/auth0-frontend/regional"
+  ami_id                                     = var.auth0_frontend_ami_id
+  auth0_client_id                            = var.auth0_client_id
+  auth0_domain                               = var.auth0_domain
+  auth0_rs_app_client_secret_arn             = var.auth0_rs_app_client_secret_arn
+  domain                                     = var.auth0_frontend_domain
+  issuer_base_url                            = var.auth0_frontend_issuer_base_url
+  key_name                                   = var.auth0_frontend_key_name
+  logout_uri                                 = var.auth0_frontend_logout_uri
+  num_replicas                               = var.auth0_frontend_num_replicas
+  redirect_uri                               = var.auth0_frontend_redirect_uri
+  subnet_ids                                 = data.aws_subnets.default.ids
+  vpc_id                                     = data.aws_vpc.default.id
+  environment                                = var.environment
+  quality                                    = var.quality
+  aws_region                                 = var.aws_region
+  iam_authorized_secrets_manager_kms_key_arn = ""
+  auth0_audience                             = var.auth0_audience
+}

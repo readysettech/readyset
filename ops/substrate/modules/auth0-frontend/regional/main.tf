@@ -68,41 +68,51 @@ resource "random_id" "app_secret" {
   byte_length = 64
 }
 
+resource "aws_iam_policy" "auth0-frontend-policy" {
+  name        = local.auth0_frontend_iam_policy_name
+  description = "EC2 instance policy for Auth0 Front End."
+  policy      = data.aws_iam_policy_document.auth0-frontend.json
+}
+module "auth0-frontend-iam-role" {
+  source                  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
+  version                 = "4.7.0"
+  create_role             = true
+  create_instance_profile = true
+  role_name               = local.auth0_frontend_iam_role_name
+  role_requires_mfa       = false
+  trusted_role_services   = ["ec2.amazonaws.com"]
+  custom_role_policy_arns = [
+    aws_iam_policy.auth0-frontend-policy.arn
+  ]
+  tags = {
+    Name = local.auth0_frontend_iam_role_name
+    role = "iam_role"
+  }
+}
+
 module "asg" {
-  source  = "terraform-aws-modules/autoscaling/aws"
-  version = "~> 6.3.0"
-  name    = "auth0-frontend"
-
-  launch_template_name = "auth0-frontend-launch-template"
-
-  image_id        = var.ami_id
-  instance_type   = "t2.micro"
-  security_groups = [aws_security_group.auth0-frontend-instance.id]
-  load_balancers  = [module.elb.elb_id]
-  key_name        = var.key_name
-
-  user_data = base64encode(
-    <<-EOT
-      #!/bin/bash
-      set -euo pipefail
-
-      export CLIENT_ID="${var.auth0_domain}"
-      export ISSUER_BASE_URL="${var.auth0_domain}"
-      export SECRET="${random_id.app_secret.b64_std}"
-      export BASE_URL="https://${var.domain}.readyset.io"
-      exec /usr/local/bin/user-data-init.sh
-    EOT
-  )
-
-  block_device_mappings = [{
-    device_name = "/dev/xvda"
-    no_device   = 0
-    ebs = {
-      delete_on_termination = true
-      volume_size           = 50
-      volume_type           = "gp3"
+  source                   = "terraform-aws-modules/autoscaling/aws"
+  version                  = "~> 6.3.0"
+  name                     = "auth0-frontend"
+  launch_template_name     = "auth0-frontend-launch-template"
+  iam_instance_profile_arn = module.auth0-frontend-iam-role.iam_instance_profile_arn
+  image_id                 = var.ami_id
+  instance_type            = "t2.micro"
+  security_groups          = [aws_security_group.auth0-frontend-instance.id]
+  load_balancers           = [module.elb.elb_id]
+  key_name                 = var.key_name
+  user_data                = base64encode(data.template_file.launch-script.rendered)
+  block_device_mappings = [
+    {
+      device_name = "/dev/xvda"
+      no_device   = 0
+      ebs = {
+        delete_on_termination = true
+        volume_size           = 50
+        volume_type           = "gp3"
+      }
     }
-  }]
+  ]
 
   metadata_options = {
     # Require IMDSv2
