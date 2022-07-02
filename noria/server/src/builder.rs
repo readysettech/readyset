@@ -156,6 +156,13 @@ impl Builder {
         self.config.replicator_config = config;
     }
 
+    /// Sets the value of [`replicators::Config::disable_replication_ssl_verification`]
+    pub fn set_disable_replication_ssl_verification(&mut self, value: bool) {
+        self.config
+            .replicator_config
+            .disable_replication_ssl_verification = value;
+    }
+
     /// Sets whether we should keep the chain of prior recipes when storing a new
     /// recipe. Setting this to false may have unexpected behavior and should be
     /// used with caution. It is currently only used in test environments.

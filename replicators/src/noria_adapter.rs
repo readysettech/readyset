@@ -39,6 +39,19 @@ pub struct Config {
     #[serde(default)]
     pub replication_url: Option<RedactedString>,
 
+    /// Disable verification of SSL certificates supplied by the replication database (postgres
+    /// only, ignored for mysql). Ignored if `--replication-url` is not passed.
+    ///
+    /// # Warning
+    ///
+    /// You should think very carefully before using this flag. If invalid certificates are
+    /// trusted, any certificate for any site will be trusted for use, including expired
+    /// certificates. This introduces significant vulnerabilities, and should only be used as a
+    /// last resort.
+    #[clap(long, env = "DISABLE_REPLICATION_SSL_VERIFICATION")]
+    #[serde(default)]
+    pub disable_replication_ssl_verification: bool,
+
     /// Sets the server id when acquiring a binlog replication slot.
     #[clap(long, hide = true)]
     #[serde(default)]
@@ -62,6 +75,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             replication_url: Default::default(),
+            disable_replication_ssl_verification: false,
             replication_server_id: Default::default(),
             replicator_restart_timeout: Duration::from_secs(30),
         }

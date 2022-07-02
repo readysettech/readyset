@@ -317,6 +317,18 @@ pub struct Options {
     /// parameters
     #[clap(long, env = "EXPERIMENTAL_MIXED_COMPARISONS_SUPPORT")]
     enable_experimental_mixed_comparisons: bool,
+
+    /// Disable verification of SSL certificates supplied by the replication database (postgres
+    /// only, ignored for mysql). Ignored if `--upstream-db-url` is not passed.
+    ///
+    /// # Warning
+    ///
+    /// You should think very carefully before using this flag. If invalid certificates are
+    /// trusted, any certificate for any site will be trusted for use, including expired
+    /// certificates. This introduces significant vulnerabilities, and should only be used as a
+    /// last resort.
+    #[clap(long, env = "DISABLE_REPLICATION_SSL_VERIFICATION")]
+    pub disable_replication_ssl_verification: bool,
 }
 
 impl<H> NoriaAdapter<H>
@@ -588,7 +600,14 @@ where
             let mut builder = Builder::default();
             let r = readers.clone();
             let auth_address = options.authority_address.clone();
-            builder.set_replication_url(options.upstream_db_url.as_ref().unwrap().0.clone());
+
+            if let Some(upstream_db_url) = &options.upstream_db_url {
+                builder.set_replication_url(upstream_db_url.clone().into());
+                builder.set_disable_replication_ssl_verification(
+                    options.disable_replication_ssl_verification,
+                );
+            }
+
             let persistence_params = noria_server::PersistenceParameters::new(
                 noria_server::DurabilityMode::Permanent,
                 Some(deployment.clone()),

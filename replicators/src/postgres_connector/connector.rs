@@ -78,10 +78,16 @@ impl PostgresWalConnector {
     pub async fn connect<S: AsRef<str>>(
         mut pg_config: pgsql::Config,
         dbname: S,
-        _config: Config,
+        config: Config,
         next_position: Option<PostgresPosition>,
     ) -> ReadySetResult<Self> {
-        let connector = native_tls::TlsConnector::builder().build().unwrap(); // Never returns an error
+        let connector = {
+            let mut builder = native_tls::TlsConnector::builder();
+            if config.disable_replication_ssl_verification {
+                builder.danger_accept_invalid_certs(true);
+            }
+            builder.build().unwrap() // Never returns an error
+        };
         let connector = postgres_native_tls::MakeTlsConnector::new(connector);
 
         setup_ddl_replication(pg_config.clone(), connector.clone()).await?;

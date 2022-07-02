@@ -219,7 +219,10 @@ impl AdvancedSettings {
         let mut vars = vec![];
 
         if !self.verify_upstream_ssl_certs {
-            vars.push(("DISABLE_UPSTREAM_SSL_VERIFICATION", "1"));
+            vars.extend([
+                ("DISABLE_UPSTREAM_SSL_VERIFICATION", "1"),
+                ("DISABLE_REPLICATION_SSL_VERIFICATION", "1"),
+            ]);
         }
 
         if self.explicit_migrations {
