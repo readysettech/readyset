@@ -465,7 +465,7 @@ impl TestScript {
             }
 
             if let Some(replication_url) = &run_opts.replication_url {
-                builder.set_replicator_url(replication_url.to_owned());
+                builder.set_replication_url(replication_url.to_owned());
             }
 
             builder.set_keep_prior_recipes(false);

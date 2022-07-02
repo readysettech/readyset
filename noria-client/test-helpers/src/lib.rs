@@ -154,7 +154,7 @@ where
     }
 
     if let Some(f) = fallback.as_ref() {
-        builder.set_replicator_url(f.clone());
+        builder.set_replication_url(f.clone());
     }
     let mut handle = builder.start(authority.clone()).await.unwrap();
     if wait_for_backend {

@@ -146,14 +146,14 @@ impl Builder {
         self.config.domain_config.aggressively_update_state_sizes = value;
     }
 
-    /// Sets the primary MySQL/PostgreSQL server to replicate from.
-    pub fn set_replicator_url(&mut self, url: String) {
-        self.config.replication_url = Some(url);
+    /// Sets the URL for the database to replicate from
+    pub fn set_replication_url(&mut self, url: String) {
+        self.config.replicator_config.replication_url = Some(url.into());
     }
 
-    /// Sets the server uuid to use when registering for a binlog replication slot.
-    pub fn set_replication_server_id(&mut self, id: u32) {
-        self.config.replication_server_id = Some(id);
+    /// Sets configuration for the replicator thread
+    pub fn set_replicator_config(&mut self, config: replicators::Config) {
+        self.config.replicator_config = config;
     }
 
     /// Sets whether we should keep the chain of prior recipes when storing a new
@@ -210,7 +210,7 @@ impl Builder {
     /// Sets the value of [`Config::replicator_restart_timeout`]. See documentation of
     /// that field for more information.
     pub fn set_replicator_restart_timeout(&mut self, value: std::time::Duration) {
-        self.config.replicator_restart_timeout = value;
+        self.config.replicator_config.replicator_restart_timeout = value;
     }
 
     /// Sets the value of [`Config::domain_config::eviction_kind`]. See documentation of

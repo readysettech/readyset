@@ -49,16 +49,12 @@ pub struct Leader {
 
     /// The amount of time to wait for a worker request to complete.
     worker_request_timeout: Duration,
-    /// The amount of time to wait before restarting the replicator on error.
-    replicator_restart_timeout: Duration,
-    /// Upstream database URL to issue replicator commands to.
-    pub(super) replicator_url: Option<String>,
+    /// Configuration for the replicator
+    pub(super) replicator_config: replicators::Config,
     /// A handle to the replicator task
     pub(super) replicator_task: Option<tokio::task::JoinHandle<()>>,
     /// A client to the current authority.
     pub(super) authority: Arc<Authority>,
-    /// Optional server id to use when registering for a slot for binlog replication.
-    pub(super) server_id: Option<u32>,
 }
 
 impl Leader {
@@ -98,27 +94,23 @@ impl Leader {
         ready_notification: Arc<Notify>,
         replication_error: UnboundedSender<ReadySetError>,
     ) {
-        let url = match &self.replicator_url {
-            Some(url) => url.to_string(),
-            None => {
-                ready_notification.notify_one();
-                info!("No primary instance specified");
-                return;
-            }
-        };
+        if self.replicator_config.replication_url.is_none() {
+            ready_notification.notify_one();
+            info!("No primary instance specified");
+            return;
+        }
 
-        let server_id = self.server_id;
         let authority = Arc::clone(&self.authority);
-        let replicator_restart_timeout = self.replicator_restart_timeout;
+        let replicator_restart_timeout = self.replicator_config.replicator_restart_timeout;
+        let config = self.replicator_config.clone();
         self.replicator_task = Some(tokio::spawn(async move {
             loop {
                 let noria: noria::ControllerHandle =
                     noria::ControllerHandle::new(Arc::clone(&authority)).await;
 
-                match replicators::NoriaAdapter::start_with_url(
-                    &url,
+                match replicators::NoriaAdapter::start(
                     noria,
-                    server_id,
+                    config.clone(),
                     Some(ready_notification.clone()),
                 )
                 .await
@@ -597,10 +589,8 @@ impl Leader {
         state: ControllerState,
         controller_uri: Url,
         authority: Arc<Authority>,
-        replicator_url: Option<String>,
-        server_id: Option<u32>,
+        replicator_config: replicators::Config,
         worker_request_timeout: Duration,
-        replicator_restart_timeout: Duration,
     ) -> Self {
         assert_ne!(state.config.quorum, 0);
 
@@ -621,12 +611,10 @@ impl Leader {
 
             controller_uri,
 
-            replicator_url,
+            replicator_config,
             replicator_task: None,
             authority,
-            server_id,
             worker_request_timeout,
-            replicator_restart_timeout,
         }
     }
 }

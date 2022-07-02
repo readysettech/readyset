@@ -7,12 +7,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::anyhow;
 use clap::{ArgEnum, Parser};
 use futures_util::future::{self, Either};
-use launchpad::redacted::RedactedString;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use noria::metrics::recorded;
 use noria_server::consensus::AuthorityType;
 use noria_server::metrics::{install_global_recorder, CompositeMetricsRecorder, MetricsRecorder};
-use noria_server::{Builder, DurabilityMode, NoriaMetricsRecorder, ReplicationOptions, VolumeId};
+use noria_server::{
+    Builder, DurabilityMode, NoriaMetricsRecorder, ReplicationOptions as DomainReplicationOptions,
+    VolumeId,
+};
 use tracing::{error, info};
 
 #[cfg(not(target_env = "msvc"))]
@@ -145,11 +147,6 @@ struct Opts {
     #[clap(long, default_value = "1024")]
     metrics_queue_len: usize,
 
-    /// A URL identifying a MySQL or PostgreSQL primary server to replicate from. Should include
-    /// username and password if necessary.
-    #[clap(long, env = "REPLICATION_URL")]
-    replication_url: Option<RedactedString>,
-
     /// Whether this server should only run reader domains
     #[clap(long)]
     reader_only: bool,
@@ -186,10 +183,6 @@ struct Opts {
     #[clap(flatten)]
     tracing: readyset_tracing::Options,
 
-    /// Sets the server id when acquiring a binlog replication slot.
-    #[clap(long, hide = true)]
-    replication_server_id: Option<u32>,
-
     /// Sets the number of concurrent replay requests in a noria-server.
     #[clap(long, hide = true)]
     max_concurrent_replays: Option<usize>,
@@ -199,12 +192,11 @@ struct Opts {
     #[clap(long, env = "DB_DIR")]
     db_dir: Option<PathBuf>,
 
-    /// The time to wait before restarting the replicator in seconds.
-    #[clap(long, hide = true)]
-    replicator_restart_timeout: Option<u64>,
+    #[clap(flatten)]
+    domain_replication_options: DomainReplicationOptions,
 
     #[clap(flatten)]
-    replication_options: ReplicationOptions,
+    replicator_config: replicators::Config,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -285,7 +277,7 @@ fn main() -> anyhow::Result<()> {
     builder.set_allow_paginate(opts.enable_experimental_paginate_support);
     builder.set_allow_mixed_comparisons(opts.enable_experimental_mixed_comparisons);
 
-    builder.set_replication_strategy(opts.replication_options.into());
+    builder.set_replication_strategy(opts.domain_replication_options.into());
 
     if let Some(volume_id) = opts.volume_id {
         info!(%volume_id);
@@ -300,10 +292,6 @@ fn main() -> anyhow::Result<()> {
         builder.set_max_concurrent_replay(r)
     }
 
-    if let Some(id) = opts.replication_server_id {
-        builder.set_replication_server_id(id);
-    }
-
     if opts.reader_only {
         builder.as_reader_only()
     }
@@ -316,13 +304,7 @@ fn main() -> anyhow::Result<()> {
     );
     builder.set_persistence(persistence_params);
 
-    if let Some(url) = opts.replication_url {
-        builder.set_replicator_url(url.0);
-    }
-
-    if let Some(t) = opts.replicator_restart_timeout {
-        builder.set_replicator_restart_timeout(Duration::from_secs(t));
-    }
+    builder.set_replicator_config(opts.replicator_config);
 
     let authority = opts.authority;
     let authority_addr = opts.authority_address;

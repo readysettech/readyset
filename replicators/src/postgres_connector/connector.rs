@@ -11,6 +11,7 @@ use super::wal_reader::{WalEvent, WalReader};
 use super::{PostgresPosition, PUBLICATION_NAME, REPLICATION_SLOT};
 use crate::noria_adapter::{Connector, ReplicationAction};
 use crate::postgres_connector::ddl_replication::DdlEvent;
+use crate::Config;
 
 /// A connector that connects to a PostgreSQL server and starts reading WAL from the "noria"
 /// replication slot with the "noria" publication.
@@ -75,18 +76,19 @@ impl PostgresWalConnector {
     /// Connects to postgres and if needed creates a new replication slot for itself with an
     /// exported snapshot.
     pub async fn connect<S: AsRef<str>>(
-        mut config: pgsql::Config,
+        mut pg_config: pgsql::Config,
         dbname: S,
+        _config: Config,
         next_position: Option<PostgresPosition>,
     ) -> ReadySetResult<Self> {
         let connector = native_tls::TlsConnector::builder().build().unwrap(); // Never returns an error
         let connector = postgres_native_tls::MakeTlsConnector::new(connector);
 
-        setup_ddl_replication(config.clone(), connector.clone()).await?;
+        setup_ddl_replication(pg_config.clone(), connector.clone()).await?;
 
-        config.dbname(dbname.as_ref()).set_replication_database();
+        pg_config.dbname(dbname.as_ref()).set_replication_database();
 
-        let (client, connection) = config.connect(connector).await?;
+        let (client, connection) = pg_config.connect(connector).await?;
         let connection_handle = tokio::spawn(connection);
 
         let mut connector = PostgresWalConnector {

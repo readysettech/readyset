@@ -588,7 +588,7 @@ where
             let mut builder = Builder::default();
             let r = readers.clone();
             let auth_address = options.authority_address.clone();
-            builder.set_replicator_url(options.upstream_db_url.as_ref().unwrap().0.clone());
+            builder.set_replication_url(options.upstream_db_url.as_ref().unwrap().0.clone());
             let persistence_params = noria_server::PersistenceParameters::new(
                 noria_server::DurabilityMode::Permanent,
                 Some(deployment.clone()),

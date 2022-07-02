@@ -1,12 +1,15 @@
 use std::collections::{hash_map, HashMap, HashSet};
 use std::convert::TryInto;
 use std::future;
-use std::str::FromStr;
+use std::num::ParseIntError;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use clap::Parser;
+use database_utils::DatabaseURL;
 use futures::{FutureExt, TryFutureExt};
+use launchpad::redacted::RedactedString;
 use launchpad::select;
 use metrics::{counter, histogram};
 use noria::consensus::Authority;
@@ -14,6 +17,8 @@ use noria::consistency::Timestamp;
 use noria::metrics::recorded::{self, SnapshotStatusTag};
 use noria::replication::{ReplicationOffset, ReplicationOffsets};
 use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table, TableOperation};
+use noria_errors::{internal_err, invalid_err};
+use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use {mysql_async as mysql, tokio_postgres as pgsql};
@@ -22,6 +27,46 @@ use crate::mysql_connector::{MySqlBinlogConnector, MySqlReplicator};
 use crate::postgres_connector::{
     PostgresPosition, PostgresReplicator, PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
 };
+
+/// Shared configuration for replication.
+///
+/// Usable as command-line options via `#[clap(flatten)]`
+#[derive(Debug, Clone, Parser, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Config {
+    /// A URL identifying a MySQL or PostgreSQL primary server to replicate from. Should include
+    /// username and password if necessary.
+    #[clap(long, env = "REPLICATION_URL")]
+    #[serde(default)]
+    pub replication_url: Option<RedactedString>,
+
+    /// Sets the server id when acquiring a binlog replication slot.
+    #[clap(long, hide = true)]
+    #[serde(default)]
+    pub replication_server_id: Option<u32>,
+
+    /// The time to wait before restarting the replicator in seconds.
+    #[clap(long, hide = true, default_value = "30", parse(try_from_str = duration_from_seconds))]
+    #[serde(default = "default_replicator_restart_timeout")]
+    pub replicator_restart_timeout: Duration,
+}
+
+fn default_replicator_restart_timeout() -> Duration {
+    Config::default().replicator_restart_timeout
+}
+
+fn duration_from_seconds(i: &str) -> Result<Duration, ParseIntError> {
+    i.parse::<u64>().map(Duration::from_secs)
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            replication_url: Default::default(),
+            replication_server_id: Default::default(),
+            replicator_restart_timeout: Duration::from_secs(30),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub(crate) enum ReplicationAction {
@@ -79,81 +124,30 @@ pub struct NoriaAdapter {
     replication_offsets: ReplicationOffsets,
 }
 
-#[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
-pub enum AdapterOpts {
-    MySql(mysql::Opts),
-    Postgres(pgsql::Config),
-}
-
-impl FromStr for AdapterOpts {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.starts_with("mysql://") {
-            let opts: mysql::Opts = s.parse().map_err(|e: mysql::UrlError| e.to_string())?;
-            if opts.db_name().is_none() {
-                return Err("Database name is required in MySQL URL".to_string());
-            }
-            Ok(AdapterOpts::MySql(opts))
-        } else if s.starts_with("postgres://") || s.starts_with("postgresql://") {
-            let opts: pgsql::Config = s.parse().map_err(|e: pgsql::Error| e.to_string())?;
-            if opts.get_dbname().is_none() {
-                return Err("Database name is required in PostgreSQL URL".to_string());
-            }
-            Ok(AdapterOpts::Postgres(opts))
-        } else {
-            Err("A valid URL should begin with mysql:// or postgresql://".to_string())
-        }
-    }
-}
-
 impl NoriaAdapter {
-    pub async fn start_with_authority(
-        authority: Authority,
-        options: AdapterOpts,
-        server_id: Option<u32>,
-    ) -> ReadySetResult<!> {
+    pub async fn start_with_authority(authority: Authority, config: Config) -> ReadySetResult<!> {
         let noria = noria::ControllerHandle::new(authority).await;
-        NoriaAdapter::start_inner(noria, options, server_id, None).await
+        NoriaAdapter::start(noria, config, None).await
     }
-}
 
-impl NoriaAdapter {
-    /// Same as [`start`](Builder::start), but accepts a MySQL/PostgreSQL url for options
-    /// and an externally supplied Noria `ControllerHandle`.
-    /// The MySQL url must contain the database name, and user and password if applicable.
-    /// i.e. `mysql://user:pass%20word@localhost/database_name` or
-    /// `postgresql://user:pass%20word@localhost/database_name`
-    #[allow(dead_code)]
-    pub async fn start_with_url<U: AsRef<str>>(
-        url: U,
+    pub async fn start(
         noria: ControllerHandle,
-        server_id: Option<u32>,
+        mut config: Config,
         ready_notify: Option<Arc<Notify>>,
     ) -> ReadySetResult<!> {
-        let options = url
-            .as_ref()
+        let url: DatabaseURL = config
+            .replication_url
+            .take()
+            .ok_or_else(|| internal_err("Replication URL not supplied"))?
             .parse()
-            .map_err(|e| ReadySetError::ReplicationFailed(format!("Invalid URL format: {}", e)))?;
+            .map_err(|e| invalid_err(format!("Invalid URL supplied to --replication-url: {e}")))?;
 
-        NoriaAdapter::start_inner(noria, options, server_id, ready_notify)
-            .instrument(info_span!("replicator"))
-            .await
-    }
-
-    async fn start_inner(
-        noria: ControllerHandle,
-        options: AdapterOpts,
-        server_id: Option<u32>,
-        ready_notify: Option<Arc<Notify>>,
-    ) -> ReadySetResult<!> {
-        match options {
-            AdapterOpts::MySql(options) => {
-                NoriaAdapter::start_inner_mysql(options, noria, server_id, ready_notify).await
+        match url {
+            DatabaseURL::MySQL(options) => {
+                NoriaAdapter::start_inner_mysql(options, noria, config, ready_notify).await
             }
-            AdapterOpts::Postgres(options) => {
-                NoriaAdapter::start_inner_postgres(options, noria, ready_notify).await
+            DatabaseURL::PostgreSQL(options) => {
+                NoriaAdapter::start_inner_postgres(options, noria, config, ready_notify).await
             }
         }
     }
@@ -171,7 +165,7 @@ impl NoriaAdapter {
     async fn start_inner_mysql(
         mysql_options: mysql::Opts,
         mut noria: ControllerHandle,
-        server_id: Option<u32>,
+        config: Config,
         ready_notify: Option<Arc<Notify>>,
     ) -> ReadySetResult<!> {
         use crate::mysql_connector::BinlogPosition;
@@ -247,7 +241,13 @@ impl NoriaAdapter {
         // present on the primary, in which case the connection will fail, and we would
         // need to perform a new snapshot
         let connector = Box::new(
-            MySqlBinlogConnector::connect(mysql_options, schemas, pos.clone(), server_id).await?,
+            MySqlBinlogConnector::connect(
+                mysql_options,
+                schemas,
+                pos.clone(),
+                config.replication_server_id,
+            )
+            .await?,
         );
 
         let mut adapter = NoriaAdapter {
@@ -291,6 +291,7 @@ impl NoriaAdapter {
     async fn start_inner_postgres(
         pgsql_opts: pgsql::Config,
         mut noria: ControllerHandle,
+        config: Config,
         ready_notify: Option<Arc<Notify>>,
     ) -> ReadySetResult<!> {
         // Attempt to retreive the latest replication offset from noria, if none is present
@@ -308,7 +309,8 @@ impl NoriaAdapter {
             .unwrap_or_default();
 
         let mut connector = Box::new(
-            PostgresWalConnector::connect(pgsql_opts.clone(), dbname.first().unwrap(), pos).await?,
+            PostgresWalConnector::connect(pgsql_opts.clone(), dbname.first().unwrap(), config, pos)
+                .await?,
         );
 
         info!("Connected to PostgreSQL");

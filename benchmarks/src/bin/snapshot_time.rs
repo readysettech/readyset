@@ -36,7 +36,7 @@ impl SnapshotBenchmark {
                 ..Default::default()
             };
             builder.set_persistence(persistence);
-            builder.set_replicator_url(self.replication_url.clone());
+            builder.set_replication_url(self.replication_url.clone());
 
             let start = Instant::now();
             let mut noria = builder.start_local().await?;
