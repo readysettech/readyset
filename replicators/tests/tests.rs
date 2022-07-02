@@ -9,7 +9,7 @@ use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::{ControllerHandle, ReadySetError, ReadySetResult};
 use noria_data::{DataType, TinyText};
 use noria_server::Builder;
-use replicators::NoriaAdapter;
+use replicators::{Config, NoriaAdapter};
 use tracing::trace;
 
 const MAX_ATTEMPTS: usize = 40;
@@ -224,10 +224,12 @@ impl TestHandle {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let controller = ControllerHandle::new(Arc::clone(&self.authority)).await;
 
-        let _ = runtime.spawn(NoriaAdapter::start_with_url(
-            self.url.clone(),
+        let _ = runtime.spawn(NoriaAdapter::start(
             controller,
-            None,
+            Config {
+                replication_url: Some(self.url.clone().into()),
+                ..Default::default()
+            },
             self.ready_notify.clone(),
         ));
 

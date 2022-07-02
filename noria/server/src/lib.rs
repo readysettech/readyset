@@ -479,8 +479,8 @@ pub struct Config {
     pub(crate) abort_on_task_failure: bool,
     /// Configuration for converting SQL to MIR
     pub(crate) mir_config: sql::mir::Config,
-    pub(crate) replication_url: Option<String>,
-    pub(crate) replication_server_id: Option<u32>,
+    #[serde(flatten)]
+    pub(crate) replicator_config: replicators::Config,
     pub(crate) keep_prior_recipes: bool,
     #[serde(default)]
     pub(crate) replication_strategy: ReplicationStrategy,
@@ -489,8 +489,6 @@ pub struct Config {
     /// The duration to wait before canceling a task waiting on a worker request. Worker requests
     /// are typically issued as part of migrations.
     pub(crate) worker_request_timeout: Duration,
-    // The duration to wait after a failure of the replication task before restarting it.
-    pub(crate) replicator_restart_timeout: Duration,
 }
 
 impl Default for Config {
@@ -516,13 +514,11 @@ impl Default for Config {
             reuse: None,
             abort_on_task_failure: true,
             mir_config: Default::default(),
-            replication_url: None,
-            replication_server_id: None,
+            replicator_config: Default::default(),
             keep_prior_recipes: true,
             replication_strategy: Default::default(),
             upquery_timeout: Duration::from_millis(5000),
             worker_request_timeout: Duration::from_millis(1800000),
-            replicator_restart_timeout: Duration::from_secs(30),
         }
     }
 }
@@ -556,3 +552,17 @@ impl<T> Sink<T> for ImplSinkForSender<T> {
 // TODO(justin): Change VolumeId type when we know this fixed size.
 /// Id associated with the worker server's volume.
 pub type VolumeId = String;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_serde_round_trip() {
+        let input = Config::default();
+        let serialized = serde_json::to_string(&input).unwrap();
+        let roundtripped = serde_json::from_str::<Config>(&serialized).unwrap();
+
+        assert_eq!(roundtripped, input);
+    }
+}

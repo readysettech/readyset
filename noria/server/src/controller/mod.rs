@@ -400,10 +400,8 @@ impl Controller {
                     state,
                     self.our_descriptor.controller_uri.clone(),
                     self.authority.clone(),
-                    self.config.replication_url.clone(),
-                    self.config.replication_server_id,
+                    self.config.replicator_config.clone(),
                     self.config.worker_request_timeout,
-                    self.config.replicator_restart_timeout,
                 );
                 self.leader_ready.store(false, Ordering::Release);
 
