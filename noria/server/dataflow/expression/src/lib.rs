@@ -41,6 +41,8 @@ pub enum BuiltinFunction {
     Round(Expression, Expression),
     /// json_typeof(expr)
     JsonTypeof(Expression),
+    /// jsonb_typeof(expr)
+    JsonbTypeof(Expression),
 }
 
 impl BuiltinFunction {
@@ -139,7 +141,28 @@ impl BuiltinFunction {
                     Type::Sql(SqlType::Text), // Always returns text containing the JSON type
                 ))
             }
+            "jsonb_typeof" => {
+                Ok((
+                    Self::JsonbTypeof(args.next().ok_or_else(arity_error)?),
+                    Type::Sql(SqlType::Text), // Always returns text containing the JSON type
+                ))
+            }
             _ => Err(ReadySetError::NoSuchFunction(name.to_owned())),
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        use BuiltinFunction::*;
+        match self {
+            ConvertTZ { .. } => "convert_tz",
+            DayOfWeek { .. } => "dayofweek",
+            IfNull { .. } => "ifnull",
+            Month { .. } => "month",
+            Timediff { .. } => "timediff",
+            Addtime { .. } => "addtime",
+            Round { .. } => "round",
+            JsonTypeof { .. } => "json_typeof",
+            JsonbTypeof { .. } => "jsonb_typeof",
         }
     }
 }
@@ -148,30 +171,35 @@ impl fmt::Display for BuiltinFunction {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use BuiltinFunction::*;
 
+        write!(f, "{}", self.name())?;
+
         match self {
             ConvertTZ(arg1, arg2, arg3) => {
-                write!(f, "convert_tz({}, {}, {})", arg1, arg2, arg3)
+                write!(f, "({}, {}, {})", arg1, arg2, arg3)
             }
             DayOfWeek(arg) => {
-                write!(f, "dayofweek({})", arg)
+                write!(f, "({})", arg)
             }
             IfNull(arg1, arg2) => {
-                write!(f, "ifnull({}, {})", arg1, arg2)
+                write!(f, "({}, {})", arg1, arg2)
             }
             Month(arg) => {
-                write!(f, "month({})", arg)
+                write!(f, "({})", arg)
             }
             Timediff(arg1, arg2) => {
-                write!(f, "timediff({}, {})", arg1, arg2)
+                write!(f, "({}, {})", arg1, arg2)
             }
             Addtime(arg1, arg2) => {
-                write!(f, "addtime({}, {})", arg1, arg2)
+                write!(f, "({}, {})", arg1, arg2)
             }
             Round(arg1, precision) => {
-                write!(f, "round({}, {})", arg1, precision)
+                write!(f, "({}, {})", arg1, precision)
             }
             JsonTypeof(arg) => {
-                write!(f, "json_typeof({})", arg)
+                write!(f, "({})", arg)
+            }
+            JsonbTypeof(arg) => {
+                write!(f, "({})", arg)
             }
         }
     }
@@ -553,7 +581,7 @@ impl Expression {
                         }
                     }
                 }
-                BuiltinFunction::JsonTypeof(expr) => {
+                BuiltinFunction::JsonTypeof(expr) | BuiltinFunction::JsonbTypeof(expr) => {
                     // TODO: Change this to coerce to `SqlType::Jsonb` and have it return a
                     // `DataType` actually representing JSON.
                     let val = try_cast_or_none!(non_null!(&expr.eval(record)?), &SqlType::Text);
@@ -561,7 +589,7 @@ impl Expression {
 
                     let json = serde_json::Value::from_str(json_str).map_err(|e| {
                         ReadySetError::ProjectExpressionBuiltInFunctionError {
-                            function: "json_typeof".into(),
+                            function: func.name().into(),
                             message: format!("parsing JSON expression failed: {}", Sensitive(&e)),
                         }
                     })?;
