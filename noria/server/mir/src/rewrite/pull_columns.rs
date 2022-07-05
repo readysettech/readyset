@@ -160,6 +160,7 @@ mod tests {
             name: "changing_index".into(),
             roots: vec![base],
             leaf: prj,
+            fields: vec!["a".into(), "agg".into()],
         };
 
         pull_all_required_columns(&mut query).unwrap();
@@ -267,6 +268,7 @@ mod tests {
             name: "unprojected_leaf_key".into(),
             roots: vec![base],
             leaf,
+            fields: vec!["a".into()],
         };
 
         pull_all_required_columns(&mut query).unwrap();

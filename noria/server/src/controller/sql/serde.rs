@@ -55,6 +55,8 @@ struct SerializableMirQuery {
     /// The leaf field of the [`MirQuery`], but holding the reference to the leaf node in the graph
     /// instead of the reference to the node.
     leaf: NodeIndex,
+    /// The fields returned by the query, corresponding to [`MirQuery::fields`].
+    fields: Vec<SqlIdentifier>,
 }
 
 impl<'a> TryFrom<&'a MirQuery> for SerializableMirQuery {
@@ -116,6 +118,7 @@ impl<'a> TryFrom<&'a MirQuery> for SerializableMirQuery {
             leaf: *leaf_node_id,
             roots,
             graph,
+            fields: mir_query.fields.clone(),
         })
     }
 }
@@ -253,6 +256,7 @@ where
             name: mir_query.name.clone(),
             roots,
             leaf: leaf_node.ok_or_else(|| E::custom("leaf node not found"))?,
+            fields: mir_query.fields,
         };
         result_mir_queries.insert(name.clone(), mir_query);
     }

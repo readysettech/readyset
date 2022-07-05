@@ -681,19 +681,9 @@ impl SqlIncorporator {
         qg: Option<QueryGraph>,
         mir: &MirQuery,
     ) {
-        // TODO(malte): we currently need to remember these for local state, but should figure out
-        // a better plan (see below)
-        let fields = mir
-            .leaf
-            .borrow()
-            .columns()
-            .iter()
-            .map(|c| c.name.clone())
-            .collect::<Vec<_>>();
-
-        // TODO(malte): get rid of duplication and figure out where to track this state
         debug!(%query_name, "registering query");
-        self.view_schemas.insert(query_name.clone(), fields);
+        self.view_schemas
+            .insert(query_name.clone(), mir.fields.clone());
 
         // We made a new query, so store the query graph and the corresponding leaf MIR node.
         // TODO(malte): we currently store nothing if there is no QG (e.g., for compound queries).

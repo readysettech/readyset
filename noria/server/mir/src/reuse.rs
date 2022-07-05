@@ -179,6 +179,7 @@ pub fn merge_mir_for_queries(new_query: &MirQuery, old_query: &MirQuery) -> (Mir
         name: new_query.name.clone(),
         roots: rewritten_roots,
         leaf: rewritten_leaf,
+        fields: new_query.fields.clone(),
     };
 
     (rewritten_query, reuse.len())
@@ -270,6 +271,7 @@ mod tests {
             name: "q1".into(),
             roots: vec![reuse_a, b],
             leaf: d,
+            fields: vec!["aa".into(), "ba".into()],
         };
 
         // when merging with ourselves, the result should consist entirely of reuse nodes
@@ -305,6 +307,7 @@ mod tests {
             name: "q2".into(),
             roots: vec![a, b],
             leaf: d,
+            fields: vec!["aa".into(), "ba".into()],
         };
         let (merged_extension, _) = merge_mir_for_queries(&mq2, &mq1);
         for n in merged_extension.topo_nodes() {
