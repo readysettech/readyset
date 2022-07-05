@@ -2,6 +2,8 @@ use launchpad::eventually;
 use noria::get_metric;
 use noria::metrics::{recorded, DumpedMetricValue};
 use noria_data::DataType;
+use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::Decimal;
 use serial_test::serial;
 
 use crate::*;
@@ -265,14 +267,20 @@ async fn replicated_readers() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(view_0_key_1, vec![DataType::from(1), DataType::from(3)]);
+    assert_eq!(
+        view_0_key_1,
+        vec![DataType::from(1), DataType::from(Decimal::from_i32(3))]
+    );
 
     let view_1_key_2 = view_1
         .lookup_first(&[2.into()], true)
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(view_1_key_2, vec![DataType::from(2), DataType::from(7)]);
+    assert_eq!(
+        view_1_key_2,
+        vec![DataType::from(2), DataType::from(Decimal::from_i32(7))]
+    );
 
     t.insert_many(vec![
         vec![DataType::from(1), DataType::from(3)],
@@ -287,7 +295,7 @@ async fn replicated_readers() {
             .await
             .unwrap()
             .unwrap();
-        view_0_key_1 == vec![DataType::from(1), DataType::from(6)]
+        view_0_key_1 == vec![DataType::from(1), DataType::from(Decimal::from_i32(6))]
     }
 
     let view_1_key_2 = view_1
@@ -295,21 +303,30 @@ async fn replicated_readers() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(view_1_key_2, vec![DataType::from(2), DataType::from(9)]);
+    assert_eq!(
+        view_1_key_2,
+        vec![DataType::from(2), DataType::from(Decimal::from_i32(9))]
+    );
 
     let view_0_key_2 = view_0
         .lookup_first(&[2.into()], true)
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(view_0_key_2, vec![DataType::from(2), DataType::from(9)]);
+    assert_eq!(
+        view_0_key_2,
+        vec![DataType::from(2), DataType::from(Decimal::from_i32(9))]
+    );
 
     let view_1_key_1 = view_1
         .lookup_first(&[1.into()], true)
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(view_1_key_1, vec![DataType::from(1), DataType::from(6)]);
+    assert_eq!(
+        view_1_key_1,
+        vec![DataType::from(1), DataType::from(Decimal::from_i32(6))]
+    );
 }
 
 #[clustertest]
