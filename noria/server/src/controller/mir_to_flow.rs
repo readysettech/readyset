@@ -1245,6 +1245,7 @@ fn make_project_node(
         .iter()
         .map(|e| e.ty().clone())
         .collect::<Vec<_>>();
+
     let literal_types = literal_values
         .iter()
         .map(|l| l.sql_type().into())
@@ -1456,11 +1457,16 @@ fn make_post_lookup(
         None
     };
     let returned_cols = if let Some(col) = returned_cols.as_ref() {
-        Some(
-            col.iter()
-                .map(|col| (parent.borrow().column_id_for_column(col)))
-                .collect::<ReadySetResult<_>>()?,
-        )
+        let returned_cols = col
+            .iter()
+            .map(|col| (parent.borrow().column_id_for_column(col)))
+            .collect::<ReadySetResult<Vec<_>>>()?;
+
+        // In the future we will avoid reordering column, and must make sure that the returned
+        // columns are a contiguous slice at the start of the row
+        debug_assert!(returned_cols.iter().enumerate().all(|(i, v)| i == *v));
+
+        Some(returned_cols)
     } else {
         None
     };

@@ -398,12 +398,12 @@ impl MirNode {
         // column struct but means its the "alias" that will exist in the parent node,
         // not the column name.
         if child.aliases.is_empty() {
-            self.columns().iter().position(|c| c == child)
+            self.columns().iter().position(|c| child == c)
         } else {
             self.columns()
                 .iter()
                 .position(|c| child.aliases.contains(c))
-                .or_else(|| self.columns().iter().position(|c| c == child))
+                .or_else(|| self.columns().iter().position(|c| child == c))
         }
     }
 

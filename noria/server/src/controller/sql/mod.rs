@@ -339,7 +339,7 @@ impl SqlIncorporator {
                             })
                             .collect::<Result<Vec<_>, _>>()?;
 
-                        let parent = mir_query
+                        let mut parent = mir_query
                             .leaf
                             .borrow()
                             .ancestors()
@@ -348,6 +348,24 @@ impl SqlIncorporator {
                             .unwrap()
                             .upgrade()
                             .unwrap();
+
+                        if matches!(parent.borrow().inner, MirNodeInner::Project { .. }) {
+                            // This might be just a reordering projection on top of a different
+                            // projection, in that case we actually want to start with the
+                            // granparent instead.
+                            let grand_parent = parent
+                                .borrow()
+                                .ancestors()
+                                .iter()
+                                .next()
+                                .unwrap()
+                                .upgrade()
+                                .unwrap();
+
+                            if matches!(grand_parent.borrow().inner, MirNodeInner::Project { .. }) {
+                                parent = grand_parent;
+                            }
+                        }
 
                         // If the existing leaf's parent contains all required parameter columns,
                         // reuse based on this parent.
@@ -413,8 +431,9 @@ impl SqlIncorporator {
                                     // columns. The latter get added later; here we simply
                                     // extract the columns that need reprojecting and pass them
                                     // along with the reuse instruction.
-                                    // FIXME Ensure ancestor includes all columns in parent, with
-                                    // the proper names.
+                                    // FIXME Ensure ancestor includes all columns in parent,
+                                    // with the proper
+                                    // names.
                                     Some(parent.borrow().columns().to_vec())
                                 }
                             };
@@ -948,6 +967,15 @@ mod tests {
         mig.graph().node_weight(na).unwrap()
     }
 
+    /// Helper to grab the immediate parent of  a named view.
+    fn get_parent_node<'a>(inc: &SqlIncorporator, mig: &'a Migration<'_>, name: &str) -> &'a Node {
+        let na = inc
+            .get_flow_node_address(&SqlIdentifier::from(name), 0)
+            .unwrap_or_else(|| panic!("No node named \"{}\" exists", name));
+        let ni = mig.graph().node_weight(na).unwrap().ancestors().unwrap()[0];
+        &mig.graph()[ni]
+    }
+
     fn get_reader<'a>(inc: &SqlIncorporator, mig: &'a Migration<'_>, name: &str) -> &'a Node {
         let na = inc
             .get_flow_node_address(&SqlIdentifier::from(name), 0)
@@ -1009,16 +1037,16 @@ mod tests {
             assert!("SELECT users.id from users;"
                 .to_flow_parts(&mut inc, None, mig)
                 .is_ok());
-            // Should now have source, "users", a leaf projection node for the new selection, and
-            // a reader node
-            assert_eq!(mig.graph().node_count(), ncount + 2);
+            // Should now have source, "users", a leaf projection node for the new selection, a
+            // reorder projection and a reader node
+            assert_eq!(mig.graph().node_count(), ncount + 3);
 
             // Invalid query should fail parsing and add no nodes
             assert!("foo bar from whatever;"
                 .to_flow_parts(&mut inc, None, mig)
                 .is_err());
-            // Should still only have source, "users" and the two nodes for the above selection
-            assert_eq!(mig.graph().node_count(), ncount + 2);
+            // Should still only have source, "users" and the three nodes for the above selection
+            assert_eq!(mig.graph().node_count(), ncount + 3);
         })
         .await;
     }
@@ -1045,7 +1073,7 @@ mod tests {
             );
             assert!(res.is_ok());
             let qfp = res.unwrap();
-            assert_eq!(qfp.new_nodes.len(), 1);
+            assert_eq!(qfp.new_nodes.len(), 2);
             let node = get_node(&inc, mig, &qfp.name);
             // fields should be projected correctly in query order
             assert_eq!(
@@ -1078,7 +1106,7 @@ mod tests {
             let res = inc.add_query("SELECT id FROM users WHERE users.name = ?;", None, mig);
             assert!(res.is_ok());
             let qfp = res.unwrap();
-            assert_eq!(qfp.new_nodes.len(), 1);
+            assert_eq!(qfp.new_nodes.len(), 2);
             let node = get_node(&inc, mig, &qfp.name);
             // fields should be projected correctly in query order, with the
             // absent parameter column included
@@ -1116,7 +1144,7 @@ mod tests {
             );
             assert!(res.is_ok());
             let qfp = res.unwrap();
-            assert_eq!(qfp.new_nodes.len(), 2);
+            assert_eq!(qfp.new_nodes.len(), 3);
 
             // Check filter node
             let qid = query_id_hash(
@@ -1216,7 +1244,7 @@ mod tests {
                 &["id", "author", "title", "name"]
             );
             // leaf node
-            let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
+            let new_leaf_view = get_parent_node(&inc, mig, &q.unwrap().name);
             assert_eq!(
                 new_leaf_view
                     .columns()
@@ -1278,7 +1306,7 @@ mod tests {
             );
             assert_eq!(filter.description(true), "σ[(0 = (lit: 42))]");
             // leaf view node
-            let edge = get_node(&inc, mig, &res.unwrap().name);
+            let edge = get_parent_node(&inc, mig, &res.unwrap().name);
             assert_eq!(
                 edge.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
                 &["name", "bogokey"]
@@ -1319,8 +1347,8 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok());
-            // added the aggregation and the edge view, and a reader
-            assert_eq!(mig.graph().node_count(), 5);
+            // added the aggregation and the edge view, reorder project and a reader
+            assert_eq!(mig.graph().node_count(), 6);
             // check aggregation view
             let qid = query_id_hash(
                 &["votes"],
@@ -1341,7 +1369,7 @@ mod tests {
             );
             assert_eq!(agg_view.description(true), "|*| γ[0]");
             // check edge view
-            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            let edge_view = get_parent_node(&inc, mig, &res.unwrap().name);
             assert_eq!(
                 edge_view
                     .columns()
@@ -1375,9 +1403,9 @@ mod tests {
             assert!(res.is_ok());
             // should have added nodes for this query, too
             let qfp = res.unwrap();
-            assert_eq!(qfp.new_nodes.len(), 2);
-            // expect three new nodes: filter, project, reader
-            assert_eq!(mig.graph().node_count(), ncount + 3);
+            assert_eq!(qfp.new_nodes.len(), 3);
+            // expect three new nodes: filter, project, project (for reorder), reader
+            assert_eq!(mig.graph().node_count(), ncount + 4);
             // should have ended up with a different leaf node
             assert_ne!(qfp.query_leaf, leaf);
         })
@@ -1426,9 +1454,9 @@ mod tests {
             let ncount = mig.graph().node_count();
             let res = inc.add_query("SELECT name, id FROM users WHERE users.id = 42;", None, mig);
             assert!(res.is_ok());
-            // should have added two more nodes (project and reader)
+            // should have added three more nodes (project, reorder project and reader)
             let qfp = res.unwrap();
-            assert_eq!(mig.graph().node_count(), ncount + 2);
+            assert_eq!(mig.graph().node_count(), ncount + 3);
             // should NOT have ended up with the same leaf node
             assert_ne!(qfp.query_leaf, leaf);
         })
@@ -1495,17 +1523,17 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok());
-            // should have added two more nodes: one projection node and one reader node
+            // should have added three more nodes: a projection, a reorder projection and one reader
             let qfp = res.unwrap();
-            assert_eq!(mig.graph().node_count(), ncount + 2);
+            assert_eq!(mig.graph().node_count(), ncount + 3);
             // only the projection node is returned in the vector of new nodes
-            assert_eq!(qfp.new_nodes.len(), 1);
+            assert_eq!(qfp.new_nodes.len(), 2);
             assert_eq!(
                 get_node(&inc, mig, &qfp.name).description(true),
                 "π[0, 1, 2]"
             );
             // we should be based off the new projection as our leaf
-            let id_node = qfp.new_nodes.get(0).unwrap();
+            let id_node = qfp.new_nodes.last().unwrap();
             assert_eq!(qfp.query_leaf, *id_node);
         })
         .await;
@@ -1545,7 +1573,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 &["id", "name", "bogokey"]
             );
-            assert_eq!(projection.description(true), "π[0, 1, lit: 0]");
+            assert_eq!(projection.description(true), "π[0, 1, 2]");
             let leaf = qfp.query_leaf;
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
@@ -1571,9 +1599,9 @@ mod tests {
                     .collect::<Vec<_>>(),
                 &["name", "id"]
             );
-            assert_eq!(projection.description(true), "π[1, 0]");
-            // should have added two more nodes (project and reader)
-            assert_eq!(mig.graph().node_count(), ncount + 2);
+            assert_eq!(projection.description(true), "π[0, 1]");
+            // should have added three more nodes (project, a reorder project and reader)
+            assert_eq!(mig.graph().node_count(), ncount + 3);
             // should NOT have ended up with the same leaf node
             assert_ne!(qfp.query_leaf, leaf);
             // Check reader column
@@ -1605,8 +1633,8 @@ mod tests {
                 &["id", "name", "address"]
             );
             assert_eq!(projection.description(true), "π[0, 1, 2]");
-            // should have added two more nodes (project and reader)
-            assert_eq!(mig.graph().node_count(), ncount + 2);
+            // should have added two more nodes (project, project reorder and reader)
+            assert_eq!(mig.graph().node_count(), ncount + 3);
             // should NOT have ended up with the same leaf node
             assert_ne!(qfp.query_leaf, leaf);
             // Check reader column
@@ -1673,7 +1701,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 &["id", "name", "bogokey"]
             );
-            assert_eq!(projection.description(true), "π[0, 1, lit: 0]");
+            assert_eq!(projection.description(true), "π[0, 1, 2]");
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
             assert_eq!(n.as_reader().unwrap().key().unwrap(), &[2]);
@@ -1710,7 +1738,6 @@ mod tests {
             assert!(res.is_ok());
             let qfp = res.unwrap();
             let leaf = qfp.query_leaf;
-            let param_address = inc.get_flow_node_address(&qfp.name, 0).unwrap();
             // Check projection
             let projection = get_node(&inc, mig, &qfp.name);
             assert_eq!(
@@ -1749,9 +1776,6 @@ mod tests {
             assert_eq!(identity.description(true), "≡");
             // should NOT have ended up with the same leaf node
             assert_ne!(qfp.query_leaf, leaf);
-            // Check that the parent of the identity is the paramaterized query.
-            let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
-            assert_eq!(top_node.ancestors().unwrap(), [param_address]);
         })
         .await;
     }
@@ -1854,7 +1878,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 &["id", "name", "one"]
             );
-            assert_eq!(projection.description(true), "π[0, 1, lit: 1]");
+            assert_eq!(projection.description(true), "π[0, 1, 2]");
             let leaf = qfp.query_leaf;
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
@@ -1878,16 +1902,16 @@ mod tests {
                     .iter()
                     .map(|c| c.name())
                     .collect::<Vec<_>>(),
-                &["id", "name", "address", "one"]
+                &["id", "name", "one", "address"]
             );
-            assert_eq!(projection.description(true), "π[0, 1, 2, lit: 1]");
-            // should have added two more nodes (identity and reader)
-            assert_eq!(mig.graph().node_count(), ncount + 2);
+            assert_eq!(projection.description(true), "π[0, 1, 3, 2]");
+            // should have added two more nodes (identity, project reorder and reader)
+            assert_eq!(mig.graph().node_count(), ncount + 3);
             // should NOT have ended up with the same leaf node
             assert_ne!(qfp.query_leaf, leaf);
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
-            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[2]);
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[3]);
             // Check that the parent of the projection is the original table, NOT the earlier
             // projection.
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
@@ -1922,8 +1946,9 @@ mod tests {
             // Try a simple COUNT function without a GROUP BY clause
             let res = inc.add_query("SELECT COUNT(votes.userid) AS count FROM votes;", None, mig);
             assert!(res.is_ok());
-            // added the aggregation, a project helper, the edge view, and reader
-            assert_eq!(mig.graph().node_count(), 6);
+            // added the aggregation, a project helper, the edge view, a reorder projection, and
+            // reader
+            assert_eq!(mig.graph().node_count(), 7);
             // check project helper node
             let qid = query_id_hash(
                 &["votes"],
@@ -1957,7 +1982,7 @@ mod tests {
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
-            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            let edge_view = get_parent_node(&inc, mig, &res.unwrap().name);
             assert_eq!(
                 edge_view
                     .columns()
@@ -2000,8 +2025,9 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok());
-            // added the aggregation, a project helper, the edge view, and reader
-            assert_eq!(mig.graph().node_count(), 5);
+            // added the aggregation, a project helper, the edge view, the reorder project and
+            // reader
+            assert_eq!(mig.graph().node_count(), 6);
             // check aggregation view
             let qid = query_id_hash(
                 &["votes"],
@@ -2024,7 +2050,7 @@ mod tests {
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
-            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            let edge_view = get_parent_node(&inc, mig, &res.unwrap().name);
             assert_eq!(
                 edge_view
                     .columns()
@@ -2061,9 +2087,9 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok());
-            // added a project for the case, the aggregation, a project helper, the edge view, and
+            // added a project for the case, the aggregation, a project helper, the edge view, the reorder project and
             // reader
-            assert_eq!(mig.graph().node_count(), 6);
+            assert_eq!(mig.graph().node_count(), 7);
             // check aggregation view
             let qid = query_id_hash(
                 &["votes"],
@@ -2079,7 +2105,7 @@ mod tests {
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
-            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            let edge_view = get_parent_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge_view.columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["count", "bogokey"]);
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         })
@@ -2108,9 +2134,9 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok());
-            // added a project for the case, the aggregation, a project helper, the edge view, and
+            // added a project for the case, the aggregation, a project helper, the edge view, a reorder projection, and
             // reader
-            assert_eq!(mig.graph().node_count(), 6);
+            assert_eq!(mig.graph().node_count(), 7);
             // check aggregation view
             let qid = query_id_hash(
                 &["votes"],
@@ -2126,7 +2152,7 @@ mod tests {
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
-            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            let edge_view = get_parent_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge_view.columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["sum", "bogokey"]);
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         })
@@ -2156,9 +2182,9 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok());
-            // added a project for the case, the aggregation, a project helper, the edge view, and
+            // added a project for the case, the aggregation, a project helper, the edge view, a reorder projection, and
             // reader
-            assert_eq!(mig.graph().node_count(), 6);
+            assert_eq!(mig.graph().node_count(), 7);
             // check aggregation view
             let qid = query_id_hash(
                 &["votes"],
@@ -2174,7 +2200,7 @@ mod tests {
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
-            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            let edge_view = get_parent_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge_view.columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["sum", "bogokey"]);
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         })
@@ -2395,9 +2421,9 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok(), "!{:?}.is_ok()", res);
-            // added a project for the case, the aggregation, a project helper, the edge view, and
+            // added a project for the case, the aggregation, a project helper, the edge view, a reorder projection, and
             // reader
-            assert_eq!(mig.graph().node_count(), 6);
+            assert_eq!(mig.graph().node_count(), 7);
             // check aggregation view
             let qid = query_id_hash(
                 &["votes"],
@@ -2413,7 +2439,7 @@ mod tests {
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
-            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            let edge_view = get_parent_node(&inc, mig, &res.unwrap().name);
             assert_eq!(edge_view.columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["votes", "bogokey"]);
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         })
@@ -2654,7 +2680,7 @@ mod tests {
             assert_eq!(join.description(true), "[1:0, 1:1, 2:1] 1:(1) ⋈ 2:(0)");
 
             // Check leaf projection node
-            let leaf_view = get_node(&inc, mig, "q_1");
+            let leaf_view = get_parent_node(&inc, mig, "q_1");
             assert_eq!(
                 leaf_view
                     .columns()
@@ -2682,7 +2708,7 @@ mod tests {
             assert!(res.is_ok());
 
             // leaf view node
-            let edge = get_node(&inc, mig, &res.unwrap().name);
+            let edge = get_parent_node(&inc, mig, &res.unwrap().name);
             assert_eq!(
                 edge.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
                 &["name", "1", "bogokey"]
@@ -2710,7 +2736,8 @@ mod tests {
             assert!(res.is_ok());
 
             // leaf view node
-            let edge = get_node(&inc, mig, &res.unwrap().name);
+            let edge = get_parent_node(&inc, mig, &res.unwrap().name);
+
             assert_eq!(
                 edge.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
                 &["(2 * `users`.`age`)", "twenty", "bogokey"]
@@ -2747,10 +2774,10 @@ mod tests {
             );
             assert!(res.is_ok());
             let qfp = res.unwrap();
-            assert_eq!(qfp.new_nodes.len(), 1);
+            assert_eq!(qfp.new_nodes.len(), 2);
 
             // Check projection node
-            let node = get_node(&inc, mig, &qfp.name);
+            let node = get_parent_node(&inc, mig, &qfp.name);
             assert_eq!(
                 node.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
                 &["name", "(2 * `users`.`age`)", "twenty"]
@@ -2762,7 +2789,7 @@ mod tests {
 
             // Check reader
             let n = get_reader(&inc, mig, &qfp.name);
-            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[0]);
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[2]);
         })
         .await;
     }
@@ -2811,7 +2838,7 @@ mod tests {
                 &["id", "author", "title", "name"]
             );
             // leaf node
-            let new_leaf_view = get_node(&inc, mig, &q.name);
+            let new_leaf_view = get_parent_node(&inc, mig, &q.name);
             assert_eq!(
                 new_leaf_view
                     .columns()
@@ -2875,7 +2902,7 @@ mod tests {
                 &["id", "author", "title", "name"]
             );
             // leaf node
-            let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
+            let new_leaf_view = get_parent_node(&inc, mig, &q.unwrap().name);
             assert_eq!(
                 new_leaf_view
                     .columns()
@@ -2960,8 +2987,8 @@ mod tests {
             let qfp = res.unwrap();
             // should NOT have ended up with the same leaf node
             assert_ne!(qfp.query_leaf, leaf);
-            // should have added three more nodes (filter, project and reader)
-            assert_eq!(mig.graph().node_count(), ncount + 3);
+            // should have added three more nodes (filter, project, reorder project and reader)
+            assert_eq!(mig.graph().node_count(), ncount + 4);
         })
         .await;
     }
@@ -2989,8 +3016,9 @@ mod tests {
                 )
                 .unwrap();
 
-            // source -> things -> project bogokey -> topk -> project_columns -> leaf
-            assert_eq!(mig.graph().node_count(), 6);
+            // source -> things -> project bogokey -> topk -> project_columns -> project reorder ->
+            // leaf
+            assert_eq!(mig.graph().node_count(), 7);
             assert_eq!(
                 query
                     .new_nodes
@@ -3283,18 +3311,47 @@ mod tests {
                 .unwrap();
 
             let g = &mig.dataflow_state.ingredients;
-            g.node_indices().for_each(|idx| {
-                if matches!(g[idx].as_internal(), Some(NodeOperator::Project(_))) {
-                    let truth = vec![
-                        &Type::Sql(SqlType::Int(None)),    // t1.a
-                        &Type::Sql(SqlType::Char(None)),   // cast(t1.b as char)
-                        &Type::Sql(SqlType::Int(None)),    // t1.a + 1
-                        &Type::Sql(SqlType::Bigint(None)), // bogokey
-                    ];
-                    let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
-                    assert_eq!(truth, types);
-                }
-            });
+
+            let mut indices = g.node_indices();
+            indices.next_back(); // Skip reader node
+            let project_reorder_node = indices.next_back().unwrap();
+            let project_leaf_node = indices.next_back().unwrap();
+
+            assert!(matches!(
+                g[project_reorder_node].as_internal(),
+                Some(NodeOperator::Project(_))
+            ));
+
+            assert!(matches!(
+                g[project_leaf_node].as_internal(),
+                Some(NodeOperator::Project(_))
+            ));
+
+            let truth = vec![
+                &Type::Sql(SqlType::Int(None)),    // t1.a
+                &Type::Sql(SqlType::Char(None)),   // cast(t1.b as char)
+                &Type::Sql(SqlType::Int(None)),    // t1.a + 1
+                &Type::Sql(SqlType::Bigint(None)), // bogokey
+            ];
+            let types = g[project_leaf_node]
+                .columns()
+                .iter()
+                .map(|c| c.ty())
+                .collect::<Vec<_>>();
+            assert_eq!(truth, types);
+
+            let truth = vec![
+                &Type::Sql(SqlType::Char(None)),   // cast(t1.b as char)
+                &Type::Sql(SqlType::Int(None)),    // t1.a
+                &Type::Sql(SqlType::Int(None)),    // t1.a + 1
+                &Type::Sql(SqlType::Bigint(None)), // bogokey
+            ];
+            let types = g[project_reorder_node]
+                .columns()
+                .iter()
+                .map(|c| c.ty())
+                .collect::<Vec<_>>();
+            assert_eq!(truth, types);
         })
         .await;
     }

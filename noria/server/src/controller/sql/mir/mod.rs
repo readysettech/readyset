@@ -1978,7 +1978,7 @@ impl SqlToMirConverter {
 
             let leaf_project_node = self.make_project_node(
                 &if has_leaf {
-                    format!("q_{:x}_leaf_project", qg.signature().hash).into()
+                    format!("q_{:x}_project", qg.signature().hash).into()
                 } else {
                     name.into()
                 },
@@ -1992,6 +1992,61 @@ impl SqlToMirConverter {
             if has_leaf {
                 // We are supposed to add a `Leaf` node keyed on the query parameters. For purely
                 // internal views (e.g., subqueries), this is not set.
+                let mut returned_cols = st
+                    .fields
+                    .iter()
+                    .map(|expression| -> ReadySetResult<_> {
+                        match expression {
+                            FieldDefinitionExpression::All
+                            | FieldDefinitionExpression::AllInTable(_) => {
+                                internal!("All expression should have been desugared at this point")
+                            }
+                            FieldDefinitionExpression::Expression {
+                                alias: Some(alias), ..
+                            } => Ok(Column::named(alias.clone())),
+                            FieldDefinitionExpression::Expression {
+                                expr: Expression::Column(c),
+                                ..
+                            } => Ok(Column::from(c)),
+                            FieldDefinitionExpression::Expression { expr, .. } => {
+                                Ok(Column::named(expr.to_string()))
+                            }
+                        }
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                returned_cols.retain(|e| e.name != "bogokey");
+
+                // After we have all of our returned columns figured out, find out how they are
+                // projected by this projection, so we can then add another projection that returns
+                // the columns in the correct order
+                let mut project_order = Vec::with_capacity(returned_cols.len());
+                let parent_columns = leaf_project_node.borrow().columns();
+                for col in returned_cols.iter() {
+                    if let Some(c) = parent_columns.iter().find(|c| col.cmp(c).is_eq()) {
+                        project_order.push(c.clone());
+                    } else {
+                        internal!("Returned column not in projected schema");
+                    }
+                }
+                for col in parent_columns {
+                    if !project_order.contains(&col) {
+                        project_order.push(col);
+                    }
+                }
+
+                // Add another project node that will return the required columns in the right order
+                let leaf_project_reorder_node = self.make_project_node(
+                    &if has_leaf {
+                        format!("q_{:x}_project_reorder", qg.signature().hash).into()
+                    } else {
+                        name.into()
+                    },
+                    leaf_project_node,
+                    project_order,
+                    vec![],
+                    vec![],
+                );
+                nodes_added.push(leaf_project_reorder_node.clone());
 
                 let aggregates = if view_key.index_type != IndexType::HashMap {
                     post_lookup_aggregates(qg, st, name)?
@@ -2037,39 +2092,11 @@ impl SqlToMirConverter {
                             })
                             .transpose()?,
                         limit: qg.pagination.as_ref().map(|p| p.limit),
-                        returned_cols: Some({
-                            let mut cols = st.fields
-                                .iter()
-                                .map(|expression| -> ReadySetResult<_> {
-                                    match expression {
-                                        FieldDefinitionExpression::All
-                                            | FieldDefinitionExpression::AllInTable(_) => {
-                                                internal!("All expression should have been desugared at this point")
-                                            }
-                                        FieldDefinitionExpression::Expression {
-                                            alias: Some(alias),
-                                            ..
-                                        } => {
-                                            Ok(Column::named(alias.clone()))
-                                        }
-                                        FieldDefinitionExpression::Expression {
-                                            expr: Expression::Column(c),
-                                            ..
-                                        } => Ok(Column::from(c)),
-                                        FieldDefinitionExpression::Expression {
-                                            expr,
-                                            ..
-                                        } => Ok(Column::named(expr.to_string())),
-                                    }
-                                })
-                                .collect::<Result<Vec<_>, _>>()?;
-                            cols.retain(|e| e.name != "bogokey");
-                            cols
-                        }),
+                        returned_cols: Some(returned_cols),
                         default_row: default_row_for_select(st),
                         aggregates,
                     },
-                    vec![MirNodeRef::downgrade(&leaf_project_node)],
+                    vec![MirNodeRef::downgrade(&leaf_project_reorder_node)],
                     vec![],
                 );
                 nodes_added.push(leaf_node);
