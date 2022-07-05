@@ -351,12 +351,12 @@ mod parse {
 
     use ndarray::{ArrayD, IxDyn};
     use nom::branch::alt;
-    use nom::bytes::complete::tag;
+    use nom::bytes::complete::{is_not, tag};
     use nom::character::complete::{digit1, multispace0};
-    use nom::combinator::{map, map_parser, opt, peek};
+    use nom::combinator::{map, map_parser, not, opt, peek};
     use nom::error::ErrorKind;
     use nom::multi::{many1, separated_list1};
-    use nom::sequence::{delimited, preceded, terminated, tuple};
+    use nom::sequence::{delimited, pair, preceded, terminated, tuple};
     use nom::IResult;
     use nom_sql::{embedded_literal, Dialect, QuotingStyle};
 
@@ -504,13 +504,24 @@ mod parse {
     }
 
     fn literal(i: &[u8]) -> IResult<&[u8], DataType> {
-        map(
-            embedded_literal(Dialect::PostgreSQL, QuotingStyle::Double),
-            |lit| {
-                DataType::try_from(lit)
-                    .expect("Only parsing literals that can be converted to DataType")
-            },
-        )(i)
+        alt((
+            map(
+                terminated(
+                    embedded_literal(Dialect::PostgreSQL, QuotingStyle::Double),
+                    peek(pair(multispace0, alt((tag(","), tag("}"))))),
+                ),
+                |lit| {
+                    DataType::try_from(lit)
+                        .expect("Only parsing literals that can be converted to DataType")
+                },
+            ),
+            unquoted_string_literal,
+        ))(i)
+    }
+
+    fn unquoted_string_literal(i: &[u8]) -> IResult<&[u8], DataType> {
+        let (i, _) = not(peek(tag("\"")))(i)?;
+        map(is_not("{},\"\\"), DataType::from)(i)
     }
 }
 
@@ -714,5 +725,25 @@ mod tests {
         let s = arr.to_string();
         let res = Array::from_str(&s).unwrap();
         assert_eq!(res, arr);
+    }
+
+    #[test]
+    fn parse_unquoted_string_array() {
+        assert_eq!(
+            "{a,b,c}".parse::<Array>().unwrap(),
+            Array::from(vec![
+                DataType::from("a"),
+                DataType::from("b"),
+                DataType::from("c")
+            ])
+        );
+    }
+
+    #[test]
+    fn parse_unquoted_numeric_string() {
+        assert_eq!(
+            Array::from_str("{2a, 3b}").unwrap(),
+            Array::from(vec![DataType::from("2a"), DataType::from("3b"),])
+        );
     }
 }
