@@ -1,7 +1,7 @@
 steps:
   - label: ":docker: Build readyset-mysql image"
     key: readyset-mysql-image
-    command: .buildkite/build-image.sh build/Dockerfile.readyset-mysql-disp-literals readyset-mysql .
+    command: .buildkite/build-image.sh build/Dockerfile.readyset-mysql readyset-mysql .
     plugins:
       ecr#v2.5.0:
         login: true

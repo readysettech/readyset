@@ -8,19 +8,19 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// Wraps a type that implements Display and Debug, overriding both implementations unless the
-/// display_literals feature is enabled
+/// Wraps a type that implements Display and Debug, overriding both implementations if the
+/// `redact_literals` feature is enabled
 pub struct Sensitive<'a, T>(pub &'a T);
 
 impl<'a, T> Display for Sensitive<'a, T>
 where
     T: Display,
 {
-    #[cfg(feature = "display_literals")]
+    #[cfg(not(feature = "redact_sensitive"))]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
-    #[cfg(not(feature = "display_literals"))]
+    #[cfg(feature = "redact_sensitive")]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<redacted>")
     }
@@ -30,11 +30,11 @@ impl<'a, T> Debug for Sensitive<'a, T>
 where
     T: Debug,
 {
-    #[cfg(feature = "display_literals")]
+    #[cfg(not(feature = "redact_sensitive"))]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.0)
     }
-    #[cfg(not(feature = "display_literals"))]
+    #[cfg(feature = "redact_sensitive")]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<redacted>")
     }

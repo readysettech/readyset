@@ -51,4 +51,5 @@ name = "proxy"
 harness = false
 
 [features]
-display_literals = ["launchpad/display_literals"]
+# Redact the display of strings marked sensitive from logs and error messages
+redact_sensitive = ["launchpad/redact_sensitive"]
