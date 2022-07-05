@@ -18,6 +18,7 @@ nom-sql = { path = "../nom-sql" }
 noria-data = { path = "../noria/data" }
 postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
 postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
+postgres-protocol = { git = "https://github.com/readysettech/rust-postgres.git" }
 thiserror = "1.0.26"
 tokio = { version = "1.15", features = ["rt-multi-thread"] }
 tokio-util = { version = "0.6.6", features = ["codec"] }

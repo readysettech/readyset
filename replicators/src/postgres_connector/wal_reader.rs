@@ -4,9 +4,11 @@ use std::sync::Arc;
 
 use bit_vec::BitVec;
 use mysql_time::MysqlTime;
+use nom_sql::SqlType;
 use noria::{ReadySetError, ReadySetResult};
-use noria_data::DataType;
+use noria_data::{Array, DataType};
 use noria_errors::unsupported;
+use postgres_types::Kind;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use tokio_postgres as pgsql;
@@ -246,67 +248,103 @@ impl wal::TupleData {
                     // Noria type
                     let str = String::from_utf8_lossy(&text);
 
-                    let val = match spec.data_type {
-                        PGType::BOOL => DataType::UnsignedInt(match str.as_ref() {
-                            "t" => true as _,
-                            "f" => false as _,
-                            _ => return Err(WalError::BoolParseError),
-                        }),
-                        PGType::INT2 | PGType::INT4 | PGType::INT8 => DataType::Int(str.parse()?),
-                        PGType::OID => DataType::UnsignedInt(str.parse()?),
-                        PGType::FLOAT4 => str.parse::<f32>()?.try_into()?,
-                        PGType::FLOAT8 => str.parse::<f64>()?.try_into()?,
-                        PGType::NUMERIC => Decimal::from_str(str.as_ref())
-                            .map_err(|_| WalError::NumericParseError)
-                            .map(|d| DataType::Numeric(Arc::new(d)))?,
-                        PGType::TEXT
-                        | PGType::JSON
-                        | PGType::VARCHAR
-                        | PGType::CHAR
-                        | PGType::MACADDR
-                        | PGType::INET
-                        | PGType::UUID
-                        | PGType::NAME => DataType::from(str.as_ref()),
-                        // JSONB might rearrange the json value (like the order of the keys in an
-                        // object for example), vs JSON that keeps the text
-                        // as-is. So, in order to get the same values, we
-                        // parse the json into a serde_json::Value and then
-                        // convert it back to String. ♪ ┏(・o･)┛ ♪
-                        PGType::JSONB => serde_json::from_str::<serde_json::Value>(str.as_ref())
-                            .map_err(|e| WalError::JsonParseError(e.to_string()))
-                            .map(|v| DataType::from(v.to_string()))?,
-                        PGType::TIMESTAMP => DataType::TimestampTz(
-                            str.parse().map_err(|_| WalError::TimestampParseError)?,
-                        ),
-                        PGType::TIMESTAMPTZ => DataType::TimestampTz(
-                            str.parse().map_err(|_| WalError::TimestampTzParseError)?,
-                        ),
-                        PGType::BYTEA => hex::decode(str.strip_prefix("\\x").unwrap_or(&str))
-                            .map_err(|_| WalError::ByteArrayHexParseError)
-                            .map(|bytes| DataType::ByteArray(Arc::new(bytes)))?,
-                        PGType::DATE => DataType::TimestampTz(
-                            str.parse().map_err(|_| WalError::DateParseError)?,
-                        ),
-                        PGType::TIME => DataType::Time(MysqlTime::from_str(&str)?),
-                        PGType::BIT | PGType::VARBIT => {
-                            let mut bits = BitVec::with_capacity(str.len());
-                            for c in str.chars() {
-                                match c {
-                                    '0' => bits.push(false),
-                                    '1' => bits.push(true),
-                                    _ => {
-                                        return Err(WalError::BitVectorParseError(format!(
-                                            "\"{}\" is not a valid binary digit",
-                                            c
-                                        )))
+                    let val = match spec.data_type.kind() {
+                        Kind::Array(member_type) => {
+                            let target_sql_type = SqlType::Array(Box::new(match *member_type {
+                                PGType::BOOL => SqlType::Bool,
+                                PGType::CHAR => SqlType::Char(None),
+                                PGType::VARCHAR => SqlType::Varchar(None),
+                                PGType::INT4 => SqlType::Int(None),
+                                PGType::INT8 => SqlType::Bigint(None),
+                                PGType::INT2 => SqlType::Smallint(None),
+                                PGType::FLOAT4 => SqlType::Real,
+                                PGType::FLOAT8 => SqlType::Double,
+                                PGType::TEXT => SqlType::Text,
+                                PGType::TIMESTAMP => SqlType::Timestamp,
+                                PGType::TIMESTAMPTZ => SqlType::TimestampTz,
+                                PGType::JSON => SqlType::Json,
+                                PGType::JSONB => SqlType::Jsonb,
+                                PGType::DATE => SqlType::Date,
+                                PGType::TIME => SqlType::Time,
+                                PGType::NUMERIC => SqlType::Numeric(None),
+                                PGType::BYTEA => SqlType::ByteArray,
+                                PGType::MACADDR => SqlType::MacAddr,
+                                PGType::INET => SqlType::Inet,
+                                PGType::UUID => SqlType::Uuid,
+                                PGType::BIT => SqlType::Bit(None),
+                                PGType::VARBIT => SqlType::Varbit(None),
+                                _ => unsupported!("unsupported type {}", spec.data_type),
+                            }));
+
+                            DataType::from(str.parse::<Array>()?).coerce_to(&target_sql_type)?
+                        }
+                        _ => match spec.data_type {
+                            PGType::BOOL => DataType::UnsignedInt(match str.as_ref() {
+                                "t" => true as _,
+                                "f" => false as _,
+                                _ => return Err(WalError::BoolParseError),
+                            }),
+                            PGType::INT2 | PGType::INT4 | PGType::INT8 => {
+                                DataType::Int(str.parse()?)
+                            }
+                            PGType::OID => DataType::UnsignedInt(str.parse()?),
+                            PGType::FLOAT4 => str.parse::<f32>()?.try_into()?,
+                            PGType::FLOAT8 => str.parse::<f64>()?.try_into()?,
+                            PGType::NUMERIC => Decimal::from_str(str.as_ref())
+                                .map_err(|_| WalError::NumericParseError)
+                                .map(|d| DataType::Numeric(Arc::new(d)))?,
+                            PGType::TEXT
+                            | PGType::JSON
+                            | PGType::VARCHAR
+                            | PGType::CHAR
+                            | PGType::MACADDR
+                            | PGType::INET
+                            | PGType::UUID
+                            | PGType::NAME => DataType::from(str.as_ref()),
+                            // JSONB might rearrange the json value (like the order of the keys in
+                            // an object for example), vs JSON that
+                            // keeps the text as-is. So, in order to get
+                            // the same values, we parse the json into a
+                            // serde_json::Value and then convert it
+                            // back to String. ♪ ┏(・o･)┛ ♪
+                            PGType::JSONB => {
+                                serde_json::from_str::<serde_json::Value>(str.as_ref())
+                                    .map_err(|e| WalError::JsonParseError(e.to_string()))
+                                    .map(|v| DataType::from(v.to_string()))?
+                            }
+                            PGType::TIMESTAMP => DataType::TimestampTz(
+                                str.parse().map_err(|_| WalError::TimestampParseError)?,
+                            ),
+                            PGType::TIMESTAMPTZ => DataType::TimestampTz(
+                                str.parse().map_err(|_| WalError::TimestampTzParseError)?,
+                            ),
+                            PGType::BYTEA => hex::decode(str.strip_prefix("\\x").unwrap_or(&str))
+                                .map_err(|_| WalError::ByteArrayHexParseError)
+                                .map(|bytes| DataType::ByteArray(Arc::new(bytes)))?,
+                            PGType::DATE => DataType::TimestampTz(
+                                str.parse().map_err(|_| WalError::DateParseError)?,
+                            ),
+                            PGType::TIME => DataType::Time(MysqlTime::from_str(&str)?),
+                            PGType::BIT | PGType::VARBIT => {
+                                let mut bits = BitVec::with_capacity(str.len());
+                                for c in str.chars() {
+                                    match c {
+                                        '0' => bits.push(false),
+                                        '1' => bits.push(true),
+                                        _ => {
+                                            return Err(WalError::BitVectorParseError(format!(
+                                                "\"{}\" is not a valid binary digit",
+                                                c
+                                            )))
+                                        }
                                     }
                                 }
+                                DataType::from(bits)
                             }
-                            DataType::from(bits)
-                        }
-                        ref t => {
-                            unsupported!("Conversion not implemented for type {:?}", t);
-                        }
+                            ref t => {
+                                unsupported!("Conversion not implemented for type {:?}", t);
+                            }
+                        },
                     };
 
                     ret.push(val);

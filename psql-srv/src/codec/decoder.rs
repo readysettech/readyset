@@ -6,7 +6,8 @@ use bit_vec::BitVec;
 use bytes::{Buf, Bytes, BytesMut};
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use eui48::MacAddress;
-use postgres_types::{FromSql, Type};
+use noria_data::Array;
+use postgres_types::{FromSql, Kind, Type};
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use tokio_util::codec::Decoder;
@@ -305,38 +306,41 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
 
     let buf = &mut src.split_to(usize::try_from(len)?);
 
-    match *t {
-        // Postgres does not allow interior 0 bytes, even thought is is valid UTF-8
-        Type::CHAR | Type::VARCHAR | Type::TEXT | Type::NAME if buf.contains(&0) => {
-            Err(Error::InvalidUtf8)
-        }
-        Type::BOOL => Ok(Value::Bool(bool::from_sql(t, buf)?)),
-        Type::VARCHAR => Ok(Value::Varchar(<&str>::from_sql(t, buf)?.into())),
-        Type::NAME => Ok(Value::Name(<&str>::from_sql(t, buf)?.into())),
-        Type::CHAR => Ok(Value::Char(i8::from_sql(t, buf)?)),
-        Type::INT4 => Ok(Value::Int(i32::from_sql(t, buf)?)),
-        Type::INT8 => Ok(Value::Bigint(i64::from_sql(t, buf)?)),
-        Type::INT2 => Ok(Value::Smallint(i16::from_sql(t, buf)?)),
-        Type::OID => Ok(Value::Oid(u32::from_sql(t, buf)?)),
-        Type::FLOAT8 => Ok(Value::Double(f64::from_sql(t, buf)?)),
-        Type::FLOAT4 => Ok(Value::Float(f32::from_sql(t, buf)?)),
-        Type::NUMERIC => Ok(Value::Numeric(Decimal::from_sql(t, buf)?)),
-        Type::TEXT => Ok(Value::Text(<&str>::from_sql(t, buf)?.into())),
-        Type::DATE => Ok(Value::Date(NaiveDate::from_sql(t, buf)?)),
-        Type::TIME => Ok(Value::Time(NaiveTime::from_sql(t, buf)?)),
-        Type::TIMESTAMP => Ok(Value::Timestamp(NaiveDateTime::from_sql(t, buf)?)),
-        Type::TIMESTAMPTZ => Ok(Value::TimestampTz(DateTime::<FixedOffset>::from_sql(
-            t, buf,
-        )?)),
-        Type::BYTEA => Ok(Value::ByteArray(<Vec<u8>>::from_sql(t, buf)?)),
-        Type::MACADDR => Ok(Value::MacAddress(MacAddress::from_sql(t, buf)?)),
-        Type::INET => Ok(Value::Inet(IpAddr::from_sql(t, buf)?)),
-        Type::UUID => Ok(Value::Uuid(Uuid::from_sql(t, buf)?)),
-        Type::JSON => Ok(Value::Json(serde_json::Value::from_sql(t, buf)?)),
-        Type::JSONB => Ok(Value::Jsonb(serde_json::Value::from_sql(t, buf)?)),
-        Type::BIT => Ok(Value::Bit(BitVec::from_sql(t, buf)?)),
-        Type::VARBIT => Ok(Value::VarBit(BitVec::from_sql(t, buf)?)),
-        _ => Err(Error::UnsupportedType(t.clone())),
+    match t.kind() {
+        Kind::Array(member_type) => Ok(Value::Array(Array::from_sql(t, buf)?, member_type.clone())),
+        _ => match *t {
+            // Postgres does not allow interior 0 bytes, even though it is valid UTF-8
+            Type::CHAR | Type::VARCHAR | Type::TEXT | Type::NAME if buf.contains(&0) => {
+                Err(Error::InvalidUtf8)
+            }
+            Type::BOOL => Ok(Value::Bool(bool::from_sql(t, buf)?)),
+            Type::VARCHAR => Ok(Value::Varchar(<&str>::from_sql(t, buf)?.into())),
+            Type::NAME => Ok(Value::Name(<&str>::from_sql(t, buf)?.into())),
+            Type::CHAR => Ok(Value::Char(i8::from_sql(t, buf)?)),
+            Type::INT4 => Ok(Value::Int(i32::from_sql(t, buf)?)),
+            Type::INT8 => Ok(Value::Bigint(i64::from_sql(t, buf)?)),
+            Type::INT2 => Ok(Value::Smallint(i16::from_sql(t, buf)?)),
+            Type::OID => Ok(Value::Oid(u32::from_sql(t, buf)?)),
+            Type::FLOAT8 => Ok(Value::Double(f64::from_sql(t, buf)?)),
+            Type::FLOAT4 => Ok(Value::Float(f32::from_sql(t, buf)?)),
+            Type::NUMERIC => Ok(Value::Numeric(Decimal::from_sql(t, buf)?)),
+            Type::TEXT => Ok(Value::Text(<&str>::from_sql(t, buf)?.into())),
+            Type::DATE => Ok(Value::Date(NaiveDate::from_sql(t, buf)?)),
+            Type::TIME => Ok(Value::Time(NaiveTime::from_sql(t, buf)?)),
+            Type::TIMESTAMP => Ok(Value::Timestamp(NaiveDateTime::from_sql(t, buf)?)),
+            Type::TIMESTAMPTZ => Ok(Value::TimestampTz(DateTime::<FixedOffset>::from_sql(
+                t, buf,
+            )?)),
+            Type::BYTEA => Ok(Value::ByteArray(<Vec<u8>>::from_sql(t, buf)?)),
+            Type::MACADDR => Ok(Value::MacAddress(MacAddress::from_sql(t, buf)?)),
+            Type::INET => Ok(Value::Inet(IpAddr::from_sql(t, buf)?)),
+            Type::UUID => Ok(Value::Uuid(Uuid::from_sql(t, buf)?)),
+            Type::JSON => Ok(Value::Json(serde_json::Value::from_sql(t, buf)?)),
+            Type::JSONB => Ok(Value::Jsonb(serde_json::Value::from_sql(t, buf)?)),
+            Type::BIT => Ok(Value::Bit(BitVec::from_sql(t, buf)?)),
+            Type::VARBIT => Ok(Value::VarBit(BitVec::from_sql(t, buf)?)),
+            _ => Err(Error::UnsupportedType(t.clone())),
+        },
     }
 }
 

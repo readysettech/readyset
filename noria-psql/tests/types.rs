@@ -106,6 +106,7 @@ mod types {
             #[serial_test::serial]
             $(#[$meta])*
             fn $test_name($(#[$strategy])* val: $rust_type) {
+                readyset_tracing::init_test_logging();
                 let rt = tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()
@@ -147,6 +148,7 @@ mod types {
         bit_varying_unlimited_bitvec("bit varying", #[strategy(arbitrary_bitvec(0..=20))] bit_vec::BitVec);
         bit_varying_bitvec("bit varying(10)", #[strategy(arbitrary_bitvec(0..=10))] bit_vec::BitVec);
         timestamp_tz_datetime("timestamp with time zone", #[strategy(arbitrary_date_time())] chrono::DateTime::<chrono::FixedOffset>);
+        text_array("text[]", Vec<String>);
     }
 
     #[tokio::test(flavor = "multi_thread")]
