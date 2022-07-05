@@ -511,6 +511,7 @@ mod tests {
             name: "q".into(),
             roots: vec![t1, t2],
             leaf,
+            fields: vec!["a".into()],
         };
 
         eliminate_dependent_joins(&mut query).unwrap();
@@ -783,6 +784,7 @@ mod tests {
             name: "q".into(),
             roots: vec![t1, t2],
             leaf,
+            fields: vec!["a".into()],
         };
 
         eliminate_dependent_joins(&mut query).unwrap();

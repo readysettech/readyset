@@ -24,14 +24,19 @@ pub struct MirQuery {
     pub name: SqlIdentifier,
     pub roots: Vec<MirNodeRef>,
     pub leaf: MirNodeRef,
+    /// The names of the fields that this query returns, in the original user-specified order.
+    ///
+    /// These fields should be used when querying from a [`MirQuery`] as a SQL `VIEW`.
+    pub fields: Vec<SqlIdentifier>,
 }
 
 impl MirQuery {
-    pub fn singleton(name: &str, node: MirNodeRef) -> MirQuery {
+    pub fn singleton(name: &str, node: MirNodeRef, fields: Vec<SqlIdentifier>) -> MirQuery {
         MirQuery {
             name: name.into(),
             roots: vec![node.clone()],
             leaf: node,
+            fields,
         }
     }
 

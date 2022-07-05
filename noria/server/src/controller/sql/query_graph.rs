@@ -158,6 +158,17 @@ impl PartialOrd for OutputColumn {
     }
 }
 
+impl OutputColumn {
+    /// Returns a reference to the final projected name for this [`OutputColumn`]
+    pub fn name(&self) -> &SqlIdentifier {
+        match self {
+            OutputColumn::Expression(ExpressionColumn { name, .. }) => name,
+            OutputColumn::Data { alias, .. } => alias,
+            OutputColumn::Literal(LiteralColumn { name, .. }) => name,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct JoinRef {
     pub src: SqlIdentifier,

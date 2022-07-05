@@ -210,6 +210,8 @@ impl SqlToMirConverter {
             Some(pc) => (true, pc.into_iter().chain(params.iter().cloned()).collect()),
         };
 
+        let fields = columns.iter().map(|c| c.name.clone()).collect();
+
         let n = if reproject {
             // add a (re-)projection and then another leaf
             MirNode::new(
@@ -263,6 +265,7 @@ impl SqlToMirConverter {
             name: name.clone(),
             roots: vec![parent],
             leaf: new_leaf,
+            fields,
         }
     }
 
@@ -384,6 +387,13 @@ impl SqlToMirConverter {
             .entry(node_id)
             .or_insert_with(|| leaf_node.clone());
 
+        let fields = leaf_node
+            .borrow()
+            .columns()
+            .iter()
+            .map(|c| c.name.clone())
+            .collect();
+
         Ok(MirQuery {
             name: name.clone(),
             roots: sqs.iter().fold(Vec::new(), |mut acc, mq| {
@@ -391,6 +401,7 @@ impl SqlToMirConverter {
                 acc
             }),
             leaf: leaf_node,
+            fields,
         })
     }
 
@@ -430,7 +441,11 @@ impl SqlToMirConverter {
             self.current.insert(name.clone(), self.schema_version);
             e.insert(n.clone());
         }
-        Ok(MirQuery::singleton(name, n))
+        Ok(MirQuery::singleton(
+            name,
+            n,
+            ctq.fields.iter().map(|cs| cs.column.name.clone()).collect(),
+        ))
     }
 
     pub(super) fn remove_query(
@@ -489,7 +504,7 @@ impl SqlToMirConverter {
         sq: &SelectStatement,
         qg: &QueryGraph,
         has_leaf: bool,
-    ) -> Result<MirQuery, ReadySetError> {
+    ) -> ReadySetResult<MirQuery> {
         let nodes = self.make_nodes_for_selection(name, sq, qg, has_leaf)?;
         let mut roots = Vec::new();
         let mut leaves = Vec::new();
@@ -520,6 +535,7 @@ impl SqlToMirConverter {
             name: name.clone(),
             roots,
             leaf,
+            fields: qg.columns.iter().map(|c| c.name().clone()).collect(),
         })
     }
 
