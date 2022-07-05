@@ -2051,6 +2051,7 @@ mod tests {
     eq_laws!(DataType);
     hash_laws!(DataType);
     ord_laws!(
+        // [note: mixed-type-comparisons]
         // The comparison semantics between Numeric and the other numeric types (floats, integers)
         // isn't well-defined, so we skip that in our ord tests.
         //

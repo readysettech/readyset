@@ -528,11 +528,23 @@ mod parse {
 #[cfg(test)]
 mod tests {
     use launchpad::ord_laws;
+    use proptest::arbitrary::any;
+    use proptest::strategy::Strategy;
     use test_strategy::proptest;
 
     use super::*;
 
-    ord_laws!(Array);
+    fn non_numeric_array() -> impl Strategy<Value = Array> {
+        any::<Array>().prop_filter("Numeric Array", |arr| {
+            !arr.values().any(|dt| matches!(dt, DataType::Numeric(_)))
+        })
+    }
+
+    ord_laws!(
+        // see [note: mixed-type-comparisons]
+        #[strategy(non_numeric_array())]
+        Array
+    );
 
     #[test]
     fn from_vec() {
