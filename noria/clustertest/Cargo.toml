@@ -32,6 +32,7 @@ noria-client = { path = "../../noria-client" }
 noria-client-metrics = { path = "../../noria-client/metrics" }
 test_utils = { path = "../../test_utils" }
 clustertest-macros = { path = "./macros" }
+rust_decimal = "1.16"
 
 [[bench]]
 name = "clustering"
