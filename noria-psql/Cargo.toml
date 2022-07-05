@@ -45,6 +45,7 @@ tokio = { version = "1.15", features = ["full"] }
 launchpad = { path = "../launchpad" }
 noria-client-test-helpers = { path = "../noria-client/test-helpers", features = ["postgres"] }
 criterion = { version = "0.3.5", features = ["async_tokio"] }
+readyset-tracing = { path = "../readyset-tracing" }
 
 [[bench]]
 name = "proxy"

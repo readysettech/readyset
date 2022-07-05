@@ -379,6 +379,9 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::VarBit(bits) => {
             bits.to_sql(&Type::VARBIT, dst)?;
         }
+        Value::Array(arr, ty) => {
+            arr.to_sql(&ty, dst)?;
+        }
     };
     // Update the length field to match the recently serialized data length in `dst`. The 4 byte
     // length field itself is excluded from the length calculation.
@@ -478,6 +481,7 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
                 .collect::<Vec<String>>()
                 .join("")
         )?,
+        Value::Array(arr, _) => write!(dst, "{}", arr)?,
     };
     // Update the length field to match the recently serialized data length in `dst`. The 4 byte
     // length field itself is excluded from the length calculation.

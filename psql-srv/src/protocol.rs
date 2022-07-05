@@ -2,7 +2,7 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use postgres_types::Type;
+use postgres_types::{Kind, Type};
 use smallvec::smallvec;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -460,29 +460,32 @@ fn make_field_description(
     col: &Column,
     transfer_format: TransferFormat,
 ) -> Result<FieldDescription, Error> {
-    let data_type_size = match col.col_type {
-        Type::BOOL => TYPLEN_1,
-        Type::CHAR => TYPLEN_1,
-        Type::TEXT => TYPLEN_VARLENA,
-        Type::VARCHAR => TYPLEN_VARLENA,
-        Type::NAME => TYPLEN_VARLENA,
-        Type::INT2 => TYPLEN_2,
-        Type::INT4 => TYPLEN_4,
-        Type::INT8 => TYPLEN_8,
-        ref t if type_is_oid(t) => TYPLEN_4,
-        Type::FLOAT4 => TYPLEN_4,
-        Type::FLOAT8 => TYPLEN_8,
-        Type::NUMERIC => TYPLEN_VARLENA,
-        Type::TIMESTAMP => TYPLEN_8,
-        Type::TIMESTAMPTZ => TYPLEN_8,
-        Type::DATE => TYPLEN_4,
-        Type::TIME => TYPLEN_8,
-        Type::BYTEA => TYPLEN_VARLENA,
-        Type::MACADDR => TYPLEN_6,
-        Type::INET => TYPLEN_VARLENA,
-        Type::UUID => TYPLEN_16,
-        Type::JSON | Type::JSONB | Type::BIT | Type::VARBIT => TYPLEN_VARLENA,
-        _ => return Err(Error::UnsupportedType(col.col_type.clone())),
+    let data_type_size = match col.col_type.kind() {
+        Kind::Array(_) => TYPLEN_VARLENA,
+        _ => match col.col_type {
+            Type::BOOL => TYPLEN_1,
+            Type::CHAR => TYPLEN_1,
+            Type::TEXT => TYPLEN_VARLENA,
+            Type::VARCHAR => TYPLEN_VARLENA,
+            Type::NAME => TYPLEN_VARLENA,
+            Type::INT2 => TYPLEN_2,
+            Type::INT4 => TYPLEN_4,
+            Type::INT8 => TYPLEN_8,
+            ref t if type_is_oid(t) => TYPLEN_4,
+            Type::FLOAT4 => TYPLEN_4,
+            Type::FLOAT8 => TYPLEN_8,
+            Type::NUMERIC => TYPLEN_VARLENA,
+            Type::TIMESTAMP => TYPLEN_8,
+            Type::TIMESTAMPTZ => TYPLEN_8,
+            Type::DATE => TYPLEN_4,
+            Type::TIME => TYPLEN_8,
+            Type::BYTEA => TYPLEN_VARLENA,
+            Type::MACADDR => TYPLEN_6,
+            Type::INET => TYPLEN_VARLENA,
+            Type::UUID => TYPLEN_16,
+            Type::JSON | Type::JSONB | Type::BIT | Type::VARBIT => TYPLEN_VARLENA,
+            _ => return Err(Error::UnsupportedType(col.col_type.clone())),
+        },
     };
 
     Ok(FieldDescription {

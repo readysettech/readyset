@@ -3,7 +3,7 @@ use std::net::IpAddr;
 use bit_vec::BitVec;
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use eui48::MacAddress;
-use noria_data::Text;
+use noria_data::{Array, Text};
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
@@ -35,4 +35,5 @@ pub enum Value {
     Jsonb(serde_json::Value),
     Bit(BitVec),
     VarBit(BitVec),
+    Array(Array, postgres_types::Type),
 }
