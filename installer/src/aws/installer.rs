@@ -254,7 +254,10 @@ impl<'a> AwsInstaller<'a> {
         self.deployment.status = DeploymentStatus::Complete;
         self.save().await?;
 
-        success!("ReadySet cluster deployed successfully!");
+        println!(
+            "\n{}",
+            style(format!("{}Finished deploying ReadySet!", Emoji("✨ ", ""))).bold()
+        );
         self.deployment.print_connection_information()?;
 
         Ok(())

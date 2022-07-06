@@ -124,11 +124,9 @@ fn installer_smoke_test() -> Result<(), Error> {
 
     p.exp_regex("Docker Compose file was saved to")?;
     p.exp_regex("Deploying with Docker Compose now")?;
-    p.exp_regex("ReadySet should be available in a few seconds.")?;
-    p.exp_regex("Run the following command to connect to ReadySet via the MySQL client:")?;
-    p.exp_regex("To connect to ReadySet using an application, use the following ReadySet")?;
-    p.exp_regex("connection string:")?;
-    p.exp_regex("Access the ReadySet dashboard at ")?;
+    p.exp_regex("Finished deploying ReadySet")?;
+    p.exp_regex("ReadySet Connection String")?;
+    p.exp_regex("MySQL Shell")?;
 
     Ok(())
 }

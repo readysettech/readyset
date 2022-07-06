@@ -5,6 +5,7 @@ use std::process::Stdio;
 
 use ::console::style;
 use anyhow::{anyhow, bail, Result};
+use console::Emoji;
 use tokio::fs::{remove_file, File, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tokio::join;
@@ -80,7 +81,10 @@ impl<'a> ComposeInstaller<'a> {
         self.deployment.status = DeploymentStatus::Complete;
         self.save().await?;
 
-        println!("ReadySet should be available in a few seconds.");
+        println!(
+            "\n{}",
+            style(format!("{}Finished deploying ReadySet!", Emoji("✨ ", ""))).bold()
+        );
         self.deployment.print_connection_information()?;
 
         Ok(())

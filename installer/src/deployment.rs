@@ -133,6 +133,23 @@ impl Engine {
         }
     }
 
+    pub(crate) fn shell_connect_command(
+        &self,
+        db_pass: &str,
+        host: &str,
+        port: u16,
+        db_name: &str,
+    ) -> String {
+        match self {
+            Engine::MySQL => {
+                format!("PGPASSWORD={db_pass} psql -h {host} -p {port} -U postgres {db_name}")
+            }
+            Engine::PostgreSQL => {
+                format!("mysql -h{host} -uroot -p{db_pass} -P{port} --database={db_name}")
+            }
+        }
+    }
+
     pub(crate) fn from_aws_engine<S>(name: S) -> Result<Self>
     where
         S: AsRef<str>,
@@ -595,6 +612,8 @@ impl Deployment {
     }
 
     pub(crate) fn print_connection_information(&self) -> Result<()> {
+        println!();
+
         match &self.inner {
             DeploymentData::Cloudformation(box CloudformationDeployment {
                 readyset_stack_outputs: Some(outputs),
@@ -611,38 +630,23 @@ impl Deployment {
                 adapter_port: Some(db_port),
                 ..
             }) => {
-                let conn_string =
+                println!(
+                    "{} {}\n",
+                    style("ReadySet Connection String:").bold(),
                     self.db_type
-                        .root_conn_string(db_pass, "127.0.0.1", *db_port, db_name);
-                match self.db_type {
-                    Engine::MySQL => {
-                        println!(
-                            "Run the following command to connect to ReadySet via the MySQL client:\n\n    \
-                             $ {}\n\n\
-                             To connect to ReadySet using an application, use the following ReadySet connection string:\n\n    \
-                             {}",
-                            style(format!(
-                               "mysql -h127.0.0.1 -uroot -p{} -P{} --database={}" ,
-                                db_pass, db_port, db_name,
-                            )).bold(),
-                            style(conn_string).bold(),
-                        )
-                    }
-                    Engine::PostgreSQL => {
-                        println!(
-                            "Run the following command to connect to ReadySet via the PostgreSQL client:\n\n    \
-                             $ {}\n\n\
-                             To connect to ReadySet using an application, use the following ReadySet connection string:\n\n    \
-                             {}",
-                            style(format!("psql {}", &conn_string)).bold(),
-                            style(&conn_string).bold()
-                        )
-                    }
-                }
+                        .root_conn_string(db_pass, "127.0.0.1", *db_port, db_name)
+                );
+                println!(
+                    "{} {}\n",
+                    style(format!("{} Shell Command Line Quick Start:", self.db_type)).bold(),
+                    self.db_type
+                        .shell_connect_command(db_pass, "127.0.0.1", *db_port, db_name)
+                );
+                println!("{} http://localhost:4000\n", style("Dashboard URL:").bold());
 
                 println!(
-                    "\nAccess the ReadySet dashboard at {}",
-                    style("http://127.0.0.1:4000").bold()
+                    "{} http://readysetcommunity.slack.com",
+                    style("Questions? Join our Slack Community:").bold()
                 );
             }
             _ => bail!("Deployment missing required fields"),
