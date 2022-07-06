@@ -11,7 +11,7 @@ use noria_errors::{
 use petgraph::graph::NodeIndex;
 use petgraph::visit::Bfs;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::sql;
 use crate::controller::recipe::alter_table::rewrite_table_definition;
@@ -179,12 +179,29 @@ impl Recipe {
         for change in changelist.changes {
             match change {
                 Change::CreateTable(cts) => {
-                    let query = SqlQuery::CreateTable(cts.clone());
                     let name = cts.table.name.clone();
-                    let qfp = self
-                        .inc
-                        .add_parsed_query(query, Some(name.clone()), false, mig)?;
-                    self.registry.add_query(RecipeExpr::Table(cts))?;
+                    match self.registry.get(&name) {
+                        Some(RecipeExpr::Table(current_cts)) => {
+                            // Table already exists, so check if it has been changed.
+                            if current_cts != &cts {
+                                // Table has changed. Drop and recreate.
+                                trace!(%cts.table.name, "table exists and has changed. Dropping and recreating...");
+                                self.drop_and_recreate(&cts.table.name.clone(), cts, mig);
+                                continue;
+                            }
+                            trace!(%cts.table.name, "table exists, but hasn't changed. Ignoring...");
+                        }
+                        Some(RecipeExpr::View(_)) => {
+                            return Err(ReadySetError::ViewAlreadyExists(name.clone().into()))
+                        }
+                        _ => {
+                            let query = SqlQuery::CreateTable(cts.clone());
+                            let qfp =
+                                self.inc
+                                    .add_parsed_query(query, Some(name.clone()), false, mig)?;
+                            self.registry.add_query(RecipeExpr::Table(cts))?;
+                        }
+                    }
                 }
                 Change::CreateView(cvs) => {
                     let query = SqlQuery::CreateView(cvs.clone());
@@ -256,20 +273,8 @@ impl Recipe {
                         ),
                     };
                     let new_table = rewrite_table_definition(&ats, original_table.clone())?;
-                    if self.remove_expression(&ats.table.name, mig)?.is_none() {
-                        error!(table = %ats.table.name,
-                                "attempted to issue ALTER TABLE, but table does not exist");
-                        internal!(
-                            "attempted to issue ALTER TABLE, but table {} does not exist",
-                            ats.table.name
-                        );
-                    }
-                    let query = SqlQuery::CreateTable(new_table.clone());
-                    let new_name = new_table.table.name.clone();
-                    let qfp =
-                        self.inc
-                            .add_parsed_query(query, Some(new_name.clone()), false, mig)?;
-                    self.registry.add_query(RecipeExpr::Table(new_table))?;
+                    let new_table_name = new_table.table.name.clone();
+                    self.drop_and_recreate(&ats.table.name, new_table, mig);
                 }
                 Change::Drop { name, if_exists } => {
                     let removed_indices = self.remove_expression(&name, mig)?;
@@ -291,6 +296,26 @@ impl Recipe {
     /// Helper method to reparent a recipe. This is needed for some of t
     pub(super) fn sql_inc(&self) -> &SqlIncorporator {
         &self.inc
+    }
+
+    fn drop_and_recreate(
+        &mut self,
+        name: &SqlIdentifier,
+        new_table: CreateTableStatement,
+        mig: &mut Migration,
+    ) -> ReadySetResult<()> {
+        let removed_node_indices = self.remove_expression(name, mig)?;
+        if removed_node_indices.is_none() {
+            error!(table = %name,
+                "attempted to issue ALTER TABLE, but table does not exist");
+            return Err(ReadySetError::TableNotFound(name.clone().into()));
+        };
+        let query = SqlQuery::CreateTable(new_table.clone());
+        let new_name = new_table.table.name.clone();
+        self.inc
+            .add_parsed_query(query, Some(new_name), false, mig)?;
+        self.registry.add_query(RecipeExpr::Table(new_table))?;
+        Ok(())
     }
 
     /// Remove the expression with the given name or alias, from the recipe.
