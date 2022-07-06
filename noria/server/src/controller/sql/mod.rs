@@ -3155,6 +3155,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "Hanging occasionally in CI (ENG-1438)"]
     async fn infers_type_for_grouped() {
         // set up graph
         let mut g = integration_utils::start_simple("infers_type_for_grouped").await;
