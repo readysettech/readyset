@@ -15,6 +15,7 @@
 - [Developer Environment](./dev-env.md)
 - [Dashboard Dev Process](./dashboard-dev.md)
 - [Gerrit Social Conventions](./gerrit.md)
+- [Git Tooling](./git_tooling.md)
 
 # Benchmarking
 - [Macro Benchmarking](./macro_benchmarking.md)
