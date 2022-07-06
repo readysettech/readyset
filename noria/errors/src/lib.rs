@@ -238,6 +238,10 @@ pub enum ReadySetError {
         workers: Vec<Url>,
     },
 
+    /// A request to create a view that already exists.
+    #[error("View '{0}' already exists")]
+    ViewAlreadyExists(String),
+
     /// A reader could not be found at the given worker.
     #[error("Reader not found")]
     ReaderNotFound,

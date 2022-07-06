@@ -9052,3 +9052,89 @@ async fn read_from_dropped_query() {
     assert!(view_res.is_err());
     assert!(view_res.err().unwrap().caused_by_view_destroyed());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn double_create_table_with_multiple_modifications() {
+    let mut g = start_simple_unsharded("double_create_table_add_column").await;
+
+    let create_table = "
+        # base tables
+        CREATE TABLE table_1 (column_1 INT, column_2 TEXT, column_3 TEXT, column_4 TEXT);
+        CREATE CACHE t1 FROM SELECT * FROM table_1;
+    ";
+    g.extend_recipe(create_table.parse().unwrap())
+        .await
+        .unwrap();
+
+    let mut table = g.table("table_1").await.unwrap();
+    table
+        .insert(vec![11.into(), "12".into(), "13".into(), "14".into()])
+        .await
+        .unwrap();
+    table
+        .insert(vec![21.into(), "22".into(), "23".into(), "24".into()])
+        .await
+        .unwrap();
+
+    let new_table = "CREATE TABLE table_1 (alternative_col_1 TEXT);";
+    g.extend_recipe(new_table.parse().unwrap()).await.unwrap();
+
+    // Altering a table currently means we delete and recreate the whole thing.
+    assert!(g.view("t1").await.is_err());
+
+    let recreate_view = "CREATE CACHE t1 FROM SELECT * FROM table_1;";
+    g.extend_recipe(recreate_view.parse().unwrap())
+        .await
+        .unwrap();
+
+    let mut view = g.view("t1").await.unwrap();
+    let results = view.lookup(&[0.into()], true).await.unwrap().into_vec();
+    assert!(results.is_empty());
+
+    let mut table = g.table("table_1").await.unwrap();
+    // This should fail as we currently have different columns than before
+    assert!(table
+        .insert(vec![11.into(), "12".into(), "13".into(), "14".into()])
+        .await
+        .is_err());
+
+    table
+        .insert_many(vec![vec!["11".into()], vec!["21".into()]])
+        .await
+        .unwrap();
+
+    let results = view.lookup(&[0.into()], true).await.unwrap().into_vec();
+    assert!(!results.is_empty());
+    assert_eq!(results[0][0], "11".into());
+    assert_eq!(results[1][0], "21".into());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn double_identical_create_table() {
+    let mut g = start_simple_unsharded("double_create_table_add_column").await;
+
+    let create_table = "
+        # base tables
+        CREATE TABLE table_1 (column_1 INT);
+        CREATE CACHE t1 FROM SELECT * FROM table_1;
+    ";
+    g.extend_recipe(create_table.parse().unwrap())
+        .await
+        .unwrap();
+
+    let mut table = g.table("table_1").await.unwrap();
+    table
+        .insert_many(vec![vec![1.into()], vec![2.into()], vec![3.into()]])
+        .await
+        .unwrap();
+
+    let new_table = "CREATE TABLE table_1 (column_1 INT);";
+    g.extend_recipe(new_table.parse().unwrap()).await.unwrap();
+
+    let mut view = g.view("t1").await.unwrap();
+    let results = view.lookup(&[0.into()], true).await.unwrap().into_vec();
+    assert!(!results.is_empty());
+    assert_eq!(results[0][0], 1.into());
+    assert_eq!(results[1][0], 2.into());
+    assert_eq!(results[2][0], 3.into());
+}
