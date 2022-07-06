@@ -87,8 +87,8 @@ converts queries issued on those connections to ReadySet queries that can be sen
     mysql -h 127.0.0.1 --port 3307
     ```
     > You can use this connection just like any other MySQL connection to:
-    >  * Create a table, `t1` with two integer columns `c1` and `c2`: `CREATE TABLE t1 (c1 int, c2 int)`.
-    >  * Insert data into the table, `t1`: `INSERT INTO t1 VALUES (4,5), (5,6), (6,7)`.
+    >  * Create a table, `t1` with two integer columns `c1` and `c2`: `CREATE TABLE t1 (c1 int, c2 int);`.
+    >  * Insert data into the table, `t1`: `INSERT INTO t1 VALUES (4,5), (5,6), (6,7);`.
     >  * Retrieve the data from the table, `t1`: `SELECT * FROM t1 WHERE c1 = 5;`.
 
 
