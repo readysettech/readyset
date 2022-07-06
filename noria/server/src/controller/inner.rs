@@ -171,19 +171,27 @@ impl Leader {
             match (&method, path) {
                 (&Method::GET, "/simple_graph") => {
                     let ds = futures::executor::block_on(self.dataflow_state_handle.read());
-                    return Ok(ds.graphviz(false).into_bytes());
+                    return Ok(ds.graphviz(false, None).into_bytes());
                 }
                 (&Method::POST, "/simple_graphviz") => {
                     let ds = futures::executor::block_on(self.dataflow_state_handle.read());
-                    return_serialized!(ds.graphviz(false));
+                    return_serialized!(ds.graphviz(false, None));
                 }
                 (&Method::GET, "/graph") => {
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
-                    return Ok(ds.graphviz(true).into_bytes());
+                    let (ds, node_key_counts) = futures::executor::block_on(async move {
+                        let ds = self.dataflow_state_handle.read().await;
+                        let node_key_counts = ds.node_key_counts().await?;
+                        ReadySetResult::Ok((ds, node_key_counts))
+                    })?;
+                    return Ok(ds.graphviz(true, Some(node_key_counts)).into_bytes());
                 }
                 (&Method::POST, "/graphviz") => {
-                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
-                    return_serialized!(ds.graphviz(true));
+                    let (ds, node_key_counts) = futures::executor::block_on(async move {
+                        let ds = self.dataflow_state_handle.read().await;
+                        let node_key_counts = ds.node_key_counts().await?;
+                        ReadySetResult::Ok((ds, node_key_counts))
+                    })?;
+                    return_serialized!(ds.graphviz(true, Some(node_key_counts)));
                 }
                 (&Method::GET | &Method::POST, "/get_statistics") => {
                     let ret = futures::executor::block_on(async move {

@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::fmt;
 
 use itertools::Itertools;
+use noria::KeyCount;
 
 use crate::node::{Node, NodeType};
 use crate::prelude::*;
@@ -25,6 +27,7 @@ impl Node {
         &self,
         idx: NodeIndex,
         detailed: bool,
+        node_key_counts: &HashMap<NodeIndex, KeyCount>,
         materialization_status: MaterializationStatus,
     ) -> String {
         let mut s = String::new();
@@ -121,6 +124,9 @@ impl Node {
                     .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
                     .unwrap_or_else(|| "white".into())
             ));
+            let key_count_str = node_key_counts
+                .get(&idx)
+                .map_or("".to_owned(), |c| format!("&nbsp;({})", c));
 
             let materialized = match materialization_status {
                 MaterializationStatus::Not => "",
@@ -161,11 +167,12 @@ impl Node {
                 NodeType::Dropped => s.push_str(&format!("{{ {} | dropped }}", addr)),
                 NodeType::Base(..) => {
                     s.push_str(&format!(
-                        "{{ {{ {} / {} | {} {} }} | {} | {} }}",
+                        "{{ {{ {} / {} | {} {} {} }} | {} | {} }}",
                         addr,
                         Self::escape(self.name()),
                         "B",
                         materialized,
+                        key_count_str,
                         self.columns()
                             .iter()
                             .enumerate()
@@ -193,10 +200,11 @@ impl Node {
                         Some(index) => format!("{:?}({:?})", index.index_type, index.columns),
                     };
                     s.push_str(&format!(
-                        "{{ {{ {} / {} {} }} | (reader / ⚷: {}) | {} }}",
+                        "{{ {{ {} / {} {} {} }} | (reader / ⚷: {}) | {} }}",
                         addr,
                         Self::escape(self.name()),
                         materialized,
+                        key_count_str,
                         key,
                         sharding,
                     ))
@@ -206,11 +214,12 @@ impl Node {
 
                     // Output node name and description. First row.
                     s.push_str(&format!(
-                        "{{ {} / {} | {} {} }}",
+                        "{{ {} / {} | {} {} {} }}",
                         addr,
                         Self::escape(self.name()),
                         Self::escape(&i.description(detailed)),
-                        materialized
+                        materialized,
+                        key_count_str,
                     ));
 
                     // Output node outputs. Second row.
@@ -223,6 +232,7 @@ impl Node {
                             .join(", \\n"),
                     ));
                     s.push_str(&format!(" | {}", sharding));
+
                     s.push('}');
                 }
             };

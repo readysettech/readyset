@@ -608,10 +608,15 @@ impl DataflowState {
             .collect()
     }
 
-    pub(super) fn graphviz(&self, detailed: bool) -> String {
+    pub(super) fn graphviz(
+        &self,
+        detailed: bool,
+        node_key_counts: Option<HashMap<NodeIndex, KeyCount>>,
+    ) -> String {
         graphviz(
             &self.ingredients,
             detailed,
+            node_key_counts,
             &self.materializations,
             Some(&self.domain_nodes),
         )
@@ -1516,12 +1521,13 @@ unsafe impl Sync for PersistableDataflowState {}
 pub(super) fn graphviz(
     graph: &Graph,
     detailed: bool,
+    node_key_counts: Option<HashMap<NodeIndex, KeyCount>>,
     materializations: &Materializations,
     domain_nodes: Option<&HashMap<DomainIndex, NodeMap<NodeIndex>>>,
 ) -> String {
     let mut s = String::new();
-
     let indentln = |s: &mut String| s.push_str("    ");
+    let node_key_counts = node_key_counts.unwrap_or_default();
 
     #[allow(clippy::unwrap_used)] // regex is hardcoded and valid
     fn sanitize(s: &str) -> Cow<str> {
@@ -1577,7 +1583,10 @@ pub(super) fn graphviz(
             let materialization_status = materializations.get_status(index, node);
             indentln(&mut s);
             s.push_str(&format!("n{}", index.index()));
-            s.push_str(sanitize(&node.describe(index, detailed, materialization_status)).as_ref());
+            s.push_str(
+                sanitize(&node.describe(index, detailed, &node_key_counts, materialization_status))
+                    .as_ref(),
+            );
         }
         if domain.is_some() {
             s.push_str("\n    }\n");
