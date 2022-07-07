@@ -8,3 +8,15 @@ datasources:
     url: http://prometheus:9090
     jsonData:
       httpMethod: POST
+
+  - name: ReadySet_DB
+    type: mysql
+    access: proxy
+    url: db:3306
+    user: root
+    database: solidus
+    jsonData:
+      tlsAuth: true
+    secureJsonData:
+      password: noria
+    editable: true

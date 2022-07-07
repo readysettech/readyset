@@ -8,8 +8,9 @@ export AUTO_ACCEPT=1
 
 sleep 30
 
-bundle exec rake db:migrate
 if [ ! -f /state/loaded ]; then
+    bundle exec rails db:schema:load
+    bundle exec rake secret
     bundle exec rake db:seed
     bundle exec rake spree_sample:load
     touch /state/loaded

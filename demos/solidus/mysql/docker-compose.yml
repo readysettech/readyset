@@ -26,37 +26,8 @@ services:
       interval: 10s
       timeout: 2s
       retries: 5
-  readyset-server:
-    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:release-2190606a3c43f239f9735a0fa6b42468dbcf4ac3"
-    expose:
-      - "32768-60999"
-    environment:
-      AUTHORITY_ADDRESS: consul:8500
-      AUTHORITY: "consul"
-      LISTEN_ADDRESS: 0.0.0.0
-      EXTERNAL_ADDRESS: readyset-server
-      NORIA_DEPLOYMENT: solidus
-      REPLICATION_URL: mysql://root:noria@mysql/solidus
-      PROMETHEUS_METRICS: 1
-      EXPERIMENTAL_TOPK_SUPPORT: 1
-      #FORBID_FULL_MATERIALIZATION: 1
-      DB_DIR: /state
-    links:
-      - mysql
-      - consul
-    depends_on:
-      mysql:
-        condition: service_healthy
-    volumes:
-      - readyset-server-state:/state
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "127.0.0.1:6033/prometheus"]
-      interval: 10s
-      timeout: 2s
-      retries: 5
-      start_period: 5s
   db:
-    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:release-2190606a3c43f239f9735a0fa6b42468dbcf4ac3"
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:latest"
     expose:
       - 3306
     ports:
@@ -72,8 +43,14 @@ services:
       PROMETHEUS_METRICS: 1
       QUERY_LOG: 1
       QUERY_LOG_AD_HOC: 1
+      EXPLICIT_MIGRATIONS: 1
+      STANDALONE: 1
+      EXPERIMENTAL_PAGINATE_SUPPORT: 1
+      EXPERIMENTAL_MIXED_COMPARISONS_SUPPORT: 1
+      EXPERIMENTAL_TOPK_SUPPORT: 1
+    volumes:
+      - readyset-server-state:/state
     links:
-      - readyset-server
       - mysql
       - consul
     healthcheck:

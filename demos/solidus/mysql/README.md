@@ -16,3 +16,11 @@ $ docker-compose up -d solidus
 
 Once the application starts, you can browse to http://localhost:3000 to open the
 Solidus application.
+
+The grafana dashboard can be found at http://localhost:4000.
+
+A connection to the ReadySet adapter through the mysql client can be established with:
+
+``` shellsession
+$ mysql -h 127.0.0.1 -uroot -pnoria
+```
