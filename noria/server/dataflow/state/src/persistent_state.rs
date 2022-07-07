@@ -63,12 +63,12 @@
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::fs;
 use std::io::Read;
 use std::ops::Bound;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
+use std::{fmt, fs};
 
 use bincode::Options;
 use common::{IndexType, KeyType, RangeKey, Record, Records, SizeOf, Tag};
@@ -283,7 +283,7 @@ struct PersistentMeta<'a> {
     replication_offset: Option<Cow<'a, ReplicationOffset>>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct PersistentIndex {
     column_family: String,
     index: Index,
@@ -312,6 +312,18 @@ pub struct PersistentState {
     /// When set to true [`SnapshotMode::SnapshotModeEnabled`] compaction will be disabled and
     /// writes will bypass WAL and fsync
     snapshot_mode: SnapshotMode,
+}
+
+impl fmt::Debug for PersistentState {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt.debug_struct("PersistentState")
+            .field("name", &self.name)
+            .field("indices", &self.indices)
+            .field("unique_keys", &self.unique_keys)
+            .field("seq", &self.seq)
+            .field("epoch", &self.epoch)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<'a> PersistentMeta<'a> {
