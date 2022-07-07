@@ -142,10 +142,10 @@ impl Engine {
     ) -> String {
         match self {
             Engine::MySQL => {
-                format!("PGPASSWORD={db_pass} psql -h {host} -p {port} -U postgres {db_name}")
+                format!("mysql -h{host} -uroot -p{db_pass} -P{port} --database={db_name}")
             }
             Engine::PostgreSQL => {
-                format!("mysql -h{host} -uroot -p{db_pass} -P{port} --database={db_name}")
+                format!("PGPASSWORD={db_pass} psql -h {host} -p {port} -U postgres {db_name}")
             }
         }
     }
