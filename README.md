@@ -107,9 +107,7 @@ brew install openssl@1.1
 ```
 sudo apt update && sudo apt install -y build-essential libssl-dev pkg-config llvm clang liblz4-dev cmake
 ```
-
 #### Install Rust 
-
 ReadySet is written entirely in Rust. If you don’t already have Rust installed, you can install it via rustup (select the version of ‘nightly’ specified in the `rust-toolchain` file):  
 
 ```curl https://sh.rustup.rs -sSf | sh```
@@ -173,7 +171,6 @@ To run tests for the project, run the following command:
 ```
 cargo test --skip integration_serial
 ```
-
 ##### Testing Notes
 
 Certain tests cannot be run in parallel with others, and these tests are typically in files postfixed with _serial. Running the entire set of tests for a package, i.e. `cargo test -p readyset-server` may fail if serial tests are included.
