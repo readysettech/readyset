@@ -6,8 +6,8 @@ use std::iter;
 use maplit::hashset;
 
 use crate::{
-    CacheInner, Column, CreateCacheStatement, Expression, FieldDefinitionExpression,
-    FieldReference, FunctionExpression, InValue, JoinConstraint, SelectStatement, SqlQuery, Table,
+    CacheInner, Column, CreateCacheStatement, Expr, FieldDefinitionExpr, FieldReference,
+    FunctionExpr, InValue, JoinConstraint, SelectStatement, SqlQuery, Table,
 };
 
 /// Extension trait providing the `referred_tables` method to various parts of the AST
@@ -60,7 +60,7 @@ impl ReferredTables for SqlQuery {
     }
 }
 
-impl ReferredTables for Expression {
+impl ReferredTables for Expr {
     fn referred_tables(&self) -> HashSet<Table> {
         self.referred_columns()
             .filter_map(|col| col.table.clone())
@@ -74,17 +74,17 @@ impl ReferredTables for Expression {
 
 #[derive(Clone)]
 pub struct ReferredColumnsIter<'a> {
-    exprs_to_visit: Vec<&'a Expression>,
+    exprs_to_visit: Vec<&'a Expr>,
     columns_to_visit: Vec<&'a Column>,
 }
 
 impl<'a> ReferredColumnsIter<'a> {
-    fn visit_expr(&mut self, expr: &'a Expression) -> Option<&'a Column> {
+    fn visit_expr(&mut self, expr: &'a Expr) -> Option<&'a Column> {
         match expr {
-            Expression::Call(fexpr) => self.visit_function_expression(fexpr),
-            Expression::Literal(_) => None,
-            Expression::Column(col) => Some(col),
-            Expression::CaseWhen {
+            Expr::Call(fexpr) => self.visit_function_expression(fexpr),
+            Expr::Literal(_) => None,
+            Expr::Column(col) => Some(col),
+            Expr::CaseWhen {
                 condition,
                 then_expr,
                 else_expr,
@@ -97,22 +97,20 @@ impl<'a> ReferredColumnsIter<'a> {
                     None
                 }
             }
-            Expression::BinaryOp { lhs, rhs, .. } => {
+            Expr::BinaryOp { lhs, rhs, .. } => {
                 self.exprs_to_visit.push(lhs);
                 self.visit_expr(rhs)
             }
-            Expression::UnaryOp { rhs: expr, .. } | Expression::Cast { expr, .. } => {
-                self.visit_expr(expr)
-            }
-            Expression::Exists { .. } => None,
-            Expression::Between {
+            Expr::UnaryOp { rhs: expr, .. } | Expr::Cast { expr, .. } => self.visit_expr(expr),
+            Expr::Exists { .. } => None,
+            Expr::Between {
                 operand, min, max, ..
             } => {
                 self.exprs_to_visit.push(operand);
                 self.exprs_to_visit.push(min);
                 self.visit_expr(max)
             }
-            Expression::In { lhs, rhs, .. } => {
+            Expr::In { lhs, rhs, .. } => {
                 self.exprs_to_visit.push(lhs);
                 match rhs {
                     InValue::Subquery(_) => None,
@@ -126,13 +124,13 @@ impl<'a> ReferredColumnsIter<'a> {
                     }
                 }
             }
-            Expression::NestedSelect(_) => None,
-            Expression::Variable(_) => None,
+            Expr::NestedSelect(_) => None,
+            Expr::Variable(_) => None,
         }
     }
 
-    fn visit_function_expression(&mut self, fexpr: &'a FunctionExpression) -> Option<&'a Column> {
-        use FunctionExpression::*;
+    fn visit_function_expression(&mut self, fexpr: &'a FunctionExpr) -> Option<&'a Column> {
+        use FunctionExpr::*;
 
         match fexpr {
             Avg { expr, .. } => self.visit_expr(expr),
@@ -175,17 +173,17 @@ impl<'a> Iterator for ReferredColumnsIter<'a> {
 }
 
 pub struct ReferredColumnsMut<'a> {
-    exprs_to_visit: Vec<&'a mut Expression>,
+    exprs_to_visit: Vec<&'a mut Expr>,
     columns_to_visit: Vec<&'a mut Column>,
 }
 
 impl<'a> ReferredColumnsMut<'a> {
-    fn visit_expr(&mut self, expr: &'a mut Expression) -> Option<&'a mut Column> {
+    fn visit_expr(&mut self, expr: &'a mut Expr) -> Option<&'a mut Column> {
         match expr {
-            Expression::Call(fexpr) => self.visit_function_expression(fexpr),
-            Expression::Literal(_) => None,
-            Expression::Column(col) => Some(col),
-            Expression::CaseWhen {
+            Expr::Call(fexpr) => self.visit_function_expression(fexpr),
+            Expr::Literal(_) => None,
+            Expr::Column(col) => Some(col),
+            Expr::CaseWhen {
                 condition,
                 then_expr,
                 else_expr,
@@ -198,22 +196,20 @@ impl<'a> ReferredColumnsMut<'a> {
                     None
                 }
             }
-            Expression::BinaryOp { lhs, rhs, .. } => {
+            Expr::BinaryOp { lhs, rhs, .. } => {
                 self.exprs_to_visit.push(lhs);
                 self.visit_expr(rhs)
             }
-            Expression::UnaryOp { rhs: expr, .. } | Expression::Cast { expr, .. } => {
-                self.visit_expr(expr)
-            }
-            Expression::Exists { .. } => None,
-            Expression::Between {
+            Expr::UnaryOp { rhs: expr, .. } | Expr::Cast { expr, .. } => self.visit_expr(expr),
+            Expr::Exists { .. } => None,
+            Expr::Between {
                 operand, min, max, ..
             } => {
                 self.exprs_to_visit.push(operand);
                 self.exprs_to_visit.push(min);
                 self.visit_expr(max)
             }
-            Expression::In { lhs, rhs, .. } => {
+            Expr::In { lhs, rhs, .. } => {
                 self.exprs_to_visit.push(lhs);
                 match rhs {
                     InValue::Subquery(_) => None,
@@ -223,16 +219,13 @@ impl<'a> ReferredColumnsMut<'a> {
                     }),
                 }
             }
-            Expression::NestedSelect(_) => None,
-            Expression::Variable(_) => None,
+            Expr::NestedSelect(_) => None,
+            Expr::Variable(_) => None,
         }
     }
 
-    fn visit_function_expression(
-        &mut self,
-        fexpr: &'a mut FunctionExpression,
-    ) -> Option<&'a mut Column> {
-        use FunctionExpression::*;
+    fn visit_function_expression(&mut self, fexpr: &'a mut FunctionExpr) -> Option<&'a mut Column> {
+        use FunctionExpr::*;
 
         match fexpr {
             Avg { expr, .. } => self.visit_expr(expr),
@@ -277,7 +270,7 @@ pub trait ReferredColumns {
     fn referred_columns_mut(&mut self) -> ReferredColumnsMut<'_>;
 }
 
-impl ReferredColumns for Expression {
+impl ReferredColumns for Expr {
     fn referred_columns(&self) -> ReferredColumnsIter {
         ReferredColumnsIter {
             exprs_to_visit: vec![self],
@@ -293,7 +286,7 @@ impl ReferredColumns for Expression {
     }
 }
 
-impl ReferredColumns for FunctionExpression {
+impl ReferredColumns for FunctionExpr {
     fn referred_columns(&self) -> ReferredColumnsIter {
         let mut iter = ReferredColumnsIter {
             exprs_to_visit: vec![],
@@ -324,8 +317,8 @@ impl SelectStatement {
             .fields
             .iter()
             .filter_map(|fde| match fde {
-                FieldDefinitionExpression::Expression { expr, .. } => Some(expr),
-                FieldDefinitionExpression::All | FieldDefinitionExpression::AllInTable(_) => None,
+                FieldDefinitionExpr::Expr { expr, .. } => Some(expr),
+                FieldDefinitionExpr::All | FieldDefinitionExpr::AllInTable(_) => None,
             })
             .chain(self.join.iter().filter_map(|join| match &join.constraint {
                 JoinConstraint::On(expr) => Some(expr),
@@ -339,13 +332,13 @@ impl SelectStatement {
             .chain(&self.having)
             .chain(self.group_by.iter().flat_map(|gb| {
                 gb.fields.iter().filter_map(|f| match f {
-                    FieldReference::Expression(expr) => Some(expr),
+                    FieldReference::Expr(expr) => Some(expr),
                     _ => None,
                 })
             }))
             .chain(self.order.iter().flat_map(|oc| {
                 oc.order_by.iter().filter_map(|(f, _)| match f {
-                    FieldReference::Expression(expr) => Some(expr),
+                    FieldReference::Expr(expr) => Some(expr),
                     _ => None,
                 })
             }))
@@ -358,29 +351,29 @@ impl SelectStatement {
     }
 }
 
-/// Returns true if the given [`FunctionExpression`] represents an aggregate function
-pub fn is_aggregate(function: &FunctionExpression) -> bool {
+/// Returns true if the given [`FunctionExpr`] represents an aggregate function
+pub fn is_aggregate(function: &FunctionExpr) -> bool {
     match function {
-        FunctionExpression::Avg { .. }
-        | FunctionExpression::Count { .. }
-        | FunctionExpression::CountStar
-        | FunctionExpression::Sum { .. }
-        | FunctionExpression::Max(_)
-        | FunctionExpression::Min(_)
-        | FunctionExpression::GroupConcat { .. } => true,
+        FunctionExpr::Avg { .. }
+        | FunctionExpr::Count { .. }
+        | FunctionExpr::CountStar
+        | FunctionExpr::Sum { .. }
+        | FunctionExpr::Max(_)
+        | FunctionExpr::Min(_)
+        | FunctionExpr::GroupConcat { .. } => true,
         // For now, assume all "generic" function calls are not aggregates
-        FunctionExpression::Call { .. } => false,
+        FunctionExpr::Call { .. } => false,
     }
 }
 
-/// Rturns true if *any* of the recursive subexpressions of the given [`Expression`] contain an
+/// Rturns true if *any* of the recursive subexpressions of the given [`Expr`] contain an
 /// aggregate
-pub fn contains_aggregate(expr: &Expression) -> bool {
+pub fn contains_aggregate(expr: &Expr) -> bool {
     match expr {
-        Expression::Call(f) => is_aggregate(f) || f.arguments().any(contains_aggregate),
-        Expression::Literal(_) => false,
-        Expression::Column { .. } => false,
-        Expression::CaseWhen {
+        Expr::Call(f) => is_aggregate(f) || f.arguments().any(contains_aggregate),
+        Expr::Literal(_) => false,
+        Expr::Column { .. } => false,
+        Expr::CaseWhen {
             condition,
             then_expr,
             else_expr,
@@ -391,32 +384,30 @@ pub fn contains_aggregate(expr: &Expression) -> bool {
                     .iter()
                     .any(|expr| contains_aggregate(expr.as_ref()))
         }
-        Expression::BinaryOp { lhs, rhs, .. } => contains_aggregate(lhs) || contains_aggregate(rhs),
-        Expression::UnaryOp { rhs: expr, .. } | Expression::Cast { expr, .. } => {
-            contains_aggregate(expr)
-        }
-        Expression::Exists(_) => false,
-        Expression::Between {
+        Expr::BinaryOp { lhs, rhs, .. } => contains_aggregate(lhs) || contains_aggregate(rhs),
+        Expr::UnaryOp { rhs: expr, .. } | Expr::Cast { expr, .. } => contains_aggregate(expr),
+        Expr::Exists(_) => false,
+        Expr::Between {
             operand, min, max, ..
         } => contains_aggregate(operand) || contains_aggregate(min) || contains_aggregate(max),
-        Expression::NestedSelect(_) => false,
-        Expression::In { lhs, rhs, .. } => {
+        Expr::NestedSelect(_) => false,
+        Expr::In { lhs, rhs, .. } => {
             contains_aggregate(lhs)
                 || match rhs {
                     InValue::Subquery(_) => false,
                     InValue::List(exprs) => exprs.iter().any(contains_aggregate),
                 }
         }
-        Expression::Variable(_) => false,
+        Expr::Variable(_) => false,
     }
 }
 
 pub struct Subexpressions<'a> {
-    subexpr_iterators: VecDeque<Box<dyn Iterator<Item = &'a Expression> + 'a>>,
+    subexpr_iterators: VecDeque<Box<dyn Iterator<Item = &'a Expr> + 'a>>,
 }
 
 impl<'a> Iterator for Subexpressions<'a> {
-    type Item = &'a Expression;
+    type Item = &'a Expr;
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(subexprs) = self.subexpr_iterators.front_mut() {
@@ -435,37 +426,37 @@ impl<'a> Iterator for Subexpressions<'a> {
     }
 }
 
-impl Expression {
-    /// Construct an iterator over all the *immediate* subexpressions of the given Expression.
+impl Expr {
+    /// Construct an iterator over all the *immediate* subexpressions of the given `Expr`.
     ///
     /// # Examaples
     ///
     /// ```rust
-    /// use nom_sql::{Column, Expression, UnaryOperator};
+    /// use nom_sql::{Column, Expr, UnaryOperator};
     ///
-    /// let expr = Expression::UnaryOp {
+    /// let expr = Expr::UnaryOp {
     ///     op: UnaryOperator::Not,
-    ///     rhs: Box::new(Expression::Column("x".into())),
+    ///     rhs: Box::new(Expr::Column("x".into())),
     /// };
     ///
     /// let subexprs = expr.immediate_subexpressions().collect::<Vec<_>>();
-    /// assert_eq!(subexprs, vec![&Expression::Column("x".into())])
+    /// assert_eq!(subexprs, vec![&Expr::Column("x".into())])
     /// ````
-    pub fn immediate_subexpressions<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Expression> + 'a> {
+    pub fn immediate_subexpressions<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Expr> + 'a> {
         match self {
-            Expression::Literal(_)
-            | Expression::Column(_)
-            | Expression::Exists(_)
-            | Expression::NestedSelect(_)
-            | Expression::Variable(_) => Box::new(iter::empty()) as _,
-            Expression::Call(fexpr) => Box::new(fexpr.arguments()) as _,
-            Expression::BinaryOp { lhs, rhs, .. } => {
+            Expr::Literal(_)
+            | Expr::Column(_)
+            | Expr::Exists(_)
+            | Expr::NestedSelect(_)
+            | Expr::Variable(_) => Box::new(iter::empty()) as _,
+            Expr::Call(fexpr) => Box::new(fexpr.arguments()) as _,
+            Expr::BinaryOp { lhs, rhs, .. } => {
                 Box::new(vec![lhs, rhs].into_iter().map(AsRef::as_ref)) as _
             }
-            Expression::UnaryOp { rhs: expr, .. } | Expression::Cast { expr, .. } => {
+            Expr::UnaryOp { rhs: expr, .. } | Expr::Cast { expr, .. } => {
                 Box::new(iter::once(expr.as_ref())) as _
             }
-            Expression::CaseWhen {
+            Expr::CaseWhen {
                 condition,
                 then_expr,
                 else_expr,
@@ -475,15 +466,15 @@ impl Expression {
                     .chain(else_expr)
                     .map(AsRef::as_ref),
             ) as _,
-            Expression::Between {
+            Expr::Between {
                 operand, min, max, ..
             } => Box::new(vec![operand, min, max].into_iter().map(AsRef::as_ref)) as _,
-            Expression::In {
+            Expr::In {
                 lhs,
                 rhs: InValue::List(exprs),
                 ..
             } => Box::new(iter::once(lhs.as_ref()).chain(exprs)) as _,
-            Expression::In {
+            Expr::In {
                 lhs,
                 rhs: InValue::Subquery(_),
                 ..
@@ -491,7 +482,7 @@ impl Expression {
         }
     }
 
-    /// Construct an iterator over all *recursive* subexpressions of the given Expression, excluding
+    /// Construct an iterator over all *recursive* subexpressions of the given Expr, excluding
     /// the expression itself. Iteration order is unspecified.
     pub fn recursive_subexpressions(&self) -> Subexpressions {
         let mut subexpr_iterators = VecDeque::with_capacity(1);
@@ -506,7 +497,7 @@ mod tests {
     use crate::BinaryOperator;
 
     mod referred_columns {
-        use Expression::{Call, Column as ColExpr, Literal as LitExpr};
+        use Expr::{Call, Column as ColExpr, Literal as LitExpr};
 
         use super::*;
         use crate::Literal;
@@ -532,8 +523,8 @@ mod tests {
         #[test]
         fn aggregate_with_column() {
             assert_eq!(
-                Call(FunctionExpression::Sum {
-                    expr: Box::new(Expression::Column(Column::from("test"))),
+                Call(FunctionExpr::Sum {
+                    expr: Box::new(Expr::Column(Column::from("test"))),
                     distinct: false
                 })
                 .referred_columns()
@@ -545,11 +536,11 @@ mod tests {
         #[test]
         fn generic_with_multiple_columns() {
             assert_eq!(
-                Call(FunctionExpression::Call {
+                Call(FunctionExpr::Call {
                     name: "ifnull".to_owned(),
                     arguments: vec![
-                        Expression::Column(Column::from("col1")),
-                        Expression::Column(Column::from("col2")),
+                        Expr::Column(Column::from("col1")),
+                        Expr::Column(Column::from("col2")),
                     ]
                 })
                 .referred_columns()
@@ -561,12 +552,12 @@ mod tests {
         #[test]
         fn nested_function_call() {
             assert_eq!(
-                Call(FunctionExpression::Count {
-                    expr: Box::new(Expression::Call(FunctionExpression::Call {
+                Call(FunctionExpr::Count {
+                    expr: Box::new(Expr::Call(FunctionExpr::Call {
                         name: "ifnull".to_owned(),
                         arguments: vec![
-                            Expression::Column(Column::from("col1")),
-                            Expression::Column(Column::from("col2")),
+                            Expr::Column(Column::from("col1")),
+                            Expr::Column(Column::from("col2")),
                         ]
                     })),
                     distinct: false,
@@ -581,10 +572,10 @@ mod tests {
         #[test]
         fn binary_op() {
             assert_eq!(
-                Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column(Column::from("sign"))),
+                Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(Column::from("sign"))),
                     op: BinaryOperator::Greater,
-                    rhs: Box::new(Expression::Literal(Literal::Integer(0)))
+                    rhs: Box::new(Expr::Literal(Literal::Integer(0)))
                 }
                 .referred_columns()
                 .collect::<Vec<_>>(),

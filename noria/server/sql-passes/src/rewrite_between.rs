@@ -1,10 +1,10 @@
 use nom_sql::{
-    BinaryOperator, DeleteStatement, Expression, FunctionExpression, InValue, SelectStatement,
-    SqlQuery, UnaryOperator, UpdateStatement,
+    BinaryOperator, DeleteStatement, Expr, FunctionExpr, InValue, SelectStatement, SqlQuery,
+    UnaryOperator, UpdateStatement,
 };
-use Expression::*;
+use Expr::*;
 
-/// Things that contain subexpressions of type `ConditionExpression` that can be targeted for the
+/// Things that contain subexpressions of type `ConditionExpr` that can be targeted for the
 /// desugaring of BETWEEN
 pub trait RewriteBetween {
     /// Recursively rewrite all BETWEEN conditions in the given query into an ANDed pair of
@@ -21,7 +21,7 @@ pub trait RewriteBetween {
     /// ```
     ///
     /// Invariant: The return value will have no recursive subexpressions of type
-    /// [`Expression::Between`]
+    /// [`Expr::Between`]
     #[must_use]
     fn rewrite_between(self) -> Self;
 }
@@ -70,7 +70,7 @@ impl RewriteBetween for SqlQuery {
     }
 }
 
-fn rewrite_expression(expr: Expression) -> Expression {
+fn rewrite_expression(expr: Expr) -> Expr {
     match expr {
         BinaryOp { lhs, rhs, op } => BinaryOp {
             lhs: Box::new(rewrite_expression(*lhs)),
@@ -98,37 +98,31 @@ fn rewrite_expression(expr: Expression) -> Expression {
         },
         Exists(select_stmt) => Exists(Box::new(select_stmt.rewrite_between())),
         Call(fexpr) => Call(match fexpr {
-            FunctionExpression::Avg { expr, distinct } => FunctionExpression::Avg {
+            FunctionExpr::Avg { expr, distinct } => FunctionExpr::Avg {
                 expr: Box::new(rewrite_expression(*expr)),
                 distinct,
             },
-            FunctionExpression::Count {
+            FunctionExpr::Count {
                 expr,
                 distinct,
                 count_nulls,
-            } => FunctionExpression::Count {
+            } => FunctionExpr::Count {
                 expr: Box::new(rewrite_expression(*expr)),
                 distinct,
                 count_nulls,
             },
-            FunctionExpression::CountStar => FunctionExpression::CountStar,
-            FunctionExpression::Sum { expr, distinct } => FunctionExpression::Sum {
+            FunctionExpr::CountStar => FunctionExpr::CountStar,
+            FunctionExpr::Sum { expr, distinct } => FunctionExpr::Sum {
                 expr: Box::new(rewrite_expression(*expr)),
                 distinct,
             },
-            FunctionExpression::Max(expr) => {
-                FunctionExpression::Max(Box::new(rewrite_expression(*expr)))
-            }
-            FunctionExpression::Min(expr) => {
-                FunctionExpression::Min(Box::new(rewrite_expression(*expr)))
-            }
-            FunctionExpression::GroupConcat { expr, separator } => {
-                FunctionExpression::GroupConcat {
-                    expr: Box::new(rewrite_expression(*expr)),
-                    separator,
-                }
-            }
-            FunctionExpression::Call { name, arguments } => FunctionExpression::Call {
+            FunctionExpr::Max(expr) => FunctionExpr::Max(Box::new(rewrite_expression(*expr))),
+            FunctionExpr::Min(expr) => FunctionExpr::Min(Box::new(rewrite_expression(*expr))),
+            FunctionExpr::GroupConcat { expr, separator } => FunctionExpr::GroupConcat {
+                expr: Box::new(rewrite_expression(*expr)),
+                separator,
+            },
+            FunctionExpr::Call { name, arguments } => FunctionExpr::Call {
                 name,
                 arguments: arguments.into_iter().map(rewrite_expression).collect(),
             },
@@ -166,15 +160,15 @@ fn rewrite_expression(expr: Expression) -> Expression {
     }
 }
 
-fn rewrite_between_condition(operand: Expression, min: Expression, max: Expression) -> Expression {
-    Expression::BinaryOp {
-        lhs: Box::new(Expression::BinaryOp {
+fn rewrite_between_condition(operand: Expr, min: Expr, max: Expr) -> Expr {
+    Expr::BinaryOp {
+        lhs: Box::new(Expr::BinaryOp {
             lhs: Box::new(operand.clone()),
             op: BinaryOperator::GreaterOrEqual,
             rhs: Box::new(rewrite_expression(min)),
         }),
         op: BinaryOperator::And,
-        rhs: Box::new(Expression::BinaryOp {
+        rhs: Box::new(Expr::BinaryOp {
             lhs: Box::new(operand),
             op: BinaryOperator::LessOrEqual,
             rhs: Box::new(rewrite_expression(max)),

@@ -15,9 +15,9 @@ pub use mir::Column;
 use mir::MirNodeRef;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
-    BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableStatement, Expression,
-    FieldDefinitionExpression, FieldReference, FunctionExpression, LimitClause, Literal,
-    OrderClause, OrderType, SelectStatement, SqlIdentifier, TableKey, UnaryOperator,
+    BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableStatement, Expr,
+    FieldDefinitionExpr, FieldReference, FunctionExpr, LimitClause, Literal, OrderClause,
+    OrderType, SelectStatement, SqlIdentifier, TableKey, UnaryOperator,
 };
 use noria::ViewPlaceholder;
 use noria_data::DataType;
@@ -46,7 +46,7 @@ lazy_static! {
 
 fn value_columns_needed_for_predicates(
     value_columns: &[OutputColumn],
-    predicates: &[Expression],
+    predicates: &[Expr],
 ) -> Vec<(Column, OutputColumn)> {
     let pred_columns: Vec<Column> = predicates
         .iter()
@@ -57,7 +57,7 @@ fn value_columns_needed_for_predicates(
     value_columns
         .iter()
         .filter_map(|oc| match *oc {
-            OutputColumn::Expression(ref ec) => Some((
+            OutputColumn::Expr(ref ec) => Some((
                 Column {
                     name: ec.name.clone(),
                     table: ec.table.clone(),
@@ -90,18 +90,18 @@ fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DataType>> {
         st.fields
             .iter()
             .map(|f| match f {
-                FieldDefinitionExpression::Expression {
-                    expr: Expression::Call(func),
+                FieldDefinitionExpr::Expr {
+                    expr: Expr::Call(func),
                     ..
                 } => match func {
-                    FunctionExpression::Avg { .. } => DataType::None,
-                    FunctionExpression::Count { .. } => DataType::Int(0),
-                    FunctionExpression::CountStar => DataType::Int(0),
-                    FunctionExpression::Sum { .. } => DataType::None,
-                    FunctionExpression::Max(..) => DataType::None,
-                    FunctionExpression::Min(..) => DataType::None,
-                    FunctionExpression::GroupConcat { .. } => DataType::None,
-                    FunctionExpression::Call { .. } => DataType::None,
+                    FunctionExpr::Avg { .. } => DataType::None,
+                    FunctionExpr::Count { .. } => DataType::Int(0),
+                    FunctionExpr::CountStar => DataType::Int(0),
+                    FunctionExpr::Sum { .. } => DataType::None,
+                    FunctionExpr::Max(..) => DataType::None,
+                    FunctionExpr::Min(..) => DataType::None,
+                    FunctionExpr::GroupConcat { .. } => DataType::None,
+                    FunctionExpr::Call { .. } => DataType::None,
                 },
                 _ => DataType::None,
             })
@@ -328,7 +328,7 @@ impl SqlToMirConverter {
                                             FieldReference::Numeric(_) => internal!(
                                                 "Numeric field references should have been removed"
                                             ),
-                                            FieldReference::Expression(e) => e.clone(),
+                                            FieldReference::Expr(e) => e.clone(),
                                         },
                                         ot.unwrap_or(OrderType::OrderAscending),
                                     ))
@@ -814,7 +814,7 @@ impl SqlToMirConverter {
         &self,
         name: &SqlIdentifier,
         parent: MirNodeRef,
-        conditions: Expression,
+        conditions: Expr,
     ) -> MirNodeRef {
         trace!(%name, %conditions, "Added filter node");
         MirNode::new(
@@ -830,13 +830,13 @@ impl SqlToMirConverter {
         &self,
         name: &SqlIdentifier,
         func_col: Column,
-        function: FunctionExpression,
+        function: FunctionExpr,
         group_cols: Vec<Column>,
         parent: MirNodeRef,
-        projected_exprs: &HashMap<Expression, SqlIdentifier>,
+        projected_exprs: &HashMap<Expr, SqlIdentifier>,
     ) -> ReadySetResult<Vec<MirNodeRef>> {
         use dataflow::ops::grouped::extremum::Extremum;
-        use nom_sql::FunctionExpression::*;
+        use nom_sql::FunctionExpr::*;
 
         macro_rules! mk_error {
             ($expression:expr) => {
@@ -871,7 +871,7 @@ impl SqlToMirConverter {
 
         Ok(match function {
             Sum {
-                expr: box Expression::Column(col),
+                expr: box Expr::Column(col),
                 distinct,
             } => mknode(
                 Column::from(col),
@@ -893,7 +893,7 @@ impl SqlToMirConverter {
                 internal!("COUNT(*) should have been rewritten earlier!")
             }
             Count {
-                expr: box Expression::Column(col),
+                expr: box Expr::Column(col),
                 distinct,
                 count_nulls,
             } => mknode(
@@ -917,7 +917,7 @@ impl SqlToMirConverter {
                 distinct,
             ),
             Avg {
-                expr: box Expression::Column(col),
+                expr: box Expr::Column(col),
                 distinct,
             } => mknode(
                 Column::from(col),
@@ -937,7 +937,7 @@ impl SqlToMirConverter {
             ),
             // TODO(atsakiris): Support Filters for Extremum/GroupConcat
             // CH: https://app.clubhouse.io/readysettech/story/198
-            Max(box Expression::Column(col)) => mknode(
+            Max(box Expr::Column(col)) => mknode(
                 Column::from(col),
                 GroupedNodeType::Extremum(Extremum::Max),
                 false,
@@ -953,7 +953,7 @@ impl SqlToMirConverter {
                 GroupedNodeType::Extremum(Extremum::Max),
                 false,
             ),
-            Min(box Expression::Column(col)) => mknode(
+            Min(box Expr::Column(col)) => mknode(
                 Column::from(col),
                 GroupedNodeType::Extremum(Extremum::Min),
                 false,
@@ -970,7 +970,7 @@ impl SqlToMirConverter {
                 false,
             ),
             GroupConcat {
-                expr: box Expression::Column(col),
+                expr: box Expr::Column(col),
                 separator,
             } => mknode(
                 Column::from(col),
@@ -1044,11 +1044,11 @@ impl SqlToMirConverter {
 
         for jp in join_predicates {
             let mut l_col = match jp.left {
-                Expression::Column(ref f) => Column::from(f),
+                Expr::Column(ref f) => Column::from(f),
                 _ => unsupported!("no multi-level joins yet"),
             };
             let r_col = match jp.right {
-                Expression::Column(ref f) => Column::from(f),
+                Expr::Column(ref f) => Column::from(f),
                 _ => unsupported!("no multi-level joins yet"),
             };
 
@@ -1150,7 +1150,7 @@ impl SqlToMirConverter {
         name: &SqlIdentifier,
         parent_node: MirNodeRef,
         emit: Vec<Column>,
-        expressions: Vec<(SqlIdentifier, Expression)>,
+        expressions: Vec<(SqlIdentifier, Expr)>,
         literals: Vec<(SqlIdentifier, DataType)>,
     ) -> MirNodeRef {
         MirNode::new(
@@ -1186,7 +1186,7 @@ impl SqlToMirConverter {
         name: &SqlIdentifier,
         mut parent: MirNodeRef,
         group_by: Vec<Column>,
-        order: &Option<Vec<(Expression, OrderType)>>,
+        order: &Option<Vec<(Expr, OrderType)>>,
         limit: usize,
         is_topk: bool,
     ) -> ReadySetResult<Vec<MirNodeRef>> {
@@ -1203,7 +1203,7 @@ impl SqlToMirConverter {
                 .map(|(expr, ot)| {
                     (
                         match expr {
-                            Expression::Column(col) => Column::from(col),
+                            Expr::Column(col) => Column::from(col),
                             expr => {
                                 let col = Column::named(expr.to_string());
                                 if parent.borrow().column_id_for_column(&col).err().iter().any(
@@ -1276,13 +1276,13 @@ impl SqlToMirConverter {
         &self,
         name: &SqlIdentifier,
         parent: MirNodeRef,
-        ce: &Expression,
+        ce: &Expr,
         nc: usize,
     ) -> ReadySetResult<Vec<MirNodeRef>> {
         let mut pred_nodes: Vec<MirNodeRef> = Vec::new();
         let output_cols = parent.borrow().columns().to_vec();
         match ce {
-            Expression::BinaryOp {
+            Expr::BinaryOp {
                 lhs,
                 op: BinaryOperator::And,
                 rhs,
@@ -1300,7 +1300,7 @@ impl SqlToMirConverter {
                 pred_nodes.extend(left);
                 pred_nodes.extend(right);
             }
-            Expression::BinaryOp {
+            Expr::BinaryOp {
                 lhs,
                 op: BinaryOperator::Or,
                 rhs,
@@ -1329,24 +1329,24 @@ impl SqlToMirConverter {
                 pred_nodes.extend(right);
                 pred_nodes.push(union);
             }
-            Expression::UnaryOp {
+            Expr::UnaryOp {
                 op: UnaryOperator::Not | UnaryOperator::Neg,
                 ..
             } => internal!("negation should have been removed earlier"),
-            Expression::Literal(_) | Expression::Column(_) => {
+            Expr::Literal(_) | Expr::Column(_) => {
                 let f = self.make_filter_node(
                     &format!("{}_f{}", name, nc).into(),
                     parent,
-                    Expression::BinaryOp {
+                    Expr::BinaryOp {
                         lhs: Box::new(ce.clone()),
                         op: BinaryOperator::NotEqual,
-                        rhs: Box::new(Expression::Literal(Literal::Integer(0))),
+                        rhs: Box::new(Expr::Literal(Literal::Integer(0))),
                     },
                 );
                 pred_nodes.push(f);
             }
-            Expression::Between { .. } => internal!("BETWEEN should have been removed earlier"),
-            Expression::Exists(subquery) => {
+            Expr::Between { .. } => internal!("BETWEEN should have been removed earlier"),
+            Expr::Exists(subquery) => {
                 let qg = to_query_graph(subquery)?;
                 let nodes = self.make_nodes_for_selection(name, subquery, &qg, false)?;
                 let subquery_leaf = nodes
@@ -1386,10 +1386,10 @@ impl SqlToMirConverter {
                 let gt_0_filter = self.make_filter_node(
                     &format!("{}_count_gt_0", name).into(),
                     exists_count_node,
-                    Expression::BinaryOp {
-                        lhs: Box::new(Expression::Column("__exists_count".into())),
+                    Expr::BinaryOp {
+                        lhs: Box::new(Expr::Column("__exists_count".into())),
                         op: BinaryOperator::Greater,
-                        rhs: Box::new(Expression::Literal(Literal::Integer(0))),
+                        rhs: Box::new(Expr::Literal(Literal::Integer(0))),
                     },
                 );
                 pred_nodes.push(gt_0_filter.clone());
@@ -1409,8 +1409,8 @@ impl SqlToMirConverter {
                 let exists_join = self.make_join_node(
                     &format!("{}_join", name).into(),
                     &[JoinPredicate {
-                        left: Expression::Column("__exists_join_key".into()),
-                        right: Expression::Column("__count_grp".into()),
+                        left: Expr::Column("__exists_join_key".into()),
+                        right: Expr::Column("__count_grp".into()),
                     }],
                     left_literal_join_key_proj,
                     gt_0_filter,
@@ -1423,10 +1423,10 @@ impl SqlToMirConverter {
 
                 pred_nodes.push(exists_join);
             }
-            Expression::Call(_) => {
+            Expr::Call(_) => {
                 internal!("Function calls should have been handled by projection earlier")
             }
-            Expression::NestedSelect(_) => unsupported!("Nested selects not supported in filters"),
+            Expr::NestedSelect(_) => unsupported!("Nested selects not supported in filters"),
             _ => {
                 let f =
                     self.make_filter_node(&format!("{}_f{}", name, nc).into(), parent, ce.clone());
@@ -1440,10 +1440,10 @@ impl SqlToMirConverter {
     fn predicates_above_group_by<'a>(
         &self,
         name: &SqlIdentifier,
-        column_to_predicates: &HashMap<nom_sql::Column, Vec<&'a Expression>>,
+        column_to_predicates: &HashMap<nom_sql::Column, Vec<&'a Expr>>,
         over_col: &nom_sql::Column,
         parent: MirNodeRef,
-        created_predicates: &mut Vec<&'a Expression>,
+        created_predicates: &mut Vec<&'a Expr>,
     ) -> ReadySetResult<Vec<MirNodeRef>> {
         let mut predicates_above_group_by_nodes = Vec::new();
         let mut prev_node = parent;
@@ -1482,22 +1482,19 @@ impl SqlToMirConverter {
             value_columns_needed_for_predicates(&qg.columns, &qg.global_predicates);
 
         Ok(if !arith_and_lit_columns_needed.is_empty() {
-            let projected_expressions: Vec<(SqlIdentifier, Expression)> =
-                arith_and_lit_columns_needed
-                    .iter()
-                    .filter_map(|&(_, ref oc)| match oc {
-                        OutputColumn::Expression(ref ac) => {
-                            Some((ac.name.clone(), ac.expression.clone()))
-                        }
-                        OutputColumn::Data { .. } => None,
-                        OutputColumn::Literal(_) => None,
-                    })
-                    .collect();
+            let projected_expressions: Vec<(SqlIdentifier, Expr)> = arith_and_lit_columns_needed
+                .iter()
+                .filter_map(|&(_, ref oc)| match oc {
+                    OutputColumn::Expr(ref ac) => Some((ac.name.clone(), ac.expression.clone())),
+                    OutputColumn::Data { .. } => None,
+                    OutputColumn::Literal(_) => None,
+                })
+                .collect();
             let projected_literals: Vec<(SqlIdentifier, DataType)> = arith_and_lit_columns_needed
                 .iter()
                 .map(|&(_, ref oc)| -> ReadySetResult<_> {
                     match oc {
-                        OutputColumn::Expression(_) => Ok(None),
+                        OutputColumn::Expr(_) => Ok(None),
                         OutputColumn::Data { .. } => Ok(None),
                         OutputColumn::Literal(ref lc) => {
                             Ok(Some((lc.name.clone(), DataType::try_from(&lc.value)?)))
@@ -1653,8 +1650,7 @@ impl SqlToMirConverter {
 
             // 3. Get columns used by each predicate. This will be used to check
             // if we need to reorder predicates before group_by nodes.
-            let mut column_to_predicates: HashMap<nom_sql::Column, Vec<&Expression>> =
-                HashMap::new();
+            let mut column_to_predicates: HashMap<nom_sql::Column, Vec<&Expr>> = HashMap::new();
 
             for rel in &sorted_rels {
                 let qgn = qg.relations.get(*rel).ok_or_else(|| {
@@ -1892,7 +1888,7 @@ impl SqlToMirConverter {
                 .columns
                 .iter()
                 .filter_map(|oc| match *oc {
-                    OutputColumn::Expression(_) => None,
+                    OutputColumn::Expr(_) => None,
                     OutputColumn::Data {
                         ref column,
                         alias: ref name,
@@ -1906,11 +1902,11 @@ impl SqlToMirConverter {
                 value_columns_needed_for_predicates(&qg.columns, &qg.global_predicates)
                     .into_iter()
                     .unzip();
-            let projected_expressions: Vec<(SqlIdentifier, Expression)> = qg
+            let projected_expressions: Vec<(SqlIdentifier, Expr)> = qg
                 .columns
                 .iter()
                 .filter_map(|oc| match *oc {
-                    OutputColumn::Expression(ref ac) => {
+                    OutputColumn::Expr(ref ac) => {
                         if !already_computed.contains(oc) {
                             Some((ac.name.clone(), ac.expression.clone()))
                         } else {
@@ -1927,7 +1923,7 @@ impl SqlToMirConverter {
                 .iter()
                 .map(|oc| -> ReadySetResult<_> {
                     match *oc {
-                        OutputColumn::Expression(_) => Ok(None),
+                        OutputColumn::Expr(_) => Ok(None),
                         OutputColumn::Data { .. } => Ok(None),
                         OutputColumn::Literal(ref lc) => {
                             if !already_computed.contains(oc) {
@@ -1997,18 +1993,17 @@ impl SqlToMirConverter {
                     .iter()
                     .map(|expression| -> ReadySetResult<_> {
                         match expression {
-                            FieldDefinitionExpression::All
-                            | FieldDefinitionExpression::AllInTable(_) => {
+                            FieldDefinitionExpr::All | FieldDefinitionExpr::AllInTable(_) => {
                                 internal!("All expression should have been desugared at this point")
                             }
-                            FieldDefinitionExpression::Expression {
+                            FieldDefinitionExpr::Expr {
                                 alias: Some(alias), ..
                             } => Ok(Column::named(alias.clone())),
-                            FieldDefinitionExpression::Expression {
-                                expr: Expression::Column(c),
+                            FieldDefinitionExpr::Expr {
+                                expr: Expr::Column(c),
                                 ..
                             } => Ok(Column::from(c)),
-                            FieldDefinitionExpression::Expression { expr, .. } => {
+                            FieldDefinitionExpr::Expr { expr, .. } => {
                                 Ok(Column::named(expr.to_string()))
                             }
                         }
@@ -2075,10 +2070,10 @@ impl SqlToMirConverter {
                                     .map(|(expr, ot)| {
                                         Ok((
                                             match expr {
-                                                FieldReference::Expression(Expression::Column(
+                                                FieldReference::Expr(Expr::Column(
                                                     col,
                                                 )) => Column::from(col),
-                                                FieldReference::Expression(expr) => {
+                                                FieldReference::Expr(expr) => {
                                                     Column::named(expr.to_string())
                                                 }
                                                 FieldReference::Numeric(_) => internal!(

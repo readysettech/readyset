@@ -1,4 +1,4 @@
-use nom_sql::{BinaryOperator, Expression, JoinConstraint, SqlQuery, UnaryOperator};
+use nom_sql::{BinaryOperator, Expr, JoinConstraint, SqlQuery, UnaryOperator};
 use noria_errors::{internal, unsupported, ReadySetResult};
 
 use crate::is_logical_op;
@@ -7,9 +7,9 @@ pub trait NegationRemoval {
     fn remove_negation(self) -> ReadySetResult<SqlQuery>;
 }
 
-fn normalize_expr(ce: &mut Expression, negate: bool) -> ReadySetResult<()> {
+fn normalize_expr(ce: &mut Expr, negate: bool) -> ReadySetResult<()> {
     match *ce {
-        Expression::BinaryOp {
+        Expr::BinaryOp {
             ref mut op,
             ref mut lhs,
             ref mut rhs,
@@ -43,17 +43,17 @@ fn normalize_expr(ce: &mut Expression, negate: bool) -> ReadySetResult<()> {
             normalize_expr(lhs, is_logical_op(op) && negate)?;
             normalize_expr(rhs, is_logical_op(op) && negate)?;
         }
-        Expression::UnaryOp {
+        Expr::UnaryOp {
             op: UnaryOperator::Not,
             ref mut rhs,
         } => {
-            *ce = std::mem::replace(rhs, Expression::Literal(nom_sql::Literal::Null));
+            *ce = std::mem::replace(rhs, Expr::Literal(nom_sql::Literal::Null));
             normalize_expr(ce, !negate)?;
         }
-        Expression::Between { .. } => {
+        Expr::Between { .. } => {
             internal!("BETWEEN should have been removed earlier")
         }
-        Expression::CaseWhen {
+        Expr::CaseWhen {
             ref mut then_expr,
             ref mut else_expr,
             ..
@@ -63,24 +63,24 @@ fn normalize_expr(ce: &mut Expression, negate: bool) -> ReadySetResult<()> {
                 normalize_expr(else_expr.as_mut(), negate)?;
             }
         }
-        Expression::In {
+        Expr::In {
             ref mut negated, ..
         } => {
             if negate {
                 *negated = !*negated;
             }
         }
-        Expression::Cast { ref mut expr, .. } => {
+        Expr::Cast { ref mut expr, .. } => {
             //TODO: should negate depend on the type of the CAST?
             normalize_expr(expr, negate)?;
         }
-        Expression::Call(_)
-        | Expression::Literal(_)
-        | Expression::Variable(_)
-        | Expression::Column(_)
-        | Expression::Exists(_)
-        | Expression::NestedSelect(_)
-        | Expression::UnaryOp {
+        Expr::Call(_)
+        | Expr::Literal(_)
+        | Expr::Variable(_)
+        | Expr::Column(_)
+        | Expr::Exists(_)
+        | Expr::NestedSelect(_)
+        | Expr::UnaryOp {
             op: UnaryOperator::Neg,
             ..
         } => {
@@ -118,34 +118,34 @@ mod tests {
 
     #[test]
     fn it_normalizes() {
-        let mut expr = Expression::UnaryOp {
+        let mut expr = Expr::UnaryOp {
             op: UnaryOperator::Not,
-            rhs: Box::new(Expression::BinaryOp {
+            rhs: Box::new(Expr::BinaryOp {
                 op: BinaryOperator::And,
-                lhs: Box::new(Expression::BinaryOp {
+                lhs: Box::new(Expr::BinaryOp {
                     op: BinaryOperator::Less,
-                    lhs: Box::new(Expression::Column("a".into())),
-                    rhs: Box::new(Expression::Column("b".into())),
+                    lhs: Box::new(Expr::Column("a".into())),
+                    rhs: Box::new(Expr::Column("b".into())),
                 }),
-                rhs: Box::new(Expression::BinaryOp {
+                rhs: Box::new(Expr::BinaryOp {
                     op: BinaryOperator::Equal,
-                    lhs: Box::new(Expression::Column("c".into())),
-                    rhs: Box::new(Expression::Column("b".into())),
+                    lhs: Box::new(Expr::Column("c".into())),
+                    rhs: Box::new(Expr::Column("b".into())),
                 }),
             }),
         };
 
-        let target = Expression::BinaryOp {
+        let target = Expr::BinaryOp {
             op: BinaryOperator::Or,
-            lhs: Box::new(Expression::BinaryOp {
+            lhs: Box::new(Expr::BinaryOp {
                 op: BinaryOperator::GreaterOrEqual,
-                lhs: Box::new(Expression::Column("a".into())),
-                rhs: Box::new(Expression::Column("b".into())),
+                lhs: Box::new(Expr::Column("a".into())),
+                rhs: Box::new(Expr::Column("b".into())),
             }),
-            rhs: Box::new(Expression::BinaryOp {
+            rhs: Box::new(Expr::BinaryOp {
                 op: BinaryOperator::NotEqual,
-                lhs: Box::new(Expression::Column("c".into())),
-                rhs: Box::new(Expression::Column("b".into())),
+                lhs: Box::new(Expr::Column("c".into())),
+                rhs: Box::new(Expr::Column("b".into())),
             }),
         };
 

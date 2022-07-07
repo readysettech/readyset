@@ -14,7 +14,7 @@ use crate::common::statement_terminator;
 use crate::expression::expression;
 use crate::literal::literal;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expression, Literal, SqlIdentifier};
+use crate::{Dialect, Expr, Literal, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SetStatement {
@@ -35,7 +35,7 @@ impl Display for SetStatement {
 }
 
 impl SetStatement {
-    pub fn variables(&self) -> Option<&[(Variable, Expression)]> {
+    pub fn variables(&self) -> Option<&[(Variable, Expr)]> {
         match self {
             SetStatement::Names(_) | SetStatement::PostgresParameter { .. } => None,
             SetStatement::Variable(set) => Some(&set.variables),
@@ -224,7 +224,7 @@ pub struct Variable {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct SetVariables {
     /// A list of variables and their assigned values
-    pub variables: Vec<(Variable, Expression)>,
+    pub variables: Vec<(Variable, Expr)>,
 }
 
 impl Variable {
@@ -349,7 +349,7 @@ pub fn set(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetStatement> {
     }
 }
 
-fn set_variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Variable, Expression)> {
+fn set_variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Variable, Expr)> {
     move |i| {
         let (i, variable) = variable(dialect)(i)?;
         let (i, _) = whitespace0(i)?;
@@ -418,7 +418,7 @@ mod tests {
                         scope: VariableScope::Local,
                         name: "sql_auto_is_null".into()
                     },
-                    Expression::Literal(0.into())
+                    Expr::Literal(0.into())
                 )),
             })
         );
@@ -436,7 +436,7 @@ mod tests {
                         scope: VariableScope::User,
                         name: "var".into()
                     },
-                    Expression::Literal(123.into())
+                    Expr::Literal(123.into())
                 )),
             })
         );
@@ -520,10 +520,10 @@ mod tests {
                         scope: VariableScope::User,
                         name: "myvar".into()
                     },
-                    Expression::BinaryOp {
-                        lhs: Box::new(Expression::Literal(100.into())),
+                    Expr::BinaryOp {
+                        lhs: Box::new(Expr::Literal(100.into())),
                         op: crate::BinaryOperator::Add,
-                        rhs: Box::new(Expression::Literal(200.into())),
+                        rhs: Box::new(Expr::Literal(200.into())),
                     }
                 )),
             })
@@ -543,10 +543,10 @@ mod tests {
                             scope: VariableScope::User,
                             name: "myvar".into()
                         },
-                        Expression::BinaryOp {
-                            lhs: Box::new(Expression::Literal(100.into())),
+                        Expr::BinaryOp {
+                            lhs: Box::new(Expr::Literal(100.into())),
                             op: crate::BinaryOperator::Add,
-                            rhs: Box::new(Expression::Literal(200.into())),
+                            rhs: Box::new(Expr::Literal(200.into())),
                         }
                     ),
                     (
@@ -554,14 +554,14 @@ mod tests {
                             scope: VariableScope::Session,
                             name: "notmyvar".into()
                         },
-                        Expression::Literal("value".into()),
+                        Expr::Literal("value".into()),
                     ),
                     (
                         Variable {
                             scope: VariableScope::Global,
                             name: "g".into()
                         },
-                        Expression::Variable(Variable {
+                        Expr::Variable(Variable {
                             scope: VariableScope::Global,
                             name: "v".into()
                         }),

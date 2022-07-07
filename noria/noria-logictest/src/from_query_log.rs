@@ -5,9 +5,7 @@ use anyhow::anyhow;
 use clap::Parser;
 use database_utils::{DatabaseConnection, DatabaseURL};
 use itertools::Itertools;
-use nom_sql::{
-    parse_query, Dialect, Expression, FieldDefinitionExpression, FunctionExpression, SqlQuery,
-};
+use nom_sql::{parse_query, Dialect, Expr, FieldDefinitionExpr, FunctionExpr, SqlQuery};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncWriteExt, BufReader};
 
@@ -55,18 +53,14 @@ fn should_validate_results(query: &str, parsed_query: &Option<SqlQuery>) -> bool
         if let SqlQuery::Select(ref select) = parsed_query {
             if select.tables.is_empty() {
                 for field in &select.fields {
-                    if let FieldDefinitionExpression::Expression { expr, .. } = field {
+                    if let FieldDefinitionExpr::Expr { expr, .. } = field {
                         match expr {
-                            Expression::Call(FunctionExpression::Call { name, .. }) => {
-                                match name.as_str() {
-                                    "VERSION" => return false,
-                                    "DATABASE" => return false,
-                                    _ => (),
-                                }
-                            }
-                            Expression::Column(column) if column.name.starts_with("@@") => {
-                                return false
-                            }
+                            Expr::Call(FunctionExpr::Call { name, .. }) => match name.as_str() {
+                                "VERSION" => return false,
+                                "DATABASE" => return false,
+                                _ => (),
+                            },
+                            Expr::Column(column) if column.name.starts_with("@@") => return false,
                             _ => (),
                         };
                     }

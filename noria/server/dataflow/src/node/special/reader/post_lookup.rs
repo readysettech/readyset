@@ -4,7 +4,7 @@ use std::collections::{hash_map, HashMap};
 use std::convert::TryFrom;
 
 use common::DataType;
-use dataflow_expression::Expression;
+use dataflow_expression::Expr;
 use itertools::Either;
 use launchpad::Indices;
 use nom_sql::OrderType;
@@ -174,12 +174,12 @@ impl PostLookup {
         *self == Self::default()
     }
 
-    /// Apply this set of post-lookup operations, optionally filtering by an [`Expression`], to the
+    /// Apply this set of post-lookup operations, optionally filtering by an [`Expr`], to the
     /// given set of results returned from a lookup
     pub fn process<'a, 'b: 'a, I>(
         &'a self,
         iter: I,
-        filter: &Option<Expression>,
+        filter: &Option<Expr>,
     ) -> ReadySetResult<Vec<Vec<Cow<'a, DataType>>>>
     where
         I: Iterator<Item = &'b Box<[DataType]>> + ExactSizeIterator,
@@ -342,14 +342,14 @@ mod tests {
         use dataflow_expression::utils::{make_int_column, make_literal};
         use nom_sql::{BinaryOperator, SqlType};
         use noria_data::noria_type::Type;
-        //use Expression::utils::{make_int_column, make_literal};
-        use Expression::Op;
+        //use Expr::utils::{make_int_column, make_literal};
+        use Expr::Op;
 
         use super::*;
 
         #[test]
         fn not_equal_filter() {
-            let filter = Expression::Op {
+            let filter = Expr::Op {
                 left: Box::new(make_int_column(0)),
                 op: BinaryOperator::NotEqual,
                 right: Box::new(make_literal(DataType::from(1))),

@@ -751,7 +751,7 @@ mod tests {
     use crate::column::Column;
     use crate::common::type_identifier;
     use crate::table::Table;
-    use crate::{BinaryOperator, ColumnConstraint, Expression, Literal, SqlType};
+    use crate::{BinaryOperator, ColumnConstraint, Expr, Literal, SqlType};
 
     #[test]
     fn sql_types() {
@@ -910,7 +910,7 @@ mod tests {
 
     #[test]
     fn compound_create_view() {
-        use crate::common::FieldDefinitionExpression;
+        use crate::common::FieldDefinitionExpr;
         use crate::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 
         let qstring = "CREATE VIEW v AS SELECT * FROM users UNION SELECT * FROM old_users;";
@@ -927,7 +927,7 @@ mod tests {
                             None,
                             SelectStatement {
                                 tables: vec![Table::from("users")],
-                                fields: vec![FieldDefinitionExpression::All],
+                                fields: vec![FieldDefinitionExpr::All],
                                 ..Default::default()
                             },
                         ),
@@ -935,7 +935,7 @@ mod tests {
                             Some(CompoundSelectOperator::DistinctUnion),
                             SelectStatement {
                                 tables: vec![Table::from("old_users")],
-                                fields: vec![FieldDefinitionExpression::All],
+                                fields: vec![FieldDefinitionExpr::All],
                                 ..Default::default()
                             },
                         ),
@@ -1216,10 +1216,10 @@ mod tests {
                 res,
                 TableKey::CheckConstraint {
                     name: None,
-                    expr: Expression::BinaryOp {
-                        lhs: Box::new(Expression::Column("x".into())),
+                    expr: Expr::BinaryOp {
+                        lhs: Box::new(Expr::Column("x".into())),
                         op: BinaryOperator::Greater,
-                        rhs: Box::new(Expression::Literal(1.into())),
+                        rhs: Box::new(Expr::Literal(1.into())),
                     },
                     enforced: None
                 }
@@ -1235,10 +1235,10 @@ mod tests {
             res,
             TableKey::CheckConstraint {
                 name: Some("foo".into()),
-                expr: Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column("x".into())),
+                expr: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column("x".into())),
                     op: BinaryOperator::Greater,
-                    rhs: Box::new(Expression::Literal(1.into())),
+                    rhs: Box::new(Expr::Literal(1.into())),
                 },
                 enforced: None
             }
@@ -1253,10 +1253,10 @@ mod tests {
             res,
             TableKey::CheckConstraint {
                 name: Some("foo".into()),
-                expr: Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column("x".into())),
+                expr: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column("x".into())),
                     op: BinaryOperator::Greater,
-                    rhs: Box::new(Expression::Literal(1.into())),
+                    rhs: Box::new(Expr::Literal(1.into())),
                 },
                 enforced: Some(false)
             }
@@ -1424,8 +1424,8 @@ mod tests {
 
         #[test]
         fn simple_create_view() {
-            use crate::common::FieldDefinitionExpression;
-            use crate::{BinaryOperator, Expression};
+            use crate::common::FieldDefinitionExpr;
+            use crate::{BinaryOperator, Expr};
 
             let qstring = "CREATE VIEW v AS SELECT * FROM users WHERE username = \"bob\";";
 
@@ -1437,10 +1437,10 @@ mod tests {
                     fields: vec![],
                     definition: Box::new(SelectSpecification::Simple(SelectStatement {
                         tables: vec![Table::from("users")],
-                        fields: vec![FieldDefinitionExpression::All],
-                        where_clause: Some(Expression::BinaryOp {
-                            lhs: Box::new(Expression::Column("username".into())),
-                            rhs: Box::new(Expression::Literal(Literal::String("bob".into()))),
+                        fields: vec![FieldDefinitionExpr::All],
+                        where_clause: Some(Expr::BinaryOp {
+                            lhs: Box::new(Expr::Column("username".into())),
+                            rhs: Box::new(Expr::Literal(Literal::String("bob".into()))),
                             op: BinaryOperator::Equal,
                         }),
                         ..Default::default()
@@ -1878,8 +1878,8 @@ mod tests {
 
         #[test]
         fn simple_create_view() {
-            use crate::common::FieldDefinitionExpression;
-            use crate::{BinaryOperator, Expression};
+            use crate::common::FieldDefinitionExpr;
+            use crate::{BinaryOperator, Expr};
 
             let qstring = "CREATE VIEW v AS SELECT * FROM users WHERE username = 'bob';";
 
@@ -1891,10 +1891,10 @@ mod tests {
                     fields: vec![],
                     definition: Box::new(SelectSpecification::Simple(SelectStatement {
                         tables: vec![Table::from("users")],
-                        fields: vec![FieldDefinitionExpression::All],
-                        where_clause: Some(Expression::BinaryOp {
-                            lhs: Box::new(Expression::Column("username".into())),
-                            rhs: Box::new(Expression::Literal(Literal::String("bob".into()))),
+                        fields: vec![FieldDefinitionExpr::All],
+                        where_clause: Some(Expr::BinaryOp {
+                            lhs: Box::new(Expr::Column("username".into())),
+                            rhs: Box::new(Expr::Literal(Literal::String("bob".into()))),
                             op: BinaryOperator::Equal,
                         }),
                         ..Default::default()

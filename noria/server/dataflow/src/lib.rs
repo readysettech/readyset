@@ -52,7 +52,7 @@ pub type Readers = Arc<Mutex<ReaderMap>>;
 
 pub type DomainConfig = domain::Config;
 
-pub use dataflow_expression::{BuiltinFunction, Expression};
+pub use dataflow_expression::{BuiltinFunction, Expr};
 pub use dataflow_state::{DurabilityMode, PersistenceParameters};
 
 pub use crate::domain::{Domain, DomainBuilder, DomainIndex};

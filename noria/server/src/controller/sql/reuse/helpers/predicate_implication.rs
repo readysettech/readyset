@@ -1,7 +1,7 @@
 use std::convert::TryFrom;
 
-use nom_sql::Expression::*;
-use nom_sql::{BinaryOperator, Expression, Literal};
+use nom_sql::Expr::*;
+use nom_sql::{BinaryOperator, Expr, Literal};
 use noria_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use noria_sql_passes::LogicalOp;
 
@@ -109,11 +109,11 @@ pub fn join_predicates_are_equivalent(
 ) -> ReadySetResult<bool> {
     fn cols(pred: &JoinPredicate) -> ReadySetResult<(&nom_sql::Column, &nom_sql::Column)> {
         let l_col = match &pred.left {
-            Expression::Column(f) => f,
+            Expr::Column(f) => f,
             expr => unsupported!("Unsupported join predicate on non-column {}", expr),
         };
         let r_col = match &pred.right {
-            Expression::Column(f) => f,
+            Expr::Column(f) => f,
             expr => unsupported!("Unsupported join predicate on non-column {}", expr),
         };
         Ok(if l_col < r_col {
@@ -133,7 +133,7 @@ pub fn join_predicates_are_equivalent(
 }
 
 /// Direct elimination for complex predicates with nested `and` and `or` expressions
-pub fn complex_predicate_implies(np: &Expression, ep: &Expression) -> Result<bool, ReadySetError> {
+pub fn complex_predicate_implies(np: &Expr, ep: &Expr) -> Result<bool, ReadySetError> {
     match ep {
         BinaryOp {
             lhs: e_lhs,
@@ -185,28 +185,24 @@ pub fn complex_predicate_implies(np: &Expression, ep: &Expression) -> Result<boo
 }
 
 fn predicate_implies(
-    (n_op, n_rhs): (BinaryOperator, &Expression),
-    (e_op, e_rhs): (BinaryOperator, &Expression),
+    (n_op, n_rhs): (BinaryOperator, &Expr),
+    (e_op, e_rhs): (BinaryOperator, &Expr),
 ) -> Result<bool, ReadySetError> {
     // use Finkelstein-style direct elimination to check if this new query graph predicate
     // implies the corresponding predicates in the existing query graph
     match n_rhs {
-        Expression::Literal(Literal::String(nv)) => match e_rhs {
-            Expression::Literal(Literal::String(ref ev)) => {
-                check_op_elimination(nv, ev, n_op, e_op)
-            }
-            Expression::Literal(_) => Ok(false),
+        Expr::Literal(Literal::String(nv)) => match e_rhs {
+            Expr::Literal(Literal::String(ref ev)) => check_op_elimination(nv, ev, n_op, e_op),
+            Expr::Literal(_) => Ok(false),
             _ => unsupported!(),
         },
-        Expression::Literal(Literal::Integer(ref nv)) => match e_rhs {
-            Expression::Literal(Literal::Integer(ref ev)) => {
-                check_op_elimination(nv, ev, n_op, e_op)
-            }
-            Expression::Literal(_) => Ok(false),
+        Expr::Literal(Literal::Integer(ref nv)) => match e_rhs {
+            Expr::Literal(Literal::Integer(ref ev)) => check_op_elimination(nv, ev, n_op, e_op),
+            Expr::Literal(_) => Ok(false),
             _ => unsupported!(),
         },
-        Expression::Literal(Literal::Null) => match e_rhs {
-            Expression::Literal(Literal::Null)
+        Expr::Literal(Literal::Null) => match e_rhs {
+            Expr::Literal(Literal::Null)
                 if n_op != BinaryOperator::Is
                     && e_op != BinaryOperator::Is
                     && n_op != BinaryOperator::IsNot
@@ -214,7 +210,7 @@ fn predicate_implies(
             {
                 Ok(true)
             }
-            Expression::Literal(_) => Ok(false),
+            Expr::Literal(_) => Ok(false),
             _ => unsupported!(),
         },
         _ => unsupported!(),
@@ -231,15 +227,15 @@ mod tests {
     fn predicate_implication() {
         let pa = (
             BinaryOperator::Less,
-            &Expression::Literal(Literal::Integer(10.into())),
+            &Expr::Literal(Literal::Integer(10.into())),
         );
         let pb = (
             BinaryOperator::Less,
-            &Expression::Literal(Literal::Integer(20.into())),
+            &Expr::Literal(Literal::Integer(20.into())),
         );
         let pc = (
             BinaryOperator::Equal,
-            &Expression::Literal(Literal::Integer(5.into())),
+            &Expr::Literal(Literal::Integer(5.into())),
         );
 
         assert!(predicate_implies(pa, pb).unwrap());
@@ -250,43 +246,43 @@ mod tests {
 
     #[test]
     fn complex_predicate_implication_or() {
-        let pa = Expression::BinaryOp {
-            lhs: Box::new(Expression::Column(Column::from("a"))),
+        let pa = Expr::BinaryOp {
+            lhs: Box::new(Expr::Column(Column::from("a"))),
             op: BinaryOperator::Less,
-            rhs: Box::new(Expression::Literal(Literal::Integer(20.into()))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(20.into()))),
         };
-        let pb = Expression::BinaryOp {
+        let pb = Expr::BinaryOp {
             op: BinaryOperator::Greater,
-            lhs: Box::new(Expression::Column(Column::from("a"))),
-            rhs: Box::new(Expression::Literal(Literal::Integer(60.into()))),
+            lhs: Box::new(Expr::Column(Column::from("a"))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(60.into()))),
         };
-        let pc = Expression::BinaryOp {
+        let pc = Expr::BinaryOp {
             op: BinaryOperator::Less,
-            lhs: Box::new(Expression::Column(Column::from("a"))),
+            lhs: Box::new(Expr::Column(Column::from("a"))),
             rhs: Box::new(Literal(Literal::Integer(10.into()))),
         };
-        let pd = Expression::BinaryOp {
+        let pd = Expr::BinaryOp {
             op: BinaryOperator::Greater,
-            lhs: Box::new(Expression::Column(Column::from("a"))),
+            lhs: Box::new(Expr::Column(Column::from("a"))),
             rhs: Box::new(Literal(Literal::Integer(80.into()))),
         };
 
         // a < 20 or a > 60
-        let cp1 = Expression::BinaryOp {
+        let cp1 = Expr::BinaryOp {
             lhs: Box::new(pa.clone()),
             rhs: Box::new(pb.clone()),
             op: BinaryOperator::Or,
         };
 
         // a < 10 or a > 80
-        let cp2 = Expression::BinaryOp {
+        let cp2 = Expr::BinaryOp {
             lhs: Box::new(pc),
             rhs: Box::new(pd),
             op: BinaryOperator::Or,
         };
 
         // a > 60 or a < 20
-        let cp3 = Expression::BinaryOp {
+        let cp3 = Expr::BinaryOp {
             lhs: Box::new(pb),
             rhs: Box::new(pa),
             op: BinaryOperator::Or,
@@ -300,43 +296,43 @@ mod tests {
 
     #[test]
     fn complex_predicate_implication_and() {
-        let pa = Expression::BinaryOp {
+        let pa = Expr::BinaryOp {
             op: BinaryOperator::Greater,
-            lhs: Box::new(Expression::Column(Column::from("a"))),
-            rhs: Box::new(Expression::Literal(Literal::Integer(20.into()))),
+            lhs: Box::new(Expr::Column(Column::from("a"))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(20.into()))),
         };
-        let pb = Expression::BinaryOp {
+        let pb = Expr::BinaryOp {
             op: BinaryOperator::Less,
-            lhs: Box::new(Expression::Column(Column::from("a"))),
-            rhs: Box::new(Expression::Literal(Literal::Integer(60.into()))),
+            lhs: Box::new(Expr::Column(Column::from("a"))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(60.into()))),
         };
-        let pc = Expression::BinaryOp {
+        let pc = Expr::BinaryOp {
             op: BinaryOperator::Greater,
-            lhs: Box::new(Expression::Column(Column::from("a"))),
-            rhs: Box::new(Expression::Literal(Literal::Integer(10.into()))),
+            lhs: Box::new(Expr::Column(Column::from("a"))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(10.into()))),
         };
-        let pd = Expression::BinaryOp {
+        let pd = Expr::BinaryOp {
             op: BinaryOperator::Less,
-            lhs: Box::new(Expression::Column(Column::from("a"))),
-            rhs: Box::new(Expression::Literal(Literal::Integer(80.into()))),
+            lhs: Box::new(Expr::Column(Column::from("a"))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(80.into()))),
         };
 
         // a > 20 and a < 60
-        let cp1 = Expression::BinaryOp {
+        let cp1 = Expr::BinaryOp {
             lhs: Box::new(pa.clone()),
             rhs: Box::new(pb.clone()),
             op: BinaryOperator::And,
         };
 
         // a > 10 and a < 80
-        let cp2 = Expression::BinaryOp {
+        let cp2 = Expr::BinaryOp {
             lhs: Box::new(pc),
             rhs: Box::new(pd),
             op: BinaryOperator::And,
         };
 
         // a < 60 and a > 20
-        let cp3 = Expression::BinaryOp {
+        let cp3 = Expr::BinaryOp {
             lhs: Box::new(pb),
             rhs: Box::new(pa),
             op: BinaryOperator::And,
@@ -350,19 +346,19 @@ mod tests {
 
     #[test]
     fn complex_predicate_implication_superset_or() {
-        let pa = Expression::BinaryOp {
+        let pa = Expr::BinaryOp {
             op: BinaryOperator::Less,
-            lhs: Box::new(Expression::Column(Column::from("a"))),
-            rhs: Box::new(Expression::Literal(Literal::Integer(20.into()))),
+            lhs: Box::new(Expr::Column(Column::from("a"))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(20.into()))),
         };
-        let pb = Expression::BinaryOp {
+        let pb = Expr::BinaryOp {
             op: BinaryOperator::Greater,
-            lhs: Box::new(Expression::Column(Column::from("a"))),
-            rhs: Box::new(Expression::Literal(Literal::Integer(60.into()))),
+            lhs: Box::new(Expr::Column(Column::from("a"))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(60.into()))),
         };
 
         // a < 20 or a > 60
-        let cp1 = Expression::BinaryOp {
+        let cp1 = Expr::BinaryOp {
             lhs: Box::new(pa.clone()),
             rhs: Box::new(pb.clone()),
             op: BinaryOperator::Or,
@@ -376,19 +372,19 @@ mod tests {
 
     #[test]
     fn complex_predicate_implication_subset_and() {
-        let pa = Expression::BinaryOp {
+        let pa = Expr::BinaryOp {
             op: BinaryOperator::Greater,
-            lhs: Box::new(Expression::Column(Column::from("a"))),
-            rhs: Box::new(Expression::Literal(Literal::Integer(20.into()))),
+            lhs: Box::new(Expr::Column(Column::from("a"))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(20.into()))),
         };
-        let pb = Expression::BinaryOp {
+        let pb = Expr::BinaryOp {
             op: BinaryOperator::Less,
-            lhs: Box::new(Expression::Column(Column::from("a"))),
-            rhs: Box::new(Expression::Literal(Literal::Integer(60.into()))),
+            lhs: Box::new(Expr::Column(Column::from("a"))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(60.into()))),
         };
 
         // a > 20 and a < 60
-        let cp1 = Expression::BinaryOp {
+        let cp1 = Expr::BinaryOp {
             lhs: Box::new(pa.clone()),
             rhs: Box::new(pb.clone()),
             op: BinaryOperator::And,
@@ -403,15 +399,15 @@ mod tests {
     #[test]
     fn is_null_does_not_imply_is_not_null() {
         assert!(!complex_predicate_implies(
-            &Expression::BinaryOp {
-                lhs: Box::new(Expression::Column("t.a".into())),
+            &Expr::BinaryOp {
+                lhs: Box::new(Expr::Column("t.a".into())),
                 op: BinaryOperator::Is,
-                rhs: Box::new(Expression::Literal(Literal::Null))
+                rhs: Box::new(Expr::Literal(Literal::Null))
             },
-            &Expression::BinaryOp {
-                lhs: Box::new(Expression::Column("t.a".into())),
+            &Expr::BinaryOp {
+                lhs: Box::new(Expr::Column("t.a".into())),
                 op: BinaryOperator::IsNot,
-                rhs: Box::new(Expression::Literal(Literal::Null))
+                rhs: Box::new(Expr::Literal(Literal::Null))
             }
         )
         .unwrap())

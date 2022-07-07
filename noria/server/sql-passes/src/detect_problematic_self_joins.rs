@@ -3,7 +3,7 @@ use std::iter;
 
 use itertools::{Either, Itertools};
 use nom_sql::{
-    BinaryOperator, Column, Expression, FieldDefinitionExpression, JoinConstraint, JoinRightSide,
+    BinaryOperator, Column, Expr, FieldDefinitionExpr, JoinConstraint, JoinRightSide,
     SelectStatement, SqlQuery, Table,
 };
 use noria_errors::{internal_err, unsupported, unsupported_err, ReadySetResult};
@@ -72,12 +72,12 @@ fn check_select_statement<'a>(
                     .fields
                     .iter()
                     .find_map(|field| match field {
-                        FieldDefinitionExpression::Expression {
+                        FieldDefinitionExpr::Expr {
                             expr,
                             alias: Some(alias),
                         } if *alias == col_name => Some(expr),
-                        FieldDefinitionExpression::Expression {
-                            expr: expr @ Expression::Column(Column { name, .. }),
+                        FieldDefinitionExpr::Expr {
+                            expr: expr @ Expr::Column(Column { name, .. }),
                             alias: None,
                         } if *name == col_name => Some(expr),
                         _ => None,
@@ -93,7 +93,7 @@ fn check_select_statement<'a>(
                     .recursive_subexpressions()
                     .chain(iter::once(expr))
                     .map(move |expr| match expr {
-                        Expression::Column(col) => {
+                        Expr::Column(col) => {
                             Ok(Either::Left(Box::new(dependent_columns(col, stmt, &ctes)?)
                                 as Box<dyn Iterator<Item = Result<_, _>>>))
                         }
@@ -148,7 +148,7 @@ fn check_select_statement<'a>(
     }
 
     fn expr_is_problematic<'a>(
-        expr: &'a Expression,
+        expr: &'a Expr,
         stmt: &'a SelectStatement,
         cte_ctx: &HashMap<&'a str, &'a SelectStatement>,
     ) -> ReadySetResult<bool> {
@@ -157,10 +157,10 @@ fn check_select_statement<'a>(
             .try_fold(false, |acc, expr| {
                 Ok(acc
                     || match expr {
-                        Expression::BinaryOp {
-                            lhs: box Expression::Column(lhs_col),
+                        Expr::BinaryOp {
+                            lhs: box Expr::Column(lhs_col),
                             op: BinaryOperator::Equal,
-                            rhs: box Expression::Column(rhs_col),
+                            rhs: box Expr::Column(rhs_col),
                         } => {
                             let lhs_cols = dependent_columns(lhs_col, stmt, cte_ctx)?
                                 .collect::<Result<HashSet<_>, _>>()?;

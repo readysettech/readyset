@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::expression::expression;
 use crate::whitespace::whitespace1;
-use crate::{Dialect, Expression};
+use crate::{Dialect, Expr};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ShowStatement {
@@ -108,7 +108,7 @@ fn show_tables(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Tables> {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum FilterPredicate {
     Like(String),
-    Where(Expression),
+    Where(Expr),
 }
 
 impl fmt::Display for FilterPredicate {
@@ -191,10 +191,10 @@ mod tests {
             ShowStatement::Tables(Tables {
                 full: false,
                 from_db: Some("db1".to_string()),
-                filter: Some(FilterPredicate::Where(Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column(Column::from("Tables_in_db1"))),
+                filter: Some(FilterPredicate::Where(Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(Column::from("Tables_in_db1"))),
                     op: BinaryOperator::Equal,
-                    rhs: Box::new(Expression::Literal(Literal::String("t1".to_string()))),
+                    rhs: Box::new(Expr::Literal(Literal::String("t1".to_string()))),
                 })),
             })
         );

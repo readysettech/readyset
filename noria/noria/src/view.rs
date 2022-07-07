@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use array2::Array2;
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
-use dataflow_expression::Expression as DataflowExpression;
+use dataflow_expression::Expr as DataflowExpr;
 use futures_util::future::TryFutureExt;
 use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::{StreamExt, TryStreamExt};
@@ -958,7 +958,7 @@ pub struct ViewQuery {
     /// rows for which it evaluates to a non-[truthy][] value will be omitted from the result set.
     ///
     /// [truthy]: DataType::is_truthy
-    pub filter: Option<DataflowExpression>,
+    pub filter: Option<DataflowExpr>,
     /// Timestamp to compare against for reads, if a timestamp is passed into the
     /// view query, a read will only return once the timestamp is less than
     /// the timestamp associated with the data.

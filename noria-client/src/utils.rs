@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 
 use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, DeleteStatement, Expression,
+    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, DeleteStatement, Expr,
     InsertStatement, Literal, SelectStatement, SqlQuery, TableKey, UpdateStatement,
 };
 use noria::{Modification, Operation};
@@ -37,19 +37,19 @@ pub(crate) fn hash_select_query(q: &SelectStatement) -> u64 {
 //    Then we'll check the right side, which will find a "hole" in the first key,
 //    and we'll get {[(aid, 1), (uid, 2)]}.
 fn do_flatten_conditional(
-    cond: &Expression,
+    cond: &Expr,
     pkey: &[&Column],
     flattened: &mut HashSet<Vec<(String, DataType)>>,
 ) -> ReadySetResult<bool> {
     Ok(match *cond {
-        Expression::BinaryOp {
-            lhs: box Expression::Literal(ref l),
-            rhs: box Expression::Column(ref c),
+        Expr::BinaryOp {
+            lhs: box Expr::Literal(ref l),
+            rhs: box Expr::Column(ref c),
             op: BinaryOperator::Equal | BinaryOperator::Is,
         }
-        | Expression::BinaryOp {
-            lhs: box Expression::Column(ref c),
-            rhs: box Expression::Literal(ref l),
+        | Expr::BinaryOp {
+            lhs: box Expr::Column(ref c),
+            rhs: box Expr::Literal(ref l),
             op: BinaryOperator::Equal | BinaryOperator::Is,
         } => {
             if !pkey.iter().any(|pk| pk.name == c.name) {
@@ -82,12 +82,12 @@ fn do_flatten_conditional(
 
             true
         }
-        Expression::BinaryOp {
-            lhs: box Expression::Literal(ref left),
-            rhs: box Expression::Literal(ref right),
+        Expr::BinaryOp {
+            lhs: box Expr::Literal(ref left),
+            rhs: box Expr::Literal(ref right),
             op: BinaryOperator::Equal,
         } if left == right => true,
-        Expression::BinaryOp {
+        Expr::BinaryOp {
             op: BinaryOperator::And,
             ref lhs,
             ref rhs,
@@ -104,7 +104,7 @@ fn do_flatten_conditional(
                 valid && (pre_count == flattened.len() || count == flattened.len())
             }
         }
-        Expression::BinaryOp {
+        Expr::BinaryOp {
             op: BinaryOperator::Or,
             ref lhs,
             ref rhs,
@@ -123,7 +123,7 @@ fn do_flatten_conditional(
 // DELETE FROM a WHERE key = 1 OR key = 2 AND key = 3 -> None // Bogus query
 // DELETE FROM a WHERE key = 1 AND key = 1 -> Some([[1]])
 pub(crate) fn flatten_conditional(
-    cond: &Expression,
+    cond: &Expr,
     pkey: &[&Column],
 ) -> ReadySetResult<Option<Vec<Vec<DataType>>>> {
     let mut flattened = HashSet::new();
@@ -173,45 +173,45 @@ pub(crate) fn get_primary_key(schema: &CreateTableStatement) -> Vec<(usize, &Col
         .collect()
 }
 
-fn get_parameter_columns_recurse(cond: &Expression) -> Vec<(&Column, BinaryOperator)> {
+fn get_parameter_columns_recurse(cond: &Expr) -> Vec<(&Column, BinaryOperator)> {
     match *cond {
-        Expression::BinaryOp {
-            lhs: box Expression::Column(ref c),
-            rhs: box Expression::Literal(Literal::Placeholder(_)),
+        Expr::BinaryOp {
+            lhs: box Expr::Column(ref c),
+            rhs: box Expr::Literal(Literal::Placeholder(_)),
             op: binop,
         } => vec![(c, binop)],
-        Expression::BinaryOp {
-            lhs: box Expression::Literal(Literal::Placeholder(_)),
-            rhs: box Expression::Column(ref c),
+        Expr::BinaryOp {
+            lhs: box Expr::Literal(Literal::Placeholder(_)),
+            rhs: box Expr::Column(ref c),
             op: binop,
         } => vec![(c, binop.flip_comparison().unwrap_or(binop))],
-        Expression::In {
-            lhs: box Expression::Column(ref c),
+        Expr::In {
+            lhs: box Expr::Column(ref c),
             rhs: nom_sql::InValue::List(ref exprs),
             negated: false,
         } if exprs
             .iter()
-            .all(|expr| matches!(expr, Expression::Literal(Literal::Placeholder(_)))) =>
+            .all(|expr| matches!(expr, Expr::Literal(Literal::Placeholder(_)))) =>
         {
             vec![(c, BinaryOperator::Equal); exprs.len()]
         }
-        Expression::In {
-            lhs: box Expression::Column(ref c),
+        Expr::In {
+            lhs: box Expr::Column(ref c),
             rhs: nom_sql::InValue::List(ref exprs),
             negated: true,
         } if exprs
             .iter()
-            .all(|expr| matches!(expr, Expression::Literal(Literal::Placeholder(_)))) =>
+            .all(|expr| matches!(expr, Expr::Literal(Literal::Placeholder(_)))) =>
         {
             vec![(c, BinaryOperator::NotEqual); exprs.len()]
         }
-        Expression::In { .. } => vec![],
-        Expression::BinaryOp {
+        Expr::In { .. } => vec![],
+        Expr::BinaryOp {
             op: BinaryOperator::And,
             ref lhs,
             ref rhs,
         }
-        | Expression::BinaryOp {
+        | Expr::BinaryOp {
             op: BinaryOperator::Or,
             ref lhs,
             ref rhs,
@@ -221,16 +221,16 @@ fn get_parameter_columns_recurse(cond: &Expression) -> Vec<(&Column, BinaryOpera
             l.append(&mut r);
             l
         }
-        Expression::BinaryOp { .. } => vec![],
-        Expression::UnaryOp { rhs: ref expr, .. } | Expression::Cast { ref expr, .. } => {
+        Expr::BinaryOp { .. } => vec![],
+        Expr::UnaryOp { rhs: ref expr, .. } | Expr::Cast { ref expr, .. } => {
             get_parameter_columns_recurse(expr)
         }
-        Expression::Call(ref f) => f
+        Expr::Call(ref f) => f
             .arguments()
             .flat_map(get_parameter_columns_recurse)
             .collect(),
-        Expression::Literal(_) => vec![],
-        Expression::CaseWhen {
+        Expr::Literal(_) => vec![],
+        Expr::CaseWhen {
             ref condition,
             ref then_expr,
             ref else_expr,
@@ -243,45 +243,45 @@ fn get_parameter_columns_recurse(cond: &Expression) -> Vec<(&Column, BinaryOpera
                     .flat_map(|expr| get_parameter_columns_recurse(expr)),
             )
             .collect(),
-        Expression::Column(_) => vec![],
-        Expression::Exists(_) => vec![],
-        Expression::Between {
-            operand: box Expression::Column(ref col),
-            min: box Expression::Literal(Literal::Placeholder(_)),
-            max: box Expression::Literal(Literal::Placeholder(_)),
+        Expr::Column(_) => vec![],
+        Expr::Exists(_) => vec![],
+        Expr::Between {
+            operand: box Expr::Column(ref col),
+            min: box Expr::Literal(Literal::Placeholder(_)),
+            max: box Expr::Literal(Literal::Placeholder(_)),
             ..
         } => vec![
             (col, BinaryOperator::GreaterOrEqual),
             (col, BinaryOperator::LessOrEqual),
         ],
 
-        Expression::Between {
-            operand: box Expression::Column(ref col),
-            min: box Expression::Literal(Literal::Placeholder(_)),
+        Expr::Between {
+            operand: box Expr::Column(ref col),
+            min: box Expr::Literal(Literal::Placeholder(_)),
             negated: false,
             ..
         }
-        | Expression::Between {
-            operand: box Expression::Column(ref col),
-            max: box Expression::Literal(Literal::Placeholder(_)),
+        | Expr::Between {
+            operand: box Expr::Column(ref col),
+            max: box Expr::Literal(Literal::Placeholder(_)),
             negated: true,
             ..
         } => vec![(col, BinaryOperator::GreaterOrEqual)],
-        Expression::Between {
-            operand: box Expression::Column(ref col),
-            max: box Expression::Literal(Literal::Placeholder(_)),
+        Expr::Between {
+            operand: box Expr::Column(ref col),
+            max: box Expr::Literal(Literal::Placeholder(_)),
             negated: false,
             ..
         }
-        | Expression::Between {
-            operand: box Expression::Column(ref col),
-            min: box Expression::Literal(Literal::Placeholder(_)),
+        | Expr::Between {
+            operand: box Expr::Column(ref col),
+            min: box Expr::Literal(Literal::Placeholder(_)),
             negated: true,
             ..
         } => vec![(col, BinaryOperator::LessOrEqual)],
-        Expression::Between { .. } => vec![],
-        Expression::NestedSelect(_) => vec![],
-        Expression::Variable(_) => vec![],
+        Expr::Between { .. } => vec![],
+        Expr::NestedSelect(_) => vec![],
+        Expr::Variable(_) => vec![],
     }
 }
 
@@ -341,7 +341,7 @@ pub(crate) fn insert_statement_parameter_columns(query: &InsertStatement) -> Vec
 
 pub(crate) fn update_statement_parameter_columns(query: &UpdateStatement) -> Vec<&Column> {
     let field_params = query.fields.iter().filter_map(|f| {
-        if let Expression::Literal(Literal::Placeholder(_)) = f.1 {
+        if let Expr::Literal(Literal::Placeholder(_)) = f.1 {
             Some(&f.0)
         } else {
             None
@@ -384,16 +384,16 @@ pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
 fn walk_pkey_where<I>(
     col2v: &mut HashMap<String, DataType>,
     params: &mut Option<I>,
-    expr: Expression,
+    expr: Expr,
 ) -> ReadySetResult<()>
 where
     I: Iterator<Item = DataType>,
 {
     match expr {
-        Expression::BinaryOp {
+        Expr::BinaryOp {
             op: BinaryOperator::Equal,
-            lhs: box Expression::Column(c),
-            rhs: box Expression::Literal(l),
+            lhs: box Expr::Column(c),
+            rhs: box Expr::Literal(l),
         } => {
             let v = match l {
                 Literal::Placeholder(_) => params
@@ -408,7 +408,7 @@ where
             let oldv = col2v.insert(c.name.to_string(), v);
             invariant!(oldv.is_none());
         }
-        Expression::BinaryOp {
+        Expr::BinaryOp {
             op: BinaryOperator::And,
             lhs,
             rhs,
@@ -438,7 +438,7 @@ where
             .position(|&(ref f, _)| f.name == field.column.name)
         {
             match q.fields.swap_remove(sets).1 {
-                Expression::Literal(Literal::Placeholder(_)) => {
+                Expr::Literal(Literal::Placeholder(_)) => {
                     let v = params
                         .as_mut()
                         .ok_or_else(|| bad_request_err("Found placeholder in ad-hoc query"))?
@@ -448,16 +448,16 @@ where
                         })?;
                     updates.push((i, Modification::Set(v)));
                 }
-                Expression::Literal(ref v) => {
+                Expr::Literal(ref v) => {
                     updates.push((
                         i,
                         Modification::Set(DataType::try_from(v)?.coerce_to(&field.sql_type)?),
                     ));
                 }
-                Expression::BinaryOp {
-                    lhs: box Expression::Column(ref c),
+                Expr::BinaryOp {
+                    lhs: box Expr::Column(ref c),
                     ref op,
-                    rhs: box Expression::Literal(ref l),
+                    rhs: box Expr::Literal(ref l),
                 } => {
                     // we only support "column = column +/- literal"
                     // TODO(ENG-142): Handle nested arithmetic
@@ -480,7 +480,7 @@ where
 }
 
 pub(crate) fn extract_pkey_where<I>(
-    where_clause: Expression,
+    where_clause: Expr,
     mut params: Option<I>,
     schema: &CreateTableStatement,
 ) -> ReadySetResult<Vec<DataType>>

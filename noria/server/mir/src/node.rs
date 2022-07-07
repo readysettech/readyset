@@ -767,7 +767,7 @@ mod tests {
         use dataflow::ops::grouped::aggregate::Aggregation;
         use dataflow::ops::grouped::extremum::Extremum;
         use dataflow::ops::union::DuplicateMode;
-        use nom_sql::{BinaryOperator, Expression, OrderType, SqlType};
+        use nom_sql::{BinaryOperator, Expr, OrderType, SqlType};
         use noria::ViewPlaceholder;
 
         use super::*;
@@ -923,10 +923,10 @@ mod tests {
                     emit: vec![Column::new(Some("base"), "b")],
                     expressions: vec![(
                         "expr".into(),
-                        Expression::BinaryOp {
-                            lhs: Box::new(Expression::Column("base.a".into())),
+                        Expr::BinaryOp {
+                            lhs: Box::new(Expr::Column("base.a".into())),
                             op: BinaryOperator::Add,
-                            rhs: Box::new(Expression::Literal(1.into())),
+                            rhs: Box::new(Expr::Literal(1.into())),
                         },
                     )],
                     literals: vec![("lit".into(), 2.into())],
@@ -942,10 +942,10 @@ mod tests {
         #[test]
         fn filter() {
             same_columns_as_parent(MirNodeInner::Filter {
-                conditions: Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column("base.a".into())),
+                conditions: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column("base.a".into())),
                     op: BinaryOperator::Equal,
-                    rhs: Box::new(Expression::Literal(1.into())),
+                    rhs: Box::new(Expr::Literal(1.into())),
                 },
             })
         }
@@ -1133,7 +1133,7 @@ mod tests {
 
     mod referenced_columns {
         use dataflow::ops::grouped::aggregate::Aggregation;
-        use nom_sql::{Expression, Literal};
+        use nom_sql::{Expr, Literal};
 
         use super::*;
 
@@ -1144,7 +1144,7 @@ mod tests {
                 0,
                 MirNodeInner::Project {
                     emit: vec![Column::new(Some("base"), "project")],
-                    expressions: vec![("expr".into(), Expression::Literal(Literal::from(0)))],
+                    expressions: vec![("expr".into(), Expr::Literal(Literal::from(0)))],
                     literals: vec![("literal".into(), 0.into())],
                 },
                 vec![],

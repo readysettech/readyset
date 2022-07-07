@@ -15,7 +15,7 @@ use crate::controller::recipe::QueryID;
 /// A single SQL expression stored in a Recipe.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) enum RecipeExpression {
+pub(super) enum RecipeExpr {
     /// Expression that represents a `CREATE TABLE` statement.
     Table(CreateTableStatement),
     /// Expression that represents a `CREATE VIEW` statement.
@@ -27,23 +27,23 @@ pub(super) enum RecipeExpression {
     },
 }
 
-impl RecipeExpression {
-    /// Returns the name associated with the [`RecipeExpression`].
+impl RecipeExpr {
+    /// Returns the name associated with the [`RecipeExpr`].
     pub(crate) fn name(&self) -> &SqlIdentifier {
         match self {
-            RecipeExpression::Table(stmt) => &stmt.table.name,
-            RecipeExpression::View(cvs) => &cvs.name,
-            RecipeExpression::Cache { name, .. } => name,
+            RecipeExpr::Table(stmt) => &stmt.table.name,
+            RecipeExpr::View(cvs) => &cvs.name,
+            RecipeExpr::Cache { name, .. } => name,
         }
     }
 
-    /// Returns the set of table names being referenced by the [`RecipeExpression`] (for views and
+    /// Returns the set of table names being referenced by the [`RecipeExpr`] (for views and
     /// queries).
-    /// If the [`RecipeExpression`] is a [`RecipeExpression::Table`], then the set will be empty.
+    /// If the [`RecipeExpr`] is a [`RecipeExpr::Table`], then the set will be empty.
     pub(super) fn table_references(&self) -> HashSet<SqlIdentifier> {
         match self {
-            RecipeExpression::Table(_) => HashSet::new(),
-            RecipeExpression::View(cvs) => {
+            RecipeExpr::Table(_) => HashSet::new(),
+            RecipeExpr::View(cvs) => {
                 let mut references = HashSet::new();
                 let select = cvs.definition.borrow();
                 match select {
@@ -58,7 +58,7 @@ impl RecipeExpression {
                 }
                 references
             }
-            RecipeExpression::Cache { statement, .. } => {
+            RecipeExpr::Cache { statement, .. } => {
                 let mut references = HashSet::with_capacity(statement.tables.len());
                 references.extend(statement.tables.iter().map(|t| t.name.clone()));
                 references
@@ -66,14 +66,14 @@ impl RecipeExpression {
         }
     }
 
-    /// Calculates a SHA-1 hash of the [`RecipeExpression`], to identify it based on its contents.
+    /// Calculates a SHA-1 hash of the [`RecipeExpr`], to identify it based on its contents.
     pub(super) fn calculate_hash(&self) -> QueryID {
         use sha1::{Digest, Sha1};
         let mut hasher = Sha1::new();
         let query_string = match self {
-            RecipeExpression::Table(cts) => cts.to_string(),
-            RecipeExpression::View(cvs) => cvs.to_string(),
-            RecipeExpression::Cache { statement, .. } => statement.to_string(),
+            RecipeExpr::Table(cts) => cts.to_string(),
+            RecipeExpr::View(cvs) => cvs.to_string(),
+            RecipeExpr::Cache { statement, .. } => statement.to_string(),
         };
         hasher.update(query_string.as_bytes());
         // Sha1 digest is 20 byte long, so it is safe to consume only 16 bytes
@@ -82,38 +82,37 @@ impl RecipeExpression {
 
     /// Returns `true` if the recipe expression is a [`Cache`].
     ///
-    /// [`Cache`]: RecipeExpression::Cache
+    /// [`Cache`]: RecipeExpr::Cache
     #[must_use]
     pub(super) fn is_cache(&self) -> bool {
         matches!(self, Self::Cache { .. })
     }
 }
 
-/// The set of all [`RecipeExpression`]s installed in a Noria server cluster.
+/// The set of all [`RecipeExpr`]s installed in a Noria server cluster.
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub(super) struct ExpressionRegistry {
-    /// A map from [`QueryID`] to the [`RecipeExpression`] associated with it.
+pub(super) struct ExprRegistry {
+    /// A map from [`QueryID`] to the [`RecipeExpr`] associated with it.
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
-    expressions: HashMap<QueryID, RecipeExpression>,
+    expressions: HashMap<QueryID, RecipeExpr>,
     /// The set of queries that depend on other queries.
     ///
     /// # Invariants
     /// - The keys here *must* be valid [`QueryID`]s (aka, present in `expressions`), and their
-    ///   associated expression should be of [`RecipeExpression::Table`] variant: Tables don't
-    ///   depend on anything, but queries depend on tables.
+    ///   associated expression should be of [`RecipeExpr::Table`] variant: Tables don't depend on
+    ///   anything, but queries depend on tables.
     /// - The values *must* be valid [`QueryID`]s (aka, present in `expressions`), and their
-    ///   associated expression should be of [`RecipeExpression::Cache`] or
-    ///   [`RecipeExpression::View`] variant.
+    ///   associated expression should be of [`RecipeExpr::Cache`] or [`RecipeExpr::View`] variant.
     dependencies: HashMap<QueryID, HashSet<QueryID>>,
-    /// Aliases assigned to each [`RecipeExpression`] stored.
+    /// Aliases assigned to each [`RecipeExpr`] stored.
     ///
     /// # Invariants
     /// - Each `QueryID` present here *must* exist as key in the `expressions` map.
     aliases: HashMap<SqlIdentifier, QueryID>,
 }
 
-impl ExpressionRegistry {
-    /// Creates a new, empty [`ExpressionRegistry`].
+impl ExprRegistry {
+    /// Creates a new, empty [`ExprRegistry`].
     pub(super) fn new() -> Self {
         Self {
             expressions: HashMap::new(),
@@ -122,18 +121,16 @@ impl ExpressionRegistry {
         }
     }
 
-    /// Adds a [`RecipeExpression`] to the registry.
-    /// If the [`RecipeExpression`] was already present, returns `Ok(false)`; otherwise it returns
+    /// Adds a [`RecipeExpr`] to the registry.
+    /// If the [`RecipeExpr`] was already present, returns `Ok(false)`; otherwise it returns
     /// `Ok(true)`.
     ///
     /// # Errors
     /// A [`ReadySetError::RecipeInvariantViolated`] error is returned if:
-    /// - The [`RecipeExpression`] is a [`RecipeExpression::View`] or
-    ///   [`RecipeExpression::CachedQuery`], and references a table that is not present in the
-    ///   registry.
-    /// - The [`RecipeExpression`] has a name that is already being used by a different
-    ///   [`RecipeExpression`].
-    pub(super) fn add_query(&mut self, expression: RecipeExpression) -> ReadySetResult<bool> {
+    /// - The [`RecipeExpr`] is a [`RecipeExpr::View`] or [`RecipeExpr::CachedQuery`], and
+    ///   references a table that is not present in the registry.
+    /// - The [`RecipeExpr`] has a name that is already being used by a different [`RecipeExpr`].
+    pub(super) fn add_query(&mut self, expression: RecipeExpr) -> ReadySetResult<bool> {
         let query_id = expression.calculate_hash();
         debug!(?expression, %query_id, "Adding expression to the registry");
         // We always try adding the alias first, in case there's another table/query
@@ -163,15 +160,15 @@ impl ExpressionRegistry {
         Ok(true)
     }
 
-    /// Retrieves the [`RecipeExpression`] associated with the given name or alias.
+    /// Retrieves the [`RecipeExpr`] associated with the given name or alias.
     /// If no query is found, returns `None`.
-    pub(super) fn get(&self, alias: &SqlIdentifier) -> Option<&RecipeExpression> {
+    pub(super) fn get(&self, alias: &SqlIdentifier) -> Option<&RecipeExpr> {
         let query_id = self.aliases.get(alias)?;
         self.expressions.get(query_id)
     }
 
     /// Retrieves the original name for the query with the given `alias` (which might already be the
-    /// original name). Returns `None` is there no [`RecipeExpression`] associated with the
+    /// original name). Returns `None` is there no [`RecipeExpr`] associated with the
     /// given `alias`.
     pub(super) fn resolve_alias(&self, name_or_alias: &SqlIdentifier) -> Option<&SqlIdentifier> {
         self.aliases
@@ -188,17 +185,17 @@ impl ExpressionRegistry {
             .map(|expr| expr.name())
     }
 
-    /// Removes the [`RecipeExpression`] associated with the given name (or alias), if
-    /// it exists, and all the [`RecipeExpression`]s that depend on it.
-    /// Returns the removed [`RecipeExpression`] if it was present, or `None` otherwise.
+    /// Removes the [`RecipeExpr`] associated with the given name (or alias), if
+    /// it exists, and all the [`RecipeExpr`]s that depend on it.
+    /// Returns the removed [`RecipeExpr`] if it was present, or `None` otherwise.
     pub(super) fn remove_expression(
         &mut self,
         name_or_alias: &SqlIdentifier,
-    ) -> Option<RecipeExpression> {
+    ) -> Option<RecipeExpr> {
         let query_id = *self.aliases.get(name_or_alias)?;
         self.aliases.retain(|_, v| *v != query_id);
         let expression = self.expressions.remove(&query_id)?;
-        if !matches!(expression, RecipeExpression::Table(_)) {
+        if !matches!(expression, RecipeExpr::Table(_)) {
             self.dependencies.iter_mut().for_each(|(_, deps)| {
                 deps.remove(&query_id);
             });
@@ -211,7 +208,7 @@ impl ExpressionRegistry {
         Some(expression)
     }
 
-    /// Returns the number of [`RecipeExpression`]s being stored in the registry.
+    /// Returns the number of [`RecipeExpr`]s being stored in the registry.
     pub(super) fn len(&self) -> usize {
         self.expressions.len()
     }
@@ -239,15 +236,15 @@ impl ExpressionRegistry {
     }
 }
 
-impl From<CreateTableStatement> for RecipeExpression {
+impl From<CreateTableStatement> for RecipeExpr {
     fn from(cts: CreateTableStatement) -> Self {
-        RecipeExpression::Table(cts)
+        RecipeExpr::Table(cts)
     }
 }
 
-impl From<CreateViewStatement> for RecipeExpression {
+impl From<CreateViewStatement> for RecipeExpr {
     fn from(cvs: CreateViewStatement) -> Self {
-        RecipeExpression::View(cvs)
+        RecipeExpr::View(cvs)
     }
 }
 
@@ -263,7 +260,7 @@ mod tests {
         #[test]
         fn name() {
             let table_name: SqlIdentifier = "test_table".into();
-            let create_table = RecipeExpression::Table(
+            let create_table = RecipeExpr::Table(
                 nom_sql::parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);")
                     .unwrap(),
             );
@@ -271,7 +268,7 @@ mod tests {
             assert_eq!(create_table.name(), &table_name);
 
             let query_name: SqlIdentifier = "test_query".into();
-            let cached_query = RecipeExpression::Cache {
+            let cached_query = RecipeExpr::Cache {
                 name: query_name.clone(),
                 statement: nom_sql::parse_select_statement(
                     Dialect::MySQL,
@@ -283,7 +280,7 @@ mod tests {
             assert_eq!(cached_query.name(), &query_name);
 
             let view_name: SqlIdentifier = "test_view".into();
-            let view = RecipeExpression::View(CreateViewStatement {
+            let view = RecipeExpr::View(CreateViewStatement {
                 name: view_name.clone(),
                 fields: vec![],
                 definition: Box::new(SelectSpecification::Simple(
@@ -298,14 +295,14 @@ mod tests {
         #[test]
         fn table_references() {
             let table_name: SqlIdentifier = "test_table".into();
-            let create_table = RecipeExpression::Table(
+            let create_table = RecipeExpr::Table(
                 nom_sql::parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);")
                     .unwrap(),
             );
 
             assert!(create_table.table_references().is_empty());
 
-            let cached_query = RecipeExpression::Cache {
+            let cached_query = RecipeExpr::Cache {
                 name: "test_query".into(),
                 statement: nom_sql::parse_select_statement(
                     Dialect::MySQL,
@@ -318,7 +315,7 @@ mod tests {
             assert_eq!(cached_query_table_refs.len(), 1);
             assert_eq!(cached_query_table_refs.iter().next().unwrap(), &table_name);
 
-            let view = RecipeExpression::View(CreateViewStatement {
+            let view = RecipeExpr::View(CreateViewStatement {
                 name: "test_view".into(),
                 fields: vec![],
                 definition: Box::new(SelectSpecification::Simple(
@@ -338,15 +335,15 @@ mod tests {
 
         use super::*;
 
-        fn create_registry() -> ExpressionRegistry {
-            // We *manually* build an `ExpressionRegistry` with a valid
+        fn create_registry() -> ExprRegistry {
+            // We *manually* build an `ExprRegistry` with a valid
             // state, to avoid creating it using the methods that we intend
             // to test.
             let mut expressions = HashMap::new();
             let mut dependencies = HashMap::new();
             let mut aliases = HashMap::new();
 
-            let create_table = RecipeExpression::Table(
+            let create_table = RecipeExpr::Table(
                 nom_sql::parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);")
                     .unwrap(),
             );
@@ -355,7 +352,7 @@ mod tests {
             aliases.insert("test_table".into(), table_qid);
 
             let query_name: SqlIdentifier = "test_query".into();
-            let cached_query = RecipeExpression::Cache {
+            let cached_query = RecipeExpr::Cache {
                 name: query_name.clone(),
                 statement: nom_sql::parse_select_statement(
                     Dialect::MySQL,
@@ -369,7 +366,7 @@ mod tests {
             aliases.insert("test_query_alias".into(), query_qid);
 
             let view_name: SqlIdentifier = "test_view".into();
-            let view = RecipeExpression::View(CreateViewStatement {
+            let view = RecipeExpr::View(CreateViewStatement {
                 name: view_name.clone(),
                 fields: vec![],
                 definition: Box::new(SelectSpecification::Simple(
@@ -390,7 +387,7 @@ mod tests {
                 .or_insert_with(|| HashSet::new());
             table_dependencies.insert(query_qid);
             table_dependencies.insert(view_qid);
-            ExpressionRegistry {
+            ExprRegistry {
                 expressions,
                 dependencies,
                 aliases,
@@ -399,7 +396,7 @@ mod tests {
 
         #[test]
         fn new() {
-            let registry = ExpressionRegistry::new();
+            let registry = ExprRegistry::new();
             assert!(registry.expressions.is_empty());
             assert!(registry.dependencies.is_empty());
             assert!(registry.aliases.is_empty());
@@ -409,7 +406,7 @@ mod tests {
         fn add_cached_query() {
             let mut registry = create_registry();
             let query_name: SqlIdentifier = "test_query2".into();
-            let cached_query = RecipeExpression::Cache {
+            let cached_query = RecipeExpr::Cache {
                 name: query_name.clone(),
                 statement: nom_sql::parse_select_statement(
                     Dialect::MySQL,
@@ -440,7 +437,7 @@ mod tests {
             let select =
                 nom_sql::parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
                     .unwrap();
-            let cached_query = RecipeExpression::Cache {
+            let cached_query = RecipeExpr::Cache {
                 name: query_name.clone(),
                 statement: select.clone(),
             };
@@ -453,7 +450,7 @@ mod tests {
             assert_eq!(registry.aliases.len(), num_aliases + 1);
             let query_qid = registry.aliases.get(&query_name).unwrap();
             let stored_expression = registry.expressions.get(query_qid).unwrap();
-            if let RecipeExpression::Cache { name, statement } = stored_expression {
+            if let RecipeExpr::Cache { name, statement } = stored_expression {
                 assert_ne!(name.clone(), query_name);
                 assert_eq!(statement.clone(), select);
             } else {
@@ -473,7 +470,7 @@ mod tests {
         fn add_view() {
             let mut registry = create_registry();
             let view_name: SqlIdentifier = "test_view2".into();
-            let view = RecipeExpression::View(CreateViewStatement {
+            let view = RecipeExpr::View(CreateViewStatement {
                 name: view_name.clone(),
                 fields: vec![],
                 definition: Box::new(SelectSpecification::Simple(
@@ -514,7 +511,7 @@ mod tests {
                 nom_sql::parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
                     .unwrap();
             let view_name: SqlIdentifier = "test_view2".into();
-            let view = RecipeExpression::View(CreateViewStatement {
+            let view = RecipeExpr::View(CreateViewStatement {
                 name: view_name.clone(),
                 fields: vec![],
                 definition: Box::new(SelectSpecification::Simple(select.clone())),
@@ -528,7 +525,7 @@ mod tests {
             assert_eq!(registry.aliases.len(), num_aliases + 1);
             let view_qid = registry.aliases.get(&view_name).unwrap();
             let stored_expression = registry.expressions.get(view_qid).unwrap();
-            if let RecipeExpression::View(cvs) = stored_expression {
+            if let RecipeExpr::View(cvs) = stored_expression {
                 assert_ne!(cvs.name.clone(), view_name);
                 let stored_select = cvs.definition.as_ref();
                 if let SelectSpecification::Simple(stored_select) = stored_select {
@@ -553,7 +550,7 @@ mod tests {
         fn add_table() {
             let mut registry = create_registry();
             let table_name: SqlIdentifier = "test_table2".into();
-            let create_table = RecipeExpression::Table(
+            let create_table = RecipeExpr::Table(
                 nom_sql::parse_create_table(Dialect::MySQL, "CREATE TABLE test_table2 (col1 INT);")
                     .unwrap(),
             );
@@ -578,7 +575,7 @@ mod tests {
         fn add_existing_table() {
             let mut registry = create_registry();
             let table_name: SqlIdentifier = "test_table".into();
-            let create_table = RecipeExpression::Table(
+            let create_table = RecipeExpr::Table(
                 nom_sql::parse_create_table(Dialect::MySQL, "CREATE TABLE test_table (col1 INT);")
                     .unwrap(),
             );

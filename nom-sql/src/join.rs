@@ -11,7 +11,7 @@ use test_strategy::Arbitrary;
 use crate::column::Column;
 use crate::select::SelectStatement;
 use crate::table::Table;
-use crate::{Expression, SqlIdentifier};
+use crate::{Expr, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum JoinRightSide {
@@ -68,7 +68,7 @@ impl fmt::Display for JoinOperator {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum JoinConstraint {
-    On(Expression),
+    On(Expr),
     Using(Vec<Column>),
     Empty,
 }
@@ -110,7 +110,7 @@ pub fn join_operator(i: &[u8]) -> IResult<&[u8], JoinOperator> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::FieldDefinitionExpression;
+    use crate::common::FieldDefinitionExpr;
     use crate::select::{selection, JoinClause, SelectStatement};
     use crate::{BinaryOperator, Dialect};
 
@@ -123,14 +123,14 @@ mod tests {
 
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
 
-        let join_cond = Expression::BinaryOp {
-            lhs: Box::new(Expression::Column(Column::from("tags.id"))),
+        let join_cond = Expr::BinaryOp {
+            lhs: Box::new(Expr::Column(Column::from("tags.id"))),
             op: BinaryOperator::Equal,
-            rhs: Box::new(Expression::Column(Column::from("taggings.tag_id"))),
+            rhs: Box::new(Expr::Column(Column::from("taggings.tag_id"))),
         };
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("tags")],
-            fields: vec![FieldDefinitionExpression::AllInTable("tags".into())],
+            fields: vec![FieldDefinitionExpr::AllInTable("tags".into())],
             join: vec![JoinClause {
                 operator: JoinOperator::InnerJoin,
                 right: JoinRightSide::Table(Table::from("taggings")),

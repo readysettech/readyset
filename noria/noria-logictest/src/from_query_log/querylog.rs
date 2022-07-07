@@ -7,7 +7,7 @@ use anyhow::{bail, Error};
 use chrono::{DateTime, FixedOffset, Utc};
 use enum_display_derive::Display;
 use nom_sql::analysis::visit::Visitor;
-use nom_sql::{Expression, ItemPlaceholder, Literal, SelectStatement, SqlQuery};
+use nom_sql::{Expr, ItemPlaceholder, Literal, SelectStatement, SqlQuery};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, Lines};
 
 #[derive(Clone, Debug, Display, Eq, PartialEq)]
@@ -90,7 +90,7 @@ impl ReplaceLiteralsWithPlaceholders for SelectStatement {
     }
 }
 
-impl ReplaceLiteralsWithPlaceholders for Expression {
+impl ReplaceLiteralsWithPlaceholders for Expr {
     fn replace_literals(&mut self) -> Vec<Literal> {
         let mut visitor = ReplaceLiteralsWithPlaceholdersVisitor::default();
         let Ok(_) = visitor.visit_expression(self);

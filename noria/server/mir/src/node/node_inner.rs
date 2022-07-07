@@ -6,7 +6,7 @@ use dataflow::ops::grouped::extremum::Extremum;
 use dataflow::ops::union;
 use dataflow::post_lookup::PostLookupAggregates;
 use itertools::Itertools;
-use nom_sql::{ColumnSpecification, Expression, OrderType, SqlIdentifier};
+use nom_sql::{ColumnSpecification, Expr, OrderType, SqlIdentifier};
 use noria::ViewPlaceholder;
 use noria_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -72,7 +72,7 @@ pub enum MirNodeInner {
         ///
         /// Note that at this point this is still just the raw AST, so column references use only
         /// name and table (and don't support aliases).
-        conditions: Expression,
+        conditions: Expr,
     },
     /// Node which makes no changes to its input
     ///
@@ -184,7 +184,7 @@ pub enum MirNodeInner {
         ///
         /// Note that at this point these expressions are still just raw AST, so column references
         /// use only name and table (and don't support aliases).
-        expressions: Vec<(SqlIdentifier, Expression)>,
+        expressions: Vec<(SqlIdentifier, Expr)>,
         /// List of pairs of `(alias, value)`, giving literal values to emit in the output
         literals: Vec<(SqlIdentifier, DataType)>,
     },

@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 
 use nom_sql::analysis::visit::{walk_select_statement, Visitor};
-use nom_sql::{
-    Column, Expression, FunctionExpression, SelectStatement, SqlIdentifier, SqlQuery, Table,
-};
+use nom_sql::{Column, Expr, FunctionExpr, SelectStatement, SqlIdentifier, SqlQuery, Table};
 use noria_errors::{internal_err, ReadySetError, ReadySetResult};
 
 #[derive(Debug)]
@@ -26,9 +24,9 @@ impl<'ast, 'schema> Visitor<'ast> for CountStarRewriteVisitor<'schema> {
 
     fn visit_function_expression(
         &mut self,
-        function_expression: &'ast mut FunctionExpression,
+        function_expression: &'ast mut FunctionExpr,
     ) -> Result<(), Self::Error> {
-        if *function_expression == FunctionExpression::CountStar {
+        if *function_expression == FunctionExpr::CountStar {
             let bogo_table = self
                 .tables
                 .as_ref()
@@ -47,8 +45,8 @@ impl<'ast, 'schema> Visitor<'ast> for CountStarRewriteVisitor<'schema> {
             // column.
             let bogo_column = schema_iter.next().unwrap();
 
-            *function_expression = FunctionExpression::Count {
-                expr: Box::new(Expression::Column(Column {
+            *function_expression = FunctionExpr::Count {
+                expr: Box::new(Expr::Column(Column {
                     name: bogo_column.clone(),
                     table: Some(bogo_table.name.clone()),
                 })),
@@ -95,8 +93,7 @@ mod tests {
 
     use nom_sql::parser::parse_query;
     use nom_sql::{
-        BinaryOperator, Column, Dialect, FieldDefinitionExpression, FunctionExpression, Literal,
-        SqlQuery,
+        BinaryOperator, Column, Dialect, FieldDefinitionExpr, FunctionExpr, Literal, SqlQuery,
     };
 
     use super::*;
@@ -118,13 +115,11 @@ mod tests {
             SqlQuery::Select(tq) => {
                 assert_eq!(
                     tq.fields,
-                    vec![FieldDefinitionExpression::from(Expression::Call(
-                        FunctionExpression::Count {
-                            expr: Box::new(Expression::Column(Column::from("users.id"))),
-                            distinct: false,
-                            count_nulls: true,
-                        }
-                    ))]
+                    vec![FieldDefinitionExpr::from(Expr::Call(FunctionExpr::Count {
+                        expr: Box::new(Expr::Column(Column::from("users.id"))),
+                        distinct: false,
+                        count_nulls: true,
+                    }))]
                 );
             }
             // if we get anything other than a selection query back, something really weird is up
@@ -149,13 +144,11 @@ mod tests {
             SqlQuery::Select(tq) => {
                 assert_eq!(
                     tq.fields,
-                    vec![FieldDefinitionExpression::from(Expression::Call(
-                        FunctionExpression::Count {
-                            expr: Box::new(Expression::Column(Column::from("users.id"))),
-                            distinct: false,
-                            count_nulls: true,
-                        }
-                    ))]
+                    vec![FieldDefinitionExpr::from(Expr::Call(FunctionExpr::Count {
+                        expr: Box::new(Expr::Column(Column::from("users.id"))),
+                        distinct: false,
+                        count_nulls: true,
+                    }))]
                 );
             }
             // if we get anything other than a selection query back, something really weird is up
@@ -176,14 +169,14 @@ mod tests {
             SqlQuery::Select(stmt) => {
                 assert_eq!(
                     stmt.fields,
-                    vec![FieldDefinitionExpression::from(Expression::BinaryOp {
-                        lhs: Box::new(Expression::Call(FunctionExpression::Count {
-                            expr: Box::new(Expression::Column("users.id".into())),
+                    vec![FieldDefinitionExpr::from(Expr::BinaryOp {
+                        lhs: Box::new(Expr::Call(FunctionExpr::Count {
+                            expr: Box::new(Expr::Column("users.id".into())),
                             distinct: false,
                             count_nulls: true,
                         })),
                         op: BinaryOperator::Add,
-                        rhs: Box::new(Expression::Literal(Literal::Integer(1)))
+                        rhs: Box::new(Expr::Literal(Literal::Integer(1)))
                     })]
                 );
             }

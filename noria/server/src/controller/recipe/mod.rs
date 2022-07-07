@@ -17,7 +17,7 @@ use tracing::{debug, error, info, warn};
 
 use super::sql;
 use crate::controller::recipe::alter_table::rewrite_table_definition;
-use crate::controller::recipe::registry::{ExpressionRegistry, RecipeExpression};
+use crate::controller::recipe::registry::{ExprRegistry, RecipeExpr};
 use crate::controller::sql::SqlIncorporator;
 use crate::controller::Migration;
 use crate::ReuseConfigType;
@@ -36,8 +36,8 @@ type QueryID = u128;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 // crate viz for tests
 pub(crate) struct Recipe {
-    /// A structure to keep track of all the [`RecipeExpression`]s in the recipe.
-    registry: ExpressionRegistry,
+    /// A structure to keep track of all the [`RecipeExpr`]s in the recipe.
+    registry: ExprRegistry,
 
     /// Maintains lower-level state, but not the graph itself. Lazily initialized.
     inc: SqlIncorporator,
@@ -63,14 +63,12 @@ impl Recipe {
     /// Get the id associated with an alias
     pub(crate) fn expression_by_alias(&self, alias: &str) -> Option<SqlQuery> {
         let expr = self.registry.get(&alias.into()).map(|e| match e {
-            RecipeExpression::Table(cts) => SqlQuery::CreateTable(cts.clone()),
-            RecipeExpression::View(cvs) => SqlQuery::CreateView(cvs.clone()),
-            RecipeExpression::Cache { name, statement } => {
-                SqlQuery::CreateCache(CreateCacheStatement {
-                    name: Some(name.clone()),
-                    inner: CacheInner::Statement(Box::new(statement.clone())),
-                })
-            }
+            RecipeExpr::Table(cts) => SqlQuery::CreateTable(cts.clone()),
+            RecipeExpr::View(cvs) => SqlQuery::CreateView(cvs.clone()),
+            RecipeExpr::Cache { name, statement } => SqlQuery::CreateCache(CreateCacheStatement {
+                name: Some(name.clone()),
+                inner: CacheInner::Statement(Box::new(statement.clone())),
+            }),
         });
         if expr.is_none() {
             warn!(%alias, "Query not found in expression registry");
@@ -82,7 +80,7 @@ impl Recipe {
     /// settings, and for temporary recipes.
     pub(crate) fn blank() -> Recipe {
         Recipe {
-            registry: ExpressionRegistry::new(),
+            registry: ExprRegistry::new(),
             inc: SqlIncorporator::new(),
         }
     }
@@ -190,14 +188,14 @@ impl Recipe {
                     let qfp = self
                         .inc
                         .add_parsed_query(query, Some(name.clone()), false, mig)?;
-                    self.registry.add_query(RecipeExpression::Table(cts))?;
+                    self.registry.add_query(RecipeExpr::Table(cts))?;
                     added.insert(name, qfp.query_leaf);
                     removed.remove(&qfp.query_leaf);
                 }
                 Change::CreateView(cvs) => {
                     let query = SqlQuery::CreateView(cvs.clone());
                     let name = cvs.name.clone();
-                    let expression = RecipeExpression::View(cvs);
+                    let expression = RecipeExpr::View(cvs);
                     if !self.registry.add_query(expression)? {
                         // The expression is already present, and we successfully added
                         // a new alias for it.
@@ -221,7 +219,7 @@ impl Recipe {
                     };
                     let query = SqlQuery::Select(select.clone());
                     if let Some(name) = ccqs.name {
-                        let expression = RecipeExpression::Cache {
+                        let expression = RecipeExpr::Cache {
                             name: name.clone(),
                             statement: select,
                         };
@@ -239,7 +237,7 @@ impl Recipe {
                     } else {
                         // add the query
                         let qfp = self.inc.add_parsed_query(query, None, true, mig)?;
-                        self.registry.add_query(RecipeExpression::Cache {
+                        self.registry.add_query(RecipeExpr::Cache {
                             name: qfp.name.clone(),
                             statement: select,
                         })?;
@@ -263,7 +261,7 @@ impl Recipe {
                             ))
                         })?;
                     let original_table = match original_expression {
-                        RecipeExpression::Table(ref table) => table,
+                        RecipeExpr::Table(ref table) => table,
                         _ => internal!(
                             "Tried to alter table {}, but that name belongs to a different expression.",
                             ats.table.name
@@ -292,8 +290,7 @@ impl Recipe {
                     let qfp =
                         self.inc
                             .add_parsed_query(query, Some(new_name.clone()), false, mig)?;
-                    self.registry
-                        .add_query(RecipeExpression::Table(new_table))?;
+                    self.registry.add_query(RecipeExpr::Table(new_table))?;
                     added.insert(new_name, qfp.query_leaf);
                     removed.remove(&qfp.query_leaf);
                 }
@@ -338,15 +335,15 @@ impl Recipe {
     ///
     /// # Errors
     /// This method will return an error whenever there's an inconsistence between the
-    /// [`ExpressionRegistry`] and the [`SqlIncorporator`], i.e, an expression exists in one but not
+    /// [`ExprRegistry`] and the [`SqlIncorporator`], i.e, an expression exists in one but not
     /// in the other.
     // TODO(fran): As we keep improving the `Recipe`, we should refactor the `SqlIncorporator` and
-    //  make sure there are no inconsistencies between it and the `ExpressionRegistry`.
+    //  make sure there are no inconsistencies between it and the `ExprRegistry`.
     //  It might be worth looking into what the `SqlIncorporator` is storing, and how. I feel like
     //  these inconsistencies are only possible because of redundant information (the expressions
-    //  belong  to both the `SqlIncorporator` and the `ExpressionRegistry`), and that feels
+    //  belong  to both the `SqlIncorporator` and the `ExprRegistry`), and that feels
     //  unnecessary.
-    //  Could we store the `RecipeExpression`s along with their associated `MirQuery`?
+    //  Could we store the `RecipeExpr`s along with their associated `MirQuery`?
     //  Would we still need a `Recipe` structure if that's the case?
     pub(super) fn remove_expression(
         &mut self,
@@ -361,7 +358,7 @@ impl Recipe {
         };
         let name = expression.name();
         let ni = match expression {
-            RecipeExpression::Table(_) => {
+            RecipeExpr::Table(_) => {
                 // a base may have many dependent queries, including ones that also lost
                 // nodes; the code handling `removed_leaves` therefore needs to take care
                 // not to remove bases while they still have children, or to try removing

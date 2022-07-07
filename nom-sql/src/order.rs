@@ -91,7 +91,7 @@ pub fn order_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], OrderC
 mod tests {
     use super::*;
     use crate::select::selection;
-    use crate::Expression;
+    use crate::Expr;
 
     #[test]
     fn order_clause() {
@@ -101,27 +101,24 @@ mod tests {
 
         let expected_ord1 = OrderClause {
             order_by: vec![(
-                FieldReference::Expression(Expression::Column("name".into())),
+                FieldReference::Expr(Expr::Column("name".into())),
                 Some(OrderType::OrderDescending),
             )],
         };
         let expected_ord2 = OrderClause {
             order_by: vec![
                 (
-                    FieldReference::Expression(Expression::Column("name".into())),
+                    FieldReference::Expr(Expr::Column("name".into())),
                     Some(OrderType::OrderAscending),
                 ),
                 (
-                    FieldReference::Expression(Expression::Column("age".into())),
+                    FieldReference::Expr(Expr::Column("age".into())),
                     Some(OrderType::OrderDescending),
                 ),
             ],
         };
         let expected_ord3 = OrderClause {
-            order_by: vec![(
-                FieldReference::Expression(Expression::Column("name".into())),
-                None,
-            )],
+            order_by: vec![(FieldReference::Expr(Expr::Column("name".into())), None)],
         };
 
         let res1 = selection(Dialect::MySQL)(qstring1.as_bytes());
@@ -136,7 +133,7 @@ mod tests {
     fn order_prints_column_table() {
         let clause = OrderClause {
             order_by: vec![(
-                FieldReference::Expression(Expression::Column("t.n".into())),
+                FieldReference::Expr(Expr::Column("t.n".into())),
                 Some(OrderType::OrderDescending),
             )],
         };
