@@ -180,7 +180,7 @@ impl LRUEviction {
             *val
         };
 
-        // We return the iterator over the keys whos counter value is lower than that
+        // We return the iterator over the keys whose counter value is lower than that
         ctrs_save
             .into_iter()
             .zip(data.iter())
@@ -200,7 +200,7 @@ impl RandomEviction {
     {
         let ratio = nkeys as f64 / data.len() as f64;
         let mut rng = rand::thread_rng();
-        // We return the iterator over the keys whos counter value is lower than that
+        // We return the iterator over the keys whose counter value is lower than that
         data.iter().filter(move |_| rng.gen_bool(ratio))
     }
 }

@@ -71,9 +71,11 @@ where
     /// # Panics
     ///
     /// Panics if the underlying map is not a [`BTreeMap`](noria::internal::IndexType::BTreeMap).
-    pub fn range<R>(&self, range: &R) -> Result<RangeIter<'_, K, V>, Miss<K>>
+    pub fn range<R, Q>(&self, range: &R) -> Result<RangeIter<'_, K, V>, Miss<K>>
     where
-        R: RangeBounds<K> + Clone,
+        R: RangeBounds<Q>,
+        Q: Ord + ToOwned<Owned = K> + ?Sized,
+        K: Borrow<Q>,
     {
         self.guard.data.range(range).map(|iter| RangeIter { iter })
     }

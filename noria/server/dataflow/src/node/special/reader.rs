@@ -143,7 +143,7 @@ impl Reader {
             m.map_data(|data| {
                 trace!(?data, "reader received regular message");
                 data.retain(|row| {
-                    match state.entry_from_record(&row[..]).exists() {
+                    match state.contains_record(&row[..]) {
                         Ok(false) => {
                             // row would miss in partial state.
                             // leave it blank so later lookup triggers replay.
@@ -181,7 +181,7 @@ impl Reader {
             m.map_data(|data| {
                 trace!(?data, "reader received replay");
                 data.retain(|row| {
-                    match state.entry_from_record(&row[..]).exists() {
+                    match state.contains_record(&row[..]) {
                         Ok(false) => {
                             // filling a hole with replay -- ok
                             true

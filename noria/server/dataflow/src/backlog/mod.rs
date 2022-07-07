@@ -1,13 +1,12 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use ahash::RandomState;
 use common::SizeOf;
 use dataflow_expression::{PostLookup, ReaderProcessing};
 use noria::consistency::Timestamp;
-use noria::results::{SharedResults, SharedRows};
+use noria::results::SharedResults;
 use noria::KeyComparison;
 use reader_map::EvictionStrategy;
 use vec1::Vec1;
@@ -16,7 +15,7 @@ pub use self::multir::LookupError;
 use crate::prelude::*;
 
 pub(crate) trait Trigger =
-    Fn(&mut dyn Iterator<Item = &KeyComparison>) -> bool + 'static + Send + Sync;
+    Fn(&mut dyn Iterator<Item = KeyComparison>) -> bool + 'static + Send + Sync;
 
 /// Allocate a new end-user facing result table.
 ///
@@ -158,6 +157,7 @@ fn key_to_single(k: Key) -> Cow<DataType> {
         Cow::Borrowed(k) => Cow::Borrowed(&k[0]),
     }
 }
+
 pub(crate) struct WriteHandle {
     handle: multiw::Handle,
     partial: bool,
@@ -173,24 +173,11 @@ pub(crate) struct MutWriteHandleEntry<'a> {
     handle: &'a mut WriteHandle,
     key: Key<'a>,
 }
-pub(crate) struct WriteHandleEntry<'a> {
-    handle: &'a WriteHandle,
-    key: Key<'a>,
-}
 
 impl<'a> MutWriteHandleEntry<'a> {
     pub(crate) fn key_value_size(&self, key: &Key) -> usize {
         self.handle.handle.base_value_size()
             + key.iter().map(SizeOf::deep_size_of).sum::<u64>() as usize
-    }
-}
-
-impl<'a> WriteHandleEntry<'a> {
-    /// Check if the underlying [`WriteHandle`] contains the key associated with this
-    /// [`WriteHandleEntry`]. Will return and error if the map was destroyed, or not yet published,
-    /// otherwise a boolean stating if the key exists.
-    pub(crate) fn exists(self) -> reader_map::Result<bool> {
-        self.handle.handle.read().contains_key(&self.key)
     }
 }
 
@@ -233,50 +220,12 @@ impl<'a> MutWriteHandleEntry<'a> {
     }
 }
 
-fn key_from_record<'a, R>(key: &[usize], contiguous: bool, record: R) -> Key<'a>
-where
-    R: Into<Cow<'a, [DataType]>>,
-{
-    match record.into() {
-        Cow::Owned(mut record) => {
-            let mut i = 0;
-            let mut keep = key.iter().peekable();
-            record.retain(|_| {
-                i += 1;
-                if let Some(&&next) = keep.peek() {
-                    if next != i - 1 {
-                        return false;
-                    }
-                } else {
-                    return false;
-                }
-
-                assert_eq!(*keep.next().unwrap(), i - 1);
-                true
-            });
-            Cow::Owned(record)
-        }
-        Cow::Borrowed(record) if contiguous => Cow::Borrowed(&record[key[0]..(key[0] + key.len())]),
-        Cow::Borrowed(record) => Cow::Owned(key.iter().map(|&i| &record[i]).cloned().collect()),
-    }
-}
-
 impl WriteHandle {
     pub(crate) fn mut_with_key<'a, K>(&'a mut self, key: K) -> MutWriteHandleEntry<'a>
     where
         K: Into<Key<'a>>,
     {
         MutWriteHandleEntry {
-            handle: self,
-            key: key.into(),
-        }
-    }
-
-    pub(crate) fn with_key<'a, K>(&'a self, key: K) -> WriteHandleEntry<'a>
-    where
-        K: Into<Key<'a>>,
-    {
-        WriteHandleEntry {
             handle: self,
             key: key.into(),
         }
@@ -292,21 +241,17 @@ impl WriteHandle {
         }
     }
 
-    #[allow(dead_code)]
-    fn mut_entry_from_record<'a, R>(&'a mut self, record: R) -> MutWriteHandleEntry<'a>
-    where
-        R: Into<Cow<'a, [DataType]>>,
-    {
-        let key = key_from_record(&self.index.columns, self.contiguous, record);
-        self.mut_with_key(key)
+    pub(crate) fn contains_record(&self, rec: &[DataType]) -> reader_map::Result<bool> {
+        let key_cols = self.index.columns.as_slice();
+        if self.contiguous {
+            self.contains_key(&rec[key_cols[0]..(key_cols[0] + key_cols.len())])
+        } else {
+            self.contains_key(&key_cols.iter().map(|c| rec[*c].clone()).collect::<Vec<_>>())
+        }
     }
 
-    pub(crate) fn entry_from_record<'a, R>(&'a self, record: R) -> WriteHandleEntry<'a>
-    where
-        R: Into<Cow<'a, [DataType]>>,
-    {
-        let key = key_from_record(&self.index.columns, self.contiguous, record);
-        self.with_key(key)
+    pub(super) fn contains_key(&self, key: &[DataType]) -> reader_map::Result<bool> {
+        self.handle.read().contains_key(key)
     }
 
     pub(crate) fn swap(&mut self) {
@@ -361,22 +306,27 @@ impl WriteHandle {
         match key {
             KeyComparison::Equal(k) => self.mut_with_key(k.as_vec()).mark_hole(),
             KeyComparison::Range((start, end)) => {
-                let range = (
-                    start.as_ref().map(Vec1::as_vec),
-                    end.as_ref().map(Vec1::as_vec),
-                );
+                let start = start.clone();
+                let end = end.clone();
+                // We don't want to clone things more than once, so construct the range key, then
+                // deconstruct it again
+                let range_key = KeyComparison::Range((start, end));
                 let size = self
                     .handle
                     .read()
-                    .range(&range)
+                    .get_multi(std::slice::from_ref(&range_key))
                     .map(|rs| {
                         rs.iter()
                             .flat_map(|rs| rs.iter().map(SizeOf::deep_size_of))
                             .sum::<u64>()
                     })
                     .unwrap_or(0);
+
                 self.mem_size = self.mem_size.saturating_sub(size as usize);
-                self.handle.empty_range(range)
+                if let KeyComparison::Range(range) = range_key {
+                    self.handle
+                        .empty_range((range.0.map(Vec1::into_vec), range.1.map(Vec1::into_vec)));
+                }
             }
         }
     }
@@ -430,9 +380,9 @@ impl std::fmt::Debug for SingleReadHandle {
 
 impl SingleReadHandle {
     /// Trigger a replay of a missing key from a partially materialized view.
-    pub fn trigger<'a, I>(&self, keys: I) -> bool
+    pub fn trigger<I>(&self, keys: I) -> bool
     where
-        I: Iterator<Item = &'a KeyComparison>,
+        I: Iterator<Item = KeyComparison>,
     {
         assert!(
             self.trigger.is_some(),
@@ -457,20 +407,11 @@ impl SingleReadHandle {
         }
     }
 
-    /// Find the rows for a given single key
-    pub fn get(&self, key: &[DataType]) -> Result<SharedRows, LookupError> {
-        match self.handle.get(key) {
-            Err(e) if e.is_miss() && self.trigger.is_none() => Ok(SharedRows::default()),
-            r => r,
-        }
-    }
-
-    /// Find the sets of rows for a given range of keys
-    pub fn range<R>(&self, range: &R) -> Result<SharedResults, LookupError>
-    where
-        R: RangeBounds<Vec<DataType>>,
-    {
-        match self.handle.range(range) {
+    pub fn get_multi<'a>(
+        &self,
+        keys: &'a [KeyComparison],
+    ) -> Result<SharedResults, LookupError<'a>> {
+        match self.handle.get_multi(keys) {
             Err(e) if e.is_miss() && self.trigger.is_none() => Ok(SharedResults::default()),
             r => r,
         }
@@ -495,7 +436,20 @@ impl SingleReadHandle {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Bound;
+
+    use noria::results::SharedRows;
+
     use super::*;
+
+    impl SingleReadHandle {
+        fn get<'a>(&self, key: &'a [DataType]) -> Result<SharedRows, LookupError<'a>> {
+            match self.handle.get(key) {
+                Err(e) if e.is_miss() && self.trigger.is_none() => Ok(SharedRows::default()),
+                r => r,
+            }
+        }
+    }
 
     #[test]
     fn store_works() {
@@ -644,21 +598,24 @@ mod tests {
         let (r, mut w) = new_partial(
             1,
             Index::hash_map(vec![0]),
-            |_: &mut dyn Iterator<Item = &KeyComparison>| true,
+            |_: &mut dyn Iterator<Item = KeyComparison>| true,
             EvictionKind::Random,
             ReaderProcessing::default(),
         );
         w.swap();
 
-        assert_eq!(
-            r.get(&[1.into()]),
-            Err(LookupError::MissPointSingle(1.into(), 0))
-        );
+        match r.get(&[1.into()]) {
+            Err(LookupError::Miss(mut misses)) => {
+                assert_eq!(
+                    misses.pop().unwrap().into_owned().equal().unwrap(),
+                    &vec1![1.into()]
+                );
+            }
+            _ => panic!("Should have missed"),
+        }
     }
 
     mod mark_filled {
-        use vec1::vec1;
-
         use super::*;
 
         #[test]
@@ -666,7 +623,7 @@ mod tests {
             let (r, mut w) = new_partial(
                 1,
                 Index::hash_map(vec![0]),
-                |_: &mut dyn Iterator<Item = &KeyComparison>| true,
+                |_: &mut dyn Iterator<Item = KeyComparison>| true,
                 EvictionKind::Random,
                 ReaderProcessing::default(),
             );
@@ -685,27 +642,29 @@ mod tests {
             let (r, mut w) = new_partial(
                 1,
                 Index::btree_map(vec![0]),
-                |_: &mut dyn Iterator<Item = &KeyComparison>| true,
+                |_: &mut dyn Iterator<Item = KeyComparison>| true,
                 EvictionKind::Random,
                 ReaderProcessing::default(),
             );
             w.swap();
 
-            let range = vec![DataType::from(0)]..vec![DataType::from(10)];
-            assert!(r.range(&range).err().unwrap().is_miss());
+            let range_key = &[KeyComparison::Range((
+                Bound::Included(vec1![DataType::from(0)]),
+                Bound::Excluded(vec1![DataType::from(10)]),
+            ))];
+
+            assert!(r.get_multi(range_key).err().unwrap().is_miss());
 
             w.mark_filled(KeyComparison::from_range(
                 &(vec1![DataType::from(0)]..vec1![DataType::from(10)]),
             ))
             .unwrap();
             w.swap();
-            assert!(r.range(&range).is_ok());
+            assert!(r.get_multi(range_key).is_ok());
         }
     }
 
     mod mark_hole {
-        use vec1::vec1;
-
         use super::*;
 
         #[test]
@@ -713,7 +672,7 @@ mod tests {
             let (r, mut w) = new_partial(
                 1,
                 Index::btree_map(vec![0]),
-                |_: &mut dyn Iterator<Item = &KeyComparison>| true,
+                |_: &mut dyn Iterator<Item = KeyComparison>| true,
                 EvictionKind::Random,
                 ReaderProcessing::default(),
             );
@@ -734,25 +693,29 @@ mod tests {
             let (r, mut w) = new_partial(
                 1,
                 Index::btree_map(vec![0]),
-                |_: &mut dyn Iterator<Item = &KeyComparison>| true,
+                |_: &mut dyn Iterator<Item = KeyComparison>| true,
                 EvictionKind::Random,
                 ReaderProcessing::default(),
             );
             w.swap();
 
-            let range = vec![DataType::from(0)]..vec![DataType::from(10)];
+            let range_key = &[KeyComparison::Range((
+                Bound::Included(vec1![DataType::from(0)]),
+                Bound::Excluded(vec1![DataType::from(10)]),
+            ))];
+
             w.mark_filled(KeyComparison::from_range(
                 &(vec1![DataType::from(0)]..vec1![DataType::from(10)]),
             ))
             .unwrap();
             w.swap();
-            assert!(r.range(&range).is_ok());
+            assert!(r.get_multi(range_key).is_ok());
 
             w.mark_hole(&KeyComparison::from_range(
                 &(vec1![DataType::from(0)]..vec1![DataType::from(10)]),
             ));
             w.swap();
-            assert!(r.range(&range).err().unwrap().is_miss());
+            assert!(r.get_multi(range_key).err().unwrap().is_miss());
         }
     }
 }

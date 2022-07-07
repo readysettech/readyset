@@ -1,4 +1,4 @@
-use std::ops::RangeBounds;
+use std::ops::{Bound, RangeBounds};
 
 use ahash::RandomState;
 use dataflow_expression::PreInsertion;
@@ -67,20 +67,17 @@ impl Handle {
         }
     }
 
-    pub fn empty_range<R>(&mut self, range: R)
-    where
-        R: RangeBounds<Vec<DataType>>,
-    {
+    pub fn empty_range(&mut self, range: (Bound<Vec<DataType>>, Bound<Vec<DataType>>)) {
         match self {
             Handle::Single(h) => {
                 h.remove_range((
-                    range.start_bound().map(|r| {
+                    range.0.map(|mut r| {
                         debug_assert_eq!(r.len(), 1);
-                        &r[0]
+                        r.pop().unwrap()
                     }),
-                    range.end_bound().map(|r| {
+                    range.1.map(|mut r| {
                         debug_assert_eq!(r.len(), 1);
-                        &r[0]
+                        r.pop().unwrap()
                     }),
                 ));
             }

@@ -1508,9 +1508,9 @@ impl Domain {
                         let (r_part, w_part) = backlog::new_partial(
                             cols,
                             index,
-                            move |misses: &mut dyn Iterator<Item = &KeyComparison>| {
+                            move |misses: &mut dyn Iterator<Item = KeyComparison>| {
                                 if num_shards == 1 {
-                                    let misses = misses.cloned().collect::<Vec<_>>();
+                                    let misses = misses.collect::<Vec<_>>();
                                     if misses.is_empty() {
                                         return true;
                                     }
@@ -1524,7 +1524,7 @@ impl Domain {
                                             per_shard
                                                 .entry(shard)
                                                 .or_insert_with(Vec::new)
-                                                .push(miss);
+                                                .push(miss.clone());
                                         }
                                     }
                                     if per_shard.is_empty() {
@@ -1533,7 +1533,7 @@ impl Domain {
                                     per_shard.into_iter().all(|(shard, keys)| {
                                         #[allow(clippy::indexing_slicing)]
                                         // we know txs.len() is equal to num_shards
-                                        txs[shard].send(keys.into_iter().cloned().collect()).is_ok()
+                                        txs[shard].send(keys).is_ok()
                                     })
                                 }
                             },
