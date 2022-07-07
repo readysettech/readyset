@@ -27,7 +27,7 @@ queries and interact accordingly with noria and/or an underlying database. This
 is abstracted away from the user when they are working with the client after
 setting it up.
 
-## Intiailization / Setup
+## Initialization / Setup
 
 A `Backend` is created using a `BackendBuilder`. [Here is an
 example](../../noria-client/examples/ryw.rs). The most notable settings are:
@@ -104,7 +104,7 @@ previously handled by the Debezium Connector, but will soon be handled by a
 different bin log streaming solution. **One important point to note is that the
 Noria Client is only responsible for sending writes to the database, everything
 that happens downstream of that (a connector detecting changes in the binlog and
-propogating them to noria) is NOT handled by the Noria Client**. Rather, that
+propagating them to noria) is NOT handled by the Noria Client**. Rather, that
 will be handled by a separate connector.
 
 Lastly, it is possible to configure the client to send writes directly to Noria,
@@ -119,7 +119,7 @@ doc](https://drive.google.com/file/d/1Fs1zqj1rqjRj4JsvQf9BHQZNkUJ8cpZ7/view?usp=
 and [implementation
 doc.](https://drive.google.com/file/d/1oXDSCP7psTPaCAgMcXZIZOvmPjJ36VpN/view?usp=sharing)
 
-The Noria Client abstracts the RYW mechnanism away from the user. When RYW is
+The Noria Client abstracts the RYW mechanism away from the user. When RYW is
 enabled, the user should be able to make queries via the client with no changes
 from normal.
 

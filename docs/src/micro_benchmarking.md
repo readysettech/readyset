@@ -1,7 +1,7 @@
 # Micro Benchmarking
 
 Micro Benchmarks can be viewed as the unit tests of the benchmarking
-world. They're typically highly targeted, directly calling interenal
+world. They're typically highly targeted, directly calling internal
 components of ReadySet.
 
 ## Criterion Benchmarks
@@ -16,7 +16,7 @@ Benchmarks are executed via the `cargo bench` subcommand, with the `bench` cargo
 
 The simplest way to run micro benchmarks:
 ```
-cargo bench --feature bench
+cargo bench --features bench
 ```
 This will run all the normal* micro benchmarks.
 

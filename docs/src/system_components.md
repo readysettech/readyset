@@ -43,12 +43,12 @@ book-keeping to do cache connections to tables and views.
 ### Noria Server
 Within a cluster, noria-server's primary responsibility is to implement the core dataflow engine that receives
 statements from the Noria client and constructs and operates dataflow representations of these queries. There can be
-many servers that comprise a noria cluster, each owning a subset of the dataflow graph. The server is responsbile for
+many servers that comprise a noria cluster, each owning a subset of the dataflow graph. The server is responsible for
 both control-plane operations via the controller (`//noria/server/src/controller`), and data-plane operations (running
 components of the dataflow graph) via the worker (`//noria/server/src/worker/`).
 
 ### Authority
 Each noria server instance regularly communicates with a cluster management **authority**. The authority is essentially
-a distributed key-value store used to perform sychronization. We implement wrappers around the authority to enable
+a distributed key-value store used to perform synchronization. We implement wrappers around the authority to enable
 failure detection and leader election. In production we use [Consul](https://www.consul.io/), but also have a
 [Zookeeper](https://zookeeper.apache.org/) authority wrapper as well.

@@ -59,7 +59,7 @@ ___
 </details>
 
 ### Request thread
-The request thread handles controller requests destined for the leader and authortity updates from the Authority thread.
+The request thread handles controller requests destined for the leader and authority updates from the Authority thread.
 If the controller is currently acting as the leader of the system, it handles controller requests and authority updates
 that apply to leaders such as: `AuthorityUpdate::NewWorker`, or `/extend_recipe` requests to update the dataflow graph.
 
@@ -92,7 +92,7 @@ leader operations:
 
    When the dataflow graph changes, a new recipe is applied to the system. We defer the discussion of how query
    planning and assignment of nodes to domains works to other sections of the docs. Migrations occur in two
-   steps: Migration planning begins by generating a <code>MigrationPlan</code>, doing so verifys that we can generate a
+   steps: Migration planning begins by generating a <code>MigrationPlan</code>, doing so verifies that we can generate a
    dataflow graph for the new recipe, and a set of operations to perform to convert our existing data flow graph
    to the new graph. If all goes well, we apply the <code>MigrationPlan</code> to the dataflow graph.
 

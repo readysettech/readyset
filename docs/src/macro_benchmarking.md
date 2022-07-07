@@ -39,7 +39,7 @@ These can be specified in several ways:
 > target and setup connection strings refer to. For a ReadySet
 > deployment this typically means that the upstream MySQL database lives
 > at `--setup-conn-str`, a noria-mysql instance can be accessed via
-> `--target-conn-str`, and atleast one noria-server instance is running.
+> `--target-conn-str`, and at least one noria-server instance is running.
 > See [Running ReadySet](./running-readyset.md) for more information on
 > how to run a local ReadySet deployment.
 
@@ -84,12 +84,12 @@ likewise $MYSQL_CONN is for the upstream database.
 For the final three arguments, `--report-target` is setting the storage
 file (`/tmp/results.json`), `--report-mode` specifies that the results
 will be stored, along with retrieving old values (if they exist) to
-perform a comparison against. `--report-profile` is used to disambiguiate
+perform a comparison against. `--report-profile` is used to disambiguate
 multiple runs with varying configurations (be careful with this when
 modifying the CI benchmarking pipelines).
 
 ## Additional Arguments 
- * `--skip-setup`: Run a benhmark without performing setup. Setup will fail if the MySQL database
+ * `--skip-setup`: Run a benchmark without performing setup. Setup will fail if the MySQL database
                    already includes any of the tables.
  * `--iterations <N>`: Run a benchmark N times and calculate aggregates over the benchmark results.
                        Not supported by all benchmarks.
@@ -163,7 +163,7 @@ used  to easily profile our system. It generates a flamegraph as an
 > your machine.
 
 When using flamegraph is it useful to:
-  * Increease the user stack dump size to 64KB from 8KB.
+  * Increase the user stack dump size to 64KB from 8KB.
   * Add a minute delay before perf starts to remove start overhead from
     the graph.
   * Only sample for a small number of seconds when the server is under

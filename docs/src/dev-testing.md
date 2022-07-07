@@ -146,7 +146,7 @@ vertical_tests! {
 ## Clustertests
 Clustertests are a multi-process deployment test framework. It enables local
 blackbox testing on multi-server deployments with support for
-programatically modifying the deployment, i.e. introducing faults,
+programmatically modifying the deployment, i.e. introducing faults,
 adding new servers, replicating readers. Clustertests run with a MySQL database
 and a consul authority run through docker containers.
 
@@ -162,7 +162,7 @@ Clustertests live in:
  * `//noria/clustertest/src/readyset_mysql.rs`: Noria + MySQL adapter
 
 See `//noria/clustertest/src/lib.rs` for more complete documentation on how to
-write and run clusteretsts.
+write and run clustertests.
 
 ### Running clustertests
 Run the complete set of clustertests using the default parameters with the following command.

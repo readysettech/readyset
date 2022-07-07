@@ -127,7 +127,7 @@ For more information `cargo run --bin failpoint -- --help`
 ## Failpoints in clustertests.
 
 Clustertests can be used to trigger failpoints that crash the process and
-verify the correct recovery behavior occured.
+verify the correct recovery behavior occurred.
 
 ```rust
 impl ServerHandle {

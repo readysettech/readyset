@@ -1,6 +1,6 @@
 # Adding Metrics
 
-Throughout the noria-server and noria adapter code we collect runtime metris. Some
+Throughout the noria-server and noria adapter code we collect runtime metrics. Some
 examples include:
   * The amount of time performing an eviction at a dataflow node.
   * The number of times a query went to the upstream database vs. Noria.

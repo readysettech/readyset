@@ -23,7 +23,7 @@ function About() {
                 href="https://www.imdb.com/interfaces/">IMBD Datasets</a>.
                 For the sake of this tutorial we’ll assume you’re using the IMBD dataset <code>title.basics.tsv</code>.
             </p>
-            <p><code>title.basics.tsv.gz</code> aContains the following fields:</p>
+            <p><code>title.basics.tsv.gz</code> Contains the following fields:</p>
 
             <SyntaxHighlighter language="text" style={xonokai}>
                 {'tconst (string) - alphanumeric unique identifier of the title\n' +

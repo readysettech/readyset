@@ -1,6 +1,6 @@
 # Running and configuring ReadySet
 
-Running ReadySet typically means atleast running:
+Running ReadySet typically means at least running:
   1. noria-server
   2. noria-mysql/noria-psql
   3. consul
@@ -43,7 +43,7 @@ includes:
 Each is configured to collect resources from the *default* noria-server and noria-mysql
 instance addresses.
 
-> For prometeums metrics to be collected, noria-server and noria-mysql must be run with
+> For prometheus metrics to be collected, noria-server and noria-mysql must be run with
 > `--prometheus-metrics`. To see prometheus metrics, navigate to `localhost:9090`.
 
 ## Running noria-server

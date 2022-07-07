@@ -7,7 +7,7 @@
 
 Building binaries locally, and then trying to use them in a remote virtual
 machine may cause issues if your local glibc version is newer than the glibc
-version in the virtual machine. To help aleviate this issue, we have scripts
+version in the virtual machine. To help alleviate this issue, we have scripts
 which will build a docker container for a specific version of ubuntu, and then
 run cargo inside of this container for you. You use it in place of `cargo`, and
 it will create a `target-ubuntu2004` folder at the root of the monorepo where

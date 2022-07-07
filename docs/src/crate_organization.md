@@ -17,7 +17,7 @@ When adding a new dependency it is always worth considering:
   * Is this crate still maintained? Unmaintained crates may cause headaches if we have
     to make changes or update dependencies.
   * Does it have a license we are allowed to use?
-  * Does it have any security vulnurabilities.
+  * Does it have any security vulnerabilities.
 
 > The latter two are checked in CI via `cargo deny`. See `//deny.toml` for more
 > information on what checks are performed by `cargo deny`.

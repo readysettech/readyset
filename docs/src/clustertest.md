@@ -2,7 +2,7 @@
 
 A local multi-process deployment test framework for ReadySet. It enables 
 local blackbox testing on multi-server deployments with support for 
-programatically modifying the deployment, i.e. introducing faults, adding new
+programmatically modifying the deployment, i.e. introducing faults, adding new
 servers, replicating readers.
 
 ## When to use clustertest

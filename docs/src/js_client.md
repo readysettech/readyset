@@ -12,7 +12,7 @@ The library is packaged as a native Node.js package and exposes a `Client` class
 2. Avoids the need to rely on third-party clients.
 3. Avoids bottleneck caused by MySQL adapter.
 
-   A bit more on that third point: all MySQL clients that run through the MySQL adapter need to connect to the same adapter that pretends to be a MySQL server. This is a bottlneck that native Node.js clients avoid, because each Node.js client has a direct connection to Noria itself.
+   A bit more on that third point: all MySQL clients that run through the MySQL adapter need to connect to the same adapter that pretends to be a MySQL server. This is a bottleneck that native Node.js clients avoid, because each Node.js client has a direct connection to Noria itself.
 
 ## Design
 
@@ -29,7 +29,7 @@ The Node.js Client Library consists of two wrappers.
 The [first wrapper](../../js-client/src/lib.rs) is a Rust wrapper around the [noria-client](./noria_client.md) that provides the ability to call, from javascript, the [noria-client](./noria_client.md)'s underlying Rust functions that carry out queries. This wrapper uses Neon to expose 4 functions:
 
 - a function to create a new `Backend` struct in rust and return a JavaScript-managed pointer to this struct
-- 3 asynchronous functions that allow `Backend`'s core 3 functions (`prepare`, `execute`, and `query`) to be called from JavaScript. These functions spaw their own threads in Rust to process queries and then trigger a callback when they are done to deliver their results to Node.js and tell Node.js that the promise can be resolved.
+- 3 asynchronous functions that allow `Backend`'s core 3 functions (`prepare`, `execute`, and `query`) to be called from JavaScript. These functions spawn their own threads in Rust to process queries and then trigger a callback when they are done to deliver their results to Node.js and tell Node.js that the promise can be resolved.
 
 This API is compiled into a [native c++ addon](https://nodejs.org/api/addons.html) with the help of Neon. Basically, this is a shared object file that can be imported like a normal node package.
 

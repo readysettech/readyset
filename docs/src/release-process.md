@@ -44,19 +44,27 @@ templates are only accessible to the list described under Access Restrictions
 
 This manual release process is a stopgap measure until automation is set up.
 
-1. In a CL, update the `READYSET_TAG` and `CFN_VERSION` release constants in: `installer/src/constants.rs`. We will need this exact value later. Traditionally it is the feature SHA-1, but it should be casually unique enough to prevent colissions.
+1. In a CL, update the `READYSET_TAG` and `CFN_VERSION` release constants in:
+   `installer/src/constants.rs`. We will need this exact value later.
+   Traditionally it is the feature SHA-1, but it should be casually unique
+   enough to prevent collisions.
 
-2. When that CL is merged, a new build is started on`ref/heads/main` in buildkite:
- https://buildkite.com/readyset/readyset/builds?branch=refs%2Fheads%2Fmain
+2. When that CL is merged, a new build is started on`ref/heads/main` in
+   buildkite:
+   https://buildkite.com/readyset/readyset/builds?branch=refs%2Fheads%2Fmain
 
 3. Promote this build through all of the build steps,
 
-4. THe last step, Deploy :amazon-ec2: AMIs and :aws-cloudformation: CloudFormation release, will prompt you for a value. Ensure you use the exact same constant as the installer constants from step 1.
+4. The last step, Deploy :amazon-ec2: AMIs and :aws-cloudformation:
+   CloudFormation release, will prompt you for a value. Ensure you use the
+   exact same constant as the installer constants from step 1.
 
 This step also pushes the templates up for direct customer use at:
 `https://readysettech-cfn-public-us-east-2.s3.us-east-2.amazonaws.com/<RELEASE>/readyset/templates/<TEMPLATE>.yaml`
 
-5. While buildkite is working, you can can do manual builds of the installer binaries across linux and mac computers. DOuble-check that you're on the latest main for each computer when building.
+5. While buildkite is working, you can can do manual builds of the installer
+   binaries across linux and mac computers. Double-check that you're on the
+   latest main for each computer when building.
 
    ```sh
    linux-computer$ cargo build --release --bin readyset-installer --target x86_64-linux-unknown-musl

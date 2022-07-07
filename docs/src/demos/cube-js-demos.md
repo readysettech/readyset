@@ -15,7 +15,7 @@ _Last Updated 5/19/2022_
 Any decently sized dataset will do but a good option is one of the [IMBD Datasets](https://www.imdb.com/interfaces/).
 For the sake of this tutorial we'll assume you're using the IMBD dataset `title.basics.tsv`.
 
-`title.basics.tsv.gz` aContains the following fields:
+`title.basics.tsv.gz` Contains the following fields:
 
     tconst (string) - alphanumeric unique identifier of the title
     titleType (string) – the type/format of the title (e.g. movie, short, tvseries, tvepisode, video, etc)
