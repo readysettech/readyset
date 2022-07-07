@@ -1,20 +1,15 @@
-use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
-use std::path::PathBuf;
+use std::net::{IpAddr, SocketAddr};
 use std::process;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::anyhow;
-use clap::{ArgEnum, Parser};
+use clap::Parser;
 use futures_util::future::{self, Either};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use noria::metrics::recorded;
 use noria_server::consensus::AuthorityType;
 use noria_server::metrics::{install_global_recorder, CompositeMetricsRecorder, MetricsRecorder};
-use noria_server::{
-    Builder, DurabilityMode, NoriaMetricsRecorder, ReplicationOptions as DomainReplicationOptions,
-    VolumeId,
-};
+use noria_server::{resolve_addr, Builder, NoriaMetricsRecorder, WorkerOptions};
 use tracing::{error, info};
 
 #[cfg(not(target_env = "msvc"))]
@@ -47,18 +42,9 @@ pub async fn get_aws_private_ip() -> anyhow::Result<IpAddr> {
         .parse()?)
 }
 
-pub fn resolve_addr(addr: &str) -> anyhow::Result<IpAddr> {
-    Ok([addr, ":0"]
-        .concat()
-        .to_socket_addrs()?
-        .next()
-        .ok_or_else(|| anyhow!("Could not resolve address: {}", addr))?
-        .ip())
-}
-
 #[derive(Parser, Debug)]
 #[clap(name = "noria-server", version)]
-struct Opts {
+struct Options {
     /// IP address to listen on
     #[clap(
         long,
@@ -89,14 +75,6 @@ struct Opts {
     #[clap(long, env = "NORIA_DEPLOYMENT", forbid_empty_values = true)]
     deployment: String,
 
-    /// How to maintain base table state
-    #[clap(long, default_value = "persistent", parse(try_from_str))]
-    durability: DurabilityMode,
-
-    /// Number of background threads used by RocksDB
-    #[clap(long, default_value = "6")]
-    persistence_threads: i32,
-
     /// Authority connection string.
     // TODO(justin): The default address should depend on the authority
     // value.
@@ -106,46 +84,6 @@ struct Opts {
     /// The authority to use. Possible values: zookeeper, consul.
     #[clap(long, env = "AUTHORITY", default_value = "consul", possible_values = &["consul", "zookeeper"])]
     authority: AuthorityType,
-
-    /// Memory, in bytes, available for partially materialized state (0 = unlimited)
-    #[clap(long, short = 'm', default_value = "0", env = "NORIA_MEMORY_BYTES")]
-    memory: usize,
-
-    /// Frequency at which to check the state size against the memory limit (in seconds)
-    #[clap(
-        long = "memory-check-every",
-        default_value = "1",
-        env = "MEMORY_CHECK_EVERY"
-    )]
-    memory_check_freq: u64,
-
-    /// The strategy to use when memory is freed from reader nodes
-    #[clap(long = "eviction-policy", arg_enum, default_value_t = dataflow::EvictionKind::Random)]
-    eviction_kind: dataflow::EvictionKind,
-
-    /// Disable partial
-    #[clap(long = "nopartial")]
-    no_partial: bool,
-
-    /// Forbid the creation of fully materialized nodes
-    #[clap(long, env = "FORBID_FULL_MATERIALIZATION")]
-    forbid_full_materialization: bool,
-
-    /// Enable packet filters in egresses before readers
-    #[clap(long)]
-    enable_packet_filters: bool,
-
-    /// Number of workers to wait for before starting (including this one)
-    #[clap(long, short = 'q', default_value = "1", env = "NORIA_QUORUM")]
-    quorum: usize,
-
-    /// Shard the graph this many ways (<= 1 : disable sharding)
-    #[clap(long, default_value = "0", env = "NORIA_SHARDS")]
-    shards: usize,
-
-    /// Metrics queue length (number of metrics updates before a flush is needed).
-    #[clap(long, default_value = "1024")]
-    metrics_queue_len: usize,
 
     /// Whether this server should only run reader domains
     #[clap(long, conflicts_with = "no-readers")]
@@ -165,46 +103,17 @@ struct Opts {
 
     /// Output noria metrics
     #[clap(long)]
-    noria_metrics: bool,
-
-    /// Volume associated with the server.
-    #[clap(long, env = "VOLUME_ID")]
-    volume_id: Option<VolumeId>,
-
-    /// Enable experimental support for TopK in dataflow
-    #[clap(long, env = "EXPERIMENTAL_TOPK_SUPPORT", hide = true)]
-    enable_experimental_topk_support: bool,
-
-    /// Enable experimental support for Paginate in dataflow
-    #[clap(long, env = "EXPERIMENTAL_PAGINATE_SUPPORT", hide = true)]
-    enable_experimental_paginate_support: bool,
-
-    /// Enable experimental support for mixing equality and inequality comparisons on query
-    /// parameters
-    #[clap(long, env = "EXPERIMENTAL_MIXED_COMPARISONS_SUPPORT", hide = true)]
-    enable_experimental_mixed_comparisons: bool,
+    pub noria_metrics: bool,
 
     #[clap(flatten)]
     tracing: readyset_tracing::Options,
 
-    /// Sets the number of concurrent replay requests in a noria-server.
-    #[clap(long, hide = true)]
-    max_concurrent_replays: Option<usize>,
-
-    /// Directory in which to store replicated table data. If not specified, defaults to the
-    /// current working directory.
-    #[clap(long, env = "DB_DIR")]
-    db_dir: Option<PathBuf>,
-
     #[clap(flatten)]
-    domain_replication_options: DomainReplicationOptions,
-
-    #[clap(flatten)]
-    replicator_config: replicators::Config,
+    worker_options: WorkerOptions,
 }
 
 fn main() -> anyhow::Result<()> {
-    let opts: Opts = Opts::parse();
+    let opts: Options = Options::parse();
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_name("worker")
@@ -224,10 +133,6 @@ fn main() -> anyhow::Result<()> {
         Either::Left(get_aws_private_ip())
     } else {
         Either::Right(future::ok(opts.external_address.unwrap_or(opts.address)))
-    };
-    let sharding = match opts.shards {
-        0 | 1 => None,
-        x => Some(x),
     };
 
     // SAFETY: we haven't initialized threads that might call the recorder yet
@@ -254,46 +159,15 @@ fn main() -> anyhow::Result<()> {
             .as_millis() as u64
     );
 
-    let mut builder = Builder::default();
-    builder.set_listen_addr(opts.address);
-    if opts.memory > 0 {
-        builder.set_memory_limit(opts.memory, Duration::from_secs(opts.memory_check_freq));
-    }
-    builder.set_eviction_kind(opts.eviction_kind);
-
-    builder.set_sharding(sharding);
-    builder.set_quorum(opts.quorum);
-    if opts.no_partial {
-        builder.disable_partial();
-    }
-    if opts.forbid_full_materialization {
-        builder.forbid_full_materialization();
-    }
-    if opts.enable_packet_filters {
-        builder.enable_packet_filters();
-    }
-
-    // TODO(fran): Reuse will be disabled until we refactor MIR to make it serializable.
-    // See `noria/server/src/controller/sql/serde.rs` for details.
-    builder.set_reuse(None);
-
-    builder.set_allow_topk(opts.enable_experimental_topk_support);
-    builder.set_allow_paginate(opts.enable_experimental_paginate_support);
-    builder.set_allow_mixed_comparisons(opts.enable_experimental_mixed_comparisons);
-
-    builder.set_replication_strategy(opts.domain_replication_options.into());
-
-    if let Some(volume_id) = opts.volume_id {
+    if let Some(volume_id) = &opts.worker_options.volume_id {
         info!(%volume_id);
-        builder.set_volume_id(volume_id);
     }
+
+    let mut builder = Builder::from_worker_options(opts.worker_options, &opts.deployment);
+    builder.set_listen_addr(opts.address);
 
     if opts.cannot_become_leader {
         builder.cannot_become_leader();
-    }
-
-    if let Some(r) = opts.max_concurrent_replays {
-        builder.set_max_concurrent_replay(r)
     }
 
     if opts.reader_only {
@@ -302,16 +176,6 @@ fn main() -> anyhow::Result<()> {
     if opts.no_readers {
         builder.no_readers()
     }
-
-    let persistence_params = noria_server::PersistenceParameters::new(
-        opts.durability,
-        Some(opts.deployment.clone()),
-        opts.persistence_threads,
-        opts.db_dir,
-    );
-    builder.set_persistence(persistence_params);
-
-    builder.set_replicator_config(opts.replicator_config);
 
     let authority = opts.authority;
     let authority_addr = opts.authority_address;

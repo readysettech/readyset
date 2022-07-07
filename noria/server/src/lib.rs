@@ -453,8 +453,12 @@ pub mod manual {
     pub use crate::controller::migrate::Migration;
 }
 
+use std::net::{IpAddr, ToSocketAddrs};
+use std::path::PathBuf;
 use std::time::Duration;
 
+use anyhow::anyhow;
+use clap::{ArgEnum, Parser};
 use dataflow::DomainConfig;
 use serde::{Deserialize, Serialize};
 
@@ -521,6 +525,105 @@ impl Default for Config {
             worker_request_timeout: Duration::from_millis(1800000),
         }
     }
+}
+
+/// Parse and normalize the given string as an [`IpAddr`]
+pub fn resolve_addr(addr: &str) -> anyhow::Result<IpAddr> {
+    Ok([addr, ":0"]
+        .concat()
+        .to_socket_addrs()?
+        .next()
+        .ok_or_else(|| anyhow!("Could not resolve address: {}", addr))?
+        .ip())
+}
+
+/// Command-line options for running a `noria-server` worker.
+///
+/// This option struct is intended to be embedded inside of a larger option struct using
+/// `#[clap(flatten)]`.
+#[derive(Parser, Debug)]
+pub struct WorkerOptions {
+    /// How to maintain base table state
+    #[clap(long, default_value = "persistent", parse(try_from_str))]
+    pub durability: DurabilityMode,
+
+    /// Number of background threads used by RocksDB
+    #[clap(long, default_value = "6")]
+    pub persistence_threads: i32,
+
+    /// Memory, in bytes, available for partially materialized state (0 = unlimited)
+    #[clap(long, short = 'm', default_value = "0", env = "NORIA_MEMORY_BYTES")]
+    pub memory: usize,
+
+    /// Frequency at which to check the state size against the memory limit (in seconds)
+    #[clap(
+        long = "memory-check-every",
+        default_value = "1",
+        env = "MEMORY_CHECK_EVERY"
+    )]
+    pub memory_check_freq: u64,
+
+    /// The strategy to use when memory is freed from reader nodes
+    #[clap(long = "eviction-policy", arg_enum, default_value_t = dataflow::EvictionKind::Random)]
+    pub eviction_kind: dataflow::EvictionKind,
+
+    /// Disable partial
+    #[clap(long = "nopartial")]
+    pub no_partial: bool,
+
+    /// Forbid the creation of fully materialized nodes
+    #[clap(long, env = "FORBID_FULL_MATERIALIZATION")]
+    pub forbid_full_materialization: bool,
+
+    /// Enable packet filters in egresses before readers
+    #[clap(long)]
+    pub enable_packet_filters: bool,
+
+    /// Number of workers to wait for before starting (including this one)
+    #[clap(long, short = 'q', default_value = "1", env = "NORIA_QUORUM")]
+    pub quorum: usize,
+
+    /// Shard the graph this many ways (<= 1 : disable sharding)
+    #[clap(long, default_value = "0", env = "NORIA_SHARDS")]
+    pub shards: usize,
+
+    /// Metrics queue length (number of metrics updates before a flush is needed).
+    #[clap(long, default_value = "1024")]
+    pub metrics_queue_len: usize,
+
+    /// Volume associated with the server.
+    #[clap(long, env = "VOLUME_ID")]
+    pub volume_id: Option<VolumeId>,
+
+    /// Enable experimental support for TopK in dataflow
+    #[clap(long, env = "EXPERIMENTAL_TOPK_SUPPORT", hide = true)]
+    pub enable_experimental_topk_support: bool,
+
+    /// Enable experimental support for Paginate in dataflow
+    #[clap(long, env = "EXPERIMENTAL_PAGINATE_SUPPORT", hide = true)]
+    pub enable_experimental_paginate_support: bool,
+
+    /// Enable experimental support for mixing equality and inequality comparisons on query
+    /// parameters
+    #[clap(long, env = "EXPERIMENTAL_MIXED_COMPARISONS_SUPPORT", hide = true)]
+    pub enable_experimental_mixed_comparisons: bool,
+
+    /// Sets the number of concurrent replay requests in a noria-server.
+    #[clap(long, hide = true)]
+    pub max_concurrent_replays: Option<usize>,
+
+    /// Directory in which to store replicated table data. If not specified, defaults to the
+    /// current working directory.
+    #[clap(long, env = "DB_DIR")]
+    pub db_dir: Option<PathBuf>,
+
+    #[allow(missing_docs)]
+    #[clap(flatten)]
+    pub domain_replication_options: ReplicationOptions,
+
+    #[allow(missing_docs)]
+    #[clap(flatten)]
+    pub replicator_config: replicators::Config,
 }
 
 use std::pin::Pin;

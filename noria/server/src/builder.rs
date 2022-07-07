@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::time;
+use std::time::{self, Duration};
 
 use dataflow::PersistenceParameters;
 use noria::consensus::{
@@ -39,7 +39,62 @@ impl Default for Builder {
         }
     }
 }
+
 impl Builder {
+    /// Initialize a [`Builder`] from a set of command-line worker options and a deployment name.
+    pub fn from_worker_options(opts: crate::WorkerOptions, deployment: &str) -> Self {
+        let mut builder = Self::default();
+        if opts.memory > 0 {
+            builder.set_memory_limit(opts.memory, Duration::from_secs(opts.memory_check_freq));
+        }
+        builder.set_eviction_kind(opts.eviction_kind);
+
+        builder.set_sharding(match opts.shards {
+            0 | 1 => None,
+            x => Some(x),
+        });
+        builder.set_quorum(opts.quorum);
+        if opts.no_partial {
+            builder.disable_partial();
+        }
+        if opts.forbid_full_materialization {
+            builder.forbid_full_materialization();
+        }
+        if opts.enable_packet_filters {
+            builder.enable_packet_filters();
+        }
+
+        // TODO(fran): Reuse will be disabled until we refactor MIR to make it serializable.
+        // See `noria/server/src/controller/sql/serde.rs` for details.
+        builder.set_reuse(None);
+
+        builder.set_allow_topk(opts.enable_experimental_topk_support);
+        builder.set_allow_paginate(opts.enable_experimental_paginate_support);
+        builder.set_allow_mixed_comparisons(opts.enable_experimental_mixed_comparisons);
+
+        builder.set_replication_strategy(opts.domain_replication_options.into());
+
+        if let Some(volume_id) = opts.volume_id {
+            builder.set_volume_id(volume_id);
+        }
+
+        if let Some(r) = opts.max_concurrent_replays {
+            builder.set_max_concurrent_replay(r)
+        }
+
+        let persistence_params = PersistenceParameters::new(
+            opts.durability,
+            Some(deployment.into()),
+            opts.persistence_threads,
+            opts.db_dir,
+        );
+        builder.set_persistence(persistence_params);
+
+        builder.set_replicator_config(opts.replicator_config);
+
+        builder
+    }
+
     /// Construct a new [`Builder`] with configuration setup for running tests
     pub fn for_tests() -> Self {
         let mut builder = Self::default();

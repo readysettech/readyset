@@ -312,30 +312,8 @@ pub struct Options {
     #[clap(long, env = "EMBEDDED_READERS", conflicts_with = "standalone")]
     embedded_readers: bool,
 
-    /// Enable experimental support for TopK in dataflow
-    #[clap(long, env = "EXPERIMENTAL_TOPK_SUPPORT")]
-    enable_experimental_topk_support: bool,
-
-    /// Enable experimental support for Paginate in dataflow
-    #[clap(long, env = "EXPERIMENTAL_PAGINATE_SUPPORT")]
-    enable_experimental_paginate_support: bool,
-
-    /// Enable experimental support for mixing equality and inequality comparisons on query
-    /// parameters
-    #[clap(long, env = "EXPERIMENTAL_MIXED_COMPARISONS_SUPPORT")]
-    enable_experimental_mixed_comparisons: bool,
-
-    /// Disable verification of SSL certificates supplied by the replication database (postgres
-    /// only, ignored for mysql). Ignored if `--upstream-db-url` is not passed.
-    ///
-    /// # Warning
-    ///
-    /// You should think very carefully before using this flag. If invalid certificates are
-    /// trusted, any certificate for any site will be trusted for use, including expired
-    /// certificates. This introduces significant vulnerabilities, and should only be used as a
-    /// last resort.
-    #[clap(long, env = "DISABLE_REPLICATION_SSL_VERIFICATION")]
-    pub disable_replication_ssl_verification: bool,
+    #[clap(flatten)]
+    server_worker_options: noria_server::WorkerOptions,
 }
 
 impl<H> NoriaAdapter<H>
@@ -604,33 +582,21 @@ where
             let (handle, valve) = Valve::new();
             let authority = options.authority.clone();
             let deployment = options.deployment.clone();
-            let mut builder = noria_server::Builder::default();
+            let mut builder = noria_server::Builder::from_worker_options(
+                options.server_worker_options,
+                &options.deployment,
+            );
             let r = readers.clone();
             let auth_address = options.authority_address.clone();
-
-            if let Some(upstream_db_url) = &options.upstream_db_url {
-                builder.set_replication_url(upstream_db_url.clone().into());
-                builder.set_disable_replication_ssl_verification(
-                    options.disable_replication_ssl_verification,
-                );
-            }
-
-            let persistence_params = noria_server::PersistenceParameters::new(
-                noria_server::DurabilityMode::Permanent,
-                Some(deployment.clone()),
-                6,
-                None,
-            );
-            builder.set_persistence(persistence_params);
 
             if options.embedded_readers {
                 builder.as_reader_only();
                 builder.cannot_become_leader();
             }
 
-            builder.set_allow_topk(options.enable_experimental_topk_support);
-            builder.set_allow_paginate(options.enable_experimental_paginate_support);
-            builder.set_allow_mixed_comparisons(options.enable_experimental_mixed_comparisons);
+            if let Some(upstream_db_url) = &options.upstream_db_url {
+                builder.set_replication_url(upstream_db_url.clone().into());
+            }
 
             let server_handle = rt.block_on(async move {
                 let authority = Arc::new(authority.to_authority(&auth_address, &deployment).await);
