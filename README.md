@@ -191,6 +191,6 @@ which point we'll force push to this repository.
 
 ## License
 
-ReadySet is licensed under the BSL 1.1 license, converting to the open-source Apache 2.0 license after 4 years. The ReadySet team is hard at work getting the codebase ready to be hosted on Github.
+ReadySet is licensed under the BSL 1.1 license, converting to the open-source Apache 2.0 license after 4 years. It is free to use on any number of nodes. The ReadySet team is hard at work getting the codebase ready to be hosted on Github.
 
 ReadySet is also available as a paid cloud service that can be deployed to your accounts or hosted entirely by ReadySet. You can get early access to our cloud product by signing up [here](https://readysettech.typeform.com/to/BqovNk8A).
