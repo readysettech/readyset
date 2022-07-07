@@ -1,5 +1,6 @@
 use std::collections::hash_map::RandomState;
 use std::hash::Hash;
+use std::ops::Bound;
 
 use reader_map::handles::{ReadHandle, WriteHandle};
 use reader_map::Error::*;
@@ -889,7 +890,7 @@ fn remove_range_works() {
         assert!(m.range(&(3..4)).is_ok());
     }
 
-    w.remove_range(4..=5);
+    w.remove_range((Bound::Included(4), Bound::Included(5)));
     w.publish();
 
     {

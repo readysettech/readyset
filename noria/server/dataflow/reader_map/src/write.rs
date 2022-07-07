@@ -207,14 +207,8 @@ where
     ///
     /// The entries will only disappear from readers after the next call to
     /// [`publish`](Self::publish).
-    pub fn remove_range<R>(&mut self, range: R) -> &mut Self
-    where
-        R: RangeBounds<K>,
-    {
-        self.add_op(Operation::RemoveRange((
-            range.start_bound().cloned(),
-            range.end_bound().cloned(),
-        )))
+    pub fn remove_range(&mut self, range: (Bound<K>, Bound<K>)) -> &mut Self {
+        self.add_op(Operation::RemoveRange(range))
     }
 
     /// Purge all value-bags from the map.

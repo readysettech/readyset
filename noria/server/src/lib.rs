@@ -395,7 +395,8 @@
     stmt_expr_attributes,
     result_flattening,
     drain_filter,
-    hash_raw_entry
+    hash_raw_entry,
+    bound_as_ref
 )]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
