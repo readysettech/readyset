@@ -50,6 +50,8 @@ lazy_static::lazy_static! {
         state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![3]), None);
 
+        state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
+
         for i in 0..UNIQUE_ENTIRES {
             let rec: Vec<DataType> = vec![
                 i.into(),
