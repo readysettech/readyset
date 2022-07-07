@@ -1,0 +1,31 @@
+{
+  "private": true,
+  "scripts": {
+    "format": "prettier --write \"./**/*.{ts,mts,cts,tsx,js,mjs,cjs,jsx,json,md,css}\"",
+    "format:check": "prettier --list-different \"./**/*.{ts,mts,cts,tsx,js,mjs,cjs,jsx,json,md,css}\"",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "pnpm run --recursive --stream test",
+    "typecheck": "pnpm run --recursive --stream typecheck"
+  },
+  "dependencies": {
+    "@swc/helpers": "^0.4.3"
+  },
+  "devDependencies": {
+    "@swc/cli": "^0.1.57",
+    "@swc/core": "^1.2.210",
+    "@swc/jest": "^0.2.21",
+    "@types/jest": "^28.1.4",
+    "@types/node": "^18.0.3",
+    "@typescript-eslint/eslint-plugin": "^5.30.5",
+    "@typescript-eslint/parser": "^5.30.5",
+    "eslint": "^8.19.0",
+    "eslint-config-prettier": "^8.5.0",
+    "eslint-plugin-jest": "^26.5.3",
+    "eslint-plugin-prettier": "^4.2.1",
+    "jest": "^28.1.2",
+    "prettier": "^2.7.1",
+    "ts-node": "^10.8.2",
+    "typescript": "^4.7.4"
+  }
+}

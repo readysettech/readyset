@@ -1,0 +1,9 @@
+{
+  "name": "data-plane",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "test": "jest",
+    "typecheck": "tsc --noEmit"
+  }
+}

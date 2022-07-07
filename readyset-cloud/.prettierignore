@@ -1,0 +1,3 @@
+node_modules
+apps/control-plane/.gen
+apps/control-plane/cdktf.out

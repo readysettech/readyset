@@ -1,0 +1,10 @@
+{
+  "language": "typescript",
+  "app": "pnpm run cdktf:app",
+  "terraformProviders": ["kubernetes@~> 2.12.0", "aws@~> 4.21.0"],
+  "context": {
+    "excludeStackIdFromLogicalIds": "true",
+    "allowSepCharsInLogicalIds": "true"
+  },
+  "projectId": "1d5273ee-26c7-487e-8473-6e15b1a506f9"
+}

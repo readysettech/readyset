@@ -1,0 +1,21 @@
+{
+  "name": "control-plane",
+  "scripts": {
+    "postinstall": "cdktf get",
+    "cdktf:get": "cdktf get",
+    "cdktf:app": "ts-node src/main.ts",
+    "cdktf:synth": "cdktf synth",
+    "test": "jest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "cdktf": "^0.11.2",
+    "constructs": "^10.1.43",
+    "data-plane": "workspace:*"
+  },
+  "devDependencies": {
+    "cdktf-cli": "^0.11.2",
+    "ink": "^3.2.0",
+    "react": "^17.0.0"
+  }
+}
