@@ -22,7 +22,7 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "iteration": 1656426628245,
+  "iteration": 1657214640011,
   "links": [
     {
       "asDropdown": false,
@@ -290,23 +290,7 @@
         }
       ],
       "title": "50p Query Latency",
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {}
-        },
-        {
-          "id": "calculateField",
-          "options": {
-            "alias": "50p latency",
-            "mode": "reduceRow",
-            "reduce": {
-              "reducer": "min"
-            },
-            "replaceFields": true
-          }
-        }
-      ],
+      "transformations": [],
       "type": "timeseries"
     },
     {
@@ -411,27 +395,7 @@
         }
       ],
       "title": "90p Query Latency",
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {}
-        },
-        {
-          "id": "calculateField",
-          "options": {
-            "alias": "90p latency",
-            "mode": "reduceRow",
-            "reduce": {
-              "include": [
-                "ReadySet 90p",
-                "MySQL 90p"
-              ],
-              "reducer": "min"
-            },
-            "replaceFields": true
-          }
-        }
-      ],
+      "transformations": [],
       "type": "timeseries"
     },
     {
@@ -536,27 +500,7 @@
         }
       ],
       "title": "99p Query Latency",
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {}
-        },
-        {
-          "id": "calculateField",
-          "options": {
-            "alias": "99p latency",
-            "mode": "reduceRow",
-            "reduce": {
-              "include": [
-                "ReadySet 99p",
-                "MySQL 99p"
-              ],
-              "reducer": "min"
-            },
-            "replaceFields": true
-          }
-        }
-      ],
+      "transformations": [],
       "type": "timeseries"
     },
     {
@@ -784,7 +728,9 @@
       "id": 35,
       "options": {
         "reduceOptions": {
-          "calcs": ["max"],
+          "calcs": [
+            "max"
+          ],
           "fields": "",
           "values": false
         },
@@ -928,8 +874,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": "",
-          "value": ""
+          "text": "SELECT `a` FROM `t` WHERE (`b` = $1)",
+          "value": "SELECT `a` FROM `t` WHERE (`b` = $1)"
         },
         "datasource": "DS_PROMETHEUS",
         "definition": "label_values(query)",
@@ -961,5 +907,5 @@
   "timezone": "",
   "title": "Specific Query",
   "uid": "query",
-  "version": 5
+  "version": 1
 }
