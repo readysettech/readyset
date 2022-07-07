@@ -5,9 +5,9 @@ use nom::IResult;
 
 use crate::expression::expression;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expression};
+use crate::{Dialect, Expr};
 
-pub fn case_when(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+pub fn case_when(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     move |i| {
         let (remaining_input, (_, _, _, _, condition, _, _, _, then_expr, _, else_expr, _)) =
             tuple((
@@ -31,7 +31,7 @@ pub fn case_when(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expressio
 
         Ok((
             remaining_input,
-            Expression::CaseWhen {
+            Expr::CaseWhen {
                 condition: Box::new(condition),
                 then_expr: Box::new(then_expr),
                 else_expr: else_expr.map(Box::new),
@@ -52,14 +52,14 @@ mod tests {
             table: None,
         };
 
-        let exp = Expression::CaseWhen {
-            condition: Box::new(Expression::BinaryOp {
+        let exp = Expr::CaseWhen {
+            condition: Box::new(Expr::BinaryOp {
                 op: BinaryOperator::Equal,
-                lhs: Box::new(Expression::Column(c1.clone())),
-                rhs: Box::new(Expression::Literal(Literal::Integer(0))),
+                lhs: Box::new(Expr::Column(c1.clone())),
+                rhs: Box::new(Expr::Literal(Literal::Integer(0))),
             }),
-            then_expr: Box::new(Expression::Column(c1.clone())),
-            else_expr: Some(Box::new(Expression::Literal(Literal::Integer(1)))),
+            then_expr: Box::new(Expr::Column(c1.clone())),
+            else_expr: Some(Box::new(Expr::Literal(Literal::Integer(1)))),
         };
 
         assert_eq!(
@@ -67,13 +67,13 @@ mod tests {
             "CASE WHEN (`foo` = 0) THEN `foo` ELSE 1 END"
         );
 
-        let exp_no_else = Expression::CaseWhen {
-            condition: Box::new(Expression::BinaryOp {
+        let exp_no_else = Expr::CaseWhen {
+            condition: Box::new(Expr::BinaryOp {
                 op: BinaryOperator::Equal,
-                lhs: Box::new(Expression::Column(c1.clone())),
-                rhs: Box::new(Expression::Literal(Literal::Integer(0))),
+                lhs: Box::new(Expr::Column(c1.clone())),
+                rhs: Box::new(Expr::Literal(Literal::Integer(0))),
             }),
-            then_expr: Box::new(Expression::Column(c1)),
+            then_expr: Box::new(Expr::Column(c1)),
             else_expr: None,
         };
 

@@ -20,8 +20,8 @@ use std::iter;
 use itertools::Either;
 pub use nom_sql::analysis::{contains_aggregate, is_aggregate};
 use nom_sql::{
-    BinaryOperator, Column, CommonTableExpression, Expression, FieldDefinitionExpression,
-    FunctionExpression, InValue, JoinClause, JoinRightSide, SelectStatement, SqlIdentifier, Table,
+    BinaryOperator, Column, CommonTableExpr, Expr, FieldDefinitionExpr, FunctionExpr, InValue,
+    JoinClause, JoinRightSide, SelectStatement, SqlIdentifier, Table,
 };
 
 pub use crate::alias_removal::AliasRemoval;
@@ -63,11 +63,11 @@ pub fn is_correlated(statement: &SelectStatement) -> bool {
 
 fn field_names(statement: &SelectStatement) -> impl Iterator<Item = &SqlIdentifier> {
     statement.fields.iter().filter_map(|field| match &field {
-        FieldDefinitionExpression::Expression {
+        FieldDefinitionExpr::Expr {
             alias: Some(alias), ..
         } => Some(alias),
-        FieldDefinitionExpression::Expression {
-            expr: Expression::Column(Column { name, .. }),
+        FieldDefinitionExpr::Expr {
+            expr: Expr::Column(Column { name, .. }),
             ..
         } => Some(name),
         _ => None,
@@ -78,7 +78,7 @@ fn field_names(statement: &SelectStatement) -> impl Iterator<Item = &SqlIdentifi
 ///
 /// Takes only the CTEs and join clause so that it doesn't have to borrow the entire statement.
 pub(self) fn subquery_schemas<'a>(
-    ctes: &'a [CommonTableExpression],
+    ctes: &'a [CommonTableExpr],
     join: &'a [JoinClause],
 ) -> HashMap<&'a SqlIdentifier, Vec<&'a SqlIdentifier>> {
     ctes.iter()
@@ -92,15 +92,15 @@ pub(self) fn subquery_schemas<'a>(
 }
 
 #[must_use]
-pub fn map_aggregates(expr: &mut Expression) -> Vec<(FunctionExpression, SqlIdentifier)> {
+pub fn map_aggregates(expr: &mut Expr) -> Vec<(FunctionExpr, SqlIdentifier)> {
     let mut ret = Vec::new();
     match expr {
-        Expression::Call(f) if is_aggregate(f) => {
+        Expr::Call(f) if is_aggregate(f) => {
             let name: SqlIdentifier = f.to_string().into();
             ret.push((f.clone(), name.clone()));
-            *expr = Expression::Column(Column { name, table: None });
+            *expr = Expr::Column(Column { name, table: None });
         }
-        Expression::CaseWhen {
+        Expr::CaseWhen {
             condition,
             then_expr,
             else_expr,
@@ -111,27 +111,24 @@ pub fn map_aggregates(expr: &mut Expression) -> Vec<(FunctionExpression, SqlIden
                 ret.append(&mut map_aggregates(else_expr));
             }
         }
-        Expression::Call(_)
-        | Expression::Literal(_)
-        | Expression::Column(_)
-        | Expression::Variable(_) => {}
-        Expression::BinaryOp { lhs, rhs, .. } => {
+        Expr::Call(_) | Expr::Literal(_) | Expr::Column(_) | Expr::Variable(_) => {}
+        Expr::BinaryOp { lhs, rhs, .. } => {
             ret.append(&mut map_aggregates(lhs));
             ret.append(&mut map_aggregates(rhs));
         }
-        Expression::UnaryOp { rhs: expr, .. } | Expression::Cast { expr, .. } => {
+        Expr::UnaryOp { rhs: expr, .. } | Expr::Cast { expr, .. } => {
             ret.append(&mut map_aggregates(expr));
         }
-        Expression::Exists(_) => {}
-        Expression::NestedSelect(_) => {}
-        Expression::Between {
+        Expr::Exists(_) => {}
+        Expr::NestedSelect(_) => {}
+        Expr::Between {
             operand, min, max, ..
         } => {
             ret.append(&mut map_aggregates(operand));
             ret.append(&mut map_aggregates(min));
             ret.append(&mut map_aggregates(max));
         }
-        Expression::In { lhs, rhs, .. } => {
+        Expr::In { lhs, rhs, .. } => {
             ret.append(&mut map_aggregates(lhs));
             match rhs {
                 InValue::Subquery(_) => {}

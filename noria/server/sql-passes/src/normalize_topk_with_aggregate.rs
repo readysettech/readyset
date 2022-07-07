@@ -1,5 +1,5 @@
 use nom_sql::analysis::contains_aggregate;
-use nom_sql::{Expression, FieldDefinitionExpression, FieldReference, SqlQuery};
+use nom_sql::{Expr, FieldDefinitionExpr, FieldReference, SqlQuery};
 use noria_errors::{ReadySetError, ReadySetResult};
 
 pub trait NormalizeTopKWithAggregate: Sized {
@@ -22,9 +22,7 @@ impl NormalizeTopKWithAggregate for SqlQuery {
                     .iter()
                     .enumerate()
                     .filter_map(|(i, f)| match f {
-                        FieldDefinitionExpression::Expression { expr, alias }
-                            if contains_aggregate(expr) =>
-                        {
+                        FieldDefinitionExpr::Expr { expr, alias } if contains_aggregate(expr) => {
                             Some((i, expr, alias))
                         }
                         _ => None,
@@ -49,12 +47,12 @@ impl NormalizeTopKWithAggregate for SqlQuery {
                                         aggs.iter().any(|(i, _, _)| *i == *n as usize)
                                     }
                                     // ... or by name
-                                    FieldReference::Expression(expr) => {
+                                    FieldReference::Expr(expr) => {
                                         aggs.iter().any(|(_, agg, alias)| {
                                             *agg == expr
                                                 || matches!(
                                                     expr,
-                                                    Expression::Column(col)
+                                                    Expr::Column(col)
                                                         if alias.as_ref() == Some(&col.name)
                                                 )
                                         })
@@ -62,7 +60,7 @@ impl NormalizeTopKWithAggregate for SqlQuery {
                                 };
 
                                 if !in_group_by_clause && !references_aggregate {
-                                    return Err(ReadySetError::ExpressionNotInGroupBy {
+                                    return Err(ReadySetError::ExprNotInGroupBy {
                                         expression: order_field.to_string(),
                                         position: "ORDER BY".to_owned(),
                                     });
@@ -85,7 +83,7 @@ impl NormalizeTopKWithAggregate for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, Dialect, Expression, LimitClause, OrderClause, OrderType};
+    use nom_sql::{parse_query, Dialect, Expr, LimitClause, OrderClause, OrderType};
 
     use super::*;
 
@@ -160,7 +158,7 @@ mod tests {
                     stmt.order,
                     Some(OrderClause {
                         order_by: vec![(
-                            FieldReference::Expression(Expression::Column("column_3".into())),
+                            FieldReference::Expr(Expr::Column("column_3".into())),
                             Some(OrderType::OrderAscending)
                         )]
                     })
@@ -206,7 +204,7 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.err(),
-            Some(ReadySetError::ExpressionNotInGroupBy { .. })
+            Some(ReadySetError::ExprNotInGroupBy { .. })
         ))
     }
 

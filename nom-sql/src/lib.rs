@@ -10,7 +10,7 @@ pub use sql_identifier::SqlIdentifier;
 
 pub use self::alter::{AlterColumnOperation, AlterTableDefinition, AlterTableStatement};
 pub use self::column::{Column, ColumnConstraint, ColumnSpecification};
-pub use self::common::{FieldDefinitionExpression, FieldReference, IndexType, SqlType, TableKey};
+pub use self::common::{FieldDefinitionExpr, FieldReference, IndexType, SqlType, TableKey};
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 pub use self::create::{
     CacheInner, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
@@ -22,9 +22,7 @@ pub use self::drop::{
     DropAllCachesStatement, DropCacheStatement, DropTableStatement, DropViewStatement,
 };
 pub use self::explain::ExplainStatement;
-pub use self::expression::{
-    BinaryOperator, Expression, FunctionExpression, InValue, UnaryOperator,
-};
+pub use self::expression::{BinaryOperator, Expr, FunctionExpr, InValue, UnaryOperator};
 pub use self::insert::InsertStatement;
 pub use self::join::{JoinConstraint, JoinOperator, JoinRightSide};
 pub use self::literal::{
@@ -33,9 +31,7 @@ pub use self::literal::{
 };
 pub use self::order::{OrderClause, OrderType};
 pub use self::parser::*;
-pub use self::select::{
-    CommonTableExpression, GroupByClause, JoinClause, LimitClause, SelectStatement,
-};
+pub use self::select::{CommonTableExpr, GroupByClause, JoinClause, LimitClause, SelectStatement};
 pub use self::set::{
     PostgresParameterScope, PostgresParameterValue, PostgresParameterValueInner, SetNames,
     SetPostgresParameter, SetPostgresParameterValue, SetStatement, SetVariables, Variable,

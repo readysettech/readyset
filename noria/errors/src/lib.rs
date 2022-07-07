@@ -203,7 +203,7 @@ pub enum ReadySetError {
              columns in the GROUP BY clause",
         Sensitive(expression)
     )]
-    ExpressionNotInGroupBy {
+    ExprNotInGroupBy {
         /// A string representation (via [`.to_string()`](ToString::to_string)) of the expression
         /// in question
         expression: String,
@@ -341,14 +341,14 @@ pub enum ReadySetError {
 
     /// Invalid index when evaluating a project expression.
     #[error("Column index out-of-bounds while evaluating project expression: index was {0}")]
-    ProjectExpressionInvalidColumnIndex(usize),
+    ProjectExprInvalidColumnIndex(usize),
 
     /// Error in built-in function of expression projection
     #[error(
         "Error in project expression built-in function: {}: {message}",
         Sensitive(function)
     )]
-    ProjectExpressionBuiltInFunctionError {
+    ProjectExprBuiltInFunctionError {
         /// The built-in function the error occured in.
         function: String,
         /// Details about the specific error.

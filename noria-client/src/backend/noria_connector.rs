@@ -5,7 +5,7 @@ use std::fmt;
 use std::ops::Bound;
 use std::sync::{atomic, Arc, RwLock};
 
-use dataflow_expression::Expression as DataflowExpression;
+use dataflow_expression::Expr as DataflowExpr;
 use itertools::Itertools;
 use launchpad::redacted::Sensitive;
 use nom_sql::{
@@ -1544,13 +1544,13 @@ fn build_view_query(
             filter_op_idx = Some(idx);
 
             // LIKE/ILIKE resolve to bool
-            Ok(DataflowExpression::Op {
-                left: Box::new(DataflowExpression::Column {
+            Ok(DataflowExpr::Op {
+                left: Box::new(DataflowExpr::Column {
                     index: column,
                     ty: key_type.clone().into(),
                 }),
                 op: *op,
-                right: Box::new(DataflowExpression::Literal {
+                right: Box::new(DataflowExpr::Literal {
                     val: value,
                     ty: key_type.clone().into(),
                 }),
@@ -1602,13 +1602,13 @@ fn build_view_query(
                             // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
                             let value = key[*idx - 1].coerce_to(key_type)?;
 
-                            let make_op = |op| DataflowExpression::Op {
-                                left: Box::new(DataflowExpression::Column {
+                            let make_op = |op| DataflowExpr::Op {
+                                left: Box::new(DataflowExpr::Column {
                                     index: *key_column_idx,
                                     ty: (*key_type).clone().into(),
                                 }),
                                 op,
-                                right: Box::new(DataflowExpression::Literal {
+                                right: Box::new(DataflowExpr::Literal {
                                     val: value.clone(),
                                     ty: (*key_type).clone().into(),
                                 }),
@@ -1711,14 +1711,12 @@ fn build_view_query(
     Ok(ViewQuery {
         key_comparisons: keys,
         block: read_behavior.is_blocking(),
-        filter: filters
-            .into_iter()
-            .reduce(|expr1, expr2| DataflowExpression::Op {
-                left: Box::new(expr1),
-                op: BinaryOperator::And,
-                right: Box::new(expr2),
-                ty: Type::Sql(SqlType::Bool), // AND is a boolean operator
-            }),
+        filter: filters.into_iter().reduce(|expr1, expr2| DataflowExpr::Op {
+            left: Box::new(expr1),
+            op: BinaryOperator::And,
+            right: Box::new(expr2),
+            ty: Type::Sql(SqlType::Bool), // AND is a boolean operator
+        }),
         timestamp: ticket,
     })
 }
@@ -2011,13 +2009,13 @@ mod tests {
 
             assert_eq!(
                 query.filter,
-                Some(DataflowExpression::Op {
-                    left: Box::new(DataflowExpression::Column {
+                Some(DataflowExpr::Op {
+                    left: Box::new(DataflowExpr::Column {
                         index: 1,
                         ty: Type::Sql(SqlType::Text)
                     }),
                     op: BinaryOperator::ILike,
-                    right: Box::new(DataflowExpression::Literal {
+                    right: Box::new(DataflowExpr::Literal {
                         val: DataType::from("%a%"),
                         ty: Type::Sql(SqlType::Text)
                     }),
@@ -2094,13 +2092,13 @@ mod tests {
 
             assert_eq!(
                 query.filter,
-                Some(DataflowExpression::Op {
-                    left: Box::new(DataflowExpression::Column {
+                Some(DataflowExpr::Op {
+                    left: Box::new(DataflowExpr::Column {
                         index: 0,
                         ty: Type::Sql(SqlType::Int(None))
                     }),
                     op: BinaryOperator::Greater,
-                    right: Box::new(DataflowExpression::Literal {
+                    right: Box::new(DataflowExpr::Literal {
                         val: 1.into(),
                         ty: Type::Sql(SqlType::Int(None))
                     }),
@@ -2133,13 +2131,13 @@ mod tests {
 
             assert_eq!(
                 query.filter,
-                Some(DataflowExpression::Op {
-                    left: Box::new(DataflowExpression::Column {
+                Some(DataflowExpr::Op {
+                    left: Box::new(DataflowExpr::Column {
                         index: 1,
                         ty: Type::Sql(SqlType::Text)
                     }),
                     op: BinaryOperator::Greater,
-                    right: Box::new(DataflowExpression::Literal {
+                    right: Box::new(DataflowExpr::Literal {
                         val: "a".into(),
                         ty: Type::Sql(SqlType::Text)
                     }),

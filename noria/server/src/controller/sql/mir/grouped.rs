@@ -6,8 +6,8 @@ use dataflow::post_lookup::{
 use mir::node::node_inner::MirNodeInner;
 use mir::{Column, MirNodeRef};
 use nom_sql::analysis::ReferredColumns;
-use nom_sql::FunctionExpression::*;
-use nom_sql::{self, Expression, FieldDefinitionExpression, SelectStatement, SqlIdentifier};
+use nom_sql::FunctionExpr::*;
+use nom_sql::{self, Expr, FieldDefinitionExpr, SelectStatement, SqlIdentifier};
 use noria_errors::{unsupported, ReadySetError};
 use noria_sql_passes::is_aggregate;
 
@@ -23,9 +23,9 @@ pub(super) fn make_predicates_above_grouped<'a>(
     qg: &QueryGraph,
     node_for_rel: &HashMap<&SqlIdentifier, MirNodeRef>,
     node_count: usize,
-    column_to_predicates: &HashMap<nom_sql::Column, Vec<&'a Expression>>,
+    column_to_predicates: &HashMap<nom_sql::Column, Vec<&'a Expr>>,
     prev_node: &mut Option<MirNodeRef>,
-) -> ReadySetResult<(Vec<&'a Expression>, Vec<MirNodeRef>)> {
+) -> ReadySetResult<(Vec<&'a Expr>, Vec<MirNodeRef>)> {
     let mut created_predicates = Vec::new();
     let mut predicates_above_group_by_nodes = Vec::new();
     let mut node_count = node_count;
@@ -77,7 +77,7 @@ pub(super) fn make_expressions_above_grouped(
     qg: &QueryGraph,
     node_count: usize,
     prev_node: &mut Option<MirNodeRef>,
-) -> HashMap<Expression, SqlIdentifier> {
+) -> HashMap<Expr, SqlIdentifier> {
     let exprs: Vec<_> = qg
         .aggregates
         .iter()
@@ -85,7 +85,7 @@ pub(super) fn make_expressions_above_grouped(
         .filter(|f| is_aggregate(f))
         .flat_map(|f| f.arguments())
         // We don't need to do any work for bare column expressions
-        .filter(|arg| !matches!(arg, Expression::Column(_)))
+        .filter(|arg| !matches!(arg, Expr::Column(_)))
         .map(|expr| (SqlIdentifier::from(expr.to_string()), expr.clone()))
         .collect();
 
@@ -113,7 +113,7 @@ pub(super) fn make_grouped(
     node_for_rel: &HashMap<&SqlIdentifier, MirNodeRef>,
     node_count: usize,
     prev_node: &mut Option<MirNodeRef>,
-    projected_exprs: &HashMap<Expression, SqlIdentifier>,
+    projected_exprs: &HashMap<Expr, SqlIdentifier>,
 ) -> ReadySetResult<Vec<MirNodeRef>> {
     let mut agg_nodes: Vec<MirNodeRef> = Vec::new();
     let mut node_count = node_count;
@@ -295,14 +295,14 @@ pub(super) fn post_lookup_aggregates(
                 .fields
                 .iter()
                 .filter_map(|expr| match expr {
-                    FieldDefinitionExpression::Expression {
+                    FieldDefinitionExpr::Expr {
                         alias: Some(alias), ..
                     } => Some(Column::named(alias.clone()).aliased_as_table(query_name.clone())),
-                    FieldDefinitionExpression::Expression {
-                        expr: Expression::Column(col),
+                    FieldDefinitionExpr::Expr {
+                        expr: Expr::Column(col),
                         ..
                     } => Some(Column::from(col).aliased_as_table(query_name.clone())),
-                    FieldDefinitionExpression::Expression { expr, .. } => {
+                    FieldDefinitionExpr::Expr { expr, .. } => {
                         Some(Column::named(expr.to_string()).aliased_as_table(query_name.clone()))
                     }
                     _ => None,

@@ -26,31 +26,31 @@ use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BuiltinFunction {
     /// convert_tz(expr, expr, expr)
-    ConvertTZ(Expression, Expression, Expression),
+    ConvertTZ(Expr, Expr, Expr),
     /// dayofweek(expr)
-    DayOfWeek(Expression),
+    DayOfWeek(Expr),
     /// ifnull(expr, expr)
-    IfNull(Expression, Expression),
+    IfNull(Expr, Expr),
     /// month(expr)
-    Month(Expression),
+    Month(Expr),
     /// timediff(expr, expr)
-    Timediff(Expression, Expression),
+    Timediff(Expr, Expr),
     /// addtime(expr, expr)
-    Addtime(Expression, Expression),
+    Addtime(Expr, Expr),
     /// round(expr, prec)
-    Round(Expression, Expression),
+    Round(Expr, Expr),
     /// json_typeof(expr)
-    JsonTypeof(Expression),
+    JsonTypeof(Expr),
     /// jsonb_typeof(expr)
-    JsonbTypeof(Expression),
+    JsonbTypeof(Expr),
 }
 
 impl BuiltinFunction {
     pub fn from_name_and_args<A>(name: &str, args: A) -> Result<(Self, Type), ReadySetError>
     where
-        A: IntoIterator<Item = Expression>,
+        A: IntoIterator<Item = Expr>,
     {
-        fn type_for_round(expr: &Expression, _precision: &Expression) -> Type {
+        fn type_for_round(expr: &Expr, _precision: &Expr) -> Type {
             match expr.ty() {
                 Type::Sql(ty) => match ty {
                     // When the first argument is of any integer type, the return type is always
@@ -128,7 +128,7 @@ impl BuiltinFunction {
             }
             "round" => {
                 let expr = args.next().ok_or_else(arity_error)?;
-                let prec = args.next().unwrap_or(Expression::Literal {
+                let prec = args.next().unwrap_or(Expr::Literal {
                     val: DataType::Int(0),
                     ty: Type::Sql(SqlType::Int(None)),
                 });
@@ -208,7 +208,7 @@ impl fmt::Display for BuiltinFunction {
 /// Expressions that can be evaluated during execution of a query
 ///
 /// This type, which is the final lowered version of the original Expression AST, essentially
-/// represents a desugared version of [`nom_sql::Expression`], with the following transformations
+/// represents a desugared version of [`nom_sql::Expr`], with the following transformations
 /// applied during lowering:
 ///
 /// - Literals replaced with their corresponding [`DataType`]
@@ -218,9 +218,9 @@ impl fmt::Display for BuiltinFunction {
 ///   x = z AND ...`
 ///
 /// During forward processing of dataflow, instances of these expressions are
-/// [evaluated](Expression::eval) by both projection nodes and filter nodes.
+/// [evaluated](Expr::eval) by both projection nodes and filter nodes.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum Expression {
+pub enum Expr {
     /// A reference to a column, by index, in the parent node
     Column { index: usize, ty: Type },
 
@@ -230,17 +230,17 @@ pub enum Expression {
     /// A binary operation
     Op {
         op: BinaryOperator,
-        left: Box<Expression>,
-        right: Box<Expression>,
+        left: Box<Expr>,
+        right: Box<Expr>,
         ty: Type,
     },
 
     /// CAST(expr AS type)
     Cast {
-        /// The `Expression` to cast
-        expr: Box<Expression>,
+        /// The `Expr` to cast
+        expr: Box<Expr>,
         /// The `SqlType` that we're attempting to cast to. This is provided
-        /// when `Expression::Cast` is created.
+        /// when `Expr::Cast` is created.
         to_type: SqlType,
         /// The `Type` of the resulting cast. For now, this should be `Type::Sql(to_type)`
         /// TODO: This field may not be necessary
@@ -253,16 +253,16 @@ pub enum Expression {
     },
 
     CaseWhen {
-        condition: Box<Expression>,
-        then_expr: Box<Expression>,
-        else_expr: Box<Expression>,
+        condition: Box<Expr>,
+        then_expr: Box<Expr>,
+        else_expr: Box<Expr>,
         ty: Type,
     },
 }
 
-impl fmt::Display for Expression {
+impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use Expression::*;
+        use Expr::*;
 
         match self {
             Column { index, .. } => write!(f, "{}", index),
@@ -314,20 +314,20 @@ macro_rules! non_null {
     };
 }
 
-impl Expression {
+impl Expr {
     /// Evaluate this expression, given a source record to pull columns from
     pub fn eval<D>(&self, record: &[D]) -> ReadySetResult<DataType>
     where
         D: Borrow<DataType>,
     {
-        use Expression::*;
+        use Expr::*;
 
         // TODO: Enforce type coercion
         match self {
             Column { index, .. } => record
                 .get(*index)
                 .map(|dt| dt.borrow().clone())
-                .ok_or(ReadySetError::ProjectExpressionInvalidColumnIndex(*index)),
+                .ok_or(ReadySetError::ProjectExprInvalidColumnIndex(*index)),
             Literal { val, .. } => Ok(val.clone()),
             Op {
                 op, left, right, ..
@@ -588,7 +588,7 @@ impl Expression {
                     let json_str = <&str>::try_from(&val)?;
 
                     let json = serde_json::Value::from_str(json_str).map_err(|e| {
-                        ReadySetError::ProjectExpressionBuiltInFunctionError {
+                        ReadySetError::ProjectExprBuiltInFunctionError {
                             function: func.name().into(),
                             message: format!("parsing JSON expression failed: {}", Sensitive(&e)),
                         }
@@ -614,12 +614,12 @@ impl Expression {
 
     pub fn ty(&self) -> &Type {
         match self {
-            Expression::Column { ty, .. }
-            | Expression::Literal { ty, .. }
-            | Expression::Op { ty, .. }
-            | Expression::Call { ty, .. }
-            | Expression::CaseWhen { ty, .. }
-            | Expression::Cast { ty, .. } => ty,
+            Expr::Column { ty, .. }
+            | Expr::Literal { ty, .. }
+            | Expr::Op { ty, .. }
+            | Expr::Call { ty, .. }
+            | Expr::CaseWhen { ty, .. }
+            | Expr::Cast { ty, .. } => ty,
         }
     }
 }
@@ -632,7 +632,7 @@ pub fn convert_tz(
     src: &str,
     target: &str,
 ) -> ReadySetResult<NaiveDateTime> {
-    let mk_err = |message: &str| ReadySetError::ProjectExpressionBuiltInFunctionError {
+    let mk_err = |message: &str| ReadySetError::ProjectExprBuiltInFunctionError {
         function: "convert_tz".to_owned(),
         message: message.to_owned(),
     };
@@ -694,7 +694,7 @@ mod tests {
     use rust_decimal::prelude::FromPrimitive;
     use rust_decimal::Decimal;
     use test_strategy::proptest;
-    use Expression::*;
+    use Expr::*;
 
     use super::*;
     use crate::utils::{make_call, make_column, make_literal};
@@ -1378,7 +1378,7 @@ mod tests {
     #[test]
     fn value_truthiness() {
         assert_eq!(
-            Expression::Op {
+            Expr::Op {
                 left: Box::new(make_literal(1.into())),
                 op: BinaryOperator::And,
                 right: Box::new(make_literal(3.into())),
@@ -1390,7 +1390,7 @@ mod tests {
         );
 
         assert_eq!(
-            Expression::Op {
+            Expr::Op {
                 left: Box::new(make_literal(1.into())),
                 op: BinaryOperator::And,
                 right: Box::new(make_literal(0.into())),
@@ -1404,7 +1404,7 @@ mod tests {
 
     #[test]
     fn eval_case_when() {
-        let expr = Expression::CaseWhen {
+        let expr = Expr::CaseWhen {
             condition: Box::new(Op {
                 left: Box::new(make_column(0)),
                 op: BinaryOperator::Equal,
@@ -1429,7 +1429,7 @@ mod tests {
 
     #[test]
     fn like_expr() {
-        let expr = Expression::Op {
+        let expr = Expr::Op {
             left: Box::new(make_literal("foo".into())),
             op: BinaryOperator::Like,
             right: Box::new(make_literal("f%".into())),

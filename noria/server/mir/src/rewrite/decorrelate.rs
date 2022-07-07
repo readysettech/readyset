@@ -2,7 +2,7 @@ use std::iter;
 
 use itertools::{Either, Itertools};
 use nom_sql::analysis::ReferredColumns;
-use nom_sql::{BinaryOperator, Expression};
+use nom_sql::{BinaryOperator, Expr};
 use noria_errors::{internal, unsupported, ReadySetResult};
 use tracing::{instrument, trace};
 
@@ -209,10 +209,10 @@ pub(super) fn eliminate_dependent_joins(query: &mut MirQuery) -> ReadySetResult<
         let dependent_condition = |node: &MirNodeRef| {
             if let MirNodeInner::Filter { conditions } = &node.borrow().inner {
                 match conditions {
-                    Expression::BinaryOp {
-                        lhs: box Expression::Column(left_col),
+                    Expr::BinaryOp {
+                        lhs: box Expr::Column(left_col),
                         op: BinaryOperator::Equal,
-                        rhs: box Expression::Column(right_col),
+                        rhs: box Expr::Column(right_col),
                     } => {
                         let matches_left = left_columns.iter().any(|c| *c == *left_col);
                         let matches_right = left_columns.iter().any(|c| *c == *right_col);
@@ -334,7 +334,7 @@ mod tests {
 
     use common::{DataType, IndexType};
     use dataflow::ops::grouped::aggregate::Aggregation;
-    use nom_sql::{BinaryOperator, ColumnSpecification, Expression, Literal, SqlType};
+    use nom_sql::{BinaryOperator, ColumnSpecification, Expr, Literal, SqlType};
 
     use super::*;
     use crate::node::{MirNode, MirNodeInner};
@@ -375,10 +375,10 @@ mod tests {
             "t2_filter".into(),
             0,
             MirNodeInner::Filter {
-                conditions: Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column("t2.a".into())),
+                conditions: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column("t2.a".into())),
                     op: BinaryOperator::Equal,
-                    rhs: Box::new(Expression::Column("t1.a".into())),
+                    rhs: Box::new(Expr::Column("t1.a".into())),
                 },
             },
             vec![Rc::downgrade(&t2)],
@@ -433,10 +433,10 @@ mod tests {
             "count_gt_0".into(),
             0,
             MirNodeInner::Filter {
-                conditions: Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column("__exists_count".into())),
+                conditions: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column("__exists_count".into())),
                     op: BinaryOperator::Greater,
-                    rhs: Box::new(Expression::Literal(Literal::Integer(0))),
+                    rhs: Box::new(Expr::Literal(Literal::Integer(0))),
                 },
             },
             vec![Rc::downgrade(&exists_count)],
@@ -609,10 +609,10 @@ mod tests {
             "t2_filter".into(),
             0,
             MirNodeInner::Filter {
-                conditions: Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column("t2.a".into())),
+                conditions: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column("t2.a".into())),
                     op: BinaryOperator::Equal,
-                    rhs: Box::new(Expression::Column("t1.a".into())),
+                    rhs: Box::new(Expr::Column("t1.a".into())),
                 },
             },
             vec![Rc::downgrade(&t2)],
@@ -638,13 +638,13 @@ mod tests {
             "q_t2_count_f1".into(),
             0,
             MirNodeInner::Filter {
-                conditions: Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column(nom_sql::Column {
+                conditions: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(nom_sql::Column {
                         table: None,
                         name: "COUNT(t2.b)".into(),
                     })),
                     op: BinaryOperator::GreaterOrEqual,
-                    rhs: Box::new(Expression::Literal(4.into())),
+                    rhs: Box::new(Expr::Literal(4.into())),
                 },
             },
             vec![Rc::downgrade(&t2_count)],
@@ -656,13 +656,13 @@ mod tests {
             "q_t2_count_f2".into(),
             0,
             MirNodeInner::Filter {
-                conditions: Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column(nom_sql::Column {
+                conditions: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(nom_sql::Column {
                         table: None,
                         name: "COUNT(t2.b)".into(),
                     })),
                     op: BinaryOperator::LessOrEqual,
-                    rhs: Box::new(Expression::Literal(7.into())),
+                    rhs: Box::new(Expr::Literal(7.into())),
                 },
             },
             vec![Rc::downgrade(&t2_count_f1)],
@@ -706,10 +706,10 @@ mod tests {
             "count_gt_0".into(),
             0,
             MirNodeInner::Filter {
-                conditions: Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column("__exists_count".into())),
+                conditions: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column("__exists_count".into())),
                     op: BinaryOperator::Greater,
-                    rhs: Box::new(Expression::Literal(Literal::Integer(0))),
+                    rhs: Box::new(Expr::Literal(Literal::Integer(0))),
                 },
             },
             vec![Rc::downgrade(&exists_count)],

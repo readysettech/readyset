@@ -13,8 +13,7 @@ use launchpad::redacted::Sensitive;
 use nom_sql::analysis::ReferredTables;
 use nom_sql::{
     parser as sql_parser, BinaryOperator, CompoundSelectOperator, CompoundSelectStatement,
-    CreateTableStatement, FieldDefinitionExpression, SelectStatement, SqlIdentifier, SqlQuery,
-    Table,
+    CreateTableStatement, FieldDefinitionExpr, SelectStatement, SqlIdentifier, SqlQuery, Table,
 };
 use noria::internal::IndexType;
 use noria_errors::{
@@ -273,7 +272,7 @@ impl SqlIncorporator {
                     // GROUP BY clause
                     let no_grouped_columns = qg.columns.iter().all(|c| match *c {
                         OutputColumn::Literal(_) => true,
-                        OutputColumn::Expression(ref ec) => contains_aggregate(&ec.expression),
+                        OutputColumn::Expr(ref ec) => contains_aggregate(&ec.expression),
                         OutputColumn::Data { .. } => true,
                     });
 
@@ -812,7 +811,7 @@ impl SqlIncorporator {
                             name: for_table,
                             ..Default::default()
                         }],
-                        fields: vec![FieldDefinitionExpression::All],
+                        fields: vec![FieldDefinitionExpr::All],
                         ..Default::default()
                     });
                     let is_name_required = true;
@@ -2240,7 +2239,7 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok());
-            // note: the FunctionExpression isn't a sumfilter because it takes the hash before
+            // note: the FunctionExpr isn't a sumfilter because it takes the hash before
             // merging
             let qid = query_id_hash(
                 &["votes"],

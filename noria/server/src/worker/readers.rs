@@ -10,9 +10,7 @@ use std::{iter, mem, time};
 
 use async_bincode::AsyncBincodeStream;
 use dataflow::prelude::{DataType, *};
-use dataflow::{
-    Expression as DataflowExpression, LookupError, ReaderMap, Readers, SingleReadHandle,
-};
+use dataflow::{Expr as DataflowExpr, LookupError, ReaderMap, Readers, SingleReadHandle};
 use derive_more::From;
 use failpoint_macros::set_failpoint;
 use futures_util::future::TryFutureExt;
@@ -581,7 +579,7 @@ pub(crate) async fn listen(
 fn do_lookup<'a>(
     reader: &'a SingleReadHandle,
     key: &KeyComparison,
-    filter: &Option<DataflowExpression>,
+    filter: &Option<DataflowExpr>,
     serialize_results: bool,
 ) -> Result<ServerReadReplyBatch, dataflow::LookupError> {
     fn maybe_serialize<'a, I>(rs: I, serialize_results: bool) -> ServerReadReplyBatch
@@ -658,7 +656,7 @@ pub struct BlockingRead {
     pending_keys: Vec<KeyComparison>,
     pending_indices: Vec<usize>,
     truth: Readers,
-    filter: Option<DataflowExpression>,
+    filter: Option<DataflowExpr>,
     trigger_timeout: Duration,
     next_trigger: time::Instant,
     first: time::Instant,

@@ -4,7 +4,7 @@ use std::mem;
 use nom_sql::analysis::visit::{
     walk_group_by_clause, walk_order_clause, walk_select_statement, Visitor,
 };
-use nom_sql::{Column, FieldDefinitionExpression, SelectStatement, SqlIdentifier, SqlQuery, Table};
+use nom_sql::{Column, FieldDefinitionExpr, SelectStatement, SqlIdentifier, SqlQuery, Table};
 use noria_errors::{internal, ReadySetError, ReadySetResult};
 use tracing::warn;
 
@@ -104,7 +104,7 @@ impl<'ast, 'schema> Visitor<'ast> for ExpandImpliedTablesVisitor<'schema> {
                 .fields
                 .iter()
                 .filter_map(|fde| match fde {
-                    FieldDefinitionExpression::Expression {
+                    FieldDefinitionExpr::Expr {
                         alias: Some(alias), ..
                     } => Some(alias.clone()),
                     _ => None,
@@ -204,9 +204,7 @@ mod tests {
     use std::collections::HashMap;
 
     use maplit::hashmap;
-    use nom_sql::{
-        parse_query, Column, Dialect, Expression, FieldDefinitionExpression, SqlQuery, Table,
-    };
+    use nom_sql::{parse_query, Column, Dialect, Expr, FieldDefinitionExpr, SqlQuery, Table};
 
     use super::*;
 
@@ -220,13 +218,13 @@ mod tests {
         let q = SelectStatement {
             tables: vec![Table::from("users"), Table::from("articles")],
             fields: vec![
-                FieldDefinitionExpression::from(Column::from("name")),
-                FieldDefinitionExpression::from(Column::from("title")),
+                FieldDefinitionExpr::from(Column::from("name")),
+                FieldDefinitionExpr::from(Column::from("title")),
             ],
-            where_clause: Some(Expression::BinaryOp {
-                lhs: Box::new(Expression::Column(Column::from("users.id"))),
+            where_clause: Some(Expr::BinaryOp {
+                lhs: Box::new(Expr::Column(Column::from("users.id"))),
                 op: BinaryOperator::Equal,
-                rhs: Box::new(Expression::Column(Column::from("author"))),
+                rhs: Box::new(Expr::Column(Column::from("author"))),
             }),
             ..Default::default()
         };
@@ -246,16 +244,16 @@ mod tests {
                 assert_eq!(
                     tq.fields,
                     vec![
-                        FieldDefinitionExpression::from(Column::from("users.name")),
-                        FieldDefinitionExpression::from(Column::from("articles.title")),
+                        FieldDefinitionExpr::from(Column::from("users.name")),
+                        FieldDefinitionExpr::from(Column::from("articles.title")),
                     ]
                 );
                 assert_eq!(
                     tq.where_clause,
-                    Some(Expression::BinaryOp {
-                        lhs: Box::new(Expression::Column(Column::from("users.id"))),
+                    Some(Expr::BinaryOp {
+                        lhs: Box::new(Expr::Column(Column::from("users.id"))),
                         op: BinaryOperator::Equal,
-                        rhs: Box::new(Expression::Column(Column::from("articles.author"))),
+                        rhs: Box::new(Expr::Column(Column::from("articles.author"))),
                     })
                 );
             }

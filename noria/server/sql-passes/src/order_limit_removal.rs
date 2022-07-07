@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expression, SqlIdentifier,
-    SqlQuery, Table, TableKey,
+    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expr, SqlIdentifier, SqlQuery,
+    Table, TableKey,
 };
 use noria_errors::{ReadySetError, ReadySetResult};
 
@@ -93,22 +93,22 @@ fn is_unique_or_primary(
 }
 
 fn compares_unique_key_against_literal(
-    expr: &Expression,
+    expr: &Expr,
     base_schemas: &HashMap<SqlIdentifier, CreateTableStatement>,
     tables: &[Table],
 ) -> ReadySetResult<bool> {
     match expr {
-        Expression::BinaryOp {
-            lhs: box Expression::Literal(_),
-            rhs: box Expression::Column(ref c),
+        Expr::BinaryOp {
+            lhs: box Expr::Literal(_),
+            rhs: box Expr::Column(ref c),
             op: BinaryOperator::Equal | BinaryOperator::Is,
         }
-        | Expression::BinaryOp {
-            lhs: box Expression::Column(ref c),
-            rhs: box Expression::Literal(_),
+        | Expr::BinaryOp {
+            lhs: box Expr::Column(ref c),
+            rhs: box Expr::Literal(_),
             op: BinaryOperator::Equal | BinaryOperator::Is,
         } => Ok(is_unique_or_primary(c, base_schemas, tables)?),
-        Expression::BinaryOp {
+        Expr::BinaryOp {
             op: BinaryOperator::And,
             ref lhs,
             ref rhs,

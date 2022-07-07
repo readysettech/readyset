@@ -6,7 +6,7 @@ use std::{iter, mem};
 use itertools::{Either, Itertools};
 use nom_sql::analysis::visit::{self, Visitor};
 use nom_sql::{
-    BinaryOperator, Expression, InValue, ItemPlaceholder, LimitClause, Literal, SelectStatement,
+    BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, SelectStatement,
 };
 use noria_errors::{unsupported, ReadySetError, ReadySetResult};
 
@@ -97,10 +97,10 @@ struct RewrittenIn {
 /// a parametrized point query, eg (value = '?')
 fn where_in_to_placeholders(
     leftmost_param_index: &mut usize,
-    expr: &mut Expression,
+    expr: &mut Expr,
 ) -> ReadySetResult<RewrittenIn> {
     let (lhs, list, negated) = match *expr {
-        Expression::In {
+        Expr::In {
             ref mut lhs,
             rhs: InValue::List(ref mut list),
             negated,
@@ -114,7 +114,7 @@ fn where_in_to_placeholders(
     let list_iter = std::mem::take(list).into_iter(); // Take the list to free the mutable reference
     let literals = list_iter
         .map(|e| match e {
-            Expression::Literal(Literal::Placeholder(ph)) => Ok(ph),
+            Expr::Literal(Literal::Placeholder(ph)) => Ok(ph),
             _ => unsupported!("IN only supported on placeholders, got: {}", e),
         })
         .collect::<ReadySetResult<Vec<_>>>()?;
@@ -128,10 +128,10 @@ fn where_in_to_placeholders(
         BinaryOperator::Equal
     };
 
-    *expr = Expression::BinaryOp {
-        lhs: mem::replace(lhs, Box::new(Expression::Literal(Literal::Null))),
+    *expr = Expr::BinaryOp {
+        lhs: mem::replace(lhs, Box::new(Expr::Literal(Literal::Null))),
         op,
-        rhs: Box::new(Expression::Literal(Literal::Placeholder(
+        rhs: Box::new(Expr::Literal(Literal::Placeholder(
             ItemPlaceholder::QuestionMark,
         ))),
     };
@@ -158,15 +158,15 @@ impl<'ast> Visitor<'ast> for CollapseWhereInVisitor {
         Ok(())
     }
 
-    fn visit_expression(&mut self, expression: &'ast mut Expression) -> Result<(), Self::Error> {
-        if let Expression::In {
+    fn visit_expression(&mut self, expression: &'ast mut Expr) -> Result<(), Self::Error> {
+        if let Expr::In {
             rhs: InValue::List(list),
             ..
         } = expression
         {
             if list
                 .iter()
-                .any(|l| matches!(l, Expression::Literal(Literal::Placeholder(_))))
+                .any(|l| matches!(l, Expr::Literal(Literal::Placeholder(_))))
             {
                 // If the list contains placeholders, flatten them. `where_in_to_placeholders` takes
                 // care of erroring-out if the list contains any *non*-placeholders
@@ -440,7 +440,7 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
         Ok(())
     }
 
-    fn visit_where_clause(&mut self, expression: &'ast mut Expression) -> Result<(), Self::Error> {
+    fn visit_where_clause(&mut self, expression: &'ast mut Expr) -> Result<(), Self::Error> {
         // We can only support parameters in the WHERE clause of the top-level query, not any
         // subqueries it contains.
         self.in_supported_position = self.query_depth <= 1;
@@ -449,46 +449,46 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
         Ok(())
     }
 
-    fn visit_expression(&mut self, expression: &'ast mut Expression) -> Result<(), Self::Error> {
+    fn visit_expression(&mut self, expression: &'ast mut Expr) -> Result<(), Self::Error> {
         let was_supported = self.in_supported_position;
         if was_supported {
             match expression {
-                Expression::BinaryOp {
-                    lhs: box Expression::Column(_),
+                Expr::BinaryOp {
+                    lhs: box Expr::Column(_),
                     op: BinaryOperator::Equal,
-                    rhs: box Expression::Literal(Literal::Placeholder(_)),
+                    rhs: box Expr::Literal(Literal::Placeholder(_)),
                 } => {}
-                Expression::BinaryOp {
-                    lhs: box Expression::Column(_),
+                Expr::BinaryOp {
+                    lhs: box Expr::Column(_),
                     op: BinaryOperator::Equal,
-                    rhs: box Expression::Literal(lit),
+                    rhs: box Expr::Literal(lit),
                 } => {
                     self.replace_literal(lit);
                     return Ok(());
                 }
-                Expression::BinaryOp {
-                    lhs: lhs @ box Expression::Literal(_),
+                Expr::BinaryOp {
+                    lhs: lhs @ box Expr::Literal(_),
                     op: BinaryOperator::Equal,
-                    rhs: rhs @ box Expression::Column(_),
+                    rhs: rhs @ box Expr::Column(_),
                 } => {
                     // for lit = col, swap the equality first then revisit
                     mem::swap(lhs, rhs);
                     return self.visit_expression(expression);
                 }
-                Expression::In {
-                    lhs: box Expression::Column(_),
+                Expr::In {
+                    lhs: box Expr::Column(_),
                     rhs: InValue::List(exprs),
                     negated: false,
                 } if exprs.iter().all(|e| {
                     matches!(
                         e,
-                        Expression::Literal(lit) if !matches!(lit, Literal::Placeholder(_))
+                        Expr::Literal(lit) if !matches!(lit, Literal::Placeholder(_))
                     )
                 }) && !self.has_aggregates =>
                 {
                     let exprs = mem::replace(
                         exprs,
-                        iter::repeat(Expression::Literal(Literal::Placeholder(
+                        iter::repeat(Expr::Literal(Literal::Placeholder(
                             ItemPlaceholder::QuestionMark,
                         )))
                         .take(exprs.len())
@@ -499,7 +499,7 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
                     self.out
                         .extend(exprs.into_iter().enumerate().filter_map(
                             move |(i, expr)| match expr {
-                                Expression::Literal(lit) => Some((i + start_index, lit)),
+                                Expr::Literal(lit) => Some((i + start_index, lit)),
                                 // unreachable since we checked everything in the list is a literal
                                 // above, but best not to panic regardless
                                 _ => None,
@@ -508,7 +508,7 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
                     self.param_index += num_exprs;
                     return Ok(());
                 }
-                Expression::BinaryOp {
+                Expr::BinaryOp {
                     lhs,
                     op: BinaryOperator::And,
                     rhs,
@@ -552,12 +552,12 @@ fn auto_parametrize_query(query: &mut SelectStatement) -> Vec<(usize, Literal)> 
             .any(|subexpr| {
                 matches!(
                     subexpr,
-                    Expression::BinaryOp {
+                    Expr::BinaryOp {
                         op: BinaryOperator::Less
                             | BinaryOperator::Greater
                             | BinaryOperator::LessOrEqual
                             | BinaryOperator::GreaterOrEqual,
-                        rhs: box Expression::Literal(Literal::Placeholder(..)),
+                        rhs: box Expr::Literal(Literal::Placeholder(..)),
                         ..
                     }
                 )

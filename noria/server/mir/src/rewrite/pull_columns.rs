@@ -51,9 +51,7 @@ pub(super) fn pull_all_required_columns(q: &mut MirQuery) -> ReadySetResult<()> 
 mod tests {
     use common::IndexType;
     use dataflow::ops::grouped::aggregate::Aggregation;
-    use nom_sql::{
-        BinaryOperator, ColumnSpecification, Expression, FunctionExpression, Literal, SqlType,
-    };
+    use nom_sql::{BinaryOperator, ColumnSpecification, Expr, FunctionExpr, Literal, SqlType};
     use noria::ViewPlaceholder;
 
     use super::*;
@@ -117,10 +115,10 @@ mod tests {
             vec![],
         );
 
-        let condition_expression_1 = Expression::BinaryOp {
+        let condition_expression_1 = Expr::BinaryOp {
             op: BinaryOperator::Equal,
-            lhs: Box::new(Expression::Column("a".into())),
-            rhs: Box::new(Expression::Literal(Literal::Integer(1))),
+            lhs: Box::new(Expr::Column("a".into())),
+            rhs: Box::new(Expr::Literal(Literal::Integer(1))),
         };
 
         // σ[a = 1]
@@ -142,12 +140,9 @@ mod tests {
                 emit: vec!["a".into(), "agg".into()],
                 expressions: vec![(
                     "c0".into(),
-                    Expression::Call(FunctionExpression::Call {
+                    Expr::Call(FunctionExpr::Call {
                         name: "ifnull".into(),
-                        arguments: vec![
-                            Expression::Column("c".into()),
-                            Expression::Literal(0.into()),
-                        ],
+                        arguments: vec![Expr::Column("c".into()), Expr::Literal(0.into())],
                     }),
                 )],
                 literals: vec![],

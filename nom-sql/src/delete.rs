@@ -10,12 +10,12 @@ use crate::common::{schema_table_reference, statement_terminator};
 use crate::select::where_clause;
 use crate::table::Table;
 use crate::whitespace::whitespace1;
-use crate::{Dialect, Expression};
+use crate::{Dialect, Expr};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DeleteStatement {
     pub table: Table,
-    pub where_clause: Option<Expression>,
+    pub where_clause: Option<Expr>,
 }
 
 impl fmt::Display for DeleteStatement {
@@ -86,10 +86,10 @@ mod tests {
     fn delete_with_where_clause() {
         let qstring = "DELETE FROM users WHERE id = 1;";
         let res = deletion(Dialect::MySQL)(qstring.as_bytes());
-        let expected_left = Expression::Column(Column::from("id"));
-        let expected_where_cond = Some(Expression::BinaryOp {
+        let expected_left = Expr::Column(Column::from("id"));
+        let expected_where_cond = Some(Expr::BinaryOp {
             lhs: Box::new(expected_left),
-            rhs: Box::new(Expression::Literal(Literal::Integer(1))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(1))),
             op: BinaryOperator::Equal,
         });
         assert_eq!(

@@ -23,7 +23,7 @@ use dataflow::ops::project::Project;
 use dataflow::ops::union::{self, Union};
 use dataflow::post_lookup::PostLookup;
 use dataflow::utils::{dataflow_column, make_columns};
-use dataflow::{DurabilityMode, Expression as DataflowExpression, PersistenceParameters};
+use dataflow::{DurabilityMode, Expr as DataflowExpr, PersistenceParameters};
 use futures::StreamExt;
 use itertools::Itertools;
 use nom_sql::{
@@ -4846,13 +4846,13 @@ async fn post_read_ilike() {
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::from_range(&(..))],
             block: true,
-            filter: Some(DataflowExpression::Op {
-                left: Box::new(DataflowExpression::Column {
+            filter: Some(DataflowExpr::Op {
+                left: Box::new(DataflowExpr::Column {
                     index: 0,
                     ty: Type::Sql(SqlType::Text),
                 }),
                 op: BinaryOperator::ILike,
-                right: Box::new(DataflowExpression::Literal {
+                right: Box::new(DataflowExpr::Literal {
                     val: "%a%".into(),
                     ty: Type::Sql(SqlType::Text),
                 }),

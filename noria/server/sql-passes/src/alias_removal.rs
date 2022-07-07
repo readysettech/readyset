@@ -4,7 +4,7 @@ use std::mem;
 use itertools::Itertools;
 use nom_sql::analysis::visit::{walk_select_statement, Visitor};
 use nom_sql::{
-    Column, CommonTableExpression, JoinRightSide, SelectStatement, SqlIdentifier, SqlQuery, Table,
+    Column, CommonTableExpr, JoinRightSide, SelectStatement, SqlIdentifier, SqlQuery, Table,
 };
 
 #[derive(Debug, PartialEq)]
@@ -68,47 +68,48 @@ impl<'ast, 'a> Visitor<'ast> for RemoveAliasesVisitor<'a> {
             .into_group_map();
 
         // Use the map of unique table references to identify any necessary alias rewrites.
-        let table_alias_rewrites: Vec<TableAliasRewrite> = table_refs
-            .into_iter()
-            .flat_map(|(name, aliases)| match aliases[..] {
-                [None] => {
-                    // The table is never referred to by an alias. No rewrite is needed.
-                    vec![]
-                }
+        let table_alias_rewrites: Vec<TableAliasRewrite> =
+            table_refs
+                .into_iter()
+                .flat_map(|(name, aliases)| match aliases[..] {
+                    [None] => {
+                        // The table is never referred to by an alias. No rewrite is needed.
+                        vec![]
+                    }
 
-                [Some(ref alias)] => {
-                    // The table is only ever referred to using one specific alias. Rewrite
-                    // to remove the alias and refer to the table itself.
-                    vec![TableAliasRewrite::Table {
-                        from: alias.clone(),
-                        to_table: name,
-                    }]
-                }
-
-                _ => aliases
-                    .into_iter()
-                    .flatten()
-                    .map(|alias| {
-                        // The alias is one among multiple distinct references to the
-                        // table. Create a globally unique view name, derived from the
-                        // query name, and rewrite to remove the alias and refer to this
-                        // view.
-                        TableAliasRewrite::View {
+                    [Some(ref alias)] => {
+                        // The table is only ever referred to using one specific alias. Rewrite
+                        // to remove the alias and refer to the table itself.
+                        vec![TableAliasRewrite::Table {
                             from: alias.clone(),
-                            to_view: format!("__{}__{}", self.query_name, alias).into(),
-                            for_table: name.clone(),
-                        }
-                    })
-                    .collect(),
-            })
-            .chain(select_statement.ctes.drain(..).map(
-                |CommonTableExpression { name, statement }| TableAliasRewrite::Cte {
-                    to_view: format!("__{}__{}", self.query_name, name).into(),
-                    from: name,
-                    for_statement: Box::new(statement),
-                },
-            ))
-            .collect();
+                            to_table: name,
+                        }]
+                    }
+
+                    _ => aliases
+                        .into_iter()
+                        .flatten()
+                        .map(|alias| {
+                            // The alias is one among multiple distinct references to the
+                            // table. Create a globally unique view name, derived from the
+                            // query name, and rewrite to remove the alias and refer to this
+                            // view.
+                            TableAliasRewrite::View {
+                                from: alias.clone(),
+                                to_view: format!("__{}__{}", self.query_name, alias).into(),
+                                for_table: name.clone(),
+                            }
+                        })
+                        .collect(),
+                })
+                .chain(select_statement.ctes.drain(..).map(
+                    |CommonTableExpr { name, statement }| TableAliasRewrite::Cte {
+                        to_view: format!("__{}__{}", self.query_name, name).into(),
+                        from: name,
+                        for_statement: Box::new(statement),
+                    },
+                ))
+                .collect();
 
         // Extract remappings for FROM and JOIN table references from the alias rewrites.
         let new_table_remap = self
@@ -202,9 +203,9 @@ mod tests {
     use std::convert::TryInto;
 
     use nom_sql::{
-        parse_query, parser, BinaryOperator, Column, Dialect, Expression,
-        FieldDefinitionExpression, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator,
-        JoinRightSide, Literal, SelectStatement, SqlQuery, Table,
+        parse_query, parser, BinaryOperator, Column, Dialect, Expr, FieldDefinitionExpr,
+        ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal,
+        SelectStatement, SqlQuery, Table,
     };
 
     use super::{AliasRemoval, TableAliasRewrite};
@@ -232,11 +233,11 @@ mod tests {
                 alias: Some("t".into()),
                 schema: None,
             }],
-            fields: vec![FieldDefinitionExpression::from(Column::from("t.id"))],
-            where_clause: Some(Expression::BinaryOp {
-                lhs: Box::new(Expression::Column(Column::from("t.id"))),
+            fields: vec![FieldDefinitionExpr::from(Column::from("t.id"))],
+            where_clause: Some(Expr::BinaryOp {
+                lhs: Box::new(Expr::Column(Column::from("t.id"))),
                 op: BinaryOperator::Equal,
-                rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                rhs: Box::new(Expr::Literal(Literal::Placeholder(
                     ItemPlaceholder::QuestionMark,
                 ))),
             }),
@@ -249,14 +250,14 @@ mod tests {
             SqlQuery::Select(tq) => {
                 assert_eq!(
                     tq.fields,
-                    vec![FieldDefinitionExpression::from(Column::from("PaperTag.id"))]
+                    vec![FieldDefinitionExpr::from(Column::from("PaperTag.id"))]
                 );
                 assert_eq!(
                     tq.where_clause,
-                    Some(Expression::BinaryOp {
-                        lhs: Box::new(Expression::Column(Column::from("PaperTag.id"))),
+                    Some(Expr::BinaryOp {
+                        lhs: Box::new(Expr::Column(Column::from("PaperTag.id"))),
                         op: BinaryOperator::Equal,
-                        rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                        rhs: Box::new(Expr::Literal(Literal::Placeholder(
                             ItemPlaceholder::QuestionMark
                         ))),
                     })
@@ -285,7 +286,7 @@ mod tests {
 
     #[test]
     fn it_removes_nested_aliases() {
-        use nom_sql::{BinaryOperator, Expression};
+        use nom_sql::{BinaryOperator, Expr};
 
         let col_small = Column {
             name: "count(t.id)".try_into().unwrap(),
@@ -301,11 +302,11 @@ mod tests {
                 alias: Some("t".into()),
                 schema: None,
             }],
-            fields: vec![FieldDefinitionExpression::from(col_small.clone())],
-            where_clause: Some(Expression::BinaryOp {
+            fields: vec![FieldDefinitionExpr::from(col_small.clone())],
+            where_clause: Some(Expr::BinaryOp {
                 op: BinaryOperator::Equal,
-                lhs: Box::new(Expression::Column(col_small)),
-                rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                lhs: Box::new(Expr::Column(col_small)),
+                rhs: Box::new(Expr::Literal(Literal::Placeholder(
                     ItemPlaceholder::QuestionMark,
                 ))),
             }),
@@ -316,16 +317,13 @@ mod tests {
         // Table alias removed in field list
         match res {
             SqlQuery::Select(tq) => {
-                assert_eq!(
-                    tq.fields,
-                    vec![FieldDefinitionExpression::from(col_full.clone())]
-                );
+                assert_eq!(tq.fields, vec![FieldDefinitionExpr::from(col_full.clone())]);
                 assert_eq!(
                     tq.where_clause,
-                    Some(Expression::BinaryOp {
+                    Some(Expr::BinaryOp {
                         op: BinaryOperator::Equal,
-                        lhs: Box::new(Expression::Column(col_full)),
-                        rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                        lhs: Box::new(Expr::Column(col_full)),
+                        rhs: Box::new(Expr::Literal(Literal::Placeholder(
                             ItemPlaceholder::QuestionMark
                         ))),
                     })
@@ -365,8 +363,8 @@ mod tests {
                 assert_eq!(
                     tq.fields,
                     vec![
-                        FieldDefinitionExpression::from(Column::from("__query_name__t1.id")),
-                        FieldDefinitionExpression::from(Column::from("__query_name__t2.name"))
+                        FieldDefinitionExpr::from(Column::from("__query_name__t1.id")),
+                        FieldDefinitionExpr::from(Column::from("__query_name__t2.name"))
                     ]
                 );
                 assert_eq!(
@@ -386,12 +384,10 @@ mod tests {
                             alias: None,
                             schema: None,
                         }),
-                        constraint: JoinConstraint::On(Expression::BinaryOp {
+                        constraint: JoinConstraint::On(Expr::BinaryOp {
                             op: BinaryOperator::Equal,
-                            lhs: Box::new(Expression::Column(Column::from(
-                                "__query_name__t1.other"
-                            ))),
-                            rhs: Box::new(Expression::Column(Column::from("__query_name__t2.id")))
+                            lhs: Box::new(Expr::Column(Column::from("__query_name__t1.other"))),
+                            rhs: Box::new(Expr::Column(Column::from("__query_name__t2.id")))
                         })
                     }]
                 );

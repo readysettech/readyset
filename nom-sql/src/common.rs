@@ -23,7 +23,7 @@ use crate::dialect::Dialect;
 use crate::expression::expression;
 use crate::table::Table;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{literal, Expression, FunctionExpression, Literal, SqlIdentifier};
+use crate::{literal, Expr, FunctionExpr, Literal, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum SqlType {
@@ -264,7 +264,7 @@ pub enum TableKey {
     },
     CheckConstraint {
         name: Option<SqlIdentifier>,
-        expr: Expression,
+        expr: Expr,
         enforced: Option<bool>,
     },
 }
@@ -401,47 +401,47 @@ impl fmt::Display for TableKey {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)] // NOTE(grfn): do we actually care about this?
-pub enum FieldDefinitionExpression {
+pub enum FieldDefinitionExpr {
     All,
     AllInTable(SqlIdentifier),
-    Expression {
-        expr: Expression,
+    Expr {
+        expr: Expr,
         alias: Option<SqlIdentifier>,
     },
 }
 
-/// Constructs a [`FieldDefinitionExpression::Expression`] without an alias
-impl From<Expression> for FieldDefinitionExpression {
-    fn from(expr: Expression) -> Self {
-        FieldDefinitionExpression::Expression { expr, alias: None }
+/// Constructs a [`FieldDefinitionExpr::Expr`] without an alias
+impl From<Expr> for FieldDefinitionExpr {
+    fn from(expr: Expr) -> Self {
+        FieldDefinitionExpr::Expr { expr, alias: None }
     }
 }
 
-/// Constructs a [`FieldDefinitionExpression::Expression`] based on an [`Expression::Column`] for
+/// Constructs a [`FieldDefinitionExpr::Expr`] based on an [`Expr::Column`] for
 /// the column and without an alias
-impl From<Column> for FieldDefinitionExpression {
+impl From<Column> for FieldDefinitionExpr {
     fn from(col: Column) -> Self {
-        FieldDefinitionExpression::Expression {
-            expr: Expression::Column(col),
+        FieldDefinitionExpr::Expr {
+            expr: Expr::Column(col),
             alias: None,
         }
     }
 }
 
-impl From<Literal> for FieldDefinitionExpression {
+impl From<Literal> for FieldDefinitionExpr {
     fn from(lit: Literal) -> Self {
-        FieldDefinitionExpression::from(Expression::Literal(lit))
+        FieldDefinitionExpr::from(Expr::Literal(lit))
     }
 }
 
-impl Display for FieldDefinitionExpression {
+impl Display for FieldDefinitionExpr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            FieldDefinitionExpression::All => write!(f, "*"),
-            FieldDefinitionExpression::AllInTable(ref table) => {
+            FieldDefinitionExpr::All => write!(f, "*"),
+            FieldDefinitionExpr::AllInTable(ref table) => {
                 write!(f, "`{}`.*", table)
             }
-            FieldDefinitionExpression::Expression { expr, alias } => {
+            FieldDefinitionExpr::Expr { expr, alias } => {
                 write!(f, "{}", expr)?;
                 if let Some(alias) = alias {
                     write!(f, " AS `{}`", alias)?;
@@ -452,9 +452,9 @@ impl Display for FieldDefinitionExpression {
     }
 }
 
-impl Default for FieldDefinitionExpression {
-    fn default() -> FieldDefinitionExpression {
-        FieldDefinitionExpression::All
+impl Default for FieldDefinitionExpr {
+    fn default() -> FieldDefinitionExpr {
+        FieldDefinitionExpr::All
     }
 }
 
@@ -470,14 +470,14 @@ pub enum FieldReference {
     /// A reference to a field in the `SELECT` list by its (1-based) index.
     Numeric(u64),
     /// An expression
-    Expression(Expression),
+    Expr(Expr),
 }
 
 impl Display for FieldReference {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             FieldReference::Numeric(n) => write!(f, "{}", n),
-            FieldReference::Expression(expr) => write!(f, "{}", expr),
+            FieldReference::Expr(expr) => write!(f, "{}", expr),
         }
     }
 }
@@ -849,9 +849,7 @@ pub fn type_identifier(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Sql
 
 // Parses the arguments for an aggregation function, and also returns whether the distinct flag is
 // present.
-pub fn agg_function_arguments(
-    dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], (Expression, bool)> {
+pub fn agg_function_arguments(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Expr, bool)> {
     move |i| {
         let distinct_parser = opt(tuple((tag_no_case("distinct"), whitespace1)));
         let (remaining_input, (distinct, args)) = tuple((distinct_parser, expression(dialect)))(i)?;
@@ -884,11 +882,11 @@ fn group_concat_fx(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Column
     }
 }
 
-fn agg_fx_args(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Expression, bool)> {
+fn agg_fx_args(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Expr, bool)> {
     move |i| delimited(tag("("), agg_function_arguments(dialect), tag(")"))(i)
 }
 
-fn delim_fx_args(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Expression>> {
+fn delim_fx_args(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Expr>> {
     move |i| {
         delimited(
             tag("("),
@@ -901,35 +899,35 @@ fn delim_fx_args(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Expre
     }
 }
 
-pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FunctionExpression> {
+pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FunctionExpr> {
     move |i| {
         alt((
-            map(tag_no_case("count(*)"), |_| FunctionExpression::CountStar),
+            map(tag_no_case("count(*)"), |_| FunctionExpr::CountStar),
             map(
                 preceded(tag_no_case("count"), agg_fx_args(dialect)),
-                |args| FunctionExpression::Count {
+                |args| FunctionExpr::Count {
                     expr: Box::new(args.0.clone()),
                     distinct: args.1,
                     count_nulls: false,
                 },
             ),
             map(preceded(tag_no_case("sum"), agg_fx_args(dialect)), |args| {
-                FunctionExpression::Sum {
+                FunctionExpr::Sum {
                     expr: Box::new(args.0.clone()),
                     distinct: args.1,
                 }
             }),
             map(preceded(tag_no_case("avg"), agg_fx_args(dialect)), |args| {
-                FunctionExpression::Avg {
+                FunctionExpr::Avg {
                     expr: Box::new(args.0.clone()),
                     distinct: args.1,
                 }
             }),
             map(preceded(tag_no_case("max"), agg_fx_args(dialect)), |args| {
-                FunctionExpression::Max(Box::new(args.0))
+                FunctionExpr::Max(Box::new(args.0))
             }),
             map(preceded(tag_no_case("min"), agg_fx_args(dialect)), |args| {
-                FunctionExpression::Min(Box::new(args.0))
+                FunctionExpr::Min(Box::new(args.0))
             }),
             map(
                 preceded(
@@ -943,8 +941,8 @@ pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Fun
                         None => String::from(","),
                         Some(s) => s,
                     };
-                    FunctionExpression::GroupConcat {
-                        expr: Box::new(Expression::Column(col.clone())),
+                    FunctionExpr::GroupConcat {
+                        expr: Box::new(Expr::Column(col.clone())),
                         separator,
                     }
                 },
@@ -955,7 +953,7 @@ pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Fun
                     whitespace0,
                     delim_fx_args(dialect),
                 )),
-                |(name, _, arguments)| FunctionExpression::Call {
+                |(name, _, arguments)| FunctionExpr::Call {
                     name: name.to_string(),
                     arguments,
                 },
@@ -1043,7 +1041,7 @@ pub fn as_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlIdentif
     }
 }
 
-fn assignment_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Column, Expression)> {
+fn assignment_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Column, Expr)> {
     move |i| {
         separated_pair(
             column_identifier_no_alias(dialect),
@@ -1084,7 +1082,7 @@ where
 
 pub fn assignment_expr_list(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(Column, Expression)>> {
+) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(Column, Expr)>> {
     move |i| separated_list1(ws_sep_comma, assignment_expr(dialect))(i)
 }
 
@@ -1093,28 +1091,26 @@ pub fn field_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Colu
     move |i| separated_list0(ws_sep_comma, column_identifier_no_alias(dialect))(i)
 }
 
-fn expression_field(
-    dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], FieldDefinitionExpression> {
+fn expression_field(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FieldDefinitionExpr> {
     move |i| {
         let (i, expr) = expression(dialect)(i)?;
         let (i, alias) = opt(as_alias(dialect))(i)?;
-        Ok((i, FieldDefinitionExpression::Expression { expr, alias }))
+        Ok((i, FieldDefinitionExpr::Expr { expr, alias }))
     }
 }
 
 // Parse list of column/field definitions.
 pub fn field_definition_expr(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<FieldDefinitionExpression>> {
+) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<FieldDefinitionExpr>> {
     move |i| {
         terminated(
             separated_list0(
                 ws_sep_comma,
                 alt((
-                    map(tag("*"), |_| FieldDefinitionExpression::All),
+                    map(tag("*"), |_| FieldDefinitionExpr::All),
                     map(terminated(table_reference(dialect), tag(".*")), |t| {
-                        FieldDefinitionExpression::AllInTable(t.name)
+                        FieldDefinitionExpr::AllInTable(t.name)
                     }),
                     expression_field(dialect),
                 )),
@@ -1216,7 +1212,7 @@ pub fn parse_comment(i: &[u8]) -> IResult<&[u8], String> {
 pub fn field_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FieldReference> {
     move |i| {
         match dialect {
-            Dialect::PostgreSQL => map(expression(dialect), FieldReference::Expression)(i),
+            Dialect::PostgreSQL => map(expression(dialect), FieldReference::Expr)(i),
             // Only MySQL supports numeric field references (postgresql considers them integer
             // literals, I'm pretty sure)
             Dialect::MySQL => alt((
@@ -1224,7 +1220,7 @@ pub fn field_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Fie
                     map_res(map_res(digit1, str::from_utf8), u64::from_str),
                     FieldReference::Numeric,
                 ),
-                map(expression(dialect), FieldReference::Expression),
+                map(expression(dialect), FieldReference::Expr),
             ))(i),
         }
     }
@@ -1303,8 +1299,8 @@ mod tests {
     #[test]
     fn group_concat() {
         let qs = b"group_concat(x separator ', ')";
-        let expected = FunctionExpression::GroupConcat {
-            expr: Box::new(Expression::Column(Column::from("x"))),
+        let expected = FunctionExpr::GroupConcat {
+            expr: Box::new(Expr::Column(Column::from("x"))),
             separator: ", ".to_owned(),
         };
         let res = column_function(Dialect::MySQL)(qs);
@@ -1321,12 +1317,12 @@ mod tests {
         ];
         for q in qlist.iter() {
             let res = column_function(Dialect::MySQL)(q);
-            let expected = FunctionExpression::Call {
+            let expected = FunctionExpr::Call {
                 name: "coalesce".to_string(),
                 arguments: vec![
-                    Expression::Column(Column::from("a")),
-                    Expression::Column(Column::from("b")),
-                    Expression::Column(Column::from("c")),
+                    Expr::Column(Column::from("a")),
+                    Expr::Column(Column::from("b")),
+                    Expr::Column(Column::from("c")),
                 ],
             };
             assert_eq!(res, Ok((&b""[..], expected)));
@@ -1338,9 +1334,9 @@ mod tests {
         let res = test_parse!(column_function(Dialect::MySQL), b"max(min(foo))");
         assert_eq!(
             res,
-            FunctionExpression::Max(Box::new(Expression::Call(FunctionExpression::Min(
-                Box::new(Expression::Column("foo".into()))
-            ))))
+            FunctionExpr::Max(Box::new(Expr::Call(FunctionExpr::Min(Box::new(
+                Expr::Column("foo".into())
+            )))))
         )
     }
 
@@ -1349,8 +1345,8 @@ mod tests {
         let res = test_parse!(column_function(Dialect::MySQL), b"max(cast(foo as int))");
         assert_eq!(
             res,
-            FunctionExpression::Max(Box::new(Expression::Cast {
-                expr: Box::new(Expression::Column("foo".into())),
+            FunctionExpr::Max(Box::new(Expr::Cast {
+                expr: Box::new(Expr::Column("foo".into())),
                 ty: SqlType::Int(None),
                 postgres_style: false,
             }))
@@ -1362,11 +1358,11 @@ mod tests {
         let (_, res) = column_function(Dialect::MySQL)(b"ifnull(x, 0)").unwrap();
         assert_eq!(
             res,
-            FunctionExpression::Call {
+            FunctionExpr::Call {
                 name: "ifnull".to_owned(),
                 arguments: vec![
-                    Expression::Column(Column::from("x")),
-                    Expression::Literal(Literal::Integer(0))
+                    Expr::Column(Column::from("x")),
+                    Expr::Literal(Literal::Integer(0))
                 ]
             }
         );
@@ -1399,8 +1395,8 @@ mod tests {
         #[test]
         fn cast() {
             let qs = b"cast(`lp`.`start_ddtm` as date)";
-            let expected = Expression::Cast {
-                expr: Box::new(Expression::Column(Column {
+            let expected = Expr::Cast {
+                expr: Box::new(Expr::Column(Column {
                     table: Some("lp".into()),
                     name: "start_ddtm".into(),
                 })),
@@ -1421,12 +1417,12 @@ mod tests {
             ];
             for q in qlist.iter() {
                 let res = column_function(Dialect::MySQL)(q);
-                let expected = FunctionExpression::Call {
+                let expected = FunctionExpr::Call {
                     name: "coalesce".to_string(),
                     arguments: vec![
-                        Expression::Literal(Literal::String("a".to_owned())),
-                        Expression::Column(Column::from("b")),
-                        Expression::Column(Column::from("c")),
+                        Expr::Literal(Literal::String("a".to_owned())),
+                        Expr::Column(Column::from("b")),
+                        Expr::Column(Column::from("c")),
                     ],
                 };
                 assert_eq!(res, Ok((&b""[..], expected)));
@@ -1448,8 +1444,8 @@ mod tests {
         #[test]
         fn cast() {
             let qs = b"cast(\"lp\".\"start_ddtm\" as date)";
-            let expected = Expression::Cast {
-                expr: Box::new(Expression::Column(Column {
+            let expected = Expr::Cast {
+                expr: Box::new(Expr::Column(Column {
                     table: Some("lp".into()),
                     name: "start_ddtm".into(),
                 })),
@@ -1470,12 +1466,12 @@ mod tests {
             ];
             for q in qlist.iter() {
                 let res = column_function(Dialect::PostgreSQL)(q);
-                let expected = FunctionExpression::Call {
+                let expected = FunctionExpr::Call {
                     name: "coalesce".to_string(),
                     arguments: vec![
-                        Expression::Literal(Literal::String("a".to_owned())),
-                        Expression::Column(Column::from("b")),
-                        Expression::Column(Column::from("c")),
+                        Expr::Literal(Literal::String("a".to_owned())),
+                        Expr::Column(Column::from("b")),
+                        Expr::Column(Column::from("c")),
                     ],
                 };
                 assert_eq!(res, Ok((&b""[..], expected)));

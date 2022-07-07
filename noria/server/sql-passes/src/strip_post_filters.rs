@@ -1,6 +1,5 @@
 use nom_sql::{
-    BinaryOperator, DeleteStatement, Expression, Literal, SelectStatement, SqlQuery,
-    UpdateStatement,
+    BinaryOperator, DeleteStatement, Expr, Literal, SelectStatement, SqlQuery, UpdateStatement,
 };
 
 pub trait StripPostFilters {
@@ -10,21 +9,21 @@ pub trait StripPostFilters {
     fn strip_post_filters(self) -> Self;
 }
 
-impl StripPostFilters for Option<Expression> {
+impl StripPostFilters for Option<Expr> {
     fn strip_post_filters(self) -> Self {
         self.and_then(|conds| match conds {
-            Expression::BinaryOp {
+            Expr::BinaryOp {
                 op: BinaryOperator::ILike | BinaryOperator::Like,
-                lhs: box Expression::Column(_),
-                rhs: box Expression::Literal(Literal::Placeholder(_)),
+                lhs: box Expr::Column(_),
+                rhs: box Expr::Literal(Literal::Placeholder(_)),
             } => None,
-            Expression::BinaryOp { op, lhs, rhs } => match (
+            Expr::BinaryOp { op, lhs, rhs } => match (
                 Some(*lhs).strip_post_filters(),
                 Some(*rhs).strip_post_filters(),
             ) {
                 (None, None) => None,
                 (Some(cond), None) | (None, Some(cond)) => Some(cond),
-                (Some(left), Some(right)) => Some(Expression::BinaryOp {
+                (Some(left), Some(right)) => Some(Expr::BinaryOp {
                     op,
                     lhs: Box::new(left),
                     rhs: Box::new(right),

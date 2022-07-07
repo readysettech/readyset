@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use lazy_static::lazy_static;
 use nom_sql::{
-    Column, ColumnSpecification, Expression, FieldDefinitionExpression, Literal, SqlIdentifier,
-    SqlQuery, SqlType, VariableScope,
+    Column, ColumnSpecification, Expr, FieldDefinitionExpr, Literal, SqlIdentifier, SqlQuery,
+    SqlType, VariableScope,
 };
 use noria::results::Results;
 use noria::{ColumnSchema, ReadySetError};
@@ -825,7 +825,7 @@ impl QueryHandler for MySqlQueryHandler {
         // Currently any query with variables requires a fallback
         match query {
             SqlQuery::Select(stmt) => stmt.fields.iter().any(|field| match field {
-                FieldDefinitionExpression::Expression { expr, .. } => expr.contains_vars(),
+                FieldDefinitionExpr::Expr { expr, .. } => expr.contains_vars(),
                 _ => false,
             }),
             _ => false,
@@ -844,8 +844,8 @@ impl QueryHandler for MySqlQueryHandler {
         let (data, schema) = match query {
             SqlQuery::Select(stmt)
                 if stmt.fields.iter().any(|field| {
-                    matches!(field, FieldDefinitionExpression::Expression {
-                        expr: Expression::Variable(var),
+                    matches!(field, FieldDefinitionExpr::Expr {
+                        expr: Expr::Variable(var),
                         ..
                     } if var.as_non_user_var() == Some(MAX_ALLOWED_PACKET_VARIABLE_NAME))
                 }) =>
@@ -892,45 +892,47 @@ impl QueryHandler for MySqlQueryHandler {
 
     fn is_set_allowed(stmt: &nom_sql::SetStatement) -> bool {
         match stmt {
-            nom_sql::SetStatement::Variable(set) => set.variables.iter().all(|(variable, value)| {
-                if variable.scope == VariableScope::User {
-                    return false;
-                }
-                match variable.name.to_ascii_lowercase().as_str() {
-                    "time_zone" => {
-                        matches!(value, Expression::Literal(Literal::String(ref s)) if s == "+00:00")
+            nom_sql::SetStatement::Variable(set) => {
+                set.variables.iter().all(|(variable, value)| {
+                    if variable.scope == VariableScope::User {
+                        return false;
                     }
-                    "autocommit" => {
-                        matches!(value, Expression::Literal(Literal::Integer(i)) if *i == 1)
-                    }
-                    "sql_mode" => {
-                        if let Expression::Literal(Literal::String(ref s)) = value {
-                            match raw_sql_modes_to_list(&s[..]) {
-                                Ok(sql_modes) => {
-                                    REQUIRED_SQL_MODES.iter().all(|m| sql_modes.contains(m))
-                                        && sql_modes.iter().all(|sql_mode| {
-                                            ALLOWED_SQL_MODES.contains(sql_mode)
-                                        })
+                    match variable.name.to_ascii_lowercase().as_str() {
+                        "time_zone" => {
+                            matches!(value, Expr::Literal(Literal::String(ref s)) if s == "+00:00")
+                        }
+                        "autocommit" => {
+                            matches!(value, Expr::Literal(Literal::Integer(i)) if *i == 1)
+                        }
+                        "sql_mode" => {
+                            if let Expr::Literal(Literal::String(ref s)) = value {
+                                match raw_sql_modes_to_list(&s[..]) {
+                                    Ok(sql_modes) => {
+                                        REQUIRED_SQL_MODES.iter().all(|m| sql_modes.contains(m))
+                                            && sql_modes.iter().all(|sql_mode| {
+                                                ALLOWED_SQL_MODES.contains(sql_mode)
+                                            })
+                                    }
+                                    Err(e) => {
+                                        warn!(%e, "unknown sql modes in set");
+                                        false
+                                    }
                                 }
-                                Err(e) => {
-                                    warn!(%e, "unknown sql modes in set");
-                                    false
-                                }
+                            } else {
+                                false
                             }
-                        } else {
-                            false
                         }
-                    }
-                    "names" => {
-                        if let Expression::Literal(Literal::String(ref s)) = value {
-                            matches!(&s[..], "latin1" | "utf8" | "utf8mb4")
-                        } else {
-                            false
+                        "names" => {
+                            if let Expr::Literal(Literal::String(ref s)) = value {
+                                matches!(&s[..], "latin1" | "utf8" | "utf8mb4")
+                            } else {
+                                false
+                            }
                         }
+                        p => ALLOWED_PARAMETERS_ANY_VALUE.contains(p),
                     }
-                    p => ALLOWED_PARAMETERS_ANY_VALUE.contains(p),
-                }
-            }),
+                })
+            }
             nom_sql::SetStatement::Names(names) => {
                 names.collation.is_none()
                     && matches!(&names.charset[..], "latin1" | "utf8" | "utf8mb4")
@@ -955,7 +957,7 @@ mod tests {
                     scope: VariableScope::Session,
                     name: "sql_mode".into(),
                 },
-                Expression::Literal(Literal::from(m)),
+                Expr::Literal(Literal::from(m)),
             )],
         });
         assert!(MySqlQueryHandler::is_set_allowed(&stmt));
@@ -970,7 +972,7 @@ mod tests {
                     scope: VariableScope::Session,
                     name: "sql_mode".into(),
                 },
-                Expression::Literal(Literal::from(m)),
+                Expr::Literal(Literal::from(m)),
             )],
         });
         assert!(!MySqlQueryHandler::is_set_allowed(&stmt));

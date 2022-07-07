@@ -24,16 +24,13 @@ use crate::{Column, Dialect, Literal, SelectStatement, SqlType};
 
 /// Function call expressions
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub enum FunctionExpression {
+pub enum FunctionExpr {
     /// `AVG` aggregation. The boolean argument is `true` if `DISTINCT`
-    Avg {
-        expr: Box<Expression>,
-        distinct: bool,
-    },
+    Avg { expr: Box<Expr>, distinct: bool },
 
     /// `COUNT` aggregation
     Count {
-        expr: Box<Expression>,
+        expr: Box<Expr>,
         distinct: bool,
         // count_nulls is not syntatic, and only ever set to true during a rewrite phase from
         // CountStar -> Count.
@@ -44,86 +41,73 @@ pub enum FunctionExpression {
     CountStar,
 
     /// `SUM` aggregation
-    Sum {
-        expr: Box<Expression>,
-        distinct: bool,
-    },
+    Sum { expr: Box<Expr>, distinct: bool },
 
     /// `MAX` aggregation
-    Max(Box<Expression>),
+    Max(Box<Expr>),
 
     /// `MIN` aggregation
-    Min(Box<Expression>),
+    Min(Box<Expr>),
 
     /// `GROUP_CONCAT` aggregation. The second argument is the separator
-    GroupConcat {
-        expr: Box<Expression>,
-        separator: String,
-    },
+    GroupConcat { expr: Box<Expr>, separator: String },
 
     /// Generic function call expression
-    Call {
-        name: String,
-        arguments: Vec<Expression>,
-    },
+    Call { name: String, arguments: Vec<Expr> },
 }
 
-impl FunctionExpression {
+impl FunctionExpr {
     /// Returns an iterator over all the direct arguments passed to the given function call
     /// expression
-    pub fn arguments(&self) -> impl Iterator<Item = &Expression> {
+    pub fn arguments(&self) -> impl Iterator<Item = &Expr> {
         match self {
-            FunctionExpression::Avg { expr: arg, .. }
-            | FunctionExpression::Count { expr: arg, .. }
-            | FunctionExpression::Sum { expr: arg, .. }
-            | FunctionExpression::Max(arg)
-            | FunctionExpression::Min(arg)
-            | FunctionExpression::GroupConcat { expr: arg, .. } => {
-                Either::Left(iter::once(arg.as_ref()))
-            }
-            FunctionExpression::CountStar => Either::Right(Either::Left(iter::empty())),
-            FunctionExpression::Call { arguments, .. } => {
-                Either::Right(Either::Right(arguments.iter()))
-            }
+            FunctionExpr::Avg { expr: arg, .. }
+            | FunctionExpr::Count { expr: arg, .. }
+            | FunctionExpr::Sum { expr: arg, .. }
+            | FunctionExpr::Max(arg)
+            | FunctionExpr::Min(arg)
+            | FunctionExpr::GroupConcat { expr: arg, .. } => Either::Left(iter::once(arg.as_ref())),
+            FunctionExpr::CountStar => Either::Right(Either::Left(iter::empty())),
+            FunctionExpr::Call { arguments, .. } => Either::Right(Either::Right(arguments.iter())),
         }
     }
 }
 
-impl Display for FunctionExpression {
+impl Display for FunctionExpr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            FunctionExpression::Avg {
+            FunctionExpr::Avg {
                 expr,
                 distinct: true,
             } => write!(f, "avg(distinct {})", expr),
-            FunctionExpression::Count {
+            FunctionExpr::Count {
                 expr,
                 distinct: true,
                 ..
             } => write!(f, "count(distinct {})", expr),
-            FunctionExpression::Sum {
+            FunctionExpr::Sum {
                 expr,
                 distinct: true,
             } => write!(f, "sum(distinct {})", expr),
-            FunctionExpression::Avg { expr, .. } => write!(f, "avg({})", expr),
-            FunctionExpression::Count { expr, .. } => write!(f, "count({})", expr),
-            FunctionExpression::CountStar => write!(f, "count(*)"),
-            FunctionExpression::Sum { expr, .. } => write!(f, "sum({})", expr),
-            FunctionExpression::Max(col) => write!(f, "max({})", col),
-            FunctionExpression::Min(col) => write!(f, "min({})", col),
-            FunctionExpression::GroupConcat { expr, separator } => {
+            FunctionExpr::Avg { expr, .. } => write!(f, "avg({})", expr),
+            FunctionExpr::Count { expr, .. } => write!(f, "count({})", expr),
+            FunctionExpr::CountStar => write!(f, "count(*)"),
+            FunctionExpr::Sum { expr, .. } => write!(f, "sum({})", expr),
+            FunctionExpr::Max(col) => write!(f, "max({})", col),
+            FunctionExpr::Min(col) => write!(f, "min({})", col),
+            FunctionExpr::GroupConcat { expr, separator } => {
                 write!(f, "group_concat({} separator '{}')", expr, separator)
             }
-            FunctionExpression::Call { name, arguments } => {
+            FunctionExpr::Call { name, arguments } => {
                 write!(f, "{}({})", name, arguments.iter().join(", "))
             }
         }
     }
 }
 
-/// Binary infix operators with [`Expression`] on both the left- and right-hand sides
+/// Binary infix operators with [`Expr`] on both the left- and right-hand sides
 ///
-/// This type is used as the operator in [`Expression::BinaryOp`].
+/// This type is used as the operator in [`Expr::BinaryOp`].
 ///
 /// Note that because all binary operators have expressions on both sides, SQL `IN` is not a binary
 /// operator - since it must have either a subquery or a list of expressions on its right-hand side
@@ -233,7 +217,7 @@ impl Display for UnaryOperator {
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, From)]
 pub enum InValue {
     Subquery(Box<SelectStatement>),
-    List(Vec<Expression>),
+    List(Vec<Expr>),
 }
 
 impl Display for InValue {
@@ -247,33 +231,30 @@ impl Display for InValue {
 
 /// SQL Expression AST
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, From)]
-pub enum Expression {
+pub enum Expr {
     /// Function call expressions
     ///
-    /// TODO(grfn): Eventually, the members of FunctionExpression should be inlined here
-    Call(FunctionExpression),
+    /// TODO(grfn): Eventually, the members of FunctionExpr should be inlined here
+    Call(FunctionExpr),
 
     /// Literal values
     Literal(Literal),
 
     /// Binary operator
     BinaryOp {
-        lhs: Box<Expression>,
+        lhs: Box<Expr>,
         op: BinaryOperator,
-        rhs: Box<Expression>,
+        rhs: Box<Expr>,
     },
 
     /// Unary operator
-    UnaryOp {
-        op: UnaryOperator,
-        rhs: Box<Expression>,
-    },
+    UnaryOp { op: UnaryOperator, rhs: Box<Expr> },
 
     /// CASE WHEN condition THEN then_expr ELSE else_expr
     CaseWhen {
-        condition: Box<Expression>,
-        then_expr: Box<Expression>,
-        else_expr: Option<Box<Expression>>,
+        condition: Box<Expr>,
+        then_expr: Box<Expr>,
+        else_expr: Option<Box<Expr>>,
     },
 
     /// A reference to a column
@@ -288,9 +269,9 @@ pub enum Expression {
 
     /// operand BETWEEN min AND max
     Between {
-        operand: Box<Expression>,
-        min: Box<Expression>,
-        max: Box<Expression>,
+        operand: Box<Expr>,
+        min: Box<Expr>,
+        max: Box<Expr>,
         negated: bool,
     },
 
@@ -301,14 +282,14 @@ pub enum Expression {
     ///
     /// Per the ANSI SQL standard, IN is its own AST node, not a binary operator
     In {
-        lhs: Box<Expression>,
+        lhs: Box<Expr>,
         rhs: InValue,
         negated: bool,
     },
 
     /// `CAST(expression AS type)`.
     Cast {
-        expr: Box<Expression>,
+        expr: Box<Expr>,
         ty: SqlType,
         /// If true indicates that the expression used the Postgres syntax (expr::type)
         postgres_style: bool,
@@ -318,13 +299,13 @@ pub enum Expression {
     Variable(Variable),
 }
 
-impl Display for Expression {
+impl Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Expression::Call(fe) => fe.fmt(f),
-            Expression::Literal(l) => write!(f, "{}", l),
-            Expression::Column(col) => col.fmt(f),
-            Expression::CaseWhen {
+            Expr::Call(fe) => fe.fmt(f),
+            Expr::Literal(l) => write!(f, "{}", l),
+            Expr::Column(col) => col.fmt(f),
+            Expr::CaseWhen {
                 condition,
                 then_expr,
                 else_expr,
@@ -335,15 +316,15 @@ impl Display for Expression {
                 }
                 write!(f, " END")
             }
-            Expression::BinaryOp { lhs, op, rhs } => write!(f, "({} {} {})", lhs, op, rhs),
-            Expression::UnaryOp {
+            Expr::BinaryOp { lhs, op, rhs } => write!(f, "({} {} {})", lhs, op, rhs),
+            Expr::UnaryOp {
                 op: UnaryOperator::Neg,
                 rhs,
             } => write!(f, "(-{})", rhs),
-            Expression::UnaryOp { op, rhs } => write!(f, "({} {})", op, rhs),
-            Expression::Exists(statement) => write!(f, "EXISTS ({})", statement),
+            Expr::UnaryOp { op, rhs } => write!(f, "({} {})", op, rhs),
+            Expr::Exists(statement) => write!(f, "EXISTS ({})", statement),
 
-            Expression::Between {
+            Expr::Between {
                 operand,
                 min,
                 max,
@@ -358,31 +339,31 @@ impl Display for Expression {
                     max
                 )
             }
-            Expression::In { lhs, rhs, negated } => {
+            Expr::In { lhs, rhs, negated } => {
                 write!(f, "{}", lhs)?;
                 if *negated {
                     write!(f, " NOT")?;
                 }
                 write!(f, " IN ({})", rhs)
             }
-            Expression::NestedSelect(q) => write!(f, "({})", q),
-            Expression::Cast {
+            Expr::NestedSelect(q) => write!(f, "({})", q),
+            Expr::Cast {
                 expr,
                 ty,
                 postgres_style,
             } if *postgres_style => write!(f, "({}::{})", expr, ty),
-            Expression::Cast { expr, ty, .. } => write!(f, "CAST({} as {})", expr, ty),
-            Expression::Variable(var) => write!(f, "{}", var),
+            Expr::Cast { expr, ty, .. } => write!(f, "CAST({} as {})", expr, ty),
+            Expr::Variable(var) => write!(f, "{}", var),
         }
     }
 }
 
-impl Expression {
-    /// If this expression is a [binary operator application](Expression::BinaryOp), returns a tuple
+impl Expr {
+    /// If this expression is a [binary operator application](Expr::BinaryOp), returns a tuple
     /// of the left-hand side, the operator, and the right-hand side, otherwise returns None
-    pub fn as_binary_op(&self) -> Option<(&Expression, BinaryOperator, &Expression)> {
+    pub fn as_binary_op(&self) -> Option<(&Expr, BinaryOperator, &Expr)> {
         match self {
-            Expression::BinaryOp { lhs, op, rhs } => Some((lhs.as_ref(), *op, rhs.as_ref())),
+            Expr::BinaryOp { lhs, op, rhs } => Some((lhs.as_ref(), *op, rhs.as_ref())),
             _ => None,
         }
     }
@@ -390,7 +371,7 @@ impl Expression {
     /// Returns true if any variables are present in the expression
     pub fn contains_vars(&self) -> bool {
         match self {
-            Expression::Variable(_) => true,
+            Expr::Variable(_) => true,
             _ => self.recursive_subexpressions().any(Self::contains_vars),
         }
     }
@@ -402,7 +383,7 @@ impl Expression {
 enum TokenTree {
     Infix(BinaryOperator),
     Prefix(UnaryOperator),
-    Primary(Expression),
+    Primary(Expr),
     Group(Vec<TokenTree>),
     PgsqlCast(Box<TokenTree>, SqlType),
 }
@@ -593,7 +574,7 @@ fn token_tree_no_and_or(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Ve
     }
 }
 
-/// A [`pratt`] operator-precedence parser for [`Expression`]s.
+/// A [`pratt`] operator-precedence parser for [`Expr`]s.
 ///
 /// This type exists only to hold the implementation of the [`PrattParser`] trait for operator
 /// precedence of expressions, and otherwise contains no data
@@ -605,7 +586,7 @@ where
 {
     type Error = pratt::NoError;
     type Input = TokenTree;
-    type Output = Expression;
+    type Output = Expr;
 
     fn query(&mut self, input: &Self::Input) -> Result<Affix, Self::Error> {
         use BinaryOperator::*;
@@ -648,7 +629,7 @@ where
             Group(group) => self.parse(&mut group.into_iter()).unwrap(),
             PgsqlCast(box expr, ty) => {
                 let tt = self.parse(&mut vec![expr].into_iter()).unwrap();
-                Expression::Cast {
+                Expr::Cast {
                     expr: tt.into(),
                     ty,
                     postgres_style: true,
@@ -669,7 +650,7 @@ where
             _ => unreachable!("Invalid fixity for infix op"),
         };
 
-        Ok(Expression::BinaryOp {
+        Ok(Expr::BinaryOp {
             lhs: Box::new(lhs),
             op,
             rhs: Box::new(rhs),
@@ -682,7 +663,7 @@ where
             _ => unreachable!("Invalid fixity for prefix op"),
         };
 
-        Ok(Expression::UnaryOp {
+        Ok(Expr::UnaryOp {
             op,
             rhs: Box::new(rhs),
         })
@@ -697,13 +678,13 @@ where
     }
 }
 
-fn in_lhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+fn in_lhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     move |i| {
         alt((
-            map(column_function(dialect), Expression::Call),
-            map(literal(dialect), Expression::Literal),
+            map(column_function(dialect), Expr::Call),
+            map(literal(dialect), Expr::Literal),
             case_when(dialect),
-            map(column_identifier_no_alias(dialect), Expression::Column),
+            map(column_identifier_no_alias(dialect), Expr::Column),
         ))(i)
     }
 }
@@ -722,7 +703,7 @@ fn in_rhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], InValue> {
     }
 }
 
-fn in_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+fn in_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     move |i| {
         let (i, lhs) = terminated(in_lhs(dialect), whitespace1)(i)?;
 
@@ -738,7 +719,7 @@ fn in_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
 
         Ok((
             i,
-            Expression::In {
+            Expr::In {
                 lhs: Box::new(lhs),
                 rhs,
                 negated: not.is_some(),
@@ -747,19 +728,19 @@ fn in_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
     }
 }
 
-fn between_operand(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+fn between_operand(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     move |i| {
         alt((
             parenthesized_expr(dialect),
-            map(column_function(dialect), Expression::Call),
-            map(literal(dialect), Expression::Literal),
+            map(column_function(dialect), Expr::Call),
+            map(literal(dialect), Expr::Literal),
             case_when(dialect),
-            map(column_identifier_no_alias(dialect), Expression::Column),
+            map(column_identifier_no_alias(dialect), Expr::Column),
         ))(i)
     }
 }
 
-fn between_max(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+fn between_max(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     move |i| {
         alt((
             map(token_tree_no_and_or(dialect), |tt| {
@@ -770,7 +751,7 @@ fn between_max(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression>
     }
 }
 
-fn between_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+fn between_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     move |i| {
         let (i, operand) = map(between_operand(dialect), Box::new)(i)?;
         let (i, _) = whitespace1(i)?;
@@ -785,7 +766,7 @@ fn between_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression
 
         Ok((
             i,
-            Expression::Between {
+            Expr::Between {
                 operand,
                 min,
                 max,
@@ -795,7 +776,7 @@ fn between_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression
     }
 }
 
-fn exists_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+fn exists_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     move |i| {
         let (i, _) = tag_no_case("exists")(i)?;
         let (i, _) = whitespace0(i)?;
@@ -806,11 +787,11 @@ fn exists_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression>
         let (i, _) = whitespace0(i)?;
         let (i, _) = char(')')(i)?;
 
-        Ok((i, Expression::Exists(Box::new(statement))))
+        Ok((i, Expr::Exists(Box::new(statement))))
     }
 }
 
-fn cast(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+fn cast(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     move |i| {
         let (i, _) = tag_no_case("cast")(i)?;
         let (i, _) = whitespace0(i)?;
@@ -827,7 +808,7 @@ fn cast(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
 
         Ok((
             i,
-            Expression::Cast {
+            Expr::Cast {
                 expr: Box::new(arg),
                 ty,
                 postgres_style: false,
@@ -836,7 +817,7 @@ fn cast(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
     }
 }
 
-fn nested_select(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+fn nested_select(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     move |i| {
         let (i, _) = char('(')(i)?;
         let (i, _) = whitespace0(i)?;
@@ -844,11 +825,11 @@ fn nested_select(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expressio
         let (i, _) = whitespace0(i)?;
         let (i, _) = char(')')(i)?;
 
-        Ok((i, Expression::NestedSelect(Box::new(statement))))
+        Ok((i, Expr::NestedSelect(Box::new(statement))))
     }
 }
 
-fn parenthesized_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+fn parenthesized_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     move |i| {
         let (i, _) = char('(')(i)?;
         let (i, _) = whitespace0(i)?;
@@ -873,7 +854,7 @@ pub(crate) fn scoped_var(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], V
 }
 
 // Expressions without (binary or unary) operators
-pub(crate) fn simple_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+pub(crate) fn simple_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     move |i| {
         alt((
             parenthesized_expr(dialect),
@@ -881,17 +862,17 @@ pub(crate) fn simple_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], 
             exists_expr(dialect),
             between_expr(dialect),
             in_expr(dialect),
-            map(column_function(dialect), Expression::Call),
-            map(literal(dialect), Expression::Literal),
+            map(column_function(dialect), Expr::Call),
+            map(literal(dialect), Expr::Literal),
             case_when(dialect),
-            map(column_identifier_no_alias(dialect), Expression::Column),
+            map(column_identifier_no_alias(dialect), Expr::Column),
             cast(dialect),
-            map(scoped_var(dialect), Expression::Variable),
+            map(scoped_var(dialect), Expr::Variable),
         ))(i)
     }
 }
 
-pub(crate) fn expression(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+pub(crate) fn expression(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     move |i| {
         alt((
             map(token_tree(dialect), |tt| {
@@ -909,7 +890,7 @@ mod tests {
     #[test]
     fn column_then_column() {
         let (rem, res) = expression(Dialect::MySQL)(b"x y").unwrap();
-        assert_eq!(res, Expression::Column("x".into()));
+        assert_eq!(res, Expr::Column("x".into()));
         assert_eq!(rem, b" y");
     }
 
@@ -954,10 +935,10 @@ mod tests {
             let res = expression(Dialect::PostgreSQL)(br#"-128::INTEGER"#);
             assert_eq!(
                 res.unwrap().1,
-                Expression::UnaryOp {
+                Expr::UnaryOp {
                     op: UnaryOperator::Neg,
-                    rhs: Box::new(Expression::Cast {
-                        expr: Box::new(Expression::Literal(Literal::Integer(128))),
+                    rhs: Box::new(Expr::Cast {
+                        expr: Box::new(Expr::Literal(Literal::Integer(128))),
                         ty: SqlType::Int(None),
                         postgres_style: true
                     }),
@@ -967,11 +948,11 @@ mod tests {
             let res = expression(Dialect::PostgreSQL)(br#"515*128::TEXT"#);
             assert_eq!(
                 res.unwrap().1,
-                Expression::BinaryOp {
+                Expr::BinaryOp {
                     op: BinaryOperator::Multiply,
-                    lhs: Box::new(Expression::Literal(Literal::Integer(515))),
-                    rhs: Box::new(Expression::Cast {
-                        expr: Box::new(Expression::Literal(Literal::Integer(128))),
+                    lhs: Box::new(Expr::Literal(Literal::Integer(515))),
+                    rhs: Box::new(Expr::Cast {
+                        expr: Box::new(Expr::Literal(Literal::Integer(128))),
                         ty: SqlType::Text,
                         postgres_style: true
                     }),
@@ -981,11 +962,11 @@ mod tests {
             let res = expression(Dialect::PostgreSQL)(br#"(515*128)::TEXT"#);
             assert_eq!(
                 res.unwrap().1,
-                Expression::Cast {
-                    expr: Box::new(Expression::BinaryOp {
+                Expr::Cast {
+                    expr: Box::new(Expr::BinaryOp {
                         op: BinaryOperator::Multiply,
-                        lhs: Box::new(Expression::Literal(Literal::Integer(515))),
-                        rhs: Box::new(Expression::Literal(Literal::Integer(128)))
+                        lhs: Box::new(Expr::Literal(Literal::Integer(515))),
+                        rhs: Box::new(Expr::Literal(Literal::Integer(128)))
                     }),
                     ty: SqlType::Text,
                     postgres_style: true,
@@ -995,11 +976,11 @@ mod tests {
             let res = expression(Dialect::PostgreSQL)(br#"200*postgres.column::DOUBLE PRECISION"#);
             assert_eq!(
                 res.unwrap().1,
-                Expression::BinaryOp {
+                Expr::BinaryOp {
                     op: BinaryOperator::Multiply,
-                    lhs: Box::new(Expression::Literal(Literal::Integer(200))),
-                    rhs: Box::new(Expression::Cast {
-                        expr: Box::new(Expression::Column(Column::from("postgres.column"))),
+                    lhs: Box::new(Expr::Literal(Literal::Integer(200))),
+                    rhs: Box::new(Expr::Cast {
+                        expr: Box::new(Expr::Column(Column::from("postgres.column"))),
                         ty: SqlType::Double,
                         postgres_style: true,
                     }),
@@ -1010,11 +991,11 @@ mod tests {
 
     mod conditions {
         use super::*;
-        use crate::{FieldDefinitionExpression, ItemPlaceholder};
+        use crate::{FieldDefinitionExpr, ItemPlaceholder};
 
-        fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpression> {
+        fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpr> {
             cols.iter()
-                .map(|c| FieldDefinitionExpression::from(Column::from(*c)))
+                .map(|c| FieldDefinitionExpr::from(Column::from(*c)))
                 .collect()
         }
 
@@ -1046,19 +1027,19 @@ mod tests {
             let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(
                 res.unwrap().1,
-                Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column(Column::from("foo"))),
+                Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(Column::from("foo"))),
                     op: BinaryOperator::Equal,
-                    rhs: Box::new(Expression::Literal(literal))
+                    rhs: Box::new(Expr::Literal(literal))
                 }
             );
         }
 
-        fn x_operator_value(op: BinaryOperator, value: Literal) -> Expression {
-            Expression::BinaryOp {
-                lhs: Box::new(Expression::Column(Column::from("x"))),
+        fn x_operator_value(op: BinaryOperator, value: Literal) -> Expr {
+            Expr::BinaryOp {
+                lhs: Box::new(Expr::Column(Column::from("x"))),
                 op,
-                rhs: Box::new(Expression::Literal(value)),
+                rhs: Box::new(Expr::Literal(value)),
             }
         }
 
@@ -1102,10 +1083,10 @@ mod tests {
             let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(
                 res.unwrap().1,
-                Expression::BinaryOp {
+                Expr::BinaryOp {
                     op: BinaryOperator::Equal,
                     lhs: Box::new(x_operator_value(BinaryOperator::Multiply, 3.into())),
-                    rhs: Box::new(Expression::Literal(21.into()))
+                    rhs: Box::new(Expr::Literal(21.into()))
                 }
             );
         }
@@ -1116,10 +1097,10 @@ mod tests {
             let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(
                 res.unwrap().1,
-                Expression::BinaryOp {
+                Expr::BinaryOp {
                     op: BinaryOperator::Equal,
                     lhs: Box::new(x_operator_value(BinaryOperator::Subtract, 7.into())),
-                    rhs: Box::new(Expression::Literal(15.into()))
+                    rhs: Box::new(Expr::Literal(15.into()))
                 }
             );
         }
@@ -1131,10 +1112,10 @@ mod tests {
             let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(
                 res.unwrap().1,
-                Expression::BinaryOp {
+                Expr::BinaryOp {
                     op: BinaryOperator::Equal,
                     lhs: Box::new(x_operator_value(BinaryOperator::Add, 2.into())),
-                    rhs: Box::new(Expression::Literal(15.into()))
+                    rhs: Box::new(Expr::Literal(15.into()))
                 }
             );
         }
@@ -1146,7 +1127,7 @@ mod tests {
             let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(
                 res.unwrap().1,
-                Expression::BinaryOp {
+                Expr::BinaryOp {
                     op: BinaryOperator::Equal,
                     lhs: Box::new(x_operator_value(BinaryOperator::Add, 2.into())),
                     rhs: Box::new(x_operator_value(BinaryOperator::Multiply, 3.into()))
@@ -1162,20 +1143,20 @@ mod tests {
             let res1 = expression(Dialect::MySQL)(cond1.as_bytes());
             assert_eq!(
                 res1.unwrap().1,
-                Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column(Column::from("foo"))),
+                Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(Column::from("foo"))),
                     op: BinaryOperator::GreaterOrEqual,
-                    rhs: Box::new(Expression::Literal(Literal::Integer(42)))
+                    rhs: Box::new(Expr::Literal(Literal::Integer(42)))
                 }
             );
 
             let res2 = expression(Dialect::MySQL)(cond2.as_bytes());
             assert_eq!(
                 res2.unwrap().1,
-                Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column(Column::from("foo"))),
+                Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(Column::from("foo"))),
                     op: BinaryOperator::LessOrEqual,
-                    rhs: Box::new(Expression::Literal(Literal::Integer(5)))
+                    rhs: Box::new(Expr::Literal(Literal::Integer(5)))
                 }
             );
         }
@@ -1187,10 +1168,10 @@ mod tests {
             let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(
                 res.unwrap().1,
-                Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column(Column::from("foo"))),
+                Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(Column::from("foo"))),
                     op: BinaryOperator::Equal,
-                    rhs: Box::new(Expression::Literal(Literal::String(String::from(""))))
+                    rhs: Box::new(Expr::Literal(Literal::String(String::from(""))))
                 }
             );
         }
@@ -1199,33 +1180,33 @@ mod tests {
         fn parenthesis() {
             let cond = "(foo = ? or bar = 12) and foobar = 'a'";
 
-            let a = Expression::BinaryOp {
+            let a = Expr::BinaryOp {
                 op: BinaryOperator::Equal,
-                lhs: Box::new(Expression::Column("foo".into())),
-                rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                lhs: Box::new(Expr::Column("foo".into())),
+                rhs: Box::new(Expr::Literal(Literal::Placeholder(
                     ItemPlaceholder::QuestionMark,
                 ))),
             };
 
-            let b = Expression::BinaryOp {
+            let b = Expr::BinaryOp {
                 op: BinaryOperator::Equal,
-                lhs: Box::new(Expression::Column("bar".into())),
-                rhs: Box::new(Expression::Literal(Literal::Integer(12.into()))),
+                lhs: Box::new(Expr::Column("bar".into())),
+                rhs: Box::new(Expr::Literal(Literal::Integer(12.into()))),
             };
 
-            let left = Expression::BinaryOp {
+            let left = Expr::BinaryOp {
                 op: BinaryOperator::Or,
                 lhs: Box::new(a),
                 rhs: Box::new(b),
             };
 
-            let right = Expression::BinaryOp {
+            let right = Expr::BinaryOp {
                 op: BinaryOperator::Equal,
-                lhs: Box::new(Expression::Column("foobar".into())),
-                rhs: Box::new(Expression::Literal(Literal::String("a".into()))),
+                lhs: Box::new(Expr::Column("foobar".into())),
+                rhs: Box::new(Expr::Literal(Literal::String("a".into()))),
             };
 
-            let complete = Expression::BinaryOp {
+            let complete = Expr::BinaryOp {
                 op: BinaryOperator::And,
                 lhs: Box::new(left),
                 rhs: Box::new(right),
@@ -1239,33 +1220,33 @@ mod tests {
         fn order_of_operations() {
             let cond = "foo = ? and bar = 12 or foobar = 'a'";
 
-            let a = Expression::BinaryOp {
+            let a = Expr::BinaryOp {
                 op: BinaryOperator::Equal,
-                lhs: Box::new(Expression::Column("foo".into())),
-                rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                lhs: Box::new(Expr::Column("foo".into())),
+                rhs: Box::new(Expr::Literal(Literal::Placeholder(
                     ItemPlaceholder::QuestionMark,
                 ))),
             };
 
-            let b = Expression::BinaryOp {
+            let b = Expr::BinaryOp {
                 op: BinaryOperator::Equal,
-                lhs: Box::new(Expression::Column("bar".into())),
-                rhs: Box::new(Expression::Literal(Literal::Integer(12.into()))),
+                lhs: Box::new(Expr::Column("bar".into())),
+                rhs: Box::new(Expr::Literal(Literal::Integer(12.into()))),
             };
 
-            let left = Expression::BinaryOp {
+            let left = Expr::BinaryOp {
                 op: BinaryOperator::And,
                 lhs: Box::new(a),
                 rhs: Box::new(b),
             };
 
-            let right = Expression::BinaryOp {
+            let right = Expr::BinaryOp {
                 op: BinaryOperator::Equal,
-                lhs: Box::new(Expression::Column("foobar".into())),
-                rhs: Box::new(Expression::Literal(Literal::String("a".into()))),
+                lhs: Box::new(Expr::Column("foobar".into())),
+                rhs: Box::new(Expr::Literal(Literal::String("a".into()))),
             };
 
-            let complete = Expression::BinaryOp {
+            let complete = Expr::BinaryOp {
                 op: BinaryOperator::Or,
                 lhs: Box::new(left),
                 rhs: Box::new(right),
@@ -1279,22 +1260,22 @@ mod tests {
         fn negation() {
             let cond = "not bar = 12 or foobar = 'a'";
 
-            let left = Expression::UnaryOp {
+            let left = Expr::UnaryOp {
                 op: UnaryOperator::Not,
-                rhs: Box::new(Expression::BinaryOp {
+                rhs: Box::new(Expr::BinaryOp {
                     op: BinaryOperator::Equal,
-                    lhs: Box::new(Expression::Column("bar".into())),
-                    rhs: Box::new(Expression::Literal(Literal::Integer(12.into()))),
+                    lhs: Box::new(Expr::Column("bar".into())),
+                    rhs: Box::new(Expr::Literal(Literal::Integer(12.into()))),
                 }),
             };
 
-            let right = Expression::BinaryOp {
+            let right = Expr::BinaryOp {
                 op: BinaryOperator::Equal,
-                lhs: Box::new(Expression::Column("foobar".into())),
-                rhs: Box::new(Expression::Literal(Literal::String("a".into()))),
+                lhs: Box::new(Expr::Column("foobar".into())),
+                rhs: Box::new(Expr::Literal(Literal::String("a".into()))),
             };
 
-            let complete = Expression::BinaryOp {
+            let complete = Expr::BinaryOp {
                 op: BinaryOperator::Or,
                 lhs: Box::new(left),
                 rhs: Box::new(right),
@@ -1319,8 +1300,8 @@ mod tests {
                 ..Default::default()
             });
 
-            let expected = Expression::In {
-                lhs: Box::new(Expression::Column("bar".into())),
+            let expected = Expr::In {
+                lhs: Box::new(Expr::Column("bar".into())),
                 rhs: InValue::Subquery(nested_select),
                 negated: false,
             };
@@ -1343,7 +1324,7 @@ mod tests {
                 ..Default::default()
             });
 
-            let expected = Expression::Exists(nested_select);
+            let expected = Expr::Exists(nested_select);
 
             assert_eq!(res.unwrap().1, expected);
         }
@@ -1363,9 +1344,9 @@ mod tests {
                 ..Default::default()
             });
 
-            let expected = Expression::UnaryOp {
+            let expected = Expr::UnaryOp {
                 op: UnaryOperator::Not,
-                rhs: Box::new(Expression::Exists(nested_select)),
+                rhs: Box::new(Expr::Exists(nested_select)),
             };
 
             assert_eq!(res.unwrap().1, expected);
@@ -1386,19 +1367,19 @@ mod tests {
                 ..Default::default()
             });
 
-            let left = Expression::In {
-                lhs: Box::new(Expression::Column("paperId".into())),
+            let left = Expr::In {
+                lhs: Box::new(Expr::Column("paperId".into())),
                 rhs: InValue::Subquery(nested_select),
                 negated: false,
             };
 
-            let right = Expression::BinaryOp {
-                lhs: Box::new(Expression::Column("size".into())),
+            let right = Expr::BinaryOp {
+                lhs: Box::new(Expr::Column("size".into())),
                 op: BinaryOperator::Greater,
-                rhs: Box::new(Expression::Literal(0.into())),
+                rhs: Box::new(Expr::Literal(0.into())),
             };
 
-            let expected = Expression::BinaryOp {
+            let expected = Expr::BinaryOp {
                 lhs: Box::new(left),
                 rhs: Box::new(right),
                 op: BinaryOperator::And,
@@ -1413,12 +1394,9 @@ mod tests {
 
             let res = expression(Dialect::MySQL)(cond.as_bytes());
 
-            let expected = Expression::In {
-                lhs: Box::new(Expression::Column("bar".into())),
-                rhs: InValue::List(vec![
-                    Expression::Literal(0.into()),
-                    Expression::Literal(1.into()),
-                ]),
+            let expected = Expr::In {
+                lhs: Box::new(Expr::Column("bar".into())),
+                rhs: InValue::List(vec![Expr::Literal(0.into()), Expr::Literal(1.into())]),
                 negated: false,
             };
 
@@ -1431,10 +1409,10 @@ mod tests {
 
             let res = expression(Dialect::MySQL)(cond.as_bytes());
 
-            let expected = Expression::BinaryOp {
-                lhs: Box::new(Expression::Column("bar".into())),
+            let expected = Expr::BinaryOp {
+                lhs: Box::new(Expr::Column("bar".into())),
                 op: BinaryOperator::Is,
-                rhs: Box::new(Expression::Literal(Literal::Null)),
+                rhs: Box::new(Expr::Literal(Literal::Null)),
             };
             assert_eq!(res.unwrap().1, expected);
         }
@@ -1444,10 +1422,10 @@ mod tests {
             let cond = "bar IS NOT NULL";
 
             let res = expression(Dialect::MySQL)(cond.as_bytes());
-            let expected = Expression::BinaryOp {
-                lhs: Box::new(Expression::Column("bar".into())),
+            let expected = Expr::BinaryOp {
+                lhs: Box::new(Expr::Column("bar".into())),
                 op: BinaryOperator::IsNot,
-                rhs: Box::new(Expression::Literal(Literal::Null)),
+                rhs: Box::new(Expr::Literal(Literal::Null)),
             };
             assert_eq!(res.unwrap().1, expected);
         }
@@ -1458,12 +1436,9 @@ mod tests {
             let res1 = expression(Dialect::MySQL)(qs1);
 
             let c1 = res1.unwrap().1;
-            let expected1 = Expression::In {
-                lhs: Box::new(Expression::Column("id".into())),
-                rhs: InValue::List(vec![
-                    Expression::Literal(1.into()),
-                    Expression::Literal(2.into()),
-                ]),
+            let expected1 = Expr::In {
+                lhs: Box::new(Expr::Column("id".into())),
+                rhs: InValue::List(vec![Expr::Literal(1.into()), Expr::Literal(2.into())]),
                 negated: true,
             };
             assert_eq!(c1, expected1);
@@ -1475,10 +1450,10 @@ mod tests {
         #[test]
         fn between_simple() {
             let qs = b"foo between 1 and 2";
-            let expected = Expression::Between {
-                operand: Box::new(Expression::Column("foo".into())),
-                min: Box::new(Expression::Literal(1.into())),
-                max: Box::new(Expression::Literal(2.into())),
+            let expected = Expr::Between {
+                operand: Box::new(Expr::Column("foo".into())),
+                min: Box::new(Expr::Literal(1.into())),
+                max: Box::new(Expr::Literal(2.into())),
                 negated: false,
             };
             let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
@@ -1489,10 +1464,10 @@ mod tests {
         #[test]
         fn not_between() {
             let qs = b"foo not between 1 and 2";
-            let expected = Expression::Between {
-                operand: Box::new(Expression::Column("foo".into())),
-                min: Box::new(Expression::Literal(1.into())),
-                max: Box::new(Expression::Literal(2.into())),
+            let expected = Expr::Between {
+                operand: Box::new(Expr::Column("foo".into())),
+                min: Box::new(Expr::Literal(1.into())),
+                max: Box::new(Expr::Literal(2.into())),
                 negated: true,
             };
             let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
@@ -1503,16 +1478,16 @@ mod tests {
         #[test]
         fn between_function_call() {
             let qs = b"f(foo, bar) between 1 and 2";
-            let expected = Expression::Between {
-                operand: Box::new(Expression::Call(FunctionExpression::Call {
+            let expected = Expr::Between {
+                operand: Box::new(Expr::Call(FunctionExpr::Call {
                     name: "f".to_owned(),
                     arguments: vec![
-                        Expression::Column(Column::from("foo")),
-                        Expression::Column(Column::from("bar")),
+                        Expr::Column(Column::from("foo")),
+                        Expr::Column(Column::from("bar")),
                     ],
                 })),
-                min: Box::new(Expression::Literal(1.into())),
-                max: Box::new(Expression::Literal(2.into())),
+                min: Box::new(Expr::Literal(1.into())),
+                max: Box::new(Expr::Literal(2.into())),
                 negated: false,
             };
             let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
@@ -1523,17 +1498,17 @@ mod tests {
         #[test]
         fn between_with_arithmetic() {
             let qs = b"foo between (1 + 2) and 3 + 5";
-            let expected = Expression::Between {
-                operand: Box::new(Expression::Column("foo".into())),
-                min: Box::new(Expression::BinaryOp {
+            let expected = Expr::Between {
+                operand: Box::new(Expr::Column("foo".into())),
+                min: Box::new(Expr::BinaryOp {
                     op: BinaryOperator::Add,
-                    lhs: Box::new(Expression::Literal(Literal::Integer(1))),
-                    rhs: Box::new(Expression::Literal(Literal::Integer(2))),
+                    lhs: Box::new(Expr::Literal(Literal::Integer(1))),
+                    rhs: Box::new(Expr::Literal(Literal::Integer(2))),
                 }),
-                max: Box::new(Expression::BinaryOp {
+                max: Box::new(Expr::BinaryOp {
                     op: BinaryOperator::Add,
-                    lhs: Box::new(Expression::Literal(Literal::Integer(3))),
-                    rhs: Box::new(Expression::Literal(Literal::Integer(5))),
+                    lhs: Box::new(Expr::Literal(Literal::Integer(3))),
+                    rhs: Box::new(Expr::Literal(Literal::Integer(5))),
                 }),
                 negated: false,
             };
@@ -1547,10 +1522,10 @@ mod tests {
         #[test]
         fn ilike() {
             let qs = b"name ILIKE ?";
-            let expected = Expression::BinaryOp {
-                lhs: Box::new(Expression::Column("name".into())),
+            let expected = Expr::BinaryOp {
+                lhs: Box::new(Expr::Column("name".into())),
                 op: BinaryOperator::ILike,
-                rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                rhs: Box::new(Expr::Literal(Literal::Placeholder(
                     ItemPlaceholder::QuestionMark,
                 ))),
             };
@@ -1562,12 +1537,12 @@ mod tests {
         #[test]
         fn and_not() {
             let qs = b"x and not y";
-            let expected = Expression::BinaryOp {
-                lhs: Box::new(Expression::Column("x".into())),
+            let expected = Expr::BinaryOp {
+                lhs: Box::new(Expr::Column("x".into())),
                 op: BinaryOperator::And,
-                rhs: Box::new(Expression::UnaryOp {
+                rhs: Box::new(Expr::UnaryOp {
                     op: UnaryOperator::Not,
-                    rhs: Box::new(Expression::Column("y".into())),
+                    rhs: Box::new(Expr::Column("y".into())),
                 }),
             };
             let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
@@ -1582,9 +1557,9 @@ mod tests {
         #[test]
         fn neg_integer() {
             let qs = b"-256";
-            let expected = Expression::UnaryOp {
+            let expected = Expr::UnaryOp {
                 op: UnaryOperator::Neg,
-                rhs: Box::new(Expression::Literal(Literal::Integer(256))),
+                rhs: Box::new(Expr::Literal(Literal::Integer(256))),
             };
             let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
@@ -1594,12 +1569,12 @@ mod tests {
         #[test]
         fn neg_in_expression() {
             let qs = b"x + -y";
-            let expected = Expression::BinaryOp {
+            let expected = Expr::BinaryOp {
                 op: BinaryOperator::Add,
-                lhs: Box::new(Expression::Column("x".into())),
-                rhs: Box::new(Expression::UnaryOp {
+                lhs: Box::new(Expr::Column("x".into())),
+                rhs: Box::new(Expr::UnaryOp {
                     op: UnaryOperator::Neg,
-                    rhs: Box::new(Expression::Column("y".into())),
+                    rhs: Box::new(Expr::Column("y".into())),
                 }),
             };
             let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
@@ -1610,11 +1585,11 @@ mod tests {
         #[test]
         fn neg_column() {
             let qs = b"NOT -id";
-            let expected = Expression::UnaryOp {
+            let expected = Expr::UnaryOp {
                 op: UnaryOperator::Not,
-                rhs: Box::new(Expression::UnaryOp {
+                rhs: Box::new(Expr::UnaryOp {
                     op: UnaryOperator::Neg,
-                    rhs: Box::new(Expression::Column("id".into())),
+                    rhs: Box::new(Expr::Column("id".into())),
                 }),
             };
             let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
@@ -1625,11 +1600,11 @@ mod tests {
         #[test]
         fn neg_not() {
             let qs = b"NOT -1";
-            let expected = Expression::UnaryOp {
+            let expected = Expr::UnaryOp {
                 op: UnaryOperator::Not,
-                rhs: Box::new(Expression::UnaryOp {
+                rhs: Box::new(Expr::UnaryOp {
                     op: UnaryOperator::Neg,
-                    rhs: Box::new(Expression::Literal(Literal::Integer(1))),
+                    rhs: Box::new(Expr::Literal(Literal::Integer(1))),
                 }),
             };
             let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
@@ -1640,11 +1615,11 @@ mod tests {
         #[test]
         fn neg_neg() {
             let qs = b"--1";
-            let expected = Expression::UnaryOp {
+            let expected = Expr::UnaryOp {
                 op: UnaryOperator::Neg,
-                rhs: Box::new(Expression::UnaryOp {
+                rhs: Box::new(Expr::UnaryOp {
                     op: UnaryOperator::Neg,
-                    rhs: Box::new(Expression::Literal(Literal::Integer(1))),
+                    rhs: Box::new(Expr::Literal(Literal::Integer(1))),
                 }),
             };
             let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
@@ -1691,83 +1666,77 @@ mod tests {
                     AND `read_ribbons`.`user_id` = ?";
 
                 let res = expression(Dialect::MySQL)(cond.as_bytes());
-                let expected = Expression::BinaryOp {
+                let expected = Expr::BinaryOp {
                     op: BinaryOperator::And,
-                    lhs: Box::new(Expression::BinaryOp {
-                        lhs: Box::new(Expression::Column("read_ribbons.is_following".into())),
+                    lhs: Box::new(Expr::BinaryOp {
+                        lhs: Box::new(Expr::Column("read_ribbons.is_following".into())),
                         op: BinaryOperator::Equal,
-                        rhs: Box::new(Expression::Literal(1.into())),
+                        rhs: Box::new(Expr::Literal(1.into())),
                     }),
-                    rhs: Box::new(Expression::BinaryOp {
+                    rhs: Box::new(Expr::BinaryOp {
                         op: BinaryOperator::And,
-                        lhs: Box::new(Expression::BinaryOp {
-                            lhs: Box::new(Expression::Column("comments.user_id".into())),
+                        lhs: Box::new(Expr::BinaryOp {
+                            lhs: Box::new(Expr::Column("comments.user_id".into())),
                             op: BinaryOperator::NotEqual,
-                            rhs: Box::new(Expression::Column("read_ribbons.user_id".into())),
+                            rhs: Box::new(Expr::Column("read_ribbons.user_id".into())),
                         }),
-                        rhs: Box::new(Expression::BinaryOp {
+                        rhs: Box::new(Expr::BinaryOp {
                             op: BinaryOperator::And,
-                            lhs: Box::new(Expression::BinaryOp {
-                                lhs: Box::new(Expression::Column("saldo".into())),
+                            lhs: Box::new(Expr::BinaryOp {
+                                lhs: Box::new(Expr::Column("saldo".into())),
                                 op: BinaryOperator::GreaterOrEqual,
-                                rhs: Box::new(Expression::Literal(0.into())),
+                                rhs: Box::new(Expr::Literal(0.into())),
                             }),
-                            rhs: Box::new(Expression::BinaryOp {
+                            rhs: Box::new(Expr::BinaryOp {
                                 op: BinaryOperator::And,
-                                lhs: Box::new(Expression::BinaryOp {
+                                lhs: Box::new(Expr::BinaryOp {
                                     op: BinaryOperator::Or,
-                                    lhs: Box::new(Expression::BinaryOp {
-                                        lhs: Box::new(Expression::Column(
+                                    lhs: Box::new(Expr::BinaryOp {
+                                        lhs: Box::new(Expr::Column(
                                             "parent_comments.user_id".into(),
                                         )),
                                         op: BinaryOperator::Equal,
-                                        rhs: Box::new(Expression::Column(
-                                            "read_ribbons.user_id".into(),
-                                        )),
+                                        rhs: Box::new(Expr::Column("read_ribbons.user_id".into())),
                                     }),
-                                    rhs: Box::new(Expression::BinaryOp {
+                                    rhs: Box::new(Expr::BinaryOp {
                                         op: BinaryOperator::And,
-                                        lhs: Box::new(Expression::BinaryOp {
-                                            lhs: Box::new(Expression::Column(
+                                        lhs: Box::new(Expr::BinaryOp {
+                                            lhs: Box::new(Expr::Column(
                                                 "parent_comments.user_id".into(),
                                             )),
                                             op: BinaryOperator::Is,
-                                            rhs: Box::new(Expression::Literal(Literal::Null)),
+                                            rhs: Box::new(Expr::Literal(Literal::Null)),
                                         }),
-                                        rhs: Box::new(Expression::BinaryOp {
-                                            lhs: Box::new(Expression::Column(
-                                                "stories.user_id".into(),
-                                            )),
+                                        rhs: Box::new(Expr::BinaryOp {
+                                            lhs: Box::new(Expr::Column("stories.user_id".into())),
                                             op: BinaryOperator::Equal,
-                                            rhs: Box::new(Expression::Column(
+                                            rhs: Box::new(Expr::Column(
                                                 "read_ribbons.user_id".into(),
                                             )),
                                         }),
                                     }),
                                 }),
-                                rhs: Box::new(Expression::BinaryOp {
+                                rhs: Box::new(Expr::BinaryOp {
                                     op: BinaryOperator::And,
-                                    lhs: Box::new(Expression::BinaryOp {
+                                    lhs: Box::new(Expr::BinaryOp {
                                         op: BinaryOperator::Or,
-                                        lhs: Box::new(Expression::BinaryOp {
-                                            lhs: Box::new(Expression::Column(
+                                        lhs: Box::new(Expr::BinaryOp {
+                                            lhs: Box::new(Expr::Column(
                                                 "parent_comments.id".into(),
                                             )),
                                             op: BinaryOperator::Is,
-                                            rhs: Box::new(Expression::Literal(Literal::Null)),
+                                            rhs: Box::new(Expr::Literal(Literal::Null)),
                                         }),
-                                        rhs: Box::new(Expression::BinaryOp {
-                                            lhs: Box::new(Expression::Column("saldo".into())),
+                                        rhs: Box::new(Expr::BinaryOp {
+                                            lhs: Box::new(Expr::Column("saldo".into())),
                                             op: BinaryOperator::GreaterOrEqual,
-                                            rhs: Box::new(Expression::Literal(0.into())),
+                                            rhs: Box::new(Expr::Literal(0.into())),
                                         }),
                                     }),
-                                    rhs: Box::new(Expression::BinaryOp {
+                                    rhs: Box::new(Expr::BinaryOp {
                                         op: BinaryOperator::Equal,
-                                        lhs: Box::new(Expression::Column(
-                                            "read_ribbons.user_id".into(),
-                                        )),
-                                        rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                                        lhs: Box::new(Expr::Column("read_ribbons.user_id".into())),
+                                        rhs: Box::new(Expr::Literal(Literal::Placeholder(
                                             ItemPlaceholder::QuestionMark,
                                         ))),
                                     }),
@@ -1789,20 +1758,20 @@ mod tests {
                 let res1 = expression(Dialect::MySQL)(cond1.as_bytes());
                 assert_eq!(
                     res1.unwrap().1,
-                    Expression::BinaryOp {
-                        lhs: Box::new(Expression::Column(Column::from("foo"))),
+                    Expr::BinaryOp {
+                        lhs: Box::new(Expr::Column(Column::from("foo"))),
                         op: BinaryOperator::Equal,
-                        rhs: Box::new(Expression::Literal(Literal::Integer(42_i64)))
+                        rhs: Box::new(Expr::Literal(Literal::Integer(42_i64)))
                     }
                 );
 
                 let res2 = expression(Dialect::MySQL)(cond2.as_bytes());
                 assert_eq!(
                     res2.unwrap().1,
-                    Expression::BinaryOp {
-                        lhs: Box::new(Expression::Column(Column::from("foo"))),
+                    Expr::BinaryOp {
+                        lhs: Box::new(Expr::Column(Column::from("foo"))),
                         op: BinaryOperator::Equal,
-                        rhs: Box::new(Expression::Literal(Literal::String(String::from("hello"))))
+                        rhs: Box::new(Expr::Literal(Literal::String(String::from("hello"))))
                     }
                 );
             }
@@ -1847,83 +1816,77 @@ mod tests {
                     AND \"read_ribbons\".\"user_id\" = ?";
 
                 let res = expression(Dialect::PostgreSQL)(cond.as_bytes());
-                let expected = Expression::BinaryOp {
+                let expected = Expr::BinaryOp {
                     op: BinaryOperator::And,
-                    lhs: Box::new(Expression::BinaryOp {
-                        lhs: Box::new(Expression::Column("read_ribbons.is_following".into())),
+                    lhs: Box::new(Expr::BinaryOp {
+                        lhs: Box::new(Expr::Column("read_ribbons.is_following".into())),
                         op: BinaryOperator::Equal,
-                        rhs: Box::new(Expression::Literal(1.into())),
+                        rhs: Box::new(Expr::Literal(1.into())),
                     }),
-                    rhs: Box::new(Expression::BinaryOp {
+                    rhs: Box::new(Expr::BinaryOp {
                         op: BinaryOperator::And,
-                        lhs: Box::new(Expression::BinaryOp {
-                            lhs: Box::new(Expression::Column("comments.user_id".into())),
+                        lhs: Box::new(Expr::BinaryOp {
+                            lhs: Box::new(Expr::Column("comments.user_id".into())),
                             op: BinaryOperator::NotEqual,
-                            rhs: Box::new(Expression::Column("read_ribbons.user_id".into())),
+                            rhs: Box::new(Expr::Column("read_ribbons.user_id".into())),
                         }),
-                        rhs: Box::new(Expression::BinaryOp {
+                        rhs: Box::new(Expr::BinaryOp {
                             op: BinaryOperator::And,
-                            lhs: Box::new(Expression::BinaryOp {
-                                lhs: Box::new(Expression::Column("saldo".into())),
+                            lhs: Box::new(Expr::BinaryOp {
+                                lhs: Box::new(Expr::Column("saldo".into())),
                                 op: BinaryOperator::GreaterOrEqual,
-                                rhs: Box::new(Expression::Literal(0.into())),
+                                rhs: Box::new(Expr::Literal(0.into())),
                             }),
-                            rhs: Box::new(Expression::BinaryOp {
+                            rhs: Box::new(Expr::BinaryOp {
                                 op: BinaryOperator::And,
-                                lhs: Box::new(Expression::BinaryOp {
+                                lhs: Box::new(Expr::BinaryOp {
                                     op: BinaryOperator::Or,
-                                    lhs: Box::new(Expression::BinaryOp {
-                                        lhs: Box::new(Expression::Column(
+                                    lhs: Box::new(Expr::BinaryOp {
+                                        lhs: Box::new(Expr::Column(
                                             "parent_comments.user_id".into(),
                                         )),
                                         op: BinaryOperator::Equal,
-                                        rhs: Box::new(Expression::Column(
-                                            "read_ribbons.user_id".into(),
-                                        )),
+                                        rhs: Box::new(Expr::Column("read_ribbons.user_id".into())),
                                     }),
-                                    rhs: Box::new(Expression::BinaryOp {
+                                    rhs: Box::new(Expr::BinaryOp {
                                         op: BinaryOperator::And,
-                                        lhs: Box::new(Expression::BinaryOp {
-                                            lhs: Box::new(Expression::Column(
+                                        lhs: Box::new(Expr::BinaryOp {
+                                            lhs: Box::new(Expr::Column(
                                                 "parent_comments.user_id".into(),
                                             )),
                                             op: BinaryOperator::Is,
-                                            rhs: Box::new(Expression::Literal(Literal::Null)),
+                                            rhs: Box::new(Expr::Literal(Literal::Null)),
                                         }),
-                                        rhs: Box::new(Expression::BinaryOp {
-                                            lhs: Box::new(Expression::Column(
-                                                "stories.user_id".into(),
-                                            )),
+                                        rhs: Box::new(Expr::BinaryOp {
+                                            lhs: Box::new(Expr::Column("stories.user_id".into())),
                                             op: BinaryOperator::Equal,
-                                            rhs: Box::new(Expression::Column(
+                                            rhs: Box::new(Expr::Column(
                                                 "read_ribbons.user_id".into(),
                                             )),
                                         }),
                                     }),
                                 }),
-                                rhs: Box::new(Expression::BinaryOp {
+                                rhs: Box::new(Expr::BinaryOp {
                                     op: BinaryOperator::And,
-                                    lhs: Box::new(Expression::BinaryOp {
+                                    lhs: Box::new(Expr::BinaryOp {
                                         op: BinaryOperator::Or,
-                                        lhs: Box::new(Expression::BinaryOp {
-                                            lhs: Box::new(Expression::Column(
+                                        lhs: Box::new(Expr::BinaryOp {
+                                            lhs: Box::new(Expr::Column(
                                                 "parent_comments.id".into(),
                                             )),
                                             op: BinaryOperator::Is,
-                                            rhs: Box::new(Expression::Literal(Literal::Null)),
+                                            rhs: Box::new(Expr::Literal(Literal::Null)),
                                         }),
-                                        rhs: Box::new(Expression::BinaryOp {
-                                            lhs: Box::new(Expression::Column("saldo".into())),
+                                        rhs: Box::new(Expr::BinaryOp {
+                                            lhs: Box::new(Expr::Column("saldo".into())),
                                             op: BinaryOperator::GreaterOrEqual,
-                                            rhs: Box::new(Expression::Literal(0.into())),
+                                            rhs: Box::new(Expr::Literal(0.into())),
                                         }),
                                     }),
-                                    rhs: Box::new(Expression::BinaryOp {
+                                    rhs: Box::new(Expr::BinaryOp {
                                         op: BinaryOperator::Equal,
-                                        lhs: Box::new(Expression::Column(
-                                            "read_ribbons.user_id".into(),
-                                        )),
-                                        rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                                        lhs: Box::new(Expr::Column("read_ribbons.user_id".into())),
+                                        rhs: Box::new(Expr::Literal(Literal::Placeholder(
                                             ItemPlaceholder::QuestionMark,
                                         ))),
                                     }),
@@ -1945,20 +1908,20 @@ mod tests {
                 let res1 = expression(Dialect::PostgreSQL)(cond1.as_bytes());
                 assert_eq!(
                     res1.unwrap().1,
-                    Expression::BinaryOp {
-                        lhs: Box::new(Expression::Column(Column::from("foo"))),
+                    Expr::BinaryOp {
+                        lhs: Box::new(Expr::Column(Column::from("foo"))),
                         op: BinaryOperator::Equal,
-                        rhs: Box::new(Expression::Literal(Literal::Integer(42_i64)))
+                        rhs: Box::new(Expr::Literal(Literal::Integer(42_i64)))
                     }
                 );
 
                 let res2 = expression(Dialect::PostgreSQL)(cond2.as_bytes());
                 assert_eq!(
                     res2.unwrap().1,
-                    Expression::BinaryOp {
-                        lhs: Box::new(Expression::Column(Column::from("foo"))),
+                    Expr::BinaryOp {
+                        lhs: Box::new(Expr::Column(Column::from("foo"))),
                         op: BinaryOperator::Equal,
-                        rhs: Box::new(Expression::Literal(Literal::String(String::from("hello"))))
+                        rhs: Box::new(Expr::Literal(Literal::String(String::from("hello"))))
                     }
                 );
             }

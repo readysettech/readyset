@@ -199,8 +199,8 @@ mod tests {
     use std::time::Duration;
 
     use nom_sql::{
-        parse_query, ColumnConstraint, ColumnSpecification, CreateViewStatement, Dialect,
-        Expression, FieldDefinitionExpression, SelectSpecification, SqlQuery, SqlType, TableKey,
+        parse_query, ColumnConstraint, ColumnSpecification, CreateViewStatement, Dialect, Expr,
+        FieldDefinitionExpr, SelectSpecification, SqlQuery, SqlType, TableKey,
     };
     use pgsql::NoTls;
     use tokio::task::JoinHandle;
@@ -462,8 +462,8 @@ mod tests {
                     SelectSpecification::Simple(select_stmt) => {
                         assert_eq!(
                             select_stmt.fields,
-                            vec![FieldDefinitionExpression::Expression {
-                                expr: Expression::Column("t.x".into()),
+                            vec![FieldDefinitionExpr::Expr {
+                                expr: Expr::Column("t.x".into()),
                                 alias: None
                             }]
                         );

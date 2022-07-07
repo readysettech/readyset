@@ -11,13 +11,13 @@ use crate::common::{assignment_expr_list, schema_table_reference_no_alias, state
 use crate::select::where_clause;
 use crate::table::Table;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expression};
+use crate::{Dialect, Expr};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct UpdateStatement {
     pub table: Table,
-    pub fields: Vec<(Column, Expression)>,
-    pub where_clause: Option<Expression>,
+    pub fields: Vec<(Column, Expr)>,
+    pub where_clause: Option<Expr>,
 }
 
 impl fmt::Display for UpdateStatement {
@@ -83,8 +83,8 @@ mod tests {
             UpdateStatement {
                 table: Table::from("users"),
                 fields: vec![
-                    (Column::from("id"), Expression::Literal(42.into())),
-                    (Column::from("name"), Expression::Literal("test".into())),
+                    (Column::from("id"), Expr::Literal(42.into())),
+                    (Column::from("name"), Expr::Literal("test".into())),
                 ],
                 ..Default::default()
             }
@@ -96,10 +96,10 @@ mod tests {
         let qstring = "UPDATE users SET id = 42, name = 'test' WHERE id = 1";
 
         let res = updating(Dialect::MySQL)(qstring.as_bytes());
-        let expected_left = Expression::Column(Column::from("id"));
-        let expected_where_cond = Some(Expression::BinaryOp {
+        let expected_left = Expr::Column(Column::from("id"));
+        let expected_where_cond = Some(Expr::BinaryOp {
             lhs: Box::new(expected_left),
-            rhs: Box::new(Expression::Literal(Literal::Integer(1))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(1))),
             op: BinaryOperator::Equal,
         });
         assert_eq!(
@@ -107,11 +107,8 @@ mod tests {
             UpdateStatement {
                 table: Table::from("users"),
                 fields: vec![
-                    (Column::from("id"), Expression::Literal(Literal::from(42)),),
-                    (
-                        Column::from("name"),
-                        Expression::Literal(Literal::from("test",)),
-                    ),
+                    (Column::from("id"), Expr::Literal(Literal::from(42)),),
+                    (Column::from("name"), Expr::Literal(Literal::from("test",)),),
                 ],
                 where_clause: expected_where_cond,
             }
@@ -131,9 +128,9 @@ mod tests {
         let qstring = "UPDATE users SET karma = karma + 1 WHERE users.id = ?;";
 
         let res = updating(Dialect::MySQL)(qstring.as_bytes());
-        let expected_where_cond = Some(Expression::BinaryOp {
-            lhs: Box::new(Expression::Column(Column::from("users.id"))),
-            rhs: Box::new(Expression::Literal(Literal::Placeholder(
+        let expected_where_cond = Some(Expr::BinaryOp {
+            lhs: Box::new(Expr::Column(Column::from("users.id"))),
+            rhs: Box::new(Expr::Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
             ))),
             op: BinaryOperator::Equal,
@@ -144,10 +141,10 @@ mod tests {
                 table: Table::from("users"),
                 fields: vec![(
                     Column::from("karma"),
-                    Expression::BinaryOp {
+                    Expr::BinaryOp {
                         op: BinaryOperator::Add,
-                        lhs: Box::new(Expression::Column(Column::from("karma"))),
-                        rhs: Box::new(Expression::Literal(1.into()))
+                        lhs: Box::new(Expr::Column(Column::from("karma"))),
+                        rhs: Box::new(Expr::Literal(1.into()))
                     },
                 ),],
                 where_clause: expected_where_cond,
@@ -159,8 +156,8 @@ mod tests {
         use super::*;
         use crate::column::Column;
         use crate::table::Table;
-        use crate::Expression::UnaryOp;
-        use crate::{BinaryOperator, Double, FunctionExpression, ItemPlaceholder, UnaryOperator};
+        use crate::Expr::UnaryOp;
+        use crate::{BinaryOperator, Double, FunctionExpr, ItemPlaceholder, UnaryOperator};
 
         #[test]
         fn updated_with_neg_float() {
@@ -168,10 +165,10 @@ mod tests {
                 "UPDATE `stories` SET `hotness` = -19216.5479744 WHERE `stories`.`id` = ?";
 
             let res = updating(Dialect::MySQL)(qstring.as_bytes());
-            let expected_left = Expression::Column(Column::from("stories.id"));
-            let expected_where_cond = Some(Expression::BinaryOp {
+            let expected_left = Expr::Column(Column::from("stories.id"));
+            let expected_where_cond = Some(Expr::BinaryOp {
                 lhs: Box::new(expected_left),
-                rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                rhs: Box::new(Expr::Literal(Literal::Placeholder(
                     ItemPlaceholder::QuestionMark,
                 ))),
                 op: BinaryOperator::Equal,
@@ -184,7 +181,7 @@ mod tests {
                         Column::from("hotness"),
                         UnaryOp {
                             op: UnaryOperator::Neg,
-                            rhs: Box::new(Expression::Literal(Literal::Double(Double {
+                            rhs: Box::new(Expr::Literal(Literal::Double(Double {
                                 value: 19216.5479744,
                                 precision: 7,
                             })))
@@ -207,10 +204,10 @@ mod tests {
                     table: Table::from("users"),
                     fields: vec![(
                         Column::from("karma"),
-                        Expression::BinaryOp {
+                        Expr::BinaryOp {
                             op: BinaryOperator::Add,
-                            lhs: Box::new(Expression::Column(Column::from("karma"))),
-                            rhs: Box::new(Expression::Literal(1.into()))
+                            lhs: Box::new(Expr::Column(Column::from("karma"))),
+                            rhs: Box::new(Expr::Literal(1.into()))
                         },
                     ),],
                     ..Default::default()
@@ -228,21 +225,19 @@ mod tests {
                     table: Table::from("group_permission"),
                     fields: vec![(
                         Column::from("permission"),
-                        Expression::Call(FunctionExpression::Call {
+                        Expr::Call(FunctionExpr::Call {
                             name: "REPLACE".to_string(),
                             arguments: vec![
-                                Expression::Column(Column::from("permission")),
-                                Expression::Literal(Literal::String("viewDiscussions".into())),
-                                Expression::Literal(Literal::String("viewForum".into())),
+                                Expr::Column(Column::from("permission")),
+                                Expr::Literal(Literal::String("viewDiscussions".into())),
+                                Expr::Literal(Literal::String("viewForum".into())),
                             ]
                         })
                     )],
-                    where_clause: Some(Expression::BinaryOp {
-                        lhs: Box::new(Expression::Column(Column::from("permission"))),
+                    where_clause: Some(Expr::BinaryOp {
+                        lhs: Box::new(Expr::Column(Column::from("permission"))),
                         op: BinaryOperator::Like,
-                        rhs: Box::new(Expression::Literal(Literal::String(
-                            "%viewDiscussions".into()
-                        ))),
+                        rhs: Box::new(Expr::Literal(Literal::String("%viewDiscussions".into()))),
                     }),
                     ..Default::default()
                 }
@@ -254,7 +249,7 @@ mod tests {
         use super::*;
         use crate::column::Column;
         use crate::table::Table;
-        use crate::Expression::UnaryOp;
+        use crate::Expr::UnaryOp;
         use crate::{BinaryOperator, Double, UnaryOperator};
 
         #[test]
@@ -263,10 +258,10 @@ mod tests {
                 "UPDATE \"stories\" SET \"hotness\" = -19216.5479744 WHERE \"stories\".\"id\" = ?";
 
             let res = updating(Dialect::PostgreSQL)(qstring.as_bytes());
-            let expected_left = Expression::Column(Column::from("stories.id"));
-            let expected_where_cond = Some(Expression::BinaryOp {
+            let expected_left = Expr::Column(Column::from("stories.id"));
+            let expected_where_cond = Some(Expr::BinaryOp {
                 lhs: Box::new(expected_left),
-                rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                rhs: Box::new(Expr::Literal(Literal::Placeholder(
                     ItemPlaceholder::QuestionMark,
                 ))),
                 op: BinaryOperator::Equal,
@@ -279,7 +274,7 @@ mod tests {
                         Column::from("hotness"),
                         UnaryOp {
                             op: UnaryOperator::Neg,
-                            rhs: Box::new(Expression::Literal(Literal::Double(Double {
+                            rhs: Box::new(Expr::Literal(Literal::Double(Double {
                                 value: 19216.5479744,
                                 precision: 7,
                             })))
@@ -302,10 +297,10 @@ mod tests {
                     table: Table::from("users"),
                     fields: vec![(
                         Column::from("karma"),
-                        Expression::BinaryOp {
+                        Expr::BinaryOp {
                             op: BinaryOperator::Add,
-                            lhs: Box::new(Expression::Column(Column::from("karma"))),
-                            rhs: Box::new(Expression::Literal(1.into()))
+                            lhs: Box::new(Expr::Column(Column::from("karma"))),
+                            rhs: Box::new(Expr::Literal(1.into()))
                         },
                     ),],
                     ..Default::default()

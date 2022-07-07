@@ -193,7 +193,7 @@ pub enum Change {
     CreateCache(CreateCacheStatement),
     /// Expression that represents an ALTER TABLE statement.
     AlterTable(AlterTableStatement),
-    /// The removal of a [`RecipeExpression`].
+    /// The removal of a [`RecipeExpr`].
     Drop {
         /// The [`SqlIdentifier`] of the query/view to remove.
         name: SqlIdentifier,

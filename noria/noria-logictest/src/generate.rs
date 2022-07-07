@@ -10,8 +10,8 @@ use colored::Colorize;
 use database_utils::{DatabaseConnection, DatabaseURL};
 use itertools::Itertools;
 use nom_sql::{
-    parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Dialect, Expression,
-    SqlQuery, Table,
+    parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Dialect, Expr, SqlQuery,
+    Table,
 };
 use query_generator::{GeneratorState, QuerySeed};
 
@@ -343,12 +343,10 @@ impl Seed {
                         .take(rows_to_delete)
                         .map(|row| DeleteStatement {
                             table: table.clone(),
-                            where_clause: Some(Expression::BinaryOp {
-                                lhs: Box::new(Expression::Column(pk.clone().into())),
+                            where_clause: Some(Expr::BinaryOp {
+                                lhs: Box::new(Expr::Column(pk.clone().into())),
                                 op: BinaryOperator::Equal,
-                                rhs: Box::new(Expression::Literal(
-                                    row[&pk].clone().try_into().unwrap(),
-                                )),
+                                rhs: Box::new(Expr::Literal(row[&pk].clone().try_into().unwrap())),
                             }),
                         })
                         .collect::<Vec<_>>())

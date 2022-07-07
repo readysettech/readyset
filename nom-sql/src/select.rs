@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::{
     as_alias, field_definition_expr, field_list, field_reference_list, schema_table_reference,
-    table_list, terminated_with_statement_terminator, ws_sep_comma, FieldDefinitionExpression,
+    table_list, terminated_with_statement_terminator, ws_sep_comma, FieldDefinitionExpr,
 };
 use crate::expression::expression;
 use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
@@ -20,7 +20,7 @@ use crate::literal::literal;
 use crate::order::{order_clause, OrderClause};
 use crate::table::Table;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expression, FieldReference, FunctionExpression, Literal, SqlIdentifier};
+use crate::{Dialect, Expr, FieldReference, FunctionExpr, Literal, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Default, Serialize, Deserialize)]
 pub struct GroupByClause {
@@ -76,12 +76,12 @@ impl fmt::Display for LimitClause {
 }
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub struct CommonTableExpression {
+pub struct CommonTableExpr {
     pub name: SqlIdentifier,
     pub statement: SelectStatement,
 }
 
-impl fmt::Display for CommonTableExpression {
+impl fmt::Display for CommonTableExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "`{}` AS ({})", self.name, self.statement)
     }
@@ -89,14 +89,14 @@ impl fmt::Display for CommonTableExpression {
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct SelectStatement {
-    pub ctes: Vec<CommonTableExpression>,
+    pub ctes: Vec<CommonTableExpr>,
     pub tables: Vec<Table>,
     pub distinct: bool,
-    pub fields: Vec<FieldDefinitionExpression>,
+    pub fields: Vec<FieldDefinitionExpr>,
     pub join: Vec<JoinClause>,
-    pub where_clause: Option<Expression>,
+    pub where_clause: Option<Expr>,
     pub group_by: Option<GroupByClause>,
-    pub having: Option<Expression>,
+    pub having: Option<Expr>,
     pub order: Option<OrderClause>,
     pub limit: Option<LimitClause>,
 }
@@ -104,18 +104,18 @@ pub struct SelectStatement {
 impl SelectStatement {
     pub fn contains_aggregate_select(&self) -> bool {
         self.fields.iter().any(|e| match e {
-            FieldDefinitionExpression::Expression { expr, .. } => match expr {
-                Expression::Call(func) => matches!(
+            FieldDefinitionExpr::Expr { expr, .. } => match expr {
+                Expr::Call(func) => matches!(
                     func,
-                    FunctionExpression::Avg { .. }
-                        | FunctionExpression::Count { .. }
-                        | FunctionExpression::CountStar
-                        | FunctionExpression::Sum { .. }
-                        | FunctionExpression::Max(_)
-                        | FunctionExpression::Min(_)
-                        | FunctionExpression::GroupConcat { .. }
+                    FunctionExpr::Avg { .. }
+                        | FunctionExpr::Count { .. }
+                        | FunctionExpr::CountStar
+                        | FunctionExpr::Sum { .. }
+                        | FunctionExpr::Max(_)
+                        | FunctionExpr::Min(_)
+                        | FunctionExpr::GroupConcat { .. }
                 ),
-                Expression::NestedSelect(select) => select.contains_aggregate_select(),
+                Expr::NestedSelect(select) => select.contains_aggregate_select(),
                 _ => false,
             },
             _ => false,
@@ -178,7 +178,7 @@ impl fmt::Display for SelectStatement {
     }
 }
 
-fn having_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+fn having_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("having")(i)?;
@@ -301,7 +301,7 @@ fn join_rhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinRightSide>
 }
 
 // Parse WHERE clause of a selection
-pub fn where_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+pub fn where_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     move |i| {
         let (remaining_input, (_, _, _, where_condition)) = tuple((
             whitespace0,
@@ -428,7 +428,7 @@ fn from_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause>
     }
 }
 
-fn cte(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CommonTableExpression> {
+fn cte(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CommonTableExpr> {
     move |i| {
         let (i, name) = dialect.identifier()(i)?;
         let (i, _) = whitespace1(i)?;
@@ -441,11 +441,11 @@ fn cte(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CommonTableExpressi
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag(")")(i)?;
 
-        Ok((i, CommonTableExpression { name, statement }))
+        Ok((i, CommonTableExpr { name, statement }))
     }
 }
 
-fn ctes(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<CommonTableExpression>> {
+fn ctes(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<CommonTableExpr>> {
     move |i| {
         let (i, _) = tag_no_case("with")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -520,13 +520,13 @@ pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Se
 mod tests {
     use super::*;
     use crate::column::Column;
-    use crate::common::{FieldDefinitionExpression, SqlType};
+    use crate::common::{FieldDefinitionExpr, SqlType};
     use crate::table::Table;
-    use crate::{BinaryOperator, Expression, FunctionExpression, InValue, ItemPlaceholder};
+    use crate::{BinaryOperator, Expr, FunctionExpr, InValue, ItemPlaceholder};
 
-    fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpression> {
+    fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpr> {
         cols.iter()
-            .map(|c| FieldDefinitionExpression::from(Column::from(*c)))
+            .map(|c| FieldDefinitionExpr::from(Column::from(*c)))
             .collect()
     }
 
@@ -559,8 +559,8 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
-                fields: vec![FieldDefinitionExpression::Expression {
-                    expr: Expression::Literal(Literal::Integer(1)),
+                fields: vec![FieldDefinitionExpr::Expr {
+                    expr: Expr::Literal(Literal::Integer(1)),
                     alias: None
                 }],
                 ..Default::default()
@@ -592,7 +592,7 @@ mod tests {
             res.unwrap().1,
             SelectStatement {
                 tables: vec![Table::from("users")],
-                fields: vec![FieldDefinitionExpression::All],
+                fields: vec![FieldDefinitionExpr::All],
                 ..Default::default()
             }
         );
@@ -607,7 +607,7 @@ mod tests {
             res.unwrap().1,
             SelectStatement {
                 tables: vec![Table::from("users"), Table::from("votes")],
-                fields: vec![FieldDefinitionExpression::AllInTable("users".into())],
+                fields: vec![FieldDefinitionExpr::AllInTable("users".into())],
                 ..Default::default()
             }
         );
@@ -679,16 +679,16 @@ mod tests {
     fn where_clause_with_variable_placeholder(qstring: &str, literal: Literal) {
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
 
-        let expected_where_cond = Some(Expression::BinaryOp {
-            lhs: Box::new(Expression::Column("email".into())),
+        let expected_where_cond = Some(Expr::BinaryOp {
+            lhs: Box::new(Expr::Column("email".into())),
             op: BinaryOperator::Equal,
-            rhs: Box::new(Expression::Literal(literal)),
+            rhs: Box::new(Expr::Literal(literal)),
         });
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
                 tables: vec![Table::from("ContactInfo")],
-                fields: vec![FieldDefinitionExpression::All],
+                fields: vec![FieldDefinitionExpr::All],
                 where_clause: expected_where_cond,
                 ..Default::default()
             }
@@ -729,7 +729,7 @@ mod tests {
                     alias: Some("t".into()),
                     schema: None,
                 },],
-                fields: vec![FieldDefinitionExpression::All],
+                fields: vec![FieldDefinitionExpr::All],
                 ..Default::default()
             }
         );
@@ -750,7 +750,7 @@ mod tests {
                     alias: Some("t".into()),
                     schema: Some("db1".into()),
                 },],
-                fields: vec![FieldDefinitionExpression::All],
+                fields: vec![FieldDefinitionExpr::All],
                 ..Default::default()
             }
         );
@@ -768,9 +768,9 @@ mod tests {
             res1,
             SelectStatement {
                 tables: vec![Table::from("PaperTag")],
-                fields: vec![FieldDefinitionExpression::Expression {
+                fields: vec![FieldDefinitionExpr::Expr {
                     alias: Some("TagName".into()),
-                    expr: Expression::Column(Column::from("name"))
+                    expr: Expr::Column(Column::from("name"))
                 }],
                 ..Default::default()
             }
@@ -780,8 +780,8 @@ mod tests {
             res2,
             SelectStatement {
                 tables: vec![Table::from("PaperTag")],
-                fields: vec![FieldDefinitionExpression::Expression {
-                    expr: Expression::Column(Column::from("PaperTag.name")),
+                fields: vec![FieldDefinitionExpr::Expr {
+                    expr: Expr::Column(Column::from("PaperTag.name")),
                     alias: Some("TagName".into()),
                 }],
                 ..Default::default()
@@ -799,9 +799,9 @@ mod tests {
             res1,
             SelectStatement {
                 tables: vec![Table::from("PaperTag")],
-                fields: vec![FieldDefinitionExpression::Expression {
+                fields: vec![FieldDefinitionExpr::Expr {
                     alias: Some("TagName".into()),
-                    expr: Expression::Column(Column {
+                    expr: Expr::Column(Column {
                         name: "name".into(),
                         table: None,
                     })
@@ -814,9 +814,9 @@ mod tests {
             res2,
             SelectStatement {
                 tables: vec![Table::from("PaperTag")],
-                fields: vec![FieldDefinitionExpression::Expression {
+                fields: vec![FieldDefinitionExpr::Expr {
                     alias: Some("TagName".into()),
-                    expr: Expression::Column(Column::from("PaperTag.name"))
+                    expr: Expr::Column(Column::from("PaperTag.name"))
                 }],
                 ..Default::default()
             }
@@ -828,10 +828,10 @@ mod tests {
         let qstring = "select distinct tag from PaperTag where paperId=?;";
 
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
-        let expected_where_cond = Some(Expression::BinaryOp {
-            lhs: Box::new(Expression::Column("paperId".into())),
+        let expected_where_cond = Some(Expr::BinaryOp {
+            lhs: Box::new(Expr::Column("paperId".into())),
             op: BinaryOperator::Equal,
-            rhs: Box::new(Expression::Literal(Literal::Placeholder(
+            rhs: Box::new(Expr::Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
             ))),
         });
@@ -853,21 +853,21 @@ mod tests {
 
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
 
-        let left_comp = Box::new(Expression::BinaryOp {
-            lhs: Box::new(Expression::Column(Column::from("paperId"))),
+        let left_comp = Box::new(Expr::BinaryOp {
+            lhs: Box::new(Expr::Column(Column::from("paperId"))),
             op: BinaryOperator::Equal,
-            rhs: Box::new(Expression::Literal(Literal::Placeholder(
+            rhs: Box::new(Expr::Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
             ))),
         });
-        let right_comp = Box::new(Expression::BinaryOp {
-            lhs: Box::new(Expression::Column(Column::from("paperStorageId"))),
+        let right_comp = Box::new(Expr::BinaryOp {
+            lhs: Box::new(Expr::Column(Column::from("paperStorageId"))),
             op: BinaryOperator::Equal,
-            rhs: Box::new(Expression::Literal(Literal::Placeholder(
+            rhs: Box::new(Expr::Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
             ))),
         });
-        let expected_where_cond = Some(Expression::BinaryOp {
+        let expected_where_cond = Some(Expr::BinaryOp {
             lhs: left_comp,
             op: BinaryOperator::And,
             rhs: right_comp,
@@ -892,9 +892,9 @@ mod tests {
             limit: 10.into(),
             offset: None,
         });
-        let ct = Expression::BinaryOp {
-            lhs: Box::new(Expression::Column(Column::from("id"))),
-            rhs: Box::new(Expression::Literal(Literal::Placeholder(
+        let ct = Expr::BinaryOp {
+            lhs: Box::new(Expr::Column(Column::from("id"))),
+            rhs: Box::new(Expr::Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
             ))),
             op: BinaryOperator::Equal,
@@ -905,7 +905,7 @@ mod tests {
             res.unwrap().1,
             SelectStatement {
                 tables: vec![Table::from("users")],
-                fields: vec![FieldDefinitionExpression::All],
+                fields: vec![FieldDefinitionExpr::All],
                 where_clause: expected_where_cond,
                 limit: expected_lim,
                 ..Default::default()
@@ -927,13 +927,12 @@ mod tests {
         let qstring = "SELECT max(addr_id) FROM address;";
 
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
-        let agg_expr =
-            FunctionExpression::Max(Box::new(Expression::Column(Column::from("addr_id"))));
+        let agg_expr = FunctionExpr::Max(Box::new(Expr::Column(Column::from("addr_id"))));
         assert_eq!(
             res.unwrap().1,
             SelectStatement {
                 tables: vec![Table::from("address")],
-                fields: vec![FieldDefinitionExpression::from(Expression::Call(agg_expr),),],
+                fields: vec![FieldDefinitionExpr::from(Expr::Call(agg_expr),),],
                 ..Default::default()
             }
         );
@@ -944,13 +943,12 @@ mod tests {
         let qstring = "SELECT max(addr_id) AS max_addr FROM address;";
 
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
-        let agg_expr =
-            FunctionExpression::Max(Box::new(Expression::Column(Column::from("addr_id"))));
+        let agg_expr = FunctionExpr::Max(Box::new(Expr::Column(Column::from("addr_id"))));
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("address")],
-            fields: vec![FieldDefinitionExpression::Expression {
+            fields: vec![FieldDefinitionExpr::Expr {
                 alias: Some("max_addr".into()),
-                expr: Expression::Call(agg_expr),
+                expr: Expr::Call(agg_expr),
             }],
             ..Default::default()
         };
@@ -962,14 +960,12 @@ mod tests {
         let qstring = "SELECT COUNT(*) FROM votes GROUP BY aid;";
 
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
-        let agg_expr = FunctionExpression::CountStar;
+        let agg_expr = FunctionExpr::CountStar;
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
-            fields: vec![FieldDefinitionExpression::from(Expression::Call(agg_expr))],
+            fields: vec![FieldDefinitionExpr::from(Expr::Call(agg_expr))],
             group_by: Some(GroupByClause {
-                fields: vec![FieldReference::Expression(Expression::Column(
-                    Column::from("aid"),
-                ))],
+                fields: vec![FieldReference::Expr(Expr::Column(Column::from("aid")))],
             }),
             ..Default::default()
         };
@@ -981,18 +977,16 @@ mod tests {
         let qstring = "SELECT COUNT(DISTINCT vote_id) FROM votes GROUP BY aid;";
 
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
-        let agg_expr = FunctionExpression::Count {
-            expr: Box::new(Expression::Column(Column::from("vote_id"))),
+        let agg_expr = FunctionExpr::Count {
+            expr: Box::new(Expr::Column(Column::from("vote_id"))),
             distinct: true,
             count_nulls: false,
         };
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
-            fields: vec![FieldDefinitionExpression::from(Expression::Call(agg_expr))],
+            fields: vec![FieldDefinitionExpr::from(Expr::Call(agg_expr))],
             group_by: Some(GroupByClause {
-                fields: vec![FieldReference::Expression(Expression::Column(
-                    Column::from("aid"),
-                ))],
+                fields: vec![FieldReference::Expr(Expr::Column(Column::from("aid")))],
             }),
             ..Default::default()
         };
@@ -1005,14 +999,14 @@ mod tests {
             "SELECT COUNT(CASE WHEN vote_id > 10 THEN vote_id END) FROM votes GROUP BY aid;";
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
 
-        let filter_cond = Expression::BinaryOp {
-            lhs: Box::new(Expression::Column(Column::from("vote_id"))),
+        let filter_cond = Expr::BinaryOp {
+            lhs: Box::new(Expr::Column(Column::from("vote_id"))),
             op: BinaryOperator::Greater,
-            rhs: Box::new(Expression::Literal(Literal::Integer(10.into()))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(10.into()))),
         };
-        let agg_expr = FunctionExpression::Count {
-            expr: Box::new(Expression::CaseWhen {
-                then_expr: Box::new(Expression::Column(Column::from("vote_id"))),
+        let agg_expr = FunctionExpr::Count {
+            expr: Box::new(Expr::CaseWhen {
+                then_expr: Box::new(Expr::Column(Column::from("vote_id"))),
                 else_expr: None,
                 condition: Box::new(filter_cond),
             }),
@@ -1021,11 +1015,9 @@ mod tests {
         };
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
-            fields: vec![FieldDefinitionExpression::from(Expression::Call(agg_expr))],
+            fields: vec![FieldDefinitionExpr::from(Expr::Call(agg_expr))],
             group_by: Some(GroupByClause {
-                fields: vec![FieldReference::Expression(Expression::Column(
-                    Column::from("aid"),
-                ))],
+                fields: vec![FieldReference::Expr(Expr::Column(Column::from("aid")))],
             }),
             ..Default::default()
         };
@@ -1038,14 +1030,14 @@ mod tests {
 
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
 
-        let filter_cond = Expression::BinaryOp {
-            lhs: Box::new(Expression::Column(Column::from("sign"))),
+        let filter_cond = Expr::BinaryOp {
+            lhs: Box::new(Expr::Column(Column::from("sign"))),
             op: BinaryOperator::Equal,
-            rhs: Box::new(Expression::Literal(Literal::Integer(1.into()))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(1.into()))),
         };
-        let agg_expr = FunctionExpression::Sum {
-            expr: Box::new(Expression::CaseWhen {
-                then_expr: Box::new(Expression::Column(Column::from("vote_id"))),
+        let agg_expr = FunctionExpr::Sum {
+            expr: Box::new(Expr::CaseWhen {
+                then_expr: Box::new(Expr::Column(Column::from("vote_id"))),
                 else_expr: None,
                 condition: Box::new(filter_cond),
             }),
@@ -1053,11 +1045,9 @@ mod tests {
         };
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
-            fields: vec![FieldDefinitionExpression::from(Expression::Call(agg_expr))],
+            fields: vec![FieldDefinitionExpr::from(Expr::Call(agg_expr))],
             group_by: Some(GroupByClause {
-                fields: vec![FieldReference::Expression(Expression::Column(
-                    Column::from("aid"),
-                ))],
+                fields: vec![FieldReference::Expr(Expr::Column(Column::from("aid")))],
             }),
             ..Default::default()
         };
@@ -1071,26 +1061,24 @@ mod tests {
 
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
 
-        let filter_cond = Expression::BinaryOp {
-            lhs: Box::new(Expression::Column(Column::from("sign"))),
+        let filter_cond = Expr::BinaryOp {
+            lhs: Box::new(Expr::Column(Column::from("sign"))),
             op: BinaryOperator::Equal,
-            rhs: Box::new(Expression::Literal(Literal::Integer(1.into()))),
+            rhs: Box::new(Expr::Literal(Literal::Integer(1.into()))),
         };
-        let agg_expr = FunctionExpression::Sum {
-            expr: Box::new(Expression::CaseWhen {
-                then_expr: Box::new(Expression::Column(Column::from("vote_id"))),
-                else_expr: Some(Box::new(Expression::Literal(Literal::Integer(6)))),
+        let agg_expr = FunctionExpr::Sum {
+            expr: Box::new(Expr::CaseWhen {
+                then_expr: Box::new(Expr::Column(Column::from("vote_id"))),
+                else_expr: Some(Box::new(Expr::Literal(Literal::Integer(6)))),
                 condition: Box::new(filter_cond),
             }),
             distinct: false,
         };
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
-            fields: vec![FieldDefinitionExpression::from(Expression::Call(agg_expr))],
+            fields: vec![FieldDefinitionExpr::from(Expr::Call(agg_expr))],
             group_by: Some(GroupByClause {
-                fields: vec![FieldReference::Expression(Expression::Column(
-                    Column::from("aid"),
-                ))],
+                fields: vec![FieldReference::Expr(Expr::Column(Column::from("aid")))],
             }),
             ..Default::default()
         };
@@ -1106,22 +1094,22 @@ mod tests {
 
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
 
-        let filter_cond = Expression::BinaryOp {
-            lhs: Box::new(Expression::BinaryOp {
-                lhs: Box::new(Expression::Column(Column::from("votes.story_id"))),
+        let filter_cond = Expr::BinaryOp {
+            lhs: Box::new(Expr::BinaryOp {
+                lhs: Box::new(Expr::Column(Column::from("votes.story_id"))),
                 op: BinaryOperator::Is,
-                rhs: Box::new(Expression::Literal(Literal::Null)),
+                rhs: Box::new(Expr::Literal(Literal::Null)),
             }),
-            rhs: Box::new(Expression::BinaryOp {
-                lhs: Box::new(Expression::Column(Column::from("votes.vote"))),
+            rhs: Box::new(Expr::BinaryOp {
+                lhs: Box::new(Expr::Column(Column::from("votes.vote"))),
                 op: BinaryOperator::Equal,
-                rhs: Box::new(Expression::Literal(Literal::Integer(0))),
+                rhs: Box::new(Expr::Literal(Literal::Integer(0))),
             }),
             op: BinaryOperator::And,
         };
-        let agg_expr = FunctionExpression::Count {
-            expr: Box::new(Expression::CaseWhen {
-                then_expr: Box::new(Expression::Column(Column::from("votes.vote"))),
+        let agg_expr = FunctionExpr::Count {
+            expr: Box::new(Expr::CaseWhen {
+                then_expr: Box::new(Expr::Column(Column::from("votes.vote"))),
                 else_expr: None,
                 condition: Box::new(filter_cond),
             }),
@@ -1130,14 +1118,14 @@ mod tests {
         };
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("votes")],
-            fields: vec![FieldDefinitionExpression::Expression {
+            fields: vec![FieldDefinitionExpr::Expr {
                 alias: Some("votes".into()),
-                expr: Expression::Call(agg_expr),
+                expr: Expr::Call(agg_expr),
             }],
             group_by: Some(GroupByClause {
-                fields: vec![FieldReference::Expression(Expression::Column(
-                    Column::from("votes.comment_id"),
-                ))],
+                fields: vec![FieldReference::Expr(Expr::Column(Column::from(
+                    "votes.comment_id",
+                )))],
             }),
             ..Default::default()
         };
@@ -1149,18 +1137,18 @@ mod tests {
         let qstring = "SELECT coalesce(a, b,c) as x,d FROM sometable;";
 
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
-        let agg_expr = FunctionExpression::Call {
+        let agg_expr = FunctionExpr::Call {
             name: "coalesce".to_owned(),
             arguments: vec![
-                Expression::Column(Column {
+                Expr::Column(Column {
                     name: "a".into(),
                     table: None,
                 }),
-                Expression::Column(Column {
+                Expr::Column(Column {
                     name: "b".into(),
                     table: None,
                 }),
-                Expression::Column(Column {
+                Expr::Column(Column {
                     name: "c".into(),
                     table: None,
                 }),
@@ -1169,11 +1157,11 @@ mod tests {
         let expected_stmt = SelectStatement {
             tables: vec![Table::from("sometable")],
             fields: vec![
-                FieldDefinitionExpression::Expression {
+                FieldDefinitionExpr::Expr {
                     alias: Some("x".into()),
-                    expr: Expression::Call(agg_expr),
+                    expr: Expr::Call(agg_expr),
                 },
-                FieldDefinitionExpression::from(Column {
+                FieldDefinitionExpr::from(Column {
                     name: "d".into(),
                     table: None,
                 }),
@@ -1189,15 +1177,15 @@ mod tests {
                        item.i_subject = ? ORDER BY item.i_title limit 50;";
 
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
-        let expected_where_cond = Some(Expression::BinaryOp {
-            lhs: Box::new(Expression::BinaryOp {
-                lhs: Box::new(Expression::Column(Column::from("item.i_a_id"))),
+        let expected_where_cond = Some(Expr::BinaryOp {
+            lhs: Box::new(Expr::BinaryOp {
+                lhs: Box::new(Expr::Column(Column::from("item.i_a_id"))),
                 op: BinaryOperator::Equal,
-                rhs: Box::new(Expression::Column(Column::from("author.a_id"))),
+                rhs: Box::new(Expr::Column(Column::from("author.a_id"))),
             }),
-            rhs: Box::new(Expression::BinaryOp {
-                lhs: Box::new(Expression::Column(Column::from("item.i_subject"))),
-                rhs: Box::new(Expression::Literal(Literal::Placeholder(
+            rhs: Box::new(Expr::BinaryOp {
+                lhs: Box::new(Expr::Column(Column::from("item.i_subject"))),
+                rhs: Box::new(Expr::Literal(Literal::Placeholder(
                     ItemPlaceholder::QuestionMark,
                 ))),
                 op: BinaryOperator::Equal,
@@ -1208,11 +1196,11 @@ mod tests {
             res.unwrap().1,
             SelectStatement {
                 tables: vec![Table::from("item"), Table::from("author")],
-                fields: vec![FieldDefinitionExpression::All],
+                fields: vec![FieldDefinitionExpr::All],
                 where_clause: expected_where_cond,
                 order: Some(OrderClause {
                     order_by: vec![(
-                        FieldReference::Expression(Expression::Column("item.i_title".into())),
+                        FieldReference::Expr(Expr::Column("item.i_title".into())),
                         None
                     )],
                 }),
@@ -1258,17 +1246,14 @@ mod tests {
             join: vec![JoinClause {
                 operator: JoinOperator::Join,
                 right: JoinRightSide::Table(Table::from("PaperReview")),
-                constraint: JoinConstraint::On(Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column(Column::from("PCMember.contactId"))),
-                    rhs: Box::new(Expression::Column(Column::from("PaperReview.contactId"))),
+                constraint: JoinConstraint::On(Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(Column::from("PCMember.contactId"))),
+                    rhs: Box::new(Expr::Column(Column::from("PaperReview.contactId"))),
                     op: BinaryOperator::Equal,
                 }),
             }],
             order: Some(OrderClause {
-                order_by: vec![(
-                    FieldReference::Expression(Expression::Column("contactId".into())),
-                    None,
-                )],
+                order_by: vec![(FieldReference::Expr(Expr::Column("contactId".into())), None)],
             }),
             ..Default::default()
         };
@@ -1292,9 +1277,9 @@ mod tests {
                        using (contactId) where ContactInfo.contactId=?;";
 
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
-        let ct = Expression::BinaryOp {
-            lhs: Box::new(Expression::Column(Column::from("ContactInfo.contactId"))),
-            rhs: Box::new(Expression::Literal(Literal::Placeholder(
+        let ct = Expr::BinaryOp {
+            lhs: Box::new(Expr::Column(Column::from("ContactInfo.contactId"))),
+            rhs: Box::new(Expr::Literal(Literal::Placeholder(
                 ItemPlaceholder::QuestionMark,
             ))),
             op: BinaryOperator::Equal,
@@ -1336,10 +1321,10 @@ mod tests {
                     WHERE orders.o_id = order_line.ol_o_id);";
 
         let res = selection(Dialect::MySQL)(qstr.as_bytes());
-        let inner_where_clause = Expression::BinaryOp {
-            lhs: Box::new(Expression::Column(Column::from("orders.o_id"))),
+        let inner_where_clause = Expr::BinaryOp {
+            lhs: Box::new(Expr::Column(Column::from("orders.o_id"))),
             op: BinaryOperator::Equal,
-            rhs: Box::new(Expression::Column(Column::from("order_line.ol_o_id"))),
+            rhs: Box::new(Expr::Column(Column::from("order_line.ol_o_id"))),
         };
 
         let inner_select = SelectStatement {
@@ -1349,8 +1334,8 @@ mod tests {
             ..Default::default()
         };
 
-        let outer_where_clause = Expression::In {
-            lhs: Box::new(Expression::Column(Column::from("orders.o_c_id"))),
+        let outer_where_clause = Expr::In {
+            lhs: Box::new(Expr::Column(Column::from("orders.o_c_id"))),
             rhs: InValue::Subquery(Box::new(inner_select)),
             negated: false,
         };
@@ -1374,26 +1359,26 @@ mod tests {
 
         let res = selection(Dialect::MySQL)(qstr.as_bytes());
 
-        let agg_expr = FunctionExpression::Max(Box::new(Expression::Column(Column::from("o_id"))));
+        let agg_expr = FunctionExpr::Max(Box::new(Expr::Column(Column::from("o_id"))));
         let recursive_select = SelectStatement {
             tables: vec![Table::from("orders")],
-            fields: vec![FieldDefinitionExpression::from(Expression::Call(agg_expr))],
+            fields: vec![FieldDefinitionExpr::from(Expr::Call(agg_expr))],
             ..Default::default()
         };
 
-        let cop1 = Expression::BinaryOp {
-            lhs: Box::new(Expression::Column(Column::from("orders.o_id"))),
+        let cop1 = Expr::BinaryOp {
+            lhs: Box::new(Expr::Column(Column::from("orders.o_id"))),
             op: BinaryOperator::Equal,
-            rhs: Box::new(Expression::Column(Column::from("order_line.ol_o_id"))),
+            rhs: Box::new(Expr::Column(Column::from("order_line.ol_o_id"))),
         };
 
-        let cop2 = Expression::BinaryOp {
-            lhs: Box::new(Expression::Column(Column::from("orders.o_id"))),
+        let cop2 = Expr::BinaryOp {
+            lhs: Box::new(Expr::Column(Column::from("orders.o_id"))),
             op: BinaryOperator::Greater,
-            rhs: Box::new(Expression::NestedSelect(Box::new(recursive_select))),
+            rhs: Box::new(Expr::NestedSelect(Box::new(recursive_select))),
         };
 
-        let inner_where_clause = Expression::BinaryOp {
+        let inner_where_clause = Expr::BinaryOp {
             lhs: Box::new(cop1),
             op: BinaryOperator::And,
             rhs: Box::new(cop2),
@@ -1406,8 +1391,8 @@ mod tests {
             ..Default::default()
         };
 
-        let outer_where_clause = Expression::In {
-            lhs: Box::new(Expression::Column(Column::from("orders.o_c_id"))),
+        let outer_where_clause = Expr::In {
+            lhs: Box::new(Expr::Column(Column::from("orders.o_c_id"))),
             rhs: InValue::Subquery(Box::new(inner_select)),
             negated: false,
         };
@@ -1450,10 +1435,10 @@ mod tests {
             join: vec![JoinClause {
                 operator: JoinOperator::Join,
                 right: JoinRightSide::NestedSelect(Box::new(inner_select), "ids".into()),
-                constraint: JoinConstraint::On(Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column(Column::from("orders.o_id"))),
+                constraint: JoinConstraint::On(Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(Column::from("orders.o_id"))),
                     op: BinaryOperator::Equal,
-                    rhs: Box::new(Expression::Column(Column::from("ids.ol_i_id"))),
+                    rhs: Box::new(Expr::Column(Column::from("ids.ol_i_id"))),
                 }),
             }],
             ..Default::default()
@@ -1469,12 +1454,12 @@ mod tests {
 
         let expected = SelectStatement {
             tables: vec![Table::from("orders")],
-            fields: vec![FieldDefinitionExpression::from(Expression::BinaryOp {
-                lhs: Box::new(Expression::Call(FunctionExpression::Max(Box::new(
-                    Expression::Column("o_id".into()),
-                )))),
+            fields: vec![FieldDefinitionExpr::from(Expr::BinaryOp {
+                lhs: Box::new(Expr::Call(FunctionExpr::Max(Box::new(Expr::Column(
+                    "o_id".into(),
+                ))))),
                 op: BinaryOperator::Subtract,
-                rhs: Box::new(Expression::Literal(3333.into())),
+                rhs: Box::new(Expr::Literal(3333.into())),
             })],
             ..Default::default()
         };
@@ -1489,14 +1474,14 @@ mod tests {
 
         let expected = SelectStatement {
             tables: vec![Table::from("orders")],
-            fields: vec![FieldDefinitionExpression::Expression {
+            fields: vec![FieldDefinitionExpr::Expr {
                 alias: Some("double_max".into()),
-                expr: Expression::BinaryOp {
-                    lhs: Box::new(Expression::Call(FunctionExpression::Max(Box::new(
-                        Expression::Column("o_id".into()),
-                    )))),
+                expr: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Call(FunctionExpr::Max(Box::new(Expr::Column(
+                        "o_id".into(),
+                    ))))),
                     op: BinaryOperator::Multiply,
-                    rhs: Box::new(Expression::Literal(2.into())),
+                    rhs: Box::new(Expr::Literal(2.into())),
                 },
             }],
             ..Default::default()
@@ -1513,13 +1498,13 @@ mod tests {
         assert!(rem.is_empty());
         assert_eq!(
             res.where_clause,
-            Some(Expression::In {
-                lhs: Box::new(Expression::Call(FunctionExpression::Avg {
-                    expr: Box::new(Expression::Column("y".into())),
+            Some(Expr::In {
+                lhs: Box::new(Expr::Call(FunctionExpr::Avg {
+                    expr: Box::new(Expr::Column("y".into())),
                     distinct: false
                 })),
                 rhs: InValue::List(vec![
-                    Expression::Literal(Literal::Placeholder(
+                    Expr::Literal(Literal::Placeholder(
                         ItemPlaceholder::QuestionMark
                     ));
                     3
@@ -1539,19 +1524,19 @@ mod tests {
             SelectStatement {
                 tables: vec!["users".into()],
                 fields: vec![
-                    FieldDefinitionExpression::from(Column::from("id")),
-                    FieldDefinitionExpression::Expression {
+                    FieldDefinitionExpr::from(Column::from("id")),
+                    FieldDefinitionExpr::Expr {
                         alias: Some("created_day".into()),
-                        expr: Expression::Cast {
-                            expr: Box::new(Expression::Column(Column::from("created_at"))),
+                        expr: Expr::Cast {
+                            expr: Box::new(Expr::Column(Column::from("created_at"))),
                             ty: SqlType::Date,
                             postgres_style: false,
                         },
                     },
                 ],
-                where_clause: Some(Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column(Column::from("id"))),
-                    rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                where_clause: Some(Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column(Column::from("id"))),
+                    rhs: Box::new(Expr::Literal(Literal::Placeholder(
                         ItemPlaceholder::QuestionMark
                     ))),
                     op: BinaryOperator::Equal,
@@ -1593,19 +1578,19 @@ mod tests {
     #[test]
     fn format_ctes() {
         let query = SelectStatement {
-            ctes: vec![CommonTableExpression {
+            ctes: vec![CommonTableExpr {
                 name: "foo".into(),
                 statement: SelectStatement {
-                    fields: vec![FieldDefinitionExpression::Expression {
-                        expr: Expression::Column("x".into()),
+                    fields: vec![FieldDefinitionExpr::Expr {
+                        expr: Expr::Column("x".into()),
                         alias: None,
                     }],
                     tables: vec!["t".into()],
                     ..Default::default()
                 },
             }],
-            fields: vec![FieldDefinitionExpression::Expression {
-                expr: Expression::Column("x".into()),
+            fields: vec![FieldDefinitionExpr::Expr {
+                expr: Expr::Column("x".into()),
                 alias: None,
             }],
             tables: vec!["foo".into()],
@@ -1626,10 +1611,10 @@ mod tests {
         );
         assert_eq!(
             res.having,
-            Some(Expression::BinaryOp {
-                lhs: Box::new(Expression::Call(FunctionExpression::CountStar)),
+            Some(Expr::BinaryOp {
+                lhs: Box::new(Expr::Call(FunctionExpr::CountStar)),
                 op: BinaryOperator::Greater,
-                rhs: Box::new(Expression::Literal(1.into()))
+                rhs: Box::new(Expr::Literal(1.into()))
             })
         );
         let stringified = res.to_string();
@@ -1642,9 +1627,9 @@ mod tests {
     mod mysql {
         use super::*;
         use crate::column::Column;
-        use crate::common::FieldDefinitionExpression;
+        use crate::common::FieldDefinitionExpr;
         use crate::table::Table;
-        use crate::{BinaryOperator, Expression, FunctionExpression, InValue};
+        use crate::{BinaryOperator, Expr, FunctionExpr, InValue};
 
         #[test]
         fn alias_generic_function() {
@@ -1656,15 +1641,15 @@ mod tests {
                 SelectStatement {
                     tables: vec!["users".into()],
                     fields: vec![
-                        FieldDefinitionExpression::from(Column::from("id")),
-                        FieldDefinitionExpression::Expression {
+                        FieldDefinitionExpr::from(Column::from("id")),
+                        FieldDefinitionExpr::Expr {
                             alias: Some("created_day".into()),
-                            expr: Expression::Call(FunctionExpression::Call {
+                            expr: Expr::Call(FunctionExpr::Call {
                                 name: "coalesce".to_owned(),
                                 arguments: vec![
-                                    Expression::Column(Column::from("a")),
-                                    Expression::Literal(Literal::String("b".to_owned())),
-                                    Expression::Column(Column::from("c"))
+                                    Expr::Column(Column::from("a")),
+                                    Expr::Literal(Literal::String("b".to_owned())),
+                                    Expr::Column(Column::from("c"))
                                 ]
                             }),
                         },
@@ -1709,12 +1694,12 @@ mod tests {
                 SelectStatement {
                     tables: vec![Table::from("users")],
                     fields: vec![
-                        FieldDefinitionExpression::from(Expression::Literal(Literal::Null,)),
-                        FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(1),)),
-                        FieldDefinitionExpression::from(Expression::Literal(Literal::String(
-                            "foo".to_owned()
-                        ),)),
-                        FieldDefinitionExpression::from(Expression::Literal(Literal::CurrentTime,)),
+                        FieldDefinitionExpr::from(Expr::Literal(Literal::Null,)),
+                        FieldDefinitionExpr::from(Expr::Literal(Literal::Integer(1),)),
+                        FieldDefinitionExpr::from(
+                            Expr::Literal(Literal::String("foo".to_owned()),)
+                        ),
+                        FieldDefinitionExpr::from(Expr::Literal(Literal::CurrentTime,)),
                     ],
                     ..Default::default()
                 }
@@ -1730,31 +1715,29 @@ mod tests {
                     WHERE `auth_permission`.`content_type_id` IN (0);";
             let res = selection(Dialect::MySQL)(qstr.as_bytes());
 
-            let expected_where_clause = Some(Expression::In {
-                lhs: Box::new(Expression::Column(Column::from(
+            let expected_where_clause = Some(Expr::In {
+                lhs: Box::new(Expr::Column(Column::from(
                     "auth_permission.content_type_id",
                 ))),
-                rhs: InValue::List(vec![Expression::Literal(0.into())]),
+                rhs: InValue::List(vec![Expr::Literal(0.into())]),
                 negated: false,
             });
 
             let expected = SelectStatement {
                 tables: vec![Table::from("auth_permission")],
                 fields: vec![
-                    FieldDefinitionExpression::from(Column::from(
-                        "auth_permission.content_type_id",
-                    )),
-                    FieldDefinitionExpression::from(Column::from("auth_permission.codename")),
+                    FieldDefinitionExpr::from(Column::from("auth_permission.content_type_id")),
+                    FieldDefinitionExpr::from(Column::from("auth_permission.codename")),
                 ],
                 join: vec![JoinClause {
                     operator: JoinOperator::Join,
                     right: JoinRightSide::Table(Table::from("django_content_type")),
-                    constraint: JoinConstraint::On(Expression::BinaryOp {
+                    constraint: JoinConstraint::On(Expr::BinaryOp {
                         op: BinaryOperator::Equal,
-                        lhs: Box::new(Expression::Column(Column::from(
+                        lhs: Box::new(Expr::Column(Column::from(
                             "auth_permission.content_type_id",
                         ))),
-                        rhs: Box::new(Expression::Column(Column::from("django_content_type.id"))),
+                        rhs: Box::new(Expr::Column(Column::from("django_content_type.id"))),
                     }),
                 }],
                 where_clause: expected_where_clause,
@@ -1793,9 +1776,9 @@ mod tests {
     mod postgres {
         use super::*;
         use crate::column::Column;
-        use crate::common::FieldDefinitionExpression;
+        use crate::common::FieldDefinitionExpr;
         use crate::table::Table;
-        use crate::{BinaryOperator, Expression, FunctionExpression, InValue};
+        use crate::{BinaryOperator, Expr, FunctionExpr, InValue};
 
         #[test]
         fn alias_generic_function() {
@@ -1807,15 +1790,15 @@ mod tests {
                 SelectStatement {
                     tables: vec!["users".into()],
                     fields: vec![
-                        FieldDefinitionExpression::from(Column::from("id")),
-                        FieldDefinitionExpression::Expression {
+                        FieldDefinitionExpr::from(Column::from("id")),
+                        FieldDefinitionExpr::Expr {
                             alias: Some("created_day".into()),
-                            expr: Expression::Call(FunctionExpression::Call {
+                            expr: Expr::Call(FunctionExpr::Call {
                                 name: "coalesce".to_owned(),
                                 arguments: vec![
-                                    Expression::Column(Column::from("a")),
-                                    Expression::Literal(Literal::String("b".to_owned())),
-                                    Expression::Column(Column::from("c"))
+                                    Expr::Column(Column::from("a")),
+                                    Expr::Literal(Literal::String("b".to_owned())),
+                                    Expr::Column(Column::from("c"))
                                 ]
                             }),
                         },
@@ -1860,12 +1843,12 @@ mod tests {
                 SelectStatement {
                     tables: vec![Table::from("users")],
                     fields: vec![
-                        FieldDefinitionExpression::from(Expression::Literal(Literal::Null,)),
-                        FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(1),)),
-                        FieldDefinitionExpression::from(Expression::Literal(Literal::String(
-                            "foo".to_owned()
-                        ),)),
-                        FieldDefinitionExpression::from(Expression::Literal(Literal::CurrentTime,)),
+                        FieldDefinitionExpr::from(Expr::Literal(Literal::Null,)),
+                        FieldDefinitionExpr::from(Expr::Literal(Literal::Integer(1),)),
+                        FieldDefinitionExpr::from(
+                            Expr::Literal(Literal::String("foo".to_owned()),)
+                        ),
+                        FieldDefinitionExpr::from(Expr::Literal(Literal::CurrentTime,)),
                     ],
                     ..Default::default()
                 }
@@ -1881,31 +1864,29 @@ mod tests {
                     WHERE \"auth_permission\".\"content_type_id\" IN (0);";
             let res = selection(Dialect::PostgreSQL)(qstr.as_bytes());
 
-            let expected_where_clause = Some(Expression::In {
-                lhs: Box::new(Expression::Column(Column::from(
+            let expected_where_clause = Some(Expr::In {
+                lhs: Box::new(Expr::Column(Column::from(
                     "auth_permission.content_type_id",
                 ))),
-                rhs: InValue::List(vec![Expression::Literal(0.into())]),
+                rhs: InValue::List(vec![Expr::Literal(0.into())]),
                 negated: false,
             });
 
             let expected = SelectStatement {
                 tables: vec![Table::from("auth_permission")],
                 fields: vec![
-                    FieldDefinitionExpression::from(Column::from(
-                        "auth_permission.content_type_id",
-                    )),
-                    FieldDefinitionExpression::from(Column::from("auth_permission.codename")),
+                    FieldDefinitionExpr::from(Column::from("auth_permission.content_type_id")),
+                    FieldDefinitionExpr::from(Column::from("auth_permission.codename")),
                 ],
                 join: vec![JoinClause {
                     operator: JoinOperator::Join,
                     right: JoinRightSide::Table(Table::from("django_content_type")),
-                    constraint: JoinConstraint::On(Expression::BinaryOp {
+                    constraint: JoinConstraint::On(Expr::BinaryOp {
                         op: BinaryOperator::Equal,
-                        lhs: Box::new(Expression::Column(Column::from(
+                        lhs: Box::new(Expr::Column(Column::from(
                             "auth_permission.content_type_id",
                         ))),
-                        rhs: Box::new(Expression::Column(Column::from("django_content_type.id"))),
+                        rhs: Box::new(Expr::Column(Column::from("django_content_type.id"))),
                     }),
                 }],
                 where_clause: expected_where_clause,

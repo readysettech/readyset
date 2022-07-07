@@ -8,9 +8,9 @@ use std::vec::Vec;
 use common::IndexType;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
-    BinaryOperator, Column, Expression, FieldDefinitionExpression, FieldReference,
-    FunctionExpression, InValue, ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide,
-    LimitClause, Literal, OrderType, SelectStatement, SqlIdentifier, Table, UnaryOperator,
+    BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
+    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderType,
+    SelectStatement, SqlIdentifier, Table, UnaryOperator,
 };
 use noria::{PlaceholderIdx, ViewPlaceholder};
 use noria_errors::{
@@ -30,10 +30,10 @@ pub struct LiteralColumn {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub struct ExpressionColumn {
+pub struct ExprColumn {
     pub name: SqlIdentifier,
     pub table: Option<SqlIdentifier>,
-    pub expression: Expression,
+    pub expression: Expr,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -43,13 +43,13 @@ pub enum OutputColumn {
         column: Column,
     },
     Literal(LiteralColumn),
-    Expression(ExpressionColumn),
+    Expr(ExprColumn),
 }
 
 impl Ord for OutputColumn {
     fn cmp(&self, other: &OutputColumn) -> Ordering {
         match *self {
-            OutputColumn::Expression(ExpressionColumn {
+            OutputColumn::Expr(ExprColumn {
                 ref name,
                 ref table,
                 ..
@@ -68,7 +68,7 @@ impl Ord for OutputColumn {
                 ref table,
                 ..
             }) => match *other {
-                OutputColumn::Expression(ExpressionColumn {
+                OutputColumn::Expr(ExprColumn {
                     name: ref other_name,
                     table: ref other_table,
                     ..
@@ -104,7 +104,7 @@ impl Ord for OutputColumn {
 impl PartialOrd for OutputColumn {
     fn partial_cmp(&self, other: &OutputColumn) -> Option<Ordering> {
         match *self {
-            OutputColumn::Expression(ExpressionColumn {
+            OutputColumn::Expr(ExprColumn {
                 ref name,
                 ref table,
                 ..
@@ -123,7 +123,7 @@ impl PartialOrd for OutputColumn {
                 ref table,
                 ..
             }) => match *other {
-                OutputColumn::Expression(ExpressionColumn {
+                OutputColumn::Expr(ExprColumn {
                     name: ref other_name,
                     table: ref other_table,
                     ..
@@ -162,7 +162,7 @@ impl OutputColumn {
     /// Returns a reference to the final projected name for this [`OutputColumn`]
     pub fn name(&self) -> &SqlIdentifier {
         match self {
-            OutputColumn::Expression(ExpressionColumn { name, .. }) => name,
+            OutputColumn::Expr(ExprColumn { name, .. }) => name,
             OutputColumn::Data { alias, .. } => alias,
             OutputColumn::Literal(LiteralColumn { name, .. }) => name,
         }
@@ -178,8 +178,8 @@ pub struct JoinRef {
 /// An equality predicate on two expressions, used as the key for a join
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct JoinPredicate {
-    pub left: Expression,
-    pub right: Expression,
+    pub left: Expr,
+    pub right: Expr,
 }
 
 /// An individual column on which a query is parameterized
@@ -193,7 +193,7 @@ pub struct Parameter {
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct QueryGraphNode {
     pub rel_name: SqlIdentifier,
-    pub predicates: Vec<Expression>,
+    pub predicates: Vec<Expr>,
     pub columns: Vec<Column>,
     pub parameters: Vec<Parameter>,
     /// If this query graph relation refers to a subquery, the graph of that subquery and the AST
@@ -210,7 +210,7 @@ pub enum QueryGraphEdge {
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Pagination {
-    pub order: Option<Vec<(Expression, OrderType)>>,
+    pub order: Option<Vec<(Expr, OrderType)>>,
     pub limit: usize,
     pub offset: Option<ViewPlaceholder>,
 }
@@ -237,7 +237,7 @@ pub struct QueryGraph {
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     pub edges: HashMap<(SqlIdentifier, SqlIdentifier), QueryGraphEdge>,
     /// Aggregates in the query, represented as a list of (expression, alias) pairs
-    pub aggregates: Vec<(FunctionExpression, SqlIdentifier)>,
+    pub aggregates: Vec<(FunctionExpr, SqlIdentifier)>,
     /// Set of columns that appear in the GROUP BY clause
     pub group_by: HashSet<Column>,
     /// Final set of projected columns in this query; may include literals in addition to the
@@ -247,7 +247,7 @@ pub struct QueryGraph {
     /// its (src, dst) pair
     pub join_order: Vec<JoinRef>,
     /// Global predicates (not associated with a particular relation)
-    pub global_predicates: Vec<Expression>,
+    pub global_predicates: Vec<Expr>,
     /// The pagination (order, limit, offset) for the query, if any
     pub pagination: Option<Pagination>,
 }
@@ -416,11 +416,11 @@ impl Hash for QueryGraph {
 }
 
 /// Splits top level conjunctions into multiple predicates
-fn split_conjunctions(ces: Vec<Expression>) -> Vec<Expression> {
+fn split_conjunctions(ces: Vec<Expr>) -> Vec<Expr> {
     let mut new_ces = Vec::new();
     for ce in ces {
         match ce {
-            Expression::BinaryOp {
+            Expr::BinaryOp {
                 op: BinaryOperator::And,
                 lhs,
                 rhs,
@@ -444,11 +444,11 @@ fn split_conjunctions(ces: Vec<Expression>) -> Vec<Expression> {
 // 3. Extract join predicates
 // 4. Collect remaining predicates as global predicates
 fn classify_conditionals(
-    ce: &Expression,
+    ce: &Expr,
     tables: &[Table],
-    local: &mut HashMap<SqlIdentifier, Vec<Expression>>,
+    local: &mut HashMap<SqlIdentifier, Vec<Expr>>,
     join: &mut Vec<JoinPredicate>,
-    global: &mut Vec<Expression>,
+    global: &mut Vec<Expr>,
     params: &mut Vec<Parameter>,
 ) -> ReadySetResult<()> {
     // Handling OR and AND expressions requires some care as there are some corner cases.
@@ -461,7 +461,7 @@ fn classify_conditionals(
     //       and we don't support these yet.
 
     match ce {
-        Expression::BinaryOp { op, lhs, rhs } => {
+        Expr::BinaryOp { op, lhs, rhs } => {
             if let Ok(op) = LogicalOp::try_from(*op) {
                 // first, we recurse on both sides, collected the result of nested predicate
                 // analysis in separate collections. What do do with these depends
@@ -499,11 +499,11 @@ fn classify_conditionals(
                             // conjunction, check if either side had a local predicate
                             invariant!(
                                 ces.len() <= 2,
-                                "can only combine two or fewer ConditionExpression's"
+                                "can only combine two or fewer ConditionExpr's"
                             );
                             if ces.len() == 2 {
                                 #[allow(clippy::unwrap_used)] // checked ces.len() first
-                                let new_ce = Expression::BinaryOp {
+                                let new_ce = Expr::BinaryOp {
                                     op: BinaryOperator::And,
                                     lhs: Box::new(ces.first().unwrap().clone()),
                                     rhs: Box::new(ces.last().unwrap().clone()),
@@ -536,10 +536,10 @@ fn classify_conditionals(
                             #[allow(clippy::unwrap_used)]
                             let (t, ces) = new_local.into_iter().next().unwrap();
                             if ces.len() != 2 {
-                                unsupported!("should combine only 2 ConditionExpressions");
+                                unsupported!("should combine only 2 ConditionExpr's");
                             }
                             #[allow(clippy::unwrap_used)] // ces.len() == 2
-                            let new_ce = Expression::BinaryOp {
+                            let new_ce = Expr::BinaryOp {
                                 lhs: Box::new(ces.first().unwrap().clone()),
                                 op: BinaryOperator::Or,
                                 rhs: Box::new(ces.last().unwrap().clone()),
@@ -561,11 +561,11 @@ fn classify_conditionals(
                 match **rhs {
                     // right-hand side is a column, so this could be a comma join
                     // or a security policy using UserContext
-                    Expression::Column(ref rf) => {
+                    Expr::Column(ref rf) => {
                         match **lhs {
                             // column/column comparison
                             #[allow(clippy::unwrap_used)] // we check lf/rf.table.is_some()
-                            Expression::Column(ref lf)
+                            Expr::Column(ref lf)
                                 if lf.table.is_some()
                                     && tables.contains(&Table::from(
                                         lf.table.as_ref().unwrap().as_str(),
@@ -607,8 +607,8 @@ fn classify_conditionals(
                     // right-hand side is a placeholder, so this must be a query parameter
                     // We carry placeholder numbers all the way to reader nodes so that they can be
                     // mapped to a reader key column
-                    Expression::Literal(Literal::Placeholder(ref placeholder)) => {
-                        if let Expression::Column(ref lf) = **lhs {
+                    Expr::Literal(Literal::Placeholder(ref placeholder)) => {
+                        if let Expr::Column(ref lf) = **lhs {
                             let idx = match placeholder {
                                 ItemPlaceholder::DollarNumber(idx) => Some(*idx as usize),
                                 _ => None,
@@ -621,8 +621,8 @@ fn classify_conditionals(
                         }
                     }
                     // right-hand side is a non-placeholder literal, so this is a predicate
-                    Expression::Literal(_) => {
-                        if let Expression::Column(ref lf) = **lhs {
+                    Expr::Literal(_) => {
+                        if let Expr::Column(ref lf) = **lhs {
                             // we assume that implied table names have previously been expanded
                             // and thus all non-computed columns carry table names
                             #[allow(clippy::unwrap_used)] // checked lf.table.is_some()
@@ -636,18 +636,18 @@ fn classify_conditionals(
                             }
                         }
                     }
-                    Expression::NestedSelect(_) => {
+                    Expr::NestedSelect(_) => {
                         unsupported!("nested SELECTs are unsupported")
                     }
-                    Expression::Call(_)
-                    | Expression::BinaryOp { .. }
-                    | Expression::UnaryOp { .. }
-                    | Expression::CaseWhen { .. }
-                    | Expression::Exists(_)
-                    | Expression::Between { .. }
-                    | Expression::Cast { .. }
-                    | Expression::In { .. }
-                    | Expression::Variable(_) => {
+                    Expr::Call(_)
+                    | Expr::BinaryOp { .. }
+                    | Expr::UnaryOp { .. }
+                    | Expr::CaseWhen { .. }
+                    | Expr::Exists(_)
+                    | Expr::Between { .. }
+                    | Expr::Cast { .. }
+                    | Expr::In { .. }
+                    | Expr::Variable(_) => {
                         unsupported!(
                             "Unsupported right-hand side of condition expression: {}",
                             rhs
@@ -658,7 +658,7 @@ fn classify_conditionals(
                 unsupported!("Arithmetic not supported here")
             }
         }
-        Expression::In {
+        Expr::In {
             lhs,
             rhs: InValue::List(rhs),
             ..
@@ -684,18 +684,18 @@ fn classify_conditionals(
                 }
             }
         }
-        Expression::UnaryOp {
+        Expr::UnaryOp {
             op: UnaryOperator::Not,
             ..
         } => {
             internal!("negation should have been removed earlier");
         }
-        Expression::Exists(_) => {
+        Expr::Exists(_) => {
             // TODO(grfn): Look into the query for correlated references to see if it's actually a
             // local predicate in disguise
             global.push(ce.clone())
         }
-        Expression::Between { .. } => {
+        Expr::Between { .. } => {
             internal!("Between should have been removed earlier")
         }
         expr => {
@@ -710,11 +710,11 @@ fn classify_conditionals(
     Ok(())
 }
 
-/// Convert the given `Expression`, which should be a set of AND-ed together direct
+/// Convert the given `Expr`, which should be a set of AND-ed together direct
 /// comparison predicates, into a list of predicate expressions
-fn collect_join_predicates(cond: Expression, out: &mut Vec<JoinPredicate>) -> ReadySetResult<()> {
+fn collect_join_predicates(cond: Expr, out: &mut Vec<JoinPredicate>) -> ReadySetResult<()> {
     match cond {
-        Expression::BinaryOp {
+        Expr::BinaryOp {
             op: BinaryOperator::Equal,
             lhs,
             rhs,
@@ -725,7 +725,7 @@ fn collect_join_predicates(cond: Expression, out: &mut Vec<JoinPredicate>) -> Re
             });
             Ok(())
         }
-        Expression::BinaryOp {
+        Expr::BinaryOp {
             lhs,
             op: BinaryOperator::And,
             rhs,
@@ -786,7 +786,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
     // a handy closure for making new relation nodes
     let new_node = |rel: SqlIdentifier,
-                    preds: Vec<Expression>,
+                    preds: Vec<Expr>,
                     st: &SelectStatement|
      -> ReadySetResult<QueryGraphNode> {
         Ok(QueryGraphNode {
@@ -798,14 +798,14 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                 .map(|field| {
                     Ok(match field {
                         // unreachable because SQL rewrite passes will have expanded these already
-                        FieldDefinitionExpression::All => {
+                        FieldDefinitionExpr::All => {
                             internal!("* should have been expanded already")
                         }
-                        FieldDefinitionExpression::AllInTable(_) => {
+                        FieldDefinitionExpr::AllInTable(_) => {
                             internal!("<table>.* should have been expanded already")
                         }
-                        FieldDefinitionExpression::Expression {
-                            expr: Expression::Column(c),
+                        FieldDefinitionExpr::Expr {
+                            expr: Expr::Column(c),
                             ..
                         } => match c.table.as_ref() {
                             None => internal!("No table name set for column {} on {}", c.name, rel),
@@ -817,7 +817,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                                 }
                             }
                         },
-                        FieldDefinitionExpression::Expression { .. } => {
+                        FieldDefinitionExpr::Expr { .. } => {
                             // No need to do anything for expressions here, since they aren't
                             // associated with a relation (and thus have
                             // no QGN) XXX(malte): don't drop
@@ -869,8 +869,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     // 2. Add edges for each pair of joined relations. Note that we must keep track of the join
     //    predicates here already, but more may be added when processing the WHERE clause lateron.
     let mut join_predicates = Vec::new();
-    let col_expr = |tbl: &str, col: &str| -> Expression {
-        Expression::Column(Column {
+    let col_expr = |tbl: &str, col: &str| -> Expr {
+        Expr::Column(Column {
             table: Some(tbl.into()),
             name: (col.into()),
         })
@@ -928,11 +928,11 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     // TODO(malte): this only deals with simple, flat join
                     // conditions for now.
                     let l = match &pred.left {
-                        Expression::Column(f) => f,
+                        Expr::Column(f) => f,
                         ref x => unsupported!("join condition not supported: {:?}", x),
                     };
                     let r = match &pred.right {
-                        Expression::Column(f) => f,
+                        Expr::Column(f) => f,
                         ref x => unsupported!("join condition not supported: {:?}", x),
                     };
                     if *l.table.as_ref().ok_or_else(|| no_table_for_col())? == right_table
@@ -1022,8 +1022,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
         // 2. Add predicates for implied (comma) joins
         for jp in join_predicates {
-            if let Expression::Column(l) = &jp.left {
-                if let Expression::Column(r) = &jp.right {
+            if let Expr::Column(l) = &jp.left {
+                if let Expr::Column(r) = &jp.right {
                     let nn = new_node(
                         l.table.clone().ok_or_else(|| no_table_for_col())?,
                         Vec::new(),
@@ -1086,26 +1086,24 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
     for field in st.fields.iter() {
         match field {
-            FieldDefinitionExpression::All | FieldDefinitionExpression::AllInTable(_) => {
+            FieldDefinitionExpr::All | FieldDefinitionExpr::AllInTable(_) => {
                 internal!("Stars should have been expanded by now!")
             }
-            FieldDefinitionExpression::Expression { expr, alias } => {
+            FieldDefinitionExpr::Expr { expr, alias } => {
                 let name: SqlIdentifier = alias.clone().unwrap_or_else(|| expr.to_string().into());
                 match expr {
-                    Expression::Literal(l) => {
-                        qg.columns.push(OutputColumn::Literal(LiteralColumn {
-                            name,
-                            table: None,
-                            value: l.clone(),
-                        }))
-                    }
-                    Expression::Column(c) => {
+                    Expr::Literal(l) => qg.columns.push(OutputColumn::Literal(LiteralColumn {
+                        name,
+                        table: None,
+                        value: l.clone(),
+                    })),
+                    Expr::Column(c) => {
                         qg.columns.push(OutputColumn::Data {
                             alias: alias.clone().unwrap_or_else(|| c.name.clone()),
                             column: c.clone(),
                         });
                     }
-                    Expression::Call(function) if is_aggregate(function) => {
+                    Expr::Call(function) if is_aggregate(function) => {
                         qg.aggregates.push((function.clone(), name.clone()));
                         qg.columns.push(OutputColumn::Data {
                             alias: name.clone(),
@@ -1117,7 +1115,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         let aggs = map_aggregates(&mut expr);
                         qg.aggregates.extend(aggs);
 
-                        qg.columns.push(OutputColumn::Expression(ExpressionColumn {
+                        qg.columns.push(OutputColumn::Expr(ExprColumn {
                             name,
                             table: None,
                             expression: expr,
@@ -1137,8 +1135,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     FieldReference::Numeric(_) => {
                         internal!("Numeric field references should have been removed")
                     }
-                    FieldReference::Expression(Expression::Column(c)) => Ok(c.clone()),
-                    FieldReference::Expression(_) => {
+                    FieldReference::Expr(Expr::Column(c)) => Ok(c.clone()),
+                    FieldReference::Expr(_) => {
                         unsupported!("Only column references are currently supported in GROUP BY")
                     }
                 })
@@ -1152,13 +1150,11 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
             .order_by
             .iter()
             .for_each(|(ord_expr, _)| match ord_expr {
-                FieldReference::Expression(Expression::Column(Column { table: None, .. })) => {
+                FieldReference::Expr(Expr::Column(Column { table: None, .. })) => {
                     // This is a reference to a projected column, otherwise the table value
                     // would be assigned in the `rewrite_selection` pass
                 }
-                FieldReference::Expression(Expression::Column(
-                    col @ Column { table: Some(_), .. },
-                )) => {
+                FieldReference::Expr(Expr::Column(col @ Column { table: Some(_), .. })) => {
                     // This is a reference to a column in a table, we need to project it if it is
                     // not yet projected in order to be able to execute `ORDER
                     // BY` post lookup.
@@ -1174,19 +1170,19 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         })
                     }
                 }
-                FieldReference::Expression(expr @ Expression::Call(func)) if is_aggregate(func) => {
+                FieldReference::Expr(expr @ Expr::Call(func)) if is_aggregate(func) => {
                     // This is an aggregate expression that we need to add to the list of projected
                     // columns and aggregates
                     qg.aggregates.push((func.clone(), func.to_string().into()));
-                    qg.columns.push(OutputColumn::Expression(ExpressionColumn {
+                    qg.columns.push(OutputColumn::Expr(ExprColumn {
                         name: ord_expr.to_string().into(),
                         table: None,
                         expression: expr.clone(),
                     }));
                 }
-                FieldReference::Expression(expr) => {
+                FieldReference::Expr(expr) => {
                     // This is an expression that we need to add to the list of projected columns
-                    qg.columns.push(OutputColumn::Expression(ExpressionColumn {
+                    qg.columns.push(OutputColumn::Expr(ExprColumn {
                         name: expr.to_string().into(),
                         table: None,
                         expression: expr.clone(),
@@ -1217,7 +1213,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                                             "Numeric field references should have been removed"
                                         )
                                     }
-                                    FieldReference::Expression(expr) => expr,
+                                    FieldReference::Expr(expr) => expr,
                                 },
                                 ot.unwrap_or(OrderType::OrderAscending),
                             ))
@@ -1251,7 +1247,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 #[allow(clippy::panic)]
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, Dialect, FunctionExpression, SqlQuery};
+    use nom_sql::{parse_query, Dialect, FunctionExpr, SqlQuery};
 
     use super::*;
 
@@ -1277,7 +1273,7 @@ mod tests {
         assert_eq!(
             qg.aggregates,
             vec![(
-                FunctionExpression::Max(Box::new(Expression::Column("t1.x".into()))),
+                FunctionExpr::Max(Box::new(Expr::Column("t1.x".into()))),
                 "max(`t1`.`x`)".into()
             )]
         );
@@ -1293,7 +1289,7 @@ mod tests {
         assert_eq!(
             qg.aggregates,
             vec![(
-                FunctionExpression::Max(Box::new(Expression::Column("t1.x".into()))),
+                FunctionExpr::Max(Box::new(Expr::Column("t1.x".into()))),
                 "max_x".into()
             )]
         );

@@ -14,7 +14,7 @@ use crate::common::{
 };
 use crate::table::Table;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expression, Literal};
+use crate::{Dialect, Expr, Literal};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct InsertStatement {
@@ -22,7 +22,7 @@ pub struct InsertStatement {
     pub fields: Option<Vec<Column>>,
     pub data: Vec<Vec<Literal>>,
     pub ignore: bool,
-    pub on_duplicate: Option<Vec<(Column, Expression)>>,
+    pub on_duplicate: Option<Vec<(Column, Expr)>>,
 }
 
 impl fmt::Display for InsertStatement {
@@ -78,7 +78,7 @@ fn data(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Literal>> {
     }
 }
 
-fn on_duplicate(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(Column, Expression)>> {
+fn on_duplicate(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(Column, Expr)>> {
     move |i| {
         preceded(
             whitespace0,
@@ -283,10 +283,10 @@ mod tests {
                     ]],
                     on_duplicate: Some(vec![(
                         Column::from("value"),
-                        Expression::BinaryOp {
+                        Expr::BinaryOp {
                             op: BinaryOperator::Add,
-                            lhs: Box::new(Expression::Column(Column::from("value"))),
-                            rhs: Box::new(Expression::Literal(1.into()))
+                            lhs: Box::new(Expr::Column(Column::from("value"))),
+                            rhs: Box::new(Expr::Literal(1.into()))
                         },
                     ),]),
                     ..Default::default()
@@ -448,10 +448,10 @@ mod tests {
                     ]],
                     on_duplicate: Some(vec![(
                         Column::from("value"),
-                        Expression::BinaryOp {
+                        Expr::BinaryOp {
                             op: BinaryOperator::Add,
-                            lhs: Box::new(Expression::Column(Column::from("value"))),
-                            rhs: Box::new(Expression::Literal(1.into()))
+                            lhs: Box::new(Expr::Column(Column::from("value"))),
+                            rhs: Box::new(Expr::Literal(1.into()))
                         },
                     ),]),
                     ..Default::default()

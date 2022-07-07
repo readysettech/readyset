@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
 
-use dataflow_expression::Expression;
+use dataflow_expression::Expr;
 pub use nom_sql::BinaryOperator;
 use noria_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
@@ -11,17 +11,17 @@ use crate::processing::{ColumnSource, IngredientLookupResult, LookupIndex, Looku
 
 /// The filter operator
 ///
-/// The filter operator evaluates an [`Expression`] on incoming records, and only emits records for
+/// The filter operator evaluates an [`Expr`] on incoming records, and only emits records for
 /// which that expression is truthy (is not 0, 0.0, '', or NULL).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Filter {
     src: IndexPair,
-    expression: Expression,
+    expression: Expr,
 }
 
 impl Filter {
     /// Construct a new filter operator with an expression
-    pub fn new(src: NodeIndex, expression: Expression) -> Filter {
+    pub fn new(src: NodeIndex, expression: Expr) -> Filter {
         Filter {
             src: src.into(),
             expression,
@@ -134,12 +134,12 @@ mod tests {
     use dataflow_expression::utils::{column_with_type, make_literal};
     use nom_sql::SqlType;
     use noria_data::noria_type::Type;
-    use Expression::Op;
+    use Expr::Op;
 
     use super::*;
     use crate::ops;
 
-    fn setup(materialized: bool, filters: Option<Expression>) -> ops::test::MockGraph {
+    fn setup(materialized: bool, filters: Option<Expr>) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
         g.set_op(

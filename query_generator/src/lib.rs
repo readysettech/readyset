@@ -84,11 +84,10 @@ use launchpad::intervals::{BoundPair, IterBoundPair};
 use lazy_static::lazy_static;
 use nom_sql::analysis::{contains_aggregate, ReferredColumns};
 use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpression,
-    CreateTableStatement, Expression, FieldDefinitionExpression, FieldReference,
-    FunctionExpression, InValue, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator,
-    JoinRightSide, LimitClause, Literal, OrderClause, OrderType, SelectStatement, SqlIdentifier,
-    SqlType, Table, TableKey,
+    BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpr,
+    CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
+    ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal,
+    OrderClause, OrderType, SelectStatement, SqlIdentifier, SqlType, Table, TableKey,
 };
 use noria_data::DataType;
 use noria_sql_passes::outermost_referred_tables;
@@ -2045,9 +2044,9 @@ lazy_static! {
     };
 }
 
-fn extend_where(query: &mut SelectStatement, op: LogicalOp, cond: Expression) {
+fn extend_where(query: &mut SelectStatement, op: LogicalOp, cond: Expr) {
     query.where_clause = Some(match query.where_clause.take() {
-        Some(existing_cond) => Expression::BinaryOp {
+        Some(existing_cond) => Expr::BinaryOp {
             op: op.into(),
             lhs: Box::new(existing_cond),
             rhs: Box::new(cond),
@@ -2056,7 +2055,7 @@ fn extend_where(query: &mut SelectStatement, op: LogicalOp, cond: Expression) {
     })
 }
 
-fn and_where(query: &mut SelectStatement, cond: Expression) {
+fn and_where(query: &mut SelectStatement, cond: Expr) {
     extend_where(query, LogicalOp::And, cond)
 }
 
@@ -2064,7 +2063,7 @@ fn query_has_aggregate(query: &SelectStatement) -> bool {
     query.fields.iter().any(|fde| {
         matches!(
             fde,
-            FieldDefinitionExpression::Expression { expr, .. } if contains_aggregate(expr),
+            FieldDefinitionExpr::Expr { expr, .. } if contains_aggregate(expr),
         )
     })
 }
@@ -2128,7 +2127,7 @@ impl QueryOperation {
 
                 let col = tbl.fresh_column_with_type(agg.column_type());
 
-                let expr = Box::new(Expression::Column(Column {
+                let expr = Box::new(Expr::Column(Column {
                     name: col.into(),
                     table: Some(tbl.name.clone().into()),
                 }));
@@ -2138,24 +2137,24 @@ impl QueryOperation {
                         distinct,
                         count_nulls,
                         ..
-                    } => FunctionExpression::Count {
+                    } => FunctionExpr::Count {
                         expr,
                         distinct,
                         count_nulls,
                     },
-                    Sum { distinct, .. } => FunctionExpression::Sum { expr, distinct },
-                    Avg { distinct, .. } => FunctionExpression::Avg { expr, distinct },
-                    GroupConcat => FunctionExpression::GroupConcat {
+                    Sum { distinct, .. } => FunctionExpr::Sum { expr, distinct },
+                    Avg { distinct, .. } => FunctionExpr::Avg { expr, distinct },
+                    GroupConcat => FunctionExpr::GroupConcat {
                         expr,
                         separator: ", ".to_owned(),
                     },
-                    Max { .. } => FunctionExpression::Max(expr),
-                    Min { .. } => FunctionExpression::Min(expr),
+                    Max { .. } => FunctionExpr::Max(expr),
+                    Min { .. } => FunctionExpr::Min(expr),
                 };
 
-                query.fields.push(FieldDefinitionExpression::Expression {
+                query.fields.push(FieldDefinitionExpr::Expr {
                     alias: Some(alias),
-                    expr: Expression::Call(func),
+                    expr: Expr::Call(func),
                 });
             }
 
@@ -2168,12 +2167,12 @@ impl QueryOperation {
                     query.tables.push(tbl.name.clone().into());
                 }
 
-                let col_expr = Expression::Column(Column {
+                let col_expr = Expr::Column(Column {
                     table: Some(tbl.name.to_string().into()),
                     ..col.clone().into()
                 });
 
-                query.fields.push(FieldDefinitionExpression::Expression {
+                query.fields.push(FieldDefinitionExpr::Expr {
                     expr: col_expr.clone(),
                     alias: Some(alias),
                 });
@@ -2183,42 +2182,42 @@ impl QueryOperation {
                         let rhs = Box::new(match rhs {
                             FilterRHS::Constant(val) => {
                                 tbl.expect_value(col, val.clone().try_into().unwrap());
-                                Expression::Literal(val.clone())
+                                Expr::Literal(val.clone())
                             }
                             FilterRHS::Column => {
                                 let col = tbl.some_column_with_type_different_than(
                                     filter.column_type.clone(),
                                     &col,
                                 );
-                                Expression::Column(Column {
+                                Expr::Column(Column {
                                     table: Some(tbl.name.clone().into()),
                                     ..col.into()
                                 })
                             }
                         });
 
-                        Expression::BinaryOp {
+                        Expr::BinaryOp {
                             op: *op,
                             lhs: Box::new(col_expr),
                             rhs,
                         }
                     }
-                    FilterOp::Between { negated } => Expression::Between {
+                    FilterOp::Between { negated } => Expr::Between {
                         operand: Box::new(col_expr),
-                        min: Box::new(Expression::Literal(Literal::Integer(1))),
-                        max: Box::new(Expression::Literal(Literal::Integer(5))),
+                        min: Box::new(Expr::Literal(Literal::Integer(1))),
+                        max: Box::new(Expr::Literal(Literal::Integer(5))),
                         negated: *negated,
                     },
                     FilterOp::IsNull { negated } => {
                         tbl.expect_value(col, DataType::None);
-                        Expression::BinaryOp {
+                        Expr::BinaryOp {
                             lhs: Box::new(col_expr),
                             op: if *negated {
                                 BinaryOperator::Is
                             } else {
                                 BinaryOperator::IsNot
                             },
-                            rhs: Box::new(Expression::Literal(Literal::Null)),
+                            rhs: Box::new(Expr::Literal(Literal::Null)),
                         }
                     }
                 };
@@ -2236,10 +2235,10 @@ impl QueryOperation {
                                     "We don't currently ever generate numeric field references"
                                 )
                             }
-                            FieldReference::Expression(expr) => expr.clone(),
+                            FieldReference::Expr(expr) => expr.clone(),
                         };
 
-                        query.fields.push(FieldDefinitionExpression::Expression {
+                        query.fields.push(FieldDefinitionExpr::Expr {
                             expr,
                             alias: Some(state.fresh_alias()),
                         })
@@ -2265,28 +2264,28 @@ impl QueryOperation {
                 query.join.push(JoinClause {
                     operator: *operator,
                     right: JoinRightSide::Table(right_table.name.clone().into()),
-                    constraint: JoinConstraint::On(Expression::BinaryOp {
+                    constraint: JoinConstraint::On(Expr::BinaryOp {
                         op: BinaryOperator::Equal,
-                        lhs: Box::new(Expression::Column(Column {
+                        lhs: Box::new(Expr::Column(Column {
                             table: Some(left_table_name.clone().into()),
                             ..left_join_key.into()
                         })),
-                        rhs: Box::new(Expression::Column(Column {
+                        rhs: Box::new(Expr::Column(Column {
                             table: Some(right_table_name.clone().into()),
                             ..right_join_key.into()
                         })),
                     }),
                 });
 
-                query.fields.push(FieldDefinitionExpression::Expression {
-                    expr: Expression::Column(Column {
+                query.fields.push(FieldDefinitionExpr::Expr {
+                    expr: Expr::Column(Column {
                         table: Some(left_table_name.into()),
                         ..left_projected.into()
                     }),
                     alias: Some(state.fresh_alias()),
                 });
-                query.fields.push(FieldDefinitionExpression::Expression {
-                    expr: Expression::Column(Column {
+                query.fields.push(FieldDefinitionExpr::Expr {
+                    expr: Expr::Column(Column {
                         table: Some(right_table_name.into()),
                         ..right_projected.into()
                     }),
@@ -2296,8 +2295,8 @@ impl QueryOperation {
 
             QueryOperation::ProjectLiteral => {
                 let alias = state.fresh_alias();
-                query.fields.push(FieldDefinitionExpression::Expression {
-                    expr: Expression::Literal(Literal::Integer(1)),
+                query.fields.push(FieldDefinitionExpr::Expr {
+                    expr: Expr::Literal(Literal::Integer(1)),
                     alias: Some(alias),
                 });
             }
@@ -2306,10 +2305,10 @@ impl QueryOperation {
                 let col = column_in_query(state, query);
                 and_where(
                     query,
-                    Expression::BinaryOp {
+                    Expr::BinaryOp {
                         op: BinaryOperator::Equal,
-                        lhs: Box::new(Expression::Column(col.clone())),
-                        rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                        lhs: Box::new(Expr::Column(col.clone())),
+                        rhs: Box::new(Expr::Literal(Literal::Placeholder(
                             ItemPlaceholder::QuestionMark,
                         ))),
                     },
@@ -2327,13 +2326,13 @@ impl QueryOperation {
                 let col = tbl.some_column_with_type(SqlType::Int(None));
                 and_where(
                     query,
-                    Expression::BinaryOp {
-                        lhs: Box::new(Expression::Column(Column {
+                    Expr::BinaryOp {
+                        lhs: Box::new(Expr::Column(Column {
                             table: Some(tbl.name.clone().into()),
                             ..col.clone().into()
                         })),
                         op: BinaryOperator::Greater,
-                        rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                        rhs: Box::new(Expr::Literal(Literal::Placeholder(
                             ItemPlaceholder::QuestionMark,
                         ))),
                     },
@@ -2355,12 +2354,12 @@ impl QueryOperation {
                 let col = column_in_query(state, query);
                 and_where(
                     query,
-                    Expression::In {
-                        lhs: Box::new(Expression::Column(col.clone())),
+                    Expr::In {
+                        lhs: Box::new(Expr::Column(col.clone())),
                         rhs: InValue::List(
                             (0..*num_values)
                                 .map(|_| {
-                                    Expression::Literal(Literal::Placeholder(
+                                    Expr::Literal(Literal::Placeholder(
                                         ItemPlaceholder::QuestionMark,
                                     ))
                                 })
@@ -2389,12 +2388,12 @@ impl QueryOperation {
 
                         let mut arguments = Vec::new();
                         add_builtin!(@args_to_expr, table, arguments, $($arg)*);
-                        let expr = Expression::Call(FunctionExpression::Call {
+                        let expr = Expr::Call(FunctionExpr::Call {
                             name: stringify!($fname).to_owned(),
                             arguments,
                         });
                         let alias = state.fresh_alias();
-                        query.fields.push(FieldDefinitionExpression::Expression {
+                        query.fields.push(FieldDefinitionExpr::Expr {
                             alias: Some(alias.clone()),
                             expr,
                         });
@@ -2403,7 +2402,7 @@ impl QueryOperation {
                     (@args_to_expr, $table: ident, $out: ident, $(,)?) => {};
 
                     (@args_to_expr, $table: ident, $out:ident, $arg:literal, $($args: tt)*) => {{
-                        $out.push(Expression::Literal($arg.into()));
+                        $out.push(Expr::Literal($arg.into()));
                         add_builtin!(@args_to_expr, $table, $out, $($args)*);
                     }};
                     (@args_to_expr, $table: ident, $out:ident, $arg:literal) => {
@@ -2411,7 +2410,7 @@ impl QueryOperation {
                     };
 
                     (@args_to_expr, $table: ident, $out:ident, $arg:expr, $($args: tt)*) => {{
-                        $out.push(Expression::Column(
+                        $out.push(Expr::Column(
                             Column {
                                 table: Some($table.name.clone().into()),
                                 ..$table.some_column_with_type($arg).into()
@@ -2452,7 +2451,7 @@ impl QueryOperation {
                 };
                 query.order = Some(OrderClause {
                     order_by: vec![(
-                        FieldReference::Expression(Expression::Column(column.clone())),
+                        FieldReference::Expr(Expr::Column(column.clone())),
                         Some(*order_type),
                     )],
                 });
@@ -2463,8 +2462,8 @@ impl QueryOperation {
                 });
 
                 if query.distinct {
-                    query.fields.push(FieldDefinitionExpression::Expression {
-                        expr: Expression::Column(column),
+                    query.fields.push(FieldDefinitionExpr::Expr {
+                        expr: Expr::Column(column),
                         alias: Some(state.fresh_alias()),
                     })
                 }
@@ -2487,7 +2486,7 @@ impl QueryOperation {
                 };
                 query.order = Some(OrderClause {
                     order_by: vec![(
-                        FieldReference::Expression(Expression::Column(column.clone())),
+                        FieldReference::Expr(Expr::Column(column.clone())),
                         Some(*order_type),
                     )],
                 });
@@ -2498,8 +2497,8 @@ impl QueryOperation {
                 });
 
                 if query.distinct {
-                    query.fields.push(FieldDefinitionExpression::Expression {
-                        expr: Expression::Column(column),
+                    query.fields.push(FieldDefinitionExpr::Expr {
+                        expr: Expr::Column(column),
                         alias: Some(state.fresh_alias()),
                     })
                 }
@@ -2785,10 +2784,10 @@ impl Subquery {
         let mut subquery = self.seed.generate(state);
         // just use the first selected column as the join key (maybe change this later)
         let right_join_col = match subquery.fields.first_mut() {
-            Some(FieldDefinitionExpression::Expression {
+            Some(FieldDefinitionExpr::Expr {
                 alias: Some(alias), ..
             }) => alias.clone(),
-            Some(FieldDefinitionExpression::Expression {
+            Some(FieldDefinitionExpr::Expr {
                 alias: alias @ None,
                 ..
             }) => alias.insert(state.fresh_alias()).clone(),
@@ -2800,7 +2799,7 @@ impl Subquery {
         let subquery_name = state.fresh_alias();
         let (join_rhs, operator) = match self.position {
             SubqueryPosition::Cte(operator) => {
-                query.ctes.push(CommonTableExpression {
+                query.ctes.push(CommonTableExpr {
                     name: subquery_name.clone(),
                     statement: subquery,
                 });
@@ -2842,18 +2841,18 @@ impl Subquery {
 
                     and_where(
                         &mut subquery,
-                        Expression::BinaryOp {
-                            lhs: Box::new(Expression::Column(Column {
+                        Expr::BinaryOp {
+                            lhs: Box::new(Expr::Column(Column {
                                 table: Some(subquery_table.into()),
                                 name: subquery_col.into(),
                             })),
                             op: BinaryOperator::Equal,
-                            rhs: Box::new(Expression::Column(outer_col)),
+                            rhs: Box::new(Expr::Column(outer_col)),
                         },
                     );
                 }
 
-                and_where(query, Expression::Exists(Box::new(subquery)));
+                and_where(query, Expr::Exists(Box::new(subquery)));
                 return;
             }
         };
@@ -2861,10 +2860,10 @@ impl Subquery {
         query.join.push(JoinClause {
             operator,
             right: join_rhs,
-            constraint: JoinConstraint::On(Expression::BinaryOp {
-                lhs: Box::new(Expression::Column(left_join_col)),
+            constraint: JoinConstraint::On(Expr::BinaryOp {
+                lhs: Box::new(Expr::Column(left_join_col)),
                 op: BinaryOperator::Equal,
-                rhs: Box::new(Expression::Column(Column {
+                rhs: Box::new(Expr::Column(Column {
                     name: right_join_col,
                     table: Some(subquery_name),
                 })),
@@ -2936,8 +2935,8 @@ impl QuerySeed {
 
         if query.fields.is_empty() {
             let col = column_in_query(state, &mut query);
-            query.fields.push(FieldDefinitionExpression::Expression {
-                expr: Expression::Column(col.clone()),
+            query.fields.push(FieldDefinitionExpr::Expr {
+                expr: Expr::Column(col.clone()),
                 alias: Some(state.fresh_alias()),
             });
 
@@ -2960,20 +2959,20 @@ impl QuerySeed {
                     FieldReference::Numeric(_) => {
                         unreachable!("We don't currently ever generate numeric field references")
                     }
-                    FieldReference::Expression(expr) => expr.clone(),
+                    FieldReference::Expr(expr) => expr.clone(),
                 })
                 .collect();
             for field in &query.fields {
-                if let FieldDefinitionExpression::Expression { expr, .. } = field {
+                if let FieldDefinitionExpr::Expr { expr, .. } = field {
                     if !contains_aggregate(expr) {
                         for col in expr.referred_columns() {
                             if !existing_group_by_exprs
                                 .iter()
-                                .any(|e| matches!(e, Expression::Column(c) if c == col))
+                                .any(|e| matches!(e, Expr::Column(c) if c == col))
                             {
-                                group_by.fields.push(FieldReference::Expression(
-                                    Expression::Column(col.clone()),
-                                ));
+                                group_by
+                                    .fields
+                                    .push(FieldReference::Expr(Expr::Column(col.clone())));
                             }
                         }
                     }
@@ -2983,15 +2982,13 @@ impl QuerySeed {
             if let Some(order) = &query.order {
                 for (field, _) in &order.order_by {
                     let expr = match field {
-                        FieldReference::Expression(expr) => expr,
+                        FieldReference::Expr(expr) => expr,
                         FieldReference::Numeric(_) => unreachable!(
                             "We don't currently ever generate numeric field references"
                         ),
                     };
                     if !existing_group_by_exprs.contains(expr) {
-                        group_by
-                            .fields
-                            .push(FieldReference::Expression(expr.clone()));
+                        group_by.fields.push(FieldReference::Expr(expr.clone()));
                     }
                 }
             }
@@ -3232,10 +3229,10 @@ mod tests {
         assert_eq!(query.join.len(), 1);
         let join = query.join.first().unwrap();
         match &join.constraint {
-            JoinConstraint::On(Expression::BinaryOp { op, lhs, rhs }) => {
+            JoinConstraint::On(Expr::BinaryOp { op, lhs, rhs }) => {
                 assert_eq!(op, &BinaryOperator::Equal);
                 match (lhs.as_ref(), rhs.as_ref()) {
-                    (Expression::Column(left_field), Expression::Column(right_field)) => {
+                    (Expr::Column(left_field), Expr::Column(right_field)) => {
                         assert_eq!(
                             left_field.table.as_ref(),
                             Some(&query.tables.first().unwrap().name)
@@ -3293,14 +3290,14 @@ mod tests {
         let query = gen.generate_query(seed);
         eprintln!("query: {}", query.statement);
         match query.statement.where_clause {
-            Some(Expression::In {
+            Some(Expr::In {
                 lhs: _,
                 rhs: InValue::List(exprs),
                 negated: false,
             }) => {
                 assert_eq!(exprs.len(), 3);
                 assert!(exprs.iter().all(|expr| *expr
-                    == Expression::Literal(Literal::Placeholder(ItemPlaceholder::QuestionMark))));
+                    == Expr::Literal(Literal::Placeholder(ItemPlaceholder::QuestionMark))));
             }
             _ => unreachable!(),
         }

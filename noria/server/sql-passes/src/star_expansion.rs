@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::mem;
 
 use nom_sql::{
-    Column, CommonTableExpression, Expression, FieldDefinitionExpression, JoinClause,
-    JoinRightSide, SelectStatement, SqlIdentifier, SqlQuery, Table,
+    Column, CommonTableExpr, Expr, FieldDefinitionExpr, JoinClause, JoinRightSide, SelectStatement,
+    SqlIdentifier, SqlQuery, Table,
 };
 use noria_errors::{ReadySetError, ReadySetResult};
 
@@ -32,7 +32,7 @@ impl StarExpansion for SelectStatement {
         self.ctes = mem::take(&mut self.ctes)
             .into_iter()
             .map(|cte| -> ReadySetResult<_> {
-                Ok(CommonTableExpression {
+                Ok(CommonTableExpr {
                     name: cte.name,
                     statement: cte.statement.expand_stars(write_schemas)?,
                 })
@@ -65,17 +65,15 @@ impl StarExpansion for SelectStatement {
                 .or_else(|| subquery_schemas.get(&table_name).cloned())
                 .ok_or_else(|| ReadySetError::TableNotFound(table_name.to_string()))?
                 .into_iter()
-                .map(move |f| FieldDefinitionExpression::Expression {
-                    expr: Expression::Column(Column::from(
-                        format!("{}.{}", table_name, f).as_ref(),
-                    )),
+                .map(move |f| FieldDefinitionExpr::Expr {
+                    expr: Expr::Column(Column::from(format!("{}.{}", table_name, f).as_ref())),
                     alias: None,
                 }))
         };
 
         for field in fields {
             match field {
-                FieldDefinitionExpression::All => {
+                FieldDefinitionExpr::All => {
                     for table in &self.tables {
                         for field in expand_table(table.name.clone())? {
                             self.fields.push(field);
@@ -87,12 +85,12 @@ impl StarExpansion for SelectStatement {
                         }
                     }
                 }
-                FieldDefinitionExpression::AllInTable(t) => {
+                FieldDefinitionExpr::AllInTable(t) => {
                     for field in expand_table(t)? {
                         self.fields.push(field);
                     }
                 }
-                e @ FieldDefinitionExpression::Expression { .. } => {
+                e @ FieldDefinitionExpr::Expr { .. } => {
                     self.fields.push(e);
                 }
             }

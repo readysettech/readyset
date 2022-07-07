@@ -14,7 +14,7 @@ use anyhow::{anyhow, bail, Context};
 use nom::multi::many1;
 use nom::sequence::{preceded, terminated};
 use nom_sql::whitespace::whitespace0;
-use nom_sql::{sql_query, Dialect, Expression, SqlQuery, VariableScope};
+use nom_sql::{sql_query, Dialect, Expr, SqlQuery, VariableScope};
 use query_generator::{TableName, TableSpec};
 
 /// Set of parameters used to generate a single table's data.
@@ -158,7 +158,7 @@ impl DatabaseSchema {
                             if var.scope != VariableScope::User {
                                 return;
                             }
-                            if let Expression::Literal(lit) = value {
+                            if let Expr::Literal(lit) = value {
                                 // Only keep the original value for each variable
                                 user_vars
                                     .entry(var.name.clone().into())
