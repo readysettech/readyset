@@ -1,7 +1,7 @@
 //! This crate provides miscellanious utilities and extensions to the Rust standard library, for use
 //! in all crates in this workspace.
 #![deny(missing_docs, rustdoc::missing_crate_level_docs)]
-#![feature(step_trait, bound_as_ref, bound_map)]
+#![feature(step_trait, bound_as_ref, bound_map, rustc_attrs)]
 
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, HashMap};
@@ -12,6 +12,7 @@ pub mod display;
 pub mod futures;
 pub mod hash;
 pub mod intervals;
+pub mod nonmaxusize;
 pub mod properties;
 pub mod redacted;
 
