@@ -135,8 +135,7 @@
     stmt_expr_attributes,
     bound_map,
     bound_as_ref,
-    box_into_inner,
-    rustc_attrs
+    box_into_inner
 )]
 #![deny(missing_docs, macro_use_extern_crate)]
 #![deny(unused_extern_crates)]
