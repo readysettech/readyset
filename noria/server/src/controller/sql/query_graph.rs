@@ -236,8 +236,12 @@ pub struct QueryGraph {
     /// Joins in the query.
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     pub edges: HashMap<(SqlIdentifier, SqlIdentifier), QueryGraphEdge>,
-    /// Aggregates in the query, represented as a list of (expression, alias) pairs
-    pub aggregates: Vec<(FunctionExpr, SqlIdentifier)>,
+    /// Aggregates in the query, represented as a map from the aggregate function to the alias for
+    /// that aggregate function
+    ///
+    /// If a single aggregate is projected as multiple aliases, only one will appear in this map,
+    /// but both will appear in `self.columns` as [`OutputColumn::Data`] referencing that alias
+    pub aggregates: HashMap<FunctionExpr, SqlIdentifier>,
     /// Set of columns that appear in the GROUP BY clause
     pub group_by: HashSet<Column>,
     /// Final set of projected columns in this query; may include literals in addition to the
@@ -406,8 +410,11 @@ impl Hash for QueryGraph {
         group_by.sort();
         group_by.hash(state);
 
+        let mut aggregates = self.aggregates.iter().collect::<Vec<_>>();
+        aggregates.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+        aggregates.hash(state);
+
         // columns and join_order are Vecs, so already ordered
-        self.aggregates.hash(state);
         self.columns.hash(state);
         self.join_order.hash(state);
         self.global_predicates.hash(state);
@@ -1104,7 +1111,11 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         });
                     }
                     Expr::Call(function) if is_aggregate(function) => {
-                        qg.aggregates.push((function.clone(), name.clone()));
+                        let agg_name = qg
+                            .aggregates
+                            .entry(function.clone())
+                            .or_insert_with(|| name.clone())
+                            .clone();
                         // Aggregates end up in qg.columns as OutputColumn::Data not because they're
                         // columns in parent tables, but because by the time we're projecting the
                         // result set columns in a query the values for the aggregates will have
@@ -1113,8 +1124,11 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         // we'd try to *evaluate them* as project expressions, which obviously we
                         // can't do.
                         qg.columns.push(OutputColumn::Data {
-                            alias: name.clone(),
-                            column: Column { name, table: None },
+                            alias: alias.clone().unwrap_or(name),
+                            column: Column {
+                                name: agg_name,
+                                table: None,
+                            },
                         })
                     }
                     _ => {
@@ -1183,7 +1197,9 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     // we don't necessarily need it projected in the result set of the query, and
                     // the pull_columns pass will make sure the topk/paginate node gets the
                     // aggregate result column
-                    qg.aggregates.push((func.clone(), func.to_string().into()));
+                    qg.aggregates
+                        .entry(func.clone())
+                        .or_insert_with(|| func.to_string().into());
                 }
                 FieldReference::Expr(expr) => {
                     // This is an expression that we need to add to the list of projected columns
@@ -1277,10 +1293,10 @@ mod tests {
         );
         assert_eq!(
             qg.aggregates,
-            vec![(
+            HashMap::from([(
                 FunctionExpr::Max(Box::new(Expr::Column("t1.x".into()))),
                 "max(`t1`.`x`)".into()
-            )]
+            )])
         );
     }
 
@@ -1293,10 +1309,40 @@ mod tests {
         );
         assert_eq!(
             qg.aggregates,
-            vec![(
+            HashMap::from([(
                 FunctionExpr::Max(Box::new(Expr::Column("t1.x".into()))),
                 "max_x".into()
-            )]
+            )])
+        );
+    }
+
+    #[test]
+    fn same_aggregate_with_two_aliases() {
+        let qg = make_query_graph(
+            "SELECT max(t1.x) AS max_x_1, max(t1.x) as max_x_2 FROM t1 JOIN t2 ON t1.id = t2.id",
+        );
+        assert_eq!(
+            qg.relations.keys().cloned().collect::<HashSet<_>>(),
+            HashSet::from(["t1".into(), "t2".into()])
+        );
+
+        let alias = qg
+            .aggregates
+            .get(&FunctionExpr::Max(Box::new(Expr::Column("t1.x".into()))))
+            .unwrap();
+        let agg_column = Column::from(alias.as_str());
+        assert_eq!(
+            qg.columns,
+            vec![
+                OutputColumn::Data {
+                    alias: "max_x_1".into(),
+                    column: agg_column.clone()
+                },
+                OutputColumn::Data {
+                    alias: "max_x_2".into(),
+                    column: agg_column
+                },
+            ]
         );
     }
 
@@ -1342,13 +1388,16 @@ mod tests {
             ]
         );
 
-        assert!(qg.aggregates.contains(&(
-            FunctionExpr::Sum {
-                expr: Box::new(Expr::Column("t.c".into())),
-                distinct: false,
-            },
-            "sum(`t`.`c`)".into()
-        )));
+        assert_eq!(
+            qg.aggregates,
+            HashMap::from([(
+                FunctionExpr::Sum {
+                    expr: Box::new(Expr::Column("t.c".into())),
+                    distinct: false,
+                },
+                "sum(`t`.`c`)".into()
+            )])
+        );
     }
 
     mod view_key {

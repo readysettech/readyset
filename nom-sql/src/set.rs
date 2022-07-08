@@ -186,7 +186,7 @@ fn postgres_parameter_value(i: &[u8]) -> IResult<&[u8], PostgresParameterValue> 
 }
 
 /// Scope for a [`Variable`]
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum VariableScope {
     User,
     Local,
@@ -215,7 +215,7 @@ pub(crate) fn variable_scope_prefix(i: &[u8]) -> IResult<&[u8], VariableScope> {
     ))(i)
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Variable {
     pub scope: VariableScope,
     pub name: SqlIdentifier,

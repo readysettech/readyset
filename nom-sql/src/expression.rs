@@ -23,7 +23,7 @@ use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Column, Dialect, Literal, SelectStatement, SqlType};
 
 /// Function call expressions
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum FunctionExpr {
     /// `AVG` aggregation. The boolean argument is `true` if `DISTINCT`
     Avg { expr: Box<Expr>, distinct: bool },
@@ -111,7 +111,9 @@ impl Display for FunctionExpr {
 ///
 /// Note that because all binary operators have expressions on both sides, SQL `IN` is not a binary
 /// operator - since it must have either a subquery or a list of expressions on its right-hand side
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+#[derive(
+    Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary,
+)]
 pub enum BinaryOperator {
     /// `AND`
     And,
@@ -198,7 +200,7 @@ impl Display for BinaryOperator {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum UnaryOperator {
     Neg,
     Not,
@@ -214,7 +216,7 @@ impl Display for UnaryOperator {
 }
 
 /// Right-hand side of IN
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, From)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Clone, Serialize, Deserialize, From)]
 pub enum InValue {
     Subquery(Box<SelectStatement>),
     List(Vec<Expr>),
@@ -230,7 +232,7 @@ impl Display for InValue {
 }
 
 /// SQL Expression AST
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, From)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Clone, Serialize, Deserialize, From)]
 pub enum Expr {
     /// Function call expressions
     ///

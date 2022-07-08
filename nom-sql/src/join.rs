@@ -13,7 +13,7 @@ use crate::select::SelectStatement;
 use crate::table::Table;
 use crate::{Expr, SqlIdentifier};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum JoinRightSide {
     /// A single table.
     Table(Table),
@@ -36,7 +36,9 @@ impl fmt::Display for JoinRightSide {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+#[derive(
+    Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary,
+)]
 pub enum JoinOperator {
     Join,
     LeftJoin,
@@ -66,7 +68,7 @@ impl fmt::Display for JoinOperator {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum JoinConstraint {
     On(Expr),
     Using(Vec<Column>),

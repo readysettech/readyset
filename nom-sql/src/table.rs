@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::SqlIdentifier;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Table {
     pub name: SqlIdentifier,
     pub alias: Option<SqlIdentifier>,

@@ -15,7 +15,9 @@ use crate::common::{field_reference, ws_sep_comma};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, FieldReference};
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+#[derive(
+    Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary,
+)]
 pub enum OrderType {
     OrderAscending,
     OrderDescending,
@@ -42,7 +44,7 @@ impl fmt::Display for OrderType {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct OrderClause {
     pub order_by: Vec<(FieldReference, Option<OrderType>)>,
 }

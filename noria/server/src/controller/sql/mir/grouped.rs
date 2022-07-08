@@ -28,7 +28,7 @@ pub(super) fn make_predicates_above_grouped<'a>(
     let mut predicates_above_group_by_nodes = Vec::new();
     let mut node_count = node_count;
 
-    for (expr, _) in &qg.aggregates {
+    for expr in qg.aggregates.keys() {
         for over_col in expr.referred_columns() {
             let over_table = over_col
                 .table

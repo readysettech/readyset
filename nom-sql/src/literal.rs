@@ -26,7 +26,7 @@ use test_strategy::Arbitrary;
 
 use crate::{Dialect, SqlType};
 
-#[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
+#[derive(Clone, Debug, PartialOrd, Serialize, Deserialize, Arbitrary)]
 pub struct Float {
     pub value: f32,
     pub precision: u8,
@@ -47,7 +47,7 @@ impl Hash for Float {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
+#[derive(Clone, Debug, PartialOrd, Serialize, Deserialize, Arbitrary)]
 pub struct Double {
     pub value: f64,
     pub precision: u8,
@@ -68,7 +68,7 @@ impl Hash for Double {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Serialize, Deserialize, Arbitrary)]
 pub enum ItemPlaceholder {
     QuestionMark,
     DollarNumber(u32),
@@ -85,7 +85,7 @@ impl ToString for ItemPlaceholder {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary)]
 pub enum Literal {
     Null,
     Boolean(bool),
