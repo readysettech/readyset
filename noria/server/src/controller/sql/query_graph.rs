@@ -1105,6 +1105,13 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     }
                     Expr::Call(function) if is_aggregate(function) => {
                         qg.aggregates.push((function.clone(), name.clone()));
+                        // Aggregates end up in qg.columns as OutputColumn::Data not because they're
+                        // columns in parent tables, but because by the time we're projecting the
+                        // result set columns in a query the values for the aggregates will have
+                        // *already been projected* (because we make aggregate nodes for all the
+                        // aggregates in `qg.aggregates`). If they were `OutputColumn::Expr` here
+                        // we'd try to *evaluate them* as project expressions, which obviously we
+                        // can't do.
                         qg.columns.push(OutputColumn::Data {
                             alias: name.clone(),
                             column: Column { name, table: None },
