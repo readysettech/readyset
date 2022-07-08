@@ -1170,15 +1170,13 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                         })
                     }
                 }
-                FieldReference::Expr(expr @ Expr::Call(func)) if is_aggregate(func) => {
-                    // This is an aggregate expression that we need to add to the list of projected
-                    // columns and aggregates
+                FieldReference::Expr(Expr::Call(func)) if is_aggregate(func) => {
+                    // This is an aggregate expression that we need to add to the list of
+                    // aggregates. We *don't* add it to the list of projected columns here, since
+                    // we don't necessarily need it projected in the result set of the query, and
+                    // the pull_columns pass will make sure the topk/paginate node gets the
+                    // aggregate result column
                     qg.aggregates.push((func.clone(), func.to_string().into()));
-                    qg.columns.push(OutputColumn::Expr(ExprColumn {
-                        name: ord_expr.to_string().into(),
-                        table: None,
-                        expression: expr.clone(),
-                    }));
                 }
                 FieldReference::Expr(expr) => {
                     // This is an expression that we need to add to the list of projected columns
@@ -1308,6 +1306,42 @@ mod tests {
 
         let subquery_rel = qg.relations.get("sq").unwrap();
         assert!(subquery_rel.subgraph.is_some());
+    }
+
+    #[test]
+    fn order_by_aggregate() {
+        let qg = make_query_graph(
+            "SELECT t.a, t.b, sum(t.c) FROM t GROUP BY t.a, t.b ORDER BY sum(t.c);",
+        );
+
+        assert_eq!(
+            qg.columns,
+            vec![
+                OutputColumn::Data {
+                    alias: "a".into(),
+                    column: Column::from("t.a")
+                },
+                OutputColumn::Data {
+                    alias: "b".into(),
+                    column: Column::from("t.b")
+                },
+                OutputColumn::Data {
+                    alias: "sum(`t`.`c`)".into(),
+                    column: Column {
+                        name: "sum(`t`.`c`)".into(),
+                        table: None
+                    }
+                }
+            ]
+        );
+
+        assert!(qg.aggregates.contains(&(
+            FunctionExpr::Sum {
+                expr: Box::new(Expr::Column("t.c".into())),
+                distinct: false,
+            },
+            "sum(`t`.`c`)".into()
+        )));
     }
 
     mod view_key {
