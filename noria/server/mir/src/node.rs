@@ -332,27 +332,17 @@ impl MirNode {
             | MirNodeInner::LeftJoin { project, .. }
             | MirNodeInner::DependentJoin { project, .. } => project.clone(),
             MirNodeInner::JoinAggregates => {
-                let mut columns = self
-                    .ancestors()
+                self.ancestors()
                     .iter()
                     .flat_map(|n| n.upgrade().unwrap().borrow().columns())
-                    .collect::<Vec<_>>();
-
-                // Crappy quadratic column deduplication, because we don't have Hash or Ord for
-                // Column due to aliases affecting equality
-                let mut i = columns.len() - 1;
-                while i > 0 {
-                    let col = &columns[i];
-                    if columns[..i].contains(col) || columns[(i + 1)..].contains(col) {
-                        columns.remove(i);
-                    } else if i == 0 {
-                        break;
-                    } else {
-                        i -= 1;
-                    }
-                }
-
-                columns
+                    // Crappy quadratic column deduplication, because we don't have Hash or Ord for
+                    // Column due to aliases affecting equality
+                    .fold(vec![], |mut cols, c| {
+                        if !cols.contains(&c) {
+                            cols.push(c);
+                        }
+                        cols
+                    })
             }
             MirNodeInner::Project {
                 emit,
@@ -1115,6 +1105,53 @@ mod tests {
                     Column::named("sum"),
                 ]
             )
+        }
+
+        #[test]
+        fn join_aggregates_with_dupes_at_end() {
+            let agg1 = MirNode::new(
+                "agg1".into(),
+                0,
+                MirNodeInner::Aggregation {
+                    on: Column::named("c"),
+                    group_by: vec![Column::named("a"), Column::named("b")],
+                    output_column: Column::named("sum(c)"),
+                    kind: Aggregation::Sum,
+                },
+                vec![],
+                vec![],
+            );
+
+            let agg2 = MirNode::new(
+                "agg2".into(),
+                0,
+                MirNodeInner::Aggregation {
+                    on: Column::named("c"),
+                    group_by: vec![Column::named("a"), Column::named("b")],
+                    output_column: Column::named("sum(c)"),
+                    kind: Aggregation::Sum,
+                },
+                vec![],
+                vec![],
+            );
+
+            let join_aggs = MirNode::new(
+                "join_aggs".into(),
+                0,
+                MirNodeInner::JoinAggregates,
+                vec![MirNodeRef::downgrade(&agg1), MirNodeRef::downgrade(&agg2)],
+                vec![],
+            );
+
+            let columns = join_aggs.borrow().columns();
+            assert_eq!(
+                columns,
+                vec![
+                    Column::named("a"),
+                    Column::named("b"),
+                    Column::named("sum(c)")
+                ]
+            );
         }
 
         #[test]
