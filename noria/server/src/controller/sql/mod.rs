@@ -1020,7 +1020,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_parses() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_parses").await;
+        let mut g = integration_utils::start_simple_unsharded("it_parses").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Must have a base node for type inference to work, so make one manually
@@ -1053,7 +1053,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_parses_parameter_column() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_parses_parameter_column").await;
+        let mut g = integration_utils::start_simple_unsharded("it_parses_parameter_column").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -1090,7 +1090,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_parses_unprojected_parameter_column() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_parses_unprojected_parameter_column").await;
+        let mut g =
+            integration_utils::start_simple_unsharded("it_parses_unprojected_parameter_column")
+                .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -1124,7 +1126,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_parses_filter_and_parameter_column() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_parses_filter_and_parameter_column").await;
+        let mut g =
+            integration_utils::start_simple_unsharded("it_parses_filter_and_parameter_column")
+                .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -1180,7 +1184,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_simple_join() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_incorporates_simple_join").await;
+        let mut g = integration_utils::start_simple_unsharded("it_incorporates_simple_join").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type for "users"
@@ -1260,7 +1264,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_simple_selection() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_incorporates_simple_selection").await;
+        let mut g =
+            integration_utils::start_simple_unsharded("it_incorporates_simple_selection").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -1318,7 +1323,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_aggregation() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_incorporates_aggregation").await;
+        let mut g = integration_utils::start_simple_unsharded("it_incorporates_aggregation").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write types
@@ -1385,7 +1390,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_does_not_reuse_if_disabled() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_does_not_reuse_if_disabled").await;
+        let mut g =
+            integration_utils::start_simple_unsharded("it_does_not_reuse_if_disabled").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             inc.disable_reuse();
@@ -1414,7 +1420,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_reuses_identical_query() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_reuses_identical_query").await;
+        let mut g = integration_utils::start_simple_unsharded("it_reuses_identical_query").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             inc.enable_reuse(crate::ReuseConfigType::Finkelstein);
@@ -1465,7 +1471,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_reuses_with_different_parameter() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_reuses_with_different_parameter").await;
+        let mut g =
+            integration_utils::start_simple_unsharded("it_reuses_with_different_parameter").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -1541,7 +1548,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_does_not_reuse_bogokey_projection_for_different_projection() {
         // set up graph
-        let mut g = integration_utils::start_simple(
+        let mut g = integration_utils::start_simple_unsharded(
             "it_does_not_reuse_bogokey_projection_with_different_projection",
         )
         .await;
@@ -1650,7 +1657,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_does_not_reuse_parameter_projection_for_bogokey_projection() {
         // set up graph
-        let mut g = integration_utils::start_simple(
+        let mut g = integration_utils::start_simple_unsharded(
             "it_does_not_reuse_parameter_projection_with_bogokey_projection",
         )
         .await;
@@ -1717,7 +1724,7 @@ mod tests {
     async fn it_reuses_projection_for_non_bogokey_table_query() {
         use super::sql_parser;
         // set up graph
-        let mut g = integration_utils::start_simple(
+        let mut g = integration_utils::start_simple_unsharded(
             "it_does_not_reuse_bogokey_projection_with_different_projection",
         )
         .await;
@@ -1790,7 +1797,9 @@ mod tests {
     async fn it_reuses_by_extending_existing_query() {
         use super::sql_parser;
         // set up graph
-        let mut g = integration_utils::start_simple("it_reuses_by_extending_existing_query").await;
+        let mut g =
+            integration_utils::start_simple_unsharded("it_reuses_by_extending_existing_query")
+                .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Add base tables
@@ -1845,8 +1854,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_does_not_reuse_ancestor_lacking_parent_key() {
         // set up graph
-        let mut g =
-            integration_utils::start_simple("it_does_not_reuse_ancestor_lacking_parent_key").await;
+        let mut g = integration_utils::start_simple_unsharded(
+            "it_does_not_reuse_ancestor_lacking_parent_key",
+        )
+        .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -1923,7 +1934,8 @@ mod tests {
     async fn it_incorporates_aggregation_no_group_by() {
         // set up graph
         let mut g =
-            integration_utils::start_simple("it_incorporates_aggregation_no_group_by").await;
+            integration_utils::start_simple_unsharded("it_incorporates_aggregation_no_group_by")
+                .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -1998,7 +2010,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_aggregation_count_star() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_incorporates_aggregation_count_star").await;
+        let mut g =
+            integration_utils::start_simple_unsharded("it_incorporates_aggregation_count_star")
+                .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -2067,7 +2081,8 @@ mod tests {
     async fn it_incorporates_aggregation_filter_count() {
         // set up graph
         let mut g =
-            integration_utils::start_simple("it_incorporates_aggregation_filter_count").await;
+            integration_utils::start_simple_unsharded("it_incorporates_aggregation_filter_count")
+                .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -2114,7 +2129,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_aggregation_filter_sum() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_incorporates_aggregation_filter_sum").await;
+        let mut g =
+            integration_utils::start_simple_unsharded("it_incorporates_aggregation_filter_sum")
+                .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -2161,8 +2178,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_aggregation_filter_sum_else() {
         // set up graph
-        let mut g =
-            integration_utils::start_simple("it_incorporates_aggregation_filter_sum_else").await;
+        let mut g = integration_utils::start_simple_unsharded(
+            "it_incorporates_aggregation_filter_sum_else",
+        )
+        .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -2210,7 +2229,7 @@ mod tests {
     #[ignore] // find_and_merge_filter_aggregates currently disabled
     async fn it_merges_filter_and_sum() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_merges_filter_and_sum").await;
+        let mut g = integration_utils::start_simple_unsharded("it_merges_filter_and_sum").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -2282,7 +2301,8 @@ mod tests {
     async fn it_merges_filter_and_sum_on_filter_column() {
         // set up graph
         let mut g =
-            integration_utils::start_simple("it_merges_filter_and_sum_on_filter_column").await;
+            integration_utils::start_simple_unsharded("it_merges_filter_and_sum_on_filter_column")
+                .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -2321,8 +2341,10 @@ mod tests {
     #[ignore]
     async fn it_doesnt_merge_sum_and_filter_on_sum_result() {
         // set up graph
-        let mut g =
-            integration_utils::start_simple("it_doesnt_merge_sum_and_filter_on_sum_result").await;
+        let mut g = integration_utils::start_simple_unsharded(
+            "it_doesnt_merge_sum_and_filter_on_sum_result",
+        )
+        .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -2397,8 +2419,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_aggregation_filter_logical_op() {
         // set up graph
-        let mut g =
-            integration_utils::start_simple("it_incorporates_aggregation_filter_sum_else").await;
+        let mut g = integration_utils::start_simple_unsharded(
+            "it_incorporates_aggregation_filter_sum_else",
+        )
+        .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -2448,7 +2472,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_explicit_multi_join() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_incorporates_explicit_multi_join").await;
+        let mut g =
+            integration_utils::start_simple_unsharded("it_incorporates_explicit_multi_join").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish base write types for "users" and "articles" and "votes"
@@ -2507,7 +2532,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_implicit_multi_join() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_incorporates_implicit_multi_join").await;
+        let mut g =
+            integration_utils::start_simple_unsharded("it_incorporates_implicit_multi_join").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish base write types for "users" and "articles" and "votes"
@@ -2587,8 +2613,10 @@ mod tests {
     #[ignore]
     async fn it_incorporates_join_projecting_join_columns() {
         // set up graph
-        let mut g =
-            integration_utils::start_simple("it_incorporates_join_projecting_join_columns").await;
+        let mut g = integration_utils::start_simple_unsharded(
+            "it_incorporates_join_projecting_join_columns",
+        )
+        .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -2644,7 +2672,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_self_join() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_incorporates_self_join").await;
+        let mut g = integration_utils::start_simple_unsharded("it_incorporates_self_join").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -2696,7 +2724,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_literal_projection() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_incorporates_literal_projection").await;
+        let mut g =
+            integration_utils::start_simple_unsharded("it_incorporates_literal_projection").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -2720,7 +2749,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_arithmetic_projection() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_incorporates_arithmetic_projection").await;
+        let mut g =
+            integration_utils::start_simple_unsharded("it_incorporates_arithmetic_projection")
+                .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -2752,7 +2783,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_arithmetic_projection_with_parameter_column() {
         // set up graph
-        let mut g = integration_utils::start_simple(
+        let mut g = integration_utils::start_simple_unsharded(
             "it_incorporates_arithmetic_projection_with_parameter_column",
         )
         .await;
@@ -2796,7 +2827,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_join_with_nested_query() {
         readyset_tracing::init_test_logging();
-        let mut g = integration_utils::start_simple("it_incorporates_join_with_nested_query").await;
+        let mut g =
+            integration_utils::start_simple_unsharded("it_incorporates_join_with_nested_query")
+                .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -2853,8 +2886,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_join_with_reused_nested_query() {
-        let mut g =
-            integration_utils::start_simple("it_incorporates_join_with_reused_nested_query").await;
+        let mut g = integration_utils::start_simple_unsharded(
+            "it_incorporates_join_with_reused_nested_query",
+        )
+        .await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -2918,7 +2953,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_incorporates_compound_selection() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_incorporates_compound_selection").await;
+        let mut g =
+            integration_utils::start_simple_unsharded("it_incorporates_compound_selection").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -2954,7 +2990,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_distinguishes_predicates() {
         // set up graph
-        let mut g = integration_utils::start_simple("it_distinguishes_predicates").await;
+        let mut g = integration_utils::start_simple_unsharded("it_distinguishes_predicates").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
@@ -2994,7 +3030,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_adds_topk() {
-        let mut g = integration_utils::start_simple("it_adds_topk").await;
+        let mut g = integration_utils::start_simple_unsharded("it_adds_topk").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             inc.set_mir_config(super::mir::Config {
@@ -3033,7 +3069,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]
     async fn it_queries_over_aliased_view() {
-        let mut g = integration_utils::start_simple("it_queries_over_aliased_view").await;
+        let mut g = integration_utils::start_simple_unsharded("it_queries_over_aliased_view").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
@@ -3073,7 +3109,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn count_star_nonexistent_table() {
-        let mut g = integration_utils::start_simple("count_star_nonexistent_table").await;
+        let mut g = integration_utils::start_simple_unsharded("count_star_nonexistent_table").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             let res = inc.add_query("SELECT count(*) FROM foo;", None, mig);
@@ -3085,7 +3121,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn infers_type_for_topk() {
         // set up graph
-        let mut g = integration_utils::start_simple("infers_type_for_topk").await;
+        let mut g = integration_utils::start_simple_unsharded("infers_type_for_topk").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             inc.set_mir_config(super::mir::Config {
@@ -3121,7 +3157,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn infers_type_for_filter() {
         // set up graph
-        let mut g = integration_utils::start_simple("infers_type_for_filter").await;
+        let mut g = integration_utils::start_simple_unsharded("infers_type_for_filter").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             inc.set_mir_config(super::mir::Config {
@@ -3154,10 +3190,9 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore = "Hanging occasionally in CI (ENG-1438)"]
     async fn infers_type_for_grouped() {
         // set up graph
-        let mut g = integration_utils::start_simple("infers_type_for_grouped").await;
+        let mut g = integration_utils::start_simple_unsharded("infers_type_for_grouped").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             inc.set_mir_config(super::mir::Config {
@@ -3209,7 +3244,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn infers_type_for_join() {
         // set up graph
-        let mut g = integration_utils::start_simple("infers_type_for_join").await;
+        let mut g = integration_utils::start_simple_unsharded("infers_type_for_join").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             inc.set_mir_config(super::mir::Config {
@@ -3254,7 +3289,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn infers_type_for_union() {
         // set up graph
-        let mut g = integration_utils::start_simple("infers_type_for_union").await;
+        let mut g = integration_utils::start_simple_unsharded("infers_type_for_union").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             inc.set_mir_config(super::mir::Config {
@@ -3290,7 +3325,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn infers_type_for_project() {
         // set up graph
-        let mut g = integration_utils::start_simple("infers_type_for_project").await;
+        let mut g = integration_utils::start_simple_unsharded("infers_type_for_project").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             inc.set_mir_config(super::mir::Config {

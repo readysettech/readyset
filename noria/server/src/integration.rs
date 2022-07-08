@@ -133,7 +133,7 @@ fn timestamp(pairs: Vec<(u32, u64)>) -> Timestamp {
 // timestamp satisfiability.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_timestamp_propagation_simple() {
-    let mut g = start_simple("test_timestamp_propagation_simple").await;
+    let mut g = start_simple_unsharded("test_timestamp_propagation_simple").await;
 
     // Create a base table "a" with columns "a", and "b".
     let _ = g
@@ -200,7 +200,7 @@ async fn test_timestamp_propagation_simple() {
 // Simulate writes from two clients.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_timestamp_propagation_multitable() {
-    let mut g = start_simple("test_timestamp_propagation_multitable").await;
+    let mut g = start_simple_unsharded("test_timestamp_propagation_multitable").await;
 
     // Create two base tables "a" and "b" with columns "a", and "b".
     let _ = g
@@ -289,6 +289,7 @@ async fn test_timestamp_propagation_multitable() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Ignoring sharded tests"]
 async fn sharded_shuffle() {
     let mut g = start_simple("sharded_shuffle").await;
 
@@ -429,7 +430,7 @@ async fn broad_recursing_upquery() {
 async fn base_mutation() {
     use noria::{Modification, Operation};
 
-    let mut g = start_simple("base_mutation").await;
+    let mut g = start_simple_unsharded("base_mutation").await;
     g.migrate(|mig| {
         let a = mig.add_base(
             "a",
@@ -518,7 +519,7 @@ async fn base_mutation() {
 #[tokio::test(flavor = "multi_thread")]
 async fn shared_interdomain_ancestor() {
     // set up graph
-    let mut g = start_simple("shared_interdomain_ancestor").await;
+    let mut g = start_simple_unsharded("shared_interdomain_ancestor").await;
     let _ = g
         .migrate(|mig| {
             let a = mig.add_base("a", make_columns(&["a", "b"]), Base::default());
@@ -571,7 +572,7 @@ async fn shared_interdomain_ancestor() {
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_w_mat() {
     // set up graph
-    let mut g = start_simple("it_works_w_mat").await;
+    let mut g = start_simple_unsharded("it_works_w_mat").await;
     let _ = g
         .migrate(|mig| {
             let a = mig.add_base("a", make_columns(&["a", "b"]), Base::default());
@@ -630,7 +631,7 @@ async fn it_works_w_mat() {
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_w_partial_mat() {
     // set up graph
-    let mut g = start_simple("it_works_w_partial_mat").await;
+    let mut g = start_simple_unsharded("it_works_w_partial_mat").await;
     let (a, b) = g
         .migrate(|mig| {
             let a = mig.add_base("a", make_columns(&["a", "b"]), Base::default());
@@ -685,7 +686,7 @@ async fn it_works_w_partial_mat() {
 async fn it_works_w_partial_mat_below_empty() {
     // set up graph with all nodes added in a single migration. The base tables are therefore empty
     // for now.
-    let mut g = start_simple("it_works_w_partial_mat_below_empty").await;
+    let mut g = start_simple_unsharded("it_works_w_partial_mat_below_empty").await;
     let _ = g
         .migrate(|mig| {
             let a = mig.add_base("a", make_columns(&["a", "b"]), Base::default());
@@ -731,7 +732,7 @@ async fn it_works_w_partial_mat_below_empty() {
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_deletion() {
     // set up graph
-    let mut g = start_simple("it_works_deletion").await;
+    let mut g = start_simple_unsharded("it_works_deletion").await;
     let _ = g
         .migrate(|mig| {
             let a = mig.add_base(
@@ -789,7 +790,7 @@ async fn it_works_deletion() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_row() {
-    let mut g = start_simple("delete_row").await;
+    let mut g = start_simple_unsharded("delete_row").await;
     g.extend_recipe(
         "
         CREATE TABLE t1 (x int, y int, z int);
@@ -830,7 +831,7 @@ async fn delete_row() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_sql_recipe() {
-    let mut g = start_simple("it_works_with_sql_recipe").await;
+    let mut g = start_simple_unsharded("it_works_with_sql_recipe").await;
     let sql = "
         CREATE TABLE Car (id int, brand varchar(255), PRIMARY KEY(id));
         CREATE CACHE CountCars FROM SELECT COUNT(*) FROM Car WHERE brand = ?;
@@ -866,7 +867,7 @@ async fn it_works_with_sql_recipe() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_vote() {
-    let mut g = start_simple("it_works_with_vote").await;
+    let mut g = start_simple_unsharded("it_works_with_vote").await;
     let sql = "
         # base tables
         CREATE TABLE Article (id int, title varchar(255), PRIMARY KEY(id));
@@ -914,7 +915,7 @@ async fn it_works_with_vote() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_identical_queries() {
-    let mut g = start_simple("it_works_with_identical_queries").await;
+    let mut g = start_simple_unsharded("it_works_with_identical_queries").await;
     let sql = "
         CREATE TABLE Article (aid int, PRIMARY KEY(aid));
         CREATE CACHE aq1 FROM SELECT Article.* FROM Article WHERE Article.aid = ?;
@@ -1046,7 +1047,7 @@ async fn it_works_with_duplicate_subquery() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_reads_before_writes() {
-    let mut g = start_simple("it_works_with_reads_before_writes").await;
+    let mut g = start_simple_unsharded("it_works_with_reads_before_writes").await;
     let sql = "
         CREATE TABLE Article (aid int, PRIMARY KEY(aid));
         CREATE TABLE Vote (aid int, uid int, PRIMARY KEY(aid, uid));
@@ -1085,7 +1086,7 @@ async fn forced_shuffle_despite_same_shard() {
     // XXX: this test doesn't currently *fail* despite
     // multiple trailing replay responses that are simply ignored...
 
-    let mut g = start_simple("forced_shuffle_despite_same_shard").await;
+    let mut g = start_simple_unsharded("forced_shuffle_despite_same_shard").await;
     let sql = "
         CREATE TABLE Car (cid int, pid int, PRIMARY KEY(pid));
         CREATE TABLE Price (pid int, price int, PRIMARY KEY(pid));
@@ -1121,7 +1122,7 @@ async fn forced_shuffle_despite_same_shard() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn double_shuffle() {
-    let mut g = start_simple("double_shuffle").await;
+    let mut g = start_simple_unsharded("double_shuffle").await;
     let sql = "
         CREATE TABLE Car (cid int, pid int, PRIMARY KEY(cid));
         CREATE TABLE Price (pid int, price int, PRIMARY KEY(pid));
@@ -1157,7 +1158,7 @@ async fn double_shuffle() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_arithmetic_aliases() {
-    let mut g = start_simple("it_works_with_arithmetic_aliases").await;
+    let mut g = start_simple_unsharded("it_works_with_arithmetic_aliases").await;
     let sql = "
         CREATE TABLE Price (pid int, cent_price int, PRIMARY KEY(pid));
         CREATE VIEW ModPrice AS SELECT pid, cent_price / 100 AS price FROM Price;
@@ -1385,7 +1386,7 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mutator_churn() {
-    let mut g = start_simple("mutator_churn").await;
+    let mut g = start_simple_unsharded("mutator_churn").await;
     let _ = g
         .migrate(|mig| {
             // migrate
@@ -1690,7 +1691,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_simple_arithmetic() {
-    let mut g = start_simple("it_works_with_simple_arithmetic").await;
+    let mut g = start_simple_unsharded("it_works_with_simple_arithmetic").await;
 
     g.migrate(|mig| {
         let mut recipe = Recipe::blank();
@@ -1718,7 +1719,7 @@ async fn it_works_with_simple_arithmetic() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_multiple_arithmetic_expressions() {
-    let mut g = start_simple("it_works_with_multiple_arithmetic_expressions").await;
+    let mut g = start_simple_unsharded("it_works_with_multiple_arithmetic_expressions").await;
     let sql = "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
                CREATE CACHE CarPrice FROM SELECT 10 * 10, 2 * price, 10 * price, FROM Car WHERE id = ?;
                ";
@@ -1743,7 +1744,7 @@ async fn it_works_with_multiple_arithmetic_expressions() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_join_arithmetic() {
-    let mut g = start_simple("it_works_with_join_arithmetic").await;
+    let mut g = start_simple_unsharded("it_works_with_join_arithmetic").await;
     let sql = "
         CREATE TABLE Car (car_id int, price_id int, PRIMARY KEY(car_id));
         CREATE TABLE Price (price_id int, price int, PRIMARY KEY(price_id));
@@ -1793,7 +1794,8 @@ async fn it_works_with_join_arithmetic() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_works_with_function_arithmetic() {
-    let mut g = start_simple("it_works_with_function_arithmetic").await;
+    readyset_tracing::init_test_logging();
+    let mut g = start_simple_unsharded("it_works_with_function_arithmetic").await;
     let sql = "
         CREATE TABLE Bread (id int, price int, PRIMARY KEY(id));
         CREATE CACHE Price FROM SELECT 2 * MAX(price) FROM Bread;
@@ -1819,7 +1821,7 @@ async fn it_works_with_function_arithmetic() {
 #[tokio::test(flavor = "multi_thread")]
 async fn votes() {
     // set up graph
-    let mut g = start_simple("votes").await;
+    let mut g = start_simple_unsharded("votes").await;
     let _ = g
         .migrate(|mig| {
             // add article base nodes (we use two so we can exercise unions too)
@@ -1939,7 +1941,7 @@ async fn votes() {
 #[tokio::test(flavor = "multi_thread")]
 async fn empty_migration() {
     // set up graph
-    let mut g = start_simple("empty_migration").await;
+    let mut g = start_simple_unsharded("empty_migration").await;
     g.migrate(|_| {}).await;
 
     let _ = g
@@ -1991,7 +1993,7 @@ async fn simple_migration() {
     let id: DataType = 1.into();
 
     // set up graph
-    let mut g = start_simple("simple_migration").await;
+    let mut g = start_simple_unsharded("simple_migration").await;
     let _ = g
         .migrate(|mig| {
             let a = mig.add_base("a", make_columns(&["a", "b"]), Base::default());
@@ -2045,7 +2047,7 @@ async fn add_columns() {
     let id: DataType = "x".try_into().unwrap();
 
     // set up graph
-    let mut g = start_simple("add_columns").await;
+    let mut g = start_simple_unsharded("add_columns").await;
     let a = g
         .migrate(|mig| {
             let a = mig.add_base(
@@ -2111,7 +2113,7 @@ async fn migrate_added_columns() {
     let id: DataType = "x".try_into().unwrap();
 
     // set up graph
-    let mut g = start_simple("migrate_added_columns").await;
+    let mut g = start_simple_unsharded("migrate_added_columns").await;
     let a = g
         .migrate(|mig| {
             mig.add_base(
@@ -2177,7 +2179,7 @@ async fn migrate_drop_columns() {
     let id: DataType = "x".try_into().unwrap();
 
     // set up graph
-    let mut g = start_simple("migrate_drop_columns").await;
+    let mut g = start_simple_unsharded("migrate_drop_columns").await;
     let a = g
         .migrate(|mig| {
             let a = mig.add_base(
@@ -2273,7 +2275,7 @@ async fn migrate_drop_columns() {
 #[tokio::test(flavor = "multi_thread")]
 async fn key_on_added() {
     // set up graph
-    let mut g = start_simple("key_on_added").await;
+    let mut g = start_simple_unsharded("key_on_added").await;
     let a = g
         .migrate(|mig| {
             mig.add_base(
@@ -2454,6 +2456,7 @@ async fn replay_during_replay() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Ignoring sharded tests"]
 async fn cascading_replays_with_sharding() {
     let mut g = start_simple("cascading_replays_with_sharding").await;
 
@@ -2552,7 +2555,7 @@ async fn cascading_replays_with_sharding() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn replay_multiple_keys_then_write() {
-    let mut g = start_simple("replay_multiple_keys_then_write").await;
+    let mut g = start_simple_unsharded("replay_multiple_keys_then_write").await;
     g.extend_recipe(
         "
         CREATE TABLE t (id INTEGER PRIMARY KEY, value INTEGER);
@@ -2592,7 +2595,7 @@ async fn replay_multiple_keys_then_write() {
 #[tokio::test(flavor = "multi_thread")]
 async fn full_aggregation_with_bogokey() {
     // set up graph
-    let mut g = start_simple("full_aggregation_with_bogokey").await;
+    let mut g = start_simple_unsharded("full_aggregation_with_bogokey").await;
     let base = g
         .migrate(|mig| {
             mig.add_base(
@@ -2834,7 +2837,7 @@ async fn materialization_frontier() {
 #[tokio::test(flavor = "multi_thread")]
 async fn crossing_migration() {
     // set up graph
-    let mut g = start_simple("crossing_migration").await;
+    let mut g = start_simple_unsharded("crossing_migration").await;
     let (a, b) = g
         .migrate(|mig| {
             let a = mig.add_base("a", make_columns(&["a", "b"]), Base::default());
@@ -2885,7 +2888,7 @@ async fn independent_domain_migration() {
     let id: DataType = 1.into();
 
     // set up graph
-    let mut g = start_simple("independent_domain_migration").await;
+    let mut g = start_simple_unsharded("independent_domain_migration").await;
     let _ = g
         .migrate(|mig| {
             let a = mig.add_base("a", make_columns(&["a", "b"]), Base::default());
@@ -2937,7 +2940,7 @@ async fn independent_domain_migration() {
 #[tokio::test(flavor = "multi_thread")]
 async fn domain_amend_migration() {
     // set up graph
-    let mut g = start_simple("domain_amend_migration").await;
+    let mut g = start_simple_unsharded("domain_amend_migration").await;
     let (a, b) = g
         .migrate(|mig| {
             let a = mig.add_base("a", make_columns(&["a", "b"]), Base::default());
@@ -2991,7 +2994,7 @@ async fn migration_depends_on_unchanged_domain() {
     // this is tricky, because the system must realize that n is materialized, even though it
     // normally wouldn't even look at that part of the data flow graph!
 
-    let mut g = start_simple("migration_depends_on_unchanged_domain").await;
+    let mut g = start_simple_unsharded("migration_depends_on_unchanged_domain").await;
     let left = g
         .migrate(|mig| {
             // base node, so will be materialized
@@ -3161,11 +3164,13 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Ignoring sharded tests"]
 async fn full_vote_migration_only_new() {
     do_full_vote_migration(true, false).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Ignoring sharded tests"]
 async fn full_vote_migration_new_and_old() {
     do_full_vote_migration(true, true).await;
 }
@@ -3178,7 +3183,7 @@ async fn full_vote_migration_new_and_old_unsharded() {
 #[tokio::test(flavor = "multi_thread")]
 async fn live_writes() {
     readyset_tracing::init_test_logging();
-    let mut g = start_simple("live_writes").await;
+    let mut g = start_simple_unsharded("live_writes").await;
     let (_vote, vc) = g
         .migrate(|mig| {
             // migrate
@@ -3273,7 +3278,7 @@ async fn state_replay_migration_query() {
     // read from rather than relying on forwarding. to further stress the graph, *both* base nodes
     // are created and populated before the migration, meaning we have to replay through a join.
 
-    let mut g = start_simple("state_replay_migration_query").await;
+    let mut g = start_simple_unsharded("state_replay_migration_query").await;
     let (a, b) = g
         .migrate(|mig| {
             let a = mig.add_base("a", make_columns(&["x", "y"]), Base::default());
@@ -3352,7 +3357,7 @@ async fn state_replay_migration_query() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn recipe_activates() {
-    let mut g = start_simple("recipe_activates").await;
+    let mut g = start_simple_unsharded("recipe_activates").await;
     g.migrate(|mig| {
         let mut r = Recipe::blank();
 
@@ -3372,7 +3377,7 @@ async fn recipe_activates_and_migrates() {
     let r1_txt = "CREATE CACHE qa FROM SELECT a FROM b;\n
                   CREATE CACHE qb FROM SELECT a, c FROM b WHERE a = 42;";
 
-    let mut g = start_simple("recipe_activates_and_migrates").await;
+    let mut g = start_simple_unsharded("recipe_activates_and_migrates").await;
     g.extend_recipe(r_txt.parse().unwrap()).await.unwrap();
     // one base node
     assert_eq!(g.inputs().await.unwrap().len(), 1);
@@ -3390,7 +3395,7 @@ async fn recipe_activates_and_migrates_with_join() {
                  CREATE TABLE b (r int, s int);\n";
     let r1_txt = "CREATE CACHE q FROM SELECT y, s FROM a, b WHERE a.x = b.r;";
 
-    let mut g = start_simple("recipe_activates_and_migrates_with_join").await;
+    let mut g = start_simple_unsharded("recipe_activates_and_migrates_with_join").await;
     g.extend_recipe(r_txt.parse().unwrap()).await.unwrap();
 
     // two base nodes
@@ -3465,7 +3470,7 @@ async fn finkelstein1982_queries() {
     use std::io::Read;
 
     // set up graph
-    let mut g = start_simple("finkelstein1982_queries").await;
+    let mut g = start_simple_unsharded("finkelstein1982_queries").await;
     g.migrate(|mig| {
         let mut inc = SqlIncorporator::default();
         let mut f = File::open("tests/finkelstein82.txt").unwrap();
@@ -3494,6 +3499,7 @@ async fn finkelstein1982_queries() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Ignoring sharded tests"]
 async fn tpc_w() {
     test_queries("tpc-w", "tests/tpc-w-queries.txt", true, true).await;
 }
@@ -3539,7 +3545,7 @@ async fn filter_aggregate_lobsters() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn node_removal() {
-    let mut g = start_simple("domain_removal").await;
+    let mut g = start_simple_unsharded("domain_removal").await;
     let cid = g
         .migrate(|mig| {
             let a = mig.add_base(
@@ -3620,7 +3626,7 @@ async fn remove_query() {
         CREATE TABLE b (a int, c text, x text);
         CREATE CACHE qa FROM SELECT a FROM b;";
 
-    let mut g = start_simple("remove_query").await;
+    let mut g = start_simple_unsharded("remove_query").await;
     g.extend_recipe(r_txt.parse().unwrap()).await.unwrap();
     assert_eq!(g.inputs().await.unwrap().len(), 1);
     assert_eq!(g.outputs().await.unwrap().len(), 2);
@@ -3804,7 +3810,7 @@ async fn union_basic() {
 
     // Add multiples of 2 to 'twos' and multiples of 3 to 'threes'.
 
-    let mut g = start_simple("union_basic").await;
+    let mut g = start_simple_unsharded("union_basic").await;
     g.extend_recipe(
         "CREATE TABLE twos (id INTEGER PRIMARY KEY);
          CREATE TABLE threes (id INTEGER PRIMARY KEY);
@@ -3852,7 +3858,7 @@ async fn union_all_basic() {
 
     // Add multiples of 2 to 'twos' and multiples of 3 to 'threes'.
 
-    let mut g = start_simple("union_all_basic").await;
+    let mut g = start_simple_unsharded("union_all_basic").await;
     g.extend_recipe(
         "CREATE TABLE twos (id INTEGER PRIMARY KEY);
          CREATE TABLE threes (id INTEGER PRIMARY KEY);
@@ -3901,7 +3907,7 @@ async fn union_all_basic() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn between() {
-    let mut g = start_simple("between_query").await;
+    let mut g = start_simple_unsharded("between_query").await;
     g.extend_recipe("CREATE TABLE things (bigness INT);".parse().unwrap())
         .await
         .unwrap();
@@ -3932,7 +3938,7 @@ async fn between() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn between_parametrized() {
-    let mut g = start_simple("between_parametrized").await;
+    let mut g = start_simple_unsharded("between_parametrized").await;
 
     g.extend_recipe("CREATE TABLE things (bigness INT);".parse().unwrap())
         .await
@@ -4015,7 +4021,7 @@ async fn not_between() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn topk_updates() {
-    let mut g = start_simple("things").await;
+    let mut g = start_simple_unsharded("things").await;
     g.extend_recipe(
         "CREATE TABLE posts (id INTEGER PRIMARY KEY, number INTEGER);
 
@@ -4193,7 +4199,7 @@ async fn correct_nested_view_schema() {
 #[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn join_column_projection() {
-    let mut g = start_simple("join_column_projection").await;
+    let mut g = start_simple_unsharded("join_column_projection").await;
 
     // NOTE u_id causes panic in stories_authors_explicit; stories_authors_tables_star also paics
     g.extend_recipe(
@@ -4262,6 +4268,7 @@ async fn join_column_projection() {
 // Tests the case where the source is sharded by a different column than the key column
 // with no parameter.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Ignoring sharded tests"]
 async fn test_join_across_shards() {
     let mut g = start_simple("test_join_across_shards").await;
     g.extend_recipe(
@@ -4319,6 +4326,7 @@ async fn test_join_across_shards() {
 // Tests the case where the source is sharded by a different column than the key column
 // with a parameter.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Ignoring sharded tests"]
 async fn test_join_across_shards_with_param() {
     let mut g = start_simple("test_join_across_shards_with_param").await;
     g.extend_recipe(
@@ -4368,7 +4376,7 @@ async fn test_join_across_shards_with_param() {
 // correct behavior in the no-param case, when column names are not reused.)
 #[tokio::test(flavor = "multi_thread")]
 async fn test_join_with_reused_column_name() {
-    let mut g = start_simple("test_join_with_reused_column_name").await;
+    let mut g = start_simple_unsharded("test_join_with_reused_column_name").await;
     g.extend_recipe(
         "CREATE TABLE votes (story int, user int);
          CREATE TABLE recs (story int, other int);
@@ -4426,7 +4434,7 @@ async fn test_join_with_reused_column_name() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_join_with_reused_column_name_with_param() {
-    let mut g = start_simple("test_join_with_reused_column_name").await;
+    let mut g = start_simple_unsharded("test_join_with_reused_column_name").await;
     g.extend_recipe(
         "CREATE TABLE votes (story int, user int);
          CREATE TABLE recs (story int, other int);
@@ -4475,7 +4483,7 @@ async fn test_join_with_reused_column_name_with_param() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore] // ENG-411
 async fn self_join_basic() {
-    let mut g = start_simple("self_join_basic").await;
+    let mut g = start_simple_unsharded("self_join_basic").await;
     g.extend_recipe(
         "CREATE TABLE votes (story int, user int);
          CREATE VIEW like_minded AS SELECT v1.user, v2.user AS agreer \
@@ -4549,7 +4557,7 @@ async fn self_join_basic() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn self_join_param() {
-    let mut g = start_simple("self_join_param").await;
+    let mut g = start_simple_unsharded("self_join_param").await;
     g.extend_recipe(
         "CREATE TABLE users (id int, friend int);
          CREATE CACHE fof FROM SELECT u1.id AS user, u2.friend AS fof \
@@ -4820,7 +4828,7 @@ async fn range_upquery_after_point_queries() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn query_reuse_aliases() {
-    let mut g = start_simple("query_reuse_aliases").await;
+    let mut g = start_simple_unsharded("query_reuse_aliases").await;
     g.extend_recipe(
         "CREATE TABLE t1 (a INT, b INT);
          CREATE CACHE q1 FROM SELECT * FROM t1 WHERE a != 1;
@@ -4864,7 +4872,7 @@ async fn query_reuse_aliases() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn same_table_columns_inequal() {
-    let mut g = start_simple("same_table_columns_inequal").await;
+    let mut g = start_simple_unsharded("same_table_columns_inequal").await;
     g.extend_recipe(
         "CREATE TABLE t1 (a INT, b INT);
          CREATE CACHE q FROM SELECT * FROM t1 WHERE t1.a != t1.b;"
@@ -4901,7 +4909,7 @@ async fn same_table_columns_inequal() {
 #[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn view_reuse_aliases() {
-    let mut g = start_simple("view_reuse_aliases").await;
+    let mut g = start_simple_unsharded("view_reuse_aliases").await;
 
     // NOTE q1 causes panic
     g.extend_recipe(
@@ -5009,7 +5017,7 @@ async fn post_read_ilike() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn cast_projection() {
-    let mut g = start_simple("cast").await;
+    let mut g = start_simple_unsharded("cast").await;
 
     g.extend_recipe(
             "CREATE TABLE users (id int, created_at timestamp);
@@ -5101,7 +5109,7 @@ async fn aggregate_missing_columns() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn post_join_filter() {
-    let mut g = start_simple("post_join_filter").await;
+    let mut g = start_simple_unsharded("post_join_filter").await;
 
     g.extend_recipe(
         "CREATE TABLE t1 (id int, val_1 int);
@@ -5157,7 +5165,7 @@ async fn post_join_filter() {
 /// Tests the case where two tables have the same column name and those columns are
 /// used in a post-join filter.
 async fn duplicate_column_names() {
-    let mut g = start_simple("duplicate_column_names").await;
+    let mut g = start_simple_unsharded("duplicate_column_names").await;
 
     g.extend_recipe(
         "CREATE TABLE t1 (id int, val int);
@@ -5210,7 +5218,7 @@ async fn duplicate_column_names() {
 }
 #[tokio::test(flavor = "multi_thread")]
 async fn filter_on_expression() {
-    let mut g = start_simple("filter_on_expression").await;
+    let mut g = start_simple_unsharded("filter_on_expression").await;
 
     g.extend_recipe(
         "CREATE TABLE users (id int, birthday date);
@@ -5246,7 +5254,7 @@ async fn filter_on_expression() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn compound_join_key() {
-    let mut g = start_simple("compound_join_key").await;
+    let mut g = start_simple_unsharded("compound_join_key").await;
     g.extend_recipe(
         "
       CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
@@ -5337,7 +5345,7 @@ async fn compound_join_key() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn left_join_null() {
-    let mut g = start_simple("left_join_null").await;
+    let mut g = start_simple_unsharded("left_join_null").await;
 
     g.extend_recipe(
             "CREATE TABLE jim (id int, a int);
@@ -5374,7 +5382,7 @@ async fn left_join_null() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn overlapping_indices() {
-    let mut g = start_simple("overlapping_indices").await;
+    let mut g = start_simple_unsharded("overlapping_indices").await;
 
     // this creates an aggregation operator indexing on [0, 1], and then a TopK child on [1]
     g.extend_recipe("CREATE TABLE test (id int, a int, b int);
@@ -5419,7 +5427,7 @@ async fn overlapping_indices() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn aggregate_after_filter_non_equality() {
-    let mut g = start_simple("aggregate_after_filter_non_equality").await;
+    let mut g = start_simple_unsharded("aggregate_after_filter_non_equality").await;
 
     g.extend_recipe(
         "CREATE TABLE test (number int, value int);
@@ -5459,7 +5467,7 @@ async fn aggregate_after_filter_non_equality() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn join_simple_cte() {
-    let mut g = start_simple("join_simple_cte").await;
+    let mut g = start_simple_unsharded("join_simple_cte").await;
 
     g.extend_recipe(
         "CREATE TABLE t1 (id int, value int);
@@ -5615,6 +5623,7 @@ async fn multiple_aggregate_same_col() {
 // multiple_aggregate_sum_sharded tests multiple aggregators of the same type, in this case sum(),
 // operating over different columns from the same table in a sharded environment.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Ignoring sharded tests"]
 async fn multiple_aggregate_sum_sharded() {
     let mut g = start_simple("multiple_aggregate_sharded").await;
 
@@ -5677,6 +5686,7 @@ async fn multiple_aggregate_sum_sharded() {
 // multiple_aggregate_same_col_sharded tests multiple aggregators of different types operating on
 // the same column in a sharded environment.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Ignoring sharded tests"]
 async fn multiple_aggregate_same_col_sharded() {
     let mut g = start_simple("multiple_aggregate_same_col_sharded").await;
 
@@ -5766,6 +5776,7 @@ async fn multiple_aggregate_over_two() {
 // multiple MirNodeInner::JoinAggregates nodes and join them all together correctly in a sharded
 // environment.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Ignoring sharded tests"]
 async fn multiple_aggregate_over_two_sharded() {
     let mut g = start_simple("multiple_aggregate_over_two_sharded").await;
 
@@ -5854,6 +5865,7 @@ async fn multiple_aggregate_with_expressions() {
 // expressions that would modify the output of the resulting columns. This tests that when we join
 // aggregates that we are ignoring projection nodes appropriately in a sharded environment
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Ignoring sharded tests"]
 async fn multiple_aggregate_with_expressions_sharded() {
     let mut g = start_simple("multiple_aggregate_with_expressions_sharded").await;
 
@@ -5968,7 +5980,7 @@ async fn multiple_aggregate_reuse() {
 // https://readysettech.atlassian.net/browse/ENG-167.
 #[ignore]
 async fn reuse_subquery_alias_name() {
-    let mut g = start_simple("reuse_subquery_alias_name").await;
+    let mut g = start_simple_unsharded("reuse_subquery_alias_name").await;
 
     // Install two views, 'q1' and 'q2', each using the same subquery alias name 't2_data'.
     g.extend_recipe(
@@ -5995,7 +6007,7 @@ async fn reuse_subquery_alias_name() {
 // Test is ignored due column parsing bug https://readysettech.atlassian.net/browse/ENG-170.
 #[ignore]
 async fn col_beginning_with_literal() {
-    let mut g = start_simple("col_beginning_with_literal").await;
+    let mut g = start_simple_unsharded("col_beginning_with_literal").await;
 
     g.extend_recipe(
         "CREATE TABLE t1 (id INT, null_hypothesis INT);
@@ -6308,7 +6320,7 @@ async fn distinct_select_works() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn partial_distinct() {
-    let mut g = start_simple("partial_distinct").await;
+    let mut g = start_simple_unsharded("partial_distinct").await;
 
     g.extend_recipe(
         "CREATE TABLE test (value int, k int);
@@ -6355,7 +6367,7 @@ async fn partial_distinct() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn partial_distinct_multi() {
-    let mut g = start_simple("partial_distinct_multi").await;
+    let mut g = start_simple_unsharded("partial_distinct_multi").await;
 
     g.extend_recipe("CREATE TABLE test (value int, number int, k int);
           CREATE CACHE distinctselectmulti FROM SELECT DISTINCT value, SUM(number) as s FROM test WHERE k = ?;".parse()
@@ -6417,6 +6429,7 @@ async fn partial_distinct_multi() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Ignoring sharded tests"]
 async fn distinct_select_works_sharded() {
     let mut g = start_simple("distinct_select_works_sharded").await;
 
@@ -6496,6 +6509,7 @@ async fn distinct_select_multi_col() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Ignoring sharded tests"]
 async fn distinct_select_multi_col_sharded() {
     let mut g = start_simple("distinct_select_multi_col_sharded").await;
 
@@ -6578,6 +6592,7 @@ async fn distinct_select_with_builtin() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Ignoring sharded tests"]
 async fn distinct_select_with_builtin_sharded() {
     let mut g = start_simple("distinct_select_with_builtin_sharded").await;
 
@@ -6669,6 +6684,7 @@ async fn distinct_select_with_join() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Ignoring sharded tests"]
 async fn distinct_select_with_join_sharded() {
     let mut g = start_simple("distinct_select_with_join_sharded").await;
     let sql = "
@@ -6757,6 +6773,7 @@ async fn distinct_select_with_agg() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Ignoring sharded tests"]
 async fn distinct_select_with_agg_sharded() {
     let mut g = start_simple("distinct_select_with_agg_sharded").await;
 
@@ -6827,6 +6844,7 @@ async fn distinct_select_with_multi_agg() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Ignoring sharded tests"]
 async fn distinct_select_with_multi_agg_sharded() {
     let mut g = start_simple("distinct_select_with_multi_agg_sharded").await;
 
@@ -6901,6 +6919,7 @@ async fn distinct_select_with_distinct_agg() {
 // This kind of a query is bad practice (it's strongly advised to not combine SELECT DISTINCT with
 // aggregate distinct. That being said, it's valid SQL, so we should still test it).
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Ignoring sharded tests"]
 async fn distinct_select_with_distinct_agg_sharded() {
     let mut g = start_simple("distinct_select_with_distinct_agg_sharded").await;
 
@@ -6993,7 +7012,7 @@ async fn assign_nonreader_domains_to_nonreader_workers() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn join_straddled_columns() {
-    let mut g = start_simple("join_straddled_columns").await;
+    let mut g = start_simple_unsharded("join_straddled_columns").await;
 
     g.extend_recipe(
             "CREATE TABLE a (a1 int, a2 int);
@@ -7041,7 +7060,7 @@ async fn join_straddled_columns() {
 #[ignore] // with full materialization, needs post-lookup filters or it returns too many rows
 async fn straddled_join_range_query() {
     readyset_tracing::init_test_logging();
-    let mut g = start_simple("straddled_join_range_query").await;
+    let mut g = start_simple_unsharded("straddled_join_range_query").await;
 
     g.extend_recipe(
             "CREATE TABLE a (a1 int, a2 int);
@@ -7101,7 +7120,7 @@ async fn straddled_join_range_query() {
 #[ignore]
 async fn overlapping_range_queries() {
     readyset_tracing::init_test_logging();
-    let mut g = start_simple("straddled_join_range_query").await;
+    let mut g = start_simple_unsharded("straddled_join_range_query").await;
 
     g.extend_recipe(
         "CREATE TABLE t (x int);
@@ -7169,7 +7188,7 @@ async fn overlapping_range_queries() {
 #[ignore]
 async fn overlapping_remapped_range_queries() {
     readyset_tracing::init_test_logging();
-    let mut g = start_simple("overlapping_remapped_range_queries").await;
+    let mut g = start_simple_unsharded("overlapping_remapped_range_queries").await;
 
     g.extend_recipe(
             "CREATE TABLE a (a1 int, a2 int);
@@ -7244,7 +7263,7 @@ async fn overlapping_remapped_range_queries() {
 #[tokio::test(flavor = "multi_thread")]
 async fn range_query_through_union() {
     readyset_tracing::init_test_logging();
-    let mut g = start_simple("range_query_through_union").await;
+    let mut g = start_simple_unsharded("range_query_through_union").await;
 
     g.extend_recipe(
         "CREATE TABLE t (a int, b int);
@@ -7396,7 +7415,7 @@ async fn mixed_inclusive_range_and_equality() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn group_by_agg_col_count() {
-    let mut g = start_simple("group_by_agg_col_count").await;
+    let mut g = start_simple_unsharded("group_by_agg_col_count").await;
 
     g.extend_recipe(
         "CREATE TABLE test (value int, number int);
@@ -7439,7 +7458,7 @@ async fn group_by_agg_col_count() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn group_by_agg_col_avg() {
-    let mut g = start_simple("group_by_agg_col_avg").await;
+    let mut g = start_simple_unsharded("group_by_agg_col_avg").await;
 
     g.extend_recipe(
         "CREATE TABLE test (value int, number int);
@@ -7482,7 +7501,7 @@ async fn group_by_agg_col_avg() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn group_by_agg_col_sum() {
-    let mut g = start_simple("group_by_agg_col_sum").await;
+    let mut g = start_simple_unsharded("group_by_agg_col_sum").await;
 
     g.extend_recipe(
         "CREATE TABLE test (value int, number int);
@@ -7525,7 +7544,7 @@ async fn group_by_agg_col_sum() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn group_by_agg_col_multi() {
-    let mut g = start_simple("group_by_agg_col_multi").await;
+    let mut g = start_simple_unsharded("group_by_agg_col_multi").await;
 
     g.extend_recipe("CREATE TABLE test (value int, number int);
          CREATE VIEW groupbyaggcolmulti AS SELECT count(value) as c, avg(number) as a FROM test GROUP BY value;".parse().unwrap())
@@ -7564,7 +7583,7 @@ async fn group_by_agg_col_multi() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn group_by_agg_col_with_join() {
-    let mut g = start_simple("group_by_agg_col_with_join").await;
+    let mut g = start_simple_unsharded("group_by_agg_col_with_join").await;
     let sql = "
         # base tables
         CREATE TABLE test (id int, number int, PRIMARY KEY(id));
@@ -7743,7 +7762,7 @@ async fn count_emit_zero() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn partial_join_on_one_parent() {
-    let mut g = start_simple("partial_join_on_one_parent").await;
+    let mut g = start_simple_unsharded("partial_join_on_one_parent").await;
     g.extend_recipe(
         "
         CREATE TABLE t1 (jk INT, val INT);
@@ -7947,7 +7966,7 @@ rusty_fork_test! {
 #[tokio::test(flavor = "multi_thread")]
 async fn partial_ingress_above_full_reader() {
     readyset_tracing::init_test_logging();
-    let mut g = start_simple("partial_ingress_above_full_reader").await;
+    let mut g = start_simple_unsharded("partial_ingress_above_full_reader").await;
     g.extend_recipe("CREATE TABLE t1 (a INT, b INT);".parse().unwrap())
         .await
         .unwrap();
@@ -8001,7 +8020,7 @@ async fn partial_ingress_above_full_reader() {
 #[tokio::test(flavor = "multi_thread")]
 async fn reroutes_recursively() {
     readyset_tracing::init_test_logging();
-    let mut g = start_simple("reroutes_twice").await;
+    let mut g = start_simple_unsharded("reroutes_twice").await;
     let sql = "
         create table t1 (a int, b int);
         create table t2 (c int, d int);
@@ -8044,7 +8063,7 @@ async fn reroutes_recursively() {
 #[tokio::test(flavor = "multi_thread")]
 async fn reroutes_two_children_at_once() {
     readyset_tracing::init_test_logging();
-    let mut g = start_simple("reroutes_two_children_at_once").await;
+    let mut g = start_simple_unsharded("reroutes_two_children_at_once").await;
     let sql = "
         create table t1 (a int, b int);
         create table t2 (c int, d int);
@@ -8160,7 +8179,7 @@ async fn reroutes_same_migration() {
 #[tokio::test(flavor = "multi_thread")]
 async fn reroutes_dependent_children() {
     readyset_tracing::init_test_logging();
-    let mut g = start_simple("reroutes_dependent_children").await;
+    let mut g = start_simple_unsharded("reroutes_dependent_children").await;
     let sql = "
         create table t1 (a int, b int);
         create table t2 (c int, d int);
@@ -8253,7 +8272,7 @@ async fn reroutes_count() {
 async fn multi_diamond_union() {
     readyset_tracing::init_test_logging();
 
-    let mut g = start_simple("double_diamond_union").await;
+    let mut g = start_simple_unsharded("double_diamond_union").await;
     let create_table = "
         # base tables
         CREATE TABLE table_1 (column_1 INT);
@@ -8645,7 +8664,7 @@ async fn simple_drop_tables_with_persisted_data() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn create_and_drop_table() {
-    let mut g = start_simple("create_and_drop_table").await;
+    let mut g = start_simple_unsharded("create_and_drop_table").await;
     let create_table = "
         # base tables
         CREATE TABLE table_1 (column_1 INT);
@@ -8667,7 +8686,7 @@ async fn create_and_drop_table() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn drop_and_recreate_different_columns() {
-    let mut g = start_simple("create_and_drop_table").await;
+    let mut g = start_simple_unsharded("create_and_drop_table").await;
     let create_table = "
         # base tables
         CREATE TABLE table_1 (column_1 INT);
@@ -8692,7 +8711,7 @@ async fn drop_and_recreate_different_columns() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_dry_run() {
-    let mut g = start_simple("simple_dry_run").await;
+    let mut g = start_simple_unsharded("simple_dry_run").await;
     let query = "
         # base tables
         CREATE TABLE table_1 (column_1 INT);
@@ -8706,7 +8725,7 @@ async fn simple_dry_run() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_dry_run_unsupported() {
-    let mut g = start_simple("simple_dry_run").await;
+    let mut g = start_simple_unsharded("simple_dry_run").await;
     let query = "
         # base tables
         CREATE TABLE table_1 (column_1 INT);
