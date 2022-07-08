@@ -6810,6 +6810,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tournament-kway"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "streaming-iterator",
+ "test-strategy",
+]
+
+[[package]]
 name = "tower"
 version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"

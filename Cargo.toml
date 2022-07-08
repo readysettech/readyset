@@ -54,6 +54,7 @@ members = [
     "telemetry-ingress",
     "telemetry-reporter",
     "array2",
+    "tournament-kway"
 ]
 resolver = "2"
 
