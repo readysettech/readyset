@@ -25,7 +25,7 @@ use crate::table::Table;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{literal, Expr, FunctionExpr, Literal, SqlIdentifier};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary)]
 pub enum SqlType {
     Bool,
     Char(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
@@ -399,7 +399,7 @@ impl fmt::Display for TableKey {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)] // NOTE(grfn): do we actually care about this?
 pub enum FieldDefinitionExpr {
     All,
@@ -465,7 +465,7 @@ pub enum Sign {
 
 /// A reference to a field in a query, usable in either the `GROUP BY` or `ORDER BY` clauses of the
 /// query
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum FieldReference {
     /// A reference to a field in the `SELECT` list by its (1-based) index.
     Numeric(u64),

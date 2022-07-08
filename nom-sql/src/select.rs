@@ -22,7 +22,7 @@ use crate::table::Table;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Expr, FieldReference, FunctionExpr, Literal, SqlIdentifier};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Default, Serialize, Deserialize)]
 pub struct GroupByClause {
     pub fields: Vec<FieldReference>,
 }
@@ -43,7 +43,7 @@ impl fmt::Display for GroupByClause {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct JoinClause {
     pub operator: JoinOperator,
     pub right: JoinRightSide,
@@ -59,7 +59,7 @@ impl fmt::Display for JoinClause {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct LimitClause {
     pub limit: Literal,
     pub offset: Option<Literal>,
@@ -75,7 +75,7 @@ impl fmt::Display for LimitClause {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct CommonTableExpr {
     pub name: SqlIdentifier,
     pub statement: SelectStatement,
@@ -87,7 +87,7 @@ impl fmt::Display for CommonTableExpr {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct SelectStatement {
     pub ctes: Vec<CommonTableExpr>,
     pub tables: Vec<Table>,
