@@ -1,0 +1,9 @@
+statement ok
+CREATE TABLE t (a INT, b INT, c INT);
+
+statement ok
+create cache from SELECT a, b, sum(c) FROM t GROUP BY a, b ORDER BY sum(c);
+
+# ENG-1446
+# statement ok
+# create cache from SELECT a, b, sum(c) FROM t GROUP BY a, b ORDER BY sum(c) + 1;
