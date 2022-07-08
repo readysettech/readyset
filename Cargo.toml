@@ -41,6 +41,7 @@ members = [
     "readyset-tracing/proc-macros",
     "readyset-repl",
     "array2",
+    "tournament-kway"
 ]
 resolver = "2"
 

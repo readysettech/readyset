@@ -1,0 +1,14 @@
+[package]
+name = "tournament-kway"
+version = "0.1.0"
+edition = "2021"
+keywords = ["sort", "tournament", "tree", "kway", "merge"]
+description = "Implementation of a k-way merge using a tournament tree"
+publish = false
+
+[dependencies]
+streaming-iterator = "0.1"
+
+[dev-dependencies]
+proptest = "1.0"
+test-strategy = "0.2"
