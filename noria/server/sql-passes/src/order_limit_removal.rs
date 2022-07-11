@@ -136,6 +136,7 @@ impl OrderLimitRemoval for SqlQuery {
             if let Some(ref expr) = stmt.where_clause {
                 if compares_unique_key_against_literal(expr, base_schemas, &stmt.tables)? {
                     stmt.limit = None;
+                    stmt.offset = None;
                     stmt.order = None;
                     return Ok(self);
                 }
@@ -232,6 +233,7 @@ mod tests {
             SqlQuery::Select(stmt) => {
                 assert!(stmt.order.is_none());
                 assert!(stmt.limit.is_none());
+                assert!(stmt.offset.is_none());
             }
             _ => panic!("Invalid query returned: {:?}", revised_query),
         }

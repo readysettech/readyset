@@ -16,8 +16,8 @@ use mir::MirNodeRef;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableStatement, Expr,
-    FieldDefinitionExpr, FieldReference, FunctionExpr, LimitClause, Literal, OrderClause,
-    OrderType, SelectStatement, SqlIdentifier, TableKey, UnaryOperator,
+    FieldDefinitionExpr, FieldReference, FunctionExpr, Literal, OrderClause, OrderType,
+    SelectStatement, SqlIdentifier, TableKey, UnaryOperator,
 };
 use noria::ViewPlaceholder;
 use noria_data::DataType;
@@ -275,7 +275,8 @@ impl SqlToMirConverter {
         sqs: Vec<&MirQuery>,
         op: CompoundSelectOperator,
         order: &Option<OrderClause>,
-        limit: &Option<LimitClause>,
+        limit: &Option<Literal>,
+        offset: &Option<Literal>,
         has_leaf: bool,
     ) -> ReadySetResult<MirQuery> {
         let union_name = if !has_leaf && limit.is_none() {
@@ -296,8 +297,7 @@ impl SqlToMirConverter {
             .entry(node_id)
             .or_insert_with(|| final_node.clone());
 
-        if let Some(limit) = limit {
-            let (limit, offset) = extract_limit_offset(limit)?;
+        if let Some((limit, offset)) = extract_limit_offset(limit, offset)? {
             let make_topk = offset.is_none();
             let paginate_name = if has_leaf {
                 if make_topk {

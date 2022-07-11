@@ -942,6 +942,7 @@ mod tests {
                     ],
                     order: None,
                     limit: None,
+                    offset: None,
                 })),
             }
         );

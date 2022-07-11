@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::{opt_delimited, terminated_with_statement_terminator};
 use crate::order::{order_clause, OrderClause};
-use crate::select::{limit_clause, nested_selection, LimitClause, SelectStatement};
+use crate::select::{limit_clause, nested_selection, offset_clause, SelectStatement};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::Dialect;
+use crate::{Dialect, Literal};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub enum CompoundSelectOperator {
@@ -37,7 +37,8 @@ impl fmt::Display for CompoundSelectOperator {
 pub struct CompoundSelectStatement {
     pub selects: Vec<(Option<CompoundSelectOperator>, SelectStatement)>,
     pub order: Option<OrderClause>,
-    pub limit: Option<LimitClause>,
+    pub limit: Option<Literal>,
+    pub offset: Option<Literal>,
 }
 
 impl fmt::Display for CompoundSelectStatement {
@@ -51,8 +52,11 @@ impl fmt::Display for CompoundSelectStatement {
         if let Some(ord) = &self.order {
             write!(f, " {}", ord)?;
         }
-        if let Some(lim) = &self.limit {
-            write!(f, " {}", lim)?;
+        if let Some(limit) = &self.limit {
+            write!(f, " LIMIT {}", limit)?;
+        }
+        if let Some(offset) = &self.offset {
+            write!(f, " OFFSET {}", offset)?;
         }
         Ok(())
     }
@@ -121,13 +125,15 @@ pub fn nested_compound_selection(
     dialect: Dialect,
 ) -> impl Fn(&[u8]) -> IResult<&[u8], CompoundSelectStatement> {
     move |i| {
-        let (remaining_input, (first_select, other_selects, _, order, limit)) = tuple((
-            opt_delimited(tag("("), nested_selection(dialect), tag(")")),
-            many1(other_selects(dialect)),
-            whitespace0,
-            opt(order_clause(dialect)),
-            opt(limit_clause(dialect)),
-        ))(i)?;
+        let (remaining_input, (first_select, other_selects, _, order, limit, offset)) =
+            tuple((
+                opt_delimited(tag("("), nested_selection(dialect), tag(")")),
+                many1(other_selects(dialect)),
+                whitespace0,
+                opt(order_clause(dialect)),
+                opt(limit_clause(dialect)),
+                opt(offset_clause(dialect)),
+            ))(i)?;
 
         let mut selects = vec![(None, first_select)];
         selects.extend(other_selects);
@@ -138,6 +144,7 @@ pub fn nested_compound_selection(
                 selects,
                 order,
                 limit,
+                offset,
             },
         ))
     }
@@ -183,6 +190,7 @@ mod tests {
             ],
             order: None,
             limit: None,
+            offset: None,
         };
 
         assert_eq!(res.unwrap().1, expected);
@@ -264,6 +272,7 @@ mod tests {
             ],
             order: None,
             limit: None,
+            offset: None,
         };
 
         assert_eq!(res.unwrap().1, expected);
@@ -297,6 +306,7 @@ mod tests {
             ],
             order: None,
             limit: None,
+            offset: None,
         };
 
         assert_eq!(res.unwrap().1, expected);

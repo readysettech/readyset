@@ -6,8 +6,8 @@
 use crate::set::Variable;
 use crate::{
     Column, CommonTableExpr, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
-    GroupByClause, InValue, JoinClause, JoinConstraint, JoinRightSide, LimitClause, Literal,
-    OrderClause, SelectStatement, SqlType, Table,
+    GroupByClause, InValue, JoinClause, JoinConstraint, JoinRightSide, Literal, OrderClause,
+    SelectStatement, SqlType, Table,
 };
 
 /// Each method of the `Visitor` trait is a hook to be potentially overridden when recursively
@@ -146,8 +146,15 @@ pub trait Visitor<'ast>: Sized {
         walk_order_clause(self, order)
     }
 
-    fn visit_limit_clause(&mut self, limit: &'ast mut LimitClause) -> Result<(), Self::Error> {
+    fn visit_limit_clause(&mut self, limit: &'ast mut Option<Literal>) -> Result<(), Self::Error> {
         walk_limit_clause(self, limit)
+    }
+
+    fn visit_offset_clause(
+        &mut self,
+        offset: &'ast mut Option<Literal>,
+    ) -> Result<(), Self::Error> {
+        walk_offset_clause(self, offset)
     }
 
     fn visit_select_statement(
@@ -329,10 +336,19 @@ pub fn walk_order_clause<'ast, V: Visitor<'ast>>(
 
 pub fn walk_limit_clause<'ast, V: Visitor<'ast>>(
     visitor: &mut V,
-    limit_clause: &'ast mut LimitClause,
+    limit_clause: &'ast mut Option<Literal>,
 ) -> Result<(), V::Error> {
-    visitor.visit_literal(&mut limit_clause.limit)?;
-    if let Some(offset) = &mut limit_clause.offset {
+    if let Some(limit) = limit_clause {
+        visitor.visit_literal(limit)?;
+    }
+    Ok(())
+}
+
+pub fn walk_offset_clause<'ast, V: Visitor<'ast>>(
+    visitor: &mut V,
+    offset_clause: &'ast mut Option<Literal>,
+) -> Result<(), V::Error> {
+    if let Some(offset) = offset_clause {
         visitor.visit_literal(offset)?;
     }
     Ok(())
@@ -366,9 +382,8 @@ pub fn walk_select_statement<'ast, V: Visitor<'ast>>(
     if let Some(order_clause) = &mut select_statement.order {
         visitor.visit_order_clause(order_clause)?;
     }
-    if let Some(limit_clause) = &mut select_statement.limit {
-        visitor.visit_limit_clause(limit_clause)?;
-    }
+    visitor.visit_limit_clause(&mut select_statement.limit)?;
+    visitor.visit_offset_clause(&mut select_statement.offset)?;
     Ok(())
 }
 
@@ -454,9 +469,20 @@ mod tests {
             walk_order_clause(self, order)
         }
 
-        fn visit_limit_clause(&mut self, limit: &'ast mut LimitClause) -> Result<(), Self::Error> {
+        fn visit_limit_clause(
+            &mut self,
+            limit: &'ast mut Option<Literal>,
+        ) -> Result<(), Self::Error> {
             self.0 += 1;
             walk_limit_clause(self, limit)
+        }
+
+        fn visit_offset_clause(
+            &mut self,
+            offset: &'ast mut Option<Literal>,
+        ) -> Result<(), Self::Error> {
+            self.0 += 1;
+            walk_offset_clause(self, offset)
         }
 
         fn visit_select_statement(
@@ -491,12 +517,12 @@ mod tests {
 
     #[test]
     fn simple_select() {
-        assert_eq!(node_count("SELECT id FROM users"), 5)
+        assert_eq!(node_count("SELECT id FROM users"), 7)
     }
 
     #[test]
     fn binary_op() {
-        assert_eq!(node_count("SELECT id + name FROM users"), 8);
+        assert_eq!(node_count("SELECT id + name FROM users"), 10);
     }
 
     #[test]
@@ -505,7 +531,7 @@ mod tests {
             node_count(
                 "SELECT id, name FROM users join (select id from users) s on users.id = s.id"
             ),
-            20
+            24
         )
     }
 }

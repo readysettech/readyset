@@ -9,13 +9,13 @@ use common::IndexType;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
-    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal, OrderType,
+    ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderType,
     SelectStatement, SqlIdentifier, Table, UnaryOperator,
 };
 use noria::{PlaceholderIdx, ViewPlaceholder};
 use noria_errors::{
-    internal, internal_err, invalid_err, invariant, invariant_eq, no_table_for_col, unsupported,
-    unsupported_err, ReadySetResult,
+    internal, invalid_err, invariant, invariant_eq, no_table_for_col, unsupported, unsupported_err,
+    ReadySetResult,
 };
 use noria_sql_passes::{is_aggregate, is_predicate, map_aggregates, LogicalOp};
 use serde::{Deserialize, Serialize};
@@ -747,40 +747,49 @@ fn collect_join_predicates(cond: Expr, out: &mut Vec<JoinPredicate>) -> ReadySet
     }
 }
 
-/// Convert limit and offset fields to usize and Option<ViewPlaceholder>
+/// Convert limit and offset fields to an optional constant numeric limit and optional placeholder
+/// for the offset
 pub(crate) fn extract_limit_offset(
-    limit_clause: &LimitClause,
-) -> ReadySetResult<(usize, Option<ViewPlaceholder>)> {
-    let limit = match limit_clause.limit {
-        Literal::Integer(val) => {
-            if val < 0 {
-                unsupported!("LIMIT field cannot have a negative value")
-            } else {
-                val as u64
-            }
-        }
+    limit: &Option<Literal>,
+    offset: &Option<Literal>,
+) -> ReadySetResult<Option<(usize, Option<ViewPlaceholder>)>> {
+    if limit.is_none() && offset.is_some() {
+        unsupported!("ReadySet does not support OFFSET without LIMIT");
+    }
+
+    let limit = if let Some(limit) = limit {
+        limit
+    } else {
+        return Ok(None);
+    };
+
+    let limit = match limit {
+        Literal::Integer(val) => u64::try_from(*val)
+            .map_err(|_| unsupported_err("LIMIT field cannot have a negative value"))?,
         Literal::Placeholder(_) => {
             unsupported!("ReadySet does not support parametrized LIMIT fields")
         }
         _ => unsupported!("Invalid LIMIT statement"),
     };
-    let offset = limit_clause
-        .offset
+
+    let offset = offset
         .as_ref()
-        .and_then(|offset| match offset {
-            Literal::Placeholder(ItemPlaceholder::DollarNumber(idx)) => {
-                Some(Ok(ViewPlaceholder::PageNumber {
-                    offset_placeholder: *idx as _,
-                    limit,
-                }))
+        // For now, remove offset if it is a literal 0
+        .filter(|offset| !matches!(offset, Literal::Integer(0)))
+        .map(|offset| -> ReadySetResult<ViewPlaceholder> {
+            match offset {
+                Literal::Placeholder(ItemPlaceholder::DollarNumber(idx)) => {
+                    Ok(ViewPlaceholder::PageNumber {
+                        offset_placeholder: *idx as _,
+                        limit,
+                    })
+                }
+                _ => unsupported!("Numeric OFFSETs must be parametrized"),
             }
-            // For now, remove offset if it is a literal 0
-            Literal::Integer(0) => None,
-            _ => Some(Err(internal_err("Numeric OFFSETs must be parametrized"))),
         })
         .transpose()?;
 
-    Ok((limit as _, offset))
+    Ok(Some((limit as _, offset)))
 }
 
 #[allow(clippy::cognitive_complexity)]
@@ -1215,9 +1224,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     }
 
     // Extract pagination parameters
-    if let Some(ref limit) = st.limit {
-        let (limit, offset) = extract_limit_offset(limit)?;
-
+    if let Some((limit, offset)) = extract_limit_offset(&st.limit, &st.offset)? {
         qg.pagination = Some(Pagination {
             order: st
                 .order
