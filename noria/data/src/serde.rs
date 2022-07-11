@@ -84,6 +84,9 @@ impl serde::ser::Serialize for DataType {
                 serialize_variant(serializer, Variant::TimestampTz, &(ts, extra))
             }
             DataType::Array(vs) => serialize_variant(serializer, Variant::Array, &vs),
+            DataType::PassThrough(_) => Err(serde::ser::Error::custom(
+                "PassThrough not supported in dataflow graph",
+            )),
             DataType::Max => serializer.serialize_unit_variant(
                 "DataType",
                 Variant::Max as _,

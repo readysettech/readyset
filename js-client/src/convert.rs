@@ -140,6 +140,7 @@ where
         DataType::Array(_) => {
             unimplemented!("Array conversion to JS")
         }
+        DataType::PassThrough(_) => cx.throw_error("Cannot convert PassThrough types to JS type"),
     }
 }
 

@@ -5087,6 +5087,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-test",
  "tokio-util 0.6.9",
+ "tracing",
  "uuid 0.8.2",
 ]
 

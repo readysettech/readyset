@@ -317,6 +317,7 @@ async fn check_query(
                         | DataType::Time(_)
                         // These types are PostgreSQL specific
                         | DataType::BitVector(_)
+                        | DataType::PassThrough(_)
                         | DataType::Array(_) => {
                             unimplemented!()
                         }

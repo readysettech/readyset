@@ -36,4 +36,5 @@ pub enum Value {
     Bit(BitVec),
     VarBit(BitVec),
     Array(Array, postgres_types::Type),
+    PassThrough(noria_data::PassThrough),
 }

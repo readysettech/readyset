@@ -5,6 +5,7 @@ use std::sync::Arc;
 use postgres_types::{Kind, Type};
 use smallvec::smallvec;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tracing::error;
 
 use crate::channel::Channel;
 use crate::error::Error;
@@ -14,7 +15,6 @@ use crate::message::StatementName::*;
 use crate::message::TransferFormat::{self, *};
 use crate::message::{CommandCompleteTag, ErrorSeverity, FieldDescription, SqlState};
 use crate::response::Response;
-use crate::util::type_is_oid;
 use crate::value::Value;
 use crate::QueryResponse::*;
 use crate::{Backend, Column, PrepareResponse};
@@ -26,8 +26,12 @@ const TYPLEN_2: i16 = 2;
 const TYPLEN_4: i16 = 4;
 const TYPLEN_6: i16 = 6;
 const TYPLEN_8: i16 = 8;
+const TYPLEN_12: i16 = 12;
 const TYPLEN_16: i16 = 16;
+const TYPLEN_24: i16 = 24;
+const TYPLEN_32: i16 = 32;
 const TYPLEN_VARLENA: i16 = -1;
+const TYPLEN_CSTRING: i16 = -2; // Null-terminated C string
 const UNKNOWN_COLUMN: i16 = 0;
 const UNKNOWN_TABLE: i32 = 0;
 
@@ -464,27 +468,102 @@ fn make_field_description(
         Kind::Array(_) => TYPLEN_VARLENA,
         _ => match col.col_type {
             Type::BOOL => TYPLEN_1,
+            Type::BYTEA => TYPLEN_VARLENA,
             Type::CHAR => TYPLEN_1,
-            Type::TEXT => TYPLEN_VARLENA,
-            Type::VARCHAR => TYPLEN_VARLENA,
             Type::NAME => TYPLEN_VARLENA,
-            Type::INT2 => TYPLEN_2,
-            Type::INT4 => TYPLEN_4,
             Type::INT8 => TYPLEN_8,
-            ref t if type_is_oid(t) => TYPLEN_4,
+            Type::INT2 => TYPLEN_2,
+            Type::INT2_VECTOR => TYPLEN_VARLENA,
+            Type::INT4 => TYPLEN_4,
+            Type::REGPROC => TYPLEN_4,
+            Type::TEXT => TYPLEN_VARLENA,
+            Type::OID => TYPLEN_4,
+            Type::TID => TYPLEN_6,
+            Type::XID => TYPLEN_4,
+            Type::CID => TYPLEN_4,
+            Type::OID_VECTOR => TYPLEN_VARLENA,
+            Type::PG_DDL_COMMAND => TYPLEN_8,
+            Type::JSON => TYPLEN_VARLENA,
+            Type::XML => TYPLEN_VARLENA,
+            Type::PG_NODE_TREE => TYPLEN_VARLENA,
+            Type::TABLE_AM_HANDLER => TYPLEN_4,
+            Type::INDEX_AM_HANDLER => TYPLEN_4,
+            Type::POINT => TYPLEN_16,
+            Type::LSEG => TYPLEN_32,
+            Type::PATH => TYPLEN_VARLENA,
+            Type::BOX => TYPLEN_32,
+            Type::POLYGON => TYPLEN_VARLENA,
+            Type::LINE => TYPLEN_24,
+            Type::CIDR => TYPLEN_VARLENA,
             Type::FLOAT4 => TYPLEN_4,
             Type::FLOAT8 => TYPLEN_8,
-            Type::NUMERIC => TYPLEN_VARLENA,
-            Type::TIMESTAMP => TYPLEN_8,
-            Type::TIMESTAMPTZ => TYPLEN_8,
-            Type::DATE => TYPLEN_4,
-            Type::TIME => TYPLEN_8,
-            Type::BYTEA => TYPLEN_VARLENA,
+            Type::UNKNOWN => TYPLEN_CSTRING,
+            Type::CIRCLE => TYPLEN_24,
+            Type::MACADDR8 => TYPLEN_8,
+            Type::MONEY => TYPLEN_8,
             Type::MACADDR => TYPLEN_6,
             Type::INET => TYPLEN_VARLENA,
+            Type::ACLITEM => TYPLEN_12,
+            Type::BPCHAR => TYPLEN_VARLENA,
+            Type::VARCHAR => TYPLEN_VARLENA,
+            Type::DATE => TYPLEN_4,
+            Type::TIME => TYPLEN_8,
+            Type::TIMESTAMP => TYPLEN_8,
+            Type::TIMESTAMPTZ => TYPLEN_8,
+            Type::INTERVAL => TYPLEN_16,
+            Type::TIMETZ => TYPLEN_12,
+            Type::BIT => TYPLEN_VARLENA,
+            Type::VARBIT => TYPLEN_VARLENA,
+            Type::NUMERIC => TYPLEN_VARLENA,
+            Type::REFCURSOR => TYPLEN_VARLENA,
+            Type::REGPROCEDURE => TYPLEN_4,
+            Type::REGOPER => TYPLEN_4,
+            Type::REGOPERATOR => TYPLEN_4,
+            Type::REGCLASS => TYPLEN_4,
+            Type::REGTYPE => TYPLEN_4,
+            Type::RECORD => TYPLEN_VARLENA,
+            Type::CSTRING => TYPLEN_CSTRING,
+            Type::ANY => TYPLEN_4,
+            Type::VOID => TYPLEN_4,
+            Type::TRIGGER => TYPLEN_4,
+            Type::LANGUAGE_HANDLER => TYPLEN_4,
+            Type::INTERNAL => TYPLEN_8,
+            Type::ANYELEMENT => TYPLEN_4,
             Type::UUID => TYPLEN_16,
-            Type::JSON | Type::JSONB | Type::BIT | Type::VARBIT => TYPLEN_VARLENA,
-            _ => return Err(Error::UnsupportedType(col.col_type.clone())),
+            Type::TXID_SNAPSHOT => TYPLEN_VARLENA,
+            Type::FDW_HANDLER => TYPLEN_4,
+            Type::PG_LSN => TYPLEN_8,
+            Type::TSM_HANDLER => TYPLEN_4,
+            Type::PG_NDISTINCT => TYPLEN_VARLENA,
+            Type::PG_DEPENDENCIES => TYPLEN_VARLENA,
+            Type::ANYENUM => TYPLEN_4,
+            Type::TS_VECTOR => TYPLEN_VARLENA,
+            Type::TSQUERY => TYPLEN_VARLENA,
+            Type::GTS_VECTOR => TYPLEN_VARLENA,
+            Type::REGCONFIG => TYPLEN_4,
+            Type::REGDICTIONARY => TYPLEN_4,
+            Type::JSONB => TYPLEN_VARLENA,
+            Type::ANY_RANGE => TYPLEN_VARLENA,
+            Type::EVENT_TRIGGER => TYPLEN_4,
+            Type::INT4_RANGE => TYPLEN_VARLENA,
+            Type::NUM_RANGE => TYPLEN_VARLENA,
+            Type::TS_RANGE => TYPLEN_VARLENA,
+            Type::TSTZ_RANGE => TYPLEN_VARLENA,
+            Type::DATE_RANGE => TYPLEN_VARLENA,
+            Type::INT8_RANGE => TYPLEN_VARLENA,
+            Type::JSONPATH => TYPLEN_VARLENA,
+            Type::REGNAMESPACE => TYPLEN_4,
+            Type::REGROLE => TYPLEN_4,
+            Type::REGCOLLATION => TYPLEN_4,
+            Type::PG_MCV_LIST => TYPLEN_VARLENA,
+            Type::PG_SNAPSHOT => TYPLEN_VARLENA,
+            Type::XID8 => TYPLEN_8,
+            Type::ANYCOMPATIBLE => TYPLEN_4,
+            Type::ANYCOMPATIBLE_RANGE => TYPLEN_VARLENA,
+            _ => {
+                error!(?col, "Couldn't make field description");
+                return Err(Error::UnsupportedType(col.col_type.clone()));
+            }
         },
     };
 
