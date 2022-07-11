@@ -1627,6 +1627,11 @@ where
                 }
                 self.query_fallback(query, &mut event).await
             }
+            // Check for COMMIT+ROLLBACK before we check whether we should proxy, since we need to
+            // know when a COMMIT or ROLLBACK happens so we can leave `ProxyState::InTransaction`
+            Ok(parsed_query @ (SqlQuery::Commit(_) | SqlQuery::Rollback(_))) => {
+                self.query_adhoc_non_select(query, &mut event, parsed_query).await
+            },
             // Parsed but proxy mode means we should send upstream
             Ok(_) if self.proxy_state.should_proxy() => self.query_fallback(query, &mut event).await,
             Ok(ref parsed_query) if Handler::requires_fallback(parsed_query) => {
