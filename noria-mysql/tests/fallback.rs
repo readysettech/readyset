@@ -265,3 +265,37 @@ async fn drop_then_recreate_table_with_query() {
         QueryDestination::Readyset
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn transaction_proxies() {
+    let (opts, _handle) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+
+    conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM t")
+        .await
+        .unwrap();
+
+    conn.query_drop("BEGIN;").await.unwrap();
+    conn.query_drop("SELECT * FROM t;").await.unwrap();
+
+    // Currently EXPLAIN LAST STATEMENT proxies with everything else (perhaps incorrectly), so we
+    // just check that it tried to treat "LAST" as a table here
+    let res = conn.query::<String, _>("EXPLAIN LAST STATEMENT").await;
+    assert!(res.is_err(), "{:?}", res);
+    let err_description = res.err().unwrap().to_string();
+    assert!(
+        err_description.contains("doesn't exist"),
+        "{}",
+        err_description
+    );
+
+    conn.query_drop("COMMIT;").await.unwrap();
+
+    conn.query_drop("SELECT * FROM t;").await.unwrap();
+    assert_eq!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::Readyset
+    );
+}
