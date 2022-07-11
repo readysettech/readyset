@@ -59,22 +59,6 @@ impl fmt::Display for JoinClause {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct LimitClause {
-    pub limit: Literal,
-    pub offset: Option<Literal>,
-}
-
-impl fmt::Display for LimitClause {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "LIMIT {}", self.limit)?;
-        if let Some(offset) = &self.offset {
-            write!(f, " OFFSET {}", offset)?;
-        }
-        Ok(())
-    }
-}
-
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct CommonTableExpr {
     pub name: SqlIdentifier,
@@ -98,7 +82,8 @@ pub struct SelectStatement {
     pub group_by: Option<GroupByClause>,
     pub having: Option<Expr>,
     pub order: Option<OrderClause>,
-    pub limit: Option<LimitClause>,
+    pub limit: Option<Literal>,
+    pub offset: Option<Literal>,
 }
 
 impl SelectStatement {
@@ -172,7 +157,10 @@ impl fmt::Display for SelectStatement {
             write!(f, " {}", order)?;
         }
         if let Some(ref limit) = self.limit {
-            write!(f, " {}", limit)?;
+            write!(f, " LIMIT {}", limit)?;
+        }
+        if let Some(ref offset) = self.offset {
+            write!(f, " OFFSET {}", offset)?;
         }
         Ok(())
     }
@@ -202,7 +190,7 @@ pub fn group_by_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Gro
     }
 }
 
-fn offset_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
+pub(crate) fn offset_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("offset")(i)?;
@@ -212,15 +200,12 @@ fn offset_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> 
 }
 
 // Parse LIMIT clause
-pub fn limit_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], LimitClause> {
+pub(crate) fn limit_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("limit")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, limit) = literal(dialect)(i)?;
-        let (i, offset) = opt(offset_clause(dialect))(i)?;
-
-        Ok((i, LimitClause { limit, offset }))
+        literal(dialect)(i)
     }
 }
 
@@ -473,6 +458,7 @@ pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Se
             let (i, having) = opt(having_clause(dialect))(i)?;
             let (i, order) = opt(order_clause(dialect))(i)?;
             let (i, limit) = opt(limit_clause(dialect))(i)?;
+            let (i, offset) = opt(offset_clause(dialect))(i)?;
 
             Ok((
                 i,
@@ -484,6 +470,7 @@ pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Se
                     group_by,
                     order,
                     limit,
+                    offset,
                 ),
             ))
         })(i)?;
@@ -495,7 +482,8 @@ pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Se
             ..Default::default()
         };
 
-        if let Some((from, extra_joins, where_clause, having, group_by, order, limit)) = from_clause
+        if let Some((from, extra_joins, where_clause, having, group_by, order, limit, offset)) =
+            from_clause
         {
             let (tables, mut join) = from
                 .into_tables_and_joins()
@@ -510,6 +498,7 @@ pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Se
             result.having = having;
             result.order = order;
             result.limit = limit;
+            result.offset = offset;
         }
 
         Ok((i, result))
@@ -700,19 +689,12 @@ mod tests {
         let qstring1 = "select * from users limit 10\n";
         let qstring2 = "select * from users limit 10 offset 10\n";
 
-        let expected_lim1 = LimitClause {
-            limit: 10.into(),
-            offset: None,
-        };
-        let expected_lim2 = LimitClause {
-            limit: 10.into(),
-            offset: Some(10.into()),
-        };
-
         let res1 = test_parse!(selection(Dialect::MySQL), qstring1.as_bytes());
         let res2 = test_parse!(selection(Dialect::MySQL), qstring2.as_bytes());
-        assert_eq!(res1.limit, Some(expected_lim1));
-        assert_eq!(res2.limit, Some(expected_lim2));
+        assert_eq!(res1.limit, Some(10.into()));
+        assert_eq!(res1.offset, None);
+        assert_eq!(res2.limit, Some(10.into()));
+        assert_eq!(res2.offset, Some(10.into()));
     }
 
     #[test]
@@ -888,10 +870,6 @@ mod tests {
         let qstring = "select * from users where id = ? limit 10\n";
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
 
-        let expected_lim = Some(LimitClause {
-            limit: 10.into(),
-            offset: None,
-        });
         let ct = Expr::BinaryOp {
             lhs: Box::new(Expr::Column(Column::from("id"))),
             rhs: Box::new(Expr::Literal(Literal::Placeholder(
@@ -907,7 +885,7 @@ mod tests {
                 tables: vec![Table::from("users")],
                 fields: vec![FieldDefinitionExpr::All],
                 where_clause: expected_where_cond,
-                limit: expected_lim,
+                limit: Some(10.into()),
                 ..Default::default()
             }
         );
@@ -917,7 +895,7 @@ mod tests {
     fn limit_placeholder() {
         let res = test_parse!(selection(Dialect::MySQL), b"select * from users limit ?");
         assert_eq!(
-            res.limit.unwrap().limit,
+            res.limit.unwrap(),
             Literal::Placeholder(ItemPlaceholder::QuestionMark)
         )
     }
@@ -1204,10 +1182,7 @@ mod tests {
                         None
                     )],
                 }),
-                limit: Some(LimitClause {
-                    limit: 50.into(),
-                    offset: None,
-                }),
+                limit: Some(50.into()),
                 ..Default::default()
             }
         );
@@ -1905,6 +1880,20 @@ mod tests {
             assert_eq!(
                 qstr,
                 "SELECT EXISTS (SELECT * FROM `groups` WHERE (`id` = ?)) AS `exists`"
+            );
+        }
+
+        #[test]
+        fn prisma_select() {
+            let qstr = br#"SELECT "public"."User"."id", "public"."User"."email", "public"."User"."name" FROM "public"."User" WHERE 1=1 OFFSET $1"#;
+            let res = test_parse!(selection(Dialect::PostgreSQL), qstr);
+            assert_eq!(
+                res.tables,
+                vec![Table {
+                    name: "User".into(),
+                    alias: None,
+                    schema: Some("public".into()),
+                }]
             );
         }
     }

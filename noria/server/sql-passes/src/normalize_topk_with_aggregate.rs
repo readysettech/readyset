@@ -83,7 +83,7 @@ impl NormalizeTopKWithAggregate for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, Dialect, Expr, LimitClause, OrderClause, OrderType};
+    use nom_sql::{parse_query, Dialect, Expr, OrderClause, OrderType};
 
     use super::*;
 
@@ -164,13 +164,7 @@ mod tests {
                     })
                 );
 
-                assert_eq!(
-                    stmt.limit,
-                    Some(LimitClause {
-                        limit: 4.into(),
-                        offset: None,
-                    })
-                );
+                assert_eq!(stmt.limit, Some(4.into()));
             }
             _ => panic!("Invalid query returned: {:?}", result),
         }

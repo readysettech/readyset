@@ -86,8 +86,8 @@ use nom_sql::analysis::{contains_aggregate, ReferredColumns};
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpr,
     CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
-    ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal,
-    OrderClause, OrderType, SelectStatement, SqlIdentifier, SqlType, Table, TableKey,
+    ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderClause,
+    OrderType, SelectStatement, SqlIdentifier, SqlType, Table, TableKey,
 };
 use noria_data::DataType;
 use noria_sql_passes::outermost_referred_tables;
@@ -2232,7 +2232,7 @@ impl QueryOperation {
                         let expr = match field {
                             FieldReference::Numeric(_) => {
                                 unreachable!(
-                                    "We don't currently ever generate numeric field references"
+                                    "We dont currently ever generate numeric field references"
                                 )
                             }
                             FieldReference::Expr(expr) => expr.clone(),
@@ -2456,10 +2456,7 @@ impl QueryOperation {
                     )],
                 });
 
-                query.limit = Some(LimitClause {
-                    limit: Literal::Integer(*limit as _),
-                    offset: None,
-                });
+                query.limit = Some(Literal::Integer(*limit as _));
 
                 if query.distinct {
                     query.fields.push(FieldDefinitionExpr::Expr {
@@ -2491,10 +2488,8 @@ impl QueryOperation {
                     )],
                 });
 
-                query.limit = Some(LimitClause {
-                    limit: Literal::Integer(*limit as _),
-                    offset: Some(Literal::Integer((*limit * *page_number) as _)),
-                });
+                query.limit = Some(Literal::Integer(*limit as _));
+                query.offset = Some(Literal::Integer((*limit * *page_number) as _));
 
                 if query.distinct {
                     query.fields.push(FieldDefinitionExpr::Expr {

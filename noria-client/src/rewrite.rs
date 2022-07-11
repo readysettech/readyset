@@ -5,9 +5,7 @@ use std::{iter, mem};
 
 use itertools::{Either, Itertools};
 use nom_sql::analysis::visit::{self, Visitor};
-use nom_sql::{
-    BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, SelectStatement,
-};
+use nom_sql::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement};
 use noria_errors::{unsupported, ReadySetError, ReadySetResult};
 
 /// Struct storing information about parameters processed from a raw user supplied query, which
@@ -528,15 +526,18 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
         Ok(())
     }
 
-    fn visit_limit_clause(&mut self, limit: &'ast mut LimitClause) -> Result<(), Self::Error> {
-        match &mut limit.offset {
+    fn visit_offset_clause(
+        &mut self,
+        offset: &'ast mut Option<Literal>,
+    ) -> Result<(), Self::Error> {
+        match offset {
             None | Some(Literal::Placeholder(_)) => {}
             Some(lit) => {
                 self.replace_literal(lit);
             }
         }
 
-        visit::walk_limit_clause(self, limit)
+        visit::walk_offset_clause(self, offset)
     }
 }
 

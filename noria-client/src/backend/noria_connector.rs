@@ -352,19 +352,13 @@ fn limit_offset_params<'param>(
     params: &'param [DataType],
     query: &SelectStatement,
 ) -> (Option<&'param DataType>, Option<&'param DataType>) {
-    let limit = if let Some(limit) = &query.limit {
-        limit
-    } else {
-        return (None, None);
-    };
-
-    let offset = if matches!(limit.offset, Some(Literal::Placeholder(_))) {
+    let offset = if matches!(query.offset, Some(Literal::Placeholder(_))) {
         params.last()
     } else {
         None
     };
 
-    let limit = if matches!(limit.limit, Literal::Placeholder(_)) {
+    let limit = if matches!(query.limit, Some(Literal::Placeholder(_))) {
         if offset.is_some() {
             params.get(params.len() - 2)
         } else {
