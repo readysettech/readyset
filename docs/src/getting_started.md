@@ -79,19 +79,20 @@ All ReadySet code lives in the [ReadySet monorepo](https://gerrit.readyset.name/
    ```bash
    brew install lz4
    brew install openssl@1.1
+   brew install rocksdb
    ```
 
    **Ubuntu**
 
    ```bash
-   sudo apt update && sudo apt install -y build-essential libssl-dev pkg-config llvm clang liblz4-dev
+   sudo apt update && sudo apt install -y build-essential libssl-dev pkg-config llvm clang liblz4-dev librocksdb-dev
    sudo apt-get -y install cmake
    ```
 
    **Arch**
 
    ```bash
-   sudo pacman -S base-devel clang lz4
+   sudo pacman -S base-devel clang lz4 rocksdb-static
    ```
 
    **Nix**
@@ -161,5 +162,48 @@ All ReadySet code lives in the [ReadySet monorepo](https://gerrit.readyset.name/
    ```
 
    > **NOTE**: On Linux you may want to manage docker as the non-root user, see [Post-installation steps for Linux](https://docs.docker.com/engine/install/linux-postinstall/).
+
+4. **[Optional] Configure linking to system library dependencies for faster builds**
+
+  ReadySet has a few system dependencies that have a long build time. Instead
+  of re-compiling them each time `cargo build` is invoked, we can instead make
+  sure the system libraries are installed and set some environmental variables
+  so that cargo can link with the system libraries directly.
+
+  - **librocksdb-sys**
+
+    librocksdb-sys also uses lz4 and has a separate flag that will pick it up
+    when running its build.rs script.
+
+    > **NOTE** adjust the lib directory based on your system--the path below is
+    > the default for MacOS/homebrew
+
+    **Fish**
+    ```
+    set -Ux ROCKSDB_LIB_DIR "/opt/homebrew/lib/"
+    set -Ux LZ4_LIB_DIR "/opt/homebrew/lib/"
+    ```
+
+    **Bash**
+    ```
+    export ROCKSDB_LIB_DIR="/opt/homebrew/lib/"
+    export LZ4_LIB_DIR="/opt/homebrew/lib/"
+    ```
+  - **openssl-sys**
+
+    openssl-sys will automatically pick up the system dependency _unless_ the
+    "vendored" feature is set. We set this feature in our installer crate (for
+    good reason), but if we know the system library will work for us and are
+    re-compiling the installer crate ourselves, we can remove that feature flag
+    locally to speed up build times. This only applies if compiling the
+    installer crate itself.
+
+    Modify installer/Cargo.toml to remove the "vendored" feature flag. Update
+    the appropriate target for your dev environment.
+
+    ```toml
+    [target.aarch64-apple-darwin.dependencies]
+    openssl = { version = "*" }
+    ```
 
 With all of the tools you'll need installed, you're ready to tackle the [Hello ReadySet!](./hello_readyset.md) project! 🎉🎉🎉
