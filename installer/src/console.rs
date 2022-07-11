@@ -42,14 +42,22 @@ pub(crate) fn select() -> Select<'static> {
     Select::with_theme(&*DIALOG_THEME)
 }
 
-/// Redefines the stdlib's println macro to wrap all output text to a consistent width
+/// Redefines the stdlib's println macro to wrap all output text to a consistent width.
+///
+/// This behavior can be overridden on a per-invocation basis by supplying `no_wrap;` before all
+/// other arguments:
+///
+/// ```
+/// println!(no_wrap; "Some long text you don't want to be wrapped...");
+/// ```
 macro_rules! println {
-    () => { std::println!(); };
+    () => { std::println!() };
+    (no_wrap; $($format_arg:tt)+) => { std::println!($($format_arg)+) };
     ($($format_arg:tt)+) => {{
         std::println!(
             "{}",
             textwrap::fill(&format!($($format_arg)*), crate::console::OUTPUT_WIDTH)
-        );
+        )
     }}
 }
 

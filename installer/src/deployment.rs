@@ -631,20 +631,23 @@ impl Deployment {
                 ..
             }) => {
                 println!(
+                    no_wrap;
                     "{} {}\n",
                     style("ReadySet Connection String:").bold(),
                     self.db_type
                         .root_conn_string(db_pass, "127.0.0.1", *db_port, db_name)
                 );
                 println!(
+                    no_wrap;
                     "{} {}\n",
                     style(format!("{} Shell Command Line Quick Start:", self.db_type)).bold(),
                     self.db_type
                         .shell_connect_command(db_pass, "127.0.0.1", *db_port, db_name)
                 );
-                println!("{} http://localhost:4000\n", style("Dashboard URL:").bold());
+                println!(no_wrap; "{} http://localhost:4000\n", style("Dashboard URL:").bold());
 
                 println!(
+                    no_wrap;
                     "{} http://readysetcommunity.slack.com",
                     style("Questions? Join our Slack Community:").bold()
                 );
