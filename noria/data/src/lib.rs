@@ -34,6 +34,14 @@ pub use crate::timestamp::{TimestampTz, TIMESTAMP_FORMAT};
 /// 86_000 - 60 = 85_940.
 const MAX_SECONDS_DATETIME_OFFSET: i32 = 85_940;
 
+/// Used to wrap arbitrary Postgres types which aren't natively supported, enabling more extensive
+/// proxying support
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct PassThrough {
+    pub ty: Type,
+    pub data: Box<[u8]>,
+}
+
 /// The main type used for user data throughout the codebase.
 ///
 /// Having this be an enum allows for our code to be agnostic about the types of user data except
@@ -75,6 +83,8 @@ pub enum DataType {
     BitVector(Arc<BitVec>),
     /// An array of [`DataType`]s.
     Array(Arc<Array>),
+    /// Container type for arbitrary unserialized, unsupported types
+    PassThrough(Arc<PassThrough>),
     /// A sentinel maximal value.
     ///
     /// This value is always greater than all other [`DataType`]s, except itself.
@@ -119,6 +129,9 @@ impl fmt::Display for DataType {
                 )
             }
             DataType::Array(ref arr) => write!(f, "{}", arr),
+            DataType::PassThrough(ref p) => {
+                write!(f, "[{}:{:x?}]", p.ty.name(), p.data)
+            }
             DataType::Max => f.write_str("MAX"),
         }
     }
@@ -153,6 +166,10 @@ impl DataType {
             DataType::Numeric(_) => DataType::from(Decimal::MIN),
             DataType::BitVector(_) => DataType::from(BitVec::new()),
             DataType::Array(_) => DataType::empty_array(),
+            DataType::PassThrough(p) => DataType::PassThrough(Arc::new(PassThrough {
+                ty: p.ty.clone(),
+                data: [].into(),
+            })),
             DataType::Max => DataType::None,
         }
     }
@@ -177,6 +194,7 @@ impl DataType {
             | DataType::ByteArray(_)
             | DataType::BitVector(_)
             | DataType::Array(_)
+            | DataType::PassThrough(_)
             | DataType::Max => DataType::Max,
         }
     }
@@ -262,7 +280,7 @@ impl DataType {
             // Truthiness only matters for mysql, and mysql doesn't have arrays, so we can kind of
             // pick whatever we want here - but it makes the most sense to try to limit falsiness to
             // only the things that mysql considers falsey
-            DataType::Array(_) => true,
+            DataType::Array(_) | DataType::PassThrough(_) => true,
         }
     }
 
@@ -311,7 +329,7 @@ impl DataType {
     pub fn sql_type(&self) -> Option<SqlType> {
         use SqlType::*;
         match self {
-            Self::None | Self::Max => None,
+            Self::None | Self::PassThrough(_) | Self::Max => None,
             Self::Int(_) => Some(Bigint(None)),
             Self::UnsignedInt(_) => Some(UnsignedBigint(None)),
             Self::Float(_) => Some(Float),
@@ -415,6 +433,13 @@ impl DataType {
                 _ => Err(mk_err()),
             },
             DataType::Time(_) | DataType::ByteArray(_) | DataType::Max => Err(mk_err()),
+            DataType::PassThrough(ref p) => {
+                return Err(ReadySetError::DataTypeConversionError {
+                    src_type: format!("PassThrough[{}]", p.ty),
+                    target_type: ty.to_string(),
+                    details: "PassThrough items cannot be coerced".into(),
+                })
+            }
         }
     }
 
@@ -764,6 +789,7 @@ impl Hash for DataType {
             DataType::Numeric(ref d) => d.hash(state),
             DataType::BitVector(ref bits) => bits.hash(state),
             DataType::Array(ref vs) => vs.hash(state),
+            DataType::PassThrough(ref p) => p.hash(state),
         }
     }
 }
@@ -1081,6 +1107,7 @@ impl TryFrom<DataType> for Literal {
             DataType::Numeric(ref d) => Ok(Literal::Numeric(d.mantissa(), d.scale())),
             DataType::BitVector(ref bits) => Ok(Literal::BitVector(bits.as_ref().to_bytes())),
             DataType::Array(_) => unsupported!("Arrays not implemented yet"),
+            DataType::PassThrough(_) => internal!("PassThrough has no representation as a literal"),
             DataType::Max => internal!("MAX has no representation as a literal"),
         }
     }
@@ -1674,52 +1701,14 @@ impl ToSql for DataType {
             (Self::ByteArray(ref array), _) => array.as_ref().to_sql(ty, out),
             (Self::BitVector(ref bits), _) => bits.as_ref().to_sql(ty, out),
             (Self::Array(ref array), _) => array.as_ref().to_sql(ty, out),
+            (Self::PassThrough(p), _) => p.data.as_ref().to_sql(&p.ty, out),
         }
     }
 
-    fn accepts(ty: &Type) -> bool {
-        match ty.kind() {
-            Kind::Array(member) => <Self as ToSql>::accepts(member),
-            _ => matches!(
-                *ty,
-                Type::BOOL
-                    | Type::BYTEA
-                    | Type::CHAR
-                    | Type::NAME
-                    | Type::INT2
-                    | Type::INT4
-                    | Type::INT8
-                    | Type::OID
-                    | Type::REGCLASS
-                    | Type::REGCOLLATION
-                    | Type::REGCONFIG
-                    | Type::REGDICTIONARY
-                    | Type::REGNAMESPACE
-                    | Type::REGOPER
-                    | Type::REGOPERATOR
-                    | Type::REGPROC
-                    | Type::REGPROCEDURE
-                    | Type::REGROLE
-                    | Type::REGTYPE
-                    | Type::FLOAT4
-                    | Type::FLOAT8
-                    | Type::NUMERIC
-                    | Type::TEXT
-                    | Type::VARCHAR
-                    | Type::DATE
-                    | Type::TIME
-                    | Type::TIMESTAMP
-                    | Type::TIMESTAMPTZ
-                    | Type::MACADDR
-                    | Type::INET
-                    | Type::UUID
-                    | Type::JSON
-                    | Type::JSONB
-                    | Type::BIT
-                    | Type::VARBIT
-            ),
-        }
+    fn accepts(_: &Type) -> bool {
+        true
     }
+
     to_sql_checked!();
 }
 
@@ -1774,11 +1763,10 @@ impl<'a> FromSql<'a> for DataType {
                     serde_json::Value::from_sql(ty, raw)?.to_string(),
                 )),
                 Type::BIT | Type::VARBIT => mk_from_sql!(BitVec),
-                _ => Err(format!(
-                    "Conversion from Postgres type '{}' to DataType is not implemented.",
-                    ty
-                )
-                .into()),
+                ref ty => Ok(DataType::PassThrough(Arc::new(PassThrough {
+                    ty: ty.clone(),
+                    data: Box::from(raw),
+                }))),
             },
         }
     }
@@ -1787,48 +1775,8 @@ impl<'a> FromSql<'a> for DataType {
         Ok(DataType::None)
     }
 
-    fn accepts(ty: &Type) -> bool {
-        match ty.kind() {
-            Kind::Array(member) => <Self as ToSql>::accepts(member),
-            _ => matches!(
-                *ty,
-                Type::BOOL
-                    | Type::BYTEA
-                    | Type::CHAR
-                    | Type::NAME
-                    | Type::INT2
-                    | Type::INT4
-                    | Type::INT8
-                    | Type::OID
-                    | Type::REGCLASS
-                    | Type::REGCOLLATION
-                    | Type::REGCONFIG
-                    | Type::REGDICTIONARY
-                    | Type::REGNAMESPACE
-                    | Type::REGOPER
-                    | Type::REGOPERATOR
-                    | Type::REGPROC
-                    | Type::REGPROCEDURE
-                    | Type::REGROLE
-                    | Type::REGTYPE
-                    | Type::FLOAT4
-                    | Type::FLOAT8
-                    | Type::NUMERIC
-                    | Type::TEXT
-                    | Type::UUID
-                    | Type::VARCHAR
-                    | Type::DATE
-                    | Type::TIME
-                    | Type::TIMESTAMP
-                    | Type::TIMESTAMPTZ
-                    | Type::MACADDR
-                    | Type::INET
-                    | Type::JSON
-                    | Type::JSONB
-                    | Type::BIT
-                    | Type::VARBIT
-            ),
-        }
+    fn accepts(_: &Type) -> bool {
+        true
     }
 }
 
@@ -1865,6 +1813,9 @@ impl TryFrom<&DataType> for mysql_common::value::Value {
                 val.microseconds(),
             )),
             DataType::ByteArray(array) => Ok(Value::Bytes(array.as_ref().clone())),
+            DataType::PassThrough(_) => {
+                internal!("DataType::PassThrough to MySQL Value type is not implemented")
+            }
             DataType::BitVector(_) => internal!("MySQL does not support bit vector types"),
             DataType::Array(_) => internal!("MySQL does not support array types"),
         }
@@ -2032,6 +1983,19 @@ impl Arbitrary for DataType {
                 .prop_map(|bs| DataType::BitVector(Arc::new(BitVec::from_bytes(&bs))))
                 .boxed(),
             Some(DataTypeKind::Array) => any::<Array>().prop_map(DataType::from).boxed(),
+            Some(DataTypeKind::PassThrough) => any::<(u32, Vec<u8>)>()
+                .prop_map(|(oid, data)| {
+                    DataType::PassThrough(Arc::new(PassThrough {
+                        ty: Type::new(
+                            "Test Type".to_string(),
+                            oid,
+                            Kind::Simple,
+                            "Test Schema".to_string(),
+                        ),
+                        data: data.into_boxed_slice(),
+                    }))
+                })
+                .boxed(),
             None => prop_oneof![
                 Just(DataType::None),
                 Just(DataType::Max),
@@ -2880,6 +2844,51 @@ mod tests {
             String::try_from(&DataType::try_from(s.clone()).unwrap()).unwrap(),
             s
         )
+    }
+
+    #[test]
+    fn data_type_passthrough_same_type_roundtrip() -> Result<(), Box<dyn Error + Sync + Send>> {
+        let original_type = Type::new(
+            "type".into(),
+            100,
+            tokio_postgres::types::Kind::Pseudo,
+            "schema".into(),
+        );
+        let original_data = vec![0u8, 1, 2, 3, 4, 5];
+
+        let data_type = DataType::from_sql(&original_type, &original_data)?;
+        assert!(matches!(data_type, DataType::PassThrough(_)));
+        let decode_type = original_type.clone();
+        let mut received_data = BytesMut::new();
+        data_type.to_sql(&decode_type, &mut received_data)?;
+        assert_eq!(
+            original_data, received_data,
+            "Failed to round-trip when supplying same type to to_sql"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn data_type_passthrough_different_type_roundtrip() -> Result<(), Box<dyn Error + Sync + Send>>
+    {
+        let original_type = Type::new(
+            "type".into(),
+            100,
+            tokio_postgres::types::Kind::Pseudo,
+            "schema".into(),
+        );
+        let original_data = vec![0u8, 1, 2, 3, 4, 5];
+
+        let data_type = DataType::from_sql(&original_type, &original_data)?;
+        assert!(matches!(data_type, DataType::PassThrough(_)));
+        let decode_type = Type::ANY;
+        let mut received_data = BytesMut::new();
+        data_type.to_sql(&decode_type, &mut received_data)?;
+        assert_eq!(
+            original_data, received_data,
+            "Failed to round-trip when supplying different type to to_sql"
+        );
+        Ok(())
     }
 
     #[test]

@@ -339,7 +339,10 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
             Type::JSONB => Ok(Value::Jsonb(serde_json::Value::from_sql(t, buf)?)),
             Type::BIT => Ok(Value::Bit(BitVec::from_sql(t, buf)?)),
             Type::VARBIT => Ok(Value::VarBit(BitVec::from_sql(t, buf)?)),
-            _ => Err(Error::UnsupportedType(t.clone())),
+            _ => Ok(Value::PassThrough(noria_data::PassThrough {
+                ty: t.clone(),
+                data: buf.to_vec().into_boxed_slice(),
+            })),
         },
     }
 }

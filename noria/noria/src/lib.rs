@@ -479,7 +479,8 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
         | DataType::ByteArray(_)
         | DataType::Numeric(_)
         | DataType::BitVector(_)
-        | DataType::Array(_) => {
+        | DataType::Array(_)
+        | DataType::PassThrough(_) => {
             use std::hash::{Hash, Hasher};
             let mut hasher = ahash::AHasher::new_with_keys(0x3306, 0x6033);
             dt.hash(&mut hasher);

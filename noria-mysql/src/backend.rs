@@ -110,6 +110,9 @@ async fn write_column<W: AsyncWrite + Unpin>(
         DataType::BitVector(_) => {
             internal!("Cannot write MySQL column: MySQL does not support bit vectors")
         }
+        DataType::PassThrough(_) => {
+            internal!("Cannot write MySQL column: PassThrough types aren't supported for MySQL")
+        }
     };
     Ok(written?)
 }

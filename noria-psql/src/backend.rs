@@ -119,6 +119,7 @@ impl TryFrom<ParamRef<'_>> for DataType {
             ps::Value::Json(v) | ps::Value::Jsonb(v) => Ok(DataType::from(v.to_string())),
             ps::Value::Bit(bits) | ps::Value::VarBit(bits) => Ok(DataType::from(bits.clone())),
             ps::Value::Array(arr, _) => Ok(DataType::from(arr.clone())),
+            ps::Value::PassThrough(p) => Ok(DataType::PassThrough(Arc::new(p.clone()))),
         }
     }
 }

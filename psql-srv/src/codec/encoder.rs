@@ -382,6 +382,9 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::Array(arr, ty) => {
             arr.to_sql(&ty, dst)?;
         }
+        Value::PassThrough(p) => {
+            dst.put(&p.data[..]);
+        }
     };
     // Update the length field to match the recently serialized data length in `dst`. The 4 byte
     // length field itself is excluded from the length calculation.
@@ -482,6 +485,12 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
                 .join("")
         )?,
         Value::Array(arr, _) => write!(dst, "{}", arr)?,
+        Value::PassThrough(p) => {
+            return Err(Error::InternalError(format!(
+                "Data of type {} unsupported in text mode",
+                p.ty
+            )));
+        }
     };
     // Update the length field to match the recently serialized data length in `dst`. The 4 byte
     // length field itself is excluded from the length calculation.

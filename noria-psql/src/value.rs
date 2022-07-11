@@ -107,6 +107,7 @@ impl TryFrom<Value> for ps::Value {
             (Type::BIT, DataType::BitVector(ref b)) => Ok(ps::Value::Bit(b.as_ref().clone())),
             (Type::VARBIT, DataType::BitVector(ref b)) => Ok(ps::Value::VarBit(b.as_ref().clone())),
             (t, DataType::Array(ref arr)) => Ok(ps::Value::Array((**arr).clone(), t)),
+            (_, DataType::PassThrough(ref p)) => Ok(ps::Value::PassThrough((**p).clone())),
             (t, dt) => {
                 trace!(?t, ?dt);
                 error!(
