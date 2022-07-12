@@ -38,12 +38,13 @@ impl NoriaServerBuilder {
     }
 
     pub fn start(&self) -> anyhow::Result<ProcessHandle> {
-        Ok(ProcessHandle {
-            process: Command::new(&self.binary)
-                .args(&self.args)
-                .spawn()
-                .map_err(|e| anyhow!(e.to_string()))?,
-        })
+        let process = Command::new(&self.binary)
+            .args(&self.args)
+            .spawn()
+            .map_err(|e| {
+                anyhow!("Failed to start noria-server. Does it exist at $BINARY_PATH? Err: {e}")
+            })?;
+        Ok(ProcessHandle { process })
     }
 
     fn push_arg(mut self, arg_name: &str) -> Self {

@@ -13,5 +13,5 @@ Clustertest uses a set of environmental variables to set:
 `AUTHORITY_ADDRESS`: The address of an authority accessible from the host.
 `AUTHORITY`: The authority type (consul or zookeeper).
 `BINARY_PATH`: The path to the directory that includes noria-server and noria-mysql.
-`MYSQL_HOST`: The address of a mysql instance accesible from the host.
+`MYSQL_HOST`: The address of a mysql instance accessible from the host.
 `MYSQL_ROOT_PASSWORD`: The root password of the mysql instance.
