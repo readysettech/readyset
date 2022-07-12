@@ -10,8 +10,9 @@ use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, T
 use enum_kinds::EnumKind;
 use itertools::Itertools;
 use launchpad::arbitrary::arbitrary_duration;
+use ndarray::{ArrayD, IxDyn};
 use nom_sql::{Double, Float, Literal, SqlType};
-use noria_errors::{internal, unsupported, ReadySetError, ReadySetResult};
+use noria_errors::{internal, invalid_err, unsupported, ReadySetError, ReadySetResult};
 use proptest::prelude::{prop_oneof, Arbitrary};
 use test_strategy::Arbitrary;
 use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
@@ -1000,6 +1001,43 @@ impl<'a> TryFrom<&'a Literal> for DataType {
             Literal::Blob(b) => Ok(DataType::from(b.as_slice())),
             Literal::ByteArray(b) => Ok(DataType::ByteArray(Arc::new(b.clone()))),
             Literal::BitVector(b) => Ok(DataType::from(BitVec::from_bytes(b.as_slice()))),
+            Literal::Array(_) => {
+                fn find_shape(lit: &Literal, out: &mut Vec<usize>) -> ReadySetResult<()> {
+                    if let Literal::Array(elems) = lit {
+                        out.push(elems.len());
+                        if let Some(elem) = elems.first() {
+                            find_shape(elem, out)?
+                        }
+                    }
+                    Ok(())
+                }
+
+                fn flatten(lit: &Literal, out: &mut Vec<DataType>) -> ReadySetResult<()> {
+                    match lit {
+                        Literal::Array(elems) => {
+                            for elem in elems {
+                                flatten(elem, out)?;
+                            }
+                        }
+                        _ => out.push(lit.try_into()?),
+                    }
+                    Ok(())
+                }
+
+                let mut shape = vec![];
+                let mut elems = vec![];
+                find_shape(l, &mut shape)?;
+                flatten(l, &mut elems)?;
+
+                Ok(DataType::from(Array::from(
+                    ArrayD::from_shape_vec(IxDyn(&shape), elems).map_err(|_| {
+                        invalid_err!(
+                            "Multidimensional arrays must have array expressions with matching \
+                             dimensions",
+                        )
+                    })?,
+                )))
+            }
             Literal::Placeholder(_) => {
                 internal!("Tried to convert a Placeholder literal to a DataType")
             }
@@ -2019,6 +2057,7 @@ impl Arbitrary for DataType {
 mod tests {
     use derive_more::{From, Into};
     use launchpad::{eq_laws, hash_laws, ord_laws};
+    use ndarray::{ArrayD, IxDyn};
     use proptest::prelude::*;
     use test_strategy::proptest;
 
@@ -3134,11 +3173,47 @@ mod tests {
         );
     }
 
+    #[test]
+    fn array_from_literal() {
+        let literal = Literal::Array(vec![
+            Literal::Array(vec![1.into(), 2.into(), 3.into()]),
+            Literal::Array(vec![4.into(), 5.into(), 6.into()]),
+        ]);
+        let dt = DataType::try_from(literal).unwrap();
+        assert_eq!(
+            dt,
+            DataType::from(Array::from(
+                ArrayD::from_shape_vec(
+                    IxDyn(&[2, 3]),
+                    vec![
+                        DataType::from(1),
+                        DataType::from(2),
+                        DataType::from(3),
+                        DataType::from(4),
+                        DataType::from(5),
+                        DataType::from(6),
+                    ]
+                )
+                .unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    fn array_from_invalid_literal() {
+        let literal = Literal::Array(vec![
+            Literal::Array(vec![1.into(), 2.into()]),
+            Literal::Array(vec![3.into()]),
+        ]);
+        let res = DataType::try_from(literal);
+        assert!(res.is_err());
+        assert!(res.err().unwrap().is_invalid_query())
+    }
+
     mod coerce_to {
         use launchpad::arbitrary::{
             arbitrary_naive_date, arbitrary_naive_date_time, arbitrary_naive_time,
         };
-        use ndarray::{ArrayD, IxDyn};
         use test_strategy::proptest;
         use SqlType::*;
 

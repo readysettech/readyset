@@ -593,7 +593,7 @@ impl ReadySetError {
         self.any_cause(|e| e.is_unparseable_query())
     }
 
-    /// Returns `true` if the ready_set_error is [`Unsupported`].
+    /// Returns `true` if the error is [`Unsupported`].
     pub fn is_unsupported(&self) -> bool {
         matches!(self, Self::Unsupported(..))
     }
@@ -647,6 +647,11 @@ impl ReadySetError {
     /// [`ViewDestroyed`]
     pub fn caused_by_view_destroyed(&self) -> bool {
         self.any_cause(|e| matches!(e, Self::ViewDestroyed))
+    }
+
+    /// Returns `true` if the error is [`InvalidQuery`].
+    pub fn is_invalid_query(&self) -> bool {
+        matches!(self, Self::InvalidQuery(..))
     }
 }
 
