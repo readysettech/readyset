@@ -1,12 +1,13 @@
 use std::borrow::Cow;
 use std::cmp::max;
 use std::convert::{TryFrom, TryInto};
+use std::fmt::Debug;
 use std::{iter, mem};
 
 use itertools::{Either, Itertools};
 use nom_sql::analysis::visit::{self, Visitor};
 use nom_sql::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement};
-use noria_errors::{unsupported, ReadySetError, ReadySetResult};
+use noria_errors::{invalid_err, unsupported, ReadySetError, ReadySetResult};
 
 /// Struct storing information about parameters processed from a raw user supplied query, which
 /// provides support for converting a user-supplied parameter list into a set of lookup keys to pass
@@ -20,6 +21,10 @@ pub struct ProcessedQueryParams {
     reordered_placeholders: Option<Vec<usize>>,
     rewritten_in_conditions: Vec<RewrittenIn>,
     auto_parameters: Vec<(usize, Literal)>,
+    /// Did the original query contain a bare `OFFSET` without a `LIMIT`?
+    ///
+    /// Note that if this was the case, it will always be the last parameter in the query
+    bare_offset: bool,
 }
 
 /// This rewrite pass accomplishes the following:
@@ -28,8 +33,10 @@ pub struct ProcessedQueryParams {
 ///   dataflow representation of the query. Note that this pass may not replace all literals and is
 ///   therefore cannot guarantee that the rewritten query is free of user PII.
 /// - Collapses 'WHERE <expr> IN ?, ... ?' to 'WHERE <expr> = ?'
+/// - Removes `OFFSET ?` if there isn't a `LIMIT`
 pub fn process_query(query: &mut SelectStatement) -> ReadySetResult<ProcessedQueryParams> {
     let reordered_placeholders = reorder_numbered_placeholders(query);
+    let bare_offset = remove_bare_offset(query)?;
     let auto_parameters = auto_parametrize_query(query);
     let rewritten_in_conditions = collapse_where_in(query)?;
     number_placeholders(query)?;
@@ -37,6 +44,7 @@ pub fn process_query(query: &mut SelectStatement) -> ReadySetResult<ProcessedQue
         reordered_placeholders,
         rewritten_in_conditions,
         auto_parameters,
+        bare_offset,
     })
 }
 
@@ -46,7 +54,7 @@ impl ProcessedQueryParams {
         params: &'param [T],
     ) -> ReadySetResult<Vec<Cow<'param, [T]>>>
     where
-        T: Clone + TryFrom<Literal, Error = ReadySetError> + std::fmt::Debug + Default,
+        T: Clone + TryFrom<Literal, Error = ReadySetError> + Debug + Default + PartialEq,
     {
         if params.is_empty() && self.auto_parameters.is_empty() {
             return Ok(vec![]);
@@ -56,6 +64,18 @@ impl ProcessedQueryParams {
             Cow::Owned(reorder_params(params, order_map)?)
         } else {
             Cow::Borrowed(params)
+        };
+
+        let params = if self.bare_offset {
+            let offset_value = params
+                .last()
+                .ok_or_else(|| invalid_err("Wrong number of parameters supplied to query"))?;
+            if *offset_value != Literal::Integer(0).try_into()? {
+                unsupported!("OFFSET without LIMIT can only be literal 0");
+            }
+            Cow::Borrowed(&params[..(params.len() - 1)])
+        } else {
+            params
         };
 
         let auto_parameters = self
@@ -378,6 +398,22 @@ pub fn number_placeholders(query: &mut SelectStatement) -> ReadySetResult<()> {
     };
     visitor.visit_select_statement(query)?;
     Ok(())
+}
+
+/// Remove a bare placeholder offset from the query, returning `Ok(true)` if one existed
+fn remove_bare_offset(query: &mut SelectStatement) -> ReadySetResult<bool> {
+    if query.limit.is_some() {
+        return Ok(false);
+    }
+
+    match query.offset.take() {
+        Some(Literal::Placeholder(_)) => Ok(true),
+        Some(lit) => {
+            query.offset = Some(lit);
+            Ok(false)
+        }
+        None => Ok(false),
+    }
 }
 
 /// This pass replaces every instance of `Literal`, except Placeholders, in the AST with
@@ -1320,6 +1356,31 @@ mod tests {
             );
 
             assert_eq!(keys, vec![vec!["x".into(), "y".into(), "z".into()]]);
+        }
+
+        #[test]
+        fn bare_offset_zero() {
+            let (keys, query) = process_and_make_keys(
+                "SELECT * FROM t WHERE x = $2 OFFSET $1",
+                vec![0.into(), 1.into()],
+            );
+
+            assert_eq!(
+                query,
+                parse_select_statement("SELECT * FROM t WHERE x = $1"),
+                "{}",
+                query
+            );
+            assert_eq!(keys, vec![vec![1.into()]]);
+        }
+
+        #[test]
+        #[should_panic]
+        fn bare_offset_nonzero() {
+            process_and_make_keys(
+                "SELECT * FROM t WHERE x = $2 OFFSET $1",
+                vec![1.into(), 2.into()],
+            );
         }
     }
 }
