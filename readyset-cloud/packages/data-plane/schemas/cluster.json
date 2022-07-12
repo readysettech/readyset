@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "adapterCount": {
+      "type": "number",
+      "minimum": 1
+    },
+    "serverCount": {
+      "type": "number",
+      "minimum": 1
+    },
+    "upstreamDatabaseUriSecretName": {
+      "type": "string"
+    },
+    "cloudDetails": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "cloud": {
+              "const": "AWS"
+            },
+            "region": {
+              "type": "string"
+            }
+          },
+          "required": ["cloud", "region"]
+        }
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "adapterCount",
+    "serverCount",
+    "upstreamDatabaseUriSecretName",
+    "cloudDetails"
+  ]
+}

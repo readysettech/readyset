@@ -2,7 +2,12 @@
 
 ## Getting Started
 
-Run `pnpm install` and everything will be configured and set up correctly
+You will need to install [`sops`][0] and [`age`][1] as prerequisites in order to
+decrypt the secret files. The current secret key for `age` is in 1Password. You
+will then need to put the secret key in your `age` keystore as defined as part
+of the `sops` [documentation][2].
+
+Run `pnpm install` and everything else be configured and set up correctly
 including fetching CDK providers. This will need to be run before any of
 the other commands.
 
@@ -17,6 +22,10 @@ Run `pnpm run format` to format all the files with Prettier.
 Run `pnpm run lint` to verify that all the configured linting rules pass.
 
 Run `pnpm run test` to run all the Jest tests.
+
+[0]: https://github.com/mozilla/sops
+[1]: https://age-encryption.org/
+[2]: https://github.com/mozilla/sops#22encrypting-using-age
 
 ## Design Summary
 

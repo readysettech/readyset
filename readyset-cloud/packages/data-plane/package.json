@@ -5,5 +5,12 @@
   "scripts": {
     "test": "jest",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ajv": "^8.11.0",
+    "glob": "^8.0.3"
+  },
+  "devDependencies": {
+    "@types/glob": "^7.2.0"
   }
 }

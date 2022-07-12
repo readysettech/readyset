@@ -3,7 +3,7 @@ import { App, TerraformStack } from "cdktf";
 import { AwsProvider } from "../.gen/providers/aws";
 
 import type { Cluster } from "data-plane";
-import { getCloudsAndRegionsByCustomerId, ALL_CLUSTERS } from "data-plane";
+import { Repository } from "data-plane";
 
 interface CustomerVpcStackOptions {
   region: string;
@@ -80,27 +80,29 @@ class ReadysetKubernetesDeploymentStack extends TerraformStack {
 }
 
 const app = new App();
-const cloudAndRegionsByCustomer = getCloudsAndRegionsByCustomerId();
+const repository = new Repository();
 
-for (const [customerId, cloudRegions] of cloudAndRegionsByCustomer.entries()) {
+for (const customer of repository.getCustomers()) {
+  const customerId = customer.id;
+  const cloudRegions = repository.getCloudRegionsForCustomer(customerId);
   for (const { cloud, region } of cloudRegions) {
     const vpcOptions = vpcOptionsForCustomer(customerId, region);
     new CustomerVpcStack(app, `${customerId}-vpc`, vpcOptions);
     const eksOptions = eksOptionsForCustomer(customerId, region);
     new CustomerEksClusterStack(app, `${customerId}-eks`, eksOptions);
   }
+
+  for (const cluster of repository.getClustersForCustomerId(customerId)) {
+    const clusterId = cluster.id;
+
+    const deploymentOptions =
+      readySetKubernetesDeploymentOptionsForCluster(cluster);
+    new ReadysetKubernetesDeploymentStack(
+      app,
+      `${clusterId}-${customerId}-deployment`,
+      deploymentOptions
+    );
+  }
 }
 
-for (const cluster of ALL_CLUSTERS) {
-  const clusterId = cluster.id;
-  const customerId = cluster.customer.id;
-
-  const deploymentOptions =
-    readySetKubernetesDeploymentOptionsForCluster(cluster);
-  new ReadysetKubernetesDeploymentStack(
-    app,
-    `${clusterId}-${customerId}-deployment`,
-    deploymentOptions
-  );
-}
 app.synth();

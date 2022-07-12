@@ -1,0 +1,12 @@
+{
+  "$schema": "../../../schemas/cluster.json",
+  "id": "bar",
+  "name": "Bar",
+  "adapterCount": 3,
+  "serverCount": 1,
+  "upstreamDatabaseUriSecretName": "barUpstreamDatabaseUri",
+  "cloudDetails": {
+    "cloud": "AWS",
+    "region": "us-east-2"
+  }
+}

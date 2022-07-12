@@ -1,0 +1,5 @@
+{
+  "$schema": "../../../../../schemas/customer.json",
+  "id": "test-0",
+  "name": "Test 0"
+}
