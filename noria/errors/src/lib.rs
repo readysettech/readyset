@@ -303,7 +303,7 @@ pub enum ReadySetError {
     },
 
     /// Manipulating a view failed.
-    #[error("Failed to manipulate view at {:?}: {source}")]
+    #[error("Failed to manipulate view at {idx:?}: {source}")]
     ViewError {
         /// The index of the view being manipulated.
         idx: NodeIndex,
