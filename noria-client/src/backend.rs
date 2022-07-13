@@ -194,13 +194,20 @@ enum ProxyState {
 }
 
 impl ProxyState {
-    /// Returns true if a query should be unconditionally proxied upstream per this [`ProxyState`]
-    #[must_use]
+    /// Returns true if a query should be proxied upstream in most cases per this [`ProxyState`].
+    /// The case in which we should not proxy a query upstream, is if our state is
+    /// Self::AutocommitOff, and the query in question has been manually migrated with the optional
+    /// `ALWAYS` flag, such as `CREATE CACHE ALWAYS`.
     fn should_proxy(&self) -> bool {
         matches!(
             self,
             Self::AutocommitOff | Self::InTransaction | Self::ProxyAlways
         )
+    }
+
+    /// Returns true if a query should be unconditionally proxied upstream per this [`ProxyState`]
+    fn should_always_proxy(&self) -> bool {
+        matches!(self, Self::InTransaction | Self::ProxyAlways)
     }
 
     /// Perform the appropriate state transition for this proxy state to begin a new transaction.
@@ -862,43 +869,72 @@ where
 
     /// Provides metadata required to prepare a select query
     fn plan_prepare_select(&mut self, stmt: nom_sql::SelectStatement) -> PrepareMeta {
+        match self.rewrite_select_and_check_noria(&stmt) {
+            Some((rewritten, should_do_noria)) => {
+                let status = self.query_status_cache.query_status(&rewritten);
+                if self.proxy_state.should_proxy()
+                    && !(status.migration_state == MigrationState::Successful && status.always)
+                {
+                    PrepareMeta::Proxy
+                } else {
+                    PrepareMeta::Select(PrepareSelectMeta {
+                        stmt,
+                        rewritten,
+                        should_do_noria,
+                        // For select statements only InRequestPath should trigger migrations
+                        // synchronously, or if no upstream is present.
+                        must_migrate: self.migration_mode == MigrationMode::InRequestPath
+                            || !self.has_fallback(),
+                    })
+                }
+            }
+            None => {
+                warn!(statement = %Sensitive(&stmt), "This statement could not be rewritten by ReadySet");
+                PrepareMeta::FailedToRewrite
+            }
+        }
+    }
+
+    /// Rewrites the provided select, and checks if the select statement should be
+    /// handled by noria. If so, the second tuple member will be true. If the select should be
+    /// handled by upstream, the second tuple member will be false.
+    ///
+    /// If the rewrite fails, the option will be None.
+    fn rewrite_select_and_check_noria(
+        &mut self,
+        stmt: &nom_sql::SelectStatement,
+    ) -> Option<(nom_sql::SelectStatement, bool)> {
         let mut rewritten = stmt.clone();
         if rewrite::process_query(&mut rewritten, self.noria.server_supports_pagination()).is_err()
         {
-            warn!(statement = %Sensitive(&stmt), "This statement could not be rewritten by ReadySet");
-            PrepareMeta::FailedToRewrite
+            None
         } else {
-            // For select statements we will always try to check with noria if it already migrated,
-            // unless it is explicitely known to be not supported.
             let should_do_noria = self.query_status_cache.query_migration_state(&rewritten)
                 != MigrationState::Unsupported;
-            // For select statements only InRequestPath should trigger migrations synchornously,
-            // or if no upstream is present
-            let must_migrate =
-                self.migration_mode == MigrationMode::InRequestPath || !self.has_fallback();
-
-            PrepareMeta::Select(PrepareSelectMeta {
-                stmt,
-                rewritten,
-                should_do_noria,
-                must_migrate,
-            })
+            Some((rewritten, should_do_noria))
         }
     }
 
     /// Provides metadata required to prepare a query
     async fn plan_prepare(&mut self, query: &str) -> PrepareMeta {
-        if self.proxy_state.should_proxy() {
+        if self.proxy_state.should_always_proxy() {
             return PrepareMeta::Proxy;
         }
-
         let parsed_query = match self.parse_query(query) {
             Ok(pq) => pq,
             Err(_) => {
-                warn!(query = %Sensitive(&query), "ReadySet failed to parse query");
-                return PrepareMeta::FailedToParse;
+                if self.proxy_state.should_proxy() {
+                    return PrepareMeta::Proxy;
+                } else {
+                    warn!(query = %Sensitive(&query), "ReadySet failed to parse query");
+                    return PrepareMeta::FailedToParse;
+                }
             }
         };
+
+        if self.proxy_state.should_proxy() && !parsed_query.is_select() {
+            return PrepareMeta::Proxy;
+        }
 
         match parsed_query {
             SqlQuery::Select(stmt) => self.plan_prepare_select(stmt),
@@ -1518,28 +1554,16 @@ where
     async fn query_adhoc_select(
         &mut self,
         original_query: &str,
-        stmt: &SelectStatement,
+        original_stmt: SelectStatement,
+        rewritten: &SelectStatement,
+        status: Option<QueryStatus>,
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
-        event.sql_type = SqlQueryType::Read;
-        if self.query_log_ad_hoc_queries {
-            event.query = Some(Arc::new(SqlQuery::Select(stmt.clone())));
-        }
-
-        // TODO(vlad): don't rewrite multiple times, it is wasteful
-        let mut rewritten = stmt.clone();
-        let mut status =
-            if rewrite::process_query(&mut rewritten, self.noria.server_supports_pagination())
-                .is_ok()
-            {
-                self.query_status_cache.query_status(&rewritten)
-            } else {
-                QueryStatus {
-                    migration_state: MigrationState::Unsupported,
-                    execution_info: None,
-                    always: false,
-                }
-            };
+        let mut status = status.unwrap_or(QueryStatus {
+            migration_state: MigrationState::Unsupported,
+            execution_info: None,
+            always: false,
+        });
         let original_status = status.clone();
         let did_work = if let Some(ref mut i) = status.execution_info {
             i.reset_if_exceeded_recovery(
@@ -1564,7 +1588,7 @@ where
             if did_work {
                 #[allow(clippy::unwrap_used)] // Validated by did_work.
                 self.query_status_cache.update_transition_time(
-                    &rewritten,
+                    rewritten,
                     &status.execution_info.unwrap().last_transition_time,
                 );
             }
@@ -1575,7 +1599,7 @@ where
             event.destination = Some(QueryDestination::Readyset);
             let start = Instant::now();
             let ctx = ExecuteSelectContext::AdHoc {
-                statement: stmt.clone(),
+                statement: original_stmt,
                 create_if_missing: self.migration_mode == MigrationMode::InRequestPath,
             };
             let res = self
@@ -1601,7 +1625,7 @@ where
                 }
                 if status != original_status {
                     self.query_status_cache
-                        .update_query_status(&rewritten, status);
+                        .update_query_status(rewritten, status);
                 }
                 Ok(noria_ok.into())
             }
@@ -1624,7 +1648,7 @@ where
 
                 if status != original_status {
                     self.query_status_cache
-                        .update_query_status(&rewritten, status);
+                        .update_query_status(rewritten, status);
                 }
 
                 // Try to execute on fallback if present
@@ -1640,6 +1664,31 @@ where
                 }
             }
         }
+    }
+
+    /// Checks if noria should try to execute a given select and in the process mutates the
+    /// supplied select statement by rewriting it.
+    /// Returns whether noria should try the select, along with the query status if it was obtained
+    /// during processing.
+    fn noria_should_try_select(&self, q: &mut SelectStatement) -> (bool, Option<QueryStatus>) {
+        let mut status = None;
+        let should_try = if rewrite::process_query(q, self.noria.server_supports_pagination())
+            .is_ok()
+        {
+            let s = self.query_status_cache.query_status(q);
+            let should_try = if self.proxy_state.should_proxy() {
+                s.always && s.migration_state == MigrationState::Successful
+            } else {
+                true
+            };
+            status = Some(s);
+            should_try
+        } else {
+            warn!(statement = %Sensitive(&q), "This statement could not be rewritten by ReadySet");
+            matches!(self.proxy_state, ProxyState::Never | ProxyState::Fallback)
+        };
+
+        (should_try, status)
     }
 
     /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
@@ -1682,8 +1731,7 @@ where
             Ok(SqlQuery::Set(s)) if let Some(true) = Handler::autocommit_state(&s) => {
                 self.query_adhoc_non_select(query, &mut event, SqlQuery::Set(s)).await
             }
-            // Parsed but proxy mode means we should send upstream
-            Ok(_) if self.proxy_state.should_proxy() => self.query_fallback(query, &mut event).await,
+            Ok(_) if self.proxy_state.should_always_proxy() => self.query_fallback(query, &mut event).await,
             Ok(ref parsed_query) if Handler::requires_fallback(parsed_query) => {
                 if self.has_fallback() {
                     // Query requires a fallback and we can send it to fallback
@@ -1695,7 +1743,21 @@ where
                         .map_err(Into::into)
                 }
             }
-            Ok(SqlQuery::Select(ref stmt)) => self.query_adhoc_select(query, stmt, &mut event).await,
+            Ok(SqlQuery::Select(stmt)) => {
+                let mut rewritten = stmt.clone();
+                let (noria_should_try, status) = self.noria_should_try_select(&mut rewritten);
+                if noria_should_try {
+                    event.sql_type = SqlQueryType::Read;
+                    if self.query_log_ad_hoc_queries {
+                        event.query = Some(Arc::new(SqlQuery::Select(stmt.clone())));
+                    }
+
+                    self.query_adhoc_select(query, stmt, &rewritten, status, &mut event).await
+                } else {
+                    self.query_fallback(query, &mut event).await
+                }
+            }
+            Ok(_) if self.proxy_state.should_proxy() => self.query_fallback(query, &mut event).await,
             Ok(parsed_query) => self.query_adhoc_non_select(query, &mut event, parsed_query).await,
         }
         .map(|r| r.into_owned());
