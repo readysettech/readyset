@@ -119,6 +119,11 @@ impl SqlQuery {
             Self::Explain(_) => "EXPLAIN",
         }
     }
+
+    /// Returns whether the provided SqlQuery is a SELECT or not.
+    pub fn is_select(&self) -> bool {
+        matches!(self, Self::Select(_))
+    }
 }
 
 pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery> {

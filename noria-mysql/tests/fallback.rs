@@ -235,6 +235,39 @@ async fn proxy_unsupported_sets() {
             .0,
         1,
     );
+
+    assert_eq!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::Upstream
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn proxy_unsupported_sets_prep_exec() {
+    let (opts, _handle) = setup_with(
+        BackendBuilder::new()
+            .require_authentication(false)
+            .unsupported_set_mode(UnsupportedSetMode::Proxy),
+    )
+    .await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+
+    conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
+    conn.query_drop("INSERT INTO t (x) values (1)")
+        .await
+        .unwrap();
+
+    conn.query_drop("SET @@SESSION.SQL_MODE = 'ANSI_QUOTES';")
+        .await
+        .unwrap();
+
+    conn.exec_drop("SELECT * FROM t", ()).await.unwrap();
+
+    assert_eq!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::Upstream
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
