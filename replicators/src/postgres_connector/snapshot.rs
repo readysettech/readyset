@@ -14,6 +14,7 @@ use tokio_postgres as pgsql;
 use tracing::{debug, error, info, info_span, trace, Instrument};
 
 use super::PostgresPosition;
+use crate::table_filter::TableFilter;
 
 const BATCH_SIZE: usize = 1024; // How many queries to buffer before pushing to Noria
 
@@ -21,8 +22,8 @@ pub struct PostgresReplicator<'a> {
     /// This is the underlying (regular) PostgreSQL transaction
     pub(crate) transaction: pgsql::Transaction<'a>,
     pub(crate) noria: &'a mut noria::ControllerHandle,
-    /// If Some then only snapshot those tables, otherwise will snapshot all tables
-    pub(crate) tables: Option<Vec<String>>,
+    /// Filters out tables we are not interested in
+    pub(crate) table_filter: TableFilter,
 }
 
 #[derive(Debug)]
@@ -250,14 +251,21 @@ impl TableDescription {
 
         let nrows = transaction
             .query_one(
-                format!("SELECT count(*) AS nrows FROM \"{}\"", self.name).as_str(),
+                format!(
+                    "SELECT count(*) AS nrows FROM \"{}\".\"{}\"",
+                    self.schema, self.name
+                )
+                .as_str(),
                 &[],
             )
             .await?
             .try_get::<_, i64>("nrows")?;
 
         // The most efficient way to copy an entire table is COPY BINARY
-        let query = format!("COPY \"{}\" TO stdout BINARY", self.name);
+        let query = format!(
+            "COPY \"{}\".\"{}\" TO stdout BINARY",
+            self.schema, self.name
+        );
         let rows = transaction.copy_out(query.as_str()).await?;
 
         let type_map: Vec<_> = self.columns.iter().map(|c| c.type_oid.clone()).collect();
@@ -304,10 +312,10 @@ impl TableDescription {
 }
 
 impl<'a> PostgresReplicator<'a> {
-    pub async fn new(
+    pub(crate) async fn new(
         client: &'a mut pgsql::Client,
         noria: &'a mut noria::ControllerHandle,
-        tables: Option<Vec<String>>,
+        table_filter: TableFilter,
     ) -> ReadySetResult<PostgresReplicator<'a>> {
         let transaction = client
             .build_transaction()
@@ -320,7 +328,7 @@ impl<'a> PostgresReplicator<'a> {
         Ok(PostgresReplicator {
             transaction,
             noria,
-            tables,
+            table_filter,
         })
     }
 
@@ -334,10 +342,8 @@ impl<'a> PostgresReplicator<'a> {
 
         let mut table_list = self.get_table_list(TableKind::RegularTable).await?;
         let view_list = self.get_table_list(TableKind::View).await?;
-        if let Some(tables) = self.tables.as_ref() {
-            // If a list of specific tables is provided, keep only those specfied
-            table_list.retain(|e| !tables.contains(&e.name));
-        }
+
+        table_list.retain(|tbl| self.table_filter.contains(&tbl.schema, &tbl.name));
 
         trace!(?table_list, "Loaded table list");
         trace!(?view_list, "Loaded view list");
@@ -396,7 +402,8 @@ impl<'a> PostgresReplicator<'a> {
         // Finally copy each table into noria
         for table in &tables {
             // TODO: parallelize with a connection pool if performance here matters
-            let span = info_span!("Replicating table", table = %table.name);
+            // TODO(vlad): should differentiate by schema when implemented
+            let span = info_span!("Replicating table", schema = %table.schema, table = %table.name);
             span.in_scope(|| info!("Replicating table"));
             let mut noria_table = self
                 .noria
@@ -414,6 +421,7 @@ impl<'a> PostgresReplicator<'a> {
 
         let mut compacting = FuturesUnordered::new();
         for table in tables {
+            // TODO(vlad): should differentiate by schema when implemented
             let mut noria_table = self.noria.table(&table.name).await?;
             compacting.push(async move {
                 let span = info_span!("Compacting table", table = %table.name);
@@ -456,7 +464,6 @@ impl<'a> PostgresReplicator<'a> {
         WHERE c.relkind IN ($1) AND n.nspname <> 'pg_catalog'
                                 AND n.nspname <> 'information_schema'
                                 AND n.nspname !~ '^pg_toast'
-                                AND pg_catalog.pg_table_is_visible(c.oid)
         ";
 
         let tables = self.transaction.query(query, &[&kind_code]).await?;

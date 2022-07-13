@@ -42,40 +42,42 @@ pub struct PostgresWalConnector {
 
 /// The decoded response to `IDENTIFY_SYSTEM`
 #[derive(Debug)]
-pub struct ServerIdentity {
+#[allow(dead_code)]
+pub(crate) struct ServerIdentity {
     /// The unique system identifier identifying the cluster. This can be used to check that the
     /// base backup used to initialize the standby came from the same cluster.
-    pub id: String,
+    pub(crate) id: String,
     /// Current timeline ID. Also useful to check that the standby is consistent with the master.
-    pub timeline: i8,
+    pub(crate) timeline: i8,
     /// Current WAL flush location. Useful to get a known location in the write-ahead log where
     /// streaming can start.
-    pub xlogpos: String,
+    pub(crate) xlogpos: String,
     /// Database connected to or null.
-    pub dbname: Option<String>,
+    pub(crate) dbname: Option<String>,
 }
 
 /// The decoded response to `CREATE_REPLICATION_SLOT`
 #[derive(Debug)]
-pub struct CreatedSlot {
+#[allow(dead_code)]
+pub(crate) struct CreatedSlot {
     /// The name of the newly-created replication slot
-    pub slot_name: String,
+    pub(crate) slot_name: String,
     /// The WAL location at which the slot became consistent. This is the earliest location
     /// from which streaming can start on this replication slot.
-    pub consistent_point: String,
+    pub(crate) consistent_point: String,
     /// The identifier of the snapshot exported by the command. The snapshot is valid until a
     /// new command is executed on this connection or the replication connection is closed.
     /// Null if the created slot is physical.
-    pub snapshot_name: Option<String>,
+    pub(crate) snapshot_name: Option<String>,
     /// The name of the output plugin used by the newly-created replication slot.
     /// Null if the created slot is physical.
-    pub output_plugin: Option<String>,
+    pub(crate) output_plugin: Option<String>,
 }
 
 impl PostgresWalConnector {
     /// Connects to postgres and if needed creates a new replication slot for itself with an
     /// exported snapshot.
-    pub async fn connect<S: AsRef<str>>(
+    pub(crate) async fn connect<S: AsRef<str>>(
         mut pg_config: pgsql::Config,
         dbname: S,
         config: Config,
@@ -244,7 +246,11 @@ impl PostgresWalConnector {
 
     /// Begin replication on the `slot` and `publication`. The `publication` must be present on
     /// the server, and can be created using: `CREATE PUBLICATION publication FOR ALL TABLES;`
-    pub async fn start_replication(&mut self, slot: &str, publication: &str) -> ReadySetResult<()> {
+    pub(crate) async fn start_replication(
+        &mut self,
+        slot: &str,
+        publication: &str,
+    ) -> ReadySetResult<()> {
         let inner_client = self.client.inner();
 
         let query = format!(
