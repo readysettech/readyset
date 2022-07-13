@@ -2,6 +2,7 @@ use std::convert::{TryFrom, TryInto};
 
 use async_trait::async_trait;
 use binlog::consts::{BinlogChecksumAlg, EventType};
+use mysql::binlog::events::StatusVarVal;
 use mysql::binlog::jsonb::{self, JsonbToJsonError};
 use mysql::prelude::Queryable;
 use mysql_async as mysql;
@@ -32,7 +33,7 @@ const DEFAULT_SERVER_ID: u32 = u32::MAX - 55;
 /// * `REPLICATION CLIENT` - to use SHOW MASTER STATUS, SHOW SLAVE STATUS, and SHOW BINARY LOGS;
 ///
 /// The connector must also be assigned a unique `server_id` value
-pub struct MySqlBinlogConnector {
+pub(crate) struct MySqlBinlogConnector {
     /// This is the underlying (regular) MySQL connection
     connection: mysql::Conn,
     /// Reader is a decoder for binlog events
@@ -42,8 +43,6 @@ pub struct MySqlBinlogConnector {
     server_id: Option<u32>,
     /// If we just want to continue reading the binlog from a previous point
     next_position: BinlogPosition,
-    /// The list of schemas we are interested in, others will be filtered out
-    schemas: Vec<String>,
     /// The GTID of the current transaction. Table modification events will have
     /// the current GTID attached if enabled in mysql.
     current_gtid: Option<u64>,
@@ -191,9 +190,8 @@ impl MySqlBinlogConnector {
     }
 
     /// Connect to a given MySQL database and subscribe to the binlog
-    pub async fn connect<S: Into<String>, O: Into<mysql::Opts>>(
+    pub(crate) async fn connect<O: Into<mysql::Opts>>(
         mysql_opts: O,
-        schemas: Vec<S>,
         next_position: BinlogPosition,
         server_id: Option<u32>,
     ) -> ReadySetResult<Self> {
@@ -202,7 +200,6 @@ impl MySqlBinlogConnector {
             reader: binlog::EventStreamReader::new(binlog::consts::BinlogVersion::Version4),
             server_id,
             next_position,
-            schemas: schemas.into_iter().map(|e| e.into()).collect(),
             current_gtid: None,
         };
 
@@ -221,11 +218,6 @@ impl MySqlBinlogConnector {
         let event = self.reader.read(&packet[1..])?;
         assert!(Self::validate_event_checksum(&event)); // TODO: definitely should never fail a CRC check, but what to do if we do?
         Ok(event)
-    }
-
-    /// Check if the provided schema is in the list of schemas we are monitoring
-    fn interested_in_schema(&self, schema: &str) -> bool {
-        self.schemas.iter().any(|s| *s == schema)
     }
 
     /// Process binlog events until an actionable event occurs.
@@ -270,23 +262,29 @@ impl MySqlBinlogConnector {
                 EventType::QUERY_EVENT => {
                     // Written when an updating statement is done.
                     let ev: events::QueryEvent = binlog_event.read_event()?;
-                    if !self.interested_in_schema(ev.schema().as_ref()) {
-                        continue;
-                    }
 
-                    if ev
+                    let namespace = match ev
                         .status_vars()
                         .get_status_var(binlog::consts::StatusVarKey::UpdatedDbNames)
-                        .is_none()
+                        .as_ref()
+                        .and_then(|v| v.get_value().ok())
                     {
+                        Some(StatusVarVal::UpdatedDbNames(names)) if !names.is_empty() => {
+                            // IMPORTANTE: For some statements there can be more than one update db,
+                            // for example `DROP TABLE db1.tbl, db2.table;` Will have `db1` and
+                            // `db2` listed, however we only need the namespace to filter out
+                            // `CREATE TABLE` and `ALTER TABLE` and those always change only one DB.
+                            names.first().unwrap().as_str().to_string()
+                        }
                         // If the query does not affect the schema, just keep going
                         // TODO: Transactions begin with the `BEGIN` queries, but we do not
                         // currently support those
-                        continue;
-                    }
+                        _ => continue,
+                    };
 
                     return Ok((
                         ReplicationAction::SchemaChange {
+                            namespace,
                             ddl: ev.query().to_string(),
                         },
                         &self.next_position,
@@ -316,10 +314,6 @@ impl MySqlBinlogConnector {
                         .get_tme(ev.table_id())
                         .ok_or("TME not found for WRITE_ROWS_EVENT")?;
 
-                    if !self.interested_in_schema(tme.database_name().as_ref()) {
-                        continue;
-                    }
-
                     let mut inserted_rows = Vec::new();
 
                     for row in ev.rows(tme) {
@@ -333,6 +327,7 @@ impl MySqlBinlogConnector {
 
                     return Ok((
                         ReplicationAction::TableAction {
+                            namespace: tme.database_name().to_string(),
                             table: tme.table_name().to_string(),
                             actions: inserted_rows,
                             txid: self.current_gtid,
@@ -349,10 +344,6 @@ impl MySqlBinlogConnector {
                         .reader
                         .get_tme(ev.table_id())
                         .ok_or(format!("TME not found for UPDATE_ROWS_EVENT {:?}", ev))?;
-
-                    if !self.interested_in_schema(tme.database_name().as_ref()) {
-                        continue;
-                    }
 
                     let mut updated_rows = Vec::new();
 
@@ -381,6 +372,7 @@ impl MySqlBinlogConnector {
 
                     return Ok((
                         ReplicationAction::TableAction {
+                            namespace: tme.database_name().to_string(),
                             table: tme.table_name().to_string(),
                             actions: updated_rows,
                             txid: self.current_gtid,
@@ -398,10 +390,6 @@ impl MySqlBinlogConnector {
                         .get_tme(ev.table_id())
                         .ok_or(format!("TME not found for UPDATE_ROWS_EVENT {:?}", ev))?;
 
-                    if !self.interested_in_schema(tme.database_name().as_ref()) {
-                        continue;
-                    }
-
                     let mut deleted_rows = Vec::new();
 
                     for row in ev.rows(tme) {
@@ -417,6 +405,7 @@ impl MySqlBinlogConnector {
 
                     return Ok((
                         ReplicationAction::TableAction {
+                            namespace: tme.database_name().to_string(),
                             table: tme.table_name().to_string(),
                             actions: deleted_rows,
                             txid: self.current_gtid,

@@ -115,7 +115,7 @@ impl<'a> DdlEvent<'a> {
     /// [`DdlEvent`] and return it, otherwise returns `Ok(None)`. Returns an error if the WAL event
     /// represents an invalid [`DdlEvent`]
     pub(crate) fn from_wal_event(wal_event: &'a WalEvent) -> ReadySetResult<Option<Self>> {
-        let tuple = if let WalEvent::Insert { table, tuple } = wal_event {
+        let tuple = if let WalEvent::Insert { table, tuple, .. } = wal_event {
             if table != DDL_REPLICATION_LOG_TABLE {
                 return Ok(None);
             }
@@ -189,6 +189,10 @@ impl<'a> DdlEvent<'a> {
             }
             .to_string(),
         }
+    }
+
+    pub(crate) fn schema(&self) -> &str {
+        self.schema_name
     }
 }
 

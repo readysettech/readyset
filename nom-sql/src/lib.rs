@@ -10,7 +10,9 @@ pub use sql_identifier::SqlIdentifier;
 
 pub use self::alter::{AlterColumnOperation, AlterTableDefinition, AlterTableStatement};
 pub use self::column::{Column, ColumnConstraint, ColumnSpecification};
-pub use self::common::{FieldDefinitionExpr, FieldReference, IndexType, SqlType, TableKey};
+pub use self::common::{
+    replicator_table_list, FieldDefinitionExpr, FieldReference, IndexType, SqlType, TableKey,
+};
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 pub use self::create::{
     CacheInner, CreateCacheStatement, CreateTableStatement, CreateViewStatement,

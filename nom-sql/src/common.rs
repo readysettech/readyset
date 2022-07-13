@@ -1114,6 +1114,11 @@ pub fn table_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Tabl
     move |i| separated_list1(ws_sep_comma, schema_table_reference(dialect))(i)
 }
 
+// Parse list of table names as used by the replicator to identify tables to replicate
+pub fn replicator_table_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Table>> {
+    move |i| separated_list1(ws_sep_comma, replicator_table_reference_no_alias(dialect))(i)
+}
+
 // Parse a list of values (e.g., for INSERT syntax).
 pub fn value_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Literal>> {
     move |i| separated_list0(ws_sep_comma, literal(dialect))(i)
@@ -1146,6 +1151,29 @@ pub fn schema_table_reference_no_alias(
             tuple((
                 opt(pair(dialect.identifier(), tag("."))),
                 dialect.identifier(),
+            )),
+            |tup| Table {
+                name: tup.1,
+                alias: None,
+                schema: tup.0.map(|(s, _)| s),
+            },
+        )(i)
+    }
+}
+
+// Parse a reference to a named schema.table or schema.* as used by the replicator to identify
+// tables to replicate
+pub fn replicator_table_reference_no_alias(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], Table> {
+    move |i| {
+        map(
+            tuple((
+                opt(pair(dialect.identifier(), tag("."))),
+                alt((
+                    dialect.identifier(),
+                    map(tag("*"), |_| SqlIdentifier::from("*")),
+                )),
             )),
             |tup| Table {
                 name: tup.1,

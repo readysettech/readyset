@@ -1,8 +1,8 @@
 mod connector;
 mod snapshot;
 
-pub use connector::MySqlBinlogConnector;
-pub use snapshot::MySqlReplicator;
+pub(crate) use connector::MySqlBinlogConnector;
+pub(crate) use snapshot::MySqlReplicator;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct BinlogPosition {
