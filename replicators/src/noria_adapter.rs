@@ -336,15 +336,12 @@ impl NoriaAdapter {
             info!(wal_position = %pos);
         }
 
-        let dbname = pgsql_opts
-            .get_dbname()
-            .map(|s| vec![s.to_string()])
-            .unwrap_or_default();
+        let dbname = pgsql_opts.get_dbname().ok_or_else(|| {
+            ReadySetError::ReplicationFailed("No database specified for replication".to_string())
+        })?;
 
-        let mut connector = Box::new(
-            PostgresWalConnector::connect(pgsql_opts.clone(), dbname.first().unwrap(), config, pos)
-                .await?,
-        );
+        let mut connector =
+            Box::new(PostgresWalConnector::connect(pgsql_opts.clone(), dbname, config, pos).await?);
 
         info!("Connected to PostgreSQL");
 
@@ -358,7 +355,8 @@ impl NoriaAdapter {
 
             let connection_handle = tokio::spawn(connection);
 
-            let mut replicator = PostgresReplicator::new(&mut client, &mut noria, None).await?;
+            let mut replicator =
+                PostgresReplicator::new(&mut client, &mut noria, table_filter.clone()).await?;
 
             select! {
                 s = replicator.snapshot_to_noria(snapshot).fuse() => s?,

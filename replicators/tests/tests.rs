@@ -16,6 +16,7 @@ const MAX_ATTEMPTS: usize = 40;
 
 // Postgres does not accept MySQL escapes, so rename the table before the query
 const PGSQL_RENAME: (&str, &str) = ("`groups`", "groups");
+const PGSQL_RENAME2: (&str, &str) = ("DATABASE", "SCHEMA");
 
 const CREATE_SCHEMA: &str = "
     DROP TABLE IF EXISTS `groups` CASCADE;
@@ -154,6 +155,7 @@ impl DbConnection {
             }
             DbConnection::PostgreSQL(c, _) => {
                 let query = query.replace(PGSQL_RENAME.0, PGSQL_RENAME.1);
+                let query = query.replace(PGSQL_RENAME2.0, PGSQL_RENAME2.1);
                 c.simple_query(query.as_str()).await?;
             }
         }
@@ -404,6 +406,18 @@ async fn pgsql_skip_unparsable() -> ReadySetResult<()> {
 #[serial_test::serial]
 async fn mysql_skip_unparsable() -> ReadySetResult<()> {
     replication_skip_unparsable_inner(&mysql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn pgsql_replication_filter() -> ReadySetResult<()> {
+    replication_filter_inner(&pgsql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn mysql_replication_filter() -> ReadySetResult<()> {
+    replication_filter_inner(&mysql_url()).await
 }
 
 /// This test checks that when writes and replication happen in parallel
@@ -753,30 +767,26 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
-async fn mysql_replication_filter() -> ReadySetResult<()> {
-    let mut client = DbConnection::connect(&mysql_url()).await?;
+async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
+    let mut client = DbConnection::connect(url).await?;
 
-    client
-        .query(
-            "
-            DROP TABLE IF EXISTS t1 CASCADE; CREATE TABLE t1 (id int);
-            DROP TABLE IF EXISTS t2 CASCADE; CREATE TABLE t2 (id int);
-            DROP TABLE IF EXISTS t3 CASCADE; CREATE TABLE t3 (id int);
-            DROP DATABASE IF EXISTS noria2; CREATE DATABASE noria2; CREATE TABLE noria2.t4 (id int);
-            DROP DATABASE IF EXISTS noria3; CREATE DATABASE noria3;
-            DROP VIEW IF EXISTS t1_view; CREATE VIEW t1_view AS SELECT * FROM t1;
-            DROP VIEW IF EXISTS t2_view; CREATE VIEW t2_view AS SELECT * FROM t2;
-            DROP VIEW IF EXISTS t3_view; CREATE VIEW t3_view AS SELECT * FROM t3;
-            ",
-        )
-        .await?;
+    let query = "
+    DROP TABLE IF EXISTS t1 CASCADE; CREATE TABLE t1 (id int);
+    DROP TABLE IF EXISTS t2 CASCADE; CREATE TABLE t2 (id int);
+    DROP TABLE IF EXISTS t3 CASCADE; CREATE TABLE t3 (id int);
+    DROP DATABASE IF EXISTS noria2; CREATE DATABASE noria2; CREATE TABLE noria2.t4 (id int);
+    DROP DATABASE IF EXISTS noria3; CREATE DATABASE noria3;
+    DROP VIEW IF EXISTS t1_view; CREATE VIEW t1_view AS SELECT * FROM t1;
+    DROP VIEW IF EXISTS t2_view; CREATE VIEW t2_view AS SELECT * FROM t2;
+    DROP VIEW IF EXISTS t3_view; CREATE VIEW t3_view AS SELECT * FROM t3;
+    ";
+
+    client.query(query).await?;
 
     let mut ctx = TestHandle::start_noria(
-        mysql_url(),
+        url.to_string(),
         Some(Config {
-            replication_tables: Some("noria.t3, t1, noria3.*, noria2.t4".to_string().into()),
+            replication_tables: Some("t3, t1, noria3.*, noria2.t4".to_string().into()),
             ..Default::default()
         }),
     )
@@ -793,12 +803,12 @@ async fn mysql_replication_filter() -> ReadySetResult<()> {
     client
         .query(
             "
+            CREATE TABLE noria2.t5 (id int);
+            CREATE TABLE noria3.t6 (id int);
             INSERT INTO t1 VALUES (1),(2),(3);
             INSERT INTO t2 VALUES (1),(2),(3);
             INSERT INTO t3 VALUES (1),(2),(3);
             INSERT INTO noria2.t4 VALUES (1),(2),(3);
-            CREATE TABLE noria2.t5 (id int);
-            CREATE TABLE noria3.t6 (id int);
             ",
         )
         .await?;
