@@ -2005,11 +2005,7 @@ impl Domain {
                 let mut res = Vec::new();
                 for (local_index, node_ref) in self.nodes.iter() {
                     let node = node_ref.borrow();
-                    if node.is_internal() || node.is_base() {
-                        if let Some(state) = self.state.get(local_index) {
-                            res.push((node.global_addr(), state.key_count()))
-                        }
-                    } else if node.is_reader() {
+                    if node.is_reader() {
                         let reader_addr =
                             (node.global_addr(), node.name().clone(), self.shard()).into();
                         #[allow(clippy::unwrap_used)] // lock poisoning is unrecoverable
@@ -2020,6 +2016,9 @@ impl Domain {
                             .get(&reader_addr)
                             .map_or(0, |handle| handle.len());
                         res.push((node.global_addr(), KeyCount::ExactKeyCount(key_count)))
+                    } else if let Some(state) = self.state.get(local_index) {
+                        // non-reader node with state
+                        res.push((node.global_addr(), state.key_count()))
                     }
                 }
                 Ok(Some(bincode::serialize(&res)?))
