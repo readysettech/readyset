@@ -1,6 +1,5 @@
 use std::collections::{hash_map, HashMap, HashSet};
 use std::convert::TryInto;
-use std::future;
 use std::num::ParseIntError;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -8,13 +7,14 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use clap::Parser;
 use database_utils::DatabaseURL;
-use futures::{FutureExt, TryFutureExt};
+use futures::FutureExt;
 use launchpad::redacted::RedactedString;
 use launchpad::select;
 use metrics::{counter, histogram};
 use noria::consensus::Authority;
 use noria::consistency::Timestamp;
 use noria::metrics::recorded::{self, SnapshotStatusTag};
+use noria::recipe::changelist::{Change, ChangeList};
 use noria::replication::{ReplicationOffset, ReplicationOffsets};
 use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table, TableOperation};
 use noria_errors::{internal_err, invalid_err};
@@ -27,6 +27,7 @@ use crate::mysql_connector::{MySqlBinlogConnector, MySqlReplicator};
 use crate::postgres_connector::{
     PostgresPosition, PostgresReplicator, PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
 };
+use crate::table_filter::TableFilter;
 
 /// Shared configuration for replication.
 ///
@@ -61,6 +62,10 @@ pub struct Config {
     #[clap(long, hide = true, default_value = "30", parse(try_from_str = duration_from_seconds))]
     #[serde(default = "default_replicator_restart_timeout")]
     pub replicator_restart_timeout: Duration,
+
+    #[clap(long, env = "REPLICATION_TABLES")]
+    #[serde(default)]
+    pub replication_tables: Option<RedactedString>,
 }
 
 fn default_replicator_restart_timeout() -> Duration {
@@ -78,6 +83,7 @@ impl Default for Config {
             disable_replication_ssl_verification: false,
             replication_server_id: Default::default(),
             replicator_restart_timeout: Duration::from_secs(30),
+            replication_tables: Default::default(),
         }
     }
 }
@@ -85,6 +91,7 @@ impl Default for Config {
 #[derive(Debug)]
 pub(crate) enum ReplicationAction {
     TableAction {
+        namespace: String,
         table: String,
         actions: Vec<TableOperation>,
         /// The transaction id of a table write operation. Each
@@ -94,6 +101,7 @@ pub(crate) enum ReplicationAction {
         txid: Option<u64>,
     },
     SchemaChange {
+        namespace: String,
         ddl: String,
     },
     LogPosition,
@@ -136,6 +144,8 @@ pub struct NoriaAdapter {
     /// replication at the *minimum* replication offset, but ignore any replication events that
     /// come before the offset for that table
     replication_offsets: ReplicationOffsets,
+    /// Filters out changes we are not interested in
+    table_filter: TableFilter,
 }
 
 impl NoriaAdapter {
@@ -179,18 +189,29 @@ impl NoriaAdapter {
     async fn start_inner_mysql(
         mysql_options: mysql::Opts,
         mut noria: ControllerHandle,
-        config: Config,
+        mut config: Config,
         ready_notify: Option<Arc<Notify>>,
     ) -> ReadySetResult<!> {
         use crate::mysql_connector::BinlogPosition;
         // Load the replication offset for all tables and the schema from Noria
         let mut replication_offsets = noria.replication_offsets().await?;
+
+        let table_filter = TableFilter::try_new(
+            nom_sql::Dialect::MySQL,
+            config.replication_tables.take(),
+            mysql_options.db_name(),
+        )?;
+
         let pos = match replication_offsets.max_offset()? {
             None => {
                 let span = info_span!("taking database snapshot");
                 let replicator_options = mysql_options.clone();
                 let pool = mysql::Pool::new(replicator_options);
-                let replicator = MySqlReplicator { pool, tables: None };
+
+                let replicator = MySqlReplicator {
+                    pool,
+                    table_filter: table_filter.clone(),
+                };
 
                 let snapshot_start = Instant::now();
                 counter!(
@@ -198,6 +219,7 @@ impl NoriaAdapter {
                     1u64,
                     "status" => SnapshotStatusTag::Started.value(),
                 );
+
                 span.in_scope(|| info!("Starting snapshot"));
                 let snapshot_result = replicator
                     .snapshot_to_noria(&mut noria, &replication_offsets, true)
@@ -246,22 +268,12 @@ impl NoriaAdapter {
             Some(pos) => pos.clone().into(),
         };
 
-        let schemas = mysql_options
-            .db_name()
-            .map(|s| vec![s.to_string()])
-            .unwrap_or_default();
-
         // TODO: it is possible that the binlog position from noria is no longer
         // present on the primary, in which case the connection will fail, and we would
         // need to perform a new snapshot
         let connector = Box::new(
-            MySqlBinlogConnector::connect(
-                mysql_options,
-                schemas,
-                pos.clone(),
-                config.replication_server_id,
-            )
-            .await?,
+            MySqlBinlogConnector::connect(mysql_options, pos.clone(), config.replication_server_id)
+                .await?,
         );
 
         let mut adapter = NoriaAdapter {
@@ -270,6 +282,7 @@ impl NoriaAdapter {
             replication_offsets,
             mutator_map: HashMap::new(),
             warned_missing_tables: HashSet::new(),
+            table_filter,
         };
 
         let mut current_pos: ReplicationOffset = pos.try_into()?;
@@ -305,13 +318,19 @@ impl NoriaAdapter {
     async fn start_inner_postgres(
         pgsql_opts: pgsql::Config,
         mut noria: ControllerHandle,
-        config: Config,
+        mut config: Config,
         ready_notify: Option<Arc<Notify>>,
     ) -> ReadySetResult<!> {
         // Attempt to retreive the latest replication offset from noria, if none is present
         // begin the snapshot process
         let replication_offsets = noria.replication_offsets().await?;
         let pos = replication_offsets.max_offset()?.map(Into::into);
+
+        let table_filter = TableFilter::try_new(
+            nom_sql::Dialect::PostgreSQL,
+            config.replication_tables.take(),
+            Some("public"),
+        )?;
 
         if let Some(pos) = pos {
             info!(wal_position = %pos);
@@ -366,6 +385,7 @@ impl NoriaAdapter {
             replication_offsets,
             mutator_map: HashMap::new(),
             warned_missing_tables: HashSet::new(),
+            table_filter,
         };
 
         adapter
@@ -378,15 +398,29 @@ impl NoriaAdapter {
     /// Apply a DDL string to noria with the current log position
     async fn handle_ddl_change(
         &mut self,
+        namespace: String,
         ddl: String,
         pos: ReplicationOffset,
     ) -> ReadySetResult<()> {
-        match future::ready(ddl.try_into())
-            .and_then(|changelist| async {
-                self.noria
-                    .extend_recipe_with_offset(changelist, &pos, false)
-                    .await
-            })
+        let mut changelist: ChangeList = match ddl.try_into() {
+            Ok(changelist) => changelist,
+            Err(e) => {
+                error!(error = %e, "Error extending recipe, DDL statement will not be used");
+                counter!(recorded::REPLICATOR_FAILURE, 1u64,);
+                return Ok(());
+            }
+        };
+
+        // Remove DDL changes outside the filtered scope
+        changelist.changes.retain(|change| match change {
+            Change::CreateTable(stmt) => self.table_filter.contains(&namespace, &stmt.table.name),
+            Change::AlterTable(stmt) => self.table_filter.contains(&namespace, &stmt.table.name),
+            _ => true,
+        });
+
+        match self
+            .noria
+            .extend_recipe_with_offset(changelist, &pos, false)
             .await
         {
             // ReadySet likely entered an invalid state, fail the replicator.
@@ -435,11 +469,14 @@ impl NoriaAdapter {
     /// Send table actions to noria tables, and update the binlog position for the table
     async fn handle_table_actions(
         &mut self,
+        _namespace: String,
         table: String,
         mut actions: Vec<TableOperation>,
         txid: Option<u64>,
         pos: ReplicationOffset,
     ) -> ReadySetResult<()> {
+        // TODO(vlad): have to handle namespace when mutators support it
+
         // Send the rows as are
         let table_mutator = if let Some(table) = self.mutator_for_table(&table).await? {
             table
@@ -462,12 +499,11 @@ impl NoriaAdapter {
         actions.push(TableOperation::SetReplicationOffset(pos.clone()));
         table_mutator.perform_all(actions).await?;
 
-        // If there was a transaction id associated, propagate the
-        // timestamp with that transaction id
-        // TODO(justin): Make this operation atomic with the table
-        // actions being pushed above.
-        // TODO(vlad): We have to propagate txid to every table or
-        // else we won't be able to ensure proper read after write
+        // If there was a transaction id associated, propagate the timestamp with that transaction
+        // id.
+        // TODO(justin): Make this operation atomic with the table actions being pushed above.
+        // TODO(vlad): We have to propagate txid to every table or else we won't be able to ensure
+        // proper read after write
         if let Some(tx) = txid {
             let mut timestamp = Timestamp::default();
             timestamp.map.insert(table_mutator.node, tx);
@@ -490,7 +526,8 @@ impl NoriaAdapter {
         pos: ReplicationOffset,
         catchup: bool,
     ) -> ReadySetResult<()> {
-        // First check if we should skip this action due to insufficient log position
+        // First check if we should skip this action due to insufficient log position or lack of
+        // interest
         match &action {
             ReplicationAction::SchemaChange { .. } | ReplicationAction::LogPosition => {
                 match &self.replication_offsets.schema {
@@ -503,7 +540,9 @@ impl NoriaAdapter {
                     _ => {}
                 }
             }
-            ReplicationAction::TableAction { table, .. } => {
+            ReplicationAction::TableAction {
+                namespace, table, ..
+            } => {
                 match self.replication_offsets.tables.get(table.as_str()) {
                     Some(Some(cur)) if pos <= *cur => {
                         if !catchup {
@@ -513,16 +552,26 @@ impl NoriaAdapter {
                     }
                     _ => {}
                 }
+
+                if !self.table_filter.contains(namespace, table) {
+                    return Ok(());
+                }
             }
         }
 
         match action {
-            ReplicationAction::SchemaChange { ddl } => self.handle_ddl_change(ddl, pos).await,
+            ReplicationAction::SchemaChange { namespace, ddl } => {
+                self.handle_ddl_change(namespace, ddl, pos).await
+            }
             ReplicationAction::TableAction {
+                namespace,
                 table,
                 actions,
                 txid,
-            } => self.handle_table_actions(table, actions, txid, pos).await,
+            } => {
+                self.handle_table_actions(namespace, table, actions, txid, pos)
+                    .await
+            }
             ReplicationAction::LogPosition => self.handle_log_position(pos).await,
         }
     }

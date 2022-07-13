@@ -16,11 +16,17 @@ use tracing::{debug, error, trace};
 
 use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
 
+struct Relation {
+    namespace: String,
+    table: String,
+    mapping: RelationMapping,
+}
+
 pub struct WalReader {
     /// The handle to the log stream itself
     wal: pgsql::client::Responses,
     /// Keeps track of the relation mappings that we had
-    relations: HashMap<i32, (String, RelationMapping)>,
+    relations: HashMap<i32, Relation>,
 }
 
 #[derive(Debug)]
@@ -28,23 +34,28 @@ pub enum WalEvent {
     WantsKeepaliveResponse,
     Commit,
     Insert {
+        namespace: String,
         table: String,
         tuple: Vec<DataType>,
     },
     DeleteRow {
+        namespace: String,
         table: String,
         tuple: Vec<DataType>,
     },
     DeleteByKey {
+        namespace: String,
         table: String,
         key: Vec<DataType>,
     },
     UpdateRow {
+        namespace: String,
         table: String,
         old_tuple: Vec<DataType>,
         new_tuple: Vec<DataType>,
     },
     UpdateByKey {
+        namespace: String,
         table: String,
         key: Vec<DataType>,
         set: Vec<noria::Modification>,
@@ -90,22 +101,41 @@ impl WalReader {
                 WalRecord::Relation(mapping) => {
                     // Store the relation in the hash map for future use
                     let id = mapping.id;
-                    let name = String::from_utf8(mapping.name.to_vec()).map_err(|v| {
+                    let namespace = String::from_utf8(mapping.namespace.to_vec()).map_err(|v| {
                         ReadySetError::ReplicationFailed(format!(
                             "Non UTF8 name {:?}",
                             v.as_bytes()
                         ))
                     })?;
-                    relations.insert(id, (name, mapping));
+                    let table = String::from_utf8(mapping.name.to_vec()).map_err(|v| {
+                        ReadySetError::ReplicationFailed(format!(
+                            "Non UTF8 name {:?}",
+                            v.as_bytes()
+                        ))
+                    })?;
+                    relations.insert(
+                        id,
+                        Relation {
+                            namespace,
+                            table,
+                            mapping,
+                        },
+                    );
                 }
                 WalRecord::Insert {
                     relation_id,
                     new_tuple,
                 } => {
-                    if let Some((name, mapping)) = relations.get(&relation_id) {
+                    if let Some(Relation {
+                        namespace,
+                        table,
+                        mapping,
+                    }) = relations.get(&relation_id)
+                    {
                         return Ok((
                             WalEvent::Insert {
-                                table: name.clone(),
+                                namespace: namespace.clone(),
+                                table: table.clone(),
                                 tuple: new_tuple.into_noria_vec(mapping, false)?,
                             },
                             end,
@@ -123,14 +153,20 @@ impl WalReader {
                     old_tuple,
                     new_tuple,
                 } => {
-                    if let Some((name, mapping)) = relations.get(&relation_id) {
+                    if let Some(Relation {
+                        namespace,
+                        table,
+                        mapping,
+                    }) = relations.get(&relation_id)
+                    {
                         // We only ever going to have a `key_tuple` *OR* `old_tuple` *OR* neither
                         if let Some(old_tuple) = old_tuple {
                             // This happens when there is no key defined for the table and `REPLICA
                             // IDENTITY` is set to `FULL`
                             return Ok((
                                 WalEvent::UpdateRow {
-                                    table: name.clone(),
+                                    namespace: namespace.clone(),
+                                    table: table.clone(),
                                     old_tuple: old_tuple.into_noria_vec(mapping, false)?,
                                     new_tuple: new_tuple.into_noria_vec(mapping, false)?,
                                 },
@@ -140,7 +176,8 @@ impl WalReader {
                             // This happens when the update is modifying the key column
                             return Ok((
                                 WalEvent::UpdateByKey {
-                                    table: name.clone(),
+                                    namespace: namespace.clone(),
+                                    table: table.clone(),
                                     key: key_tuple.into_noria_vec(mapping, true)?,
                                     set: new_tuple
                                         .into_noria_vec(mapping, false)?
@@ -156,7 +193,8 @@ impl WalReader {
                             // key value from the tuple as is
                             return Ok((
                                 WalEvent::UpdateByKey {
-                                    table: name.clone(),
+                                    namespace: namespace.clone(),
+                                    table: table.clone(),
                                     key: new_tuple.clone().into_noria_vec(mapping, true)?,
                                     set: new_tuple
                                         .into_noria_vec(mapping, false)?
@@ -174,14 +212,20 @@ impl WalReader {
                     key_tuple,
                     old_tuple,
                 } => {
-                    if let Some((name, mapping)) = relations.get(&relation_id) {
+                    if let Some(Relation {
+                        namespace,
+                        table,
+                        mapping,
+                    }) = relations.get(&relation_id)
+                    {
                         // We only ever going to have a `key_tuple` *OR* `old_tuple`
                         if let Some(old_tuple) = old_tuple {
                             // This happens when there is no key defined for the table and `REPLICA
                             // IDENTITY` is set to `FULL`
                             return Ok((
                                 WalEvent::DeleteRow {
-                                    table: name.clone(),
+                                    namespace: namespace.clone(),
+                                    table: table.clone(),
                                     tuple: old_tuple.into_noria_vec(mapping, false)?,
                                 },
                                 end,
@@ -189,7 +233,8 @@ impl WalReader {
                         } else if let Some(key_tuple) = key_tuple {
                             return Ok((
                                 WalEvent::DeleteByKey {
-                                    table: name.clone(),
+                                    namespace: namespace.clone(),
+                                    table: table.clone(),
                                     key: key_tuple.into_noria_vec(mapping, true)?,
                                 },
                                 end,

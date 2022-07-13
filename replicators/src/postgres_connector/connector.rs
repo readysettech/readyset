@@ -364,6 +364,17 @@ impl Drop for PostgresWalConnector {
     }
 }
 
+struct CurTable {
+    ns: String,
+    tbl: String,
+}
+
+impl CurTable {
+    fn is(&self, ns: &str, tbl: &str) -> bool {
+        self.ns == ns && self.tbl == tbl
+    }
+}
+
 #[async_trait]
 impl Connector for PostgresWalConnector {
     /// Process WAL events and batch them into actions
@@ -375,7 +386,10 @@ impl Connector for PostgresWalConnector {
         // Calling the Noria API is a bit expensive, therefore we try to queue as many
         // actions as possible before calling into the API.
         const MAX_QUEUED_ACTIONS: usize = 100;
-        let mut cur_table = String::new();
+        let mut cur_table = CurTable {
+            ns: String::new(),
+            tbl: String::new(),
+        };
         let mut cur_lsn: PostgresPosition = 0.into();
         let mut actions = Vec::with_capacity(MAX_QUEUED_ACTIONS);
 
@@ -384,7 +398,8 @@ impl Connector for PostgresWalConnector {
             if actions.len() > MAX_QUEUED_ACTIONS {
                 return Ok((
                     ReplicationAction::TableAction {
-                        table: cur_table,
+                        namespace: cur_table.ns,
+                        table: cur_table.tbl,
                         actions,
                         txid: None,
                     },
@@ -402,25 +417,37 @@ impl Connector for PostgresWalConnector {
             // Check if next event is for another table, in which case we have to flush the events
             // accumulated for this table and store the next event in `peek`.
             match &event {
-                WalEvent::Insert { table, .. }
-                | WalEvent::DeleteRow { table, .. }
-                | WalEvent::DeleteByKey { table, .. }
-                | WalEvent::UpdateRow { table, .. }
-                | WalEvent::UpdateByKey { table, .. }
-                    if table.as_str() != cur_table =>
-                {
+                WalEvent::Insert {
+                    namespace, table, ..
+                }
+                | WalEvent::DeleteRow {
+                    namespace, table, ..
+                }
+                | WalEvent::DeleteByKey {
+                    namespace, table, ..
+                }
+                | WalEvent::UpdateRow {
+                    namespace, table, ..
+                }
+                | WalEvent::UpdateByKey {
+                    namespace, table, ..
+                } if !cur_table.is(namespace, table) => {
                     if !actions.is_empty() {
                         self.peek = Some((event, lsn));
                         return Ok((
                             ReplicationAction::TableAction {
-                                table: cur_table,
+                                namespace: cur_table.ns,
+                                table: cur_table.tbl,
                                 actions,
                                 txid: None,
                             },
                             cur_lsn.into(),
                         ));
                     } else {
-                        cur_table = table.clone();
+                        cur_table = CurTable {
+                            ns: namespace.clone(),
+                            tbl: table.clone(),
+                        };
                     }
                 }
                 _ => {}
@@ -433,6 +460,7 @@ impl Connector for PostgresWalConnector {
                     if actions.is_empty() {
                         return Ok((
                             ReplicationAction::SchemaChange {
+                                namespace: ddl_event.schema().to_string(),
                                 ddl: ddl_event.to_ddl(),
                             },
                             PostgresPosition::from(lsn).into(),
@@ -441,7 +469,8 @@ impl Connector for PostgresWalConnector {
                         self.peek = Some((event, lsn));
                         return Ok((
                             ReplicationAction::TableAction {
-                                table: cur_table,
+                                namespace: cur_table.ns,
+                                table: cur_table.tbl,
                                 actions,
                                 txid: None,
                             },
@@ -468,7 +497,8 @@ impl Connector for PostgresWalConnector {
                         // comming
                         return Ok((
                             ReplicationAction::TableAction {
-                                table: cur_table,
+                                namespace: cur_table.ns,
+                                table: cur_table.tbl,
                                 actions,
                                 txid: None,
                             },
