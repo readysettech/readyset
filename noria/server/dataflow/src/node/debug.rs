@@ -182,8 +182,8 @@ impl Node {
                     ));
                 }
                 NodeType::Ingress => s.push_str(&format!(
-                    "{{ {{ {} {} }} | (ingress) | {} }}",
-                    addr, materialized, sharding
+                    "{{ {{ {} {} {} }} | (ingress) | {} }}",
+                    addr, materialized, key_count_str, sharding
                 )),
                 NodeType::Egress { .. } => {
                     s.push_str(&format!("{{ {} | (egress) | {} }}", addr, sharding))
