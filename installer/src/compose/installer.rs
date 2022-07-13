@@ -380,6 +380,7 @@ impl<'a> ComposeInstaller<'a> {
         let deployment_name = self.deployment.name().to_owned();
         let db_type = self.deployment.db_type;
         self.compose_deployment()?
+            .set_name(deployment_name.clone())?
             .set_db_name(deployment_name)?
             .set_db_password()?
             .set_adapter_port(db_type)?

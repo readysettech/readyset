@@ -450,6 +450,13 @@ impl DockerComposeDeployment {
         }
     }
 
+    // Sets the deployment name
+    // Used as a default database name
+    pub fn set_name(&mut self, name: String) -> Result<&mut DockerComposeDeployment> {
+        self.name = Some(name);
+        Ok(self)
+    }
+
     /// Sets the underlying database name to the supplied name String.
     pub fn set_db_name(&mut self, name: String) -> Result<&mut DockerComposeDeployment> {
         if self.mysql_db_name.is_some() {
@@ -491,13 +498,19 @@ impl DockerComposeDeployment {
             .with_prompt(format!("Backing {db_type} password"))
             .with_confirmation("Confirm password", "Passwords mismatching")
             .interact()?;
+        self.mysql_db_name = Some(
+            input()
+                .with_prompt(format!("Backing {db_type} database name"))
+                .default(self.name.clone().unwrap_or_default())
+                .interact_text()?,
+        );
 
         let protocol = db_type.to_string().to_lowercase();
-        let db_name = self.mysql_db_name.as_ref().ok_or_else(|| {
-            anyhow!("Database name unset when attempting to create connection string")
-        })?;
         self.db_connection_string = Some(format!(
             "{protocol}://{username}:{password}@{address}/{db_name}",
+            db_name = self.mysql_db_name.as_ref().ok_or_else(|| {
+                anyhow!("Database name unset when attempting to create connection string")
+            })?
         ));
 
         Ok(self)
