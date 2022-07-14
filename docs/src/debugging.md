@@ -211,11 +211,18 @@ In a dataflow graphviz diagram:
         node 4
     - For [base table][base] nodes, there is the letter "B" in place of the
       ingredient description, which is short for "Base"
-    - Finally in the title section is an optional representation of the
-      *statefulness* of the node. Fully materialized nodes have a filled circle
-      ("●"), whereas partially materialized nodes have a three-quarters-filled
-      circle ("◕"). Note that base nodes are by definition always fully
-      materialized
+    - The title section can optionally contain a representation of the
+      *statefulness* of the node. This includes a symbol that indicates
+      partial vs. full materialization, followed by a key count.
+      - Fully materialized nodes have a filled circle ("●"), whereas partially
+        materialized nodes have a three-quarters-filled circle ("◕"). Note that
+        [base][] nodes are by definition always fully materialized.
+      - After the materialization symbol, a key count is contained in
+        parenthesis. For most nodes, this is a precise count of the number of
+        keys that the node contains in memory. However, since [base][] nodes are
+        backed on disk via [RocksDB][rocksdb], it is non-trivial to obtain an accurate key
+        count, and instead an estimate of the row count is given, with a tilde
+        (~) prefixing the count to indicate that it is not necessarily precise.
   - Following the title, for [internal][] and [base][] nodes, is a list of the
     column indices and names in that node.
   - In the place of columns, [ingress][] and [egress][] nodes contain just the
@@ -240,6 +247,7 @@ In a dataflow graphviz diagram:
 [egress]: /rustdoc/noria_dataflow/node/special/struct.Egress.html
 [reader]: /rustdoc/noria_dataflow/node/special/reader/struct.Reader.html
 [index type]: /rustdoc/noria_dataflow/prelude/enum.IndexType.html
+[rocksdb]: /rustdoc/rocksdb/index.html
 
 #### Sharding
 
