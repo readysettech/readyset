@@ -223,6 +223,9 @@ steps:
                 - Cargo.toml
                 - rust-toolchain
 
+            - label: ":cloud: ReadySet Cloud"
+              include: "readyset-cloud/**"
+
   - wait: ~
     continue_on_failure: true
 

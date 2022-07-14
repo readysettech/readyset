@@ -1,6 +1,7 @@
 {
   "private": true,
   "scripts": {
+    "ci": "pnpm run format:check && pnpm run typecheck && pnpm run lint && pnpm run test",
     "format": "prettier --write \"./**/*.{ts,mts,cts,tsx,js,mjs,cjs,jsx,json,md,css}\"",
     "format:check": "prettier --list-different \"./**/*.{ts,mts,cts,tsx,js,mjs,cjs,jsx,json,md,css}\"",
     "lint": "eslint .",

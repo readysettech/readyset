@@ -1,0 +1,7 @@
+steps:
+  - name: ":node:"
+    command: pnpm run ci
+    plugins:
+      - docker-compose#v3.10.0:
+          run: app
+          config: readyset-cloud/docker-compose.yml
