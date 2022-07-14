@@ -80,7 +80,8 @@ use launchpad::redacted::Sensitive;
 use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
     CacheInner, CreateCacheStatement, DeleteStatement, Dialect, DropCacheStatement,
-    InsertStatement, SelectStatement, ShowStatement, SqlIdentifier, SqlQuery, UpdateStatement,
+    InsertStatement, SelectStatement, SetStatement, ShowStatement, SqlIdentifier, SqlQuery,
+    UpdateStatement,
 };
 use noria::consistency::Timestamp;
 use noria::results::Results;
@@ -172,9 +173,16 @@ enum ProxyState {
     /// This is the initial behavior used when an upstream database is configured for a backend
     Fallback,
 
-    /// We are inside a transaction, so proxy all statements upstream, but return to
-    /// [`ProxyState::Fallback`] when the transaction is finished
+    /// We are inside an explicit transaction (received a BEGIN or START TRANSACTION packet), so
+    /// proxy all statements upstream, but return to [`ProxyState::Fallback`] when the transaction
+    /// is finished. This state does not apply to transactions formed by `SET autocommit=0`.
     InTransaction,
+
+    /// We are inside of an implicit transaction due to autocommit being turned off. This means
+    /// that every time we get COMMIT or ROLLBACK, we instantly start a new transaction. All
+    /// statements are proxied upstream unless we receive a `SET autocommit=1` statement, which
+    /// would turn autocommit back on.
+    AutocommitOff,
 
     /// Unconditionally proxy all statements upstream, and do not leave this state when leaving
     /// transactions. The backend enters this state when it receives an unsupported SQL `SET`
@@ -189,7 +197,10 @@ impl ProxyState {
     /// Returns true if a query should be unconditionally proxied upstream per this [`ProxyState`]
     #[must_use]
     fn should_proxy(&self) -> bool {
-        matches!(self, Self::InTransaction | Self::ProxyAlways)
+        matches!(
+            self,
+            Self::AutocommitOff | Self::InTransaction | Self::ProxyAlways
+        )
     }
 
     /// Perform the appropriate state transition for this proxy state to begin a new transaction.
@@ -201,8 +212,23 @@ impl ProxyState {
 
     /// Perform the appropriate state transition for this proxy state to end a transaction
     fn end_transaction(&mut self) {
-        if !matches!(self, Self::Never | Self::ProxyAlways) {
+        if !matches!(self, Self::Never | Self::ProxyAlways | Self::AutocommitOff) {
             *self = ProxyState::Fallback;
+        }
+    }
+
+    /// Sets the autocommit state accordingly. If turning autcommit on, will set ProxyState to
+    /// Fallback as long as current state is AutocommitOff.
+    ///
+    /// If turning autocommit off, will set state to AutocommitOff as long as state is not
+    /// currently ProxyAlways or Never, as these states should not be overwritten.
+    fn set_autocommit(&mut self, on: bool) {
+        if on {
+            if matches!(self, Self::AutocommitOff) {
+                *self = ProxyState::Fallback;
+            }
+        } else if !matches!(self, Self::ProxyAlways | Self::Never) {
+            *self = ProxyState::AutocommitOff;
         }
     }
 
@@ -1639,6 +1665,11 @@ where
             Ok(ref parsed_query) if let Some(noria_extension) = self.query_noria_extensions(parsed_query, &mut event).await => {
                 noria_extension.map(Into::into).map_err(Into::into)
             }
+            // SET autocommit=1 needs to be handled explicitly or it will end up getting proxied in
+            // most cases.
+            Ok(SqlQuery::Set(s)) if let Some(true) = Handler::autocommit_state(&s) => {
+                self.query_adhoc_non_select(query, &mut event, SqlQuery::Set(s)).await
+            }
             // Parsed but proxy mode means we should send upstream
             Ok(_) if self.proxy_state.should_proxy() => self.query_fallback(query, &mut event).await,
             Ok(ref parsed_query) if Handler::requires_fallback(parsed_query) => {
@@ -1705,6 +1736,55 @@ where
         }
     }
 
+    /// Handles a parsed set statement.
+    ///
+    /// If we have an upstream then we will pass valid set statements across to that upstream.
+    /// If no upstream is present we will ignore the statement
+    /// Disallowed set statements always produce an error
+    fn handle_set(
+        &mut self,
+        query: &str,
+        set: &SetStatement,
+        event: &mut QueryExecutionEvent,
+    ) -> Result<(), DB::Error> {
+        if !Handler::is_set_allowed(set) {
+            warn!(%set, "received unsupported SET statement");
+            match self.unsupported_set_mode {
+                UnsupportedSetMode::Error => {
+                    let e = ReadySetError::SetDisallowed {
+                        statement: query.to_string(),
+                    };
+                    if self.has_fallback() {
+                        event.set_noria_error(&e);
+                    }
+                    return Err(e.into());
+                }
+                UnsupportedSetMode::Proxy => {
+                    self.proxy_state = ProxyState::ProxyAlways;
+                }
+                UnsupportedSetMode::Allow => {}
+            }
+        } else if let Some(on) = Handler::autocommit_state(set) {
+            warn!(%set, "received unsupported SET statement");
+            match self.unsupported_set_mode {
+                UnsupportedSetMode::Error if !on => {
+                    let e = ReadySetError::SetDisallowed {
+                        statement: query.to_string(),
+                    };
+                    if self.has_fallback() {
+                        event.set_noria_error(&e);
+                    }
+                    return Err(e.into());
+                }
+                UnsupportedSetMode::Proxy => {
+                    self.proxy_state.set_autocommit(on);
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     #[instrument(level = "trace", name = "query", skip_all)]
     async fn query_adhoc_non_select<'a>(
         &'a mut self,
@@ -1714,28 +1794,8 @@ where
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let parsed_query = &parse_result;
 
-        // If we have an upstream then we will pass valid set statements across to that upstream.
-        // If no upstream is present we will ignore the statement
-        // Disallowed set statements always produce an error
         if let SqlQuery::Set(s) = parsed_query {
-            if !Handler::is_set_allowed(s) {
-                warn!(%s, "received unsupported SET statement");
-                match self.unsupported_set_mode {
-                    UnsupportedSetMode::Error => {
-                        let e = ReadySetError::SetDisallowed {
-                            statement: parsed_query.to_string(),
-                        };
-                        if self.has_fallback() {
-                            event.set_noria_error(&e);
-                        }
-                        return Err(e.into());
-                    }
-                    UnsupportedSetMode::Proxy => {
-                        self.proxy_state = ProxyState::ProxyAlways;
-                    }
-                    UnsupportedSetMode::Allow => {}
-                }
-            }
+            self.handle_set(query, s, event)?;
         }
 
         macro_rules! handle_ddl {

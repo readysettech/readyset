@@ -1,6 +1,6 @@
 use mysql_async::prelude::*;
 use mysql_async::{Conn, Result, Row, Statement};
-use noria_client::backend::MigrationMode;
+use noria_client::backend::{MigrationMode, QueryInfo, UnsupportedSetMode};
 use noria_client::query_status_cache::QueryStatusCache;
 use noria_client_metrics::QueryDestination;
 use noria_client_test_helpers::mysql_helpers::{last_query_info, query_cache_setup};
@@ -18,6 +18,7 @@ async fn in_request_path_query_with_fallback() {
         query_status_cache.clone(),
         true, // fallback enabled
         MigrationMode::InRequestPath,
+        UnsupportedSetMode::Error,
     )
     .await;
     let mut conn = Conn::new(opts).await.unwrap();
@@ -63,6 +64,7 @@ async fn in_request_path_query_without_fallback() {
         query_status_cache.clone(),
         false, // fallback disabled
         MigrationMode::InRequestPath,
+        UnsupportedSetMode::Error,
     )
     .await;
 
@@ -93,6 +95,7 @@ async fn out_of_band_query_with_fallback() {
         query_status_cache.clone(),
         true, // fallback enabled
         MigrationMode::OutOfBand,
+        UnsupportedSetMode::Error,
     )
     .await;
 
@@ -132,6 +135,74 @@ async fn out_of_band_query_with_fallback() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn autocommit_state() {
+    let _query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
+    let (opts, _handle) = query_cache_setup(
+        _query_status_cache.clone(),
+        true, // fallback enabled
+        MigrationMode::OutOfBand,
+        UnsupportedSetMode::Proxy,
+    )
+    .await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TABLE test (x int, y int)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.query_drop("INSERT INTO test (x, y) VALUES (4, 2)")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM test")
+        .await
+        .unwrap();
+    sleep().await;
+
+    conn.query_drop("SELECT * FROM test").await.unwrap();
+    sleep().await;
+
+    // We should initially go to ReadySet because no unsupported SET has been sent, and we can
+    // support this query.
+    let destination: QueryInfo = conn
+        .query_first("EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(destination.destination, QueryDestination::Readyset);
+
+    conn.query_drop("SET autocommit=0").await.unwrap();
+    sleep().await;
+
+    conn.query_drop("SELECT * FROM test").await.unwrap();
+    sleep().await;
+
+    // After turning off autocommit we should send to upstream because this is unsupported.
+    let destination: QueryInfo = conn
+        .query_first("EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(destination.destination, QueryDestination::Upstream);
+
+    conn.query_drop("SET autocommit=1").await.unwrap();
+    sleep().await;
+
+    conn.query_drop("SELECT * FROM test").await.unwrap();
+    sleep().await;
+
+    // Turning autocommit back on should cause us to then send back to ReadySet.
+    let destination: QueryInfo = conn
+        .query_first("EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(destination.destination, QueryDestination::Readyset);
+}
+
 // With in_request_path migration and fallback, a supported query should execute on Noria
 // and be marked allowed on completion, an unsupported query should execute on Noria
 // and then fallback, and be marked denied.
@@ -143,6 +214,7 @@ async fn in_request_path_prep_exec_with_fallback() {
         query_status_cache.clone(),
         true, // fallback enabled
         MigrationMode::InRequestPath,
+        UnsupportedSetMode::Error,
     )
     .await;
 
@@ -220,6 +292,7 @@ async fn in_request_path_prep_without_fallback() {
         query_status_cache.clone(),
         false, // fallback disabled
         MigrationMode::InRequestPath,
+        UnsupportedSetMode::Error,
     )
     .await;
 
@@ -250,6 +323,7 @@ async fn out_of_band_prep_exec_with_fallback() {
         query_status_cache.clone(),
         true, // fallback enabled
         MigrationMode::OutOfBand,
+        UnsupportedSetMode::Error,
     )
     .await;
 
@@ -345,6 +419,7 @@ async fn in_request_path_rewritten_query_without_fallback() {
         query_status_cache.clone(),
         false, // fallback disabled
         MigrationMode::InRequestPath,
+        UnsupportedSetMode::Error,
     )
     .await;
 
@@ -377,6 +452,7 @@ async fn out_of_band_rewritten_query_without_fallback() {
         query_status_cache.clone(),
         false, // fallback disabled
         MigrationMode::OutOfBand,
+        UnsupportedSetMode::Error,
     )
     .await;
 
@@ -404,6 +480,7 @@ async fn drop_all_caches() {
         query_status_cache,
         false, // fallback disabled
         MigrationMode::OutOfBand,
+        UnsupportedSetMode::Error,
     )
     .await;
 

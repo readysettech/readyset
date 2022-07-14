@@ -20,4 +20,11 @@ pub trait QueryHandler: Sized + Send {
     /// hence cannot change the behavior of upstream queries in a way that would not also be
     /// reflected by ReadySet
     fn is_set_allowed(stmt: &nom_sql::SetStatement) -> bool;
+
+    /// Checks if the set is trying to set the autocommit state.
+    ///
+    /// Some(true) if SET autocommit=1.
+    /// Some(false) if SET autocommit=0.
+    /// None if not autocommit related SET.
+    fn autocommit_state(stmt: &nom_sql::SetStatement) -> Option<bool>;
 }

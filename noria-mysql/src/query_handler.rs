@@ -173,6 +173,7 @@ lazy_static! {
         "authentication_policy",
         "auto_increment_increment",
         "auto_increment_offset",
+        "autocommit",
         "automatic_sp_privileges",
         "avoid_temporal_upgrade",
         "big_tables",
@@ -890,9 +891,6 @@ impl QueryHandler for MySqlQueryHandler {
                         "time_zone" => {
                             matches!(value, Expr::Literal(Literal::String(ref s)) if s == "+00:00")
                         }
-                        "autocommit" => {
-                            matches!(value, Expr::Literal(Literal::Integer(i)) if *i == 1)
-                        }
                         "sql_mode" => {
                             if let Expr::Literal(Literal::String(ref s)) = value {
                                 match raw_sql_modes_to_list(&s[..]) {
@@ -927,6 +925,20 @@ impl QueryHandler for MySqlQueryHandler {
                     && matches!(&names.charset[..], "latin1" | "utf8" | "utf8mb4")
             }
             nom_sql::SetStatement::PostgresParameter(_) => false,
+        }
+    }
+
+    fn autocommit_state(stmt: &nom_sql::SetStatement) -> Option<bool> {
+        match stmt {
+            nom_sql::SetStatement::Variable(set) => {
+                for (var, val) in set.variables.iter() {
+                    if var.name.as_str().eq_ignore_ascii_case("autocommit") {
+                        return Some(matches!(val, Expr::Literal(Literal::Integer(i)) if *i == 1));
+                    }
+                }
+                None
+            }
+            _ => None,
         }
     }
 }
