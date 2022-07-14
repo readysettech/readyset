@@ -7,7 +7,7 @@ use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
 use launchpad::redacted::Sensitive;
 use nom_sql::{parse_key_specification_string, Dialect, TableKey};
-use noria::ReadySetResult;
+use noria::{ReadySetError, ReadySetResult};
 use noria_data::DataType;
 use postgres_types::{accepts, FromSql, Type};
 use tokio_postgres as pgsql;
@@ -89,14 +89,21 @@ impl<'a> FromSql<'a> for ConstraintDefinition {
 }
 
 impl TryFrom<pgsql::Row> for ColumnEntry {
-    type Error = pgsql::Error;
+    type Error = ReadySetError;
 
     fn try_from(row: pgsql::Row) -> Result<Self, Self::Error> {
         Ok(ColumnEntry {
             name: row.try_get(0)?,
             definition: row.try_get(1)?,
             not_null: row.try_get(2)?,
-            type_oid: Type::from_oid(row.try_get(3)?).unwrap(),
+            type_oid: Type::from_oid(row.try_get(3)?).ok_or_else(|| {
+                // Type::from_oid returns None when the oid does not refer to a Postgres type
+                #[allow(clippy::unwrap_used)] // this just worked
+                let definition: String = row.try_get(1).unwrap();
+                ReadySetError::Unsupported(format!(
+                    "ReadySet does not yet support custom types: {definition}"
+                ))
+            })?,
         })
     }
 }
@@ -154,7 +161,7 @@ impl TableEntry {
     async fn get_columns<'a>(
         oid: u32,
         transaction: &'a pgsql::Transaction<'a>,
-    ) -> Result<Vec<ColumnEntry>, pgsql::Error> {
+    ) -> Result<Vec<ColumnEntry>, ReadySetError> {
         let query = r"
             SELECT a.attname, pg_catalog.format_type(a.atttypid, a.atttypmod), a.attnotnull, a.atttypid
             FROM pg_catalog.pg_attribute a WHERE a.attrelid = $1 AND a.attnum > 0 AND NOT a.attisdropped
@@ -186,7 +193,7 @@ impl TableEntry {
     async fn get_table<'a>(
         self,
         transaction: &'a pgsql::Transaction<'a>,
-    ) -> Result<TableDescription, pgsql::Error> {
+    ) -> Result<TableDescription, ReadySetError> {
         let columns = Self::get_columns(self.oid, transaction).await?;
         let constraints = Self::get_constraints(self.oid, transaction).await?;
 
