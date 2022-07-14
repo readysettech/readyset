@@ -6,7 +6,7 @@ use mysql_async::prelude::Queryable;
 use mysql_async::Conn;
 use mysql_srv::MysqlIntermediary;
 use noria_client::backend::noria_connector::ReadBehavior;
-use noria_client::backend::{BackendBuilder, MigrationMode, QueryInfo};
+use noria_client::backend::{BackendBuilder, MigrationMode, QueryInfo, UnsupportedSetMode};
 use noria_client::query_status_cache::QueryStatusCache;
 use noria_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
 use noria_server::Handle;
@@ -122,9 +122,12 @@ pub async fn query_cache_setup(
     query_status_cache: &'static QueryStatusCache,
     fallback: bool,
     migration_mode: MigrationMode,
+    set_mode: UnsupportedSetMode,
 ) -> (mysql_async::Opts, Handle) {
     crate::setup_inner::<MySQLAdapter>(
-        BackendBuilder::new().require_authentication(false),
+        BackendBuilder::new()
+            .require_authentication(false)
+            .unsupported_set_mode(set_mode),
         if fallback {
             Some(MySQLAdapter::url())
         } else {

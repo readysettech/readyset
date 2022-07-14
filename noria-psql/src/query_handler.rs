@@ -74,6 +74,7 @@ lazy_static! {
             "autovacuum_vacuum_cost_limit",
             "autovacuum_vacuum_scale_factor",
             "autovacuum_vacuum_threshold",
+            "autocommit",
             "default_text_search_config",
             "server_encoding",
             "timezone_abbreviations",
@@ -386,6 +387,25 @@ impl QueryHandler for PostgreSqlQueryHandler {
             _ => false,
         }
     }
+
+    fn autocommit_state(stmt: &SetStatement) -> Option<bool> {
+        match stmt {
+            SetStatement::PostgresParameter(SetPostgresParameter { name, value, .. }) => {
+                if name.as_str() == "autocommit" {
+                    let allowed_values = AllowedParameterValue::one_of([
+                        PostgresParameterValue::literal(0),
+                        PostgresParameterValue::literal(false),
+                        PostgresParameterValue::identifier("off"),
+                    ]);
+                    let off = allowed_values.set_value_is_allowed(value);
+                    Some(!off)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -436,5 +456,25 @@ mod tests {
     #[test]
     fn client_encoding_utf8_allowed() {
         is_allowed("SET client_encoding = 'UTF8'");
+    }
+
+    #[test]
+    fn autcommit_state() {
+        assert_eq!(
+            PostgreSqlQueryHandler::autocommit_state(&parse_set_statement("SET autocommit = off")),
+            Some(false),
+        );
+
+        assert_eq!(
+            PostgreSqlQueryHandler::autocommit_state(&parse_set_statement("SET autocommit = on")),
+            Some(true),
+        );
+
+        assert_eq!(
+            PostgreSqlQueryHandler::autocommit_state(&parse_set_statement(
+                "SET client_encoding = 'UTF8'",
+            )),
+            None,
+        );
     }
 }
