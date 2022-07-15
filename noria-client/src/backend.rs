@@ -1783,12 +1783,12 @@ where
 
                                 let new_timestamp = timestamp_service
                                     .append_write(WriteId::MySqlGtid(identifier), affected_tables)
-                                    .map_err(|e| internal_err(e.to_string()))?;
+                                    .map_err(|e| internal_err!("{e}"))?;
 
                                 // TODO(andrew, justin): solidify error handling in client
                                 // https://app.clubhouse.io/readysettech/story/366
                                 let current_ticket = &self.ticket.as_ref().ok_or_else(|| {
-                                    internal_err("RYW enabled backends must have a current ticket")
+                                    internal_err!("RYW enabled backends must have a current ticket")
                                 })?;
 
                                 self.ticket = Some(Timestamp::join(current_ticket, &new_timestamp));

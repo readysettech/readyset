@@ -275,7 +275,7 @@ impl ReadRequestHandler {
                 return CallResult::Immediate(Err(ReadySetError::ServerShuttingDown));
             }
 
-            CallResult::Async(rx.map_ok_or_else(|e| Err(internal_err(e.to_string())), |o| o))
+            CallResult::Async(rx.map_ok_or_else(|e| Err(internal_err!("{e}")), |o| o))
         }
     }
 

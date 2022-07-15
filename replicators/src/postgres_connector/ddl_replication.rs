@@ -139,7 +139,7 @@ impl<'a> DdlEvent<'a> {
         }
 
         let kind = DdlEventKind::from_str((&tuple[1]).try_into()?)
-            .map_err(|_| internal_err("Invalid DDL event kind"))?;
+            .map_err(|_| internal_err!("Invalid DDL event kind"))?;
         let schema_name = (&tuple[2]).try_into()?;
         let object_name = (&tuple[3]).try_into()?;
         let statement = if [DdlEventKind::CreateTable, DdlEventKind::CreateView].contains(&kind) {

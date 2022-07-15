@@ -198,7 +198,7 @@ impl Ingredient for Paginate {
         let us = self.our_index.unwrap();
         let db = state
             .get(*us)
-            .ok_or_else(|| internal_err("paginate must have its own state materialized"))?;
+            .ok_or_else(|| internal_err!("paginate must have its own state materialized"))?;
 
         let mut current_group_key: Vec<DataType> = vec![];
         let mut current_group: BinaryHeap<CurrentRecord> = BinaryHeap::new();

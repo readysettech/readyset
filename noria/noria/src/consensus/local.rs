@@ -78,7 +78,7 @@ impl LocalAuthorityStore {
     fn inner_lock(&self) -> Result<MutexGuard<'_, LocalAuthorityStoreInner>, Error> {
         match self.inner.lock() {
             Ok(inner) => Ok(inner),
-            Err(e) => bail!(internal_err(format!("mutex is poisoned: '{}'", e))),
+            Err(e) => bail!(internal_err!("mutex is poisoned: '{}'", e)),
         }
     }
 
@@ -88,7 +88,7 @@ impl LocalAuthorityStore {
     ) -> Result<MutexGuard<'a, LocalAuthorityStoreInner>, Error> {
         match self.cv.wait(inner_guard) {
             Ok(inner) => Ok(inner),
-            Err(e) => bail!(internal_err(format!("mutex is poisoned: '{}'", e))),
+            Err(e) => bail!(internal_err!("mutex is poisoned: '{}'", e)),
         }
     }
 
@@ -124,14 +124,14 @@ impl LocalAuthority {
     fn inner_read(&self) -> Result<RwLockReadGuard<'_, LocalAuthorityInner>, Error> {
         match self.inner.read() {
             Ok(inner) => Ok(inner),
-            Err(e) => bail!(internal_err(format!("rwlock is poisoned: '{}'", e))),
+            Err(e) => bail!(internal_err!("rwlock is poisoned: '{}'", e)),
         }
     }
 
     fn inner_write(&self) -> Result<RwLockWriteGuard<'_, LocalAuthorityInner>, Error> {
         match self.inner.write() {
             Ok(inner) => Ok(inner),
-            Err(e) => bail!(internal_err(format!("rwlock is poisoned: '{}'", e))),
+            Err(e) => bail!(internal_err!("rwlock is poisoned: '{}'", e)),
         }
     }
 }
@@ -243,13 +243,13 @@ impl AuthorityControl for LocalAuthority {
         match store_inner.keys.get(CONTROLLER_KEY) {
             Some(data) => match serde_json::from_slice(data) {
                 Ok(payload) => Ok(payload),
-                Err(e) => bail!(internal_err(format!(
+                Err(e) => bail!(internal_err!(
                     "failed to deserialize leader payload '{}'",
                     e
-                ))),
+                )),
             },
             None => {
-                bail!(internal_err("no keys found when looking for leader"))
+                bail!(internal_err!("no keys found when looking for leader"))
             }
         }
     }

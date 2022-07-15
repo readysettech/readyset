@@ -180,10 +180,7 @@ impl SqlToMirConverter {
             .nodes
             .get(&(SqlIdentifier::from(view_name), *v))
             .ok_or_else(|| {
-                internal_err(format!(
-                    "Inconsistency: view {} does not exist at v{}",
-                    view_name, v
-                ))
+                internal_err!("Inconsistency: view {} does not exist at v{}", view_name, v)
             })?;
 
         let reuse_node = MirNode::reuse(node.clone(), self.schema_version);
@@ -458,12 +455,13 @@ impl SqlToMirConverter {
         let v = self
             .current
             .remove(name)
-            .ok_or_else(|| internal_err(format!("no query named \"{}\"?", name)))?;
+            .ok_or_else(|| internal_err!("no query named \"{}\"?", name))?;
 
         let nodeid = (name.clone(), v);
-        let leaf_mn = self.nodes.remove(&nodeid).ok_or_else(|| {
-            internal_err(format!("could not find MIR node {:?} for removal", nodeid))
-        })?;
+        let leaf_mn = self
+            .nodes
+            .remove(&nodeid)
+            .ok_or_else(|| internal_err!("could not find MIR node {:?} for removal", nodeid))?;
 
         invariant_eq!(leaf_mn.borrow().name, mq.leaf.borrow().name);
 
@@ -563,7 +561,7 @@ impl SqlToMirConverter {
                     );
                     let node_key = (name.clone(), existing_version);
                     let existing_node = self.nodes.get(&node_key).cloned().ok_or_else(|| {
-                        internal_err(format!("could not find MIR node {:?} for reuse", node_key))
+                        internal_err!("could not find MIR node {:?} for reuse", node_key)
                     })?;
                     return Ok(MirNode::reuse(existing_node, self.schema_version));
                 } else {
@@ -608,10 +606,10 @@ impl SqlToMirConverter {
                         let node_key = (name.clone(), existing_version);
                         let existing_node =
                             self.nodes.get(&node_key).cloned().ok_or_else(|| {
-                                internal_err(format!(
+                                internal_err!(
                                     "couldn't find MIR node {:?} in add/remove cols",
                                     node_key
-                                ))
+                                )
                             })?;
 
                         let mut columns: Vec<ColumnSpecification> = existing_node
@@ -629,11 +627,11 @@ impl SqlToMirConverter {
                                     .iter()
                                     .position(|cc| cc == *removed)
                                     .ok_or_else(|| {
-                                        internal_err(format!(
+                                        internal_err!(
                                             "couldn't find column \"{:#?}\", \
                                              which we're removing",
                                             removed
-                                        ))
+                                        )
                                     })?;
                             columns.remove(pos);
                         }
@@ -840,10 +838,10 @@ impl SqlToMirConverter {
 
         macro_rules! mk_error {
             ($expression:expr) => {
-                internal_err(format!(
+                internal_err!(
                     "projected_exprs does not contain {:?}",
                     Sensitive($expression)
-                ))
+                )
             };
         }
 
@@ -1352,7 +1350,7 @@ impl SqlToMirConverter {
                 let subquery_leaf = nodes
                     .iter()
                     .find(|n| n.borrow().children().is_empty())
-                    .ok_or_else(|| internal_err("MIR query missing leaf!"))?
+                    .ok_or_else(|| internal_err!("MIR query missing leaf!"))?
                     .clone();
                 pred_nodes.extend(nodes);
 
@@ -1563,7 +1561,7 @@ impl SqlToMirConverter {
                         let leaf = sub_nodes
                             .iter()
                             .find(|n| n.borrow().children().is_empty())
-                            .ok_or_else(|| internal_err("MIR query missing leaf!"))?
+                            .ok_or_else(|| internal_err!("MIR query missing leaf!"))?
                             .clone();
                         nodes_added.extend(sub_nodes);
                         if is_correlated(subquery) {
@@ -1653,9 +1651,10 @@ impl SqlToMirConverter {
             let mut column_to_predicates: HashMap<nom_sql::Column, Vec<&Expr>> = HashMap::new();
 
             for rel in &sorted_rels {
-                let qgn = qg.relations.get(*rel).ok_or_else(|| {
-                    internal_err(format!("couldn't find {:?} in qg relations", rel))
-                })?;
+                let qgn = qg
+                    .relations
+                    .get(*rel)
+                    .ok_or_else(|| internal_err!("couldn't find {:?} in qg relations", rel))?;
                 for pred in qgn.predicates.iter().chain(&qg.global_predicates) {
                     for col in pred.referred_columns() {
                         column_to_predicates
@@ -1698,9 +1697,10 @@ impl SqlToMirConverter {
             // added in a different order every time, which will yield different node identifiers
             // and make it difficult for applications to check what's going on.
             for rel in &sorted_rels {
-                let qgn = qg.relations.get(*rel).ok_or_else(|| {
-                    internal_err(format!("qg relations did not contain {:?}", rel))
-                })?;
+                let qgn = qg
+                    .relations
+                    .get(*rel)
+                    .ok_or_else(|| internal_err!("qg relations did not contain {:?}", rel))?;
                 // the following conditional is required to avoid "empty" nodes (without any
                 // projected columns) that are required as inputs to joins
                 if !qgn.predicates.is_empty() {
@@ -1712,7 +1712,7 @@ impl SqlToMirConverter {
 
                         let parent = match prev_node {
                             None => node_for_rel.get(rel).cloned().ok_or_else(|| {
-                                internal_err(format!("node_for_rel did not contain {:?}", rel))
+                                internal_err!("node_for_rel did not contain {:?}", rel)
                             })?,
                             Some(pn) => pn,
                         };
@@ -1805,7 +1805,7 @@ impl SqlToMirConverter {
                         .get(sorted_rels.last().unwrap())
                         .cloned()
                         .ok_or_else(|| {
-                            internal_err("node_for_rel does not contain final node rel")
+                            internal_err!("node_for_rel does not contain final node rel")
                         })?
                 }
             };

@@ -32,7 +32,7 @@ fn check_select_statement<'a>(
         cte_ctx: &HashMap<&'a str, &'a SelectStatement>,
     ) -> ReadySetResult<impl Iterator<Item = ReadySetResult<(&'a str, &'a str)>> + 'a> {
         let table_alias = col.table.as_ref().ok_or_else(|| {
-            internal_err("detect_problematic_self_joins must be run after expand_implied_tables")
+            internal_err!("detect_problematic_self_joins must be run after expand_implied_tables")
         })?;
 
         let table_matches =
@@ -83,10 +83,11 @@ fn check_select_statement<'a>(
                         _ => None,
                     })
                     .ok_or_else(|| {
-                        unsupported_err(format!(
+                        unsupported_err!(
                             "Could not resolve column reference {}.{}",
-                            table_alias, col_name
-                        ))
+                            table_alias,
+                            col_name
+                        )
                     })?;
                 let ctes = ctes.clone();
                 Ok(expr
@@ -131,7 +132,7 @@ fn check_select_statement<'a>(
 
             Ok(Either::Right(
                 res.ok_or_else(|| {
-                    unsupported_err(format!("Could not resolve table alias {}", table_alias))
+                    unsupported_err!("Could not resolve table alias {}", table_alias)
                 })?
                 .map(move |c| {
                     let (tbl, cn) = c?;

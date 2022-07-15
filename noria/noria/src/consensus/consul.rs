@@ -337,9 +337,9 @@ impl ConsulAuthority {
             ConsulClientSettingsBuilder::default()
                 .address(address)
                 .build()
-                .map_err(|_| internal_err("Invalid config for consul client"))?,
+                .map_err(|_| internal_err!("Invalid config for consul client"))?,
         )
-        .map_err(|_| internal_err("Failed to connect to consul client"))?;
+        .map_err(|_| internal_err!("Failed to connect to consul client"))?;
 
         let authority = Self {
             consul: client,
@@ -400,10 +400,10 @@ impl ConsulAuthority {
         if let Some(inner_mutex) = &self.inner {
             match inner_mutex.read() {
                 Ok(inner) => Ok(inner),
-                Err(e) => bail!(internal_err(format!("rwlock is poisoned: '{}'", e))),
+                Err(e) => bail!(internal_err!("rwlock is poisoned: '{}'", e)),
             }
         } else {
-            bail!(internal_err(
+            bail!(internal_err!(
                 "attempting to read inner on readonly consul authority"
             ))
         }
@@ -413,10 +413,10 @@ impl ConsulAuthority {
         if let Some(inner_mutex) = &self.inner {
             match inner_mutex.write() {
                 Ok(inner) => Ok(inner),
-                Err(e) => bail!(internal_err(format!("rwlock is poisoned: '{}'", e))),
+                Err(e) => bail!(internal_err!("rwlock is poisoned: '{}'", e)),
             }
         } else {
-            bail!(internal_err(
+            bail!(internal_err!(
                 "attempting to mutate inner on readonly consul authority"
             ))
         }

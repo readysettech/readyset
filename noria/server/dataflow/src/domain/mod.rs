@@ -1303,7 +1303,7 @@ impl Domain {
                     .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
                     .borrow_mut();
                 n.get_base_mut()
-                    .ok_or_else(|| internal_err("told to drop base column from non-base node"))?
+                    .ok_or_else(|| internal_err!("told to drop base column from non-base node"))?
                     .drop_column(column)?;
                 Ok(None)
             }
@@ -1667,7 +1667,7 @@ impl Domain {
                             }
                             SourceSelection::SameShard => {
                                 Ok(vec![shard(self.shard.ok_or_else(|| {
-                                    internal_err(
+                                    internal_err!(
                                         "Cannot use SourceSelection::SameShard for a replay path\
                                              through an unsharded domain",
                                     )
@@ -2114,7 +2114,7 @@ impl Domain {
                 // *other* reader requested it, so let's double check that it indeed still
                 // misses!
                 let w = self.reader_write_handles.get_mut(node).ok_or_else(|| {
-                    internal_err("reader replay requested for non-materialized reader")
+                    internal_err!("reader replay requested for non-materialized reader")
                 })?;
                 // ensure that all writes have been applied
                 w.swap();
@@ -2138,7 +2138,7 @@ impl Domain {
                 }
 
                 let reader_index_type = r.index_type().ok_or_else(|| {
-                    internal_err("reader replay requested for non-indexed reader")
+                    internal_err!("reader replay requested for non-indexed reader")
                 })?;
                 drop(n); // NLL needs a little help. don't we all, sometimes?
 
@@ -2379,10 +2379,10 @@ impl Domain {
         };
 
         let state = self.state.get(*source).ok_or_else(|| {
-            internal_err(format!(
+            internal_err!(
                 "migration replay path (tag {:?}) started with non-materialized node",
                 tag
-            ))
+            )
         })?;
 
         if let Some(node) = self.nodes.get(*source) {
@@ -2464,7 +2464,7 @@ impl Domain {
     fn handle_replay(&mut self, m: Packet, ex: &mut dyn Executor) -> ReadySetResult<()> {
         let tag = m
             .tag()
-            .ok_or_else(|| internal_err("handle_replay called on an invalid message"))?;
+            .ok_or_else(|| internal_err!("handle_replay called on an invalid message"))?;
         #[allow(clippy::indexing_slicing)]
         // tag came from an internal data structure that guarantees it exists
         if self.nodes[self.replay_paths[tag].last_segment().node]
@@ -3028,7 +3028,7 @@ impl Domain {
                                     let n = self.nodes[*src].borrow();
                                     if n.beyond_mat_frontier() {
                                         let state = self.state.get_mut(*src).ok_or_else(|| {
-                                            internal_err("replay sourced at non-materialized node")
+                                            internal_err!("replay sourced at non-materialized node")
                                         })?;
                                         trace!(
                                             node = n.global_addr().index(),
@@ -3727,7 +3727,7 @@ impl Domain {
                             .into_iter()
                             .map(|k| {
                                 KeyComparison::try_from(k)
-                                    .map_err(|_| internal_err("Empty key evicted"))
+                                    .map_err(|_| internal_err!("Empty key evicted"))
                             })
                             .collect::<ReadySetResult<Vec<_>>>()?;
 

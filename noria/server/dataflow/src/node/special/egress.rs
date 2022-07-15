@@ -126,7 +126,7 @@ impl Egress {
             .tag()
             .map(|tag| {
                 tags.get(&tag).cloned().ok_or_else(|| {
-                    internal_err("egress node told about replay message, but not on replay path")
+                    internal_err!("egress node told about replay message, but not on replay path")
                 })
             })
             .transpose()?;

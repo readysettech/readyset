@@ -92,7 +92,7 @@ impl<'a> TryFrom<&'a MirQuery> for SerializableMirQuery {
             let node = node_ref.borrow();
             let node_id = *nodes
                 .get(&(node.name.clone(), node.from_version))
-                .ok_or_else(|| internal_err("node not found"))?;
+                .ok_or_else(|| internal_err!("node not found"))?;
             for child_ref in node.children.iter() {
                 let child = child_ref.borrow();
                 // Create a new node for the child.
@@ -110,7 +110,7 @@ impl<'a> TryFrom<&'a MirQuery> for SerializableMirQuery {
             let leaf = mir_query.leaf.borrow();
             nodes
                 .get(&(leaf.name.clone(), leaf.from_version))
-                .ok_or_else(|| internal_err("leaf node not found"))?
+                .ok_or_else(|| internal_err!("leaf node not found"))?
         };
 
         Ok(SerializableMirQuery {

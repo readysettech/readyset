@@ -254,11 +254,11 @@ impl MirNode {
         if !self.inner.add_column(c.clone())? {
             self.parent()
                 .ok_or_else(|| {
-                    internal_err(format!(
+                    internal_err!(
                         "MIR node {:?} has the wrong number of parents ({})",
                         self.inner,
                         self.ancestors().len()
-                    ))
+                    )
                 })?
                 .borrow_mut()
                 .add_column(c)?;
@@ -467,10 +467,10 @@ impl MirNode {
     pub fn flow_node_addr(&self) -> ReadySetResult<NodeIndex> {
         match self.flow_node {
             Some(FlowNode::New(na)) | Some(FlowNode::Existing(na)) => Ok(na),
-            None => Err(internal_err(format!(
+            None => Err(internal_err!(
                 "MIR node \"{}\" does not have an associated FlowNode",
                 self.versioned_name()
-            ))),
+            )),
         }
     }
 

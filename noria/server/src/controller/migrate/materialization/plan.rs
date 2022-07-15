@@ -871,7 +871,7 @@ impl<'a> Plan<'a> {
         let s = if let Some(r) = our_node.as_reader() {
             let index = r
                 .index()
-                .ok_or_else(|| internal_err("Reader has no key"))?
+                .ok_or_else(|| internal_err!("Reader has no key"))?
                 .clone();
 
             if self.partial {

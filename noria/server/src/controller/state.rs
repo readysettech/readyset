@@ -189,10 +189,7 @@ impl DataflowState {
                             self.domain_nodes
                                 .get(di)
                                 .ok_or_else(|| {
-                                    internal_err(format!(
-                                        "{:?} in domains but not in domain_nodes",
-                                        di
-                                    ))
+                                    internal_err!("{:?} in domains but not in domain_nodes", di)
                                 })?
                                 .values(),
                         )
@@ -374,7 +371,7 @@ impl DataflowState {
             .iter()
             .map(|idx| columns.get(*idx).map(|c| c.name().into()))
             .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| internal_err("Schema expects valid column indices"))?;
+            .ok_or_else(|| internal_err!("Schema expects valid column indices"))?;
 
         let key_mapping = Vec::from(reader.mapping());
 
@@ -516,17 +513,14 @@ impl DataflowState {
                 self.channel_coordinator
                     .get_addr(&replica_addr)
                     .ok_or_else(|| {
-                        internal_err(format!(
-                            "failed to get channel coordinator for {}",
-                            replica_addr
-                        ))
+                        internal_err!("failed to get channel coordinator for {}", replica_addr)
                     })
             })
             .collect::<ReadySetResult<Vec<_>>>()?;
 
         let base_operator = node
             .get_base()
-            .ok_or_else(|| internal_err("asked to get table for non-base node"))?;
+            .ok_or_else(|| internal_err!("asked to get table for non-base node"))?;
         let columns: Vec<SqlIdentifier> = node
             .columns()
             .iter()
@@ -697,10 +691,11 @@ impl DataflowState {
                         for (lni, offset) in replica {
                             #[allow(clippy::indexing_slicing)] // came from self.domains
                             let ni = self.domain_nodes[&domain].get(lni).ok_or_else(|| {
-                                internal_err(format!(
+                                internal_err!(
                                     "Domain {} returned nonexistent local node {}",
-                                    domain, lni
-                                ))
+                                    domain,
+                                    lni
+                                )
                             })?;
                             #[allow(clippy::indexing_slicing)] // internal invariant
                             let table_name = self.ingredients[*ni].name();
@@ -765,7 +760,7 @@ impl DataflowState {
             .map(|(di, lni)| -> ReadySetResult<SqlIdentifier> {
                 #[allow(clippy::indexing_slicing)] // just came from self.domains
                 let li = *self.domain_nodes[di].get(*lni).ok_or_else(|| {
-                    internal_err(format!("Domain {} returned nonexistent node {}", di, lni))
+                    internal_err!("Domain {} returned nonexistent node {}", di, lni)
                 })?;
                 #[allow(clippy::indexing_slicing)] // internal invariant
                 let node = &self.ingredients[li];
@@ -1422,8 +1417,8 @@ impl DataflowStateHandle {
                 },
             )
             .await
-            .map_err(|e| internal_err(format!("Unable to update state: {}", e)))?
-            .map_err(|_| internal_err("Unable to update state"))?;
+            .map_err(|e| internal_err!("Unable to update state: {}", e))?
+            .map_err(|_| internal_err!("Unable to update state"))?;
         let mut state_guard = self.reader.write().await;
         state_guard.replace(persistable_ds.state);
         Ok(())

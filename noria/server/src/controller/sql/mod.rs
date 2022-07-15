@@ -222,7 +222,7 @@ impl SqlIncorporator {
                 let existing_qg = self
                     .query_graphs
                     .get(&qg_hash)
-                    .ok_or_else(|| internal_err("query graph should be present"))?;
+                    .ok_or_else(|| internal_err!("query graph should be present"))?;
 
                 // note that this also checks the *order* in which parameters are specified; a
                 // different order means that we cannot simply reuse the existing reader.
@@ -626,13 +626,10 @@ impl SqlIncorporator {
         let nodeid = self
             .leaf_addresses
             .remove(query_name)
-            .ok_or_else(|| internal_err("tried to remove unknown query"))?;
+            .ok_or_else(|| internal_err!("tried to remove unknown query"))?;
 
         let qg_hash = self.named_queries.remove(query_name).ok_or_else(|| {
-            internal_err(format!(
-                "missing query hash for named query \"{}\"",
-                query_name
-            ))
+            internal_err!("missing query hash for named query \"{}\"", query_name)
         })?;
         let mir = match self.mir_queries.get(&qg_hash) {
             None => return Ok(None),
@@ -674,7 +671,7 @@ impl SqlIncorporator {
         let mir = self
             .base_mir_queries
             .remove(name)
-            .ok_or_else(|| invalid_err(format!("tried to remove unknown base {}", name)))?;
+            .ok_or_else(|| invalid_err!("tried to remove unknown base {}", name))?;
         let roots = mir
             .roots
             .iter()
@@ -691,7 +688,7 @@ impl SqlIncorporator {
 
         self.leaf_addresses
             .remove(name)
-            .ok_or_else(|| invalid_err(format!("tried to remove unknown base {}", name)))
+            .ok_or_else(|| invalid_err!("tried to remove unknown base {}", name))
     }
 
     fn register_query(

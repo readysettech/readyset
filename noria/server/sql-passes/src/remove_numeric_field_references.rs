@@ -13,7 +13,7 @@ pub trait RemoveNumericFieldReferences: Sized {
 impl RemoveNumericFieldReferences for SelectStatement {
     fn remove_numeric_field_references(mut self) -> ReadySetResult<Self> {
         let lookup_field = |n: usize| -> ReadySetResult<Expr> {
-            let oob = invalid_err("Out-of-bounds index in numeric field reference");
+            let oob = invalid_err!("Out-of-bounds index in numeric field reference");
 
             if n == 0 {
                 return Err(oob);

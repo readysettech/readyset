@@ -52,7 +52,7 @@ impl Array {
     {
         let lower_bounds = lower_bounds.into();
         if lower_bounds.len() != contents.ndim() {
-            return Err(invalid_err(
+            return Err(invalid_err!(
                 "Specified array dimensions do not match array contents",
             ));
         }

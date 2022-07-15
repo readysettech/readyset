@@ -194,7 +194,7 @@ pub fn add(
                     .neighbors_directed(ingress, petgraph::EdgeDirection::Incoming);
                 let sender = senders
                     .next()
-                    .ok_or_else(|| internal_err("ingress has no parents"))?;
+                    .ok_or_else(|| internal_err!("ingress has no parents"))?;
                 if senders.count() != 0 {
                     internal!("ingress had more than one parent");
                 }

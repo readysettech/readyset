@@ -127,10 +127,10 @@ impl ZookeeperAuthority {
         if let Some(inner_mutex) = &self.inner {
             match inner_mutex.read() {
                 Ok(inner) => Ok(inner),
-                Err(e) => bail!(internal_err(format!("rwlock is poisoned: '{}'", e))),
+                Err(e) => bail!(internal_err!("rwlock is poisoned: '{}'", e)),
             }
         } else {
-            bail!(internal_err(
+            bail!(internal_err!(
                 "attempting to read inner on readonly zk authority"
             ))
         }
@@ -140,10 +140,10 @@ impl ZookeeperAuthority {
         if let Some(inner_mutex) = &self.inner {
             match inner_mutex.write() {
                 Ok(inner) => Ok(inner),
-                Err(e) => bail!(internal_err(format!("rwlock is poisoned: '{}'", e))),
+                Err(e) => bail!(internal_err!("rwlock is poisoned: '{}'", e)),
             }
         } else {
-            bail!(internal_err(
+            bail!(internal_err!(
                 "attempting to mutate inner on readonly zk authority"
             ))
         }

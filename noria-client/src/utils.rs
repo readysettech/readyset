@@ -491,7 +491,7 @@ where
     pkey.iter()
         .map(|&(_, c)| {
             col_to_val.remove(c.name.as_str()).ok_or_else(|| {
-                unsupported_err(
+                unsupported_err!(
                     "UPDATE or DELETE on columns other than the primary key are not supported",
                 )
             })
@@ -512,7 +512,7 @@ where
     let updates = extract_update_params_and_fields(&mut q, &mut params, schema);
     let where_clause = q
         .where_clause
-        .ok_or_else(|| unsupported_err("UPDATE without WHERE is not supported"))?;
+        .ok_or_else(|| unsupported_err!("UPDATE without WHERE is not supported"))?;
     let key = extract_pkey_where(where_clause, params, schema)?;
     Ok((key, updates?))
 }
@@ -527,7 +527,7 @@ where
 {
     let where_clause = q
         .where_clause
-        .ok_or_else(|| unsupported_err("DELETE without WHERE is not supported"))?;
+        .ok_or_else(|| unsupported_err!("DELETE without WHERE is not supported"))?;
     extract_pkey_where(where_clause, params, schema)
 }
 
