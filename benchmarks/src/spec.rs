@@ -12,6 +12,16 @@
 //!   * `range` - Data will be sampled from an integer (i64) range.
 //!     * `start` - Integer. Range start, inclusive
 //!     * `end` - Integer. Range end, exclusive.
+//!   * `pair` - First column will be sampled from an integer range, and the second column will be
+//!     sampled from the distance parameter and added to the first value. Useful to generate
+//!     parameters for a between statement.
+//!     * `range` - First column will be sampled from an integer (i64) range.
+//!       * `start` - Integer. Range start, inclusive
+//!       * `end` - Integer. Range end, exclusive.
+//!     * `distance` - Second column will be the value of the first column plus a value sampled from
+//!       an integer (i64) range. Alway uniformly distributed in range.
+//!       * `start` - Integer. Distance start, inclusive
+//!       * `end` - Integer. Distance end, exclusive.
 //!   * `query` - String. Data will be sampled from the results of a SQL query, the query is run on
 //!     the setup database and the results are stored in a vector of rows.
 //!
@@ -26,6 +36,14 @@
 //! - name: auth_token
 //!   zipf: 1.15
 //!   query: select auth_token from user_auth_tokens
+//! - name: between
+//!   pair:
+//!     range:
+//!       start: 0
+//!       end: 1000000
+//!     distance:
+//!       start: 1
+//!       end: 200
 //! ```
 //!
 //! * `queries` - A list of queries to run.
@@ -70,6 +88,8 @@
 //!     weight: 500000
 //!     migrate: true
 //! ```
+use std::ops::Range;
+
 use serde::{Deserialize, Serialize};
 
 /// A Noria/MySQL workload specification, consisting of a list of distributions that specify how to
@@ -107,9 +127,16 @@ pub struct WorkloadQuery {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct Pair {
+    pub range: Range<i64>,
+    pub distance: Range<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum WorkloadDistributionSource {
-    Range { range: std::ops::Range<i64> },
+    Range { range: Range<i64> },
+    Pair { pair: Pair },
     Query { query: String },
 }
 

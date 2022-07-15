@@ -16,6 +16,7 @@ use mysql_async::{Row, Value};
 use nom_sql::SqlQuery;
 use noria_data::DataType;
 use rand::distributions::Uniform;
+use rand::Rng;
 use rand_distr::weighted_alias::WeightedAliasIndex;
 use rand_distr::Distribution;
 use serde::{Deserialize, Serialize};
@@ -25,8 +26,8 @@ use zipf::ZipfDistribution;
 
 use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters, MetricGoal};
 use crate::spec::{
-    WorkloadDistribution, WorkloadDistributionKind, WorkloadDistributionSource, WorkloadQuery,
-    WorkloadSpec,
+    Pair, WorkloadDistribution, WorkloadDistributionKind, WorkloadDistributionSource,
+    WorkloadQuery, WorkloadSpec,
 };
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
@@ -201,6 +202,20 @@ impl WorkloadEmulator {
             let data: Vec<Vec<DataType>> = match from {
                 WorkloadDistributionSource::Range { range } => {
                     range.into_iter().map(|n| vec![DataType::from(n)]).collect()
+                }
+                WorkloadDistributionSource::Pair {
+                    pair: Pair { range, distance },
+                } => {
+                    let mut rng = rand::thread_rng();
+                    range
+                        .into_iter()
+                        .map(|n| {
+                            vec![
+                                DataType::from(n),
+                                DataType::from(n + rng.gen_range(distance.clone())),
+                            ]
+                        })
+                        .collect()
                 }
                 WorkloadDistributionSource::Query { query } => {
                     let mut conn = deployment.connect_to_setup().await?;
