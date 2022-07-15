@@ -487,7 +487,6 @@ async fn dry_run_evaluates_support() {
 /// of the servers. After the failure, we verify that we can still perform the
 /// query on Noria and we return the correct results.
 #[clustertest]
-#[ignore = "flaky (ENG-1383)"]
 async fn correct_data_after_restart() {
     let mut deployment = readyset_mysql("ct_correct_data_after_restart")
         .quorum(2)
@@ -902,7 +901,6 @@ async fn update_propagation_through_failed_domain() {
 /// Fail the controller 10 times and check if we can execute the query. This
 /// test will pass if we correctly execute queries against fallback.
 #[clustertest]
-#[ignore = "flaky (ENG-1385"]
 async fn end_to_end_with_restarts() {
     if skip_slow_tests() {
         return;

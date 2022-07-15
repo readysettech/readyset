@@ -264,6 +264,14 @@ impl Handle {
             }
         }
     }
+
+    /// Returns true if the corresponding write handle has been dropped
+    pub(super) fn was_dropped(&self) -> bool {
+        match self {
+            Handle::Single(h) => h.was_dropped(),
+            Handle::Many(h) => h.was_dropped(),
+        }
+    }
 }
 
 #[cfg(test)]

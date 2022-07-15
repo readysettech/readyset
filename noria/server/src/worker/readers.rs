@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 use core::task::Context;
-use std::collections::hash_map::Entry::{Occupied, Vacant};
+use std::collections::hash_map::Entry::Occupied;
 use std::future::Future;
 use std::task::Poll;
 use std::time;
@@ -196,15 +196,10 @@ impl ReadRequestHandler {
             };
         }
 
-        let reader = match self.readers_cache.entry(target.clone()) {
-            Occupied(v) => v.into_mut(),
-            Vacant(v) => {
-                let readers = self.global_readers.lock().unwrap();
-                match readers.get(&target) {
-                    None => reply_with_error!(ReadySetError::ReaderNotFound),
-                    Some(reader) => v.insert(reader.clone()),
-                }
-            }
+        let reader = get_reader_from_cache(&target, &mut self.readers_cache, &self.global_readers);
+        let reader = match reader {
+            Ok(r) => r,
+            Err(e) => reply_with_error!(e),
         };
 
         let consistency_miss = !has_sufficient_timestamp(reader, &timestamp);
@@ -279,17 +274,8 @@ impl ReadRequestHandler {
         }
     }
 
-    fn handle_size_query(&mut self, tag: u32, target: ReaderAddress) -> Reply {
-        let reader = match self.readers_cache.entry(target.clone()) {
-            Occupied(v) => v.into_mut(),
-            Vacant(v) => {
-                let readers = self.global_readers.lock().unwrap();
-                match readers.get(&target) {
-                    None => return Err(ReadySetError::ReaderNotFound),
-                    Some(reader) => v.insert(reader.clone()),
-                }
-            }
-        };
+    fn handle_size_query(&mut self, tag: u32, target: &ReaderAddress) -> Reply {
+        let reader = get_reader_from_cache(target, &mut self.readers_cache, &self.global_readers)?;
 
         Ok(Tagged {
             tag,
@@ -297,17 +283,8 @@ impl ReadRequestHandler {
         })
     }
 
-    fn handle_keys_query(&mut self, tag: u32, target: ReaderAddress) -> Reply {
-        let reader = match self.readers_cache.entry(target.clone()) {
-            Occupied(v) => v.into_mut(),
-            Vacant(v) => {
-                let readers = self.global_readers.lock().unwrap();
-                match readers.get(&target) {
-                    None => return Err(ReadySetError::ReaderNotFound),
-                    Some(reader) => v.insert(reader.clone()),
-                }
-            }
-        };
+    fn handle_keys_query(&mut self, tag: u32, target: &ReaderAddress) -> Reply {
+        let reader = get_reader_from_cache(target, &mut self.readers_cache, &self.global_readers)?;
 
         Ok(Tagged {
             tag,
@@ -335,12 +312,12 @@ impl Service<Tagged<ReadQuery>> for ReadRequestHandler {
                 let _g = span.enter();
                 self.handle_normal_read_query(tag, target, query, false)
             }
-            ReadQuery::Size { target } => {
+            ReadQuery::Size { ref target } => {
                 let span = readyset_tracing::child_span!(INFO, "size_query");
                 let _g = span.enter();
                 CallResult::Immediate(self.handle_size_query(tag, target))
             }
-            ReadQuery::Keys { target } => {
+            ReadQuery::Keys { ref target } => {
                 let span = readyset_tracing::child_span!(INFO, "keys_query");
                 let _g = span.enter();
                 CallResult::Immediate(self.handle_keys_query(tag, target))
@@ -541,6 +518,32 @@ impl BlockingRead {
             Poll::Pending
         }
     }
+}
+
+fn get_reader_from_cache<'a>(
+    target: &ReaderAddress,
+    readers_cache: &'a mut ReaderMap,
+    global_readers: &Readers,
+) -> ReadySetResult<&'a mut SingleReadHandle> {
+    Ok(match readers_cache.entry(target.clone()) {
+        Occupied(v) if !v.get().was_dropped() => v.into_mut(),
+        // If the entry is Vacant _or_ the WriteHandle was dropped out from under us, we need to
+        // refer to the global_readers.
+        entry => {
+            let readers = global_readers.lock().unwrap();
+            match readers.get(target) {
+                None => {
+                    if let Occupied(v) = entry {
+                        // This reader's write handle was dropped, so it will not be usable
+                        // anymore.
+                        v.remove();
+                    }
+                    return Err(ReadySetError::ReaderNotFound);
+                }
+                Some(reader) => entry.insert_entry(reader.clone()).into_mut(),
+            }
+        }
+    })
 }
 
 #[cfg(test)]

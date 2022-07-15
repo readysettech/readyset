@@ -389,14 +389,15 @@
 //! + [id=1, title=Hello world, votes=43]
 //! ```
 #![feature(
-    type_alias_impl_trait,
+    bound_as_ref,
     box_patterns,
-    try_find,
-    stmt_expr_attributes,
-    result_flattening,
     drain_filter,
+    entry_insert,
     hash_raw_entry,
-    bound_as_ref
+    result_flattening,
+    stmt_expr_attributes,
+    try_find,
+    type_alias_impl_trait
 )]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
