@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
-use std::mem;
+use std::fmt::Display;
+use std::{fmt, mem};
 
+use itertools::Itertools;
 use nom_sql::{self, SqlIdentifier, Table};
 use serde::{Deserialize, Serialize};
 
@@ -156,6 +158,24 @@ impl Ord for Column {
 impl PartialOrd for Column {
     fn partial_cmp(&self, other: &Column) -> Option<Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl Display for Column {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(table) = &self.table {
+            write!(f, "{table}.")?;
+        }
+
+        write!(f, "{}", self.name)?;
+
+        if f.alternate() && !self.aliases.is_empty() {
+            write!(f, " (")?;
+            write!(f, "{:#}", self.aliases.iter().join(","))?;
+            write!(f, ")")?;
+        }
+
+        Ok(())
     }
 }
 
