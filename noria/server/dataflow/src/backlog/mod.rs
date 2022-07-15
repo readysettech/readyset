@@ -432,6 +432,11 @@ impl SingleReadHandle {
     pub fn timestamp(&self) -> Option<Timestamp> {
         self.handle.timestamp()
     }
+
+    /// Returns true if the corresponding write handle to our read handle has been dropped
+    pub fn was_dropped(&self) -> bool {
+        self.handle.was_dropped()
+    }
 }
 
 #[cfg(test)]

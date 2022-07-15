@@ -379,7 +379,7 @@ struct CachedPreparedStatement<DB>
 where
     DB: UpstreamDatabase,
 {
-    /// Indicates if the statment was prepared for Noria, Fallback, or Both
+    /// Indicates if the statement was prepared for Noria, Fallback, or Both
     prep: PrepareResult<DB>,
     /// The current Noria migration state
     migration_state: MigrationState,
@@ -593,6 +593,16 @@ impl<DB: UpstreamDatabase> PrepareResult<DB> {
         match self {
             Self::Upstream(res) | Self::Both(_, res) => SinglePrepareResult::Upstream(res),
             Self::Noria(res) => SinglePrepareResult::Noria(res),
+        }
+    }
+
+    /// If this [`PrepareResult`] is a [`PrepareResult::Both`], convert it into only a
+    /// [`PrepareResult::Upstream`]
+    pub fn make_upstream_only(&mut self) {
+        match self {
+            Self::Noria(_) => {}
+            Self::Upstream(_) => {}
+            Self::Both(_, u) => *self = Self::Upstream(u.clone()),
         }
     }
 }
@@ -1111,19 +1121,9 @@ where
         Ok(())
     }
 
-    fn invalidate_prepared_cache_entry(prep: &mut PrepareResult<DB>) {
-        match prep {
-            //We can't invalidate the Noria entry if there is no fallback
-            PrepareResult::Noria(_) => {}
-            //Nothing to see here
-            PrepareResult::Upstream(_) => {}
-            PrepareResult::Both(_, u) => *prep = PrepareResult::Upstream(u.clone()),
-        }
-    }
-
     /// Iterate over the cache of the prepared statements, and invalidate those that are
     /// equal to the one provided
-    fn invalidate_prepared_statments_cache(&mut self, stmt: &SelectStatement) {
+    fn invalidate_prepared_statements_cache(&mut self, stmt: &SelectStatement) {
         // Linear scan, but we shouldn't be doing it often, right?
         self.prepared_statements
             .iter_mut()
@@ -1144,7 +1144,7 @@ where
                     }
                 },
             )
-            .for_each(Self::invalidate_prepared_cache_entry);
+            .for_each(|ps| ps.make_upstream_only());
     }
 
     /// Executes a prepared statement identified by `id` with parameters specified by the client
@@ -1227,10 +1227,10 @@ where
         };
 
         if let Some(e) = event.noria_error.as_ref() {
-            if e.caused_by_view_not_found() || e.caused_by_view_destroyed() {
+            if e.caused_by_view_not_found() {
                 // This can happen during cascade execution if the noria query was removed from
                 // another connection
-                Self::invalidate_prepared_cache_entry(&mut cached_statement.prep);
+                cached_statement.prep.make_upstream_only();
             } else if e.caused_by_unsupported() {
                 // On an unsupported execute we update the query migration state to be unsupported.
                 //
@@ -1345,7 +1345,7 @@ where
         if let Some(stmt) = maybe_select_statement {
             self.query_status_cache
                 .update_query_migration_state(&stmt, MigrationState::Pending);
-            self.invalidate_prepared_statments_cache(&stmt);
+            self.invalidate_prepared_statements_cache(&stmt);
         }
         Ok(noria_connector::QueryResult::Empty)
     }
@@ -1363,7 +1363,7 @@ where
                 if *migration_state == MigrationState::Successful {
                     *migration_state = MigrationState::Pending;
                 }
-                Self::invalidate_prepared_cache_entry(prep);
+                prep.make_upstream_only();
             },
         );
         Ok(noria_connector::QueryResult::Empty)
