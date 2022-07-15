@@ -90,11 +90,15 @@ pub enum MirNodeInner {
     Join {
         /// Columns in the first parent to use as the join key.
         ///
+        /// The columns in this list have a 1:1 correspondence with the columns in `on_right`
+        ///
         /// # Invariants
         ///
         /// * This must have the same length as `on_right`
         on_left: Vec<Column>,
         /// Columns in the second parent to use as the join key.
+        ///
+        /// The columns in this list have a 1:1 correspondence with the columns in `on_right`
         ///
         /// # Invariants
         ///
