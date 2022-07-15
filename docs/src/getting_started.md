@@ -76,11 +76,21 @@ All ReadySet code lives in the [ReadySet monorepo](https://gerrit.readyset.name/
 1. **Install ReadySet dependencies.**
 
    **macOS with [homebrew](https://brew.sh/)**
+
    ```bash
-   brew install lz4
-   brew install openssl@1.1
-   brew install rocksdb
+   brew install lz4 openssl@1.1 rocksdb
    ```
+
+   Add the following to your [cargo config](https://doc.rust-lang.org/cargo/reference/config.html)
+   to make it discover `lz4`:
+
+    ```toml
+    [target.aarch64-apple-darwin.env]
+    LIBRARY_PATH = "/opt/homebrew/lib"
+
+    [target.x86_64-apple-darwin.env]
+    LIBRARY_PATH = "/opt/homebrew/lib"
+    ```
 
    **Ubuntu**
 
