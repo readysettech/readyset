@@ -713,6 +713,10 @@ fn make_identity_node(
     Ok(FlowNode::New(node))
 }
 
+/// Lower a join MIR node to dataflow
+///
+/// See [`MirNodeInner::Join`] for documentation on what `on_left`, `on_right`, and `project` mean
+/// here
 fn make_join_node(
     name: &str,
     left: MirNodeRef,
@@ -733,122 +737,55 @@ fn make_join_node(
     #[allow(clippy::indexing_slicing)] // just got the address
     let right_cols = mig.dataflow_state.ingredients[right.borrow().flow_node_addr()?].columns();
 
-    let mut cols = proj_cols
-        .iter()
-        .map(|c| match left.borrow().column_id_for_column(c) {
-            Ok(idx) => left_cols
-                .get(idx)
-                .cloned()
-                .ok_or_else(|| internal_err!("Invalid index")),
-            Err(_) => match right.borrow().column_id_for_column(c) {
-                Ok(idx) => right_cols
-                    .get(idx)
+    let mut emit = Vec::with_capacity(proj_cols.len());
+    let mut cols = Vec::with_capacity(proj_cols.len());
+    for c in proj_cols {
+        if let Some(join_key_idx) = on_left.iter().position(|left_col| left_col == c) {
+            // Column is a join key - find its index in the left and the index of the corresponding
+            // column in the right, then add it as a column from both sides.
+            //
+            // We check for columns in the left first here because we have to pick a side, but we
+            // don't have to - we could check for the right first if we wanted to
+            let l = left
+                .borrow()
+                .column_id_for_column(c)
+                .map_err(|_| internal_err!("Left join column must exist in left parent"))?;
+            #[allow(clippy::indexing_slicing)] // validated they're the same length
+            let r = right
+                .borrow()
+                .column_id_for_column(&on_right[join_key_idx])
+                .map_err(|_| internal_err!("Right join column must exist in right parent"))?;
+            emit.push(JoinSource::B(l, r));
+            cols.push(
+                left_cols
+                    .get(l)
                     .cloned()
-                    .ok_or_else(|| internal_err!("Invalid index")),
-                Err(_) => Err(internal_err!("Column not found in either parent")),
-            },
-        })
-        .collect::<ReadySetResult<Vec<_>>>()?;
+                    .ok_or_else(|| internal_err!("Invalid index"))?,
+            );
+        } else if let Ok(l) = left.borrow().column_id_for_column(c) {
+            // Column isn't a join key, and comes from the left
+            emit.push(JoinSource::L(l));
+            cols.push(
+                left_cols
+                    .get(l)
+                    .cloned()
+                    .ok_or_else(|| internal_err!("Invalid index"))?,
+            );
+        } else if let Ok(r) = right.borrow().column_id_for_column(c) {
+            // Column isn't a join key, and comes from the right
+            emit.push(JoinSource::R(r));
+            cols.push(
+                right_cols
+                    .get(r)
+                    .cloned()
+                    .ok_or_else(|| internal_err!("Invalid index"))?,
+            );
+        } else {
+            internal!("Column {c} not found in either parent")
+        }
+    }
 
     set_names(&column_names(columns), &mut cols)?;
-
-    let (projected_cols_left, rest): (Vec<Column>, Vec<Column>) = proj_cols
-        .iter()
-        .cloned()
-        .partition(|c| left.borrow().columns().contains(c));
-    let (projected_cols_right, rest): (Vec<Column>, Vec<Column>) = rest
-        .into_iter()
-        .partition(|c| right.borrow().columns().contains(c));
-    invariant!(
-        rest.is_empty(),
-        "could not resolve output columns projected from join: {:?}",
-        rest
-    );
-
-    invariant_eq!(
-        projected_cols_left.len() + projected_cols_right.len(),
-        proj_cols.len()
-    );
-
-    // this assumes the columns we want to join on appear first in the list
-    // of projected columns. this is fine for joins against different tables
-    // since we assume unique column names in each table. however, this is
-    // not correct for joins against the same table, for example:
-    // SELECT r1.a as a1, r2.a as a2 from r as r1, r as r2 where r1.a = r2.b and r2.a = r1.b;
-    //
-    // the `r1.a = r2.b` join predicate will create a join node with columns: r1.a, r1.b, r2.a, r2,b
-    // however, because the way we deal with aliases, we can't distinguish between `r1.a` and `r2.a`
-    // at this point in the codebase, so the `r2.a = r1.b` will join on the wrong `a` column.
-    let join_col_mappings = on_left
-        .iter()
-        .zip(on_right)
-        .map(|(l, r)| -> ReadySetResult<_> {
-            let left_join_col_id = left
-                .borrow()
-                .columns()
-                .iter()
-                .position(|lc| lc == l)
-                .ok_or_else(|| {
-                    internal_err!(
-                        "missing left-side join column {:#?} in {:#?}",
-                        on_left.first(),
-                        left.borrow().columns()
-                    )
-                })?;
-
-            let right_join_col_id = right
-                .borrow()
-                .columns()
-                .iter()
-                .position(|rc| rc == r)
-                .ok_or_else(|| {
-                    internal_err!(
-                        "missing right-side join column {:#?} in {:#?}",
-                        on_right.first(),
-                        right.borrow().columns()
-                    )
-                })?;
-
-            Ok((left_join_col_id, right_join_col_id))
-        })
-        .collect::<Result<HashMap<_, _>, _>>()?;
-
-    let mut from_left = 0;
-    let mut from_right = 0;
-    let mut join_config: Vec<_> = left
-        .borrow()
-        .columns()
-        .iter()
-        .enumerate()
-        .filter_map(|(i, c)| {
-            if let Some(r) = join_col_mappings.get(&i) {
-                from_left += 1;
-                Some(JoinSource::B(i, *r))
-            } else if projected_cols_left.contains(c) {
-                from_left += 1;
-                Some(JoinSource::L(i))
-            } else {
-                None
-            }
-        })
-        .chain(
-            right
-                .borrow()
-                .columns()
-                .iter()
-                .enumerate()
-                .filter_map(|(i, c)| {
-                    if projected_cols_right.contains(c) {
-                        from_right += 1;
-                        Some(JoinSource::R(i))
-                    } else {
-                        None
-                    }
-                }),
-        )
-        .collect();
-    invariant_eq!(from_left, projected_cols_left.len());
-    invariant_eq!(from_right, projected_cols_right.len());
 
     let mut left_na = left.borrow().flow_node_addr()?;
     let mut right_na = right.borrow().flow_node_addr()?;
@@ -856,7 +793,7 @@ fn make_join_node(
     // If we don't have any join condition, we're making a cross join.
     // Dataflow needs a non-empty join condition, so project out a constant value on both sides to
     // use as our join key
-    if join_col_mappings.is_empty() {
+    if on_left.is_empty() {
         let mut make_cross_join_bogokey = |node: MirNodeRef| {
             let mut node_columns = node.borrow().columns().to_vec();
             node_columns.push(Column::named("cross_join_bogokey"));
@@ -878,7 +815,7 @@ fn make_join_node(
         left_na = make_cross_join_bogokey(left)?.address();
         right_na = make_cross_join_bogokey(right)?.address();
 
-        join_config.push(JoinSource::B(left_col_idx, right_col_idx));
+        emit.push(JoinSource::B(left_col_idx, right_col_idx));
         cols.push(DataflowColumn::new(
             "cross_join_bogokey".into(),
             SqlType::Bigint(None).into(),
@@ -886,7 +823,7 @@ fn make_join_node(
         ));
     }
 
-    let j = Join::new(left_na, right_na, kind, join_config);
+    let j = Join::new(left_na, right_na, kind, emit);
     let n = mig.add_ingredient(String::from(name), cols, j);
 
     Ok(FlowNode::New(n))

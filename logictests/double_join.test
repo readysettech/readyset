@@ -1,0 +1,45 @@
+statement ok
+CREATE TABLE table_1 (column_1 INT(32), column_2 TINYINT(1))
+
+statement ok
+CREATE TABLE table_2 (column_1 INT(32), column_2 TINYINT(1))
+
+statement ok
+CREATE TABLE table_3 (column_1 INT(32), column_2 TINYINT(1))
+
+statement ok
+INSERT INTO table_1 (column_1, column_2) VALUES (5000, 0), (6000, 1), (7000, 1)
+
+statement ok
+INSERT INTO table_2 (column_1, column_2) VALUES (5000, 1), (6000, 1), (7000, 1)
+
+statement ok
+INSERT INTO table_3 (column_1, column_2) VALUES (5000, 1), (6000, 1), (7000, 1)
+
+statement ok
+create cache from
+SELECT
+    table_1.column_1,
+    table_2.column_1,
+    table_3.column_1
+FROM table_1
+JOIN table_2 ON table_1.column_1 = table_2.column_1
+JOIN table_3 ON table_2.column_1 = table_3.column_1
+WHERE table_1.column_1 = ?
+
+graphviz
+
+query  nosort
+SELECT
+    table_1.column_1,
+    table_2.column_1,
+    table_3.column_1
+FROM table_1
+JOIN table_2 ON table_1.column_1 = table_2.column_1
+JOIN table_3 ON table_2.column_1 = table_3.column_1
+WHERE table_1.column_1 = ?
+? = 5000
+----
+5000
+5000
+5000
