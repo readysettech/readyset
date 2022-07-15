@@ -128,7 +128,7 @@ impl GroupedOperation for GroupConcat {
 
         let first_diff = diffs
             .peek()
-            .ok_or_else(|| internal_err("group_concat got no diffs"))?;
+            .ok_or_else(|| internal_err!("group_concat got no diffs"))?;
         let group = first_diff.group_by.clone();
 
         let mut ls = self.last_state.borrow_mut().remove(&group);
@@ -162,13 +162,14 @@ impl GroupedOperation for GroupConcat {
                     .ok_or_else(|| {
                         #[cfg(feature = "display literals")]
                         {
-                            internal_err(format!(
+                            internal_err!(
                                 "group_concat couldn't remove {:?} from {:?}",
-                                value, prev_state.data
-                            ))
+                                value,
+                                prev_state.data
+                            )
                         }
                         #[cfg(not(feature = "display literals"))]
-                        internal_err("group_concat couldn't remove value from data")
+                        internal_err!("group_concat couldn't remove value from data")
                     })?;
                 prev_state.data.remove(item_pos);
             }

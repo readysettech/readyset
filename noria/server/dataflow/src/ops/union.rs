@@ -386,7 +386,7 @@ impl Ingredient for Union {
             if let Some(parent) = match self.emit {
                 Emit::Project { ref cols_l, .. } => {
                     let first_parent = cols_l.keys().next().ok_or_else(|| {
-                        internal_err(
+                        internal_err!(
                             "Union node with DuplicateMode::BagUnion must have exactly 2 parents",
                         )
                     })?;

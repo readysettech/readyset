@@ -395,10 +395,11 @@ where
                                 };
                             }
                             None => {
-                                let e = Error::from(internal_err(format!(
+                                let e = Error::from(internal_err!(
                                     "tried to emit column {:?} not in getter with schema {:?}",
-                                    c.column, mysql_schema
-                                )));
+                                    c.column,
+                                    mysql_schema
+                                ));
                                 error!(err = %e);
                                 return rw.error(e.error_kind(), e.to_string().as_bytes()).await;
                             }
@@ -507,7 +508,7 @@ where
                     .await
             }
             _ => {
-                let e = Error::from(internal_err("Matched a QueryResult that is not supported by on_prepare/on_execute in on_execute."));
+                let e = Error::from(internal_err!("Matched a QueryResult that is not supported by on_prepare/on_execute in on_execute."));
                 error!(err = %e);
                 results
                     .error(e.error_kind(), e.to_string().as_bytes())
@@ -570,10 +571,11 @@ where
                                 }
                             }
                             None => {
-                                let e = Error::from(internal_err(format!(
+                                let e = Error::from(internal_err!(
                                     "tried to emit column {:?} not in getter with schema {:?}",
-                                    c.column, columns
-                                )));
+                                    c.column,
+                                    columns
+                                ));
                                 error!(err = %e);
                                 return rw.error(e.error_kind(), e.to_string().as_bytes()).await;
                             }

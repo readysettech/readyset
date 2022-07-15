@@ -243,10 +243,10 @@ impl Recipe {
                 Change::AlterTable(ats) => {
                     let original_expression =
                         self.registry.get(&ats.table.name).ok_or_else(|| {
-                            internal_err(format!(
+                            internal_err!(
                                 "Tried to alter table {}, but table doesn't exist.",
                                 ats.table.name
-                            ))
+                            )
                         })?;
                     let original_table = match original_expression {
                         RecipeExpr::Table(ref table) => table,
@@ -343,7 +343,7 @@ impl Recipe {
                 }
             }
             _ => self.inc.remove_query(name)?
-                .ok_or_else(|| internal_err(format!("Inconsistent state in recipe: query exists in recipe but not in SqlIncorporator. Query name: {}", name)))?
+                .ok_or_else(|| internal_err!("Inconsistent state in recipe: query exists in recipe but not in SqlIncorporator. Query name: {}", name))?
         };
         let is_base = mig
             .dataflow_state

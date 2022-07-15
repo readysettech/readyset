@@ -214,7 +214,7 @@ impl ViewSchema {
             .into_iter()
             .map(|i| schema.get(i).map(|c| &c.spec.sql_type))
             .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| internal_err("Schema expects valid column indices"))
+            .ok_or_else(|| internal_err!("Schema expects valid column indices"))
     }
 
     /// Convert the given iterator [`Columns`] to a `Vec` of [`ColumnSchema`]. The columns match if
@@ -242,7 +242,7 @@ impl ViewSchema {
                     .get(&c.name)
                     .or_else(|| by_base_name.get(&c.name))
                     .copied()
-                    .ok_or_else(|| internal_err(format!("Column `{}` not found", c)))
+                    .ok_or_else(|| internal_err!("Column `{}` not found", c))
             })
             .collect()
     }
@@ -267,7 +267,7 @@ impl ViewSchema {
             })
         })
         .collect::<Option<Vec<_>>>()
-        .ok_or_else(|| internal_err("Schema expects all columns to be present"))
+        .ok_or_else(|| internal_err!("Schema expects all columns to be present"))
     }
 }
 
@@ -874,7 +874,7 @@ impl ViewBuilder {
             // they happen to be targeting the same machine.
             let mut rpcs = rpcs
                 .lock()
-                .map_err(|e| internal_err(format!("mutex was poisoned: '{}'", e)))?;
+                .map_err(|e| internal_err!("mutex was poisoned: '{}'", e))?;
             let s = match rpcs.entry((*shard_addr, shardi)) {
                 Entry::Occupied(e) => e.get().clone(),
                 Entry::Vacant(h) => {
@@ -912,7 +912,7 @@ impl ViewBuilder {
             key_mapping,
             shard_addrs: addrs,
             shards: Vec1::try_from_vec(conns)
-                .map_err(|_| internal_err("cannot create view '{}' without shards"))?,
+                .map_err(|_| internal_err!("cannot create view '{}' without shards", self.name))?,
         })
     }
 }
@@ -1042,7 +1042,7 @@ impl Service<ViewQuery> for View {
                                 .v
                                 .into_normal()
                                 .ok_or_else(|| {
-                                    internal_err("Unexpected response type from reader service")
+                                    internal_err!("Unexpected response type from reader service")
                                 })?
                                 .map(|l| {
                                     l.map_results(|rows, stats| {
@@ -1110,7 +1110,7 @@ impl Service<ViewQuery> for View {
                         .map_err(rpc_err!("<View as Service<ViewQuery>>::call"))
                         .and_then(|reply| async move {
                             reply.v.into_normal().ok_or_else(|| {
-                                internal_err("Unexpected response type from reader service")
+                                internal_err!("Unexpected response type from reader service")
                             })?
                         })
                         .map_err(move |e| view_err(ni, e))

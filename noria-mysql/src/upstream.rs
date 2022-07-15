@@ -247,10 +247,10 @@ impl UpstreamDatabase for MySqlUpstream {
         let last_insert_id = transaction.last_insert_id();
         let status_flags = transaction.status();
         let txid = transaction.commit_returning_gtid().await.map_err(|e| {
-            internal_err(format!(
+            internal_err!(
                 "Error obtaining GTID from MySQL for RYW-enabled commit: {}",
                 e
-            ))
+            )
         })?;
         Ok((
             QueryResult::WriteResult {

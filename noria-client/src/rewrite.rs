@@ -69,7 +69,7 @@ impl ProcessedQueryParams {
         let params = if self.bare_offset {
             let offset_value = params
                 .last()
-                .ok_or_else(|| invalid_err("Wrong number of parameters supplied to query"))?;
+                .ok_or_else(|| invalid_err!("Wrong number of parameters supplied to query"))?;
             if *offset_value != Literal::Integer(0).try_into()? {
                 unsupported!("OFFSET without LIMIT can only be literal 0");
             }

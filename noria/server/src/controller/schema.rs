@@ -20,11 +20,11 @@ fn type_for_internal_column(
         .columns()
         .get(column_index)
         .ok_or_else(|| {
-            internal_err(format!(
+            internal_err!(
                 "Invalid index into node's columns, node={:?}, index={}",
                 node.global_addr(),
                 column_index
-            ))
+            )
         })?
         .ty()
         .clone()

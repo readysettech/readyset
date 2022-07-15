@@ -102,7 +102,7 @@ pub(super) fn make_cross_joins(
     let mut nodes = nodes.into_iter();
     let first_node = nodes
         .next()
-        .ok_or_else(|| internal_err("make_cross_joins called with empty nodes"))?;
+        .ok_or_else(|| internal_err!("make_cross_joins called with empty nodes"))?;
     nodes.try_fold(first_node, |n1, n2| -> ReadySetResult<_> {
         *node_count += 1;
         let join_kind = if correlated_nodes.contains(n2.borrow().name()) {

@@ -650,19 +650,95 @@ impl ReadySetError {
     }
 }
 
-/// Make a new [`ReadySetError::Internal`] with the provided string-able argument.
-pub fn internal_err<T: Into<String>>(err: T) -> ReadySetError {
-    ReadySetError::Internal(err.into())
+/// Make a new [`ReadySetError::Internal`] with the provided format arguments.
+///
+/// When building in debug mode, the returned error also captures file, line, and column information
+/// for futher debugging purposes
+///
+/// When called with no arguments, generates an internal error with the text
+/// "entered unreachable code".
+///
+/// # Examples
+///
+/// ```
+/// use noria_errors::internal_err;
+///
+/// let x = 4;
+/// let my_err = internal_err!("{x} things went wrong!");
+/// assert!(my_err.to_string().contains("4 things went wrong!"));
+/// ```
+#[macro_export]
+macro_rules! internal_err {
+    () => {
+        $crate::internal_err!("entered unreachable code")
+    };
+    ($($format_args:tt)*) => {
+        $crate::ReadySetError::Internal(format!(
+            "{}{}",
+            $crate::__location_info!("in {}: "),
+            format_args!($($format_args)*)
+        ))
+    }
 }
 
-/// Make a new [`ReadySetError::InvalidQuery`] with the provided string-able argument.
-pub fn invalid_err<T: Into<String>>(err: T) -> ReadySetError {
-    ReadySetError::InvalidQuery(err.into())
+/// Make a new [`ReadySetError::InvalidQuery`] with the provided format arguments.
+///
+/// When building in debug mode, the returned error also captures file, line, and column information
+/// for futher debugging purposes
+///
+/// # Examples
+///
+/// ```
+/// use noria_errors::invalid_err;
+///
+/// let x = 4;
+/// let my_err = invalid_err!("{x} things were wrong about your query!");
+/// assert!(my_err
+///     .to_string()
+///     .contains("4 things were wrong about your query!"));
+/// ```
+#[macro_export]
+macro_rules! invalid_err {
+    ($($format_args:tt)*) => {
+        $crate::ReadySetError::InvalidQuery(format!(
+            "{}{}",
+            $crate::__location_info!("in {}: "),
+            format_args!($($format_args)*)
+        ))
+    }
 }
 
-/// Make a new [`ReadySetError::Unsupported`] with the provided string-able argument.
-pub fn unsupported_err<T: Into<String>>(err: T) -> ReadySetError {
-    ReadySetError::Unsupported(err.into())
+/// Make a new [`ReadySetError::Unsupported`] with the provided format arguments.
+///
+/// When building in debug mode, the returned error also captures file, line, and column information
+/// for futher debugging purposes
+///
+/// When called with no arguments, generates an unsupported error with the text "operation not
+/// implemented yet".
+///
+/// # Examples
+///
+/// ```
+/// use noria_errors::unsupported_err;
+///
+/// let x = 4;
+/// let my_err = unsupported_err!("We can't do {x} of those things yet");
+/// assert!(my_err
+///     .to_string()
+///     .contains("We can't do 4 of those things yet"));
+/// ```
+#[macro_export]
+macro_rules! unsupported_err {
+    () => {
+        $crate::unsupported_err!("operation not implemented yet")
+    };
+    ($($format_args:tt)*) => {
+        $crate::ReadySetError::Unsupported(format!(
+            "{}{}",
+            $crate::__location_info!("in {}: "),
+            format_args!($($format_args)*)
+        ))
+    }
 }
 
 /// Make a new [`ReadySetError::BadRequest`] with the provided string-able argument.
@@ -708,15 +784,8 @@ macro_rules! __location_info {
 /// "entered unreachable code".
 #[macro_export]
 macro_rules! internal {
-    () => {
-        internal!("entered unreachable code")
-    };
-    ($($tt:tt)*) => {
-        return Err($crate::internal_err(format!(
-            "{}{}",
-            $crate::__location_info!("in {}: "),
-            format_args!($($tt)*)
-        )).into())
+    ($($format_args:tt)*) => {
+        return Err($crate::internal_err!($($format_args)*).into())
     };
 }
 
@@ -726,26 +795,19 @@ macro_rules! internal {
 /// When building in debug mode, the returned error also captures file, line, and column information
 /// for further debugging purposes.
 ///
-/// When called with no arguments, generates an internal error with the text
-/// "operation not implemented yet".
+/// When called with no arguments, generates an unsupported error with the text "operation not
+/// implemented yet".
 #[macro_export]
 macro_rules! unsupported {
-    () => {
-        unsupported!("operation not implemented yet")
-    };
-    ($($tt:tt)*) => {
-        return Err($crate::unsupported_err(format!(
-            "{}{}",
-            format_args!($($tt)*),
-            $crate::__location_info!()
-        )).into())
+    ($($format_args:tt)*) => {
+        return Err($crate::unsupported_err!($($format_args)*).into())
     };
 }
 
-/// Return a [`ReadySetError::Internal`] from the current function, if and only if
-/// the argument evaluates to false.
+/// Return a [`ReadySetError::Internal`] from the current function, if and only if the argument
+/// evaluates to false.
 ///
-/// This is intended to be used wherever [`assert!`] was used previously.
+/// This is intended to be used wherever [`assert!`] would otherwise be used.
 #[macro_export]
 macro_rules! invariant {
     ($expr:expr, $($tt:tt)*) => {
@@ -844,7 +906,7 @@ pub fn rpc_err<T: Into<String>>(during: T, err: Box<dyn std::error::Error>) -> R
     // unravel the complete madness that is `tokio_tower` yet.
     let rse: Box<ReadySetError> = err
         .downcast()
-        .unwrap_or_else(|e| Box::new(internal_err(format!("failed to downcast: {}", e))));
+        .unwrap_or_else(|e| Box::new(internal_err!("failed to downcast: {}", e)));
     ReadySetError::RpcFailed {
         during: during.into(),
         source: rse,

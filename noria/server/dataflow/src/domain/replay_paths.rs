@@ -231,11 +231,11 @@ impl ReplayPaths {
                 } else {
                     (
                         source.ok_or_else(|| {
-                            internal_err("Path without target must have source in the same domain")
+                            internal_err!("Path without target must have source in the same domain")
                         })?,
                         source_index.ok_or_else(|| {
                             // I think?
-                            internal_err("Partial replay path must have an index at the source")
+                            internal_err!("Partial replay path must have an index at the source")
                         })?,
                     )
                 };

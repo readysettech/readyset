@@ -68,10 +68,7 @@ pub(super) fn mir_query_to_flow_parts(
         let edge_counts = in_edge_counts
             .get(&n.borrow().versioned_name())
             .ok_or_else(|| {
-                internal_err(format!(
-                    "no in_edge_counts for {}",
-                    n.borrow().versioned_name()
-                ))
+                internal_err!("no in_edge_counts for {}", n.borrow().versioned_name())
             })?;
         invariant_eq!(*edge_counts, 0);
         let (name, from_version) = {
@@ -109,7 +106,7 @@ pub(super) fn mir_query_to_flow_parts(
         .borrow()
         .flow_node
         .as_ref()
-        .ok_or_else(|| internal_err("Leaf must have FlowNode by now"))?
+        .ok_or_else(|| internal_err!("Leaf must have FlowNode by now"))?
         .address();
 
     Ok(QueryFlowParts {
@@ -266,7 +263,7 @@ fn mir_node_to_flow_parts(
                     // each match arm must return a `FlowNode`, so we use the parent's one
                     // here.
                     let node = match *parent.borrow().flow_node.as_ref().ok_or_else(|| {
-                        internal_err("parent of a Leaf mirnodeinner had no flow_node")
+                        internal_err!("parent of a Leaf mirnodeinner had no flow_node")
                     })? {
                         FlowNode::New(na) => FlowNode::Existing(na),
                         n @ FlowNode::Existing(..) => n,
@@ -317,7 +314,7 @@ fn mir_node_to_flow_parts(
                     match *node.borrow()
                         .flow_node
                         .as_ref()
-                        .ok_or_else(|| internal_err("Reused MirNode must have FlowNode"))? {
+                        .ok_or_else(|| internal_err!("Reused MirNode must have FlowNode"))? {
                         // "New" => flow node was originally created for the node that we
                         // are reusing
                         FlowNode::New(na) |
@@ -379,7 +376,7 @@ fn mir_node_to_flow_parts(
                 MirNodeInner::AliasTable { .. } => mir_node
                     .parent()
                     .and_then(|n| n.borrow().flow_node)
-                    .ok_or_else(|| internal_err("MirNodeInner::AliasTable must have a parent"))?,
+                    .ok_or_else(|| internal_err!("MirNodeInner::AliasTable must have a parent"))?,
             };
 
             // any new flow nodes have been instantiated by now, so we replace them with
@@ -432,16 +429,17 @@ fn adapt_base_node(
             .iter()
             .position(|&(ref ecs, _)| ecs == r)
             .ok_or_else(|| {
-                internal_err(format!(
+                internal_err!(
                     "could not find ColumnSpecification {:?} in {:?}",
-                    r, column_specs
-                ))
+                    r,
+                    column_specs
+                )
             })?;
         // pos just came from `position` above
         #[allow(clippy::indexing_slicing)]
         let cid = column_specs[pos]
             .1
-            .ok_or_else(|| internal_err("base column ID must be set to remove column"))?;
+            .ok_or_else(|| internal_err!("base column ID must be set to remove column"))?;
         mig.drop_column(na, cid)?;
     }
 
@@ -491,9 +489,7 @@ fn make_base_node(
                     .position(|(ColumnSpecification { column, .. }, _)| {
                         column.name == col.name && column.table == col.table
                     })
-                    .ok_or_else(|| {
-                        internal_err(format!("could not find pkey column id for {:?}", col))
-                    })
+                    .ok_or_else(|| internal_err!("could not find pkey column id for {:?}", col))
             })
             .collect()
     };
@@ -530,7 +526,7 @@ fn make_union_node(
 
     let mut cols = Vec::with_capacity(
         emit.get(0)
-            .ok_or_else(|| internal_err("No emit columns"))?
+            .ok_or_else(|| internal_err!("No emit columns"))?
             .len(),
     );
 
@@ -540,7 +536,7 @@ fn make_union_node(
     for (i, n) in ancestors.iter().enumerate() {
         let emit_cols = emit
             .get(i)
-            .ok_or_else(|| internal_err(format!("no index {} in emit cols {:?}", i, emit)))?
+            .ok_or_else(|| internal_err!("no index {} in emit cols {:?}", i, emit))?
             .iter()
             .map(|c| n.borrow().column_id_for_column(c))
             .collect::<ReadySetResult<Vec<_>>>()?;
@@ -557,7 +553,7 @@ fn make_union_node(
                     parent_cols
                         .get(*i)
                         .cloned()
-                        .ok_or_else(|| internal_err("Invalid index"))
+                        .ok_or_else(|| internal_err!("Invalid index"))
                 })
                 .collect::<ReadySetResult<Vec<_>>>()?;
         }
@@ -627,17 +623,17 @@ fn make_grouped_node(
             parent_cols
                 .get(*i)
                 .cloned()
-                .ok_or_else(|| internal_err("Invalid index"))
+                .ok_or_else(|| internal_err!("Invalid index"))
         })
         .collect::<ReadySetResult<Vec<_>>>()?;
 
     let over_col_ty = parent_cols
         .get(over_col_indx)
-        .ok_or_else(|| internal_err("Invalid index"))?
+        .ok_or_else(|| internal_err!("Invalid index"))?
         .ty();
     let over_col_name = &columns
         .last()
-        .ok_or_else(|| internal_err("Grouped has no projections"))?
+        .ok_or_else(|| internal_err!("Grouped has no projections"))?
         .name;
 
     let na = match kind {
@@ -743,13 +739,13 @@ fn make_join_node(
             Ok(idx) => left_cols
                 .get(idx)
                 .cloned()
-                .ok_or_else(|| internal_err("Invalid index")),
+                .ok_or_else(|| internal_err!("Invalid index")),
             Err(_) => match right.borrow().column_id_for_column(c) {
                 Ok(idx) => right_cols
                     .get(idx)
                     .cloned()
-                    .ok_or_else(|| internal_err("Invalid index")),
-                Err(_) => Err(internal_err("Column not found in either parent")),
+                    .ok_or_else(|| internal_err!("Invalid index")),
+                Err(_) => Err(internal_err!("Column not found in either parent")),
             },
         })
         .collect::<ReadySetResult<Vec<_>>>()?;
@@ -793,11 +789,11 @@ fn make_join_node(
                 .iter()
                 .position(|lc| lc == l)
                 .ok_or_else(|| {
-                    internal_err(format!(
+                    internal_err!(
                         "missing left-side join column {:#?} in {:#?}",
                         on_left.first(),
                         left.borrow().columns()
-                    ))
+                    )
                 })?;
 
             let right_join_col_id = right
@@ -806,11 +802,11 @@ fn make_join_node(
                 .iter()
                 .position(|rc| rc == r)
                 .ok_or_else(|| {
-                    internal_err(format!(
+                    internal_err!(
                         "missing right-side join column {:#?} in {:#?}",
                         on_right.first(),
                         right.borrow().columns()
-                    ))
+                    )
                 })?;
 
             Ok((left_join_col_id, right_join_col_id))
@@ -961,11 +957,11 @@ fn make_join_aggregates_node(
             JoinSource::B(i, _) | JoinSource::L(i) => left_cols
                 .get(*i)
                 .cloned()
-                .ok_or_else(|| internal_err("Invalid index")),
+                .ok_or_else(|| internal_err!("Invalid index")),
             JoinSource::R(i) => right_cols
                 .get(*i)
                 .cloned()
-                .ok_or_else(|| internal_err("Invalid index")),
+                .ok_or_else(|| internal_err!("Invalid index")),
         })
         .collect::<ReadySetResult<Vec<_>>>()?;
 
@@ -1059,12 +1055,7 @@ fn lower_expression(
                 .column_id_for_column(&Column::new(table.as_deref(), &name))?;
             let ty = parent_cols
                 .get(index)
-                .ok_or_else(|| {
-                    internal_err(format!(
-                        "Index exceeds length of parent cols, idx={}",
-                        index
-                    ))
-                })?
+                .ok_or_else(|| internal_err!("Index exceeds length of parent cols, idx={}", index))?
                 .ty()
                 .clone();
             Ok(DataflowExpr::Column { index, ty })
@@ -1207,9 +1198,7 @@ fn make_project_node(
             parent
                 .borrow()
                 .find_source_for_child_column(c)
-                .ok_or_else(|| {
-                    internal_err(format!("could not find source for child column: {:?}", c))
-                })
+                .ok_or_else(|| internal_err!("could not find source for child column: {:?}", c))
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -1219,7 +1208,7 @@ fn make_project_node(
             parent_cols
                 .get(*i)
                 .cloned()
-                .ok_or_else(|| internal_err("Invalid index"))
+                .ok_or_else(|| internal_err!("Invalid index"))
         })
         .collect::<ReadySetResult<Vec<_>>>()?;
 
@@ -1293,9 +1282,7 @@ fn make_distinct_node(
             parent
                 .borrow()
                 .find_source_for_child_column(c)
-                .ok_or_else(|| {
-                    internal_err(format!("could not find source for child column: {:?}", c))
-                })
+                .ok_or_else(|| internal_err!("could not find source for child column: {:?}", c))
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -1305,14 +1292,14 @@ fn make_distinct_node(
             parent_cols
                 .get(*i)
                 .cloned()
-                .ok_or_else(|| internal_err("Invalid index"))
+                .ok_or_else(|| internal_err!("Invalid index"))
         })
         .collect::<ReadySetResult<Vec<_>>>()?;
 
     // distinct count is projected last
     let distinct_count_name = columns
         .last()
-        .ok_or_else(|| internal_err("No projected columns for distinct"))?
+        .ok_or_else(|| internal_err!("No projected columns for distinct"))?
         .name
         .clone();
     cols.push(DataflowColumn::new(

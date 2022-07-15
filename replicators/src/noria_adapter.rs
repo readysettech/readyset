@@ -152,9 +152,9 @@ impl NoriaAdapter {
         let url: DatabaseURL = config
             .replication_url
             .take()
-            .ok_or_else(|| internal_err("Replication URL not supplied"))?
+            .ok_or_else(|| internal_err!("Replication URL not supplied"))?
             .parse()
-            .map_err(|e| invalid_err(format!("Invalid URL supplied to --replication-url: {e}")))?;
+            .map_err(|e| invalid_err!("Invalid URL supplied to --replication-url: {e}"))?;
 
         match url {
             DatabaseURL::MySQL(options) => {

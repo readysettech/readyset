@@ -77,7 +77,7 @@ impl NoriaBackend {
         // TODO(ENG-707): Support retrying to create a backend in the future.
         self.inner
             .as_mut()
-            .ok_or_else(|| internal_err("Failed to create a Noria backend."))
+            .ok_or_else(|| internal_err!("Failed to create a Noria backend."))
     }
 }
 
@@ -441,7 +441,7 @@ impl ReadBehavior {
 async fn short_circuit_empty_resultset(getter: &mut View) -> ReadySetResult<QueryResult<'_>> {
     let getter_schema = getter
         .schema()
-        .ok_or_else(|| internal_err("No schema for view"))?;
+        .ok_or_else(|| internal_err!("No schema for view"))?;
     Ok(QueryResult::empty(SelectSchema {
         use_bogo: false,
         schema: Cow::Borrowed(getter_schema.schema(SchemaType::ReturnedSchema)),
@@ -567,7 +567,7 @@ impl NoriaConnector {
         trace!("query::insert::extract schema");
         let schema = putter
             .schema()
-            .ok_or_else(|| internal_err(format!("no schema for table '{}'", table)))?;
+            .ok_or_else(|| internal_err!("no schema for table '{}'", table))?;
 
         // set column names (insert schema) if not set
         let q = match q.fields {
@@ -607,9 +607,7 @@ impl NoriaConnector {
         trace!("insert::extract schema");
         let schema = mutator
             .schema()
-            .ok_or_else(|| {
-                internal_err(format!("Could not find schema for table {}", q.table.name))
-            })?
+            .ok_or_else(|| internal_err!("Could not find schema for table {}", q.table.name))?
             .fields
             .iter()
             .map(|cs| ColumnSchema::from_base(cs.clone(), q.table.name.clone()))
@@ -638,9 +636,7 @@ impl NoriaConnector {
                         .iter()
                         .cloned()
                         .find(|mc| c.name == mc.spec.column.name)
-                        .ok_or_else(|| {
-                            internal_err(format!("column '{}' missing in mutator schema", c))
-                        })
+                        .ok_or_else(|| internal_err!("column '{}' missing in mutator schema", c))
                 })
                 .collect::<ReadySetResult<Vec<_>>>()?
         };
@@ -675,7 +671,7 @@ impl NoriaConnector {
                 trace!("insert::extract schema");
                 let schema = putter
                     .schema()
-                    .ok_or_else(|| internal_err(format!("no schema for table '{}'", table)))?;
+                    .ok_or_else(|| internal_err!("no schema for table '{}'", table))?;
                 // unwrap: safe because we always pass in Some(params) so don't hit None path of
                 // coerce_params
                 let coerced_params =
@@ -699,7 +695,7 @@ impl NoriaConnector {
         let cond = q
             .where_clause
             .as_ref()
-            .ok_or_else(|| unsupported_err("only supports DELETEs with WHERE-clauses"))?;
+            .ok_or_else(|| unsupported_err!("only supports DELETEs with WHERE-clauses"))?;
 
         // create a mutator if we don't have one for this table already
         trace!(table = %q.table.name, "delete::access mutator");
@@ -766,9 +762,9 @@ impl NoriaConnector {
             .get_noria_table(&q.table.name)
             .await?;
         trace!("update::extract schema");
-        let table_schema = mutator.schema().ok_or_else(|| {
-            internal_err(format!("Could not find schema for table {}", q.table.name))
-        })?;
+        let table_schema = mutator
+            .schema()
+            .ok_or_else(|| internal_err!("Could not find schema for table {}", q.table.name))?;
 
         // extract parameter columns
         let params = utils::update_statement_parameter_columns(&q)
@@ -782,7 +778,7 @@ impl NoriaConnector {
                     .find(|f| f.column.name == c.name)
                     .cloned()
                     .map(|cs| ColumnSchema::from_base(cs, q.table.name.clone()))
-                    .ok_or_else(|| internal_err(format!("Unknown column {}", c)))
+                    .ok_or_else(|| internal_err!("Unknown column {}", c))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -829,9 +825,9 @@ impl NoriaConnector {
             .get_noria_table(&q.table.name)
             .await?;
         trace!("delete::extract schema");
-        let table_schema = mutator.schema().ok_or_else(|| {
-            internal_err(format!("Could not find schema for table {}", q.table.name))
-        })?;
+        let table_schema = mutator
+            .schema()
+            .ok_or_else(|| internal_err!("Could not find schema for table {}", q.table.name))?;
 
         // extract parameter columns
         let params = utils::delete_statement_parameter_columns(&q)
@@ -845,7 +841,7 @@ impl NoriaConnector {
                     .find(|f| f.column.name == c.name)
                     .cloned()
                     .map(|cs| ColumnSchema::from_base(cs, q.table.name.clone()))
-                    .ok_or_else(|| internal_err(format!("Unknown column {}", c)))
+                    .ok_or_else(|| internal_err!("Unknown column {}", c))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -1032,7 +1028,7 @@ impl NoriaConnector {
         trace!("insert::extract schema");
         let schema = putter
             .schema()
-            .ok_or_else(|| internal_err(format!("no schema for table '{}'", table)))?;
+            .ok_or_else(|| internal_err!("no schema for table '{}'", table))?;
 
         let columns_specified: Vec<_> = q
             .fields
@@ -1145,7 +1141,7 @@ impl NoriaConnector {
                     let value = row
                         .get(ci)
                         .ok_or_else(|| {
-                            internal_err(
+                            internal_err!(
                                 "Row returned from noria-server had the wrong number of columns",
                             )
                         })?
@@ -1362,7 +1358,7 @@ impl NoriaConnector {
 
         let getter_schema = getter
             .schema()
-            .ok_or_else(|| internal_err(format!("no schema for view '{}'", qname)))?;
+            .ok_or_else(|| internal_err!("no schema for view '{}'", qname))?;
 
         let mut params: Vec<_> = getter_schema
             .to_cols(&client_param_columns, SchemaType::ProjectedSchema)?
@@ -1715,7 +1711,7 @@ async fn do_read<'a>(
     let vq = build_view_query(
         getter
             .schema()
-            .ok_or_else(|| internal_err("No schema for view"))?,
+            .ok_or_else(|| internal_err!("No schema for view"))?,
         getter.key_map(),
         q,
         raw_keys,
@@ -1743,11 +1739,11 @@ async fn do_read<'a>(
             result
                 .v
                 .into_normal()
-                .ok_or_else(|| internal_err("Unexpected response type from reader service"))??
+                .ok_or_else(|| internal_err!("Unexpected response type from reader service"))??
                 .into_results()
                 .ok_or(ReadySetError::ReaderMissingKey)?
                 .pop()
-                .ok_or_else(|| internal_err("Expected a single result set for local reader"))?
+                .ok_or_else(|| internal_err!("Expected a single result set for local reader"))?
                 .into_unserialized()
                 .expect("Requested raw result")
         } else {

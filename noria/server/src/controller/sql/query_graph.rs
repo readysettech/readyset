@@ -323,7 +323,7 @@ impl QueryGraph {
             let mut last_op = None;
             for param in parameters {
                 let new_index_type = Some(IndexType::for_operator(param.op).ok_or_else(|| {
-                    unsupported_err(format!("Unsupported binary operator `{}`", param.op))
+                    unsupported_err!("Unsupported binary operator `{}`", param.op)
                 })?);
 
                 if !config.allow_mixed_comparisons
@@ -765,7 +765,7 @@ pub(crate) fn extract_limit_offset(
 
     let limit = match limit {
         Literal::Integer(val) => u64::try_from(*val)
-            .map_err(|_| unsupported_err("LIMIT field cannot have a negative value"))?,
+            .map_err(|_| unsupported_err!("LIMIT field cannot have a negative value"))?,
         Literal::Placeholder(_) => {
             unsupported!("ReadySet does not support parametrized LIMIT fields")
         }
@@ -1080,10 +1080,11 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                 }
                 Some(ref table) => {
                     let rel = qg.relations.get_mut(table).ok_or_else(|| {
-                        invalid_err(format!(
+                        invalid_err!(
                             "Column {} references non-existent table {}",
-                            param.col.name, table
-                        ))
+                            param.col.name,
+                            table
+                        )
                     })?;
                     if !rel.columns.contains(&param.col) {
                         rel.columns.push(param.col.clone());

@@ -32,7 +32,7 @@ impl<'ast, 'schema> Visitor<'ast> for CountStarRewriteVisitor<'schema> {
                 .as_ref()
                 .and_then(|ts| ts.first())
                 .cloned()
-                .ok_or_else(|| internal_err("Tables should be set first"))?;
+                .ok_or_else(|| internal_err!("Tables should be set first"))?;
 
             #[allow(clippy::unwrap_used)]
             // We've already checked that all the tables referenced in the query exist

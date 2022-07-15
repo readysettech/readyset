@@ -471,7 +471,7 @@ impl Ingredient for Join {
                                     .cloned()
                                     .collect::<Vec<_>>()
                                     .try_into()
-                                    .map_err(|_| internal_err("Empty join key"))?,
+                                    .map_err(|_| internal_err!("Empty join key"))?,
                             });
                         }
 
@@ -565,7 +565,7 @@ impl Ingredient for Join {
                         .cloned()
                         .collect::<Vec<_>>()
                         .try_into()
-                        .map_err(|_| internal_err("Empty join key"))?,
+                        .map_err(|_| internal_err!("Empty join key"))?,
                 });
             }
 
@@ -848,10 +848,10 @@ impl Ingredient for Join {
                     // straddling both parents - which is an invariant of this function!
                     (
                         left_key.try_into().map_err(|_| {
-                            internal_err("Join handle_upquery passed a non-straddled join key")
+                            internal_err!("Join handle_upquery passed a non-straddled join key")
                         })?,
                         right_key.try_into().map_err(|_| {
-                            internal_err("Join handle_upquery passed a non-straddled join key")
+                            internal_err!("Join handle_upquery passed a non-straddled join key")
                         })?,
                     )
                 }

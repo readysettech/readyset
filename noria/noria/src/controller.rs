@@ -109,10 +109,10 @@ impl Service<ControllerRequest> for Controller {
                     );
                 }
                 if url.is_none() {
-                    let descriptor: ControllerDescriptor =
-                        auth.get_leader().await.map_err(|e| {
-                            internal_err(format!("failed to get current leader: {}", e))
-                        })?;
+                    let descriptor: ControllerDescriptor = auth
+                        .get_leader()
+                        .await
+                        .map_err(|e| internal_err!("failed to get current leader: {}", e))?;
 
                     url = Some(descriptor.controller_uri);
                 }
@@ -123,7 +123,7 @@ impl Service<ControllerRequest> for Controller {
                 let string_url = url.as_ref().unwrap().join(path)?.to_string();
                 let r = hyper::Request::post(string_url)
                     .body(hyper::Body::from(body.clone()))
-                    .map_err(|e| internal_err(format!("http request failed: {}", e)))?;
+                    .map_err(|e| internal_err!("http request failed: {}", e))?;
 
                 let res = match tokio::time::timeout(request_timeout - elapsed, client.request(r))
                     .await
@@ -146,7 +146,7 @@ impl Service<ControllerRequest> for Controller {
                 let status = res.status();
                 let body = hyper::body::to_bytes(res.into_body())
                     .await
-                    .map_err(|he| internal_err(format!("hyper response failed: {}", he)))?;
+                    .map_err(|he| internal_err!("hyper response failed: {}", he))?;
 
                 match status {
                     hyper::StatusCode::OK => {

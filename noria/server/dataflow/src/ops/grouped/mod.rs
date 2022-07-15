@@ -216,7 +216,7 @@ where
         // find the current value for this group
         let us = self.us.unwrap();
         let db = state.get(*us).ok_or_else(|| {
-            internal_err("grouped operators must have their own state materialized")
+            internal_err!("grouped operators must have their own state materialized")
         })?;
 
         let mut misses = Vec::new();
@@ -242,7 +242,7 @@ where
                                     key: group
                                         .clone()
                                         .try_into()
-                                        .map_err(|_| internal_err("Empty group"))?,
+                                        .map_err(|_| internal_err!("Empty group"))?,
                                 });
                             }
 
@@ -326,7 +326,7 @@ where
                                             key: group
                                                 .clone()
                                                 .try_into()
-                                                .map_err(|_| internal_err("Empty group"))?,
+                                                .map_err(|_| internal_err!("Empty group"))?,
                                         });
                                     }
                                     rs.into_iter()

@@ -248,14 +248,16 @@ impl Worker {
                 let bind_on = self.domain_bind;
                 let listener = tokio::net::TcpListener::bind(&SocketAddr::new(bind_on, 0))
                     .map_err(|e| {
-                        internal_err(format!(
+                        internal_err!(
                             "failed to bind domain {} on {}: {}",
-                            replica_addr, bind_on, e
-                        ))
+                            replica_addr,
+                            bind_on,
+                            e
+                        )
                     })
                     .await?;
                 let bind_actual = listener.local_addr().map_err(|e| {
-                    internal_err(format!("couldn't get TCP local address for domain: {}", e))
+                    internal_err!("couldn't get TCP local address for domain: {}", e)
                 })?;
                 let mut bind_external = bind_actual;
                 bind_external.set_ip(self.domain_external);
@@ -525,10 +527,10 @@ async fn do_eviction(
                         Occupied(entry) => entry.into_mut(),
                         Vacant(entry) => entry.insert(tokio::task::block_in_place(|| {
                             coord.builder_for(&target)?.build_async().map_err(|e| {
-                                internal_err(format!(
+                                internal_err!(
                                     "an error occurred while trying to create a domain connection: '{}'",
                                     e
-                                ))
+                                )
                             })
                         })?),
                     };

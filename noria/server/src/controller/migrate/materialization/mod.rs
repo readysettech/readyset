@@ -337,13 +337,13 @@ impl Materializations {
                                     .and_then(|(_, col)| col);
 
                                 really.ok_or_else(|| {
-                                    internal_err(format!(
+                                    internal_err!(
                                         "could not resolve obligation past operator;\
                                      node => {}, ancestor => {}, column => {}",
                                         n.global_addr().index(),
                                         parent.index(),
                                         col
-                                    ))
+                                    )
                                 })
                             })
                             .collect::<ReadySetResult<Vec<usize>>>()?,
@@ -939,7 +939,7 @@ impl Materializations {
                 let parent = graph
                     .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
                     .next()
-                    .ok_or_else(|| internal_err("shard mergers must have a parent"))?;
+                    .ok_or_else(|| internal_err!("shard mergers must have a parent"))?;
                 let psharding = graph[parent].sharded_by();
 
                 if let Sharding::ByColumn(col, _) = psharding {
@@ -951,7 +951,7 @@ impl Materializations {
                             .into_iter()
                             .find(|&(n, _)| self.have.contains_key(&n))
                             .ok_or_else(|| {
-                                internal_err(
+                                internal_err!(
                                     "since bases are materialized, \
                                  every path must eventually have a materialized node",
                                 )

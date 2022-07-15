@@ -339,7 +339,7 @@ impl Controller {
         self.worker_tx
             .send(WorkerRequest { kind, done_tx: tx })
             .await
-            .map_err(|e| internal_err(format!("failed to send to instance worker: {}", e)))?;
+            .map_err(|e| internal_err!("failed to send to instance worker: {}", e))?;
         Ok(())
     }
 
