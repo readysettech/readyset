@@ -192,6 +192,7 @@ impl ArbitraryQueryParameters {
         let create_cache_query = nom_sql::CreateCacheStatement {
             name: Some("q".into()),
             inner: nom_sql::CacheInner::Statement(Box::new(stmt)),
+            always: false,
         };
 
         conn.query_drop(create_cache_query.to_string()).await?;

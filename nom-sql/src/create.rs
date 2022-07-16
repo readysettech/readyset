@@ -139,18 +139,22 @@ pub enum CacheInner {
     Id(SqlIdentifier),
 }
 
-/// `CREATE CACHE [<name>] FROM ...`
+/// `CREATE CACHE [ALWAYS] [<name>] FROM ...`
 ///
 /// This is a non-standard ReadySet specific extension to SQL
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateCacheStatement {
     pub name: Option<SqlIdentifier>,
     pub inner: CacheInner,
+    pub always: bool,
 }
 
 impl fmt::Display for CreateCacheStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "CREATE CACHE ")?;
+        if self.always {
+            write!(f, "ALWAYS ")?;
+        }
         if let Some(name) = &self.name {
             write!(f, "`{}` ", name)?;
         }
@@ -734,11 +738,19 @@ pub fn create_cached_query(
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("cache")(i)?;
         let (i, _) = whitespace1(i)?;
+        let (i, always) = opt(terminated(tag_no_case("always"), whitespace1))(i)?;
         let (i, name) = opt(terminated(dialect.identifier(), whitespace1))(i)?;
         let (i, _) = tag_no_case("from")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, inner) = cached_query_inner(dialect)(i)?;
-        Ok((i, CreateCacheStatement { name, inner }))
+        Ok((
+            i,
+            CreateCacheStatement {
+                name,
+                inner,
+                always: always.is_some(),
+            },
+        ))
     }
 }
 
@@ -1531,6 +1543,21 @@ mod tests {
                 _ => panic!(),
             };
             assert_eq!(id.as_str(), "q_0123456789ABCDEF")
+        }
+
+        #[test]
+        fn create_cached_query_with_always() {
+            let res = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHE ALWAYS FROM SELECT id FROM users WHERE name = ?"
+            );
+            assert!(res.name.is_none());
+            let statement = match res.inner {
+                CacheInner::Statement(s) => s,
+                _ => panic!(),
+            };
+            assert_eq!(statement.tables, vec!["users".into()]);
+            assert!(res.always);
         }
 
         #[test]

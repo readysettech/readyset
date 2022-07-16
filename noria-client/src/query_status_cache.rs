@@ -24,6 +24,7 @@ pub fn hash_to_query_id(hash: u64) -> String {
 pub struct QueryStatus {
     pub migration_state: MigrationState,
     pub execution_info: Option<ExecutionInfo>,
+    pub always: bool,
 }
 
 impl QueryStatus {
@@ -31,6 +32,7 @@ impl QueryStatus {
         Self {
             migration_state: MigrationState::Pending,
             execution_info: None,
+            always: false,
         }
     }
 
@@ -457,8 +459,22 @@ impl QueryStatusCache {
                     QueryStatus {
                         migration_state: m,
                         execution_info: None,
+                        always: false,
                     },
                 );
+            }
+            _ => {}
+        }
+    }
+
+    /// Updates the query's always flag, indicating whether the query should be served from
+    /// ReadySet regardless of autocommit state.
+    /// Will not apply the always flag to unsupported queries, or try to insert a query if it has
+    /// not already been registered.
+    pub fn always_attempt_readyset(&self, q: &Query, always: bool) {
+        match self.statuses.get_mut(q) {
+            Some(mut s) if s.migration_state != MigrationState::Unsupported => {
+                s.always = always;
             }
             _ => {}
         }
@@ -489,6 +505,7 @@ impl QueryStatusCache {
             .filter(|v| v.is_successful())
             .for_each(|mut v| {
                 v.migration_state = MigrationState::Pending;
+                v.always = false;
             });
     }
 

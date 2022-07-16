@@ -208,13 +208,14 @@ pub enum Change {
 impl Change {
     /// Creates a new [`Change::CreateCache`] from the given `name` and
     /// [`SelectStatement`].
-    pub fn create_cache<N>(name: N, statement: SelectStatement) -> Self
+    pub fn create_cache<N>(name: N, statement: SelectStatement, always: bool) -> Self
     where
         N: Into<SqlIdentifier>,
     {
         Self::CreateCache(CreateCacheStatement {
             name: Some(name.into()),
             inner: CacheInner::Statement(Box::new(statement)),
+            always,
         })
     }
 }

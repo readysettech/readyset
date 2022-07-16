@@ -244,12 +244,14 @@ impl DataflowState {
             .collect()
     }
 
-    /// Get a map of all known output nodes created from `CREATE CACHE` statements, mapping the name
-    /// of the node to the `SelectStatement`
+    /// Get a map of all known output nodes created from `CREATE CACHE` statements, mapping the
+    /// name of the node to a tuple of (`SelectStatement`, always) where always is a bool that
+    /// indicates whether the `CREATE CACHE` statement was created with the optional `ALWAYS`
+    /// argument.
     ///
     /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
     /// to calling `.maintain` or `.stream` for a node during a migration
-    pub(super) fn verbose_outputs(&self) -> BTreeMap<SqlIdentifier, SelectStatement> {
+    pub(super) fn verbose_outputs(&self) -> BTreeMap<SqlIdentifier, (SelectStatement, bool)> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -269,8 +271,9 @@ impl DataflowState {
                         // CacheInner::ID should have been expanded to CacheInner::Statement
                         SqlQuery::CreateCache(CreateCacheStatement {
                             inner: CacheInner::Statement(stmt),
+                            always,
                             ..
-                        }) => Some((name.clone(), (*stmt).clone())),
+                        }) => Some((name.clone(), ((*stmt).clone(), always))),
                         _ => None,
                     }
                 } else {

@@ -1569,15 +1569,34 @@ async fn create_query_cache_where_in() {
         .unwrap();
     sleep().await;
 
-    let queries: Vec<(String, String)> = conn.query("SHOW CACHES;").await.unwrap();
-    assert!(queries.iter().any(|(query_name, _)| query_name == "test"));
+    let queries: Vec<(String, String, String)> = conn.query("SHOW CACHES;").await.unwrap();
+    assert!(queries
+        .iter()
+        .any(|(query_name, _, always)| query_name == "test" && always == "no"));
 
     conn.query_drop("CREATE CACHE test FROM SELECT id FROM t WHERE id IN (?, ?);")
         .await
         .unwrap();
     sleep().await;
-    let new_queries: Vec<(String, String)> = conn.query("SHOW CACHES;").await.unwrap();
+    let new_queries: Vec<(String, String, String)> = conn.query("SHOW CACHES;").await.unwrap();
     assert_eq!(new_queries.len(), queries.len());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn show_caches_with_always() {
+    let (opts, _handle) = setup(true).await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TABLE t (id INT);").await.unwrap();
+    sleep().await;
+
+    conn.query_drop("CREATE CACHE ALWAYS test_always FROM SELECT id FROM t WHERE id IN (?, ?);")
+        .await
+        .unwrap();
+    sleep().await;
+    let queries: Vec<(String, String, String)> = conn.query("SHOW CACHES;").await.unwrap();
+    assert!(queries
+        .iter()
+        .any(|(query_name, _, always)| query_name == "test_always" && always == "yes"));
 }
 
 #[tokio::test(flavor = "multi_thread")]
