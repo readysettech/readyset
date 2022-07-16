@@ -331,7 +331,9 @@ impl ControllerHandle {
     /// Enumerate all known external views. Includes the SqlQuery that created the view
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub async fn verbose_outputs(&mut self) -> ReadySetResult<BTreeMap<String, SelectStatement>> {
+    pub async fn verbose_outputs(
+        &mut self,
+    ) -> ReadySetResult<BTreeMap<String, (SelectStatement, bool)>> {
         let body: hyper::body::Bytes = self
             .handle
             .ready()

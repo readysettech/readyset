@@ -63,9 +63,14 @@ impl Recipe {
         let expr = self.registry.get(&alias.into()).map(|e| match e {
             RecipeExpr::Table(cts) => SqlQuery::CreateTable(cts.clone()),
             RecipeExpr::View(cvs) => SqlQuery::CreateView(cvs.clone()),
-            RecipeExpr::Cache { name, statement } => SqlQuery::CreateCache(CreateCacheStatement {
+            RecipeExpr::Cache {
+                name,
+                statement,
+                always,
+            } => SqlQuery::CreateCache(CreateCacheStatement {
                 name: Some(name.clone()),
                 inner: CacheInner::Statement(Box::new(statement.clone())),
+                always: *always,
             }),
         });
         if expr.is_none() {
@@ -231,6 +236,7 @@ impl Recipe {
                         let expression = RecipeExpr::Cache {
                             name: name.clone(),
                             statement: select,
+                            always: ccqs.always,
                         };
                         if !self.registry.add_query(expression)? {
                             // The expression is already present, and we successfully added
@@ -247,6 +253,7 @@ impl Recipe {
                         self.registry.add_query(RecipeExpr::Cache {
                             name: qfp.name.clone(),
                             statement: select,
+                            always: ccqs.always,
                         })?;
                     };
                 }

@@ -235,7 +235,7 @@ where
         }
         let qname = utils::generate_query_name(stmt);
         let changelist = ChangeList {
-            changes: vec![Change::create_cache(qname, stmt.clone())],
+            changes: vec![Change::create_cache(qname, stmt.clone(), false)],
         };
         match controller.dry_run(changelist).await {
             Ok(_) => {

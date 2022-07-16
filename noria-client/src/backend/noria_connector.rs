@@ -527,15 +527,35 @@ impl NoriaConnector {
                     },
                     base: None,
                 },
+                ColumnSchema {
+                    spec: nom_sql::ColumnSpecification {
+                        column: nom_sql::Column {
+                            name: "bypass_autocommit".into(),
+                            table: None,
+                        },
+                        sql_type: nom_sql::SqlType::Text,
+                        constraints: vec![],
+                        comment: None,
+                    },
+                    base: None,
+                },
             ]),
 
-            columns: Cow::Owned(vec!["name".into(), "query".into()]),
+            columns: Cow::Owned(vec![
+                "name".into(),
+                "query".into(),
+                "bypass_autocommit".into(),
+            ]),
         };
         let data = outputs
             .into_iter()
-            .map(|(n, mut q)| {
+            .map(|(n, (mut q, always))| {
                 rewrite::anonymize_literals(&mut q);
-                vec![DataType::from(n), DataType::from(q.to_string())]
+                vec![
+                    DataType::from(n),
+                    DataType::from(q.to_string()),
+                    DataType::from(if always { "yes" } else { "no" }),
+                ]
             })
             .collect::<Vec<_>>();
         Ok(QueryResult::from_owned(
@@ -929,12 +949,17 @@ impl NoriaConnector {
         &mut self,
         name: Option<&str>,
         statement: &nom_sql::SelectStatement,
+        always: bool,
     ) -> ReadySetResult<()> {
         let name: SqlIdentifier = name
             .map(|s| s.into())
             .unwrap_or_else(|| utils::generate_query_name(statement).into());
         let changelist = ChangeList {
-            changes: vec![Change::create_cache(name.clone(), statement.clone())],
+            changes: vec![Change::create_cache(
+                name.clone(),
+                statement.clone(),
+                always,
+            )],
         };
 
         noria_await!(
@@ -969,7 +994,7 @@ impl NoriaConnector {
                     }
 
                     let changelist = ChangeList {
-                        changes: vec![Change::create_cache(qname.clone(), q.clone())],
+                        changes: vec![Change::create_cache(qname.clone(), q.clone(), false)],
                     };
 
                     if let Err(e) = noria_await!(

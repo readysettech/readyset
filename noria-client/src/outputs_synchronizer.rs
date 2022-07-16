@@ -42,9 +42,10 @@ impl OutputsSynchronizer {
                         Ok(outputs) => {
                             //TODO(Dan): Update so that we only request changes to output since
                             //some timestamp. Also consider using query hashes instead of SqlQuery
-                            outputs.iter().for_each(|(_, query)| {
+                            outputs.iter().for_each(|(_, (query, always))| {
                                 self.query_status_cache
-                                    .update_query_migration_state(query, MigrationState::Successful)
+                                    .update_query_migration_state(query, MigrationState::Successful);
+                                self.query_status_cache.always_attempt_readyset(query, *always);
                             });
                         }
                         Err(e) => {

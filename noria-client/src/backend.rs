@@ -1343,6 +1343,7 @@ where
         &mut self,
         name: Option<&str>,
         mut stmt: SelectStatement,
+        always: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         // If we have another query with the same name, drop that query first
         if let Some(name) = name {
@@ -1356,9 +1357,13 @@ where
         }
         // Now migrate the new query
         rewrite::process_query(&mut stmt, self.noria.server_supports_pagination())?;
-        self.noria.handle_create_cached_query(name, &stmt).await?;
+        self.noria
+            .handle_create_cached_query(name, &stmt, always)
+            .await?;
         self.query_status_cache
             .update_query_migration_state(&stmt, MigrationState::Successful);
+        self.query_status_cache
+            .always_attempt_readyset(&stmt, always);
         Ok(noria_connector::QueryResult::Empty)
     }
 
@@ -1372,6 +1377,8 @@ where
         if let Some(stmt) = maybe_select_statement {
             self.query_status_cache
                 .update_query_migration_state(&stmt, MigrationState::Pending);
+            self.query_status_cache
+                .always_attempt_readyset(&stmt, false);
             self.invalidate_prepared_statements_cache(&stmt);
         }
         Ok(noria_connector::QueryResult::Empty)
@@ -1475,7 +1482,11 @@ where
             SqlQuery::Explain(nom_sql::ExplainStatement::Graphviz { simplified }) => {
                 self.noria.graphviz(*simplified).await
             }
-            SqlQuery::CreateCache(CreateCacheStatement { name, inner }) => {
+            SqlQuery::CreateCache(CreateCacheStatement {
+                name,
+                inner,
+                always,
+            }) => {
                 let st = match inner {
                     CacheInner::Statement(st) => *st.clone(),
                     CacheInner::Id(id) => match self.query_status_cache.query(id.as_str()) {
@@ -1485,7 +1496,7 @@ where
                         }
                     },
                 };
-                self.create_cached_query(name.as_deref(), st).await
+                self.create_cached_query(name.as_deref(), st, *always).await
             }
             SqlQuery::DropCache(DropCacheStatement { name }) => {
                 self.drop_cached_query(name.as_str()).await
@@ -1526,6 +1537,7 @@ where
                 QueryStatus {
                     migration_state: MigrationState::Unsupported,
                     execution_info: None,
+                    always: false,
                 }
             };
         let original_status = status.clone();

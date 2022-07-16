@@ -24,6 +24,7 @@ pub(super) enum RecipeExpr {
     Cache {
         name: SqlIdentifier,
         statement: SelectStatement,
+        always: bool,
     },
 }
 
@@ -279,6 +280,7 @@ mod tests {
                     "SELECT * FROM test_table;",
                 )
                 .unwrap(),
+                always: false,
             };
 
             assert_eq!(cached_query.name(), &query_name);
@@ -313,6 +315,7 @@ mod tests {
                     "SELECT * FROM test_table;",
                 )
                 .unwrap(),
+                always: false,
             };
 
             let cached_query_table_refs = cached_query.table_references();
@@ -363,6 +366,7 @@ mod tests {
                     "SELECT * FROM test_table;",
                 )
                 .unwrap(),
+                always: false,
             };
             let query_qid = cached_query.calculate_hash();
             expressions.insert(query_qid, cached_query);
@@ -417,6 +421,7 @@ mod tests {
                     "SELECT DISTINCT * FROM test_table;",
                 )
                 .unwrap(),
+                always: false,
             };
             let num_expressions = registry.expressions.len();
             let num_dependencies = registry.dependencies.len();
@@ -444,6 +449,7 @@ mod tests {
             let cached_query = RecipeExpr::Cache {
                 name: query_name.clone(),
                 statement: select.clone(),
+                always: false,
             };
             let num_expressions = registry.expressions.len();
             let num_dependencies = registry.dependencies.len();
@@ -454,7 +460,10 @@ mod tests {
             assert_eq!(registry.aliases.len(), num_aliases + 1);
             let query_qid = registry.aliases.get(&query_name).unwrap();
             let stored_expression = registry.expressions.get(query_qid).unwrap();
-            if let RecipeExpr::Cache { name, statement } = stored_expression {
+            if let RecipeExpr::Cache {
+                name, statement, ..
+            } = stored_expression
+            {
                 assert_ne!(name.clone(), query_name);
                 assert_eq!(statement.clone(), select);
             } else {
