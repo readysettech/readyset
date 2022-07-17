@@ -1,7 +1,11 @@
 import Link from 'next/link'
-import Image from "next/image";
 
-function Header({user, loading}) {
+type HeaderProps = {
+    user?: any
+    loading: boolean
+}
+
+const Header = ({ user, loading }: HeaderProps) => {
     return (
         <header>
             <nav>

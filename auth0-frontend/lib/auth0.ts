@@ -1,6 +1,7 @@
-import {initAuth0} from '@auth0/nextjs-auth0'
+import { initAuth0 } from '@auth0/nextjs-auth0'
+import { SignInWithAuth0 } from '@auth0/nextjs-auth0/dist/instance'
 
-export default initAuth0({
+const auth0: SignInWithAuth0 = initAuth0({
     secret: process.env.SESSION_COOKIE_SECRET,
     issuerBaseURL: process.env.NEXT_PUBLIC_AUTH0_DOMAIN,
     baseURL: process.env.NEXT_PUBLIC_BASE_URL,
@@ -20,6 +21,9 @@ export default initAuth0({
         audience: process.env.NEXT_PUBLIC_AUTH0_AUDIENCE,
     },
     session: {
-        absoluteDuration: process.env.SESSION_COOKIE_LIFETIME,
+        absoluteDuration: Number(process.env.SESSION_COOKIE_LIFETIME),
     },
 })
+
+
+export default auth0

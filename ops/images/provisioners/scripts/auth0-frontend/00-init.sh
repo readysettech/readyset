@@ -10,6 +10,7 @@ sudo cp -r \
 sudo chown -R root:root /opt/auth0-frontend
 
 test -f /opt/auth0-frontend/package.json
+sudo rm /opt/auth0-frontend/package-lock.json
 
 pushd /opt/auth0-frontend
 sudo npm install

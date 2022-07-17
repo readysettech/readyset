@@ -3,7 +3,7 @@ import {useUser} from '@auth0/nextjs-auth0';
 import {Prism as SyntaxHighlighter} from 'react-syntax-highlighter'
 import {xonokai} from 'react-syntax-highlighter/dist/cjs/styles/prism'
 
-function About() {
+const About = () => {
     const {user, error, isLoading} = useUser();
 
     return (
@@ -68,7 +68,7 @@ function About() {
             <p><em>(note that these flags can be removed from the docker compose files once the data set has been
                 loaded)</em></p>
             <p>Connect to the MySQL database and load the example dataset into the newly created table.</p>
-            <pre class="mysql"><code>load data infile &#39;/opt/title.basics.tsv/data.tsv&#39; into table imbd_title_basics ignore 1 lines;</code></pre>
+            <pre className="mysql"><code>load data infile &#39;/opt/title.basics.tsv/data.tsv&#39; into table imbd_title_basics ignore 1 lines;</code></pre>
             <h2 id="set-up-cube.js">Set Up Cube.js</h2>
             <ul>
                 <li><p>Run a Cube.js container locally using host networking via the following command:</p>

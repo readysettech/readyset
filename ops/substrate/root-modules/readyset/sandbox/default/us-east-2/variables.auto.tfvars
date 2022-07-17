@@ -3,7 +3,7 @@ aws_region  = "us-east-2"
 environment = "sandbox"
 quality     = "default"
 # Auth0 Frontend
-auth0_frontend_ami_id          = "ami-064322a7e6d7dd819"
+auth0_frontend_ami_id          = "ami-05d708522ca6cbdfb"
 auth0_client_id                = "eOBJRWf5nKfCAXdbvtIpHEtlesileuKo"
 auth0_domain                   = "https://readyset.us.auth0.com"
 auth0_audience                 = "https://console.dev.readyset.io/"

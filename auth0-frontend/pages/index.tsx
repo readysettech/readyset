@@ -5,9 +5,9 @@ import {CopyToClipboard} from "react-copy-to-clipboard";
 import {useUser} from '@auth0/nextjs-auth0';
 
 const runReadySetCommand = (user) =>
-      `RS_API_KEY=${user.access_token} bash -c "$(curl -sSL https://launch.readyset.io)"`;
+    `RS_API_KEY=${user.access_token} bash -c "$(curl -sSL https://launch.readyset.io)"`;
 
-function Home() {
+const Home = () => {
     const {user, error, isLoading} = useUser();
 
     return (
