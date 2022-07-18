@@ -434,14 +434,14 @@ impl State for PersistentState {
 
         let mut opts = rocksdb::ReadOptions::default();
         let mut inclusive_end = None;
+
         match upper {
-            Bound::Excluded(k) => {
-                opts.set_iterate_upper_bound(k);
-            }
+            Bound::Excluded(k) => opts.set_iterate_upper_bound(k),
             Bound::Included(k) => {
-                // RocksDB's iterate_upper_bound is exclusive, so we can't use that - instead just
-                // save the upper bound and stop iterating once we hit it
-                inclusive_end = Some(k);
+                // RocksDB's iterate_upper_bound is exclusive, so after we reach that, we still have
+                // to lookup the inclusive bound
+                inclusive_end = Some(k.clone());
+                opts.set_iterate_upper_bound(k);
             }
             _ => {}
         }
@@ -476,29 +476,22 @@ impl State for PersistentState {
             None => deserialize_row(val),
         };
 
-        let mut hit_end = false;
-        while iterator.valid() {
-            // Are we currently pointing at a key that is equal to our inclusive upper bound? (Note
-            // that there may be *multiple* rows where this is the case, and we want to collect them
-            // all)
-            let at_end = inclusive_end.iter().any(|end| {
-                let key = iterator.key().unwrap();
-                key.len() >= end.len() && end == &key[..end.len()]
-            });
-
-            // If we previously hit the inclusive upper bound, but we're not *currently* at that
-            // bound, it means we went off the top of our range, so break out of the iteration
-            // before we add the value to the result set
-            if !at_end && hit_end {
-                break;
-            }
-
-            rows.push(get_value(iterator.value().unwrap()));
-
-            // Remember if we've already hit the upper bound during iteration
-            hit_end = at_end;
-
+        while let Some(value) = iterator.value() {
+            rows.push(get_value(value));
             iterator.next();
+        }
+
+        // After the iterator is done, still have to fetch the rows for the inclusive upper bound
+        if let Some(end_key) = inclusive_end {
+            iterator = db.raw_iterator_cf(cf);
+            iterator.seek(&end_key);
+            while let Some(cur_key) = iterator.key() {
+                if prefix_transform(cur_key) != end_key {
+                    break;
+                }
+                rows.push(get_value(iterator.value().unwrap()));
+                iterator.next();
+            }
         }
 
         RangeLookupResult::Some(RecordResult::Owned(rows))
@@ -2464,6 +2457,35 @@ mod tests {
                 ),
                 RangeLookupResult::Some(
                     (3..=7)
+                        .skip(1)
+                        .map(|n| vec![n.into()])
+                        .collect::<Vec<_>>()
+                        .into()
+                )
+            );
+        }
+
+        #[test]
+        fn exclusive_inclusive_missing() {
+            let mut state = setup();
+            // ENG-1560: When the upper included bound is not actually in the map, shouldn't read
+            // past it anyway
+            state.process_records(
+                &mut vec![Record::from((vec![7.into()], false))].into(),
+                None,
+                None,
+            );
+
+            assert_eq!(
+                state.lookup_range(
+                    &[0],
+                    &RangeKey::from(&(
+                        Bound::Excluded(vec1![DataType::from(3)]),
+                        Bound::Included(vec1![DataType::from(7)])
+                    ))
+                ),
+                RangeLookupResult::Some(
+                    (3..7)
                         .skip(1)
                         .map(|n| vec![n.into()])
                         .collect::<Vec<_>>()
