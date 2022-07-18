@@ -1,3 +1,3 @@
-FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/rustlang/rust:nightly
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/rustlang/rust:1.62
 
 RUN cargo install cargo-deny && cargo deny --version
