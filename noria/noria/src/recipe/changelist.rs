@@ -124,7 +124,10 @@ impl FromStr for ChangeList {
                                 name: dcs.name,
                                 if_exists: false,
                             }),
-                            _ => unsupported!("Query not supported"),
+                            _ => unsupported!(
+                                "Only DDL statements supported in ChangeList (got {})",
+                                parsed.query_type()
+                            ),
                         }
                         Ok(changes)
                     })
