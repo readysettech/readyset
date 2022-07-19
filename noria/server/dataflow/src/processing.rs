@@ -346,10 +346,10 @@ impl<'a> ReplayContext<'a> {
 }
 
 /// A reference to one or more of a node's columns.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ColumnRef {
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ColumnRef<N = NodeIndex> {
     /// The index of the referenced node.
-    pub node: NodeIndex,
+    pub node: N,
     /// The referenced column indices.
     pub columns: Vec1<usize>,
 }

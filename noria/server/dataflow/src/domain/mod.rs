@@ -11,7 +11,9 @@ use std::sync::Arc;
 use std::{cell, cmp, mem, time};
 
 use ahash::RandomState;
-use dataflow_state::{MaterializedNodeState, RangeLookupResult};
+use dataflow_state::{
+    EvictBytesResult, EvictKeysResult, MaterializedNodeState, RangeLookupResult, Rows,
+};
 use failpoint_macros::failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
@@ -2032,10 +2034,19 @@ impl Domain {
                 self.replay_completed = false;
                 Ok(Some(bincode::serialize(&ret)?))
             }
-            DomainRequest::GeneratedColumns { node, index, tag } => {
+            DomainRequest::GeneratedColumns {
+                node,
+                index,
+                generated_from,
+                tag,
+            } => {
                 // Record that these columns are generated...
-                self.replay_paths
-                    .insert_generated_columns(node, index.columns.clone(), tag);
+                self.replay_paths.insert_generated_columns(
+                    node,
+                    index.columns.clone(),
+                    generated_from,
+                    tag,
+                );
                 // ...and also make sure we use that tag to index those columns in this node, so we
                 // know what hole to fill when we've satisfied replays to those columns
                 self.state
@@ -2684,12 +2695,11 @@ impl Domain {
                         let is_target = backfill_keys.is_some() && segment.is_target;
                         let cols = segment.partial_index.as_ref().map(|idx| &idx.columns);
                         // If this replay path is targeting a set of generated columns, figure out
-                        // what the tag is for those generated columns so we can mark it as filled
-                        // later
-                        let tag_for_generated = cols.and_then(|cols| {
+                        // what the tags are for those generated columns so we can mark them as
+                        // filled later
+                        let tags_for_generated = cols.and_then(|cols| {
                             self.replay_paths
-                                .tag_for_generated_columns(segment.node, cols)
-                                .cloned()
+                                .tags_for_generated_columns(segment.node, cols)
                         });
 
                         // are we about to fill a hole?
@@ -2717,7 +2727,7 @@ impl Domain {
                                         }
                                     }
                                 }
-                            } else if tag_for_generated.is_some() {
+                            } else if tags_for_generated.is_some() {
                                 // If we're processing a replay that ends at a set of generated
                                 // columns, and there's some downstream replay that's waiting on us,
                                 // we need to mark that downstream replay's key as filled before
@@ -3524,6 +3534,7 @@ impl Domain {
         fn trigger_downstream_evictions(
             index: &Index,
             keys: &[KeyComparison],
+            rows_evicted: Rows,
             node: LocalNodeIndex,
             ex: &mut dyn Executor,
             not_ready: &HashSet<LocalNodeIndex>,
@@ -3534,60 +3545,51 @@ impl Domain {
             reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
             nodes: &DomainNodes,
         ) -> Result<(), ReadySetError> {
-            // TODO: this is a linear walk of replay paths -- we should make that not linear
-            for (tag, path) in replay_paths {
-                if path.source == Some(node) {
-                    // Check whether this replay path is for the same key.
-                    match &path.trigger {
-                        TriggerEndpoint::Local(ref key) | TriggerEndpoint::Start(ref key) => {
-                            // what if just key order changed?
-                            if key != index {
-                                continue;
-                            }
-                        }
-                        _ => {
-                            internal!();
-                        }
-                    };
+            for (tag, path, keys) in
+                replay_paths.downstream_dependent_paths(node, index, keys, rows_evicted)
+            {
+                walk_path(
+                    &path.path[..],
+                    &keys,
+                    tag,
+                    shard,
+                    replica,
+                    nodes,
+                    reader_write_handles,
+                    ex,
+                )?;
 
-                    walk_path(
-                        &path.path[..],
-                        keys,
-                        *tag,
-                        shard,
-                        replica,
-                        nodes,
-                        reader_write_handles,
-                        ex,
-                    )?;
-
-                    if let TriggerEndpoint::Local(_) = path.trigger {
-                        #[allow(clippy::indexing_slicing)] // tag came from replay_paths
-                        let target = replay_paths[*tag].last_segment();
-                        #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
-                        if nodes[target.node].borrow().is_reader() {
-                            // already evicted from in walk_path
-                            continue;
+                if let TriggerEndpoint::Local(_) = path.trigger {
+                    #[allow(clippy::indexing_slicing)] // tag came from replay_paths
+                    let target = replay_paths[tag].last_segment();
+                    #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
+                    if nodes[target.node].borrow().is_reader() {
+                        // already evicted from in walk_path
+                        continue;
+                    }
+                    if !state.contains_key(target.node) {
+                        // this is probably because
+                        if !not_ready.contains(&target.node) {
+                            debug!(
+                                node = target.node.id(),
+                                "got eviction for ready but stateless node"
+                            )
                         }
-                        if !state.contains_key(target.node) {
-                            // this is probably because
-                            if !not_ready.contains(&target.node) {
-                                debug!(
-                                    node = target.node.id(),
-                                    "got eviction for ready but stateless node"
-                                )
-                            }
-                            continue;
-                        }
+                        continue;
+                    }
 
-                        #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
-                        state[target.node].evict_keys(*tag, keys);
+                    trace!(local = %target.node, ?keys, ?tag, "Evicting keys");
+                    #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
+                    if let Some(EvictKeysResult { rows_evicted, .. }) =
+                        state[target.node].evict_keys(tag, &keys)
+                    {
                         #[allow(clippy::unwrap_used)]
-                        // we can only evict from partial replay paths, so we must have a partial
-                        // key
+                        // we can only evict from partial replay paths, so we must have a
+                        // partial key
                         trigger_downstream_evictions(
                             target.partial_index.as_ref().unwrap(),
-                            keys,
+                            &keys,
+                            rows_evicted,
                             target.node,
                             ex,
                             not_ready,
@@ -3723,9 +3725,14 @@ impl Domain {
                     } else if let Some(state) = self.reader_write_handles.get_mut(node) {
                         freed += state.evict_bytes(num_bytes as usize);
                         state.swap();
-                    } else if let Some(evicted) = self.state[node].evict_bytes(num_bytes as usize) {
-                        let keys = evicted
-                            .keys_evicted
+                    } else if let Some(EvictBytesResult {
+                        index,
+                        keys_evicted,
+                        rows_evicted,
+                        bytes_freed,
+                    }) = self.state[node].evict_bytes(num_bytes as usize)
+                    {
+                        let keys = keys_evicted
                             .into_iter()
                             .map(|k| {
                                 KeyComparison::try_from(k)
@@ -3733,13 +3740,13 @@ impl Domain {
                             })
                             .collect::<ReadySetResult<Vec<_>>>()?;
 
-                        freed += evicted.bytes_freed;
-                        let index = evicted.index.clone();
-
+                        freed += bytes_freed;
                         if !keys.is_empty() {
+                            let index = index.clone();
                             trigger_downstream_evictions(
                                 &index,
                                 &keys[..],
+                                rows_evicted,
                                 node,
                                 ex,
                                 &self.not_ready,
@@ -3807,14 +3814,20 @@ impl Domain {
                         if self.nodes[target].borrow().is_dropped() {
                             return Ok(());
                         }
+
+                        let index = path.last().partial_index.clone().ok_or_else(|| {
+                            internal_err!("Received eviction for non-partial replay path")
+                        })?;
+
+                        trace!(local = %target, ?keys, ?tag, "Evicting keys");
                         #[allow(clippy::indexing_slicing)] // came from replay paths
-                        if let Some((index, _evicted_bytes)) =
+                        if let Some(EvictKeysResult { rows_evicted, .. }) =
                             self.state[target].evict_keys(tag, &keys)
                         {
-                            let index = index.clone();
                             trigger_downstream_evictions(
                                 &index,
                                 &keys[..],
+                                rows_evicted,
                                 target,
                                 ex,
                                 &self.not_ready,

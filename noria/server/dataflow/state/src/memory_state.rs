@@ -13,7 +13,8 @@ use tracing::trace;
 use crate::keyed_state::KeyedState;
 use crate::single_state::SingleState;
 use crate::{
-    LookupResult, PersistentState, RangeLookupResult, RecordResult, Row, Rows, State, StateEvicted,
+    EvictBytesResult, EvictKeysResult, LookupResult, PersistentState, RangeLookupResult,
+    RecordResult, Row, Rows, State,
 };
 
 #[derive(Default)]
@@ -294,11 +295,12 @@ impl State for MemoryState {
     /// Evicts `bytes` by evicting random keys from the state. The key are first evicted from the
     /// strongly referenced `state`, then they are removed from the weakly referenced
     /// `weak_indices`.
-    fn evict_bytes(&mut self, bytes: usize) -> Option<StateEvicted> {
+    fn evict_bytes(&mut self, bytes: usize) -> Option<EvictBytesResult> {
         let mut rng = rand::thread_rng();
         let state_index = rng.gen_range(0, self.state.len());
         let mut bytes_freed = 0u64;
         let mut keys_evicted = Vec::new();
+        let mut rows_evicted = Rows::default();
 
         while bytes_freed < bytes as u64 {
             let evicted = self.state[state_index].evict_random(&mut rng);
@@ -322,6 +324,7 @@ impl State for MemoryState {
             }
             bytes_freed += base_row_bytes(&keys);
             keys_evicted.push(keys);
+            rows_evicted.extend(rows);
         }
 
         if bytes_freed == 0 {
@@ -329,22 +332,23 @@ impl State for MemoryState {
         }
 
         self.mem_size = self.mem_size.saturating_sub(bytes_freed);
-        return Some(StateEvicted {
+        return Some(EvictBytesResult {
             index: self.state[state_index].index(),
             keys_evicted,
+            rows_evicted,
             bytes_freed,
         });
     }
 
-    fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<(&Index, u64)> {
+    fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<EvictKeysResult> {
         // we may be told to evict from a tag that add_key hasn't been called for yet
         // this can happen if an upstream domain issues an eviction for a replay path that we have
         // been told about, but that has not yet been finalized.
         self.by_tag.get(&tag).cloned().map(move |state_index| {
-            let rows = self.state[state_index].evict_keys(keys);
-            let mut bytes = 0;
+            let rows_evicted = self.state[state_index].evict_keys(keys);
+            let mut bytes_freed = 0;
 
-            for row in &rows {
+            for row in &rows_evicted {
                 for (key, weak_index) in self.weak_indices.iter_mut() {
                     weak_index.remove(key, row, None);
                 }
@@ -352,14 +356,19 @@ impl State for MemoryState {
                 // Only count strong references after we removed a row from `weak_indices`
                 // otherwise if it is there, it will never have a reference count of 1
                 if Rc::strong_count(&row.0) == 1 {
-                    bytes += row.deep_size_of();
+                    bytes_freed += row.deep_size_of();
                 }
             }
 
             let key_bytes = keys.iter().map(base_row_bytes_from_comparison).sum::<u64>();
 
-            self.mem_size = self.mem_size.saturating_sub(bytes + key_bytes);
-            (self.state[state_index].index(), bytes)
+            self.mem_size = self.mem_size.saturating_sub(bytes_freed + key_bytes);
+
+            EvictKeysResult {
+                index: self.state[state_index].index(),
+                rows_evicted,
+                bytes_freed,
+            }
         })
     }
 

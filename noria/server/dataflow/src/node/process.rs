@@ -477,6 +477,12 @@ impl Node {
             }
             NodeType::Reader(_) => {
                 if let Some(state) = reader_write_handles.get_mut(addr) {
+                    trace!(
+                        local = %self.local_addr(),
+                        ?keys,
+                        ?tag,
+                        "Evicting keys from reader"
+                    );
                     for k in keys {
                         state.mark_hole(k)?;
                     }
