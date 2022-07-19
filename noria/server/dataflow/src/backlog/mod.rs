@@ -302,7 +302,10 @@ impl WriteHandle {
         bytes_to_be_freed
     }
 
-    pub(crate) fn mark_hole(&mut self, key: &KeyComparison) {
+    pub(crate) fn mark_hole(&mut self, key: &KeyComparison) -> ReadySetResult<()> {
+        if let Some(len) = key.len() {
+            invariant_eq!(len, self.index.len());
+        }
         match key {
             KeyComparison::Equal(k) => self.mut_with_key(k.as_vec()).mark_hole(),
             KeyComparison::Range((start, end)) => {
@@ -329,9 +332,13 @@ impl WriteHandle {
                 }
             }
         }
+        Ok(())
     }
 
     pub(crate) fn mark_filled(&mut self, key: KeyComparison) -> ReadySetResult<()> {
+        if let Some(len) = key.len() {
+            invariant_eq!(len, self.index.len());
+        }
         match key {
             KeyComparison::Equal(equal) => self.mut_with_key(equal.as_vec()).mark_filled()?,
             KeyComparison::Range((start, end)) => self.handle.insert_range((

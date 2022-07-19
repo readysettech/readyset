@@ -478,7 +478,7 @@ impl Node {
             NodeType::Reader(_) => {
                 if let Some(state) = reader_write_handles.get_mut(addr) {
                     for k in keys {
-                        state.mark_hole(k);
+                        state.mark_hole(k)?;
                     }
                     state.swap();
                 }
