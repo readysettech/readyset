@@ -504,33 +504,37 @@ impl<'a> Plan<'a> {
                     #[allow(clippy::unwrap_used)] // checked by invariant!()
                     let first = nodes.first().unwrap();
                     if let Some(ref index) = first.1 {
-                        let mut generated = false;
                         #[allow(clippy::indexing_slicing)] // replay paths contain valid nodes
                         if self.graph[first.0].is_internal() {
-                            if let ColumnSource::GeneratedFromColumns(..) =
+                            if let ColumnSource::GeneratedFromColumns(generated_from) =
                                 self.graph[first.0].column_source(&index.columns)
                             {
-                                generated = true;
-                            }
-                        }
-                        if generated {
-                            debug!(
-                                domain = %domain.index(),
-                                ?tag,
-                                "telling domain about generated columns {:?} on {}",
-                                index.columns,
-                                first.0.index()
-                            );
+                                debug!(
+                                    domain = %domain.index(),
+                                    ?tag,
+                                    on_node = %first.0.index(),
+                                    generated_columns = ?index.columns,
+                                    ?generated_from,
+                                    "telling domain about generated columns",
+                                );
 
-                            #[allow(clippy::indexing_slicing)] // replay paths contain valid nodes
-                            self.dmp.add_message(
-                                domain,
-                                DomainRequest::GeneratedColumns {
-                                    node: self.graph[first.0].local_addr(),
-                                    index: index.clone(),
-                                    tag,
-                                },
-                            )?;
+                                let generated_from = generated_from.mapped(|cr| ColumnRef {
+                                    node: self.graph[cr.node].local_addr(),
+                                    columns: cr.columns,
+                                });
+
+                                #[allow(clippy::indexing_slicing)]
+                                // replay paths contain valid nodes
+                                self.dmp.add_message(
+                                    domain,
+                                    DomainRequest::GeneratedColumns {
+                                        node: self.graph[first.0].local_addr(),
+                                        index: index.clone(),
+                                        generated_from,
+                                        tag,
+                                    },
+                                )?;
+                            }
                         }
                     }
                 }

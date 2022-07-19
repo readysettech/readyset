@@ -85,7 +85,7 @@ use test_strategy::Arbitrary;
 use thiserror::Error;
 use tracing::{error, info, warn};
 
-use crate::{LookupResult, RangeLookupResult, RecordResult, State};
+use crate::{EvictKeysResult, LookupResult, RangeLookupResult, RecordResult, State};
 
 // Incremented on each PersistentState initialization so that IndexSeq
 // can be used to create unique identifiers for rows.
@@ -577,13 +577,13 @@ impl State for PersistentState {
 
     /// Panics if called
     #[allow(clippy::unreachable)] // this should never happen!
-    fn evict_bytes(&mut self, _: usize) -> Option<super::StateEvicted> {
+    fn evict_bytes(&mut self, _: usize) -> Option<super::EvictBytesResult> {
         unreachable!("can't evict keys from PersistentState")
     }
 
     /// Panics if called
     #[allow(clippy::unreachable)] // this should never happen!
-    fn evict_keys(&mut self, _: Tag, _: &[KeyComparison]) -> Option<(&Index, u64)> {
+    fn evict_keys(&mut self, _: Tag, _: &[KeyComparison]) -> Option<EvictKeysResult> {
         unreachable!("can't evict keys from PersistentState")
     }
 

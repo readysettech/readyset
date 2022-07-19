@@ -30,11 +30,23 @@ pub use self::persistent_state::{
 };
 
 /// Information about state evicted via a call to [`State::evict_bytes`]
-pub struct StateEvicted<'a> {
+pub struct EvictBytesResult<'a> {
     /// The index that was evicted from
     pub index: &'a Index,
     /// The keys that were evicted
     pub keys_evicted: Vec<Vec<DataType>>,
+    /// The rows that were evicted
+    pub rows_evicted: Rows,
+    /// The number of bytes removed from the state
+    pub bytes_freed: u64,
+}
+
+/// Information about state evicted via a call to [`State::evict_keys`]
+pub struct EvictKeysResult<'a> {
+    /// The index that was evicted from
+    pub index: &'a Index,
+    /// The rows that were evicted
+    pub rows_evicted: Rows,
     /// The number of bytes removed from the state
     pub bytes_freed: u64,
 }
@@ -189,11 +201,11 @@ pub trait State: SizeOf + Send {
 
     /// Evict up to `bytes` by randomly selected keys, returning a struct representing the index
     /// chosen to evict from along with the keys evicted and the number of bytes evicted.
-    fn evict_bytes(&mut self, bytes: usize) -> Option<StateEvicted>;
+    fn evict_bytes(&mut self, bytes: usize) -> Option<EvictBytesResult>;
 
     /// Evict the listed keys from the materialization targeted by `tag`, returning the index chosen
     /// to evict from and the number of bytes evicted.
-    fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<(&Index, u64)>;
+    fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<EvictKeysResult>;
 
     /// Remove all rows from this state
     fn clear(&mut self);
@@ -349,14 +361,14 @@ impl State for MaterializedNodeState {
         }
     }
 
-    fn evict_bytes(&mut self, bytes: usize) -> Option<StateEvicted> {
+    fn evict_bytes(&mut self, bytes: usize) -> Option<EvictBytesResult> {
         match self {
             MaterializedNodeState::Memory(ms) => ms.evict_bytes(bytes),
             MaterializedNodeState::Persistent(ps) => ps.evict_bytes(bytes),
         }
     }
 
-    fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<(&Index, u64)> {
+    fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<EvictKeysResult> {
         match self {
             MaterializedNodeState::Memory(ms) => ms.evict_keys(tag, keys),
             MaterializedNodeState::Persistent(ps) => ps.evict_keys(tag, keys),
@@ -555,6 +567,7 @@ impl<'a> Iterator for RecordResultIterator<'a> {
     }
 }
 
+#[derive(Debug)]
 pub enum LookupResult<'a> {
     Some(RecordResult<'a>),
     Missing,
