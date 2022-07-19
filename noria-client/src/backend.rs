@@ -1635,6 +1635,10 @@ where
             Ok(parsed_query @ (SqlQuery::Commit(_) | SqlQuery::Rollback(_))) => {
                 self.query_adhoc_non_select(query, &mut event, parsed_query).await
             },
+            // Noria extensions should never be proxied.
+            Ok(ref parsed_query) if let Some(noria_extension) = self.query_noria_extensions(parsed_query, &mut event).await => {
+                noria_extension.map(Into::into).map_err(Into::into)
+            }
             // Parsed but proxy mode means we should send upstream
             Ok(_) if self.proxy_state.should_proxy() => self.query_fallback(query, &mut event).await,
             Ok(ref parsed_query) if Handler::requires_fallback(parsed_query) => {
@@ -1647,9 +1651,6 @@ where
                         .map(QueryResult::Noria)
                         .map_err(Into::into)
                 }
-            }
-            Ok(ref parsed_query) if let Some(noria_extension) = self.query_noria_extensions(parsed_query, &mut event).await => {
-                noria_extension.map(Into::into).map_err(Into::into)
             }
             Ok(SqlQuery::Select(ref stmt)) => self.query_adhoc_select(query, stmt, &mut event).await,
             Ok(parsed_query) => self.query_adhoc_non_select(query, &mut event, parsed_query).await,

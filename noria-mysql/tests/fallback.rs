@@ -239,6 +239,49 @@ async fn proxy_unsupported_sets() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
+async fn proxy_mode_should_allow_commands() {
+    let (opts, _handle) = setup_with(
+        BackendBuilder::new()
+            .require_authentication(false)
+            .unsupported_set_mode(UnsupportedSetMode::Proxy),
+    )
+    .await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+
+    conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
+    conn.query_drop("INSERT INTO t (x) values (1)")
+        .await
+        .unwrap();
+
+    conn.query_drop("SET @@SESSION.SQL_MODE = 'ANSI_QUOTES';")
+        .await
+        .unwrap();
+
+    // We should proxy the SET statement upstream, then all subsequent statements should go upstream
+    // (evidenced by the fact that `"x"` is interpreted as a column reference, per the ANSI_QUOTES
+    // SQL mode)
+    assert_eq!(
+        conn.query_first::<(i32,), _>("SELECT \"x\" FROM \"t\"")
+            .await
+            .unwrap()
+            .unwrap()
+            .0,
+        1,
+    );
+
+    // We should still handle custom ReadySet commands directly, otherwise we will end up passing
+    // back errors from the upstream database for queries it doesn't recognize.
+    // This validates what we already just validated (that the query went to upstream) and also
+    // that EXPLAIN LAST STATEMENT, a ReadySet command, was handled directly by ReadySet and not
+    // proxied upstream.
+    assert_eq!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::Upstream
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn drop_then_recreate_table_with_query() {
     let (opts, _handle) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
@@ -280,15 +323,9 @@ async fn transaction_proxies() {
     conn.query_drop("BEGIN;").await.unwrap();
     conn.query_drop("SELECT * FROM t;").await.unwrap();
 
-    // Currently EXPLAIN LAST STATEMENT proxies with everything else (perhaps incorrectly), so we
-    // just check that it tried to treat "LAST" as a table here
-    let res = conn.query::<String, _>("EXPLAIN LAST STATEMENT").await;
-    assert!(res.is_err(), "{:?}", res);
-    let err_description = res.err().unwrap().to_string();
-    assert!(
-        err_description.contains("doesn't exist"),
-        "{}",
-        err_description
+    assert_eq!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::Upstream
     );
 
     conn.query_drop("COMMIT;").await.unwrap();
