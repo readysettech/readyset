@@ -2199,7 +2199,7 @@ impl Domain {
 
     /// Timed purges happen when [`FrontierStrategy`] is not None, in which case all keys
     /// are purged from the node after a given amount of time
-    fn handle_timed_purges(&mut self) {
+    fn handle_timed_purges(&mut self) -> ReadySetResult<()> {
         let mut swap = HashSet::new();
         while let Some(tp) = self.timed_purges.front() {
             let now = time::Instant::now();
@@ -2216,7 +2216,7 @@ impl Domain {
                 );
                 if let Some(wh) = self.reader_write_handles.get_mut(tp.view) {
                     for key in tp.keys {
-                        wh.mark_hole(&key);
+                        wh.mark_hole(&key)?;
                     }
                     swap.insert(tp.view);
                 }
@@ -2230,6 +2230,8 @@ impl Domain {
                 wh.swap();
             }
         }
+
+        Ok(())
     }
 
     fn seed_row(&self, source: LocalNodeIndex, row: Cow<[DataType]>) -> ReadySetResult<Record> {
@@ -2817,7 +2819,7 @@ impl Domain {
                                     self.reader_write_handles.get_mut(segment.node)
                                 {
                                     for miss in &missed_on {
-                                        wh.mark_hole(miss);
+                                        wh.mark_hole(miss)?;
                                     }
                                 }
                             } else if n.is_reader() {
@@ -2849,7 +2851,7 @@ impl Domain {
                             } else if n.is_reader() {
                                 if let Some(wh) = self.reader_write_handles.get_mut(segment.node) {
                                     for key in &process_result.captured {
-                                        wh.mark_hole(key);
+                                        wh.mark_hole(key)?;
                                     }
                                 }
                             }
@@ -3962,7 +3964,7 @@ impl Domain {
         }
 
         if !self.timed_purges.is_empty() {
-            self.handle_timed_purges();
+            self.handle_timed_purges()?;
         }
 
         if self.aggressively_update_state_sizes {
