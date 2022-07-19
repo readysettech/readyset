@@ -96,6 +96,7 @@ use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, instrument, trace, warn};
 
+use crate::backend::noria_connector::ExecuteSelectContext;
 use crate::query_status_cache::{
     DeniedQuery, ExecutionInfo, ExecutionState, MigrationState, QueryStatus, QueryStatusCache,
 };
@@ -989,9 +990,8 @@ where
             Select {
                 statement_id: id, ..
             } => {
-                noria
-                    .execute_prepared_select(*id, params, ticket, event)
-                    .await
+                let ctx = ExecuteSelectContext::Prepared { q_id: *id, params };
+                noria.execute_select(ctx, ticket, event).await
             }
             Insert {
                 statement_id: id, ..
@@ -1532,14 +1532,13 @@ where
         let noria_res = {
             event.destination = Some(QueryDestination::Readyset);
             let start = Instant::now();
+            let ctx = ExecuteSelectContext::AdHoc {
+                statement: stmt.clone(),
+                create_if_missing: self.migration_mode == MigrationMode::InRequestPath,
+            };
             let res = self
                 .noria
-                .handle_select(
-                    stmt.clone(),
-                    self.ticket.clone(),
-                    self.migration_mode == MigrationMode::InRequestPath,
-                    event,
-                )
+                .execute_select(ctx, self.ticket.clone(), event)
                 .await;
             event.readyset_duration = Some(start.elapsed());
             res
@@ -1872,19 +1871,13 @@ where
                 let start = Instant::now();
 
                 let res = match parsed_query {
+                    SqlQuery::Select(_) => unreachable!("read path returns prior"),
                     // CREATE VIEW will still trigger migrations with epxlicit-migrations enabled
                     SqlQuery::CreateView(q) => self.noria.handle_create_view(q).await,
                     SqlQuery::CreateTable(q) => self.noria.handle_table_operation(q.clone()).await,
                     SqlQuery::AlterTable(q) => self.noria.handle_table_operation(q.clone()).await,
                     SqlQuery::DropTable(q) => self.noria.handle_table_operation(q.clone()).await,
                     SqlQuery::DropView(q) => self.noria.handle_table_operation(q.clone()).await,
-                    SqlQuery::Select(q) => {
-                        let res = self
-                            .noria
-                            .handle_select(q.clone(), self.ticket.clone(), true, event)
-                            .await;
-                        res
-                    }
                     SqlQuery::Insert(q) => self.noria.handle_insert(q).await,
                     SqlQuery::Update(q) => self.noria.handle_update(q).await,
                     SqlQuery::Delete(q) => self.noria.handle_delete(q).await,
