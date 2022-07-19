@@ -26,7 +26,6 @@ use noria_data::DataType;
 use noria_errors::ReadySetError::PreparedStatementMissing;
 use noria_errors::{internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err};
 use noria_server::worker::readers::{CallResult, ReadRequestHandler};
-use readyset_tracing::instrument_child;
 use tracing::{error, info, instrument, trace};
 use vec1::vec1;
 
@@ -348,24 +347,25 @@ impl ViewCache {
 
 /// If the query has parametrized OFFSET or LIMIT, get the values for those params from the given
 /// slice of parameters, returning a tuple of `limit, offset`
-fn limit_offset_params<'param>(
-    params: &'param [DataType],
-    query: &SelectStatement,
-) -> (Option<&'param DataType>, Option<&'param DataType>) {
-    let offset = if matches!(query.offset, Some(Literal::Placeholder(_))) {
-        params.last()
-    } else {
-        None
+fn limit_offset_params(params: &[DataType], query: &SelectStatement) -> (Option<i64>, Option<i64>) {
+    let mut params = params.iter().rev();
+
+    let offset = match query.offset {
+        Some(Literal::Placeholder(_)) => params.next().and_then(|v| match v {
+            DataType::Int(v) => Some(*v),
+            _ => None,
+        }),
+        Some(Literal::Integer(v)) => Some(v),
+        _ => None,
     };
 
-    let limit = if matches!(query.limit, Some(Literal::Placeholder(_))) {
-        if offset.is_some() {
-            params.get(params.len() - 2)
-        } else {
-            params.last()
-        }
-    } else {
-        None
+    let limit = match query.limit {
+        Some(Literal::Placeholder(_)) => params.next().and_then(|v| match v {
+            DataType::Int(v) => Some(*v),
+            _ => None,
+        }),
+        Some(Literal::Integer(v)) => Some(v),
+        _ => None,
     };
 
     (limit, offset)
@@ -447,6 +447,21 @@ async fn short_circuit_empty_resultset(getter: &mut View) -> ReadySetResult<Quer
         schema: Cow::Borrowed(getter_schema.schema(SchemaType::ReturnedSchema)),
         columns: Cow::Borrowed(getter.columns()),
     }))
+}
+
+/// Provides the neccessary context to execute a select statement agains noria, either for a
+/// prepared or an ad-hoc query
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+pub(crate) enum ExecuteSelectContext<'ctx> {
+    Prepared {
+        q_id: u32,
+        params: &'ctx [DataType],
+    },
+    AdHoc {
+        statement: nom_sql::SelectStatement,
+        create_if_missing: bool,
+    },
 }
 
 impl NoriaConnector {
@@ -1263,53 +1278,6 @@ impl NoriaConnector {
         })
     }
 
-    #[instrument_child(level = "info", fields(create_if_not_exist))]
-    pub(crate) async fn handle_select(
-        &mut self,
-        // TODO(mc):  Take a reference here; requires getting rewrite::process_query() to Cow
-        mut query: nom_sql::SelectStatement,
-        ticket: Option<Timestamp>,
-        create_if_not_exist: bool,
-        event: &mut noria_client_metrics::QueryExecutionEvent,
-    ) -> ReadySetResult<QueryResult<'_>> {
-        let processed = rewrite::process_query(&mut query)?;
-
-        trace!("query::select::access view");
-        let qname = self.get_view(&query, false, create_if_not_exist).await?;
-
-        // we need the schema for the result writer
-        trace!(%qname, "query::select::extract schema");
-
-        let view_failed = self.failed_views.take(&qname).is_some();
-        let getter = self
-            .inner
-            .get_mut()
-            .await?
-            .get_noria_view(&qname, view_failed)
-            .await?;
-
-        let keys = processed.make_keys(&[])?;
-
-        trace!(%qname, "query::select::do");
-        let res = do_read(
-            getter,
-            &query,
-            keys,
-            ticket,
-            self.read_behavior,
-            self.read_request_handler.as_mut(),
-            event,
-        )
-        .await;
-        if let Err(e) = res.as_ref() {
-            if e.is_networking_related() || e.caused_by_view_destroyed() {
-                self.failed_views.insert(qname.to_owned());
-            }
-        }
-
-        res
-    }
-
     #[instrument(level = "info", skip(self, statement))]
     pub(crate) async fn prepare_select(
         &mut self,
@@ -1387,65 +1355,81 @@ impl NoriaConnector {
         })
     }
 
-    #[instrument(level = "debug", skip(self, params, event))]
-    pub(crate) async fn execute_prepared_select(
+    #[instrument(level = "debug", skip(self, event))]
+    pub(crate) async fn execute_select(
         &mut self,
-        q_id: u32,
-        params: &[DataType],
+        ctx: ExecuteSelectContext<'_>,
         ticket: Option<Timestamp>,
         event: &mut noria_client_metrics::QueryExecutionEvent,
     ) -> ReadySetResult<QueryResult<'_>> {
-        let NoriaConnector {
-            prepared_statement_cache,
-            failed_views,
-            ..
-        } = self;
-
-        let PreparedSelectStatement {
-            name,
-            statement,
-            processed_query_params,
-        } = {
-            match prepared_statement_cache.get(&q_id) {
-                Some(PreparedStatement::Select(ps)) => ps,
-                Some(_) => internal!(),
-                None => return Err(PreparedStatementMissing { statement_id: q_id }),
-            }
-        };
-
-        let (limit, offset) = limit_offset_params(params, statement);
-
-        let res = {
-            let view_failed = failed_views.take(name).is_some();
-            let getter = self
-                .inner
-                .get_mut()
-                .await?
-                .get_noria_view(name, view_failed)
-                .await?;
-
-            if (matches!(limit, Some(DataType::Int(1)))
-                && offset.is_some()
-                && !matches!(offset, Some(DataType::Int(0))))
-                || matches!(limit, Some(DataType::Int(0)))
-            {
-                short_circuit_empty_resultset(getter).await
-            } else {
-                do_read(
-                    getter,
+        let (qname, statement, processed_query_params, params) = match ctx {
+            ExecuteSelectContext::Prepared { q_id, params } => {
+                let PreparedSelectStatement {
+                    name,
                     statement,
-                    processed_query_params.make_keys(params)?,
-                    ticket,
-                    self.read_behavior,
-                    self.read_request_handler.as_mut(),
-                    event,
+                    processed_query_params,
+                } = {
+                    match self.prepared_statement_cache.get(&q_id) {
+                        Some(PreparedStatement::Select(ps)) => ps,
+                        Some(_) => internal!(),
+                        None => return Err(PreparedStatementMissing { statement_id: q_id }),
+                    }
+                };
+                (
+                    Cow::Borrowed(name.as_str()),
+                    Cow::Borrowed(statement.as_ref()),
+                    Cow::Borrowed(processed_query_params),
+                    params,
                 )
-                .await
+            }
+            ExecuteSelectContext::AdHoc {
+                mut statement,
+                create_if_missing,
+            } => {
+                let processed_query_params = rewrite::process_query(&mut statement)?;
+                let name = self.get_view(&statement, false, create_if_missing).await?;
+                (
+                    Cow::Owned(name),
+                    Cow::Owned(statement),
+                    Cow::Owned(processed_query_params),
+                    &[][..],
+                )
             }
         };
 
-        if res.is_err() {
-            failed_views.insert(name.to_owned());
+        let view_failed = self.failed_views.take(qname.as_ref()).is_some();
+        let getter = self
+            .inner
+            .get_mut()
+            .await?
+            .get_noria_view(&qname, view_failed)
+            .await?;
+
+        let keys = processed_query_params.make_keys(params)?;
+
+        let (limit, offset) = limit_offset_params(params, statement.as_ref());
+
+        let res = if (matches!(limit, Some(1)) && offset.is_some() && !matches!(offset, Some(0)))
+            || matches!(limit, Some(0))
+        {
+            short_circuit_empty_resultset(getter).await
+        } else {
+            do_read(
+                getter,
+                statement.as_ref(),
+                keys,
+                ticket,
+                self.read_behavior,
+                self.read_request_handler.as_mut(),
+                event,
+            )
+            .await
+        };
+
+        if let Err(e) = res.as_ref() {
+            if e.is_networking_related() || e.caused_by_view_destroyed() {
+                self.failed_views.insert(qname.into_owned());
+            }
         }
 
         res
