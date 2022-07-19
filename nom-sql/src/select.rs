@@ -190,7 +190,7 @@ pub fn group_by_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Gro
     }
 }
 
-pub(crate) fn offset_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
+fn offset_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("offset")(i)?;
@@ -199,13 +199,40 @@ pub(crate) fn offset_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8]
     }
 }
 
-// Parse LIMIT clause
-pub(crate) fn limit_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
+// Parses a generic SQL `{limit} [OFFSET {offset}]`
+fn limit_offset_generic(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], (Option<Literal>, Option<Literal>)> {
+    move |i| {
+        let (i, limit) = literal(dialect)(i)?;
+        let (i, offset) = opt(offset_clause(dialect))(i)?;
+        Ok((i, (Some(limit), offset)))
+    }
+}
+
+// Parse LIMIT [OFFSET] clause
+fn limit_offset(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], (Option<Literal>, Option<Literal>)> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("limit")(i)?;
         let (i, _) = whitespace1(i)?;
-        literal(dialect)(i)
+        let (i, limit_offset) = alt((dialect.offset_limit(), limit_offset_generic(dialect)))(i)?;
+
+        Ok((i, limit_offset))
+    }
+}
+
+// Parse LIMIT [OFFSET] clause or a bare OFFSET clause
+pub(crate) fn limit_offset_clause(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], (Option<Literal>, Option<Literal>)> {
+    move |i| {
+        alt((
+            limit_offset(dialect),
+            map(offset_clause(dialect), |offset| (None, Some(offset))),
+        ))(i)
     }
 }
 
@@ -457,9 +484,9 @@ pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Se
             let (i, group_by) = opt(group_by_clause(dialect))(i)?;
             let (i, having) = opt(having_clause(dialect))(i)?;
             let (i, order) = opt(order_clause(dialect))(i)?;
-            let (i, limit) = opt(limit_clause(dialect))(i)?;
-            let (i, offset) = opt(offset_clause(dialect))(i)?;
+            let (i, limit_offset) = opt(limit_offset_clause(dialect))(i)?;
 
+            let (limit, offset) = limit_offset.unwrap_or_default();
             Ok((
                 i,
                 (
@@ -688,13 +715,20 @@ mod tests {
     fn limit_clause() {
         let qstring1 = "select * from users limit 10\n";
         let qstring2 = "select * from users limit 10 offset 10\n";
+        let qstring3 = "select * from users limit 5, 10\n";
 
         let res1 = test_parse!(selection(Dialect::MySQL), qstring1.as_bytes());
         let res2 = test_parse!(selection(Dialect::MySQL), qstring2.as_bytes());
+        let res3 = test_parse!(selection(Dialect::MySQL), qstring3.as_bytes());
+        let res3_pgsql = selection(Dialect::PostgreSQL)(qstring3.as_bytes());
+
         assert_eq!(res1.limit, Some(10.into()));
         assert_eq!(res1.offset, None);
         assert_eq!(res2.limit, Some(10.into()));
         assert_eq!(res2.offset, Some(10.into()));
+        assert_eq!(res3.limit, Some(10.into()));
+        assert_eq!(res3.offset, Some(5.into()));
+        assert!(res3_pgsql.is_err());
     }
 
     #[test]
