@@ -6,7 +6,6 @@ use itertools::Itertools;
 use nom_sql::{self, SqlIdentifier, Table};
 use serde::{Deserialize, Serialize};
 
-// FIXME: this is _not_ okay! malte knows about it
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Column {
     pub table: Option<Table>,
