@@ -1692,13 +1692,9 @@ where
                 trace!("Parsing query");
                 match nom_sql::parse_query(self.dialect, query) {
                     Ok(parsed_query) => Ok(entry.insert(parsed_query).clone()),
-                    Err(_) => {
-                        // error is useless anyway
-                        error!("query can't be parsed: \"{}\"", Sensitive(&query));
-                        Err(ReadySetError::UnparseableQuery {
-                            query: query.to_string(),
-                        })
-                    }
+                    Err(_) => Err(ReadySetError::UnparseableQuery {
+                        query: query.to_string(),
+                    }),
                 }
             }
         }
