@@ -1,0 +1,15 @@
+version: '3.6'
+
+services:
+
+  josh:
+    image: joshproject/josh-proxy:r22.06.22
+    ports:
+      - "80:8000"
+    volumes:
+      - "josh-vol:/data/git"
+    environment:
+      JOSH_REMOTE: "https://gerrit.readyset.name"
+
+volumes:
+  josh-vol:
