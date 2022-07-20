@@ -849,7 +849,7 @@ async fn query_logger(
                         Some(s) => match s.as_ref() {
                             SqlQuery::Select(stmt) => {
                                 let mut stmt = stmt.clone();
-                                if noria_client::rewrite::process_query(&mut stmt).is_ok() {
+                                if noria_client::rewrite::process_query(&mut stmt, true).is_ok() {
                                     anonymize_literals(&mut stmt);
                                     stmt.to_string()
                                 } else {

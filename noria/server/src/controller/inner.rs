@@ -385,7 +385,12 @@ impl Leader {
                     })?;
                     return_serialized!(ret);
                 }
-
+                (&Method::GET | &Method::POST, "/supports_pagination") => {
+                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    let supports =
+                        ds.recipe.mir_config().allow_paginate && ds.recipe.mir_config().allow_topk;
+                    return_serialized!(supports)
+                }
                 _ => {}
             }
         }

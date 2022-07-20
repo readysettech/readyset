@@ -9,8 +9,8 @@ use dataflow_expression::Expr as DataflowExpr;
 use itertools::Itertools;
 use launchpad::redacted::Sensitive;
 use nom_sql::{
-    self, BinaryOperator, ColumnConstraint, DeleteStatement, InsertStatement, Literal,
-    SelectStatement, SqlIdentifier, SqlQuery, SqlType, UpdateStatement,
+    self, BinaryOperator, ColumnConstraint, DeleteStatement, InsertStatement, SelectStatement,
+    SqlIdentifier, SqlQuery, SqlType, UpdateStatement,
 };
 use noria::consistency::Timestamp;
 use noria::internal::LocalNodeIndex;
@@ -26,7 +26,7 @@ use noria_data::DataType;
 use noria_errors::ReadySetError::PreparedStatementMissing;
 use noria_errors::{internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err};
 use noria_server::worker::readers::{CallResult, ReadRequestHandler};
-use tracing::{error, info, instrument, trace};
+use tracing::{debug, error, info, instrument, trace};
 use vec1::vec1;
 
 use crate::backend::SelectSchema;
@@ -84,6 +84,9 @@ pub struct NoriaBackendInner {
     noria: ControllerHandle,
     inputs: BTreeMap<String, Table>,
     outputs: BTreeMap<String, View>,
+    /// The server can handle (non-parametrized) LIMITs and (parametrized) OFFSETs in the dataflow
+    /// graph
+    server_supports_pagination: bool,
 }
 
 macro_rules! noria_await {
@@ -96,11 +99,15 @@ macro_rules! noria_await {
 }
 
 impl NoriaBackendInner {
-    async fn new(ch: ControllerHandle) -> ReadySetResult<Self> {
+    async fn new(mut ch: ControllerHandle) -> ReadySetResult<Self> {
+        let server_supports_pagination = ch.supports_pagination().await?;
+        debug!(supported = %server_supports_pagination, "Check backend pagination support");
+
         Ok(NoriaBackendInner {
             inputs: BTreeMap::new(),
             outputs: BTreeMap::new(),
             noria: ch,
+            server_supports_pagination,
         })
     }
 
@@ -345,32 +352,6 @@ impl ViewCache {
     }
 }
 
-/// If the query has parametrized OFFSET or LIMIT, get the values for those params from the given
-/// slice of parameters, returning a tuple of `limit, offset`
-fn limit_offset_params(params: &[DataType], query: &SelectStatement) -> (Option<i64>, Option<i64>) {
-    let mut params = params.iter().rev();
-
-    let offset = match query.offset {
-        Some(Literal::Placeholder(_)) => params.next().and_then(|v| match v {
-            DataType::Int(v) => Some(*v),
-            _ => None,
-        }),
-        Some(Literal::Integer(v)) => Some(v),
-        _ => None,
-    };
-
-    let limit = match query.limit {
-        Some(Literal::Placeholder(_)) => params.next().and_then(|v| match v {
-            DataType::Int(v) => Some(*v),
-            _ => None,
-        }),
-        Some(Literal::Integer(v)) => Some(v),
-        _ => None,
-    };
-
-    (limit, offset)
-}
-
 pub struct NoriaConnector {
     inner: NoriaBackend,
     auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
@@ -561,6 +542,14 @@ impl NoriaConnector {
             select_schema,
             vec![Results::new(data)],
         ))
+    }
+
+    pub(crate) fn server_supports_pagination(&self) -> bool {
+        self.inner
+            .inner
+            .as_ref()
+            .map(|v| v.server_supports_pagination)
+            .unwrap_or(false)
     }
 
     // TODO(andrew): Allow client to map table names to NodeIndexes without having to query Noria
@@ -1308,7 +1297,8 @@ impl NoriaConnector {
             .collect();
 
         trace!("select::collapse where-in clauses");
-        let processed_query_params = rewrite::process_query(&mut statement)?;
+        let processed_query_params =
+            rewrite::process_query(&mut statement, self.server_supports_pagination())?;
 
         // check if we already have this query prepared
         trace!("select::access view");
@@ -1386,7 +1376,8 @@ impl NoriaConnector {
                 mut statement,
                 create_if_missing,
             } => {
-                let processed_query_params = rewrite::process_query(&mut statement)?;
+                let processed_query_params =
+                    rewrite::process_query(&mut statement, self.server_supports_pagination())?;
                 let name = self.get_view(&statement, false, create_if_missing).await?;
                 (
                     Cow::Owned(name),
@@ -1405,26 +1396,17 @@ impl NoriaConnector {
             .get_noria_view(&qname, view_failed)
             .await?;
 
-        let keys = processed_query_params.make_keys(params)?;
-
-        let (limit, offset) = limit_offset_params(params, statement.as_ref());
-
-        let res = if (matches!(limit, Some(1)) && offset.is_some() && !matches!(offset, Some(0)))
-            || matches!(limit, Some(0))
-        {
-            short_circuit_empty_resultset(getter).await
-        } else {
-            do_read(
-                getter,
-                statement.as_ref(),
-                keys,
-                ticket,
-                self.read_behavior,
-                self.read_request_handler.as_mut(),
-                event,
-            )
-            .await
-        };
+        let res = do_read(
+            getter,
+            processed_query_params.as_ref(),
+            params,
+            statement.as_ref(),
+            ticket,
+            self.read_behavior,
+            self.read_request_handler.as_mut(),
+            event,
+        )
+        .await;
 
         if let Err(e) = res.as_ref() {
             if e.is_networking_related() || e.caused_by_view_destroyed() {
@@ -1461,12 +1443,17 @@ impl NoriaConnector {
 fn build_view_query(
     getter_schema: &ViewSchema,
     key_map: &[(ViewPlaceholder, KeyColumnIdx)],
+    processed_query_params: &ProcessedQueryParams,
+    params: &[DataType],
     q: &nom_sql::SelectStatement,
-    mut raw_keys: Vec<Cow<'_, [DataType]>>,
     ticket: Option<Timestamp>,
     read_behavior: ReadBehavior,
 ) -> ReadySetResult<ViewQuery> {
     let projected_schema = getter_schema.schema(SchemaType::ProjectedSchema);
+
+    let (limit, offset) = processed_query_params.limit_offset_params(params)?;
+
+    let mut raw_keys = processed_query_params.make_keys(params)?;
 
     let mut key_types = getter_schema.col_types(
         key_map.iter().map(|(_, key_column_idx)| *key_column_idx),
@@ -1675,6 +1662,8 @@ fn build_view_query(
             right: Box::new(expr2),
             ty: Type::Sql(SqlType::Bool), // AND is a boolean operator
         }),
+        limit,
+        offset,
         timestamp: ticket,
     })
 }
@@ -1682,26 +1671,34 @@ fn build_view_query(
 /// Run the supplied [`SelectStatement`] on the supplied [`View`]
 /// Assumption: the [`View`] was created for that specific [`SelectStatement`]
 #[allow(clippy::needless_lifetimes)] // clippy erroneously thinks the timelife can be elided
+#[allow(clippy::too_many_arguments)]
 async fn do_read<'a>(
     getter: &'a mut View,
+    processed_query_params: &ProcessedQueryParams,
+    params: &[DataType],
     q: &nom_sql::SelectStatement,
-    raw_keys: Vec<Cow<'_, [DataType]>>,
     ticket: Option<Timestamp>,
     read_behavior: ReadBehavior,
     read_request_handler: Option<&'a mut ReadRequestHandler>,
     event: &mut noria_client_metrics::QueryExecutionEvent,
 ) -> ReadySetResult<QueryResult<'a>> {
-    let use_bogo = raw_keys.is_empty();
+    let (limit, _) = processed_query_params.limit_offset_params(params)?;
+    if limit == Some(0) {
+        return short_circuit_empty_resultset(getter).await;
+    }
+
     let vq = build_view_query(
         getter
             .schema()
             .ok_or_else(|| internal_err!("No schema for view"))?,
         getter.key_map(),
+        processed_query_params,
+        params,
         q,
-        raw_keys,
         ticket,
         read_behavior,
     )?;
+
     event.num_keys = Some(vq.key_comparisons.len() as _);
 
     let data = if let Some(rh) = read_request_handler {
@@ -1743,7 +1740,8 @@ async fn do_read<'a>(
 
     Ok(QueryResult::from_iter(
         SelectSchema {
-            use_bogo,
+            // TODO(vlad): looks like poor `use_bogo` is unused except in js? Should just remove it.
+            use_bogo: false,
             schema: Cow::Borrowed(getter.schema().unwrap().schema(SchemaType::ReturnedSchema)), /* Safe because we already unwrapped above */
             columns: Cow::Borrowed(getter.columns()),
         },
@@ -1887,17 +1885,32 @@ mod tests {
             }
         }
 
-        #[test]
-        fn simple_point_lookup() {
-            let query = build_view_query(
+        fn make_build_query(
+            query: &str,
+            key_map: &[(ViewPlaceholder, KeyColumnIdx)],
+            params: &[DataType],
+        ) -> ViewQuery {
+            let mut q = parse_select_statement(query);
+            let pp = rewrite::process_query(&mut q, true).unwrap();
+            build_view_query(
                 &*SCHEMA,
-                &[(ViewPlaceholder::OneToOne(1), 0)],
-                &parse_select_statement("SELECT t.x FROM t WHERE t.x = $1"),
-                vec![vec![DataType::from(1)].into()],
+                key_map,
+                &pp,
+                params,
+                &q,
                 None,
                 ReadBehavior::Blocking,
             )
-            .unwrap();
+            .unwrap()
+        }
+
+        #[test]
+        fn simple_point_lookup() {
+            let query = make_build_query(
+                "SELECT t.x FROM t WHERE t.x = $1",
+                &[(ViewPlaceholder::OneToOne(1), 0)],
+                &[DataType::from(1)],
+            );
 
             assert!(query.filter.is_none());
             assert_eq!(
@@ -1908,15 +1921,11 @@ mod tests {
 
         #[test]
         fn single_between() {
-            let query = build_view_query(
-                &*SCHEMA,
+            let query = make_build_query(
+                "SELECT t.x FROM t WHERE t.x BETWEEN $1 AND $2",
                 &[(ViewPlaceholder::Between(1, 2), 0)],
-                &parse_select_statement("SELECT t.x FROM t WHERE t.x BETWEEN $1 AND $2"),
-                vec![vec![DataType::from(1), DataType::from(2)].into()],
-                None,
-                ReadBehavior::Blocking,
-            )
-            .unwrap();
+                &[DataType::from(1), DataType::from(2)],
+            );
 
             assert!(query.filter.is_none());
             assert_eq!(
@@ -1929,18 +1938,14 @@ mod tests {
 
         #[test]
         fn ilike_and_equality() {
-            let query = build_view_query(
-                &*SCHEMA,
+            let query = make_build_query(
+                "SELECT t.x FROM t WHERE t.x = $1 AND t.y ILIKE $2",
                 &[
                     (ViewPlaceholder::OneToOne(1), 0),
                     (ViewPlaceholder::OneToOne(2), 1),
                 ],
-                &parse_select_statement("SELECT t.x FROM t WHERE t.x = $1 AND t.y ILIKE $2"),
-                vec![vec![DataType::from(1), DataType::from("%a%")].into()],
-                None,
-                ReadBehavior::Blocking,
-            )
-            .unwrap();
+                &[DataType::from(1), DataType::from("%a%")],
+            );
 
             assert_eq!(
                 query.filter,
@@ -1961,18 +1966,14 @@ mod tests {
 
         #[test]
         fn mixed_equal_and_inclusive() {
-            let query = build_view_query(
-                &*SCHEMA,
+            let query = make_build_query(
+                "SELECT t.x FROM t WHERE t.x >= $1 AND t.y = $2",
                 &[
                     (ViewPlaceholder::OneToOne(2), 1),
                     (ViewPlaceholder::OneToOne(1), 0),
                 ],
-                &parse_select_statement("SELECT t.x FROM t WHERE t.x >= $1 AND t.y = $2"),
-                vec![vec![DataType::from(1), DataType::from("a")].into()],
-                None,
-                ReadBehavior::Blocking,
-            )
-            .unwrap();
+                &[DataType::from(1), DataType::from("a")],
+            );
 
             assert_eq!(
                 query.key_comparisons,
@@ -1985,20 +1986,14 @@ mod tests {
 
         #[test]
         fn mixed_equal_and_between() {
-            let query = build_view_query(
-                &*SCHEMA,
+            let query = make_build_query(
+                "SELECT t.x FROM t WHERE t.x BETWEEN $1 AND $2 AND t.y = $3",
                 &[
                     (ViewPlaceholder::OneToOne(3), 1),
                     (ViewPlaceholder::Between(1, 2), 0),
                 ],
-                &parse_select_statement(
-                    "SELECT t.x FROM t WHERE t.x BETWEEN $1 AND $2 AND t.y = $3",
-                ),
-                vec![vec![DataType::from(1), DataType::from(2), DataType::from("a")].into()],
-                None,
-                ReadBehavior::Blocking,
-            )
-            .unwrap();
+                &[DataType::from(1), DataType::from(2), DataType::from("a")],
+            );
 
             assert!(query.filter.is_none());
             assert_eq!(
@@ -2012,18 +2007,14 @@ mod tests {
 
         #[test]
         fn mixed_equal_and_exclusive() {
-            let query = build_view_query(
-                &*SCHEMA,
+            let query = make_build_query(
+                "SELECT t.x FROM t WHERE t.x > $1 AND t.y = $2",
                 &[
                     (ViewPlaceholder::OneToOne(2), 1),
                     (ViewPlaceholder::OneToOne(1), 0),
                 ],
-                &parse_select_statement("SELECT t.x FROM t WHERE t.x > $1 AND t.y = $2"),
-                vec![vec![DataType::from(1), DataType::from("a")].into()],
-                None,
-                ReadBehavior::Blocking,
-            )
-            .unwrap();
+                &[DataType::from(1), DataType::from("a")],
+            );
 
             assert_eq!(
                 query.filter,
@@ -2051,18 +2042,14 @@ mod tests {
 
         #[test]
         fn compound_range() {
-            let query = build_view_query(
-                &*SCHEMA,
+            let query = make_build_query(
+                "SELECT t.x FROM t WHERE t.x > $1 AND t.y > $2",
                 &[
                     (ViewPlaceholder::OneToOne(1), 0),
                     (ViewPlaceholder::OneToOne(2), 1),
                 ],
-                &parse_select_statement("SELECT t.x FROM t WHERE t.x > $1 AND t.y > $2"),
-                vec![vec![DataType::from(1), DataType::from("a")].into()],
-                None,
-                ReadBehavior::Blocking,
-            )
-            .unwrap();
+                &[DataType::from(1), DataType::from("a")],
+            );
 
             assert_eq!(
                 query.filter,
@@ -2091,8 +2078,8 @@ mod tests {
 
         #[test]
         fn paginated_with_key() {
-            let query = build_view_query(
-                &*SCHEMA,
+            let query = make_build_query(
+                "SELECT t.x FROM t WHERE t.x = $1 ORDER BY t.y ASC LIMIT 3 OFFSET $2",
                 &[
                     (ViewPlaceholder::OneToOne(1), 0),
                     (
@@ -2103,14 +2090,8 @@ mod tests {
                         1,
                     ),
                 ],
-                &parse_select_statement(
-                    "SELECT t.x FROM t WHERE t.x = $1 ORDER BY t.y ASC LIMIT 3 OFFSET $2",
-                ),
-                vec![vec![DataType::from(1), DataType::from(3)].into()],
-                None,
-                ReadBehavior::Blocking,
-            )
-            .unwrap();
+                &[DataType::from(1), DataType::from(3)],
+            );
 
             assert_eq!(query.filter, None);
 

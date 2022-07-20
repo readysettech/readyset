@@ -837,7 +837,8 @@ where
     /// Provides metadata required to prepare a select query
     fn plan_prepare_select(&mut self, stmt: nom_sql::SelectStatement) -> PrepareMeta {
         let mut rewritten = stmt.clone();
-        if rewrite::process_query(&mut rewritten).is_err() {
+        if rewrite::process_query(&mut rewritten, self.noria.server_supports_pagination()).is_err()
+        {
             warn!(statement = %Sensitive(&stmt), "This statement could not be rewritten by ReadySet");
             PrepareMeta::FailedToRewrite
         } else {
@@ -1328,7 +1329,7 @@ where
             }
         }
         // Now migrate the new query
-        rewrite::process_query(&mut stmt)?;
+        rewrite::process_query(&mut stmt, self.noria.server_supports_pagination())?;
         self.noria.handle_create_cached_query(name, &stmt).await?;
         self.query_status_cache
             .update_query_migration_state(&stmt, MigrationState::Successful);
@@ -1490,14 +1491,17 @@ where
 
         // TODO(vlad): don't rewrite multiple times, it is wasteful
         let mut rewritten = stmt.clone();
-        let mut status = if rewrite::process_query(&mut rewritten).is_ok() {
-            self.query_status_cache.query_status(&rewritten)
-        } else {
-            QueryStatus {
-                migration_state: MigrationState::Unsupported,
-                execution_info: None,
-            }
-        };
+        let mut status =
+            if rewrite::process_query(&mut rewritten, self.noria.server_supports_pagination())
+                .is_ok()
+            {
+                self.query_status_cache.query_status(&rewritten)
+            } else {
+                QueryStatus {
+                    migration_state: MigrationState::Unsupported,
+                    execution_info: None,
+                }
+            };
         let original_status = status.clone();
         let did_work = if let Some(ref mut i) = status.execution_info {
             i.reset_if_exceeded_recovery(

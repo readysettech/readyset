@@ -201,12 +201,10 @@ impl Writer {
     }
 
     async fn read_article(&self, article: usize, view: &mut View) -> anyhow::Result<()> {
-        let vq = ViewQuery {
-            key_comparisons: vec![KeyComparison::Equal(Vec1::new(DataType::Int(article as _)))],
-            block: true,
-            filter: None,
-            timestamp: None,
-        };
+        let vq = ViewQuery::from((
+            vec![KeyComparison::Equal(Vec1::new(DataType::Int(article as _)))],
+            true,
+        ));
 
         let res = view.raw_lookup(vq).await?.into_vec();
         assert_eq!(res.len(), 1);

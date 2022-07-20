@@ -302,12 +302,7 @@ impl NoriaExecutor {
                 .map(|k| KeyComparison::Equal(Vec1::new(DataType::Int(k.key[0] as _))))
                 .collect();
 
-            let vq = ViewQuery {
-                key_comparisons: keys,
-                block: true,
-                filter: None,
-                timestamp: None,
-            };
+            let vq = ViewQuery::from((keys, true));
 
             let r = self.view.raw_lookup(vq).await?.into_vec();
             assert_eq!(r.len(), batch.len());
