@@ -169,12 +169,11 @@ async fn test_timestamp_propagation_simple() {
     // satisfies. We begin with a blocking read as the data is not
     // materialized at the reader.
     let res = cq
-        .raw_lookup(ViewQuery {
-            key_comparisons: vec![KeyComparison::Equal(vec1![id.clone()])],
-            block: true,
-            filter: None,
-            timestamp: Some(t.clone()),
-        })
+        .raw_lookup(ViewQuery::from((
+            vec![KeyComparison::Equal(vec1![id.clone()])],
+            true,
+            Some(t.clone()),
+        )))
         .await
         .unwrap()
         .into_vec();
@@ -183,14 +182,13 @@ async fn test_timestamp_propagation_simple() {
 
     // Perform a read with a timestamp the reader cannot satisfy.
     assert!(matches!(
-        cq.raw_lookup(ViewQuery {
-            key_comparisons: vec![KeyComparison::Equal(vec1![id.clone()])],
-            block: false,
-            filter: None,
+        cq.raw_lookup(ViewQuery::from((
+            vec![KeyComparison::Equal(vec1![id.clone()])],
+            false,
             // The timestamp at the reader node { 0: 4 }, does not
             // satisfy this timestamp.
-            timestamp: Some(timestamp(vec![(1, 4)])),
-        })
+            Some(timestamp(vec![(1, 4)]))
+        )))
         .await,
         Err(ReadySetError::ReaderMissingKey)
     ));
@@ -260,12 +258,11 @@ async fn test_timestamp_propagation_multitable() {
     // calculated the max over the timestamp entries they had seen for
     // each table.
     let res = cq
-        .raw_lookup(ViewQuery {
-            key_comparisons: vec![KeyComparison::Equal(vec1![DataType::Int(1)])],
-            block: true,
-            filter: None,
-            timestamp: Some(timestamp(vec![(0, 6), (1, 6)])),
-        })
+        .raw_lookup(ViewQuery::from((
+            vec![KeyComparison::Equal(vec1![DataType::Int(1)])],
+            true,
+            Some(timestamp(vec![(0, 6), (1, 6)])),
+        )))
         .await
         .unwrap()
         .into_vec();
@@ -276,12 +273,11 @@ async fn test_timestamp_propagation_multitable() {
     // be able to satisfy. A non-blocking read of a satisfiable timestamp would
     // suceed here due to the previous read materializing the data.
     assert!(matches!(
-        cq.raw_lookup(ViewQuery {
-            key_comparisons: vec![KeyComparison::Equal(vec1![DataType::Int(1)])],
-            block: false,
-            filter: None,
-            timestamp: Some(timestamp(vec![(0, 6), (1, 7)])),
-        })
+        cq.raw_lookup(ViewQuery::from((
+            vec![KeyComparison::Equal(vec1![DataType::Int(1)])],
+            false,
+            Some(timestamp(vec![(0, 6), (1, 7)])),
+        )))
         .await,
         Err(ReadySetError::ReaderMissingKey)
     ));
@@ -4998,6 +4994,8 @@ async fn post_read_ilike() {
                 ty: Type::Sql(SqlType::Bool),
             }),
             timestamp: None,
+            limit: None,
+            offset: None,
         })
         .await
         .unwrap()
@@ -7896,12 +7894,7 @@ async fn aggressive_eviction_impl() {
             .map(|k| KeyComparison::Equal(vec1::Vec1::new(DataType::Int(k))))
             .collect();
 
-        let vq = ViewQuery {
-            key_comparisons: keys.clone(),
-            block: true,
-            filter: None,
-            timestamp: None,
-        };
+        let vq = ViewQuery::from((keys.clone(), true));
 
         let r = view.raw_lookup(vq).await.unwrap().into_vec();
         assert_eq!(r.len(), LIMIT);
@@ -7915,15 +7908,13 @@ async fn aggressive_eviction_range_impl() {
 
     for i in (0..500).rev() {
         let offset = i % 10;
-        let vq = ViewQuery {
-            key_comparisons: vec![KeyComparison::Range((
+        let vq = ViewQuery::from((
+            vec![KeyComparison::Range((
                 Bound::Included(vec1![DataType::Int(offset)]),
                 Bound::Excluded(vec1![DataType::Int(offset + 20)]),
             ))],
-            block: true,
-            filter: None,
-            timestamp: None,
-        };
+            true,
+        ));
 
         let r = view.raw_lookup(vq).await.unwrap().into_vec();
         assert_eq!(r.len(), LIMIT);

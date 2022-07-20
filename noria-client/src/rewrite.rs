@@ -6,8 +6,10 @@ use std::{iter, mem};
 
 use itertools::{Either, Itertools};
 use nom_sql::analysis::visit::{self, Visitor};
-use nom_sql::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement};
+use nom_sql::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement, SqlType};
+use noria_data::DataType;
 use noria_errors::{invalid_err, unsupported, ReadySetError, ReadySetResult};
+use tracing::trace;
 
 /// Struct storing information about parameters processed from a raw user supplied query, which
 /// provides support for converting a user-supplied parameter list into a set of lookup keys to pass
@@ -21,10 +23,37 @@ pub struct ProcessedQueryParams {
     reordered_placeholders: Option<Vec<usize>>,
     rewritten_in_conditions: Vec<RewrittenIn>,
     auto_parameters: Vec<(usize, Literal)>,
-    /// Did the original query contain a bare `OFFSET` without a `LIMIT`?
-    ///
-    /// Note that if this was the case, it will always be the last parameter in the query
-    bare_offset: bool,
+    pagination_parameters: AdapterPaginationParams,
+}
+
+#[derive(Debug, Clone)]
+struct AdapterPaginationParams {
+    /// The values of `LIMIT` and `OFFSET` in the original query
+    limit: Option<Literal>,
+    offset: Option<Literal>,
+    force_paginate_in_adapter: bool,
+}
+
+/// This method checks if readyset-server is configured to handle LIMIT/OFFSET queries at the
+/// dataflow level. If not then LIMIT and OFFSET will be stripped and executed in the
+/// post-processing path.
+fn use_fallback_pagination(
+    server_supports_pagination: bool,
+    limit: &Option<Literal>,
+    offset: &Option<Literal>,
+) -> bool {
+    if server_supports_pagination &&
+        // Can't handle parametrized LIMIT even if support is enabled
+        !matches!(limit, Some(Literal::Placeholder(_))) &&
+        // Can't handle bare OFFSET
+        !(limit.is_none() && offset.is_some())
+    {
+        return false;
+    }
+
+    trace!("Will use fallback LIMIT/OFFSET for query");
+
+    true
 }
 
 /// This rewrite pass accomplishes the following:
@@ -34,9 +63,22 @@ pub struct ProcessedQueryParams {
 ///   therefore cannot guarantee that the rewritten query is free of user PII.
 /// - Collapses 'WHERE <expr> IN ?, ... ?' to 'WHERE <expr> = ?'
 /// - Removes `OFFSET ?` if there isn't a `LIMIT`
-pub fn process_query(query: &mut SelectStatement) -> ReadySetResult<ProcessedQueryParams> {
+pub fn process_query(
+    query: &mut SelectStatement,
+    server_supports_pagination: bool,
+) -> ReadySetResult<ProcessedQueryParams> {
     let reordered_placeholders = reorder_numbered_placeholders(query);
-    let bare_offset = remove_bare_offset(query)?;
+
+    let limit = query.limit.take();
+    let offset = query.offset.take();
+    let force_paginate_in_adapter =
+        use_fallback_pagination(server_supports_pagination, &limit, &offset);
+    if !force_paginate_in_adapter {
+        // If adapter pagination shouldn't be used reinstate the limit and offset clauses
+        query.limit.clone_from(&limit);
+        query.offset.clone_from(&offset);
+    }
+
     let auto_parameters = auto_parametrize_query(query);
     let rewritten_in_conditions = collapse_where_in(query)?;
     number_placeholders(query)?;
@@ -44,11 +86,75 @@ pub fn process_query(query: &mut SelectStatement) -> ReadySetResult<ProcessedQue
         reordered_placeholders,
         rewritten_in_conditions,
         auto_parameters,
-        bare_offset,
+        pagination_parameters: AdapterPaginationParams {
+            limit,
+            offset,
+            force_paginate_in_adapter,
+        },
     })
 }
 
 impl ProcessedQueryParams {
+    /// If the query has values for OFFSET or LIMIT, get their values, returning a tuple of `limit,
+    /// offset`
+    pub(crate) fn limit_offset_params(
+        &self,
+        params: &[DataType],
+    ) -> ReadySetResult<(Option<usize>, Option<usize>)> {
+        let mut params_iter = self
+            .reordered_placeholders
+            .as_ref()
+            .map(|p| Either::Left(p.iter().rev().filter_map(|i| params.get(*i))))
+            .unwrap_or_else(|| Either::Right(params.iter().rev()))
+            .into_iter();
+
+        let mut get_param = |lit: &Literal| -> ReadySetResult<usize> {
+            match lit {
+                Literal::Placeholder(_) => match params_iter
+                    .next()
+                    .ok_or_else(|| invalid_err!("Wrong number of parameters"))
+                    .and_then(|v| v.coerce_to(&SqlType::UnsignedBigint(None)))?
+                {
+                    DataType::UnsignedInt(v) => Ok(v as usize),
+                    _ => unreachable!("Succesfully coerced"),
+                },
+                Literal::Integer(v) => {
+                    usize::try_from(*v).map_err(|_| invalid_err!("Non negative integer expected"))
+                }
+                Literal::Null => Ok(0), // Invalid in MySQL but 0 for Postgres
+                Literal::Float(_)
+                | Literal::Double(_)
+                | Literal::String(_)
+                | Literal::Numeric(_, _) => {
+                    // All of those are invalid in MySQL, but Postgres coerces to integer
+                    match DataType::try_from(lit)?.coerce_to(&SqlType::UnsignedBigint(None))? {
+                        DataType::UnsignedInt(v) => Ok(v as usize),
+                        _ => unreachable!("Succesfully coerced"),
+                    }
+                }
+                _ => Err(invalid_err!("Non negative integer expected")),
+            }
+        };
+
+        let AdapterPaginationParams {
+            limit,
+            offset,
+            force_paginate_in_adapter,
+        } = &self.pagination_parameters;
+
+        // TODO(vlad): actually limit and offset can get in reverse order in MySQL if
+        // LIMIT $offset, $limit syntax is used, we need to propagate that info via
+        // [`SelectStatement`]
+        let offset = offset.as_ref().map(&mut get_param).transpose()?;
+        let limit = limit.as_ref().map(&mut get_param).transpose()?;
+
+        if *force_paginate_in_adapter || limit == Some(0) {
+            Ok((limit, offset))
+        } else {
+            Ok((None, None))
+        }
+    }
+
     pub(crate) fn make_keys<'param, T>(
         &self,
         params: &'param [T],
@@ -56,27 +162,36 @@ impl ProcessedQueryParams {
     where
         T: Clone + TryFrom<Literal, Error = ReadySetError> + Debug + Default + PartialEq,
     {
-        if params.is_empty() && self.auto_parameters.is_empty() {
-            return Ok(vec![]);
-        }
-
         let params = if let Some(order_map) = &self.reordered_placeholders {
             Cow::Owned(reorder_params(params, order_map)?)
         } else {
             Cow::Borrowed(params)
         };
 
-        let params = if self.bare_offset {
-            let offset_value = params
-                .last()
-                .ok_or_else(|| invalid_err!("Wrong number of parameters supplied to query"))?;
-            if *offset_value != Literal::Integer(0).try_into()? {
-                unsupported!("OFFSET without LIMIT can only be literal 0");
+        let mut params = params.as_ref();
+
+        let AdapterPaginationParams {
+            limit,
+            offset,
+            force_paginate_in_adapter,
+        } = &self.pagination_parameters;
+
+        if *force_paginate_in_adapter {
+            // When fallback pagination is used, remove the parameters for offset and limit from the
+            // list
+            if matches!(offset, Some(Literal::Placeholder(_))) {
+                // Skip parameter for offset
+                params = &params[..params.len() - 1];
             }
-            Cow::Borrowed(&params[..(params.len() - 1)])
-        } else {
-            params
-        };
+            if matches!(limit, Some(Literal::Placeholder(_))) {
+                // Skip parameter for limit
+                params = &params[..params.len() - 1];
+            }
+        }
+
+        if params.is_empty() && self.auto_parameters.is_empty() {
+            return Ok(vec![]);
+        }
 
         let auto_parameters = self
             .auto_parameters
@@ -85,7 +200,7 @@ impl ProcessedQueryParams {
             .map(|(i, lit)| -> ReadySetResult<_> { Ok((i, lit.try_into()?)) })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let params = splice_auto_parameters(&params, &auto_parameters);
+        let params = splice_auto_parameters(params, &auto_parameters);
 
         if self.rewritten_in_conditions.is_empty() {
             return Ok(vec![Cow::Owned(params.into_owned())]);
@@ -398,22 +513,6 @@ pub fn number_placeholders(query: &mut SelectStatement) -> ReadySetResult<()> {
     };
     visitor.visit_select_statement(query)?;
     Ok(())
-}
-
-/// Remove a bare placeholder offset from the query, returning `Ok(true)` if one existed
-fn remove_bare_offset(query: &mut SelectStatement) -> ReadySetResult<bool> {
-    if query.limit.is_some() {
-        return Ok(false);
-    }
-
-    match query.offset.take() {
-        Some(Literal::Placeholder(_)) => Ok(true),
-        Some(lit) => {
-            query.offset = Some(lit);
-            Ok(false)
-        }
-        None => Ok(false),
-    }
 }
 
 /// This pass replaces every instance of `Literal`, except Placeholders, in the AST with
@@ -966,7 +1065,7 @@ mod tests {
             let expected = parse_select_statement(
                 "SELECT id + \"<anonymized>\" FROM users WHERE credit_card_number = $1",
             );
-            process_query(&mut query).expect("Should be able to rewrite query");
+            process_query(&mut query, false).expect("Should be able to rewrite query");
             anonymize_literals(&mut query);
             assert_eq!(query, expected);
         }
@@ -979,7 +1078,7 @@ mod tests {
             let expected = parse_select_statement(
                 "SELECT id FROM users WHERE credit_card_number = $1 AND id = $2",
             );
-            process_query(&mut query).expect("Should be able to rewrite query");
+            process_query(&mut query, false).expect("Should be able to rewrite query");
             assert_eq!(query.to_string(), expected.to_string());
             anonymize_literals(&mut query);
             assert_eq!(
@@ -1212,7 +1311,7 @@ mod tests {
             params: Vec<DataType>,
         ) -> (Vec<Vec<DataType>>, SelectStatement) {
             let mut query = parse_select_statement(query);
-            let processed = process_query(&mut query).unwrap();
+            let processed = process_query(&mut query, false).unwrap();
             (
                 processed
                     .make_keys(&params)
@@ -1375,11 +1474,71 @@ mod tests {
         }
 
         #[test]
-        #[should_panic]
         fn bare_offset_nonzero() {
-            process_and_make_keys(
+            let (keys, query) = process_and_make_keys(
                 "SELECT * FROM t WHERE x = $2 OFFSET $1",
-                vec![1.into(), 2.into()],
+                vec![15.into(), 1.into()],
+            );
+
+            assert_eq!(
+                query,
+                parse_select_statement("SELECT * FROM t WHERE x = $1"),
+                "{}",
+                query
+            );
+            assert_eq!(keys, vec![vec![1.into()]]);
+        }
+
+        #[test]
+        fn correct_offset_limit() {
+            let get_lim_off = |q: &str, p: &[DataType]| -> (Option<usize>, Option<usize>) {
+                let proc = process_query(&mut parse_select_statement(q), false).unwrap();
+                proc.limit_offset_params(p).unwrap()
+            };
+
+            assert_eq!(
+                get_lim_off(
+                    "SELECT * FROM t WHERE x = $2 LIMIT $3 OFFSET $1",
+                    &[1.into(), 2.into(), 3.into()]
+                ),
+                (Some(3), Some(1))
+            );
+
+            assert_eq!(
+                get_lim_off(
+                    "SELECT * FROM t WHERE x = ? LIMIT ? OFFSET ?",
+                    &[1.into(), 2.into(), 3.into()]
+                ),
+                (Some(2), Some(3))
+            );
+
+            assert_eq!(
+                get_lim_off("SELECT * FROM t WHERE x = ? LIMIT ?", &[1.into(), 2.into()]),
+                (Some(2), None)
+            );
+
+            assert_eq!(
+                get_lim_off(
+                    "SELECT * FROM t WHERE x = ? OFFSET ?",
+                    &[1.into(), 2.into()]
+                ),
+                (None, Some(2))
+            );
+
+            assert_eq!(
+                get_lim_off(
+                    "SELECT * FROM t WHERE x = ? LIMIT ? OFFSET 4",
+                    &[1.into(), 2.into()]
+                ),
+                (Some(2), Some(4))
+            );
+
+            assert_eq!(
+                get_lim_off(
+                    "SELECT * FROM t WHERE x = ? LIMIT 4 OFFSET ?",
+                    &[1.into(), 2.into()]
+                ),
+                (Some(4), Some(2))
             );
         }
     }

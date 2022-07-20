@@ -959,6 +959,10 @@ pub struct ViewQuery {
     ///
     /// [truthy]: DataType::is_truthy
     pub filter: Option<DataflowExpr>,
+    /// An optional limit to the number of values to return
+    pub limit: Option<usize>,
+    /// An optional offset to skip the given number of rows from the beginning of the result set
+    pub offset: Option<usize>,
     /// Timestamp to compare against for reads, if a timestamp is passed into the
     /// view query, a read will only return once the timestamp is less than
     /// the timestamp associated with the data.
@@ -975,6 +979,8 @@ impl From<(Vec<KeyComparison>, bool, Option<Timestamp>)> for ViewQuery {
         Self {
             key_comparisons,
             block,
+            limit: None,
+            offset: None,
             filter: None,
             timestamp: ticket,
         }
@@ -987,6 +993,8 @@ impl From<(Vec<KeyComparison>, bool)> for ViewQuery {
             key_comparisons,
             block,
             filter: None,
+            limit: None,
+            offset: None,
             timestamp: None,
         }
     }
@@ -1093,12 +1101,16 @@ impl Service<ViewQuery> for View {
                     let span = readyset_tracing::child_span!(INFO, "view-shard", shardi);
                     let _guard = tracing::Span::enter(&span);
 
+                    // NOTE: Sharded views can't actually work with aggregates, order by, limit or
+                    // offset
                     let request = Instrumented::from(Tagged::from(ReadQuery::Normal {
                         target: (node, name.clone(), shardi).into(),
                         query: ViewQuery {
                             key_comparisons: shard_queries,
                             block: query.block,
                             filter: query.filter.clone(),
+                            limit: query.limit,
+                            offset: query.offset,
                             timestamp: query.timestamp.clone(),
                         },
                     }));

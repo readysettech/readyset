@@ -678,6 +678,11 @@ impl ControllerHandle {
         self.rpc("status", (), self.request_timeout)
     }
 
+    /// Returns true if topk and pagination support are enabled on the server
+    pub fn supports_pagination(&mut self) -> impl Future<Output = ReadySetResult<bool>> + '_ {
+        self.rpc("supports_pagination", (), self.request_timeout)
+    }
+
     #[cfg(feature = "failure_injection")]
     pub fn failpoint(
         &mut self,

@@ -176,6 +176,8 @@ impl ReadRequestHandler {
             block,
             timestamp,
             filter,
+            limit,
+            offset,
         } = query;
 
         macro_rules! reply_with_ok {
@@ -218,7 +220,7 @@ impl ReadRequestHandler {
                 // immediately
                 self.hit_ctr.increment(1);
 
-                let results = ResultIterator::new(hit, &reader.post_lookup, filter);
+                let results = ResultIterator::new(hit, &reader.post_lookup, limit, offset, filter);
 
                 let results = if raw_result {
                     ServerReadReplyBatch::Unserialized(results)
@@ -257,6 +259,8 @@ impl ReadRequestHandler {
                     next_trigger: now,
                     first: now,
                     warned: false,
+                    limit,
+                    offset,
                     filter,
                     timestamp,
                     upquery_timeout: self.upquery_timeout,
@@ -426,6 +430,8 @@ pub struct BlockingRead {
     target: ReaderAddress,
     key_comparisons: Vec<KeyComparison>,
     truth: Readers,
+    limit: Option<usize>,
+    offset: Option<usize>,
     filter: Option<DataflowExpr>,
     trigger_timeout: Duration,
     next_trigger: time::Instant,
@@ -473,7 +479,13 @@ impl BlockingRead {
             Err(_) => return Poll::Ready(Err(ReadySetError::ServerShuttingDown)),
             Ok(hit) => {
                 // We hit on all keys, and there is no consistency miss, can return results
-                let results = ResultIterator::new(hit, &reader.post_lookup, self.filter.take());
+                let results = ResultIterator::new(
+                    hit,
+                    &reader.post_lookup,
+                    self.limit,
+                    self.offset,
+                    self.filter.take(),
+                );
 
                 let results = if self.raw_result {
                     ServerReadReplyBatch::Unserialized(results)
@@ -565,6 +577,8 @@ mod readreply {
                             ServerReadReplyBatch::serialize(ResultIterator::new(
                                 [d].into(),
                                 &Default::default(),
+                                None,
+                                None,
                                 None,
                             ))
                         })
@@ -727,6 +741,8 @@ mod readreply {
                             ServerReadReplyBatch::serialize(ResultIterator::new(
                                 [d].into(),
                                 &Default::default(),
+                                None,
+                                None,
                                 None,
                             ))
                         })

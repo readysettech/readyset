@@ -61,6 +61,8 @@ pub struct ResultIterator {
     inner: ResultIteratorInner,
     /// The maximum number of elements to return
     limit: Option<usize>,
+    /// The number of rows to skip from the beginning
+    offset: Option<usize>,
     /// The row to return if the result set is empty
     default_row: Option<Arc<Row>>,
     /// If not the first result to be returned
@@ -151,7 +153,16 @@ impl ResultIterator {
     /// Create a new [`ResultIterator`] from a set of [`SharedRows`] and a [`PostLookup`].
     /// Each individual set of [`SharedRows`] is assumed sorted in regards to the provided
     /// [`PostLookup`], otherwise the iteration order may break.
-    pub fn new(data: SharedResults, post_lookup: &PostLookup, mut filter: Option<Expr>) -> Self {
+    /// The parameter for `adapter_limit` is used to override any limit set in the `PostLookup`
+    /// provided, in case the adapter requesting this result thinks it needs a different number of
+    /// rows.
+    pub fn new(
+        data: SharedResults,
+        post_lookup: &PostLookup,
+        adapter_limit: Option<usize>,
+        offset: Option<usize>,
+        mut filter: Option<Expr>,
+    ) -> Self {
         let PostLookup {
             order_by,
             limit,
@@ -161,7 +172,7 @@ impl ResultIterator {
             ..
         } = post_lookup;
 
-        let limit = *limit; // Limit specifies total number of results to return
+        let limit = adapter_limit.or(*limit); // Limit specifies total number of results to return
 
         let inner = match (order_by, aggregates) {
             // No specific order is required, simply iterate over each result set one by one
@@ -238,6 +249,7 @@ impl ResultIterator {
                         filter: filter.take(),
                     }),
                     limit,
+                    offset: None,
                     default_row: default_row.clone(),
                     non_empty: false,
                     filter: None,
@@ -252,6 +264,10 @@ impl ResultIterator {
                         .fold(Ordering::Equal, |acc, next| acc.then(next))
                 });
 
+                if let Some(offset) = offset {
+                    results.drain(offset..);
+                }
+
                 return ResultIterator::owned(vec![Results {
                     results,
                     stats: None,
@@ -262,6 +278,7 @@ impl ResultIterator {
         ResultIterator {
             inner,
             limit,
+            offset,
             default_row: default_row.clone(),
             non_empty: false,
             // When aggregates (group_by) is present, filtering is processed by the inner
@@ -283,6 +300,7 @@ impl ResultIterator {
                 row: None,
             }),
             limit: None,
+            offset: None,
             default_row: None,
             non_empty: false,
             filter: None,
@@ -304,6 +322,22 @@ impl ResultIterator {
                     None => total,
                 }),
             _ => None,
+        }
+    }
+
+    /// Advance the iterator skipping rows which don't pass the filter predicate
+    fn advance_filtered(&mut self) {
+        loop {
+            self.inner.advance();
+            if let Some(filter) = &self.filter {
+                // Check if the row passes the filter predicate
+                if let Some(expr) = self.inner.get() {
+                    if !filter.eval(expr).map(|r| r.is_truthy()).unwrap_or(false) {
+                        continue;
+                    }
+                }
+            }
+            break;
         }
     }
 }
@@ -524,22 +558,20 @@ impl StreamingIterator for ResultIterator {
 
     #[inline(always)]
     fn advance(&mut self) {
+        if let Some(offset) = self.offset.take() {
+            for _ in 0..offset {
+                self.advance_filtered();
+                if self.inner.get().is_none() {
+                    break;
+                }
+            }
+        }
+
         if let Some(limit) = self.limit.as_mut() {
             *limit = limit.wrapping_sub(1);
         }
 
-        loop {
-            self.inner.advance();
-            if let Some(filter) = &self.filter {
-                // Check if the row passes the filter predicate
-                if let Some(expr) = self.inner.get() {
-                    if !filter.eval(expr).map(|r| r.is_truthy()).unwrap_or(false) {
-                        continue;
-                    }
-                }
-            }
-            break;
-        }
+        self.advance_filtered();
         // If after the first advance get returns None the default row should be returned, otherwise
         // the default row should be removed
         if self.non_empty {
