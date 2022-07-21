@@ -1,27 +1,30 @@
-use std::cmp::Ordering;
+use std::fmt::Display;
 use std::hash::Hash;
 use std::{fmt, str};
 
+use nom::branch::alt;
+use nom::bytes::complete::tag;
+use nom::combinator::{map, opt};
+use nom::multi::separated_list1;
+use nom::sequence::terminated;
+use nom::IResult;
 use serde::{Deserialize, Serialize};
 
-use crate::SqlIdentifier;
+use crate::common::{as_alias, ws_sep_comma};
+use crate::{Dialect, SqlIdentifier};
 
-#[derive(Clone, Debug, Default, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Table {
-    pub name: SqlIdentifier,
-    pub alias: Option<SqlIdentifier>,
     pub schema: Option<SqlIdentifier>,
+    pub name: SqlIdentifier,
 }
 
-impl fmt::Display for Table {
+impl Display for Table {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(ref schema) = self.schema {
             write!(f, "`{}`.", schema)?;
         }
         write!(f, "`{}`", self.name)?;
-        if let Some(ref alias) = self.alias {
-            write!(f, " AS `{}`", alias)?;
-        }
         Ok(())
     }
 }
@@ -40,32 +43,9 @@ impl PartialEq for Table {
     }
 }
 
-// Ordering ignores `alias`
-// NOTE: this implementation violates the transitive property. The implementation is correct so long
-// as all Tables either refer to the same schema or no schema at all. This should be treated
-// carefully, and should be fixed if we want to handle multiple schemas.
-impl Ord for Table {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self.schema.as_ref(), other.schema.as_ref()) {
-            (Some(s), Some(o)) => (s, &self.name).cmp(&(o, &other.name)),
-            _ => self.name.cmp(&other.name),
-        }
-    }
-}
-
-impl PartialOrd for Table {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 impl From<SqlIdentifier> for Table {
     fn from(name: SqlIdentifier) -> Self {
-        Table {
-            name,
-            alias: None,
-            schema: None,
-        }
+        Table { name, schema: None }
     }
 }
 
@@ -73,7 +53,6 @@ impl From<&SqlIdentifier> for Table {
     fn from(name: &SqlIdentifier) -> Self {
         Table {
             name: name.clone(),
-            alias: None,
             schema: None,
         }
     }
@@ -83,8 +62,75 @@ impl<'a> From<&'a str> for Table {
     fn from(t: &str) -> Table {
         Table {
             name: t.into(),
-            alias: None,
             schema: None,
         }
     }
+}
+
+/// An expression for a table in the `FROM` clause of a query, with optional alias
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Hash, Serialize, Deserialize)]
+pub struct TableExpr {
+    pub table: Table,
+    pub alias: Option<SqlIdentifier>,
+}
+
+impl Display for TableExpr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.table)?;
+        if let Some(alias) = &self.alias {
+            write!(f, " AS `{alias}`")?;
+        }
+        Ok(())
+    }
+}
+
+/// Constructs a [`TableExpr`] with no alias
+impl From<Table> for TableExpr {
+    fn from(table: Table) -> Self {
+        Self { table, alias: None }
+    }
+}
+
+// Parse a reference to a named schema.table
+pub fn table_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Table> {
+    move |i| {
+        let (i, schema) = opt(terminated(dialect.identifier(), tag(".")))(i)?;
+        let (i, name) = dialect.identifier()(i)?;
+        Ok((i, Table { schema, name }))
+    }
+}
+
+// Parse list of table names.
+pub fn table_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Table>> {
+    move |i| separated_list1(ws_sep_comma, table_reference(dialect))(i)
+}
+
+pub fn table_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableExpr> {
+    move |i| {
+        let (i, table) = table_reference(dialect)(i)?;
+        let (i, alias) = opt(as_alias(dialect))(i)?;
+        Ok((i, TableExpr { table, alias }))
+    }
+}
+
+pub fn table_expr_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<TableExpr>> {
+    move |i| separated_list1(ws_sep_comma, table_expr(dialect))(i)
+}
+
+// Parse a reference to a named schema.table or schema.* as used by the replicator to identify
+// tables to replicate
+pub fn replicator_table_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Table> {
+    move |i| {
+        let (i, schema) = opt(terminated(dialect.identifier(), tag(".")))(i)?;
+        let (i, name) = alt((
+            dialect.identifier(),
+            map(tag("*"), |_| SqlIdentifier::from("*")),
+        ))(i)?;
+        Ok((i, Table { schema, name }))
+    }
+}
+
+// Parse list of table names as used by the replicator to identify tables to replicate
+pub fn replicator_table_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Table>> {
+    move |i| separated_list1(ws_sep_comma, replicator_table_reference(dialect))(i)
 }

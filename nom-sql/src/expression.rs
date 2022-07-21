@@ -993,7 +993,7 @@ mod tests {
 
     mod conditions {
         use super::*;
-        use crate::{FieldDefinitionExpr, ItemPlaceholder};
+        use crate::{FieldDefinitionExpr, ItemPlaceholder, TableExpr};
 
         fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpr> {
             cols.iter()
@@ -1297,7 +1297,7 @@ mod tests {
             let res = expression(Dialect::MySQL)(cond.as_bytes());
 
             let nested_select = Box::new(SelectStatement {
-                tables: vec![Table::from("foo")],
+                tables: vec![TableExpr::from(Table::from("foo"))],
                 fields: columns(&["col"]),
                 ..Default::default()
             });
@@ -1321,7 +1321,7 @@ mod tests {
             let res = expression(Dialect::MySQL)(cond.as_bytes());
 
             let nested_select = Box::new(SelectStatement {
-                tables: vec![Table::from("foo")],
+                tables: vec![TableExpr::from(Table::from("foo"))],
                 fields: columns(&["col"]),
                 ..Default::default()
             });
@@ -1341,7 +1341,7 @@ mod tests {
             let res = expression(Dialect::MySQL)(cond.as_bytes());
 
             let nested_select = Box::new(SelectStatement {
-                tables: vec![Table::from("foo")],
+                tables: vec![TableExpr::from(Table::from("foo"))],
                 fields: columns(&["col"]),
                 ..Default::default()
             });
@@ -1364,7 +1364,7 @@ mod tests {
             let res = expression(Dialect::MySQL)(cond.as_bytes());
 
             let nested_select = Box::new(SelectStatement {
-                tables: vec![Table::from("PaperConflict")],
+                tables: vec![TableExpr::from(Table::from("PaperConflict"))],
                 fields: columns(&["paperId"]),
                 ..Default::default()
             });

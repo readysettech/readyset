@@ -4,7 +4,7 @@ use std::mem;
 use itertools::Itertools;
 use nom_sql::analysis::visit::{walk_select_statement, Visitor};
 use nom_sql::{
-    Column, CommonTableExpr, JoinRightSide, SelectStatement, SqlIdentifier, SqlQuery, Table,
+    Column, CommonTableExpr, JoinRightSide, SelectStatement, SqlIdentifier, SqlQuery, TableExpr,
 };
 
 #[derive(Debug, PartialEq)]
@@ -63,7 +63,7 @@ impl<'ast, 'a> Visitor<'ast> for RemoveAliasesVisitor<'a> {
                 JoinRightSide::Tables(ref ts) => ts.clone(),
                 _ => vec![],
             }))
-            .map(|t| (t.name, t.alias))
+            .map(|t| (t.table.name /* TODO: schema */, t.alias))
             .unique()
             .into_group_map();
 
@@ -148,16 +148,16 @@ impl<'ast, 'a> Visitor<'ast> for RemoveAliasesVisitor<'a> {
         Ok(())
     }
 
-    fn visit_table(&mut self, table: &'ast mut Table) -> Result<(), Self::Error> {
+    fn visit_table_expr(&mut self, table: &'ast mut TableExpr) -> Result<(), Self::Error> {
         if let Some(name) = table
             .alias
             .as_ref()
             .and_then(|t| self.table_remap.get(t))
             .cloned()
         {
-            table.name = name
-        } else if let Some(name) = self.col_table_remap.get(&table.name) {
-            table.name = name.clone();
+            table.table.name = name
+        } else if let Some(name) = self.col_table_remap.get(&table.table.name) {
+            table.table.name = name.clone();
         }
         table.alias = None;
 
@@ -209,7 +209,7 @@ mod tests {
     use nom_sql::{
         parse_query, parser, BinaryOperator, Column, Dialect, Expr, FieldDefinitionExpr,
         ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal,
-        SelectStatement, SqlQuery, Table,
+        SelectStatement, SqlQuery, Table, TableExpr,
     };
 
     use super::{AliasRemoval, TableAliasRewrite};
@@ -232,10 +232,12 @@ mod tests {
     #[test]
     fn it_removes_aliases() {
         let q = SelectStatement {
-            tables: vec![Table {
-                name: "PaperTag".into(),
+            tables: vec![TableExpr {
+                table: Table {
+                    name: "PaperTag".into(),
+                    schema: None,
+                },
                 alias: Some("t".into()),
-                schema: None,
             }],
             fields: vec![FieldDefinitionExpr::from(Column::from("t.id"))],
             where_clause: Some(Expr::BinaryOp {
@@ -268,10 +270,12 @@ mod tests {
                 );
                 assert_eq!(
                     tq.tables,
-                    vec![Table {
-                        name: "PaperTag".into(),
+                    vec![TableExpr {
+                        table: Table {
+                            schema: None,
+                            name: "PaperTag".into(),
+                        },
                         alias: None,
-                        schema: None,
                     }]
                 );
             }
@@ -301,10 +305,12 @@ mod tests {
             table: None,
         };
         let q = SelectStatement {
-            tables: vec![Table {
-                name: "PaperTag".into(),
+            tables: vec![TableExpr {
+                table: Table {
+                    schema: None,
+                    name: "PaperTag".into(),
+                },
                 alias: Some("t".into()),
-                schema: None,
             }],
             fields: vec![FieldDefinitionExpr::from(col_small.clone())],
             where_clause: Some(Expr::BinaryOp {
@@ -334,10 +340,12 @@ mod tests {
                 );
                 assert_eq!(
                     tq.tables,
-                    vec![Table {
-                        name: "PaperTag".into(),
+                    vec![TableExpr {
+                        table: Table {
+                            schema: None,
+                            name: "PaperTag".into(),
+                        },
                         alias: None,
-                        schema: None,
                     }]
                 );
             }
@@ -373,20 +381,24 @@ mod tests {
                 );
                 assert_eq!(
                     tq.tables,
-                    vec![Table {
-                        name: "__query_name__t1".into(),
+                    vec![TableExpr {
+                        table: Table {
+                            schema: None,
+                            name: "__query_name__t1".into(),
+                        },
                         alias: None,
-                        schema: None,
                     }]
                 );
                 assert_eq!(
                     tq.join,
                     vec![JoinClause {
                         operator: JoinOperator::Join,
-                        right: JoinRightSide::Table(Table {
-                            name: "__query_name__t2".into(),
+                        right: JoinRightSide::Table(TableExpr {
+                            table: Table {
+                                schema: None,
+                                name: "__query_name__t2".into(),
+                            },
                             alias: None,
-                            schema: None,
                         }),
                         constraint: JoinConstraint::On(Expr::BinaryOp {
                             op: BinaryOperator::Equal,

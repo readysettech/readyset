@@ -1,6 +1,6 @@
 #![warn(clippy::panic)]
 
-use nom_sql::{self, ColumnConstraint, SqlType};
+use nom_sql::{self, ColumnConstraint, SqlType, Table};
 use noria_errors::{unsupported, ReadySetResult};
 
 use crate::constants::DEFAULT_CHARACTER_SET;
@@ -148,7 +148,15 @@ pub(crate) fn convert_column(
     }
 
     Ok(mysql_srv::Column {
-        table: col.column.table.clone().unwrap_or_default().to_string(),
+        table: col
+            .column
+            .table
+            .clone()
+            .unwrap_or_else(|| Table {
+                schema: None,
+                name: "".into(),
+            })
+            .to_string(),
         column: col.column.name.to_string(),
         coltype,
         colflags,

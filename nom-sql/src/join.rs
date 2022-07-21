@@ -10,15 +10,14 @@ use test_strategy::Arbitrary;
 
 use crate::column::Column;
 use crate::select::SelectStatement;
-use crate::table::Table;
-use crate::{Expr, SqlIdentifier};
+use crate::{Expr, SqlIdentifier, TableExpr};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum JoinRightSide {
     /// A single table.
-    Table(Table),
+    Table(TableExpr),
     /// A comma-separated (and implicitly joined) sequence of tables.
-    Tables(Vec<Table>),
+    Tables(Vec<TableExpr>),
     /// A nested selection, represented as (query, alias).
     NestedSelect(Box<SelectStatement>, SqlIdentifier),
 }
@@ -114,7 +113,7 @@ mod tests {
     use super::*;
     use crate::common::FieldDefinitionExpr;
     use crate::select::{selection, JoinClause, SelectStatement};
-    use crate::{BinaryOperator, Dialect};
+    use crate::{BinaryOperator, Dialect, Table};
 
     #[test]
     fn inner_join() {
@@ -131,11 +130,11 @@ mod tests {
             rhs: Box::new(Expr::Column(Column::from("taggings.tag_id"))),
         };
         let expected_stmt = SelectStatement {
-            tables: vec![Table::from("tags")],
+            tables: vec![TableExpr::from(Table::from("tags"))],
             fields: vec![FieldDefinitionExpr::AllInTable("tags".into())],
             join: vec![JoinClause {
                 operator: JoinOperator::InnerJoin,
-                right: JoinRightSide::Table(Table::from("taggings")),
+                right: JoinRightSide::Table(TableExpr::from(Table::from("taggings"))),
                 constraint: JoinConstraint::On(join_cond),
             }],
             ..Default::default()

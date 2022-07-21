@@ -11,7 +11,7 @@ use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
     ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderType,
-    SelectStatement, SqlIdentifier, Table, UnaryOperator,
+    SelectStatement, SqlIdentifier, Table, TableExpr, UnaryOperator,
 };
 use noria::{PlaceholderIdx, ViewPlaceholder};
 use noria_errors::{
@@ -449,7 +449,7 @@ fn split_conjunctions(ces: Vec<Expr>) -> Vec<Expr> {
 // 4. Collect remaining predicates as global predicates
 fn classify_conditionals(
     ce: &Expr,
-    tables: &[Table],
+    tables: &[TableExpr],
     local: &mut HashMap<Table, Vec<Expr>>,
     join: &mut Vec<JoinPredicate>,
     global: &mut Vec<Expr>,
@@ -571,9 +571,13 @@ fn classify_conditionals(
                             #[allow(clippy::unwrap_used)] // we check lf/rf.table.is_some()
                             Expr::Column(ref lf)
                                 if lf.table.is_some()
-                                    && tables.contains(lf.table.as_ref().unwrap())
+                                    && tables
+                                        .iter()
+                                        .any(|te| &te.table == lf.table.as_ref().unwrap())
                                     && rf.table.is_some()
-                                    && tables.contains(rf.table.as_ref().unwrap())
+                                    && tables
+                                        .iter()
+                                        .any(|te| &te.table == rf.table.as_ref().unwrap())
                                     && lf.table != rf.table =>
                             {
                                 // both columns' tables appear in table list and the tables are
@@ -848,17 +852,19 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     // 1. Add any relations mentioned in the query to the query graph.
     // This is needed so that we don't end up with an empty query graph when there are no
     // conditionals, but rather with a one-node query graph that has no predicates.
-    for table in &st.tables {
-        qg.relations.insert(
-            table.clone().into(),
-            new_node(table.clone().into(), Vec::new(), st)?,
-        );
+    for table_expr in &st.tables {
+        let rel: Relation = table_expr.table.clone().into();
+        qg.relations
+            .insert(rel.clone(), new_node(rel, Vec::new(), st)?);
     }
     for jc in &st.join {
         match &jc.right {
-            JoinRightSide::Table(table) => {
-                if !qg.relations.contains_key(&table.name) {
-                    let rel: Relation = table.clone().into();
+            JoinRightSide::Table(table_expr) => {
+                if !qg
+                    .relations
+                    .contains_key(&table_expr.table.name /* TODO: schema */)
+                {
+                    let rel: Relation = table_expr.table.clone().into();
                     qg.relations
                         .insert(rel.clone(), new_node(rel, Vec::new(), st)?);
                 }
@@ -891,7 +897,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     let prev_table = st.tables.last().cloned();
     for jc in &st.join {
         let rhs_relation = match &jc.right {
-            JoinRightSide::Table(table) => table.clone(),
+            JoinRightSide::Table(table) => table.table.clone(),
             JoinRightSide::NestedSelect(_, alias) => alias.into(),
             _ => internal!(),
         };
@@ -959,7 +965,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
                 // prev_table must exist because we error on st.tables.is_empty()
                 #[allow(clippy::unwrap_used)]
-                left_table = prev_table.as_ref().unwrap().clone();
+                left_table = prev_table.as_ref().unwrap().table.clone();
                 right_table = rhs_relation.clone();
 
                 vec![JoinPredicate {
@@ -970,7 +976,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
             JoinConstraint::Empty => {
                 // prev_table must exist because we error on st.tables.is_empty()
                 #[allow(clippy::unwrap_used)]
-                left_table = prev_table.as_ref().unwrap().clone();
+                left_table = prev_table.as_ref().unwrap().table.clone();
                 right_table = rhs_relation.clone();
                 // An empty predicate indicates a cartesian product is expected
                 vec![]

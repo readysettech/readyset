@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
 use nom_sql::analysis::visit::{walk_select_statement, Visitor};
-use nom_sql::{Column, Expr, FunctionExpr, SelectStatement, SqlIdentifier, SqlQuery, Table};
+use nom_sql::{Column, Expr, FunctionExpr, SelectStatement, SqlIdentifier, SqlQuery, TableExpr};
 use noria_errors::{internal_err, ReadySetError, ReadySetResult};
 
 #[derive(Debug)]
 pub struct CountStarRewriteVisitor<'schema> {
     schemas: &'schema HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
-    tables: Option<Vec<Table>>,
+    tables: Option<Vec<TableExpr>>,
 }
 
 impl<'ast, 'schema> Visitor<'ast> for CountStarRewriteVisitor<'schema> {
@@ -36,7 +36,7 @@ impl<'ast, 'schema> Visitor<'ast> for CountStarRewriteVisitor<'schema> {
 
             #[allow(clippy::unwrap_used)]
             // We've already checked that all the tables referenced in the query exist
-            let mut schema_iter = self.schemas.get(&bogo_table.name).unwrap().iter();
+            let mut schema_iter = self.schemas.get(&bogo_table.table.name).unwrap().iter();
             // The columns in the write_schemas map are actually columns as seen from the
             // current mir node. In this case, we've already passed star expansion, which
             // means the list of columns in the passed in write_schemas map contains all
@@ -48,7 +48,7 @@ impl<'ast, 'schema> Visitor<'ast> for CountStarRewriteVisitor<'schema> {
             *function_expression = FunctionExpr::Count {
                 expr: Box::new(Expr::Column(Column {
                     name: bogo_column.clone(),
-                    table: Some(bogo_table.clone()),
+                    table: Some(bogo_table.table.clone()),
                 })),
                 distinct: false,
                 count_nulls: true,

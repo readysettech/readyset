@@ -21,7 +21,7 @@ use itertools::Either;
 pub use nom_sql::analysis::{contains_aggregate, is_aggregate};
 use nom_sql::{
     BinaryOperator, Column, CommonTableExpr, Expr, FieldDefinitionExpr, FunctionExpr, InValue,
-    JoinClause, JoinRightSide, SelectStatement, SqlIdentifier, Table,
+    JoinClause, JoinRightSide, SelectStatement, SqlIdentifier, TableExpr,
 };
 
 pub use crate::alias_removal::AliasRemoval;
@@ -37,23 +37,31 @@ pub use crate::rewrite_between::RewriteBetween;
 pub use crate::star_expansion::StarExpansion;
 pub use crate::strip_post_filters::StripPostFilters;
 
+pub(crate) fn join_clause_tables(join: &JoinClause) -> impl Iterator<Item = &TableExpr> {
+    match &join.right {
+        JoinRightSide::Table(table) => Either::Left(iter::once(table)),
+        JoinRightSide::Tables(tables) => Either::Right(Either::Left(tables.iter())),
+        JoinRightSide::NestedSelect(..) => Either::Right(Either::Right(iter::empty())),
+    }
+}
+
 /// Returns an iterator over all the tables referred to by the *outermost* query in the given
 /// statement (eg not including any subqueries)
-pub fn outermost_referred_tables(stmt: &SelectStatement) -> impl Iterator<Item = &Table> {
+pub fn outermost_table_exprs(stmt: &SelectStatement) -> impl Iterator<Item = &TableExpr> {
     stmt.tables
         .iter()
-        .chain(stmt.join.iter().flat_map(|join| match &join.right {
-            JoinRightSide::Table(table) => Either::Left(iter::once(table)),
-            JoinRightSide::Tables(tables) => Either::Right(Either::Left(tables.iter())),
-            JoinRightSide::NestedSelect(..) => Either::Right(Either::Right(iter::empty())),
-        }))
+        .chain(stmt.join.iter().flat_map(join_clause_tables))
 }
 
 /// Returns true if the given select statement is *correlated* if used as a subquery, eg if it
 /// refers to tables not explicitly mentioned in the query
 pub fn is_correlated(statement: &SelectStatement) -> bool {
-    let tables = outermost_referred_tables(statement)
-        .map(|tbl| tbl.alias.as_ref().unwrap_or(&tbl.name))
+    let tables = outermost_table_exprs(statement)
+        .map(|tbl| {
+            tbl.alias
+                .as_ref()
+                .unwrap_or(&tbl.table.name /* TODO: schema */)
+        })
         .collect::<HashSet<_>>();
 
     statement

@@ -8,7 +8,7 @@ use nom_sql::{Column, FieldDefinitionExpr, SelectStatement, SqlIdentifier, SqlQu
 use noria_errors::{internal, ReadySetError, ReadySetResult};
 use tracing::warn;
 
-use crate::outermost_referred_tables;
+use crate::outermost_table_exprs;
 
 pub trait ImpliedTableExpansion {
     fn expand_implied_tables(
@@ -86,8 +86,12 @@ impl<'ast, 'schema> Visitor<'ast> for ExpandImpliedTablesVisitor<'schema> {
     ) -> Result<(), Self::Error> {
         let orig_tables = mem::replace(
             &mut self.tables,
-            outermost_referred_tables(select_statement)
-                .map(|tbl| tbl.alias.as_ref().unwrap_or(&tbl.name))
+            outermost_table_exprs(select_statement)
+                .map(|tbl| {
+                    tbl.alias
+                        .as_ref()
+                        .unwrap_or(&tbl.table.name /* TODO: schema */)
+                })
                 .cloned()
                 .collect(),
         );
@@ -204,7 +208,7 @@ mod tests {
     use std::collections::HashMap;
 
     use maplit::hashmap;
-    use nom_sql::{parse_query, Column, Dialect, Expr, FieldDefinitionExpr, SqlQuery, Table};
+    use nom_sql::{parse_query, Column, Dialect, Expr, FieldDefinitionExpr, SqlQuery, TableExpr};
 
     use super::*;
 
@@ -216,7 +220,10 @@ mod tests {
         // -->
         // SELECT users.name, articles.title FROM users, articles WHERE users.id = articles.author;
         let q = SelectStatement {
-            tables: vec![Table::from("users"), Table::from("articles")],
+            tables: vec![
+                TableExpr::from(Table::from("users")),
+                TableExpr::from(Table::from("articles")),
+            ],
             fields: vec![
                 FieldDefinitionExpr::from(Column::from("name")),
                 FieldDefinitionExpr::from(Column::from("title")),

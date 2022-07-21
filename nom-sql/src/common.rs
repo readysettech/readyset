@@ -403,7 +403,7 @@ impl fmt::Display for TableKey {
 #[allow(clippy::large_enum_variant)] // NOTE(grfn): do we actually care about this?
 pub enum FieldDefinitionExpr {
     All,
-    AllInTable(SqlIdentifier),
+    AllInTable(Table),
     Expr {
         expr: Expr,
         alias: Option<SqlIdentifier>,
@@ -439,7 +439,7 @@ impl Display for FieldDefinitionExpr {
         match self {
             FieldDefinitionExpr::All => write!(f, "*"),
             FieldDefinitionExpr::AllInTable(ref table) => {
-                write!(f, "`{}`.*", table)
+                write!(f, "{}.*", table)
             }
             FieldDefinitionExpr::Expr { expr, alias } => {
                 write!(f, "{}", expr)?;
@@ -978,7 +978,6 @@ pub fn column_identifier_no_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult
             (Some(db), Some(t)) => Some(Table {
                 schema: Some(db),
                 name: t,
-                alias: None,
             }),
             // (None, Some(t)) should be unreachable
             (Some(t), None) | (None, Some(t)) => Some(Table::from(t)),
@@ -1088,6 +1087,27 @@ fn expression_field(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FieldD
     }
 }
 
+fn all_in_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FieldDefinitionExpr> {
+    move |i| {
+        let (i, ident1) = terminated(dialect.identifier(), tag("."))(i)?;
+        let (i, ident2) = opt(terminated(dialect.identifier(), tag(".")))(i)?;
+        let (i, _) = tag("*")(i)?;
+
+        let table = match ident2 {
+            Some(name) => Table {
+                schema: Some(ident1),
+                name,
+            },
+            None => Table {
+                schema: None,
+                name: ident1,
+            },
+        };
+
+        Ok((i, FieldDefinitionExpr::AllInTable(table)))
+    }
+}
+
 // Parse list of column/field definitions.
 pub fn field_definition_expr(
     dialect: Dialect,
@@ -1098,9 +1118,7 @@ pub fn field_definition_expr(
                 ws_sep_comma,
                 alt((
                     map(tag("*"), |_| FieldDefinitionExpr::All),
-                    map(terminated(table_reference(dialect), tag(".*")), |t| {
-                        FieldDefinitionExpr::AllInTable(t.name)
-                    }),
+                    all_in_table(dialect),
                     expression_field(dialect),
                 )),
             ),
@@ -1109,79 +1127,9 @@ pub fn field_definition_expr(
     }
 }
 
-// Parse list of table names.
-pub fn table_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Table>> {
-    move |i| separated_list1(ws_sep_comma, schema_table_reference(dialect))(i)
-}
-
-// Parse list of table names as used by the replicator to identify tables to replicate
-pub fn replicator_table_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Table>> {
-    move |i| separated_list1(ws_sep_comma, replicator_table_reference_no_alias(dialect))(i)
-}
-
 // Parse a list of values (e.g., for INSERT syntax).
 pub fn value_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Literal>> {
     move |i| separated_list0(ws_sep_comma, literal(dialect))(i)
-}
-
-// Parse a reference to a named schema.table, with an optional alias
-pub fn schema_table_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Table> {
-    move |i| {
-        map(
-            tuple((
-                opt(pair(dialect.identifier(), tag("."))),
-                dialect.identifier(),
-                opt(as_alias(dialect)),
-            )),
-            |tup| Table {
-                name: tup.1,
-                alias: tup.2,
-                schema: tup.0.map(|(s, _)| s),
-            },
-        )(i)
-    }
-}
-
-// Parse a reference to a named schema.table
-pub fn schema_table_reference_no_alias(
-    dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], Table> {
-    move |i| {
-        map(
-            tuple((
-                opt(pair(dialect.identifier(), tag("."))),
-                dialect.identifier(),
-            )),
-            |tup| Table {
-                name: tup.1,
-                alias: None,
-                schema: tup.0.map(|(s, _)| s),
-            },
-        )(i)
-    }
-}
-
-// Parse a reference to a named schema.table or schema.* as used by the replicator to identify
-// tables to replicate
-pub fn replicator_table_reference_no_alias(
-    dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], Table> {
-    move |i| {
-        map(
-            tuple((
-                opt(pair(dialect.identifier(), tag("."))),
-                alt((
-                    dialect.identifier(),
-                    map(tag("*"), |_| SqlIdentifier::from("*")),
-                )),
-            )),
-            |tup| Table {
-                name: tup.1,
-                alias: None,
-                schema: tup.0.map(|(s, _)| s),
-            },
-        )(i)
-    }
 }
 
 pub(crate) fn if_not_exists(i: &[u8]) -> IResult<&[u8], bool> {
@@ -1197,19 +1145,6 @@ pub(crate) fn if_not_exists(i: &[u8]) -> IResult<&[u8], bool> {
     })(i)?;
 
     Ok((i, s.is_some()))
-}
-
-// Parse a reference to a named table, with an optional alias
-pub fn table_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Table> {
-    move |i| {
-        map(pair(dialect.identifier(), opt(as_alias(dialect))), |tup| {
-            Table {
-                name: tup.0,
-                alias: tup.1.as_deref().map(Into::into),
-                schema: None,
-            }
-        })(i)
-    }
 }
 
 // Parse rule for a comment part.
@@ -1475,7 +1410,6 @@ mod tests {
                 table: Some(Table {
                     schema: Some("db".into()),
                     name: "t".into(),
-                    alias: None,
                 }),
             };
             assert_eq!(res1, expected);
@@ -1742,7 +1676,6 @@ mod tests {
                 table: Some(Table {
                     schema: Some("db".into()),
                     name: "t".into(),
-                    alias: None,
                 }),
             };
             assert_eq!(res1, expected);

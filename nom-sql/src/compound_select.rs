@@ -159,7 +159,7 @@ mod tests {
     use crate::column::Column;
     use crate::common::FieldDefinitionExpr;
     use crate::table::Table;
-    use crate::{Expr, Literal};
+    use crate::{Expr, Literal, TableExpr};
 
     #[test]
     fn union() {
@@ -169,7 +169,7 @@ mod tests {
         let res2 = nested_compound_selection(Dialect::MySQL)(qstr2.as_bytes());
 
         let first_select = SelectStatement {
-            tables: vec![Table::from("Vote")],
+            tables: vec![TableExpr::from(Table::from("Vote"))],
             fields: vec![
                 FieldDefinitionExpr::from(Column::from("id")),
                 FieldDefinitionExpr::from(Expr::Literal(Literal::Integer(1))),
@@ -177,7 +177,7 @@ mod tests {
             ..Default::default()
         };
         let second_select = SelectStatement {
-            tables: vec![Table::from("Rating")],
+            tables: vec![TableExpr::from(Table::from("Rating"))],
             fields: vec![
                 FieldDefinitionExpr::from(Column::from("id")),
                 FieldDefinitionExpr::from(Column::from("stars")),
@@ -241,7 +241,7 @@ mod tests {
         let res = nested_compound_selection(Dialect::MySQL)(qstr.as_bytes());
 
         let first_select = SelectStatement {
-            tables: vec![Table::from("Vote")],
+            tables: vec![TableExpr::from(Table::from("Vote"))],
             fields: vec![
                 FieldDefinitionExpr::from(Column::from("id")),
                 FieldDefinitionExpr::from(Expr::Literal(Literal::Integer(1))),
@@ -249,7 +249,7 @@ mod tests {
             ..Default::default()
         };
         let second_select = SelectStatement {
-            tables: vec![Table::from("Rating")],
+            tables: vec![TableExpr::from(Table::from("Rating"))],
             fields: vec![
                 FieldDefinitionExpr::from(Column::from("id")),
                 FieldDefinitionExpr::from(Column::from("stars")),
@@ -257,7 +257,7 @@ mod tests {
             ..Default::default()
         };
         let third_select = SelectStatement {
-            tables: vec![Table::from("Vote")],
+            tables: vec![TableExpr::from(Table::from("Vote"))],
             fields: vec![
                 FieldDefinitionExpr::from(Expr::Literal(Literal::Integer(42))),
                 FieldDefinitionExpr::from(Expr::Literal(Literal::Integer(5))),
@@ -285,7 +285,7 @@ mod tests {
         let res = nested_compound_selection(Dialect::MySQL)(qstr.as_bytes());
 
         let first_select = SelectStatement {
-            tables: vec![Table::from("Vote")],
+            tables: vec![TableExpr::from(Table::from("Vote"))],
             fields: vec![
                 FieldDefinitionExpr::from(Column::from("id")),
                 FieldDefinitionExpr::from(Expr::Literal(Literal::Integer(1))),
@@ -293,7 +293,7 @@ mod tests {
             ..Default::default()
         };
         let second_select = SelectStatement {
-            tables: vec![Table::from("Rating")],
+            tables: vec![TableExpr::from(Table::from("Rating"))],
             fields: vec![
                 FieldDefinitionExpr::from(Column::from("id")),
                 FieldDefinitionExpr::from(Column::from("stars")),

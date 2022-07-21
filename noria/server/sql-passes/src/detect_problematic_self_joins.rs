@@ -4,7 +4,7 @@ use std::iter;
 use itertools::{Either, Itertools};
 use nom_sql::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, JoinConstraint, JoinRightSide,
-    SelectStatement, SqlQuery, Table,
+    SelectStatement, SqlQuery, TableExpr,
 };
 use noria_errors::{internal_err, unsupported, unsupported_err, ReadySetResult};
 
@@ -36,8 +36,9 @@ fn check_select_statement<'a>(
         })?;
 
         // TODO: Consider `Table::schema`
-        let table_matches =
-            |tbl: &Table| tbl.alias.as_ref() == Some(table_alias) || tbl.name == *table_alias;
+        let table_matches = |tbl: &TableExpr| {
+            tbl.alias.as_ref() == Some(table_alias) || tbl.table.name == *table_alias
+        };
 
         macro_rules! once_ok {
             ($tn: expr, $cn: expr) => {
@@ -49,7 +50,7 @@ fn check_select_statement<'a>(
         }
 
         if let Some(tbl) = stmt.tables.iter().find(|t| table_matches(*t)) {
-            Ok(once_ok!(tbl.name.as_str(), col.name.as_str()))
+            Ok(once_ok!(tbl.table.name.as_str(), col.name.as_str()))
         } else {
             let ctes = cte_ctx
                 .iter()
@@ -109,12 +110,12 @@ fn check_select_statement<'a>(
             for j in &stmt.join {
                 match &j.right {
                     JoinRightSide::Table(t) if table_matches(t) => {
-                        res = Some(once_ok!(t.name.as_str(), col.name.as_str()));
+                        res = Some(once_ok!(t.table.name.as_str(), col.name.as_str()));
                         break;
                     }
                     JoinRightSide::Tables(ts) => {
                         if let Some(tbl) = ts.iter().find(|t| table_matches(*t)) {
-                            res = Some(once_ok!(tbl.name.as_str(), col.name.as_str()));
+                            res = Some(once_ok!(tbl.table.name.as_str(), col.name.as_str()));
                             break;
                         }
                     }

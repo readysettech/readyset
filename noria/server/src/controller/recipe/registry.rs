@@ -40,6 +40,7 @@ impl RecipeExpr {
     /// Returns the set of table names being referenced by the [`RecipeExpr`] (for views and
     /// queries).
     /// If the [`RecipeExpr`] is a [`RecipeExpr::Table`], then the set will be empty.
+    // TODO: return `Table`, care about schema
     pub(super) fn table_references(&self) -> HashSet<SqlIdentifier> {
         match self {
             RecipeExpr::Table(_) => HashSet::new(),
@@ -49,18 +50,21 @@ impl RecipeExpr {
                 match select {
                     SelectSpecification::Compound(compound_select) => {
                         references.extend(compound_select.selects.iter().flat_map(
-                            |(_, select)| select.tables.iter().map(|table| table.name.clone()),
+                            |(_, select)| {
+                                select.tables.iter().map(|table| table.table.name.clone())
+                            },
                         ));
                     }
                     SelectSpecification::Simple(select) => {
-                        references.extend(select.tables.iter().map(|table| table.name.clone()));
+                        references
+                            .extend(select.tables.iter().map(|table| table.table.name.clone()));
                     }
                 }
                 references
             }
             RecipeExpr::Cache { statement, .. } => {
                 let mut references = HashSet::with_capacity(statement.tables.len());
-                references.extend(statement.tables.iter().map(|t| t.name.clone()));
+                references.extend(statement.tables.iter().map(|t| t.table.name.clone()));
                 references
             }
         }

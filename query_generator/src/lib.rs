@@ -87,10 +87,10 @@ use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpr,
     CreateTableStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
     ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderClause,
-    OrderType, SelectStatement, SqlIdentifier, SqlType, Table, TableKey,
+    OrderType, SelectStatement, SqlIdentifier, SqlType, Table, TableExpr, TableKey,
 };
 use noria_data::DataType;
-use noria_sql_passes::outermost_referred_tables;
+use noria_sql_passes::outermost_table_exprs;
 use parking_lot::Mutex;
 use proptest::arbitrary::{any, any_with, Arbitrary};
 use proptest::strategy::{BoxedStrategy, Strategy};
@@ -439,7 +439,6 @@ impl From<TableName> for Table {
     fn from(name: TableName) -> Self {
         Table {
             name: name.0,
-            alias: None,
             schema: None,
         }
     }
@@ -1438,7 +1437,7 @@ impl<'a> QueryState<'a> {
             }))
             .next()
         {
-            Some(tbl) => self.gen.table_mut(tbl.name.as_str()).unwrap(),
+            Some(tbl) => self.gen.table_mut(tbl.table.name.as_str()).unwrap(),
             None => self.some_table_mut(),
         }
     }
@@ -1448,8 +1447,8 @@ impl<'a> QueryState<'a> {
         &'b mut self,
         query: &SelectStatement,
     ) -> &'b mut TableSpec {
-        let tables_in_query = outermost_referred_tables(query)
-            .map(|tbl| tbl.alias.as_ref().unwrap_or(&tbl.name))
+        let tables_in_query = outermost_table_exprs(query)
+            .map(|tbl| tbl.alias.as_ref().unwrap_or(&tbl.table.name))
             .collect::<HashSet<_>>();
         if let Some(table) = self
             .tables
@@ -2070,20 +2069,22 @@ fn query_has_aggregate(query: &SelectStatement) -> bool {
 
 fn column_in_query<'state>(state: &mut QueryState<'state>, query: &mut SelectStatement) -> Column {
     match query.tables.last() {
-        Some(table) => {
+        Some(table_expr) => {
             let column = state
                 .gen
-                .table_mut(table.name.as_str())
+                .table_mut(table_expr.table.name.as_str())
                 .unwrap()
                 .some_column_name();
             Column {
                 name: column.into(),
-                table: Some(table.clone()),
+                table: Some(table_expr.table.clone()),
             }
         }
         None => {
             let table = state.some_table_mut();
-            query.tables.push(table.name.clone().into());
+            query
+                .tables
+                .push(TableExpr::from(Table::from(table.name.clone())));
             let colname = table.some_column_name();
             Column {
                 name: colname.into(),
@@ -2121,7 +2122,9 @@ impl QueryOperation {
                 let tbl = state.some_table_in_query_mut(query);
 
                 if query.tables.is_empty() {
-                    query.tables.push(tbl.name.clone().into());
+                    query
+                        .tables
+                        .push(TableExpr::from(Table::from(tbl.name.clone())));
                 }
 
                 let col = tbl.fresh_column_with_type(agg.column_type());
@@ -2163,7 +2166,9 @@ impl QueryOperation {
                 let col = tbl.some_column_with_type(filter.column_type.clone());
 
                 if query.tables.is_empty() {
-                    query.tables.push(Table::from(tbl.name.0.as_str()));
+                    query
+                        .tables
+                        .push(TableExpr::from(Table::from(tbl.name.0.as_str())));
                 }
 
                 let col_expr = Expr::Column(Column {
@@ -2252,7 +2257,9 @@ impl QueryOperation {
                 let left_projected = left_table.fresh_column();
 
                 if query.tables.is_empty() {
-                    query.tables.push(left_table_name.clone().into());
+                    query
+                        .tables
+                        .push(TableExpr::from(Table::from(left_table_name.clone())));
                 }
 
                 let right_table = state.fresh_table_mut();
@@ -2262,7 +2269,9 @@ impl QueryOperation {
 
                 query.join.push(JoinClause {
                     operator: *operator,
-                    right: JoinRightSide::Table(right_table.name.clone().into()),
+                    right: JoinRightSide::Table(TableExpr::from(Table::from(
+                        right_table.name.clone(),
+                    ))),
                     constraint: JoinConstraint::On(Expr::BinaryOp {
                         op: BinaryOperator::Equal,
                         lhs: Box::new(Expr::Column(Column {
@@ -2382,7 +2391,7 @@ impl QueryOperation {
                         let table = state.some_table_in_query_mut(&query);
 
                         if query.tables.is_empty() {
-                            query.tables.push(table.name.clone().into());
+                            query.tables.push(TableExpr::from(Table::from(table.name.clone())));
                         }
 
                         let mut arguments = Vec::new();
@@ -2440,7 +2449,9 @@ impl QueryOperation {
                 let table = state.some_table_in_query_mut(query);
 
                 if query.tables.is_empty() {
-                    query.tables.push(table.name.clone().into());
+                    query
+                        .tables
+                        .push(TableExpr::from(Table::from(table.name.clone())));
                 }
 
                 let column_name = table.some_column_name();
@@ -2472,7 +2483,9 @@ impl QueryOperation {
                 let table = state.some_table_in_query_mut(query);
 
                 if query.tables.is_empty() {
-                    query.tables.push(table.name.clone().into());
+                    query
+                        .tables
+                        .push(TableExpr::from(Table::from(table.name.clone())));
                 }
 
                 let column_name = table.some_column_name();
@@ -2798,11 +2811,10 @@ impl Subquery {
                     statement: subquery,
                 });
                 (
-                    JoinRightSide::Table(Table {
+                    JoinRightSide::Table(TableExpr::from(Table {
                         name: subquery_name.clone(),
                         schema: None,
-                        alias: None,
-                    }),
+                    })),
                     operator,
                 )
             }
@@ -2820,11 +2832,13 @@ impl Subquery {
                         name: outer_col.into(),
                     };
 
-                    let subquery_table = if let Some(table) = subquery.tables.first() {
-                        table.name.clone().into()
+                    let subquery_table = if let Some(table_expr) = subquery.tables.first() {
+                        table_expr.table.name.clone().into()
                     } else {
                         let subquery_table = state.some_table_not_in_query_mut(query);
-                        subquery.tables.push(subquery_table.name.clone().into());
+                        subquery
+                            .tables
+                            .push(TableExpr::from(Table::from(subquery_table.name.clone())));
                         subquery_table.name.clone()
                     };
                     let subquery_col = state
@@ -2935,7 +2949,7 @@ impl QuerySeed {
             });
 
             if query.tables.is_empty() {
-                query.tables.push(col.table.unwrap());
+                query.tables.push(col.table.unwrap().into());
             }
         }
 
@@ -3224,11 +3238,19 @@ mod tests {
                 match (lhs.as_ref(), rhs.as_ref()) {
                     (Expr::Column(left_field), Expr::Column(right_field)) => {
                         assert_eq!(
-                            left_field.table.as_ref(),
+                            left_field
+                                .table
+                                .as_ref()
+                                .map(|t| TableExpr::from(t.clone()))
+                                .as_ref(),
                             Some(query.tables.first().unwrap())
                         );
                         assert_eq!(
-                            right_field.table.as_ref(),
+                            right_field
+                                .table
+                                .as_ref()
+                                .map(|t| TableExpr::from(t.clone()))
+                                .as_ref(),
                             Some(match &join.right {
                                 JoinRightSide::Table(table) => table,
                                 _ => unreachable!(),

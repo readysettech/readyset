@@ -7,13 +7,13 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::column::Column;
-use crate::common::{assignment_expr_list, schema_table_reference_no_alias, statement_terminator};
+use crate::common::{assignment_expr_list, statement_terminator};
 use crate::select::where_clause;
-use crate::table::Table;
+use crate::table::{table_reference, Table};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Expr};
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct UpdateStatement {
     pub table: Table,
     pub fields: Vec<(Column, Expr)>,
@@ -46,7 +46,7 @@ pub fn updating(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], UpdateStat
         let (remaining_input, (_, _, table, _, _, _, fields, _, where_clause, _)) = tuple((
             tag_no_case("update"),
             whitespace1,
-            schema_table_reference_no_alias(dialect),
+            table_reference(dialect),
             whitespace1,
             tag_no_case("set"),
             whitespace1,
@@ -86,7 +86,7 @@ mod tests {
                     (Column::from("id"), Expr::Literal(42.into())),
                     (Column::from("name"), Expr::Literal("test".into())),
                 ],
-                ..Default::default()
+                where_clause: None
             }
         );
     }
@@ -188,7 +188,6 @@ mod tests {
                         },
                     )],
                     where_clause: expected_where_cond,
-                    ..Default::default()
                 }
             );
         }
@@ -210,7 +209,7 @@ mod tests {
                             rhs: Box::new(Expr::Literal(1.into()))
                         },
                     ),],
-                    ..Default::default()
+                    where_clause: None
                 }
             );
         }
@@ -239,7 +238,6 @@ mod tests {
                         op: BinaryOperator::Like,
                         rhs: Box::new(Expr::Literal(Literal::String("%viewDiscussions".into()))),
                     }),
-                    ..Default::default()
                 }
             );
         }
@@ -281,7 +279,6 @@ mod tests {
                         },
                     ),],
                     where_clause: expected_where_cond,
-                    ..Default::default()
                 }
             );
         }
@@ -303,7 +300,7 @@ mod tests {
                             rhs: Box::new(Expr::Literal(1.into()))
                         },
                     ),],
-                    ..Default::default()
+                    where_clause: None
                 }
             );
         }

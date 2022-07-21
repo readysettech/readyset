@@ -14,6 +14,7 @@ use nom_sql::analysis::ReferredTables;
 use nom_sql::{
     parser as sql_parser, BinaryOperator, CompoundSelectOperator, CompoundSelectStatement,
     CreateTableStatement, FieldDefinitionExpr, SelectStatement, SqlIdentifier, SqlQuery, Table,
+    TableExpr,
 };
 use noria::internal::IndexType;
 use noria_errors::{
@@ -805,10 +806,7 @@ impl SqlIncorporator {
                     to_view, for_table, ..
                 } => {
                     let query = SqlQuery::Select(SelectStatement {
-                        tables: vec![Table {
-                            name: for_table,
-                            ..Default::default()
-                        }],
+                        tables: vec![TableExpr::from(Table::from(for_table))],
                         fields: vec![FieldDefinitionExpr::All],
                         ..Default::default()
                     });
