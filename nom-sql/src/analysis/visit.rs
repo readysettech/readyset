@@ -12,9 +12,9 @@ use crate::{
 
 /// Each method of the `Visitor` trait is a hook to be potentially overridden when recursively
 /// traversing SQL statements. The default implementation of each method recursively visits the
-/// substructure of the input via the corresponding `walk` method, eg `visit_expression` by default
-/// calls `visit::walk_expression`. This allows defining algorithms that depend on recursively
-/// traversing ASTs without having to reimplement AST traversal every time.
+/// substructure of the input via the corresponding `walk` method, eg `visit_expr` by default calls
+/// `visit::walk_expr`. This allows defining algorithms that depend on recursively traversing ASTs
+/// without having to reimplement AST traversal every time.
 ///
 /// Currently only partially implemented for the AST rooted at [`SelectStatement`] - in the future,
 /// we should support everything that can go into a [`nom_sql::SqlQuery`].
@@ -80,37 +80,37 @@ pub trait Visitor<'ast>: Sized {
         walk_column(self, column)
     }
 
-    fn visit_function_expression(
+    fn visit_function_expr(
         &mut self,
-        function_expression: &'ast mut FunctionExpr,
+        function_expr: &'ast mut FunctionExpr,
     ) -> Result<(), Self::Error> {
-        walk_function_expression(self, function_expression)
+        walk_function_expr(self, function_expr)
     }
 
     fn visit_in_value(&mut self, in_value: &'ast mut InValue) -> Result<(), Self::Error> {
         walk_in_value(self, in_value)
     }
 
-    fn visit_expression(&mut self, expression: &'ast mut Expr) -> Result<(), Self::Error> {
-        walk_expression(self, expression)
+    fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
+        walk_expr(self, expr)
     }
 
-    fn visit_common_table_expression(
+    fn visit_common_table_expr(
         &mut self,
         cte: &'ast mut CommonTableExpr,
     ) -> Result<(), Self::Error> {
-        walk_common_table_expression(self, cte)
+        walk_common_table_expr(self, cte)
     }
 
-    fn visit_field_definition_expression(
+    fn visit_field_definition_expr(
         &mut self,
         fde: &'ast mut FieldDefinitionExpr,
     ) -> Result<(), Self::Error> {
-        walk_field_definition_expression(self, fde)
+        walk_field_definition_expr(self, fde)
     }
 
-    fn visit_where_clause(&mut self, expression: &'ast mut Expr) -> Result<(), Self::Error> {
-        self.visit_expression(expression)
+    fn visit_where_clause(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
+        self.visit_expr(expr)
     }
 
     fn visit_join_clause(&mut self, join: &'ast mut JoinClause) -> Result<(), Self::Error> {
@@ -138,8 +138,8 @@ pub trait Visitor<'ast>: Sized {
         walk_group_by_clause(self, group_by)
     }
 
-    fn visit_having_clause(&mut self, expression: &'ast mut Expr) -> Result<(), Self::Error> {
-        self.visit_expression(expression)
+    fn visit_having_clause(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
+        self.visit_expr(expr)
     }
 
     fn visit_order_clause(&mut self, order: &'ast mut OrderClause) -> Result<(), Self::Error> {
@@ -169,27 +169,27 @@ pub trait Visitor<'ast>: Sized {
     }
 }
 
-pub fn walk_expression<'ast, V: Visitor<'ast>>(
+pub fn walk_expr<'ast, V: Visitor<'ast>>(
     visitor: &mut V,
-    expression: &'ast mut Expr,
+    expr: &'ast mut Expr,
 ) -> Result<(), V::Error> {
-    match expression {
-        Expr::Call(fexpr) => visitor.visit_function_expression(fexpr),
+    match expr {
+        Expr::Call(fexpr) => visitor.visit_function_expr(fexpr),
         Expr::Literal(lit) => visitor.visit_literal(lit),
         Expr::BinaryOp { lhs, rhs, .. } => {
-            visitor.visit_expression(lhs.as_mut())?;
-            visitor.visit_expression(rhs.as_mut())
+            visitor.visit_expr(lhs.as_mut())?;
+            visitor.visit_expr(rhs.as_mut())
         }
-        Expr::UnaryOp { rhs, .. } => visitor.visit_expression(rhs.as_mut()),
+        Expr::UnaryOp { rhs, .. } => visitor.visit_expr(rhs.as_mut()),
         Expr::CaseWhen {
             condition,
             then_expr,
             else_expr,
         } => {
-            visitor.visit_expression(condition.as_mut())?;
-            visitor.visit_expression(then_expr.as_mut())?;
+            visitor.visit_expr(condition.as_mut())?;
+            visitor.visit_expr(then_expr.as_mut())?;
             if let Some(else_expr) = else_expr {
-                visitor.visit_expression(else_expr)?;
+                visitor.visit_expr(else_expr)?;
             }
             Ok(())
         }
@@ -198,38 +198,38 @@ pub fn walk_expression<'ast, V: Visitor<'ast>>(
         Expr::Between {
             operand, min, max, ..
         } => {
-            visitor.visit_expression(operand.as_mut())?;
-            visitor.visit_expression(min.as_mut())?;
-            visitor.visit_expression(max.as_mut())
+            visitor.visit_expr(operand.as_mut())?;
+            visitor.visit_expr(min.as_mut())?;
+            visitor.visit_expr(max.as_mut())
         }
         Expr::NestedSelect(statement) => visitor.visit_select_statement(statement.as_mut()),
         Expr::In { lhs, rhs, .. } => {
-            visitor.visit_expression(lhs.as_mut())?;
+            visitor.visit_expr(lhs.as_mut())?;
             visitor.visit_in_value(rhs)
         }
         Expr::Cast { expr, ty, .. } => {
-            visitor.visit_expression(expr.as_mut())?;
+            visitor.visit_expr(expr.as_mut())?;
             visitor.visit_sql_type(ty)
         }
         Expr::Variable(var) => visitor.visit_variable(var),
     }
 }
 
-pub fn walk_function_expression<'ast, V: Visitor<'ast>>(
+pub fn walk_function_expr<'ast, V: Visitor<'ast>>(
     visitor: &mut V,
-    function_expression: &'ast mut FunctionExpr,
+    function_expr: &'ast mut FunctionExpr,
 ) -> Result<(), V::Error> {
-    match function_expression {
-        FunctionExpr::Avg { expr, .. } => visitor.visit_expression(expr.as_mut()),
-        FunctionExpr::Count { expr, .. } => visitor.visit_expression(expr.as_mut()),
+    match function_expr {
+        FunctionExpr::Avg { expr, .. } => visitor.visit_expr(expr.as_mut()),
+        FunctionExpr::Count { expr, .. } => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::CountStar => Ok(()),
-        FunctionExpr::Sum { expr, .. } => visitor.visit_expression(expr.as_mut()),
-        FunctionExpr::Max(expr) => visitor.visit_expression(expr.as_mut()),
-        FunctionExpr::Min(expr) => visitor.visit_expression(expr.as_mut()),
-        FunctionExpr::GroupConcat { expr, .. } => visitor.visit_expression(expr.as_mut()),
+        FunctionExpr::Sum { expr, .. } => visitor.visit_expr(expr.as_mut()),
+        FunctionExpr::Max(expr) => visitor.visit_expr(expr.as_mut()),
+        FunctionExpr::Min(expr) => visitor.visit_expr(expr.as_mut()),
+        FunctionExpr::GroupConcat { expr, .. } => visitor.visit_expr(expr.as_mut()),
         FunctionExpr::Call { arguments, .. } => {
             for arg in arguments {
-                visitor.visit_expression(arg)?;
+                visitor.visit_expr(arg)?;
             }
             Ok(())
         }
@@ -244,28 +244,28 @@ pub fn walk_in_value<'ast, V: Visitor<'ast>>(
         InValue::Subquery(statement) => visitor.visit_select_statement(statement.as_mut()),
         InValue::List(exprs) => {
             for expr in exprs {
-                visitor.visit_expression(expr)?;
+                visitor.visit_expr(expr)?;
             }
             Ok(())
         }
     }
 }
 
-pub fn walk_common_table_expression<'ast, V: Visitor<'ast>>(
+pub fn walk_common_table_expr<'ast, V: Visitor<'ast>>(
     visitor: &mut V,
     cte: &'ast mut CommonTableExpr,
 ) -> Result<(), V::Error> {
     visitor.visit_select_statement(&mut cte.statement)
 }
 
-pub fn walk_field_definition_expression<'ast, V: Visitor<'ast>>(
+pub fn walk_field_definition_expr<'ast, V: Visitor<'ast>>(
     visitor: &mut V,
     fde: &'ast mut FieldDefinitionExpr,
 ) -> Result<(), V::Error> {
     match fde {
         FieldDefinitionExpr::All => Ok(()),
         FieldDefinitionExpr::AllInTable(_) => Ok(()),
-        FieldDefinitionExpr::Expr { expr, .. } => visitor.visit_expression(expr),
+        FieldDefinitionExpr::Expr { expr, .. } => visitor.visit_expr(expr),
     }
 }
 
@@ -293,7 +293,7 @@ pub fn walk_join_constraint<'ast, V: Visitor<'ast>>(
     join_constraint: &'ast mut JoinConstraint,
 ) -> Result<(), V::Error> {
     match join_constraint {
-        JoinConstraint::On(expr) => visitor.visit_expression(expr),
+        JoinConstraint::On(expr) => visitor.visit_expr(expr),
         JoinConstraint::Using(cols) => {
             for col in cols {
                 visitor.visit_column(col)?;
@@ -310,7 +310,7 @@ fn walk_field_reference<'ast, V: Visitor<'ast>>(
 ) -> Result<(), V::Error> {
     match field_reference {
         FieldReference::Numeric(_) => Ok(()),
-        FieldReference::Expr(expr) => visitor.visit_expression(expr),
+        FieldReference::Expr(expr) => visitor.visit_expr(expr),
     }
 }
 
@@ -369,13 +369,13 @@ pub fn walk_select_statement<'ast, V: Visitor<'ast>>(
     select_statement: &'ast mut SelectStatement,
 ) -> Result<(), V::Error> {
     for cte in &mut select_statement.ctes {
-        visitor.visit_common_table_expression(cte)?;
+        visitor.visit_common_table_expr(cte)?;
     }
     for table in &mut select_statement.tables {
         visitor.visit_table(table)?;
     }
     for field in &mut select_statement.fields {
-        visitor.visit_field_definition_expression(field)?;
+        visitor.visit_field_definition_expr(field)?;
     }
     for join in &mut select_statement.join {
         visitor.visit_join_clause(join)?;
@@ -424,33 +424,33 @@ mod tests {
             Ok(())
         }
 
-        fn visit_function_expression(
+        fn visit_function_expr(
             &mut self,
-            function_expression: &'ast mut FunctionExpr,
+            function_expr: &'ast mut FunctionExpr,
         ) -> Result<(), Self::Error> {
             self.0 += 1;
-            walk_function_expression(self, function_expression)
+            walk_function_expr(self, function_expr)
         }
 
-        fn visit_expression(&mut self, expression: &'ast mut Expr) -> Result<(), Self::Error> {
+        fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
             self.0 += 1;
-            walk_expression(self, expression)
+            walk_expr(self, expr)
         }
 
-        fn visit_common_table_expression(
+        fn visit_common_table_expr(
             &mut self,
             cte: &'ast mut CommonTableExpr,
         ) -> Result<(), Self::Error> {
             self.0 += 1;
-            walk_common_table_expression(self, cte)
+            walk_common_table_expr(self, cte)
         }
 
-        fn visit_field_definition_expression(
+        fn visit_field_definition_expr(
             &mut self,
             fde: &'ast mut FieldDefinitionExpr,
         ) -> Result<(), Self::Error> {
             self.0 += 1;
-            walk_field_definition_expression(self, fde)
+            walk_field_definition_expr(self, fde)
         }
 
         fn visit_join_clause(&mut self, join: &'ast mut JoinClause) -> Result<(), Self::Error> {

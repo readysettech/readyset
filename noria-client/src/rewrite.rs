@@ -291,7 +291,7 @@ impl<'ast> Visitor<'ast> for CollapseWhereInVisitor {
         Ok(())
     }
 
-    fn visit_expression(&mut self, expression: &'ast mut Expr) -> Result<(), Self::Error> {
+    fn visit_expr(&mut self, expression: &'ast mut Expr) -> Result<(), Self::Error> {
         if let Expr::In {
             rhs: InValue::List(list),
             ..
@@ -311,7 +311,7 @@ impl<'ast> Visitor<'ast> for CollapseWhereInVisitor {
             }
         }
 
-        visit::walk_expression(self, expression)
+        visit::walk_expr(self, expression)
     }
 }
 
@@ -331,7 +331,7 @@ fn collapse_where_in(query: &mut SelectStatement) -> ReadySetResult<Vec<Rewritte
 
     if let Some(ref mut w) = query.where_clause {
         let mut visitor = CollapseWhereInVisitor::default();
-        visitor.visit_expression(w)?;
+        visitor.visit_expr(w)?;
         res = visitor.out;
 
         // When a `SELECT` statement contains aggregates, such as `SUM` or `COUNT` (or `DISTINCT`,
@@ -577,12 +577,12 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
         // We can only support parameters in the WHERE clause of the top-level query, not any
         // subqueries it contains.
         self.in_supported_position = self.query_depth <= 1;
-        self.visit_expression(expression)?;
+        self.visit_expr(expression)?;
         self.in_supported_position = false;
         Ok(())
     }
 
-    fn visit_expression(&mut self, expression: &'ast mut Expr) -> Result<(), Self::Error> {
+    fn visit_expr(&mut self, expression: &'ast mut Expr) -> Result<(), Self::Error> {
         let was_supported = self.in_supported_position;
         if was_supported {
             match expression {
@@ -606,7 +606,7 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
                 } => {
                     // for lit = col, swap the equality first then revisit
                     mem::swap(lhs, rhs);
-                    return self.visit_expression(expression);
+                    return self.visit_expr(expression);
                 }
                 Expr::In {
                     lhs: box Expr::Column(_),
@@ -646,9 +646,9 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
                     op: BinaryOperator::And,
                     rhs,
                 } => {
-                    self.visit_expression(lhs.as_mut())?;
+                    self.visit_expr(lhs.as_mut())?;
                     self.in_supported_position = true;
-                    self.visit_expression(rhs.as_mut())?;
+                    self.visit_expr(rhs.as_mut())?;
                     self.in_supported_position = true;
                     return Ok(());
                 }
@@ -656,7 +656,7 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
             }
         }
 
-        visit::walk_expression(self, expression)?;
+        visit::walk_expr(self, expression)?;
         self.in_supported_position = was_supported;
         Ok(())
     }
