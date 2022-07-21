@@ -1,0 +1,187 @@
+version: "3.8"
+services:
+  consul:
+    networks:
+      - readyset
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/consul
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "8500"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+  mysql:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/mysql:8.0
+    networks:
+      - readyset
+    cap_add:
+      - SYS_NICE #CAP_SYS_NICE
+    expose:
+      - 3306
+    environment:
+      MYSQL_DATABASE: wordpress_develop
+      MYSQL_ROOT_PASSWORD: password
+    volumes:
+      - ./tools/local-env/mysql-init.sql:/docker-entrypoint-initdb.d/mysql-init.sql
+
+      - mysql:/var/lib/mysql
+    # For compatibility with PHP versions that don't support the caching_sha2_password auth plugin used in MySQL 8.0.
+    command: --default-authentication-plugin=mysql_native_password
+
+    # doesn't actually depend on consul, but I can't figure out a way to have
+    # a depends_on with multiple health check relationships, so chaining them to ensure
+    # readyset-server waits on both consul and mysql for fallback.
+    depends_on:
+      consul:
+        condition: service_healthy
+    healthcheck:
+      test: "mysqladmin ping"
+      start_period: 10s
+      interval: 10s
+      timeout: 2s
+      retries: 5
+  readyset-server:
+    networks:
+      - readyset
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:release-latest
+    expose:
+      # ❯ cat /proc/sys/net/ipv4/ip_local_port_range
+      #   32768	60999
+      - "32768-60999"
+    environment:
+      AUTHORITY_ADDRESS: consul:8500
+      AUTHORITY: consul
+      LISTEN_ADDRESS: 0.0.0.0
+      EXTERNAL_ADDRESS: readyset-server
+      NORIA_DEPLOYMENT: wp-rs-test
+      REPLICATION_URL: mysql://root:password@mysql/wordpress_develop
+      LOG_LEVEL: info
+    links:
+      - mysql
+      - consul
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "127.0.0.1:6033/prometheus"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+  db:
+    networks:
+      - readyset
+      - wpdevnet
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:release-latest
+    expose:
+      - 3333
+    environment:
+      AUTHORITY_ADDRESS: consul:8500
+      AUTHORITY: consul
+      LISTEN_ADDRESS: 0.0.0.0:3333
+      NORIA_DEPLOYMENT: wp-rs-test
+      LOG_LEVEL: info
+      UPSTREAM_DB_URL: mysql://root:password@mysql/wordpress_develop
+      ALLOWED_PASSWORD: password
+      ALLOWED_USERNAME: root
+      ALLOW_UNSUPPORTED_SET: 1
+      PROMETHEUS_METRICS: 1
+    links:
+      - readyset-server
+      - mysql
+      - consul
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1", "--port=3333", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 10s
+      retries: 2
+      start_period: 5s
+    depends_on:
+      readyset-server:
+        condition: service_healthy
+  ##
+  # The web server container.
+  ##
+  wordpress-develop:
+    image: nginx:alpine
+    networks:
+      - wpdevnet
+    ports:
+      - ${LOCAL_PORT-8889}:80
+    environment:
+      LOCAL_DIR: ${LOCAL_DIR-src}
+    volumes:
+      - ./tools/local-env/default.template:/etc/nginx/conf.d/default.template
+      - ./:/var/www
+    command: /bin/sh -c "envsubst '$$LOCAL_DIR' < /etc/nginx/conf.d/default.template > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"
+    depends_on:
+      - php
+
+  ##
+  # The PHP container.
+  ##
+  php:
+    image: wordpressdevelop/php:${LOCAL_PHP-latest}
+
+    networks:
+      - wpdevnet
+
+    environment:
+      - LOCAL_PHP_XDEBUG=${LOCAL_PHP_XDEBUG-false}
+      - XDEBUG_MODE=${LOCAL_PHP_XDEBUG_MODE-develop,debug}
+      - LOCAL_PHP_MEMCACHED=${LOCAL_PHP_MEMCACHED-false}
+      - PHP_FPM_UID=${PHP_FPM_UID-1000}
+      - PHP_FPM_GID=${PHP_FPM_GID-1000}
+      - GITHUB_REF=${GITHUB_REF-false}
+      - GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME-false}
+      - DB_HOST=127.0.0.1:3333
+
+    volumes:
+      - ./tools/local-env/php-config.ini:/usr/local/etc/php/conf.d/php-config.ini
+      - ./:/var/www
+
+    depends_on:
+      - db
+
+    # The init directive ensures the command runs with a PID > 1, so Ctrl+C works correctly.
+    init: true
+
+    extra_hosts:
+      - localhost:host-gateway
+
+  ##
+  # The WP CLI container.
+  ##
+  cli:
+    image: wordpressdevelop/cli:${LOCAL_PHP-latest}
+
+    networks:
+      - wpdevnet
+
+    environment:
+      - LOCAL_PHP_XDEBUG=${LOCAL_PHP_XDEBUG-false}
+      - LOCAL_PHP_MEMCACHED=${LOCAL_PHP_MEMCACHED-false}
+      - PHP_FPM_UID=${PHP_FPM_UID-1000}
+      - PHP_FPM_GID=${PHP_FPM_GID-1000}
+    depends_on:
+      - db
+      - php
+
+    volumes:
+      - ./:/var/www
+
+    # The init directive ensures the command runs with a PID > 1, so Ctrl+C works correctly.
+    init: true
+
+    extra_hosts:
+      - localhost:host-gateway
+
+volumes:
+  # So that sites aren't wiped every time containers are restarted, MySQL uses a persistent volume.
+  mysql: {}
+
+networks:
+  readyset:
+    driver: bridge
+  wpdevnet:
+    driver: bridge

@@ -1,0 +1,34 @@
+# Clones WordPress and bootstraps the sample database and web sever
+run_wordpress: clone modify build start bootstrap_database
+
+# Clone the WordPress repository or updates it if it already exists
+clone:
+  git -C wordpress_develop pull || git clone git://develop.git.wordpress.org/ wordpress_develop
+
+# Make some modifications to support using ReadySet with WordPress
+modify:
+	mv ./wordpress_develop/docker-compose.yml ./wordpress_develop/docker-compose.yml.bak
+	cp ./docker-compose.wordpress.yml ./wordpress_develop/docker-compose.yml
+	mv ./wordpress_develop/tools/local-env/scripts/install.js ./wordpress_develop/tools/local-env/scripts/install.js.bak
+	cp ./install.js ./wordpress_develop/tools/local-env/scripts/install.js
+
+# Build the WordPress app
+build:
+	cd wordpress_develop && npm install
+	cd wordpress_develop && npm run build:dev
+
+# Start the docker containers to run ReadySet and WordPress
+start:
+	cd wordpress_develop && npm run env:start
+
+# Creates the sample WordPress database for the web app
+bootstrap_database:
+	cd wordpress_develop && npm run env:install
+
+test_php:
+	cd wordpress_develop && npm run test:php
+
+
+# Shuts down and removes docker containers
+clean:
+	cd wordpress_develop && npm run env:reset
