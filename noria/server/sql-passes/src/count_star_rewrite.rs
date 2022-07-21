@@ -22,7 +22,7 @@ impl<'ast, 'schema> Visitor<'ast> for CountStarRewriteVisitor<'schema> {
         Ok(())
     }
 
-    fn visit_function_expression(
+    fn visit_function_expr(
         &mut self,
         function_expression: &'ast mut FunctionExpr,
     ) -> Result<(), Self::Error> {

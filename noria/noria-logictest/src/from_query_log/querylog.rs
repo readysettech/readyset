@@ -93,7 +93,7 @@ impl ReplaceLiteralsWithPlaceholders for SelectStatement {
 impl ReplaceLiteralsWithPlaceholders for Expr {
     fn replace_literals(&mut self) -> Vec<Literal> {
         let mut visitor = ReplaceLiteralsWithPlaceholdersVisitor::default();
-        let Ok(_) = visitor.visit_expression(self);
+        let Ok(_) = visitor.visit_expr(self);
         visitor.out
     }
 }
