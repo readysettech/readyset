@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expr, SqlIdentifier, SqlQuery,
-    Table, TableKey,
+    TableExpr, TableKey,
 };
 use noria_errors::{ReadySetError, ReadySetResult};
 
@@ -21,7 +21,7 @@ pub trait OrderLimitRemoval: Sized {
 fn is_unique_or_primary(
     col: &Column,
     base_schemas: &HashMap<SqlIdentifier, CreateTableStatement>,
-    tables: &[Table],
+    table_exprs: &[TableExpr],
 ) -> ReadySetResult<bool> {
     // This assumes that we will find exactly one table matching col.table and exactly one col
     // matching col.name. The pass also assumes that col will always have an associated table.
@@ -42,12 +42,12 @@ fn is_unique_or_primary(
             // Attempt to resolve alias. Most queries are not likely to do this, so we resolve
             // reactively
             let err_str = "Table name must match table in base schema".to_string();
-            let table_name = tables
+            let table_name = table_exprs
                 .iter()
-                .find_map(|table| {
-                    if let Some(_alias) = table.alias.as_ref() {
+                .find_map(|table_expr| {
+                    if let Some(_alias) = table_expr.alias.as_ref() {
                         if table_name == _alias {
-                            Some(&table.name)
+                            Some(&table_expr.table.name)
                         } else {
                             None
                         }
@@ -97,7 +97,7 @@ fn is_unique_or_primary(
 fn compares_unique_key_against_literal(
     expr: &Expr,
     base_schemas: &HashMap<SqlIdentifier, CreateTableStatement>,
-    tables: &[Table],
+    table_exprs: &[TableExpr],
 ) -> ReadySetResult<bool> {
     match expr {
         Expr::BinaryOp {
@@ -109,14 +109,14 @@ fn compares_unique_key_against_literal(
             lhs: box Expr::Column(ref c),
             rhs: box Expr::Literal(_),
             op: BinaryOperator::Equal | BinaryOperator::Is,
-        } => Ok(is_unique_or_primary(c, base_schemas, tables)?),
+        } => Ok(is_unique_or_primary(c, base_schemas, table_exprs)?),
         Expr::BinaryOp {
             op: BinaryOperator::And,
             ref lhs,
             ref rhs,
         } => Ok(
-            compares_unique_key_against_literal(lhs, base_schemas, tables)?
-                || compares_unique_key_against_literal(rhs, base_schemas, tables)?,
+            compares_unique_key_against_literal(lhs, base_schemas, table_exprs)?
+                || compares_unique_key_against_literal(rhs, base_schemas, table_exprs)?,
         ),
         // TODO(DAN): it may be possible to determine that a query will return a single (or no)
         // resut if it has a nested select in the conditional
@@ -150,14 +150,13 @@ impl OrderLimitRemoval for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, ColumnSpecification, Dialect};
+    use nom_sql::{parse_query, ColumnSpecification, Dialect, Table};
 
     use super::*;
 
     fn generate_base_schemas() -> HashMap<SqlIdentifier, CreateTableStatement> {
         let table = Table {
             name: "t".into(),
-            alias: None,
             schema: None,
         };
 

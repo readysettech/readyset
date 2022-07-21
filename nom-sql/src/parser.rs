@@ -449,7 +449,8 @@ mod tests {
                 table: Table::from("users"),
                 fields: None,
                 data: vec![vec![42.into(), "test".into()]],
-                ..Default::default()
+                ignore: false,
+                on_duplicate: None,
             });
             let mut h0 = DefaultHasher::new();
             let mut h1 = DefaultHasher::new();
@@ -513,7 +514,8 @@ mod tests {
                 table: Table::from("users"),
                 fields: None,
                 data: vec![vec![42.into(), "test".into()]],
-                ..Default::default()
+                ignore: false,
+                on_duplicate: None,
             });
             let mut h0 = DefaultHasher::new();
             let mut h1 = DefaultHasher::new();

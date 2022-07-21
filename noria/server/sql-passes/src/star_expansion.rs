@@ -3,19 +3,11 @@ use std::mem;
 
 use nom_sql::{
     Column, CommonTableExpr, Expr, FieldDefinitionExpr, JoinClause, JoinRightSide, SelectStatement,
-    SqlIdentifier, SqlQuery, Table,
+    SqlIdentifier, SqlQuery,
 };
 use noria_errors::{ReadySetError, ReadySetResult};
 
-fn extract_tables_from_join(joins: &[JoinClause]) -> impl Iterator<Item = &Table> {
-    use itertools::Either;
-    joins.iter().flat_map(|j| match j.right {
-        // subquery schemas should be handled separately
-        JoinRightSide::NestedSelect(..) => Either::Left(Either::Left(std::iter::empty())),
-        JoinRightSide::Table(ref t) => Either::Left(Either::Right(std::iter::once(t))),
-        JoinRightSide::Tables(ref v) => Either::Right(v.iter()),
-    })
-}
+use crate::join_clause_tables;
 
 pub trait StarExpansion: Sized {
     fn expand_stars(
@@ -74,19 +66,19 @@ impl StarExpansion for SelectStatement {
         for field in fields {
             match field {
                 FieldDefinitionExpr::All => {
-                    for table in &self.tables {
-                        for field in expand_table(table.name.clone())? {
+                    for table_expr in &self.tables {
+                        for field in expand_table(table_expr.table.name.clone())? {
                             self.fields.push(field);
                         }
                     }
-                    for t in extract_tables_from_join(&self.join) {
-                        for field in expand_table(t.name.clone())? {
+                    for table_expr in self.join.iter().flat_map(join_clause_tables) {
+                        for field in expand_table(table_expr.table.name.clone())? {
                             self.fields.push(field);
                         }
                     }
                 }
                 FieldDefinitionExpr::AllInTable(t) => {
-                    for field in expand_table(t)? {
+                    for field in expand_table(t.name /* TODO: schema */)? {
                         self.fields.push(field);
                     }
                 }

@@ -12,12 +12,10 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::column::{column_specification, ColumnSpecification};
-use crate::common::{
-    schema_table_reference_no_alias, statement_terminator, ws_sep_comma, TableKey,
-};
+use crate::common::{statement_terminator, ws_sep_comma, TableKey};
 use crate::create::key_specification;
 use crate::literal::literal;
-use crate::table::Table;
+use crate::table::{table_reference, Table};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Literal, SqlIdentifier};
 
@@ -109,7 +107,7 @@ impl fmt::Display for AlterTableDefinition {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct AlterTableStatement {
     pub table: Table,
     pub definitions: Vec<AlterTableDefinition>,
@@ -286,7 +284,7 @@ pub fn alter_table_statement(
         let (i, _) = tag_no_case("table")(i)?;
         let (i, _) = whitespace1(i)?;
 
-        let (i, table) = schema_table_reference_no_alias(dialect)(i)?;
+        let (i, table) = table_reference(dialect)(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, definitions) = separated_list0(ws_sep_comma, alter_table_definition(dialect))(i)?;
         let (i, _) = whitespace0(i)?;
@@ -327,7 +325,6 @@ mod tests {
             table: Table {
                 name: "employees".into(),
                 schema: None,
-                alias: None,
             },
             definitions: vec![
                 AlterTableDefinition::AddColumn(ColumnSpecification {
@@ -366,7 +363,6 @@ mod tests {
                 table: Table {
                     name: "t".into(),
                     schema: None,
-                    alias: None,
                 },
                 definitions: vec![AlterTableDefinition::AddColumn(ColumnSpecification {
                     column: Column {
@@ -389,7 +385,6 @@ mod tests {
                 table: Table {
                     name: "t".into(),
                     schema: None,
-                    alias: None,
                 },
                 definitions: vec![
                     AlterTableDefinition::AddColumn(ColumnSpecification {
@@ -423,7 +418,6 @@ mod tests {
                 table: Table {
                     name: "t".into(),
                     schema: None,
-                    alias: None,
                 },
                 definitions: vec![AlterTableDefinition::DropColumn {
                     name: "c".into(),
@@ -441,7 +435,6 @@ mod tests {
                 table: Table {
                     name: "t".into(),
                     schema: None,
-                    alias: None,
                 },
                 definitions: vec![AlterTableDefinition::DropColumn {
                     name: "c".into(),
@@ -459,7 +452,6 @@ mod tests {
                 table: Table {
                     name: "t".into(),
                     schema: None,
-                    alias: None,
                 },
                 definitions: vec![AlterTableDefinition::AlterColumn {
                     name: "c".into(),
@@ -479,7 +471,6 @@ mod tests {
                 table: Table {
                     name: "t".into(),
                     schema: None,
-                    alias: None,
                 },
                 definitions: vec![AlterTableDefinition::AlterColumn {
                     name: "c".into(),
@@ -652,7 +643,6 @@ mod tests {
                 table: Table {
                     name: "t".into(),
                     schema: None,
-                    alias: None,
                 },
                 definitions: vec![AlterTableDefinition::AddColumn(ColumnSpecification {
                     column: Column {
@@ -675,7 +665,6 @@ mod tests {
                 table: Table {
                     name: "t".into(),
                     schema: None,
-                    alias: None,
                 },
                 definitions: vec![
                     AlterTableDefinition::AddColumn(ColumnSpecification {
@@ -709,7 +698,6 @@ mod tests {
                 table: Table {
                     name: "t".into(),
                     schema: None,
-                    alias: None,
                 },
                 definitions: vec![AlterTableDefinition::DropColumn {
                     name: "c".into(),
@@ -727,7 +715,6 @@ mod tests {
                 table: Table {
                     name: "t".into(),
                     schema: None,
-                    alias: None,
                 },
                 definitions: vec![AlterTableDefinition::DropColumn {
                     name: "c".into(),
@@ -745,7 +732,6 @@ mod tests {
                 table: Table {
                     name: "t".into(),
                     schema: None,
-                    alias: None,
                 },
                 definitions: vec![AlterTableDefinition::AlterColumn {
                     name: "c".into(),
@@ -765,7 +751,6 @@ mod tests {
                 table: Table {
                     name: "t".into(),
                     schema: None,
-                    alias: None,
                 },
                 definitions: vec![AlterTableDefinition::AlterColumn {
                     name: "c".into(),

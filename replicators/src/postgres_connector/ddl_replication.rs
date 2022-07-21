@@ -174,7 +174,6 @@ impl<'a> DdlEvent<'a> {
                 tables: vec![Table {
                     schema: Some(self.schema_name.into()),
                     name: self.object_name.into(),
-                    alias: None,
                 }],
                 // We might be getting a drop table event for a table we don't have, eg if the table
                 // originally failed to parse
@@ -204,7 +203,7 @@ mod tests {
 
     use nom_sql::{
         parse_query, ColumnConstraint, ColumnSpecification, CreateViewStatement, Dialect, Expr,
-        FieldDefinitionExpr, SelectSpecification, SqlQuery, SqlType, TableKey,
+        FieldDefinitionExpr, SelectSpecification, SqlQuery, SqlType, TableExpr, TableKey,
     };
     use pgsql::NoTls;
     use tokio::task::JoinHandle;
@@ -471,7 +470,7 @@ mod tests {
                                 alias: None
                             }]
                         );
-                        assert_eq!(select_stmt.tables, vec!["t".into()]);
+                        assert_eq!(select_stmt.tables, vec![TableExpr::from(Table::from("t"))]);
                     }
                     _ => panic!(),
                 }

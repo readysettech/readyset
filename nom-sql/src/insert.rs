@@ -9,14 +9,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::column::Column;
 use crate::common::{
-    assignment_expr_list, field_list, schema_table_reference_no_alias, statement_terminator,
-    value_list, ws_sep_comma,
+    assignment_expr_list, field_list, statement_terminator, value_list, ws_sep_comma,
 };
-use crate::table::Table;
+use crate::table::{table_reference, Table};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{Dialect, Expr, Literal};
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct InsertStatement {
     pub table: Table,
     pub fields: Option<Vec<Column>>,
@@ -103,7 +102,7 @@ pub fn insertion(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], InsertSta
             whitespace1,
             tag_no_case("into"),
             whitespace1,
-            schema_table_reference_no_alias(dialect),
+            table_reference(dialect),
             whitespace0,
             opt(fields(dialect)),
             tag_no_case("values"),
@@ -112,7 +111,6 @@ pub fn insertion(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], InsertSta
             opt(on_duplicate(dialect)),
             statement_terminator,
         ))(i)?;
-        assert!(table.alias.is_none());
         let ignore = ignore_res.is_some();
 
         Ok((
@@ -149,7 +147,8 @@ mod tests {
                     Literal::Placeholder(ItemPlaceholder::QuestionMark),
                     Literal::Placeholder(ItemPlaceholder::QuestionMark)
                 ]],
-                ..Default::default()
+                on_duplicate: None,
+                ignore: false
             }
         );
     }
@@ -172,7 +171,8 @@ mod tests {
                     table: Table::from("users"),
                     fields: None,
                     data: vec![vec![42.into(), "test".into()]],
-                    ..Default::default()
+                    on_duplicate: None,
+                    ignore: false
                 }
             );
         }
@@ -193,7 +193,8 @@ mod tests {
                         "test".into(),
                         Literal::CurrentTimestamp,
                     ],],
-                    ..Default::default()
+                    on_duplicate: None,
+                    ignore: false
                 }
             );
         }
@@ -209,7 +210,8 @@ mod tests {
                     table: Table::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
                     data: vec![vec![42.into(), "test".into()]],
-                    ..Default::default()
+                    on_duplicate: None,
+                    ignore: false
                 }
             );
         }
@@ -226,7 +228,8 @@ mod tests {
                     table: Table::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
                     data: vec![vec![42.into(), "test".into()]],
-                    ..Default::default()
+                    on_duplicate: None,
+                    ignore: false
                 }
             );
         }
@@ -242,11 +245,11 @@ mod tests {
                     table: Table {
                         schema: Some("db1".into()),
                         name: "users".into(),
-                        alias: None
                     },
                     fields: None,
                     data: vec![vec![42.into(), "test".into()]],
-                    ..Default::default()
+                    on_duplicate: None,
+                    ignore: false,
                 }
             );
         }
@@ -265,7 +268,8 @@ mod tests {
                         vec![42.into(), "test".into()],
                         vec![21.into(), "test2".into()],
                     ],
-                    ..Default::default()
+                    on_duplicate: None,
+                    ignore: false,
                 }
             );
         }
@@ -292,8 +296,8 @@ mod tests {
                             lhs: Box::new(Expr::Column(Column::from("value"))),
                             rhs: Box::new(Expr::Literal(1.into()))
                         },
-                    ),]),
-                    ..Default::default()
+                    )]),
+                    ignore: false,
                 }
             );
         }
@@ -309,7 +313,8 @@ mod tests {
                     table: Table::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
                     data: vec![vec![42.into(), "test".into()]],
-                    ..Default::default()
+                    on_duplicate: None,
+                    ignore: false,
                 }
             );
         }
@@ -341,7 +346,8 @@ mod tests {
                     table: Table::from("users"),
                     fields: None,
                     data: vec![vec![42.into(), "test".into()]],
-                    ..Default::default()
+                    on_duplicate: None,
+                    ignore: false,
                 }
             );
         }
@@ -362,7 +368,8 @@ mod tests {
                         "test".into(),
                         Literal::CurrentTimestamp,
                     ],],
-                    ..Default::default()
+                    on_duplicate: None,
+                    ignore: false,
                 }
             );
         }
@@ -378,7 +385,8 @@ mod tests {
                     table: Table::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
                     data: vec![vec![42.into(), "test".into()]],
-                    ..Default::default()
+                    on_duplicate: None,
+                    ignore: false,
                 }
             );
         }
@@ -395,7 +403,8 @@ mod tests {
                     table: Table::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
                     data: vec![vec![42.into(), "test".into()]],
-                    ..Default::default()
+                    on_duplicate: None,
+                    ignore: false,
                 }
             );
         }
@@ -411,11 +420,11 @@ mod tests {
                     table: Table {
                         schema: Some("db1".into()),
                         name: "users".into(),
-                        alias: None
                     },
                     fields: None,
                     data: vec![vec![42.into(), "test".into()]],
-                    ..Default::default()
+                    on_duplicate: None,
+                    ignore: false,
                 }
             );
         }
@@ -434,7 +443,8 @@ mod tests {
                         vec![42.into(), "test".into()],
                         vec![21.into(), "test2".into()],
                     ],
-                    ..Default::default()
+                    ignore: false,
+                    on_duplicate: None
                 }
             );
         }
@@ -462,7 +472,7 @@ mod tests {
                             rhs: Box::new(Expr::Literal(1.into()))
                         },
                     ),]),
-                    ..Default::default()
+                    ignore: false
                 }
             );
         }
@@ -478,7 +488,8 @@ mod tests {
                     table: Table::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
                     data: vec![vec![42.into(), "test".into()]],
-                    ..Default::default()
+                    ignore: false,
+                    on_duplicate: None
                 }
             );
         }

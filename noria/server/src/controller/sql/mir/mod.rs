@@ -142,7 +142,6 @@ impl From<Relation> for Table {
         Table {
             name: r.name,
             schema: r.schema,
-            alias: None,
         }
     }
 }

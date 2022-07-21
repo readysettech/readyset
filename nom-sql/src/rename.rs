@@ -6,8 +6,8 @@ use nom::multi::separated_list1;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 
-use crate::common::{schema_table_reference, ws_sep_comma};
-use crate::table::Table;
+use crate::common::ws_sep_comma;
+use crate::table::{table_reference, Table};
 use crate::whitespace::whitespace1;
 use crate::Dialect;
 
@@ -37,7 +37,7 @@ pub fn rename_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Rename
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct RenameTableOperation {
     pub from: Table,
     pub to: Table,
@@ -53,11 +53,11 @@ fn rename_table_operation(
     dialect: Dialect,
 ) -> impl Fn(&[u8]) -> IResult<&[u8], RenameTableOperation> {
     move |i| {
-        let (i, from) = schema_table_reference(dialect)(i)?;
+        let (i, from) = table_reference(dialect)(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("to")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, to) = schema_table_reference(dialect)(i)?;
+        let (i, to) = table_reference(dialect)(i)?;
         Ok((i, RenameTableOperation { from, to }))
     }
 }

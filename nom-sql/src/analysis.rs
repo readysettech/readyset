@@ -22,15 +22,18 @@ impl ReferredTables for SqlQuery {
             SqlQuery::CreateTable(ref ctq) => hashset![ctq.table.clone()],
             SqlQuery::AlterTable(ref atq) => hashset![atq.table.clone()],
             SqlQuery::Insert(ref iq) => hashset![iq.table.clone()],
-            SqlQuery::Select(ref sq) => sq.tables.iter().cloned().collect(),
+            SqlQuery::Select(ref sq) => sq.tables.iter().map(|te| &te.table).cloned().collect(),
             SqlQuery::CreateCache(CreateCacheStatement { inner: ref i, .. }) => match i {
-                CacheInner::Statement(sq) => sq.tables.iter().cloned().collect(),
+                CacheInner::Statement(sq) => {
+                    sq.tables.iter().map(|te| &te.table).cloned().collect()
+                }
                 CacheInner::Id(_) => HashSet::new(),
             },
             SqlQuery::CompoundSelect(ref csq) => csq
                 .selects
                 .iter()
                 .flat_map(|(_, sq)| &sq.tables)
+                .map(|te| &te.table)
                 .cloned()
                 .collect(),
             SqlQuery::RenameTable(ref rt) => rt

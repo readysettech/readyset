@@ -9,8 +9,8 @@ use nom::sequence::preceded;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 
-use crate::common::{statement_terminator, table_list, ws_sep_comma};
-use crate::table::Table;
+use crate::common::{statement_terminator, ws_sep_comma};
+use crate::table::{table_list, Table};
 use crate::whitespace::whitespace1;
 use crate::{Dialect, SqlIdentifier};
 
@@ -182,12 +182,10 @@ mod tests {
             vec![
                 Table {
                     name: "t1".into(),
-                    alias: None,
                     schema: Some("schema1".into())
                 },
                 Table {
                     name: "t2".into(),
-                    alias: None,
                     schema: Some("schema2".into())
                 }
             ]

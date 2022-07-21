@@ -7,7 +7,7 @@ use crate::set::Variable;
 use crate::{
     Column, CommonTableExpr, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
     GroupByClause, InValue, JoinClause, JoinConstraint, JoinRightSide, Literal, OrderClause,
-    SelectStatement, SqlType, Table,
+    SelectStatement, SqlType, Table, TableExpr,
 };
 
 /// Each method of the `Visitor` trait is a hook to be potentially overridden when recursively
@@ -78,6 +78,10 @@ pub trait Visitor<'ast>: Sized {
 
     fn visit_column(&mut self, column: &'ast mut Column) -> Result<(), Self::Error> {
         walk_column(self, column)
+    }
+
+    fn visit_table_expr(&mut self, table_expr: &'ast mut TableExpr) -> Result<(), Self::Error> {
+        walk_table_expr(self, table_expr)
     }
 
     fn visit_function_expr(
@@ -274,10 +278,10 @@ pub fn walk_join_clause<'ast, V: Visitor<'ast>>(
     join: &'ast mut JoinClause,
 ) -> Result<(), V::Error> {
     match &mut join.right {
-        JoinRightSide::Table(table) => visitor.visit_table(table)?,
-        JoinRightSide::Tables(tables) => {
-            for table in tables {
-                visitor.visit_table(table)?;
+        JoinRightSide::Table(table_expr) => visitor.visit_table_expr(table_expr)?,
+        JoinRightSide::Tables(table_exprs) => {
+            for table_expr in table_exprs {
+                visitor.visit_table_expr(table_expr)?;
             }
         }
         JoinRightSide::NestedSelect(statement, _) => {
@@ -364,6 +368,13 @@ pub fn walk_column<'ast, V: Visitor<'ast>>(
     Ok(())
 }
 
+pub fn walk_table_expr<'ast, V: Visitor<'ast>>(
+    visitor: &mut V,
+    table_expr: &'ast mut TableExpr,
+) -> Result<(), V::Error> {
+    visitor.visit_table(&mut table_expr.table)
+}
+
 pub fn walk_select_statement<'ast, V: Visitor<'ast>>(
     visitor: &mut V,
     select_statement: &'ast mut SelectStatement,
@@ -371,8 +382,8 @@ pub fn walk_select_statement<'ast, V: Visitor<'ast>>(
     for cte in &mut select_statement.ctes {
         visitor.visit_common_table_expr(cte)?;
     }
-    for table in &mut select_statement.tables {
-        visitor.visit_table(table)?;
+    for table_expr in &mut select_statement.tables {
+        visitor.visit_table_expr(table_expr)?;
     }
     for field in &mut select_statement.fields {
         visitor.visit_field_definition_expr(field)?;

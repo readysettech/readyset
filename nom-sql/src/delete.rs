@@ -6,13 +6,13 @@ use nom::sequence::{delimited, tuple};
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 
-use crate::common::{schema_table_reference, statement_terminator};
+use crate::common::statement_terminator;
 use crate::select::where_clause;
-use crate::table::Table;
+use crate::table::{table_reference, Table};
 use crate::whitespace::whitespace1;
 use crate::{Dialect, Expr};
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DeleteStatement {
     pub table: Table,
     pub where_clause: Option<Expr>,
@@ -34,7 +34,7 @@ pub fn deletion(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DeleteStat
         let (remaining_input, (_, _, table, where_clause, _)) = tuple((
             tag_no_case("delete"),
             delimited(whitespace1, tag_no_case("from"), whitespace1),
-            schema_table_reference(dialect),
+            table_reference(dialect),
             opt(where_clause(dialect)),
             statement_terminator,
         ))(i)?;
@@ -64,7 +64,7 @@ mod tests {
             res.unwrap().1,
             DeleteStatement {
                 table: Table::from("users"),
-                ..Default::default()
+                where_clause: None,
             }
         );
     }
@@ -79,9 +79,8 @@ mod tests {
                 table: Table {
                     schema: Some("db1".into()),
                     name: "users".into(),
-                    alias: None
                 },
-                ..Default::default()
+                where_clause: None,
             }
         );
     }

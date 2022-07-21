@@ -13,19 +13,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::column::{column_specification, Column, ColumnSpecification};
 use crate::common::{
-    column_identifier_no_alias, if_not_exists, schema_table_reference, statement_terminator,
-    ws_sep_comma, IndexType, ReferentialAction, TableKey,
+    column_identifier_no_alias, if_not_exists, statement_terminator, ws_sep_comma, IndexType,
+    ReferentialAction, TableKey,
 };
 use crate::compound_select::{nested_compound_selection, CompoundSelectStatement};
 use crate::create_table_options::{table_options, CreateTableOption};
 use crate::expression::expression;
 use crate::order::{order_type, OrderType};
 use crate::select::{nested_selection, selection, SelectStatement};
-use crate::table::Table;
+use crate::table::{table_reference, Table};
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{ColumnConstraint, Dialect, SqlIdentifier};
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateTableStatement {
     pub table: Table,
     pub fields: Vec<ColumnSpecification>,
@@ -311,7 +311,7 @@ fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("references")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, target_table) = schema_table_reference(dialect)(i)?;
+        let (i, target_table) = table_reference(dialect)(i)?;
 
         // (columns)
         let (i, _) = whitespace0(i)?;
@@ -489,7 +489,7 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
             tag_no_case("table"),
             whitespace1,
             if_not_exists,
-            schema_table_reference(dialect),
+            table_reference(dialect),
             whitespace0,
             tag("("),
             whitespace0,
@@ -502,9 +502,6 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
             table_options(dialect),
             statement_terminator,
         ))(i)?;
-
-        // "table AS alias" isn't legal in CREATE statements
-        assert!(table.alias.is_none());
 
         let mut primary_key = None;
 
@@ -751,7 +748,7 @@ mod tests {
     use crate::column::Column;
     use crate::common::type_identifier;
     use crate::table::Table;
-    use crate::{BinaryOperator, ColumnConstraint, Expr, Literal, SqlType};
+    use crate::{BinaryOperator, ColumnConstraint, Expr, Literal, SqlType, TableExpr};
 
     #[test]
     fn sql_types() {
@@ -809,7 +806,8 @@ mod tests {
                     ),
                 ],
                 if_not_exists: true,
-                ..Default::default()
+                keys: None,
+                options: vec![]
             }
         );
     }
@@ -826,7 +824,9 @@ mod tests {
                     Column::from("t.x"),
                     SqlType::Int(None)
                 ),],
-                ..Default::default()
+                keys: None,
+                if_not_exists: false,
+                options: vec![]
             }
         );
     }
@@ -841,13 +841,14 @@ mod tests {
                 table: Table {
                     schema: Some("db1".into()),
                     name: "t".into(),
-                    alias: None
                 },
                 fields: vec![ColumnSpecification::new(
                     Column::from("t.x"),
                     SqlType::Int(None)
                 ),],
-                ..Default::default()
+                keys: None,
+                if_not_exists: false,
+                options: vec![]
             }
         );
     }
@@ -878,7 +879,8 @@ mod tests {
                     name: None,
                     columns: vec![Column::from("users.id")]
                 }]),
-                ..Default::default()
+                if_not_exists: false,
+                options: vec![]
             }
         );
 
@@ -907,7 +909,8 @@ mod tests {
                     columns: vec![Column::from("users.id")],
                     index_type: None
                 },]),
-                ..Default::default()
+                if_not_exists: false,
+                options: vec![]
             }
         );
     }
@@ -930,7 +933,7 @@ mod tests {
                         (
                             None,
                             SelectStatement {
-                                tables: vec![Table::from("users")],
+                                tables: vec![TableExpr::from(Table::from("users"))],
                                 fields: vec![FieldDefinitionExpr::All],
                                 ..Default::default()
                             },
@@ -938,7 +941,7 @@ mod tests {
                         (
                             Some(CompoundSelectOperator::DistinctUnion),
                             SelectStatement {
-                                tables: vec![Table::from("old_users")],
+                                tables: vec![TableExpr::from(Table::from("old_users"))],
                                 fields: vec![FieldDefinitionExpr::All],
                                 ..Default::default()
                             },
@@ -1274,7 +1277,7 @@ mod tests {
         use super::*;
         use crate::column::Column;
         use crate::table::Table;
-        use crate::{ColumnConstraint, Literal, SqlType};
+        use crate::{ColumnConstraint, Literal, SqlType, TableExpr};
 
         #[test]
         fn create_view_with_security_params() {
@@ -1447,7 +1450,7 @@ mod tests {
                     name: "v".into(),
                     fields: vec![],
                     definition: Box::new(SelectSpecification::Simple(SelectStatement {
-                        tables: vec![Table::from("users")],
+                        tables: vec![TableExpr::from(Table::from("users"))],
                         fields: vec![FieldDefinitionExpr::All],
                         where_clause: Some(Expr::BinaryOp {
                             lhs: Box::new(Expr::Column("username".into())),
@@ -1479,7 +1482,10 @@ mod tests {
                 CacheInner::Statement(s) => s,
                 _ => panic!(),
             };
-            assert_eq!(statement.tables, vec!["users".into()]);
+            assert_eq!(
+                statement.tables,
+                vec![TableExpr::from(Table::from("users"))]
+            );
         }
 
         #[test]
@@ -1493,7 +1499,10 @@ mod tests {
                 CacheInner::Statement(s) => s,
                 _ => panic!(),
             };
-            assert_eq!(statement.tables, vec!["users".into()]);
+            assert_eq!(
+                statement.tables,
+                vec![TableExpr::from(Table::from("users"))]
+            );
         }
 
         #[test]
@@ -1648,7 +1657,8 @@ mod tests {
                         ),
                     ],
                     options: vec![CreateTableOption::Other],
-                    ..Default::default()
+                    keys: None,
+                    if_not_exists: false
                 }
             );
         }
@@ -1777,7 +1787,9 @@ mod tests {
                         Column::from("groups.id"),
                         SqlType::Int(None)
                     ),],
-                    ..Default::default()
+                    keys: None,
+                    if_not_exists: false,
+                    options: vec![]
                 }
             );
         }
@@ -1925,7 +1937,7 @@ mod tests {
                     name: "v".into(),
                     fields: vec![],
                     definition: Box::new(SelectSpecification::Simple(SelectStatement {
-                        tables: vec![Table::from("users")],
+                        tables: vec![TableExpr::from(Table::from("users"))],
                         fields: vec![FieldDefinitionExpr::All],
                         where_clause: Some(Expr::BinaryOp {
                             lhs: Box::new(Expr::Column("username".into())),
@@ -2057,7 +2069,8 @@ mod tests {
                         ),
                     ],
                     options: vec![CreateTableOption::Other],
-                    ..Default::default()
+                    keys: None,
+                    if_not_exists: false
                 }
             );
         }
