@@ -1,16 +1,56 @@
 # Git Tooling
 
-# Vim
+## Git command line extensions
 
-If you're using Vim, a very useful tool is [Vim
-Fugitive](https://github.com/tpope/vim-fugitive)
+There are extensions to the git command line interface that can be installed
+to help with the stacked diff workflow.
 
-Git Fugitive can make aspects of our rebase first Git approach easier to manage. 
+You can find a [list of various tools][0] but a couple are discussed here.
+
+[0]: https://github.com/arxanas/git-branchless/wiki/Related-tools
+
+### git-branchless
+
+[git-branchless](https://github.com/arxanas/git-branchless) requires adding a
+hook to the git repository you want it to work in but adds additional features
+like a `git undo` command alongside other tooling.
+
+### git-stack
+
+[git-stack](https://github.com/gitext-rs/git-stack) requires marking some
+branches as protected and and requires working off on another branch which
+might be more familiar.
+
+## Editor integrations
+
+### VSCode
+
+The following configuration helps with commit message writing by adding
+a colored column at 50 and 72 characters to help keep the different lines within
+the boundaries for the subject and the body.
+
+```json
+"[git-commit]": {
+    "editor.rulers": [50, 72],
+}
+```
+
+The [GitLens extension](https://gitlens.amod.io/) includes a [special editor][4]
+for dealing with rebases.
+
+[1]: https://github.com/gitkraken/vscode-gitlens#interactive-rebase-editor-
+
+### Vim/NeoVim
+
+The [fugitive](https://github.com/tpope/vim-fugitive) plugin includes
+many tools for helping with commits and rebases.
+
+#### Example Workflow
 
 Let's walk through how one would apply a fix a few commits back in a commit
 chain using Vim Fugitive.
 
-## Fixup method
+##### Fixup method
 
 An easy way to apply a fix when you are at the tip of a commit chain onto an
 earlier commit in the chain, is to write the fix first. Then pull up Fugitive
@@ -35,7 +75,7 @@ not worry about it, because the very last fixup that I apply will result in no
 remaining unstaged changes, and all fixup commits will be correctly squashed at
 that point in time.
 
-## Rebase edit method
+###### Rebase edit method
 
 You can also apply a fix into an earlier commit, but performing an interactive
 rebase, and choosing to `edit` the commit in question. This will drop you into
@@ -45,11 +85,11 @@ process. This can be a useful way to work, but can also in some cases make it
 difficult to test how a change to an earlier commit effects future work in the
 commit chain. In that case the fixup approach is more sensible.
 
-## Line-based commiting
+##### Line-based commiting
 
 Sometimes we will work on a larger body of work that we realize later should be
 split into multiple commits. To handle this task, we can perform line based
-commiting using Vim Fugitive. 
+commiting using Vim Fugitive.
 
 Type `:Git` to pull up Fugitive. Highlight the file you would like to perform
 line based commiting on, and type `dd`. Another approach is if you already have
@@ -67,3 +107,12 @@ makes it very easy to see what you have staged.
 
 When you are finished with all relevant files, write a commit and move onto the
 segments you would like to stage for the next commit.
+
+### Emacs
+
+The [magit](https://magit.vc/) package includes many tools to help with
+commits and rebasing.
+
+### IntelliJ
+
+TODO: Looking for help here.
