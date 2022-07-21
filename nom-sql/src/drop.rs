@@ -172,6 +172,29 @@ mod tests {
     }
 
     #[test]
+    fn drop_table_qualified() {
+        let res = test_parse!(
+            drop_table(Dialect::PostgreSQL),
+            b"DROP TABLE schema1.t1, schema2.t2"
+        );
+        assert_eq!(
+            res.tables,
+            vec![
+                Table {
+                    name: "t1".into(),
+                    alias: None,
+                    schema: Some("schema1".into())
+                },
+                Table {
+                    name: "t2".into(),
+                    alias: None,
+                    schema: Some("schema2".into())
+                }
+            ]
+        )
+    }
+
+    #[test]
     fn parse_drop_cached_query() {
         let res = test_parse!(drop_cached_query(Dialect::MySQL), b"DROP CACHE test");
         assert_eq!(res.name, "test");
