@@ -85,7 +85,7 @@ impl BuiltinFunction {
         let mut args = args.into_iter();
         let mut next_arg = || args.next().ok_or_else(arity_error);
 
-        match name {
+        let result = match name {
             "convert_tz" => {
                 // Type is inferred from input argument
                 let input = next_arg()?;
@@ -144,7 +144,13 @@ impl BuiltinFunction {
                 ))
             }
             _ => Err(ReadySetError::NoSuchFunction(name.to_owned())),
+        };
+
+        if args.next().is_some() {
+            return Err(arity_error());
         }
+
+        result
     }
 
     fn name(&self) -> &'static str {
