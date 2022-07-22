@@ -66,6 +66,12 @@ mod arrays {
 
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
+    async fn empty_array_to_from_sql() {
+        round_trip("text[]", Array::from(vec![])).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn one_d_array_to_from_sql() {
         round_trip(
             "int[]",

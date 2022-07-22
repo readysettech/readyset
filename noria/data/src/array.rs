@@ -285,6 +285,11 @@ impl<'a> FromSql<'a> for Array {
             .map(|v| DataType::from_sql_nullable(member_type, v))
             .collect::<Vec<_>>()?;
 
+        if values.is_empty() && lengths.is_empty() {
+            lengths.push(0);
+            lower_bounds.push(1); // default lower bound
+        }
+
         Ok(Array {
             lower_bounds: lower_bounds.into(),
             contents: ArrayD::from_shape_vec(IxDyn(lengths.as_slice()), values)?,
