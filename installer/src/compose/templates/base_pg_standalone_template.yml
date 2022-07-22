@@ -2,22 +2,12 @@ version: "3.8"
 volumes:
   readyset-server-state:
 services:
-  consul:
-    healthcheck:
-      test: ["CMD", "nc", "-vz", "localhost", "8500"]
-      interval: 10s
-      timeout: 2s
-      retries: 5
-      start_period: 5s
   postgres:
     expose:
       - 5432
     environment:
       POSTGRES_PASSWORD: noria
       POSTGRES_DB: noria
-    depends_on:
-      consul:
-        condition: service_healthy
     command:
       - "postgres"
       - "-c"
@@ -32,8 +22,6 @@ services:
     expose:
       - 5433
     environment:
-      AUTHORITY_ADDRESS: consul:8500
-      AUTHORITY: "consul"
       LISTEN_ADDRESS: 0.0.0.0:5433
       NORIA_DEPLOYMENT: noria
       UPSTREAM_DB_URL: postgresql://postgres:noria@postgres/noria
@@ -43,7 +31,6 @@ services:
       STANDALONE: 1
     links:
       - postgres
-      - consul
     volumes:
       - readyset-server-state:/state
     healthcheck:

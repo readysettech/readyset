@@ -1,13 +1,5 @@
 version: "3.8"
 services:
-  consul:
-    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/consul
-    healthcheck:
-      test: ["CMD", "nc", "-vz", "localhost", "8500"]
-      interval: 10s
-      timeout: 2s
-      retries: 5
-      start_period: 5s
   mysql:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/mysql:8.0
     expose:
@@ -15,12 +7,6 @@ services:
     environment:
       MYSQL_DATABASE: test
       MYSQL_ROOT_PASSWORD: root
-    # doesn't actually depend on consul, but I can't figure out a way to have
-    # a depends_on with multiple health check relationships, so chaining them to ensure
-    # noria-server waits on both consul and mysql for fallback.
-    depends_on:
-      consul:
-        condition: service_healthy
     healthcheck:
       test: "mysqladmin ping"
       start_period: 10s
@@ -33,10 +19,8 @@ services:
       - 3333
     environment:
       UPSTREAM_DB_URL: mysql://root:root@mysql/test
-      AUTHORITY_ADDRESS: consul:8500
       NORIA_DEPLOYMENT: frameworktests
       STANDALONE: 1
-      AUTHORITY: "consul"
       LISTEN_ADDRESS: 0.0.0.0:3333
       ALLOWED_USERNAME: root
       ALLOWED_PASSWORD: root
@@ -46,7 +30,6 @@ services:
       - "readyset-server-state:/state"
     links:
       - mysql
-      - consul
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1", "--port=3333", "-uroot", "-proot"]
       interval: 10s

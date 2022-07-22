@@ -2,14 +2,6 @@ version: "3.8"
 volumes:
   readyset-server-state:
 services:
-  consul:
-    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/consul
-    healthcheck:
-      test: ["CMD", "nc", "-vz", "localhost", "8500"]
-      interval: 10s
-      timeout: 2s
-      retries: 5
-      start_period: 5s
   mysql:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/mysql:8.0
     expose:
@@ -17,9 +9,6 @@ services:
     environment:
       MYSQL_DATABASE: solidus
       MYSQL_ROOT_PASSWORD: noria
-    depends_on:
-      consul:
-        condition: service_healthy
     healthcheck:
       test: "mysqladmin ping -h127.0.0.1 --port=3306 -uroot -pnoria"
       start_period: 10s
@@ -33,8 +22,6 @@ services:
     ports:
       - 3306:3306
     environment:
-      AUTHORITY_ADDRESS: consul:8500
-      AUTHORITY: "consul"
       LISTEN_ADDRESS: 0.0.0.0:3306
       NORIA_DEPLOYMENT: solidus
       UPSTREAM_DB_URL: mysql://root:noria@mysql/solidus
@@ -52,7 +39,6 @@ services:
       - readyset-server-state:/state
     links:
       - mysql
-      - consul
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1", "--port=3306", "-uroot", "-pnoria"]
       interval: 10s

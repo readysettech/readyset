@@ -2,22 +2,12 @@ version: "3.8"
 volumes:
   readyset-server-state:
 services:
-  consul:
-    healthcheck:
-      test: ["CMD", "nc", "-vz", "localhost", "8500"]
-      interval: 10s
-      timeout: 2s
-      retries: 5
-      start_period: 5s
   mysql:
     expose:
       - 3306
     environment:
       MYSQL_DATABASE: noria
       MYSQL_ROOT_PASSWORD: noria
-    depends_on:
-      consul:
-        condition: service_healthy
     healthcheck:
       test: "mysqladmin ping -h127.0.0.1 -P3306 -uroot -pnoria"
       start_period: 20s
@@ -28,8 +18,6 @@ services:
     expose:
       - 3307
     environment:
-      AUTHORITY_ADDRESS: consul:8500
-      AUTHORITY: "consul"
       LISTEN_ADDRESS: 0.0.0.0:3307
       NORIA_DEPLOYMENT: noria
       UPSTREAM_DB_URL: mysql://root:noria@mysql/noria
@@ -39,7 +27,6 @@ services:
       STANDALONE: 1
     links:
       - mysql
-      - consul
     volumes:
       - readyset-server-state:/state
     healthcheck:

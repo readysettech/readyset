@@ -2,14 +2,6 @@ version: "3.8"
 volumes:
   readyset-server-state:
 services:
-  consul:
-    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/consul 
-    healthcheck:
-      test: ["CMD", "nc", "-vz", "localhost", "8500"]
-      interval: 10s
-      timeout: 2s
-      retries: 5
-      start_period: 5s
   postgres:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/postgres:13
     expose:
@@ -17,12 +9,6 @@ services:
     environment:
       POSTGRES_DB: test
       POSTGRES_PASSWORD: noria
-    # doesn't actually depend on consul, but I can't figure out a way to have
-    # a depends_on with multiple health check relationships, so chaining them to ensure
-    # noria-server waits on both consul and postgres for fallback.
-    depends_on:
-      consul:
-        condition: service_healthy
     command:
       - "postgres"
       - "-c"
@@ -39,10 +25,8 @@ services:
       - 3333
     environment:
       UPSTREAM_DB_URL: postgresql://postgres:noria@postgres/test
-      AUTHORITY_ADDRESS: consul:8500
       NORIA_DEPLOYMENT: frameworktests
       STANDALONE: 1
-      AUTHORITY: "consul"
       LISTEN_ADDRESS: 0.0.0.0:3333
       ALLOWED_USERNAME: root
       ALLOWED_PASSWORD: root
@@ -50,7 +34,6 @@ services:
       UNSUPPORTED_SET_MODE: proxy
     links:
       - postgres
-      - consul
     volumes:
       - readyset-server-state:/state
     healthcheck:
