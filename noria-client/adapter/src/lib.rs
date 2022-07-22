@@ -142,14 +142,27 @@ pub struct Options {
     #[clap(long, env = "NORIA_DEPLOYMENT", forbid_empty_values = true)]
     deployment: String,
 
-    /// Authority connection string.
-    // TODO(justin): The default_value should depend on the value of authority.
-    #[clap(long, env = "AUTHORITY_ADDRESS", default_value = "127.0.0.1:8500")]
-    authority_address: String,
-
-    /// The authority to use. Possible values: zookeeper, consul.
-    #[clap(long, env = "AUTHORITY", default_value = "consul", possible_values = &["consul", "zookeeper"])]
+    /// The authority to use. Possible values: zookeeper, consul, standalone.
+    #[clap(
+        long,
+        env = "AUTHORITY",
+        default_value_if("standalone", None, Some("standalone")),
+        default_value = "consul",
+        possible_values = &["consul", "zookeeper", "standalone"]
+    )]
     authority: AuthorityType,
+
+    /// Authority uri
+    // NOTE: `authority_address` should come after `authority` for clap to set default values
+    // properly
+    #[clap(
+        long,
+        env = "AUTHORITY_ADDRESS",
+        default_value_if("authority", Some("standalone"), Some(".")),
+        default_value_if("authority", Some("consul"), Some("127.0.0.1:8500")),
+        default_value_if("authority", Some("zookeeper"), Some("127.0.0.1:2181"))
+    )]
+    authority_address: String,
 
     /// Log slow queries (> 5ms)
     #[clap(long)]

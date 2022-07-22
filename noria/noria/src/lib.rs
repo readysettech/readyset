@@ -136,7 +136,8 @@
     bound_map,
     bound_as_ref,
     box_into_inner,
-    is_sorted
+    is_sorted,
+    once_cell
 )]
 #![deny(missing_docs, macro_use_extern_crate)]
 #![deny(unused_extern_crates)]
