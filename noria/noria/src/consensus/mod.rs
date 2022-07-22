@@ -15,9 +15,12 @@ use url::Url;
 
 mod consul;
 mod local;
+mod standalone;
 pub mod zk;
+
 pub use self::consul::ConsulAuthority;
 pub use self::local::{LocalAuthority, LocalAuthorityStore};
+pub use self::standalone::StandaloneAuthority;
 pub use self::zk::ZookeeperAuthority;
 use crate::ControllerDescriptor;
 
@@ -227,6 +230,7 @@ pub enum Authority {
     ZookeeperAuthority,
     ConsulAuthority,
     LocalAuthority,
+    StandaloneAuthority,
 }
 
 /// Enum that mirrors Authority that parses command line arguments.
@@ -235,6 +239,7 @@ pub enum AuthorityType {
     Zookeeper,
     Consul,
     Local,
+    Standalone,
 }
 
 impl FromStr for AuthorityType {
@@ -244,6 +249,7 @@ impl FromStr for AuthorityType {
             "zookeeper" => Ok(AuthorityType::Zookeeper),
             "consul" => Ok(AuthorityType::Consul),
             "local" => Ok(AuthorityType::Local),
+            "standalone" => Ok(AuthorityType::Standalone),
             other => Err(anyhow!("Invalid authority type: {}", other)),
         }
     }
@@ -255,6 +261,7 @@ impl ToString for AuthorityType {
             AuthorityType::Zookeeper => "zookeeper".to_string(),
             AuthorityType::Consul => "consul".to_string(),
             AuthorityType::Local => "local".to_string(),
+            AuthorityType::Standalone => "standalone".to_string(),
         }
     }
 }
@@ -263,14 +270,17 @@ impl AuthorityType {
     pub async fn to_authority(&self, addr: &str, deployment: &str) -> Authority {
         match self {
             AuthorityType::Zookeeper => Authority::from(
-                ZookeeperAuthority::new(&format!("{}/{}", &addr, &deployment))
+                ZookeeperAuthority::new(&format!("{}/{}", addr, deployment))
                     .await
                     .unwrap(),
             ),
             AuthorityType::Consul => Authority::from(
-                ConsulAuthority::new(&format!("http://{}/{}", &addr, &deployment)).unwrap(),
+                ConsulAuthority::new(&format!("http://{}/{}", addr, deployment)).unwrap(),
             ),
             AuthorityType::Local => Authority::from(LocalAuthority::new()),
+            AuthorityType::Standalone => {
+                Authority::from(StandaloneAuthority::new(addr, deployment).unwrap())
+            }
         }
     }
 }

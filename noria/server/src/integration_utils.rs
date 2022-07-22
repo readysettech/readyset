@@ -31,6 +31,17 @@ pub fn get_persistence_params(prefix: &str) -> PersistenceParameters {
     }
 }
 
+/// PersistenceParameters with a log_name of the form of `prefix`. This creates a permanent database
+/// in the given directory and it is the callers responsibility to remove the directory when done.
+pub fn get_persistence_params_in_tmp_dir(prefix: &str, tmpdir: &str) -> PersistenceParameters {
+    PersistenceParameters {
+        mode: DurabilityMode::Permanent,
+        db_filename_prefix: String::from(prefix),
+        db_dir: Some(tmpdir.into()),
+        ..Default::default()
+    }
+}
+
 /// Builds a local worker.
 pub async fn start_simple(prefix: &str) -> Handle {
     build(prefix, Some(DEFAULT_SHARDING), None).await

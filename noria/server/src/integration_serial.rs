@@ -15,6 +15,7 @@ use common::Index;
 use dataflow::node::special::Base;
 use dataflow::ops::union::{self, Union};
 use dataflow::utils::make_columns;
+use noria::consensus::StandaloneAuthority;
 use noria::get_metric;
 use noria::metrics::{recorded, DumpedMetricValue, MetricsDump};
 use noria_data::DataType;
@@ -188,6 +189,88 @@ async fn it_works_basic() {
 
     // send a query to c
     //assert_eq!(cq.lookup(&[id.clone()], true).await, Ok(vec![vec![1.into(), 6.into()]]));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn it_works_basic_standalone() {
+    let dir = tempfile::tempdir().unwrap();
+    let dir_path = dir.path().to_str().unwrap();
+
+    let start_standalone = || {
+        let mut builder = Builder::for_tests();
+        builder.set_sharding(None);
+        builder.set_persistence(get_persistence_params_in_tmp_dir(
+            "it_works_basic_standalone",
+            dir_path,
+        ));
+        builder.enable_packet_filters();
+        builder.start_local_custom(std::sync::Arc::new(noria::consensus::Authority::from(
+            StandaloneAuthority::new(dir_path, "it_works_basic_standalone").unwrap(),
+        )))
+    };
+
+    let mut g = start_standalone().await.unwrap();
+
+    g.extend_recipe("CREATE TABLE a (a int PRIMARY KEY, b int)".parse().unwrap())
+        .await
+        .unwrap();
+
+    g.extend_recipe("CREATE TABLE b (a int PRIMARY KEY, b int)".parse().unwrap())
+        .await
+        .unwrap();
+
+    g.extend_recipe(
+        "CREATE VIEW c AS SELECT a,b FROM a WHERE a = ? UNION SELECT a,b FROM b WHERE a = ? ORDER BY b"
+            .parse()
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let mut cq = g.view("c").await.unwrap();
+    let mut muta = g.table("a").await.unwrap();
+    let mut mutb = g.table("b").await.unwrap();
+    let id: DataType = 1.into();
+
+    assert_eq!(muta.table_name(), "a");
+    assert_eq!(muta.columns(), &["a", "b"]);
+
+    // send a value on a
+    muta.insert(vec![id.clone(), DataType::try_from(2i32).unwrap()])
+        .await
+        .unwrap();
+
+    // Force the table to flush so we get a non zero table size metric
+    muta.set_snapshot_mode(false).await.unwrap();
+
+    // give it some time to propagate
+    sleep().await;
+
+    // send a query to c
+    assert_eq!(
+        cq.lookup(&[id.clone()], true).await.unwrap().into_vec(),
+        vec![vec![1.into(), 2.into()]]
+    );
+
+    // update value again
+    mutb.insert(vec![id.clone(), DataType::try_from(4i32).unwrap()])
+        .await
+        .unwrap();
+
+    // Stop the server and start a new one
+    drop(g);
+
+    let mut g = start_standalone().await.unwrap();
+
+    // Check that everything was restored properly
+    let mut cq = g.view("c").await.unwrap();
+
+    let res = cq.lookup(&[id.clone()], true).await.unwrap().into_vec();
+    assert_eq!(
+        res,
+        vec![vec![id.clone(), 2.into()], vec![id.clone(), 4.into()]]
+    );
 }
 
 fn get_external_requests_count(metrics_dump: &MetricsDump) -> f64 {
