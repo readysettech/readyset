@@ -83,58 +83,47 @@ impl BuiltinFunction {
         let arity_error = || ReadySetError::ArityError(name.to_owned());
 
         let mut args = args.into_iter();
+        let mut next_arg = || args.next().ok_or_else(arity_error);
+
         match name {
             "convert_tz" => {
                 // Type is inferred from input argument
-                let input = args.next().ok_or_else(arity_error)?;
+                let input = next_arg()?;
                 let ty = input.ty().clone();
-                Ok((
-                    Self::ConvertTZ(
-                        input,
-                        args.next().ok_or_else(arity_error)?,
-                        args.next().ok_or_else(arity_error)?,
-                    ),
-                    ty,
-                ))
+                Ok((Self::ConvertTZ(input, next_arg()?, next_arg()?), ty))
             }
             "dayofweek" => {
                 Ok((
-                    Self::DayOfWeek(args.next().ok_or_else(arity_error)?),
+                    Self::DayOfWeek(next_arg()?),
                     Type::Sql(SqlType::Int(None)), // Day of week is always an int
                 ))
             }
             "ifnull" => {
-                let expr = args.next().ok_or_else(arity_error)?;
-                let val = args.next().ok_or_else(arity_error)?;
+                let expr = next_arg()?;
+                let val = next_arg()?;
                 // Type is inferred from the value provided
                 let ty = val.ty().clone();
                 Ok((Self::IfNull(expr, val), ty))
             }
             "month" => {
                 Ok((
-                    Self::Month(args.next().ok_or_else(arity_error)?),
+                    Self::Month(next_arg()?),
                     Type::Sql(SqlType::Int(None)), // Month is always an int
                 ))
             }
             "timediff" => {
                 Ok((
-                    Self::Timediff(
-                        args.next().ok_or_else(arity_error)?,
-                        args.next().ok_or_else(arity_error)?,
-                    ),
+                    Self::Timediff(next_arg()?, next_arg()?),
                     Type::Sql(SqlType::Time), // type is always time
                 ))
             }
             "addtime" => {
-                let base_time = args.next().ok_or_else(arity_error)?;
+                let base_time = next_arg()?;
                 let ty = base_time.ty().clone();
-                Ok((
-                    Self::Addtime(base_time, args.next().ok_or_else(arity_error)?),
-                    ty,
-                ))
+                Ok((Self::Addtime(base_time, next_arg()?), ty))
             }
             "round" => {
-                let expr = args.next().ok_or_else(arity_error)?;
+                let expr = next_arg()?;
                 let prec = args.next().unwrap_or(Expr::Literal {
                     val: DataType::Int(0),
                     ty: Type::Sql(SqlType::Int(None)),
@@ -144,13 +133,13 @@ impl BuiltinFunction {
             }
             "json_typeof" => {
                 Ok((
-                    Self::JsonTypeof(args.next().ok_or_else(arity_error)?),
+                    Self::JsonTypeof(next_arg()?),
                     Type::Sql(SqlType::Text), // Always returns text containing the JSON type
                 ))
             }
             "jsonb_typeof" => {
                 Ok((
-                    Self::JsonbTypeof(args.next().ok_or_else(arity_error)?),
+                    Self::JsonbTypeof(next_arg()?),
                     Type::Sql(SqlType::Text), // Always returns text containing the JSON type
                 ))
             }
