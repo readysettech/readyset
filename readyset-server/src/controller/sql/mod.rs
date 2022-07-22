@@ -648,18 +648,18 @@ impl SqlIncorporator {
                     to_view, for_table, ..
                 } => {
                     let query = SelectStatement {
-                        tables: vec![TableExpr::from(Table::from(for_table))],
+                        tables: vec![TableExpr::from(for_table)],
                         fields: vec![FieldDefinitionExpr::All],
                         ..Default::default()
                     };
-                    self.add_select_query(to_view, self.rewrite(query)?, true, false, mig)?;
+                    self.add_select_query(to_view.name, self.rewrite(query)?, true, false, mig)?;
                 }
                 TableAliasRewrite::Cte {
                     to_view,
                     for_statement,
                     ..
                 } => {
-                    self.add_select_query(to_view, *for_statement, true, false, mig)?;
+                    self.add_select_query(to_view.name, *for_statement, true, false, mig)?;
                 }
                 TableAliasRewrite::Table { .. } => {}
             }
@@ -782,9 +782,23 @@ impl SqlIncorporator {
     where
         S: Rewrite,
     {
+        // TODO(grfn): make view_schemas and base_schemas include schema in the keys
+        let view_schemas = self
+            .view_schemas
+            .clone()
+            .into_iter()
+            .map(|(k, v)| (Table::from(k), v))
+            .collect();
+        let base_schemas = self
+            .base_schemas
+            .clone()
+            .into_iter()
+            .map(|(k, v)| (Table::from(k), v))
+            .collect();
+
         stmt.rewrite(RewriteContext {
-            view_schemas: &self.view_schemas,
-            base_schemas: &self.base_schemas,
+            view_schemas: &view_schemas,
+            base_schemas: &base_schemas,
         })
     }
 

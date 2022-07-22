@@ -4,9 +4,9 @@ use std::iter;
 use itertools::{Either, Itertools};
 use nom_sql::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, JoinConstraint, JoinRightSide,
-    SelectStatement, SqlQuery, TableExpr,
+    SelectStatement, SqlIdentifier, SqlQuery, Table, TableExpr,
 };
-use readyset_errors::{internal_err, unsupported, unsupported_err, ReadySetResult};
+use readyset_errors::{internal_err, invalid_err, unsupported, unsupported_err, ReadySetResult};
 
 pub trait DetectProblematicSelfJoins: Sized {
     /// Detect and return an unsupported error for any joins where both sides of the join key are
@@ -22,22 +22,22 @@ pub trait DetectProblematicSelfJoins: Sized {
 
 fn check_select_statement<'a>(
     stmt: &'a SelectStatement,
-    cte_ctx: &HashMap<&'a str, &'a SelectStatement>,
+    cte_ctx: &HashMap<&'a SqlIdentifier, &'a SelectStatement>,
 ) -> ReadySetResult<()> {
     // Iterate over all the *base table* columns in the query that the given *projected* column
     // depends on
     fn dependent_columns<'a>(
         col: &'a Column,
         stmt: &'a SelectStatement,
-        cte_ctx: &HashMap<&'a str, &'a SelectStatement>,
-    ) -> ReadySetResult<impl Iterator<Item = ReadySetResult<(&'a str, &'a str)>> + 'a> {
-        let table_alias = col.table.as_ref().map(|t| &t.name).ok_or_else(|| {
+        cte_ctx: &HashMap<&'a SqlIdentifier, &'a SelectStatement>,
+    ) -> ReadySetResult<impl Iterator<Item = ReadySetResult<(Table, &'a str)>> + 'a> {
+        let table = col.table.as_ref().ok_or_else(|| {
             internal_err!("detect_problematic_self_joins must be run after expand_implied_tables")
         })?;
 
-        // TODO: Consider `Table::schema`
         let table_matches = |tbl: &TableExpr| {
-            tbl.alias.as_ref() == Some(table_alias) || tbl.table.name == *table_alias
+            (table.schema.is_none() && tbl.alias.as_ref() == Some(&table.name))
+                || tbl.table == *table
         };
 
         macro_rules! once_ok {
@@ -50,24 +50,20 @@ fn check_select_statement<'a>(
         }
 
         if let Some(tbl) = stmt.tables.iter().find(|t| table_matches(t)) {
-            Ok(once_ok!(tbl.table.name.as_str(), col.name.as_str()))
+            Ok(once_ok!(tbl.table.clone(), col.name.as_str()))
         } else {
             let ctes = cte_ctx
                 .iter()
                 .map(|(k, v)| (*k, *v))
-                .chain(
-                    stmt.ctes
-                        .iter()
-                        .map(|cte| (cte.name.as_str(), &cte.statement)),
-                )
+                .chain(stmt.ctes.iter().map(|cte| (&cte.name, &cte.statement)))
                 .collect::<HashMap<_, _>>();
 
             fn trace_subquery<'a>(
                 stmt: &'a SelectStatement,
-                table_alias: &'a str,
+                table: Table,
                 col_name: &'a str,
-                ctes: &HashMap<&'a str, &'a SelectStatement>,
-            ) -> ReadySetResult<impl Iterator<Item = ReadySetResult<(&'a str, &'a str)>> + 'a>
+                ctes: &HashMap<&'a SqlIdentifier, &'a SelectStatement>,
+            ) -> ReadySetResult<impl Iterator<Item = ReadySetResult<(Table, &'a str)>> + 'a>
             {
                 check_select_statement(stmt, ctes)?;
                 let expr = stmt
@@ -85,11 +81,7 @@ fn check_select_statement<'a>(
                         _ => None,
                     })
                     .ok_or_else(|| {
-                        unsupported_err!(
-                            "Could not resolve column reference {}.{}",
-                            table_alias,
-                            col_name
-                        )
+                        invalid_err!("Could not resolve column reference {}.{}", table, col_name)
                     })?;
                 let ctes = ctes.clone();
                 Ok(expr
@@ -103,26 +95,28 @@ fn check_select_statement<'a>(
                         _ => Ok(Either::Right(iter::empty())),
                     })
                     .flatten_ok()
-                    .map(|r: Result<Result<_, _>, _>| -> Result<(&str, &str), _> { r.flatten() }))
+                    .map(|r: Result<Result<_, _>, _>| -> Result<(Table, &str), _> { r.flatten() }))
             }
 
             let mut res = None;
             for j in &stmt.join {
                 match &j.right {
                     JoinRightSide::Table(t) if table_matches(t) => {
-                        res = Some(once_ok!(t.table.name.as_str(), col.name.as_str()));
+                        res = Some(once_ok!(t.table.clone(), col.name.as_str()));
                         break;
                     }
                     JoinRightSide::Tables(ts) => {
                         if let Some(tbl) = ts.iter().find(|t| table_matches(t)) {
-                            res = Some(once_ok!(tbl.table.name.as_str(), col.name.as_str()));
+                            res = Some(once_ok!(tbl.table.clone(), col.name.as_str()));
                             break;
                         }
                     }
-                    JoinRightSide::NestedSelect(stmt, t) if t == table_alias => {
+                    JoinRightSide::NestedSelect(stmt, alias)
+                        if table.schema.is_none() && *alias == table.name =>
+                    {
                         res = Some(Either::Right(trace_subquery(
                             stmt,
-                            table_alias,
+                            table.clone(),
                             &col.name,
                             &ctes,
                         )?));
@@ -133,19 +127,17 @@ fn check_select_statement<'a>(
             }
 
             Ok(Either::Right(
-                res.ok_or_else(|| {
-                    unsupported_err!("Could not resolve table alias {}", table_alias)
-                })?
-                .map(move |c| {
-                    let (tbl, cn) = c?;
-                    if let Some(cte) = ctes.get(tbl) {
-                        Ok(Either::Right(trace_subquery(cte, tbl, cn, &ctes)?))
-                    } else {
-                        Ok(once_ok!((tbl, cn)))
-                    }
-                })
-                .flatten_ok()
-                .map(|r| r.flatten()),
+                res.ok_or_else(|| unsupported_err!("Could not resolve table alias {}", table))?
+                    .map(move |c| {
+                        let (tbl, cn) = c?;
+                        if tbl.schema.is_none() && let Some(cte) = ctes.get(&tbl.name) {
+                            Ok(Either::Right(trace_subquery(cte, tbl, cn, &ctes)?))
+                        } else {
+                            Ok(once_ok!((tbl, cn)))
+                        }
+                    })
+                    .flatten_ok()
+                    .map(|r| r.flatten()),
             ))
         }
     }
@@ -153,7 +145,7 @@ fn check_select_statement<'a>(
     fn expr_is_problematic<'a>(
         expr: &'a Expr,
         stmt: &'a SelectStatement,
-        cte_ctx: &HashMap<&'a str, &'a SelectStatement>,
+        cte_ctx: &HashMap<&'a SqlIdentifier, &'a SelectStatement>,
     ) -> ReadySetResult<bool> {
         expr.recursive_subexpressions()
             .chain(iter::once(expr))

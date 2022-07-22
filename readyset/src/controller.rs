@@ -468,7 +468,10 @@ impl ControllerHandle {
                 .map_err(|e| rpc_err_no_downcast("ControllerHandle::table", e))?
             {
                 Some(tb) => Ok(tb.build(domains)),
-                None => Err(ReadySetError::TableNotFound(name)),
+                None => Err(ReadySetError::TableNotFound {
+                    name,
+                    schema: None, /* TODO fill in schema */
+                }),
             }
         }
     }

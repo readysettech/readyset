@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expr, SelectStatement,
-    SqlIdentifier, SqlQuery, TableExpr, TableKey,
+    SqlQuery, Table, TableExpr, TableKey,
 };
-use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 
 pub trait OrderLimitRemoval: Sized {
     /// Remove any LIMIT and ORDER statement belonging to a query that is determined to return at
@@ -14,13 +14,13 @@ pub trait OrderLimitRemoval: Sized {
     /// column have an associated table name.
     fn order_limit_removal(
         self,
-        base_schemas: &HashMap<SqlIdentifier, CreateTableStatement>,
+        base_schemas: &HashMap<Table, CreateTableStatement>,
     ) -> ReadySetResult<Self>;
 }
 
 fn is_unique_or_primary(
     col: &Column,
-    base_schemas: &HashMap<SqlIdentifier, CreateTableStatement>,
+    base_schemas: &HashMap<Table, CreateTableStatement>,
     table_exprs: &[TableExpr],
 ) -> ReadySetResult<bool> {
     // This assumes that we will find exactly one table matching col.table and exactly one col
@@ -29,25 +29,21 @@ fn is_unique_or_primary(
     // expand_implied_tables() pass
     // This pass should also be run after the key_def_coalition pass, beause this pass will only
     // search for primary keys in the table.keys filed (and not in column.constraints)
-    //
-    // TODO: consider table.schema
-    let table_name = col.table.as_ref().map(|t| &t.name).ok_or_else(|| {
-        ReadySetError::Internal(
-            "All columns must have an associated table name at this point".to_string(),
-        )
+    let table = col.table.as_ref().ok_or_else(|| {
+        internal_err!("All columns must have an associated table name at this point")
     })?;
 
-    let table = match base_schemas.get(table_name) {
+    let table = match base_schemas.get(table) {
         None => {
             // Attempt to resolve alias. Most queries are not likely to do this, so we resolve
             // reactively
-            let err_str = "Table name must match table in base schema".to_string();
-            let table_name = table_exprs
+            let err = || internal_err!("Table name must match table in base schema");
+            let resolved_table = table_exprs
                 .iter()
                 .find_map(|table_expr| {
-                    if let Some(_alias) = table_expr.alias.as_ref() {
-                        if table_name == _alias {
-                            Some(&table_expr.table.name)
+                    if let Some(alias) = table_expr.alias.as_ref() {
+                        if table.schema.is_none() && table.name == alias {
+                            Some(&table_expr.table)
                         } else {
                             None
                         }
@@ -55,10 +51,8 @@ fn is_unique_or_primary(
                         None
                     }
                 })
-                .ok_or_else(|| ReadySetError::Internal(err_str.clone()))?;
-            base_schemas
-                .get(table_name)
-                .ok_or(ReadySetError::Internal(err_str))?
+                .ok_or_else(err)?;
+            base_schemas.get(resolved_table).ok_or_else(err)?
         }
         Some(table) => table,
     };
@@ -96,7 +90,7 @@ fn is_unique_or_primary(
 
 fn compares_unique_key_against_literal(
     expr: &Expr,
-    base_schemas: &HashMap<SqlIdentifier, CreateTableStatement>,
+    base_schemas: &HashMap<Table, CreateTableStatement>,
     table_exprs: &[TableExpr],
 ) -> ReadySetResult<bool> {
     match expr {
@@ -127,7 +121,7 @@ fn compares_unique_key_against_literal(
 impl OrderLimitRemoval for SelectStatement {
     fn order_limit_removal(
         mut self,
-        base_schemas: &HashMap<SqlIdentifier, CreateTableStatement>,
+        base_schemas: &HashMap<Table, CreateTableStatement>,
     ) -> ReadySetResult<Self> {
         // If the query uses an equality filter on a column that has a unique or primary key
         // index, remove order and limit
@@ -147,7 +141,7 @@ impl OrderLimitRemoval for SelectStatement {
 impl OrderLimitRemoval for SqlQuery {
     fn order_limit_removal(
         self,
-        base_schemas: &HashMap<SqlIdentifier, CreateTableStatement>,
+        base_schemas: &HashMap<Table, CreateTableStatement>,
     ) -> ReadySetResult<Self> {
         match self {
             SqlQuery::Select(stmt) => Ok(SqlQuery::Select(stmt.order_limit_removal(base_schemas)?)),
@@ -162,11 +156,8 @@ mod tests {
 
     use super::*;
 
-    fn generate_base_schemas() -> HashMap<SqlIdentifier, CreateTableStatement> {
-        let table = Table {
-            name: "t".into(),
-            schema: None,
-        };
+    fn generate_base_schemas() -> HashMap<Table, CreateTableStatement> {
+        let table = Table::from("t");
 
         let col1 = ColumnSpecification {
             column: Column {
@@ -341,7 +332,7 @@ mod tests {
             name: None,
             columns: vec![col1.clone(), col2.clone()],
         }]);
-        base_schema.get_mut("t").unwrap().keys = keys;
+        base_schema.get_mut(&Table::from("t")).unwrap().keys = keys;
         assert_eq!(
             input_query,
             input_query
@@ -355,7 +346,7 @@ mod tests {
             columns: vec![col1, col2],
             index_type: None,
         }]);
-        base_schema.get_mut("t").unwrap().keys = keys;
+        base_schema.get_mut(&Table::from("t")).unwrap().keys = keys;
         assert_eq!(
             input_query,
             input_query

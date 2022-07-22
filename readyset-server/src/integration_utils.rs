@@ -173,15 +173,16 @@ pub fn get_counter(metric: &str, metrics_dump: &MetricsDump) -> f64 {
     }
 }
 
+// TODO: schema
 pub fn assert_table_not_found<T, S>(err: ReadySetResult<T>, table_name: S)
 where
     S: Into<String> + Display,
 {
     let table_name: String = table_name.into();
     match err {
-        Err(ReadySetError::TableNotFound(name))
+        Err(ReadySetError::TableNotFound { name, .. })
         | Err(ReadySetError::RpcFailed {
-            source: box ReadySetError::TableNotFound(name),
+            source: box ReadySetError::TableNotFound { name, .. },
             ..
         }) => assert_eq!(*name, table_name),
         _ => panic!("Expected table not found error for table {}", table_name),

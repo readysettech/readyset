@@ -306,7 +306,10 @@ impl Recipe {
         if removed_node_indices.is_none() {
             error!(table = %name,
                 "attempted to issue ALTER TABLE, but table does not exist");
-            return Err(ReadySetError::TableNotFound(name.clone().into()));
+            return Err(ReadySetError::TableNotFound {
+                name: name.clone().into(),
+                schema: None, /* TODO */
+            });
         };
         self.inc.add_table(new_table.clone(), mig)?;
         self.registry.add_query(RecipeExpr::Table(new_table))?;

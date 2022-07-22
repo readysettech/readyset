@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
 use nom_sql::analysis::visit::{walk_select_statement, Visitor};
-use nom_sql::{Column, Expr, FunctionExpr, SelectStatement, SqlIdentifier, SqlQuery, TableExpr};
+use nom_sql::{
+    Column, Expr, FunctionExpr, SelectStatement, SqlIdentifier, SqlQuery, Table, TableExpr,
+};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 
 #[derive(Debug)]
 pub struct CountStarRewriteVisitor<'schema> {
-    schemas: &'schema HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+    schemas: &'schema HashMap<Table, Vec<SqlIdentifier>>,
     tables: Option<Vec<TableExpr>>,
 }
 
@@ -36,12 +38,15 @@ impl<'ast, 'schema> Visitor<'ast> for CountStarRewriteVisitor<'schema> {
 
             let mut schema_iter = self
                 .schemas
-                .get(&bogo_table.table.name)
-                .ok_or_else(|| ReadySetError::TableNotFound(bogo_table.table.name.clone().into()))?
+                .get(&bogo_table.table)
+                .ok_or_else(|| ReadySetError::TableNotFound {
+                    name: bogo_table.table.name.clone().into(),
+                    schema: bogo_table.table.schema.clone().map(Into::into),
+                })?
                 .iter();
-            // The columns in the write_schemas map are actually columns as seen from the
+            // The columns in the table_columns map are actually columns as seen from the
             // current mir node. In this case, we've already passed star expansion, which
-            // means the list of columns in the passed in write_schemas map contains all
+            // means the list of columns in the passed in table_columns map contains all
             // columns for the table in question. This means that we are garaunteed to have
             // at least one result in this columns list, and can simply choose the first
             // column.
@@ -64,17 +69,17 @@ impl<'ast, 'schema> Visitor<'ast> for CountStarRewriteVisitor<'schema> {
 pub trait CountStarRewrite: Sized {
     fn rewrite_count_star(
         self,
-        write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+        schemas: &HashMap<Table, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<Self>;
 }
 
 impl CountStarRewrite for SelectStatement {
     fn rewrite_count_star(
         mut self,
-        write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+        schemas: &HashMap<Table, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<Self> {
         let mut visitor = CountStarRewriteVisitor {
-            schemas: write_schemas,
+            schemas,
             tables: None,
         };
 
@@ -86,10 +91,10 @@ impl CountStarRewrite for SelectStatement {
 impl CountStarRewrite for SqlQuery {
     fn rewrite_count_star(
         self,
-        write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+        schemas: &HashMap<Table, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<SqlQuery> {
         match self {
-            SqlQuery::Select(sq) => Ok(SqlQuery::Select(sq.rewrite_count_star(write_schemas)?)),
+            SqlQuery::Select(sq) => Ok(SqlQuery::Select(sq.rewrite_count_star(schemas)?)),
             _ => Ok(self),
         }
     }

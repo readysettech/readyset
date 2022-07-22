@@ -18,7 +18,7 @@ mod util;
 use std::collections::HashMap;
 
 pub use nom_sql::analysis::{contains_aggregate, is_aggregate};
-use nom_sql::{CreateTableStatement, SelectStatement, SqlIdentifier};
+use nom_sql::{CreateTableStatement, SelectStatement, SqlIdentifier, Table};
 use readyset_errors::ReadySetResult;
 
 pub use crate::alias_removal::AliasRemoval;
@@ -43,11 +43,11 @@ pub use crate::util::{
 pub struct RewriteContext<'a> {
     /// Map from names of views and tables in the database, to (ordered) lists of the column names
     /// in those views
-    pub view_schemas: &'a HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+    pub view_schemas: &'a HashMap<Table, Vec<SqlIdentifier>>,
 
     /// Map from names of *tables* in the database, to the [`CreateTableStatement`] that was used
     /// to create that table. Each key in this map should also exist in [`view_schemas`].
-    pub base_schemas: &'a HashMap<SqlIdentifier, CreateTableStatement>,
+    pub base_schemas: &'a HashMap<Table, CreateTableStatement>,
 }
 
 /// Extension trait providing the ability to rewrite a query to normalize, validate and desugar it.

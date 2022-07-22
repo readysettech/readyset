@@ -214,8 +214,15 @@ pub enum ReadySetError {
     /// A table couldn't be found.
     ///
     /// FIXME(eta): this is currently slightly overloaded in meaning.
-    #[error("Could not find table '{0}'")]
-    TableNotFound(String),
+    #[error(
+        "Could not find table '{}{}'",
+        schema.as_ref().map(|s| format!("{}.", s)).unwrap_or_default(),
+        name
+    )]
+    TableNotFound {
+        name: String,
+        schema: Option<String>,
+    },
 
     /// A view is not yet available.
     #[error("view not yet available")]
@@ -623,7 +630,7 @@ impl ReadySetError {
 
     /// Returns `true` if self is [`TableNotFound`].
     pub fn is_table_not_found(&self) -> bool {
-        matches!(self, Self::TableNotFound(..))
+        matches!(self, Self::TableNotFound { .. })
     }
 
     /// Returns `true` if self either *is* [`TableNotFound`], or was *caused by* [`TableNotFound`].

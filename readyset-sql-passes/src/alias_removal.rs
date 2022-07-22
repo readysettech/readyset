@@ -4,7 +4,8 @@ use std::mem;
 use itertools::Itertools;
 use nom_sql::analysis::visit::{walk_select_statement, Visitor};
 use nom_sql::{
-    Column, CommonTableExpr, JoinRightSide, SelectStatement, SqlIdentifier, SqlQuery, TableExpr,
+    Column, CommonTableExpr, JoinRightSide, SelectStatement, SqlIdentifier, SqlQuery, Table,
+    TableExpr,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -12,20 +13,20 @@ pub enum TableAliasRewrite {
     /// An alias to a base table was rewritten
     Table {
         from: SqlIdentifier,
-        to_table: SqlIdentifier,
+        to_table: Table,
     },
 
     /// An alias to a view was rewritten
     View {
         from: SqlIdentifier,
-        to_view: SqlIdentifier,
-        for_table: SqlIdentifier,
+        to_view: Table,
+        for_table: Table,
     },
 
     /// An alias to a common table expression was rewritten
     Cte {
         from: SqlIdentifier,
-        to_view: SqlIdentifier,
+        to_view: Table,
         for_statement: Box<SelectStatement>, // box for perf
     },
 }
@@ -39,8 +40,8 @@ pub trait AliasRemoval {
 
 struct RemoveAliasesVisitor<'a> {
     query_name: &'a str,
-    table_remap: HashMap<SqlIdentifier, SqlIdentifier>,
-    col_table_remap: HashMap<SqlIdentifier, SqlIdentifier>,
+    table_remap: HashMap<SqlIdentifier, Table>,
+    col_table_remap: HashMap<SqlIdentifier, Table>,
     out: Vec<TableAliasRewrite>,
 }
 
@@ -63,7 +64,7 @@ impl<'ast, 'a> Visitor<'ast> for RemoveAliasesVisitor<'a> {
                 JoinRightSide::Tables(ref ts) => ts.clone(),
                 _ => vec![],
             }))
-            .map(|t| (t.table.name /* TODO: schema */, t.alias))
+            .map(|t| (t.table, t.alias))
             .unique()
             .into_group_map();
 
@@ -71,7 +72,7 @@ impl<'ast, 'a> Visitor<'ast> for RemoveAliasesVisitor<'a> {
         let table_alias_rewrites: Vec<TableAliasRewrite> =
             table_refs
                 .into_iter()
-                .flat_map(|(name, aliases)| match aliases[..] {
+                .flat_map(|(table, aliases)| match aliases[..] {
                     [None] => {
                         // The table is never referred to by an alias. No rewrite is needed.
                         vec![]
@@ -82,7 +83,7 @@ impl<'ast, 'a> Visitor<'ast> for RemoveAliasesVisitor<'a> {
                         // to remove the alias and refer to the table itself.
                         vec![TableAliasRewrite::Table {
                             from: alias.clone(),
-                            to_table: name,
+                            to_table: table,
                         }]
                     }
 
@@ -97,7 +98,7 @@ impl<'ast, 'a> Visitor<'ast> for RemoveAliasesVisitor<'a> {
                             TableAliasRewrite::View {
                                 from: alias.clone(),
                                 to_view: format!("__{}__{}", self.query_name, alias).into(),
-                                for_table: name.clone(),
+                                for_table: table.clone(),
                             }
                         })
                         .collect(),
@@ -148,33 +149,35 @@ impl<'ast, 'a> Visitor<'ast> for RemoveAliasesVisitor<'a> {
         Ok(())
     }
 
-    fn visit_table_expr(&mut self, table: &'ast mut TableExpr) -> Result<(), Self::Error> {
-        if let Some(name) = table
+    fn visit_table_expr(&mut self, table_expr: &'ast mut TableExpr) -> Result<(), Self::Error> {
+        if let Some(table) = table_expr
             .alias
             .as_ref()
             .and_then(|t| self.table_remap.get(t))
             .cloned()
         {
-            table.table.name = name
-        } else if let Some(name) = self.col_table_remap.get(&table.table.name) {
-            table.table.name = name.clone();
+            table_expr.table = table
+        } else if table_expr.table.schema.is_none()
+            && let Some(table) = self.col_table_remap.get(&table_expr.table.name) {
+            // No schema, but table name in `col_table_remap`, means we're referencing an aliased
+            // subquery or CTE
+            table_expr.table = table.clone();
         }
-        table.alias = None;
+        table_expr.alias = None;
 
         Ok(())
     }
 
-    // TODO: This function currently ignores `Table::schema`, using only `Table::name` instead
     fn visit_column(&mut self, column: &'ast mut Column) -> Result<(), Self::Error> {
-        if let Some(remapped_table_name) = column
+        if let Some(remapped_table) = column
             .table
             .as_ref()
             .and_then(|t| self.col_table_remap.get(&t.name))
             .cloned()
         {
             // We know this table exists
-            if let Some(ref mut t) = column.table {
-                t.name = remapped_table_name;
+            if let Some(t) = &mut column.table {
+                *t = remapped_table;
             }
         }
 
@@ -518,5 +521,13 @@ mod tests {
             }]
         );
         assert_eq!(res, expected, "\n\n   {}\n!= {}", res, expected);
+    }
+
+    #[test]
+    fn schemas() {
+        rewrites_to!(
+            "SELECT t1.x, t2.x FROM schema_1.t AS t1, schema_2.t AS t2;",
+            "SELECT schema_1.t.x, schema_2.t.x FROM schema_1.t, schema_2.t;"
+        )
     }
 }

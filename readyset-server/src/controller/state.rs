@@ -465,7 +465,10 @@ impl DfState {
             Err(_) => *self
                 .inputs()
                 .get(base)
-                .ok_or_else(|| ReadySetError::TableNotFound(base.into()))?,
+                .ok_or_else(|| ReadySetError::TableNotFound {
+                    name: base.into(),
+                    schema: None, /* TODO */
+                })?,
         };
         let node = self
             .ingredients

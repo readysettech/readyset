@@ -1000,7 +1000,10 @@ async fn postgresql_ddl_replicate_drop_table() {
         matches!(
             res.err(),
             Some(ReadySetError::RpcFailed { source, .. })
-                if matches!(&*source, ReadySetError::TableNotFound(table) if table == "t1")
+                if matches!(&*source, ReadySetError::TableNotFound{
+                    name,
+                    schema: None
+                } if name == "t1")
         )
     }
 }

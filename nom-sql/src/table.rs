@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::common::{as_alias, ws_sep_comma};
 use crate::{Dialect, SqlIdentifier};
 
-#[derive(Clone, Debug, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Table {
     pub schema: Option<SqlIdentifier>,
     pub name: SqlIdentifier,
@@ -26,20 +26,6 @@ impl Display for Table {
         }
         write!(f, "`{}`", self.name)?;
         Ok(())
-    }
-}
-
-// `schema` is ignored for now as we do not support multiple DBs/namespaces
-impl Hash for Table {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
-    }
-}
-
-// `schema` is ignored for now as we do not support multiple DBs/namespaces
-impl PartialEq for Table {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
     }
 }
 
@@ -60,6 +46,15 @@ impl From<&SqlIdentifier> for Table {
 
 impl<'a> From<&'a str> for Table {
     fn from(t: &str) -> Table {
+        Table {
+            name: t.into(),
+            schema: None,
+        }
+    }
+}
+
+impl From<String> for Table {
+    fn from(t: String) -> Self {
         Table {
             name: t.into(),
             schema: None,

@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::mem;
 
+use itertools::Itertools;
 use nom_sql::analysis::visit::{
     walk_group_by_clause, walk_order_clause, walk_select_statement, Visitor,
 };
@@ -13,27 +14,15 @@ use crate::{outermost_table_exprs, util};
 pub trait ImpliedTableExpansion: Sized {
     fn expand_implied_tables(
         self,
-        write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+        table_columns: &HashMap<Table, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<Self>;
-}
-
-// Sets the table for the `Column` in `f`to `table`. This is mostly useful for CREATE TABLE
-// and INSERT queries and deliberately leaves function specifications unaffected, since
-// they can refer to remote tables and `set_table` should not be used for queries that have
-// computed columns.
-fn set_table(mut f: Column, table: &Table) -> ReadySetResult<Column> {
-    f.table = match f.table {
-        None => Some(table.clone()),
-        Some(x) => Some(x),
-    };
-    Ok(f)
 }
 
 #[derive(Debug)]
 struct ExpandImpliedTablesVisitor<'schema> {
-    schema: &'schema HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+    schema: &'schema HashMap<Table, Vec<SqlIdentifier>>,
     subquery_schemas: HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
-    tables: HashSet<SqlIdentifier>,
+    tables: HashSet<Table>,
     aliases: HashSet<SqlIdentifier>,
     // Are we currently in a position in the query that can reference aliases in the projected
     // field list?
@@ -41,28 +30,33 @@ struct ExpandImpliedTablesVisitor<'schema> {
 }
 
 impl<'schema> ExpandImpliedTablesVisitor<'schema> {
-    fn find_table(&self, column_name: &str) -> Option<SqlIdentifier> {
+    fn find_table(&self, column_name: &str) -> Option<Table> {
         let mut matches = self
             .schema
             .iter()
-            .chain(self.subquery_schemas.iter())
-            .filter(|&(t, _)| self.tables.is_empty() || self.tables.contains(t))
+            .map(|(t, v)| (t.clone(), v))
+            .chain(
+                self.subquery_schemas
+                    .iter()
+                    .map(|(n, fs)| (Table::from(n.clone()), fs)),
+            )
+            .filter(|(t, _)| self.tables.is_empty() || self.tables.contains(t))
             .filter_map(|(t, ws)| {
                 let num_matching = ws.iter().filter(|c| **c == column_name).count();
                 assert!(num_matching <= 1);
                 if num_matching == 1 {
-                    Some(SqlIdentifier::from(t))
+                    Some(t)
                 } else {
                     None
                 }
             })
-            .collect::<Vec<SqlIdentifier>>();
+            .collect::<Vec<_>>();
 
         if matches.len() > 1 {
             warn!(
                 "Ambiguous column {} exists in tables: {} -- picking a random one",
                 column_name,
-                matches.as_slice().join(", ")
+                matches.iter().join(", ")
             );
             Some(matches.pop().unwrap())
         } else if matches.is_empty() {
@@ -89,10 +83,10 @@ impl<'ast, 'schema> Visitor<'ast> for ExpandImpliedTablesVisitor<'schema> {
             outermost_table_exprs(select_statement)
                 .map(|tbl| {
                     tbl.alias
-                        .as_ref()
-                        .unwrap_or(&tbl.table.name /* TODO: schema */)
+                        .clone()
+                        .map(Table::from)
+                        .unwrap_or_else(|| tbl.table.clone())
                 })
-                .cloned()
                 .collect(),
         );
         let orig_subquery_schemas = mem::replace(
@@ -150,7 +144,7 @@ impl<'ast, 'schema> Visitor<'ast> for ExpandImpliedTablesVisitor<'schema> {
         }
 
         if !(self.can_reference_aliases && self.aliases.contains(&column.name)) {
-            column.table = self.find_table(&column.name).map(|t| t.into());
+            column.table = self.find_table(&column.name);
         }
 
         Ok(())
@@ -159,7 +153,7 @@ impl<'ast, 'schema> Visitor<'ast> for ExpandImpliedTablesVisitor<'schema> {
 
 fn rewrite_select(
     mut select_statement: SelectStatement,
-    schema: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+    schema: &HashMap<Table, Vec<SqlIdentifier>>,
 ) -> ReadySetResult<SelectStatement> {
     let mut visitor = ExpandImpliedTablesVisitor {
         schema,
@@ -176,16 +170,16 @@ fn rewrite_select(
 impl ImpliedTableExpansion for SelectStatement {
     fn expand_implied_tables(
         self,
-        write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+        table_columns: &HashMap<Table, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<Self> {
-        rewrite_select(self, write_schemas)
+        rewrite_select(self, table_columns)
     }
 }
 
 impl ImpliedTableExpansion for SqlQuery {
     fn expand_implied_tables(
         self,
-        write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+        table_columns: &HashMap<Table, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<SqlQuery> {
         Ok(match self {
             SqlQuery::CreateTable(..) => self,
@@ -193,18 +187,24 @@ impl ImpliedTableExpansion for SqlQuery {
                 csq.selects = csq
                     .selects
                     .into_iter()
-                    .map(|(op, sq)| Ok((op, rewrite_select(sq, write_schemas)?)))
+                    .map(|(op, sq)| Ok((op, rewrite_select(sq, table_columns)?)))
                     .collect::<ReadySetResult<Vec<_>>>()?;
                 SqlQuery::CompoundSelect(csq)
             }
-            SqlQuery::Select(sq) => SqlQuery::Select(sq.expand_implied_tables(write_schemas)?),
+            SqlQuery::Select(sq) => SqlQuery::Select(sq.expand_implied_tables(table_columns)?),
             SqlQuery::Insert(mut iq) => {
                 let table = iq.table.clone();
                 // Expand within field list
-                iq.fields = iq
-                    .fields
-                    .map(|fields| fields.into_iter().map(|c| set_table(c, &table)).collect())
-                    .transpose()?;
+                iq.fields = iq.fields.map(|fields| {
+                    fields
+                        .into_iter()
+                        .map(|c| Column {
+                            table: Some(c.table.unwrap_or_else(|| table.clone())),
+                            ..c
+                        })
+                        .collect()
+                });
+
                 SqlQuery::Insert(iq)
             }
             _ => internal!(),

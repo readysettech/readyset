@@ -5,7 +5,7 @@ use itertools::Either;
 use nom_sql::analysis::is_aggregate;
 use nom_sql::{
     BinaryOperator, Column, CommonTableExpr, Expr, FieldDefinitionExpr, FunctionExpr, InValue,
-    JoinClause, JoinRightSide, SelectStatement, SqlIdentifier, TableExpr,
+    JoinClause, JoinRightSide, SelectStatement, SqlIdentifier, Table, TableExpr,
 };
 
 pub(crate) fn join_clause_tables(join: &JoinClause) -> impl Iterator<Item = &TableExpr> {
@@ -27,17 +27,18 @@ pub fn outermost_table_exprs(stmt: &SelectStatement) -> impl Iterator<Item = &Ta
 /// Returns true if the given select statement is *correlated* if used as a subquery, eg if it
 /// refers to tables not explicitly mentioned in the query
 pub fn is_correlated(statement: &SelectStatement) -> bool {
-    let tables = outermost_table_exprs(statement)
+    let tables: HashSet<_> = outermost_table_exprs(statement)
         .map(|tbl| {
             tbl.alias
-                .as_ref()
-                .unwrap_or(&tbl.table.name /* TODO: schema */)
+                .clone()
+                .map(Table::from)
+                .unwrap_or_else(|| tbl.table.clone())
         })
-        .collect::<HashSet<_>>();
+        .collect();
 
     statement
         .outermost_referred_columns()
-        .any(|col| col.table.iter().any(|tbl| !tables.contains(&tbl.name)))
+        .any(|col| col.table.iter().any(|tbl| !tables.contains(tbl)))
 }
 
 fn field_names(statement: &SelectStatement) -> impl Iterator<Item = &SqlIdentifier> {
@@ -203,6 +204,12 @@ mod tests {
         fn correlated_query() {
             let query =
                 parse_select_statement("SELECT * FROM t WHERE t.x = t.y AND t.z = 4 AND t.w = u.a");
+            assert!(is_correlated(&query));
+        }
+
+        #[test]
+        fn correlated_different_schemas() {
+            let query = parse_select_statement("SELECT * FROM a.t WHERE a.t = b.t");
             assert!(is_correlated(&query));
         }
     }

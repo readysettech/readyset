@@ -1282,6 +1282,7 @@ async fn show_readyset_status() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Schema support is WIP (ENG-1447)"]
 async fn schema_qualifier() {
     let (opts, _handle) = setup(true).await;
     let conn = connect(opts).await;
