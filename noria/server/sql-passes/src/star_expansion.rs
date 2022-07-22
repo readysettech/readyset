@@ -1,10 +1,8 @@
 use std::collections::HashMap;
 use std::mem;
 
-use nom_sql::{
-    Column, CommonTableExpr, Expr, FieldDefinitionExpr, JoinClause, JoinRightSide, SelectStatement,
-    SqlIdentifier, SqlQuery,
-};
+use nom_sql::analysis::visit::{self, Visitor};
+use nom_sql::{Column, Expr, FieldDefinitionExpr, SelectStatement, SqlIdentifier, SqlQuery};
 use noria_errors::{ReadySetError, ReadySetResult};
 
 use crate::join_clause_tables;
@@ -12,46 +10,30 @@ use crate::join_clause_tables;
 pub trait StarExpansion: Sized {
     fn expand_stars(
         self,
-        write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+        table_columns: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<Self>;
 }
 
-impl StarExpansion for SelectStatement {
-    fn expand_stars(
-        mut self,
-        write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
-    ) -> ReadySetResult<Self> {
-        self.ctes = mem::take(&mut self.ctes)
-            .into_iter()
-            .map(|cte| -> ReadySetResult<_> {
-                Ok(CommonTableExpr {
-                    name: cte.name,
-                    statement: cte.statement.expand_stars(write_schemas)?,
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+struct ExpandStarsVisitor<'schema> {
+    table_columns: &'schema HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+}
 
-        self.join = mem::take(&mut self.join)
-            .into_iter()
-            .map(|join| -> ReadySetResult<_> {
-                Ok(JoinClause {
-                    right: match join.right {
-                        JoinRightSide::NestedSelect(stmt, name) => JoinRightSide::NestedSelect(
-                            Box::new(stmt.expand_stars(write_schemas)?),
-                            name,
-                        ),
-                        r => r,
-                    },
-                    ..join
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+impl<'ast, 'schema> Visitor<'ast> for ExpandStarsVisitor<'schema> {
+    type Error = ReadySetError;
 
-        let fields = mem::take(&mut self.fields);
-        let subquery_schemas = super::subquery_schemas(&self.ctes, &self.join);
+    fn visit_select_statement(
+        &mut self,
+        select_statement: &'ast mut SelectStatement,
+    ) -> Result<(), Self::Error> {
+        visit::walk_select_statement(self, select_statement)?;
 
-        let expand_table = move |table_name: SqlIdentifier| -> ReadySetResult<_> {
-            Ok(write_schemas
+        let fields = mem::take(&mut select_statement.fields);
+        let subquery_schemas =
+            super::subquery_schemas(&select_statement.ctes, &select_statement.join);
+
+        let expand_table = |table_name: SqlIdentifier| -> ReadySetResult<_> {
+            Ok(self
+                .table_columns
                 .get(&table_name)
                 .map(|fs| fs.iter().collect())
                 .or_else(|| subquery_schemas.get(&table_name).cloned())
@@ -66,28 +48,39 @@ impl StarExpansion for SelectStatement {
         for field in fields {
             match field {
                 FieldDefinitionExpr::All => {
-                    for table_expr in &self.tables {
+                    for table_expr in &select_statement.tables {
                         for field in expand_table(table_expr.table.name.clone())? {
-                            self.fields.push(field);
+                            select_statement.fields.push(field);
                         }
                     }
-                    for table_expr in self.join.iter().flat_map(join_clause_tables) {
+                    for table_expr in select_statement.join.iter().flat_map(join_clause_tables) {
                         for field in expand_table(table_expr.table.name.clone())? {
-                            self.fields.push(field);
+                            select_statement.fields.push(field);
                         }
                     }
                 }
                 FieldDefinitionExpr::AllInTable(t) => {
                     for field in expand_table(t.name /* TODO: schema */)? {
-                        self.fields.push(field);
+                        select_statement.fields.push(field);
                     }
                 }
                 e @ FieldDefinitionExpr::Expr { .. } => {
-                    self.fields.push(e);
+                    select_statement.fields.push(e);
                 }
             }
         }
 
+        Ok(())
+    }
+}
+
+impl StarExpansion for SelectStatement {
+    fn expand_stars(
+        mut self,
+        table_columns: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+    ) -> ReadySetResult<Self> {
+        let mut visitor = ExpandStarsVisitor { table_columns };
+        visitor.visit_select_statement(&mut self)?;
         Ok(self)
     }
 }
