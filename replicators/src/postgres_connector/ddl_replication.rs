@@ -460,7 +460,7 @@ mod tests {
             SqlQuery::CreateView(CreateViewStatement {
                 name, definition, ..
             }) => {
-                assert_eq!(name, "v");
+                assert_eq!(name, "v".into());
                 match *definition {
                     SelectSpecification::Simple(select_stmt) => {
                         assert_eq!(

@@ -32,7 +32,7 @@ impl RecipeExpr {
     pub(crate) fn name(&self) -> &SqlIdentifier {
         match self {
             RecipeExpr::Table(stmt) => &stmt.table.name,
-            RecipeExpr::View(cvs) => &cvs.name,
+            RecipeExpr::View(cvs) => &cvs.name.name,
             RecipeExpr::Cache { name, .. } => name,
         }
     }
@@ -285,7 +285,7 @@ mod tests {
 
             let view_name: SqlIdentifier = "test_view".into();
             let view = RecipeExpr::View(CreateViewStatement {
-                name: view_name.clone(),
+                name: view_name.clone().into(),
                 fields: vec![],
                 definition: Box::new(SelectSpecification::Simple(
                     nom_sql::parse_select_statement(Dialect::MySQL, "SELECT * FROM test_table;")
@@ -371,7 +371,7 @@ mod tests {
 
             let view_name: SqlIdentifier = "test_view".into();
             let view = RecipeExpr::View(CreateViewStatement {
-                name: view_name.clone(),
+                name: view_name.clone().into(),
                 fields: vec![],
                 definition: Box::new(SelectSpecification::Simple(
                     nom_sql::parse_select_statement(
@@ -475,7 +475,7 @@ mod tests {
             let mut registry = create_registry();
             let view_name: SqlIdentifier = "test_view2".into();
             let view = RecipeExpr::View(CreateViewStatement {
-                name: view_name.clone(),
+                name: view_name.clone().into(),
                 fields: vec![],
                 definition: Box::new(SelectSpecification::Simple(
                     nom_sql::parse_select_statement(
@@ -516,7 +516,7 @@ mod tests {
                     .unwrap();
             let view_name: SqlIdentifier = "test_view2".into();
             let view = RecipeExpr::View(CreateViewStatement {
-                name: view_name.clone(),
+                name: view_name.clone().into(),
                 fields: vec![],
                 definition: Box::new(SelectSpecification::Simple(select.clone())),
             });
@@ -530,7 +530,7 @@ mod tests {
             let view_qid = registry.aliases.get(&view_name).unwrap();
             let stored_expression = registry.expressions.get(view_qid).unwrap();
             if let RecipeExpr::View(cvs) = stored_expression {
-                assert_ne!(cvs.name.clone(), view_name);
+                assert_ne!(cvs.name.clone(), view_name.into());
                 let stored_select = cvs.definition.as_ref();
                 if let SelectSpecification::Simple(stored_select) = stored_select {
                     assert_eq!(stored_select.clone(), select);

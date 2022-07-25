@@ -10,7 +10,7 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{statement_terminator, ws_sep_comma};
-use crate::table::{table_list, Table};
+use crate::table::{table_list, table_reference, Table};
 use crate::whitespace::whitespace1;
 use crate::{Dialect, SqlIdentifier};
 
@@ -95,7 +95,7 @@ pub fn drop_cached_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], D
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DropViewStatement {
-    pub views: Vec<SqlIdentifier>,
+    pub views: Vec<Table>,
     pub if_exists: bool,
 }
 
@@ -105,11 +105,7 @@ impl Display for DropViewStatement {
         if self.if_exists {
             write!(f, "IF EXISTS ")?;
         }
-        write!(
-            f,
-            "{}",
-            self.views.iter().map(|v| format!("`{}`", v)).join(", ")
-        )
+        write!(f, "{}", self.views.iter().join(", "))
     }
 }
 
@@ -120,7 +116,7 @@ pub fn drop_view(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DropViewS
         let (i, _) = tag_no_case("view")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, if_exists) = if_exists(i)?;
-        let (i, views) = separated_list1(ws_sep_comma, dialect.identifier())(i)?;
+        let (i, views) = separated_list1(ws_sep_comma, table_reference(dialect))(i)?;
         let (i, _) = restrict_cascade(i)?;
         let (i, _) = statement_terminator(i)?;
         Ok((i, DropViewStatement { views, if_exists }))
@@ -210,14 +206,14 @@ mod tests {
     #[test]
     fn drop_single_view() {
         let res = test_parse!(drop_view(Dialect::MySQL), b"DroP   ViEw  v ;");
-        assert_eq!(res.views, vec![SqlIdentifier::from("v")]);
+        assert_eq!(res.views, vec![Table::from("v")]);
         assert!(!res.if_exists);
     }
 
     #[test]
     fn drop_view_if_exists() {
         let res = test_parse!(drop_view(Dialect::MySQL), b"DroP   ViEw  if EXISTS v ;");
-        assert_eq!(res.views, vec![SqlIdentifier::from("v")]);
+        assert_eq!(res.views, vec![Table::from("v")]);
         assert!(res.if_exists);
     }
 
@@ -226,11 +222,7 @@ mod tests {
         let res = test_parse!(drop_view(Dialect::MySQL), b"DroP   ViEw  v1,   v2, v3 ;");
         assert_eq!(
             res.views,
-            vec![
-                SqlIdentifier::from("v1"),
-                SqlIdentifier::from("v2"),
-                SqlIdentifier::from("v3")
-            ]
+            vec![Table::from("v1"), Table::from("v2"), Table::from("v3")]
         );
         assert!(!res.if_exists);
     }

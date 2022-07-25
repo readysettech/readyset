@@ -727,7 +727,7 @@ impl SqlIncorporator {
     ) -> Result<QueryFlowParts, ReadySetError> {
         let name = match q {
             SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
-            SqlQuery::CreateView(ref cvq) => cvq.name.clone(),
+            SqlQuery::CreateView(ref cvq) => cvq.name.name.clone(),
             SqlQuery::Select(_) | SqlQuery::CompoundSelect(_) => {
                 format!("q_{}", self.num_queries).into()
             }
@@ -842,7 +842,7 @@ impl SqlIncorporator {
         // CreateView in all of our rewrite passes.
         if let SqlQuery::CreateView(cvq) = q {
             use nom_sql::SelectSpecification;
-            let name = cvq.name.clone();
+            let name = cvq.name.name.clone();
             match *cvq.definition {
                 SelectSpecification::Compound(csq) => {
                     return self.nodes_for_named_query(
