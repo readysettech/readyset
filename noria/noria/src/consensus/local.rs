@@ -26,7 +26,7 @@ use serde::Serialize;
 
 use super::{
     AdapterId, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
-    WorkerDescriptor, WorkerId,
+    UpdateInPlace, WorkerDescriptor, WorkerId,
 };
 
 pub const CONTROLLER_KEY: &str = "/controller";
@@ -326,6 +326,14 @@ impl AuthorityControl for LocalAuthority {
         Ok(r)
     }
 
+    fn as_local<E, F, P>(&self) -> Option<&dyn UpdateInPlace<E, F, P>>
+    where
+        P: 'static,
+        F: FnMut(Option<&mut P>) -> Result<(), E>,
+    {
+        Some(self)
+    }
+
     async fn update_controller_state<F, U, P: 'static, E>(
         &self,
         mut f: F,
@@ -431,6 +439,17 @@ impl AuthorityControl for LocalAuthority {
 
     async fn get_adapters(&self) -> Result<HashSet<SocketAddr>, Error> {
         todo!();
+    }
+}
+
+impl<E, F, P> UpdateInPlace<E, F, P> for LocalAuthority
+where
+    P: 'static,
+    F: FnMut(Option<&mut P>) -> Result<(), E>,
+{
+    fn update_controller_in_place(&self, mut f: F) -> Result<(), E> {
+        let mut store_inner = self.store.inner_lock().unwrap();
+        f(store_inner.state.as_mut().and_then(|v| v.downcast_mut()))
     }
 }
 
