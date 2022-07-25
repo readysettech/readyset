@@ -95,9 +95,28 @@ pub struct WorkerDescriptor {
     pub domain_scheduling_config: WorkerSchedulingConfig,
 }
 
+pub trait UpdateInPlace<E, F, P>: Send + Sync
+where
+    F: FnMut(Option<&mut P>) -> Result<(), E>,
+{
+    /// An optimized method to update the controller state in place, the update is performed with
+    /// the provided `f` closure.
+    fn update_controller_in_place(&self, f: F) -> Result<(), E>;
+}
+
 #[async_trait]
 #[enum_dispatch]
 pub trait AuthorityControl: Send + Sync {
+    /// If this [`AuthorityControl`] also implements the optimized [`UpdateInPlace`] trait, returns
+    /// self as [`UpdateInPlace`], so caller can use optimized method instead.
+    fn as_local<E, F, P>(&self) -> Option<&dyn UpdateInPlace<E, F, P>>
+    where
+        P: 'static,
+        F: FnMut(Option<&mut P>) -> Result<(), E>,
+    {
+        None
+    }
+
     /// Initializes the authority. This performs any initialization that the authority client
     /// needs to perform with the backend. This should be performed before any other
     /// calls are made to AuthorityControl functions.

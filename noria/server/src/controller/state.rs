@@ -1399,29 +1399,46 @@ impl DataflowStateHandle {
         let persistable_ds = PersistableDataflowState {
             state: writer.state,
         };
-        authority
-            .update_controller_state(
-                |state: Option<ControllerState>| {
-                    let _ = &persistable_ds; // capture the whole value, so the closure implements
-                                             // Send
-                    match state {
-                        None => {
-                            eprintln!("There's no controller state to update");
-                            Err(())
-                        }
-                        Some(mut state) => {
-                            state.dataflow_state = persistable_ds.state.clone();
-                            Ok(state)
-                        }
-                    }
-                },
-                |state: &mut ControllerState| {
+
+        if let Some(local) = authority.as_local() {
+            local.update_controller_in_place(|state: Option<&mut ControllerState>| match state {
+                None => {
+                    eprintln!("There's no controller state to update");
+                    Err(())
+                }
+                Some(mut state) => {
+                    state.dataflow_state = persistable_ds.state.clone();
                     state.dataflow_state.touch_up();
-                },
-            )
-            .await
-            .map_err(|e| internal_err!("Unable to update state: {}", e))?
-            .map_err(|_| internal_err!("Unable to update state"))?;
+                    Ok(())
+                }
+            })
+        } else {
+            authority
+                .update_controller_state(
+                    |state: Option<ControllerState>| {
+                        let _ = &persistable_ds; // capture the whole value, so the closure implements
+                                                 // Send
+                        match state {
+                            None => {
+                                eprintln!("There's no controller state to update");
+                                Err(())
+                            }
+                            Some(mut state) => {
+                                state.dataflow_state = persistable_ds.state.clone();
+                                Ok(state)
+                            }
+                        }
+                    },
+                    |state: &mut ControllerState| {
+                        state.dataflow_state.touch_up();
+                    },
+                )
+                .await
+                .map_err(|e| internal_err!("Unable to update state: {}", e))?
+                .map(|_| ())
+        }
+        .map_err(|_| internal_err!("Unable to update state"))?;
+
         let mut state_guard = self.reader.write().await;
         state_guard.replace(persistable_ds.state);
         Ok(())
