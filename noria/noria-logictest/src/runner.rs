@@ -133,6 +133,14 @@ impl TestScript {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.records.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -147,11 +155,6 @@ impl TestScript {
                 .to_string_lossy()
                 .blue()
         );
-
-        let db_name = match &opts.upstream_database_url {
-            Some(db_url) => db_url.database_type().to_string(),
-            None => "Noria".to_owned(),
-        };
 
         if let Some(upstream_url) = &opts.upstream_database_url {
             self.recreate_test_database(upstream_url).await?;
@@ -169,16 +172,6 @@ impl TestScript {
 
             self.run_on_noria(&opts, &noria_opts).await?;
         };
-
-        println!(
-            "{}",
-            format!(
-                "==> Successfully ran {} operations against {}",
-                self.records.len(),
-                db_name
-            )
-            .bold()
-        );
 
         Ok(())
     }
