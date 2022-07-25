@@ -115,8 +115,8 @@ impl FromStr for ChangeList {
                                 }))
                             }
                             SqlQuery::DropView(dvs) => {
-                                changes.extend(dvs.views.into_iter().map(|name| Change::Drop {
-                                    name,
+                                changes.extend(dvs.views.into_iter().map(|t| Change::Drop {
+                                    name: t.name,
                                     if_exists: dvs.if_exists,
                                 }))
                             }
@@ -168,8 +168,8 @@ impl From<DropViewStatement> for ChangeList {
             changes: dvs
                 .views
                 .into_iter()
-                .map(|name| Change::Drop {
-                    name,
+                .map(|t| Change::Drop {
+                    name: t.name,
                     if_exists: dvs.if_exists,
                 })
                 .collect(),

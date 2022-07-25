@@ -106,14 +106,14 @@ impl fmt::Display for SelectSpecification {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateViewStatement {
-    pub name: SqlIdentifier,
+    pub name: Table,
     pub fields: Vec<Column>,
     pub definition: Box<SelectSpecification>,
 }
 
 impl fmt::Display for CreateViewStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "CREATE VIEW `{}` ", self.name)?;
+        write!(f, "CREATE VIEW {} ", self.name)?;
         if !self.fields.is_empty() {
             write!(f, "(")?;
             write!(
@@ -686,7 +686,7 @@ pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Creat
             opt(create_view_params),
             tag_no_case("view"),
             whitespace1,
-            dialect.identifier(),
+            table_reference(dialect),
             whitespace1,
             tag_no_case("as"),
             whitespace1,

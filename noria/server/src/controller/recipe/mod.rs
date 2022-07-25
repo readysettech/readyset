@@ -188,7 +188,7 @@ impl Recipe {
                 }
                 Change::CreateView(cvs) => {
                     let query = SqlQuery::CreateView(cvs.clone());
-                    let name = cvs.name.clone();
+                    let name = cvs.name.name.clone();
                     let expression = RecipeExpr::View(cvs);
                     if !self.registry.add_query(expression)? {
                         // The expression is already present, and we successfully added
