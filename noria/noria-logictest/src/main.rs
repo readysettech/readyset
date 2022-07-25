@@ -6,6 +6,7 @@ use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use std::{env, io, process};
 
 use anyhow::{anyhow, bail, Context};
@@ -35,6 +36,8 @@ use crate::from_query_log::FromQueryLog;
 use crate::generate::Generate;
 use crate::permute::Permute;
 use crate::runner::{NoriaOptions, RunOptions, TestScript};
+
+const REPORT_HANG: Duration = Duration::from_secs(20 * 60);
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -419,10 +422,43 @@ impl Verify {
             let noria_opts = NoriaOptions { authority };
 
             tasks.push(tokio::spawn(async move {
+                let test_started = Instant::now();
+
+                let script_name = script.name().to_string();
+                let hang_notifier = tokio::spawn(async move {
+                    tokio::time::sleep(REPORT_HANG).await;
+                    println!("Test {script_name} has been running for {REPORT_HANG:?}");
+                });
+
                 let script_result = script
                     .run(run_opts, noria_opts)
                     .await
                     .with_context(|| format!("Running test script {}", script.name()));
+
+                hang_notifier.abort();
+
+                if script_result.is_ok() {
+                    println!(
+                        "{}",
+                        format!(
+                            "==> {} successfully ran {} operations in {:.1} seconds",
+                            script.name(),
+                            script.len(),
+                            test_started.elapsed().as_secs_f64()
+                        )
+                        .bold()
+                    );
+                } else {
+                    println!(
+                        "{}",
+                        format!(
+                            "==> {} failed in {:.1} seconds",
+                            script.name(),
+                            test_started.elapsed().as_secs_f64()
+                        )
+                        .bold()
+                    );
+                }
 
                 match script_result {
                     Ok(_) if expected_result == ExpectedResult::Fail => {
