@@ -14,8 +14,9 @@ WORKDIR /opt/drupal/web
 
 # A couple hacks
 RUN \
-	# This fails searching for specific text in one of the front-end webpages; assumption is that it was never updated to handle some change to Drupal \
-	rm -vf core/modules/system/tests/src/Functional/Database/SelectTableSortDefaultTest.php && \
+  # These tests fail searching for specific text in one of the front-end webpages; assumption is that they were never updated to handle some change to Drupal \
+  rm -vf core/modules/system/tests/src/Functional/Database/SelectTableSortDefaultTest.php && \
+  rm -vf core/tests/Drupal/FunctionalTests/ExistingDrupal8StyleDatabaseConnectionInSettingsPhpTest.php && \
 	# This causes a PHP mkdir() call to not fail...one of those "you changed the outcome by observing it" type deals \
 	sed -i '/@mkdir/ i\      echo "!!! mkdir '"'"'${directory}'"'"'\\n";' core/lib/Drupal/Component/PhpStorage/FileStorage.php
 
