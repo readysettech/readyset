@@ -109,9 +109,6 @@ impl Join {
                             let remapped = remap[c];
                             let other = remap.iter().position(|&c| c == i);
 
-                            // Columns can't appear multiple times in join output!
-                            assert!((remapped >= i) || (emit[remapped].0 != side));
-
                             remap[c] = i;
                             if let Some(other) = other {
                                 remap[other] = remapped;
