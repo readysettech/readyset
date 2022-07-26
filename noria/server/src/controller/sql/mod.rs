@@ -23,7 +23,7 @@ use noria_errors::{
 use noria_sql_passes::alias_removal::TableAliasRewrite;
 use noria_sql_passes::{
     contains_aggregate, AliasRemoval, CountStarRewrite, DetectProblematicSelfJoins,
-    ImpliedTableExpansion, KeyDefinitionCoalescing, NegationRemoval, NormalizeTopKWithAggregate,
+    ImpliedTableExpansion, KeyDefinitionCoalescing, NormalizeNegation, NormalizeTopKWithAggregate,
     OrderLimitRemoval, RemoveNumericFieldReferences, RewriteBetween, StarExpansion,
     StripPostFilters,
 };
@@ -783,7 +783,7 @@ impl SqlIncorporator {
 
         let mut q = q
             .rewrite_between()
-            .remove_negation()?
+            .normalize_negation()
             .strip_post_filters()
             .coalesce_key_definitions()
             .expand_stars(&self.view_schemas)?
