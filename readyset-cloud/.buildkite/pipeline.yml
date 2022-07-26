@@ -4,4 +4,6 @@ steps:
     plugins:
       - docker-compose#v3.10.0:
           run: app
-          config: readyset-cloud/docker-compose.yml
+          config: docker-compose.yml
+    env:
+      READYSET_SUBPROJECT_ROOT: readyset-cloud/
