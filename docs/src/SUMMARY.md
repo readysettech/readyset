@@ -17,7 +17,7 @@
 
 # Git & Code Review
 
-- [Git](./git.mid)
+- [Git](./git.md)
 - [Git Tooling](./git-tooling.md)
 - [Gerrit](./gerrit.md)
 
