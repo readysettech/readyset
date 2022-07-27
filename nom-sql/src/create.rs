@@ -1556,7 +1556,10 @@ mod tests {
                 CacheInner::Statement(s) => s,
                 _ => panic!(),
             };
-            assert_eq!(statement.tables, vec!["users".into()]);
+            assert_eq!(
+                statement.tables,
+                vec![TableExpr::from(Table::from("users"))]
+            );
             assert!(res.always);
         }
 
