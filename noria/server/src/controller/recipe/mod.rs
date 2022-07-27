@@ -1,9 +1,7 @@
 use std::str;
 use std::vec::Vec;
 
-use nom_sql::{
-    CacheInner, CreateCacheStatement, CreateTableStatement, Dialect, SqlIdentifier, SqlQuery,
-};
+use nom_sql::{CacheInner, CreateCacheStatement, CreateTableStatement, SqlIdentifier, SqlQuery};
 use noria::recipe::changelist::{Change, ChangeList};
 use noria_errors::{
     internal, internal_err, invariant, invariant_eq, ReadySetError, ReadySetResult,
@@ -22,11 +20,6 @@ use crate::ReuseConfigType;
 
 mod alter_table;
 pub(super) mod registry;
-
-/// The canonical SQL dialect used for central Noria server recipes. All direct clients of
-/// noria-server must use this dialect for their SQL recipes, and all adapters and client libraries
-/// must translate into this dialect as part of handling requests from users
-pub const CANONICAL_DIALECT: Dialect = Dialect::MySQL;
 
 type QueryID = u128;
 
