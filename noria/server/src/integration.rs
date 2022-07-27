@@ -26,7 +26,8 @@ use dataflow::{DurabilityMode, Expr as DataflowExpr, PersistenceParameters, Read
 use futures::StreamExt;
 use itertools::Itertools;
 use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, ColumnSpecification, OrderType, SqlType, TableKey,
+    parse_query, BinaryOperator, Column, ColumnConstraint, ColumnSpecification, Dialect, OrderType,
+    SqlType, TableKey,
 };
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::consistency::Timestamp;
@@ -3487,7 +3488,9 @@ async fn finkelstein1982_queries() {
 
         // Add them one by one
         for q in lines.iter() {
-            assert!(inc.add_query(q, None, mig).is_ok());
+            assert!(inc
+                .add_parsed_query(parse_query(Dialect::MySQL, q).unwrap(), None, true, mig)
+                .is_ok());
         }
     })
     .await;
