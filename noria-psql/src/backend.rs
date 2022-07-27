@@ -52,8 +52,11 @@ impl ps::Backend for Backend {
 
     const SERVER_VERSION: &'static str = "13.4 (ReadySet)";
 
-    async fn on_init(&mut self, _database: &str) -> Result<(), ps::Error> {
-        Ok(())
+    async fn on_init(&mut self, _database: &str) -> Result<ps::CredentialsNeeded, ps::Error> {
+        match self.require_authentication {
+            true => Ok(ps::CredentialsNeeded::Cleartext),
+            false => Ok(ps::CredentialsNeeded::None),
+        }
     }
 
     async fn on_query(&mut self, query: &str) -> Result<ps::QueryResponse<Resultset>, ps::Error> {
@@ -79,6 +82,17 @@ impl ps::Backend for Backend {
 
     async fn on_close(&mut self, _statement_id: u32) -> Result<(), ps::Error> {
         Ok(())
+    }
+
+    async fn on_auth(&mut self, credentials: ps::Credentials) -> Result<(), ps::Error> {
+        match credentials {
+            ps::Credentials::Cleartext { user, password } => {
+                if self.users.get(&user) == Some(&password) {
+                    return Ok(());
+                }
+                return Err(ps::Error::AuthenticationFailure(user));
+            }
+        }
     }
 }
 

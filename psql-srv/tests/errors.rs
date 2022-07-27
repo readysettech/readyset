@@ -4,7 +4,10 @@ use async_trait::async_trait;
 use futures::Future;
 use postgres::NoTls;
 use postgres_types::Type;
-use psql_srv::{run_backend, Backend, Column, Error, PrepareResponse, QueryResponse};
+use psql_srv::{
+    run_backend, Backend, Column, Credentials, CredentialsNeeded, Error, PrepareResponse,
+    QueryResponse,
+};
 use tokio::join;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -39,7 +42,11 @@ impl Backend for ErrorBackend {
 
     const SERVER_VERSION: &'static str = "example";
 
-    async fn on_init(&mut self, _database: &str) -> Result<(), Error> {
+    async fn on_init(&mut self, _database: &str) -> Result<CredentialsNeeded, Error> {
+        Ok(CredentialsNeeded::None)
+    }
+
+    async fn on_auth(&mut self, _credentials: Credentials) -> Result<(), Error> {
         Ok(())
     }
 

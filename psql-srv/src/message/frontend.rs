@@ -42,6 +42,9 @@ pub enum FrontendMessage {
         query: BytesStr,
         parameter_data_types: Vec<Type>,
     },
+    PasswordMessage {
+        password: BytesStr,
+    },
     Query {
         query: BytesStr,
     },
@@ -70,6 +73,7 @@ impl fmt::Display for FrontendMessage {
             Self::Describe { .. } => write!(f, "Describe"),
             Self::Execute { .. } => write!(f, "Execute"),
             Self::Parse { .. } => write!(f, "Parse"),
+            Self::PasswordMessage { .. } => write!(f, "PasswordMessage"),
             Self::Query { .. } => write!(f, "Query"),
             Self::SSLRequest => write!(f, "SSLRequest"),
             Self::StartupMessage { .. } => write!(f, "StartupMessage"),

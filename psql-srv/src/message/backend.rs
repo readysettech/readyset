@@ -24,6 +24,7 @@ const SSL_RESPONSE_N: u8 = b'N';
 ///   which can be serialized along with the rest of the `BackendMessage`.
 #[derive(Debug, PartialEq)]
 pub enum BackendMessage<R> {
+    AuthenticationCleartextPassword,
     AuthenticationOk,
     BindComplete,
     CloseComplete,

@@ -23,6 +23,7 @@ use crate::message::StatementName::*;
 use crate::message::TransferFormat::{self, *};
 use crate::value::Value;
 
+const ID_AUTHENTICATE: u8 = b'p';
 const ID_BIND: u8 = b'B';
 const ID_CLOSE: u8 = b'C';
 const ID_DESCRIBE: u8 = b'D';
@@ -128,6 +129,10 @@ impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Decoder for Co
         let _length = get_i32(msg)?;
 
         let ret = match id {
+            ID_AUTHENTICATE => Ok(Some(PasswordMessage {
+                password: get_str(msg)?,
+            })),
+
             ID_BIND => {
                 let portal_name = get_str(msg)?;
                 let prepared_statement_name = get_str(msg)?;

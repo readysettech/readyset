@@ -14,7 +14,7 @@ use crate::message::ErrorSeverity;
 use crate::message::TransferFormat::{self, *};
 use crate::value::Value;
 
-const ID_AUTHENTICATION_OK: u8 = b'R';
+const ID_AUTHENTICATION_REQUEST: u8 = b'R';
 const ID_BIND_COMPLETE: u8 = b'2';
 const ID_CLOSE_COMPLETE: u8 = b'3';
 const ID_COMMAND_COMPLETE: u8 = b'C';
@@ -27,6 +27,7 @@ const ID_READY_FOR_QUERY: u8 = b'Z';
 const ID_ROW_DESCRIPTION: u8 = b'T';
 
 const AUTHENTICATION_OK_SUCCESS: i32 = 0;
+const AUTHENTICATION_CLEARTEXT_REQUIRED: i32 = 3;
 
 const COMMAND_COMPLETE_DELETE_TAG: &str = "DELETE";
 const COMMAND_COMPLETE_INSERT_TAG: &str = "INSERT";
@@ -87,8 +88,14 @@ where
     let start_ofs = dst.len();
 
     match message {
+        AuthenticationCleartextPassword => {
+            put_u8(ID_AUTHENTICATION_REQUEST, dst);
+            put_i32(LENGTH_PLACEHOLDER, dst);
+            put_i32(AUTHENTICATION_CLEARTEXT_REQUIRED, dst);
+        }
+
         AuthenticationOk => {
-            put_u8(ID_AUTHENTICATION_OK, dst);
+            put_u8(ID_AUTHENTICATION_REQUEST, dst);
             put_i32(LENGTH_PLACEHOLDER, dst);
             put_i32(AUTHENTICATION_OK_SUCCESS, dst);
         }
@@ -545,6 +552,20 @@ mod tests {
         exp.put_u8(b'R'); // message id
         exp.put_i32(8); // message length
         exp.put_i32(0); // success code
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_authentication_cleartext_password() {
+        let mut codec = Codec::<Vec<Value>>::new();
+        let mut buf = BytesMut::new();
+        codec
+            .encode(AuthenticationCleartextPassword, &mut buf)
+            .unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_u8(b'R'); // message id
+        exp.put_i32(8); // message length
+        exp.put_i32(3); // require cleartext password
         assert_eq!(buf, exp);
     }
 
