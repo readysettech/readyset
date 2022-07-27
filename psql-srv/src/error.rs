@@ -8,6 +8,9 @@ use crate::message::FrontendMessage;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("password authentication failed for user \"{0}\"")]
+    AuthenticationFailure(String),
+
     #[error("decode error: {0}")]
     DecodeError(#[from] DecodeError),
 

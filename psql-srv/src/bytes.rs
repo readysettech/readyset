@@ -7,7 +7,7 @@ use bytes::Bytes;
 /// A [`Bytes`] wrapper that always contains a valid utf8 string and can be borrowed as a `&str`.
 ///
 /// [`Bytes`]: https://docs.rs/bytes/0.5.6/bytes/struct.Bytes.html
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct BytesStr(Bytes);
 
 impl TryFrom<Bytes> for BytesStr {

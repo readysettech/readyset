@@ -32,8 +32,20 @@ use postgres_types::Type;
 use protocol::Protocol;
 use tokio::io::{AsyncRead, AsyncWrite};
 
+pub use crate::bytes::BytesStr;
 pub use crate::error::Error;
 pub use crate::value::Value;
+
+pub enum CredentialsNeeded {
+    None,
+    Cleartext,
+}
+
+// Represents different forms of credentials provided by the client as part of authorization
+#[derive(PartialEq, Eq)]
+pub enum Credentials {
+    Cleartext { user: String, password: String },
+}
 
 /// A trait for implementing a SQL backend that produces responses to SQL query statements. This
 /// trait is the primary interface for the `psql-srv` crate.
@@ -62,7 +74,12 @@ pub trait Backend {
     ///
     /// * `database` - The name of the database that will be used for queries to this `Backend`
     ///   instance.
-    async fn on_init(&mut self, database: &str) -> Result<(), Error>;
+    async fn on_init(&mut self, database: &str) -> Result<CredentialsNeeded, Error>;
+
+    /// Validate authentication credentials provided by connected client
+    ///
+    /// * `credentials` - Authentication info provided by the client
+    async fn on_auth(&mut self, credentials: Credentials) -> Result<(), Error>;
 
     /// Performs the specified SQL query.
     ///

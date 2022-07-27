@@ -91,7 +91,9 @@ async fn prepare_execute_fallback() {
 #[serial]
 async fn proxy_unsupported_sets() {
     let (config, _handle) = setup_w_fallback_with(
-        BackendBuilder::new().unsupported_set_mode(UnsupportedSetMode::Proxy),
+        BackendBuilder::new()
+            .unsupported_set_mode(UnsupportedSetMode::Proxy)
+            .require_authentication(false),
     )
     .await;
     let client = connect(config).await;

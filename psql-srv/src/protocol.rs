@@ -7,6 +7,7 @@ use smallvec::smallvec;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::error;
 
+use crate::bytes::BytesStr;
 use crate::channel::Channel;
 use crate::error::Error;
 use crate::message::BackendMessage::{self, *};
@@ -40,13 +41,18 @@ const UNKNOWN_TABLE: i32 = 0;
 /// The state transitions are:
 ///
 /// * StartingUp -> Ready
+/// * StartingUp -> Authenticating
+/// * Authenticating -> Ready
 /// * Ready -> Extended
 /// * Extended -> Error
 /// * Error -> Ready
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum State {
     /// The server is starting up
     StartingUp,
+
+    /// The client is performing authentication
+    Authenticating { user: BytesStr },
 
     /// The server is ready to accept queries
     Ready,
@@ -136,6 +142,32 @@ impl Protocol {
         channel: &mut Channel<C, B::Row>,
     ) -> Result<Response<B::Row, B::Resultset>, Error> {
         // TODO(grfn): Discard if self.state.is_error()?
+        let get_ready_message = || {
+            smallvec![
+                AuthenticationOk,
+                BackendMessage::ParameterStatus {
+                    parameter_name: "client_encoding".to_owned(),
+                    parameter_value: "UTF8".to_owned(),
+                },
+                BackendMessage::ParameterStatus {
+                    parameter_name: "DateStyle".to_owned(),
+                    parameter_value: "ISO".to_owned(),
+                },
+                BackendMessage::ParameterStatus {
+                    parameter_name: "TimeZone".to_owned(),
+                    parameter_value: "UTC".to_owned(),
+                },
+                BackendMessage::ParameterStatus {
+                    parameter_name: "standard_conforming_strings".to_owned(),
+                    parameter_value: "on".to_owned(),
+                },
+                BackendMessage::ParameterStatus {
+                    parameter_name: "server_version".to_owned(),
+                    parameter_value: B::SERVER_VERSION.to_owned(),
+                },
+                BackendMessage::ready_for_query_idle(),
+            ]
+        };
         match self.state {
             State::StartingUp => match message {
                 // A request for an SSL connection.
@@ -145,36 +177,43 @@ impl Protocol {
                 }
 
                 // A request to start up a connection, with some metadata provided.
-                StartupMessage { database, .. } => {
+                StartupMessage { database, user, .. } => {
                     let database = database
                         .ok_or_else(|| Error::Unsupported("database is required".to_string()))?;
-                    backend.on_init(database.borrow()).await?;
-                    self.state = State::Ready;
+                    let response = match backend.on_init(database.borrow()).await? {
+                        crate::CredentialsNeeded::None => {
+                            self.state = State::Ready;
+                            get_ready_message()
+                        }
+                        crate::CredentialsNeeded::Cleartext => {
+                            self.state = State::Authenticating {
+                                user: user.ok_or(Error::AuthenticationFailure(String::new()))?,
+                            };
+                            smallvec![AuthenticationCleartextPassword]
+                        }
+                    };
+
                     channel.set_start_up_complete();
-                    Ok(Response::Messages(smallvec![
-                        AuthenticationOk,
-                        BackendMessage::ParameterStatus {
-                            parameter_name: "client_encoding".to_owned(),
-                            parameter_value: "UTF8".to_owned(),
-                        },
-                        BackendMessage::ParameterStatus {
-                            parameter_name: "DateStyle".to_owned(),
-                            parameter_value: "ISO".to_owned(),
-                        },
-                        BackendMessage::ParameterStatus {
-                            parameter_name: "TimeZone".to_owned(),
-                            parameter_value: "UTC".to_owned(),
-                        },
-                        BackendMessage::ParameterStatus {
-                            parameter_name: "standard_conforming_strings".to_owned(),
-                            parameter_value: "on".to_owned(),
-                        },
-                        BackendMessage::ParameterStatus {
-                            parameter_name: "server_version".to_owned(),
-                            parameter_value: B::SERVER_VERSION.to_owned(),
-                        },
-                        BackendMessage::ready_for_query_idle(),
-                    ]))
+                    Ok(Response::Messages(response))
+                }
+
+                m => {
+                    println!("FAILED TO HANDLE MESSAGE: {m:?}");
+                    Err(Error::UnsupportedMessage(m))
+                }
+            },
+
+            State::Authenticating { ref user } => match message {
+                PasswordMessage { ref password } => {
+                    backend
+                        .on_auth(crate::Credentials::Cleartext {
+                            user: user.to_string(),
+                            password: password.to_string(),
+                        })
+                        .await?;
+                    self.state = State::Ready;
+
+                    Ok(Response::Messages(get_ready_message()))
                 }
 
                 m => Err(Error::UnsupportedMessage(m)),
@@ -437,6 +476,7 @@ impl Protocol {
 
 fn make_error_response<R>(error: Error) -> BackendMessage<R> {
     let sqlstate = match error {
+        Error::AuthenticationFailure(_) => SqlState::INVALID_PASSWORD,
         Error::DecodeError(_) => SqlState::IO_ERROR,
         Error::EncodeError(_) => SqlState::IO_ERROR,
         Error::IncorrectFormatCount(_) => SqlState::IO_ERROR,
@@ -594,7 +634,7 @@ mod tests {
     use super::*;
     use crate::bytes::BytesStr;
     use crate::value::Value as DataValue;
-    use crate::{PrepareResponse, QueryResponse};
+    use crate::{Credentials, CredentialsNeeded, PrepareResponse, QueryResponse};
 
     fn bytes_str(s: &str) -> BytesStr {
         let mut buf = BytesMut::new();
@@ -627,6 +667,7 @@ mod tests {
         last_close: Option<u32>,
         last_execute_id: Option<u32>,
         last_execute_params: Option<Vec<DataValue>>,
+        needed_credentials: Option<Credentials>,
     }
 
     impl Backend {
@@ -641,6 +682,7 @@ mod tests {
                 last_close: None,
                 last_execute_id: None,
                 last_execute_params: None,
+                needed_credentials: None,
             }
         }
     }
@@ -653,9 +695,26 @@ mod tests {
 
         const SERVER_VERSION: &'static str = "test";
 
-        async fn on_init(&mut self, database: &str) -> Result<(), Error> {
+        async fn on_init(&mut self, database: &str) -> Result<CredentialsNeeded, Error> {
             self.database = Some(database.to_string());
-            Ok(())
+            match &self.needed_credentials {
+                Some(_) => Ok(CredentialsNeeded::Cleartext),
+                None => Ok(CredentialsNeeded::None),
+            }
+        }
+
+        async fn on_auth(&mut self, provided: Credentials) -> Result<(), Error> {
+            let needed_credentials = match &self.needed_credentials {
+                Some(n) => n,
+                None => return Ok(()),
+            };
+
+            match (needed_credentials, &provided) {
+                (needed, provided) if needed == provided => Ok(()),
+                (Credentials::Cleartext { .. }, Credentials::Cleartext { user, .. }) => {
+                    Err(Error::AuthenticationFailure(user.to_owned()))
+                }
+            }
         }
 
         async fn on_query(&mut self, query: &str) -> Result<QueryResponse<Self::Resultset>, Error> {
@@ -830,6 +889,107 @@ mod tests {
         assert_eq!(backend.database.unwrap(), "database_name");
         // The protocol is no longer "starting up".
         assert_eq!(protocol.state, State::Ready);
+    }
+
+    #[test]
+    fn authentication_flow_successful() {
+        let expected_username = bytes_str("user_name");
+        let expected_password = bytes_str("password");
+        let mut protocol = Protocol::new();
+        assert_eq!(protocol.state, State::StartingUp);
+        let request = FrontendMessage::StartupMessage {
+            protocol_version: 12345,
+            user: Some(expected_username.clone()),
+            database: Some(bytes_str("database_name")),
+        };
+        let mut backend = Backend::new();
+        backend.needed_credentials = Some(Credentials::Cleartext {
+            user: expected_username.to_string(),
+            password: expected_password.to_string(),
+        });
+        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        assert_eq!(
+            block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
+            Response::Messages(smallvec![BackendMessage::AuthenticationCleartextPassword])
+        );
+        assert_eq!(
+            protocol.state,
+            State::Authenticating {
+                user: expected_username
+            }
+        );
+
+        let auth_request = FrontendMessage::PasswordMessage {
+            password: expected_password,
+        };
+
+        assert_eq!(
+            block_on(protocol.on_request(auth_request, &mut backend, &mut channel)).unwrap(),
+            Response::Messages(smallvec![
+                BackendMessage::AuthenticationOk,
+                BackendMessage::ParameterStatus {
+                    parameter_name: "client_encoding".to_owned(),
+                    parameter_value: "UTF8".to_owned(),
+                },
+                BackendMessage::ParameterStatus {
+                    parameter_name: "DateStyle".to_owned(),
+                    parameter_value: "ISO".to_owned(),
+                },
+                BackendMessage::ParameterStatus {
+                    parameter_name: "TimeZone".to_owned(),
+                    parameter_value: "UTC".to_owned(),
+                },
+                BackendMessage::ParameterStatus {
+                    parameter_name: "standard_conforming_strings".to_owned(),
+                    parameter_value: "on".to_owned(),
+                },
+                BackendMessage::ParameterStatus {
+                    parameter_name: "server_version".to_owned(),
+                    parameter_value: "test".to_owned(),
+                },
+                BackendMessage::ready_for_query_idle()
+            ])
+        );
+    }
+
+    #[test]
+    fn authentication_flow_failure() {
+        let expected_username = bytes_str("user_name");
+        let expected_password = bytes_str("password");
+        let provided_password = bytes_str("incorrect password");
+        let mut protocol = Protocol::new();
+        assert_eq!(protocol.state, State::StartingUp);
+        let request = FrontendMessage::StartupMessage {
+            protocol_version: 12345,
+            user: Some(expected_username.clone()),
+            database: Some(bytes_str("database_name")),
+        };
+        let mut backend = Backend::new();
+        backend.needed_credentials = Some(Credentials::Cleartext {
+            user: expected_username.to_string(),
+            password: expected_password.to_string(),
+        });
+        let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
+        assert_eq!(
+            block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
+            Response::Messages(smallvec![BackendMessage::AuthenticationCleartextPassword])
+        );
+        assert_eq!(
+            protocol.state,
+            State::Authenticating {
+                user: expected_username.clone()
+            }
+        );
+
+        let auth_request = FrontendMessage::PasswordMessage {
+            password: provided_password,
+        };
+
+        let output =
+            block_on(protocol.on_request(auth_request, &mut backend, &mut channel)).unwrap_err();
+        assert!(
+            matches!(output, Error::AuthenticationFailure(x) if x == expected_username.to_string())
+        );
     }
 
     #[test]
