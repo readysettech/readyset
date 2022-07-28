@@ -695,7 +695,7 @@ mod tests {
             w.swap();
             assert!(r.get(&key).is_ok());
 
-            w.mark_hole(&key.clone().into());
+            w.mark_hole(&key.clone().into()).unwrap();
             w.swap();
             assert!(r.get(&key).err().unwrap().is_miss());
         }
@@ -725,7 +725,8 @@ mod tests {
 
             w.mark_hole(&KeyComparison::from_range(
                 &(vec1![DataType::from(0)]..vec1![DataType::from(10)]),
-            ));
+            ))
+            .unwrap();
             w.swap();
             assert!(r.get_multi(range_key).err().unwrap().is_miss());
         }
