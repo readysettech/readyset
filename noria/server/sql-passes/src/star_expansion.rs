@@ -5,7 +5,7 @@ use nom_sql::analysis::visit::{self, Visitor};
 use nom_sql::{Column, Expr, FieldDefinitionExpr, SelectStatement, SqlIdentifier, SqlQuery};
 use noria_errors::{ReadySetError, ReadySetResult};
 
-use crate::join_clause_tables;
+use crate::util::{self, join_clause_tables};
 
 pub trait StarExpansion: Sized {
     fn expand_stars(
@@ -29,7 +29,7 @@ impl<'ast, 'schema> Visitor<'ast> for ExpandStarsVisitor<'schema> {
 
         let fields = mem::take(&mut select_statement.fields);
         let subquery_schemas =
-            super::subquery_schemas(&select_statement.ctes, &select_statement.join);
+            util::subquery_schemas(&select_statement.ctes, &select_statement.join);
 
         let expand_table = |table_name: SqlIdentifier| -> ReadySetResult<_> {
             Ok(self

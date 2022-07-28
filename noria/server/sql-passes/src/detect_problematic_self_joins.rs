@@ -196,6 +196,13 @@ fn check_select_statement<'a>(
     Ok(())
 }
 
+impl DetectProblematicSelfJoins for SelectStatement {
+    fn detect_problematic_self_joins(self) -> ReadySetResult<Self> {
+        check_select_statement(&self, &HashMap::new())?;
+        Ok(self)
+    }
+}
+
 impl DetectProblematicSelfJoins for SqlQuery {
     fn detect_problematic_self_joins(self) -> ReadySetResult<Self> {
         match &self {

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expr, SqlIdentifier, SqlQuery,
-    TableExpr, TableKey,
+    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expr, SelectStatement,
+    SqlIdentifier, SqlQuery, TableExpr, TableKey,
 };
 use noria_errors::{ReadySetError, ReadySetResult};
 
@@ -124,27 +124,35 @@ fn compares_unique_key_against_literal(
     }
 }
 
-impl OrderLimitRemoval for SqlQuery {
+impl OrderLimitRemoval for SelectStatement {
     fn order_limit_removal(
         mut self,
         base_schemas: &HashMap<SqlIdentifier, CreateTableStatement>,
     ) -> ReadySetResult<Self> {
         // If the query uses an equality filter on a column that has a unique or primary key
         // index, remove order and limit
-        if let SqlQuery::Select(stmt) = &mut self {
-            if stmt.limit.is_none() {
-                return Ok(self);
-            }
-            if let Some(ref expr) = stmt.where_clause {
-                if compares_unique_key_against_literal(expr, base_schemas, &stmt.tables)? {
-                    stmt.limit = None;
-                    stmt.offset = None;
-                    stmt.order = None;
-                    return Ok(self);
+        if self.limit.is_some() {
+            if let Some(ref expr) = self.where_clause {
+                if compares_unique_key_against_literal(expr, base_schemas, &self.tables)? {
+                    self.limit = None;
+                    self.offset = None;
+                    self.order = None;
                 }
             }
         }
         Ok(self)
+    }
+}
+
+impl OrderLimitRemoval for SqlQuery {
+    fn order_limit_removal(
+        self,
+        base_schemas: &HashMap<SqlIdentifier, CreateTableStatement>,
+    ) -> ReadySetResult<Self> {
+        match self {
+            SqlQuery::Select(stmt) => Ok(SqlQuery::Select(stmt.order_limit_removal(base_schemas)?)),
+            _ => Ok(self),
+        }
     }
 }
 

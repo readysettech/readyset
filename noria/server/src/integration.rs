@@ -27,7 +27,7 @@ use futures::StreamExt;
 use itertools::Itertools;
 use nom_sql::{
     parse_query, BinaryOperator, Column, ColumnConstraint, ColumnSpecification, Dialect, OrderType,
-    SqlType, TableKey,
+    SqlQuery, SqlType, TableKey,
 };
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::consistency::Timestamp;
@@ -790,7 +790,7 @@ async fn delete_row() {
     g.extend_recipe(
         "
         CREATE TABLE t1 (x int, y int, z int);
-        CREATE VIEW all_rows AS SELECT * FROM t1;
+        CREATE CACHE all_rows FROM SELECT * FROM t1;
     "
         .parse()
         .unwrap(),
@@ -3488,9 +3488,16 @@ async fn finkelstein1982_queries() {
 
         // Add them one by one
         for q in lines.iter() {
-            assert!(inc
-                .add_parsed_query(parse_query(Dialect::MySQL, q).unwrap(), None, true, mig)
-                .is_ok());
+            let q = parse_query(Dialect::MySQL, q).unwrap();
+            match q {
+                SqlQuery::CreateTable(stmt) => {
+                    inc.add_table(stmt, mig).unwrap();
+                }
+                SqlQuery::Select(stmt) => {
+                    inc.add_query(None, stmt, mig).unwrap();
+                }
+                _ => panic!("unexpected query type"),
+            }
         }
     })
     .await;
@@ -3813,7 +3820,7 @@ async fn union_basic() {
         "CREATE TABLE twos (id INTEGER PRIMARY KEY);
          CREATE TABLE threes (id INTEGER PRIMARY KEY);
          CREATE VIEW twos_union_threes AS (SELECT id FROM twos) UNION (SELECT id FROM threes);
-         CREATE CACHE query FROM SELECT id FROM twos_union_threes;"
+         CREATE CACHE `query` FROM SELECT id FROM twos_union_threes;"
             .parse()
             .unwrap(),
     )
@@ -4163,7 +4170,8 @@ async fn correct_nested_view_schema() {
 
     let r_txt = "CREATE TABLE votes (story int, user int);
                  CREATE TABLE stories (id int, content text);
-                 CREATE VIEW swvc AS SELECT stories.id, stories.content, COUNT(votes.user) AS vc \
+                 CREATE CACHE swvc FROM
+                 SELECT stories.id, stories.content, COUNT(votes.user) AS vc \
                      FROM stories \
                      JOIN votes ON (stories.id = votes.story) \
                      WHERE stories.id = ? GROUP BY votes.story;";
@@ -4378,7 +4386,7 @@ async fn test_join_with_reused_column_name() {
     g.extend_recipe(
         "CREATE TABLE votes (story int, user int);
          CREATE TABLE recs (story int, other int);
-         CREATE VIEW all_user_recs AS SELECT votes.user as user, recs.other as story
+         CREATE CACHE all_user_recs FROM SELECT votes.user as user, recs.other as story
              FROM votes \
              JOIN recs ON (votes.story = recs.story);"
             .parse()
@@ -4436,7 +4444,7 @@ async fn test_join_with_reused_column_name_with_param() {
     g.extend_recipe(
         "CREATE TABLE votes (story int, user int);
          CREATE TABLE recs (story int, other int);
-         CREATE VIEW user_recs AS SELECT votes.user as user, recs.other as story
+         CREATE CACHE user_recs FROM SELECT votes.user as user, recs.other as story
              FROM votes \
              JOIN recs ON (votes.story = recs.story) WHERE votes.user = ?;"
             .parse()
@@ -4501,24 +4509,6 @@ async fn self_join_basic() {
     votes.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
     votes.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
 
-    // Check like_minded
-
-    let mut query = g.view("like_minded").await.unwrap();
-    assert_eq!(query.columns(), vec!["user", "agreer"]);
-    let results: Vec<(i32, i32)> = query
-        .lookup(&[0i32.into()], true)
-        .await
-        .unwrap()
-        .into_vec()
-        .iter()
-        .map(|r| {
-            (
-                get_col!(query, r, "user", i32),
-                get_col!(query, r, "agreer", i32),
-            )
-        })
-        .sorted()
-        .collect();
     let expected = vec![
         (1, 1),
         (1, 1),
@@ -4530,7 +4520,6 @@ async fn self_join_basic() {
         (3, 1),
         (3, 3),
     ];
-    assert_eq!(results, expected);
 
     // Check follow_on
 
@@ -5221,7 +5210,7 @@ async fn filter_on_expression() {
 
     g.extend_recipe(
         "CREATE TABLE users (id int, birthday date);
-         CREATE VIEW friday_babies AS SELECT id FROM users WHERE dayofweek(birthday) = 6;"
+         CREATE CACHE friday_babies FROM SELECT id FROM users WHERE dayofweek(birthday) = 6;"
             .parse()
             .unwrap(),
     )
@@ -5349,7 +5338,7 @@ async fn left_join_null() {
     g.extend_recipe(
             "CREATE TABLE jim (id int, a int);
          CREATE TABLE bob (id int);
-         CREATE VIEW funky AS SELECT * FROM jim LEFT JOIN bob ON jim.id = bob.id WHERE bob.id IS NULL;".parse()
+         CREATE CACHE funky FROM SELECT * FROM jim LEFT JOIN bob ON jim.id = bob.id WHERE bob.id IS NULL;".parse()
         .unwrap(),
     )
     .await
@@ -5430,7 +5419,7 @@ async fn aggregate_after_filter_non_equality() {
 
     g.extend_recipe(
         "CREATE TABLE test (number int, value int);
-         CREATE VIEW filteragg AS SELECT sum(value) AS s FROM test WHERE number > 2;"
+         CREATE CACHE filteragg FROM SELECT sum(value) AS s FROM test WHERE number > 2;"
             .parse()
             .unwrap(),
     )
@@ -5471,7 +5460,7 @@ async fn join_simple_cte() {
     g.extend_recipe(
         "CREATE TABLE t1 (id int, value int);
          CREATE TABLE t2 (value int, name text);
-         CREATE VIEW join_simple_cte AS
+         CREATE CACHE join_simple_cte FROM
          WITH max_val AS (SELECT max(value) as value FROM t1)
          SELECT name FROM t2 JOIN max_val ON max_val.value = t2.value;"
             .parse()
@@ -5516,7 +5505,7 @@ async fn multiple_aggregate_sum() {
     g.extend_recipe(
 
             "CREATE TABLE test (number int, value1 int, value2 int);
-         CREATE VIEW multiagg AS SELECT sum(value1) AS s1, sum(value2) as s2 FROM test GROUP BY number;".parse()
+         CREATE CACHE multiagg FROM SELECT sum(value1) AS s1, sum(value2) as s2 FROM test GROUP BY number;".parse()
         .unwrap(),
     )
     .await
@@ -5582,7 +5571,7 @@ async fn multiple_aggregate_same_col() {
     g.extend_recipe(
 
             "CREATE TABLE test (number int, value int);
-         CREATE VIEW multiaggsamecol AS SELECT sum(value) AS s, avg(value) AS a FROM test GROUP BY number;".parse()
+         CREATE CACHE multiaggsamecol FROM SELECT sum(value) AS s, avg(value) AS a FROM test GROUP BY number;".parse()
         .unwrap(),
     )
     .await
@@ -5627,7 +5616,7 @@ async fn multiple_aggregate_sum_sharded() {
     let mut g = start_simple("multiple_aggregate_sharded").await;
 
     g.extend_recipe("CREATE TABLE test (number int, value1 int, value2 int);
-         CREATE VIEW multiaggsharded AS SELECT sum(value1) AS s1, sum(value2) as s2 FROM test GROUP BY number;".parse().unwrap())
+         CREATE CACHE multiaggsharded FROM SELECT sum(value1) AS s1, sum(value2) as s2 FROM test GROUP BY number;".parse().unwrap())
     .await
     .unwrap();
 
@@ -5690,7 +5679,7 @@ async fn multiple_aggregate_same_col_sharded() {
     let mut g = start_simple("multiple_aggregate_same_col_sharded").await;
 
     g.extend_recipe("CREATE TABLE test (number int, value int);
-         CREATE VIEW multiaggsamecolsharded AS SELECT sum(value) AS s, avg(value) AS a FROM test GROUP BY number;".parse().unwrap())
+         CREATE CACHE multiaggsamecolsharded FROM SELECT sum(value) AS s, avg(value) AS a FROM test GROUP BY number;".parse().unwrap())
     .await
     .unwrap();
 
@@ -5733,7 +5722,7 @@ async fn multiple_aggregate_over_two() {
     let mut g = start_simple_unsharded("multiple_aggregate_over_two").await;
 
     g.extend_recipe("CREATE TABLE test (number int, value int);
-         CREATE VIEW multiaggovertwo AS SELECT sum(value) AS s, avg(value) AS a, count(value) AS c, max(value) as m FROM test GROUP BY number;".parse().unwrap())
+         CREATE CACHE multiaggovertwo FROM SELECT sum(value) AS s, avg(value) AS a, count(value) AS c, max(value) as m FROM test GROUP BY number;".parse().unwrap())
     .await
     .unwrap();
 
@@ -5780,7 +5769,7 @@ async fn multiple_aggregate_over_two_sharded() {
     let mut g = start_simple("multiple_aggregate_over_two_sharded").await;
 
     g.extend_recipe("CREATE TABLE test (number int, value int);
-         CREATE VIEW multiaggovertwosharded AS SELECT sum(value) AS s, avg(value) AS a, count(value) AS c, max(value) as m FROM test GROUP BY number;".parse().unwrap())
+         CREATE CACHE multiaggovertwosharded FROM SELECT sum(value) AS s, avg(value) AS a, count(value) AS c, max(value) as m FROM test GROUP BY number;".parse().unwrap())
     .await
     .unwrap();
 
@@ -5825,7 +5814,7 @@ async fn multiple_aggregate_with_expressions() {
     let mut g = start_simple_unsharded("multiple_aggregate_with_expressions").await;
 
     g.extend_recipe("CREATE TABLE test (number int, value int);
-         CREATE VIEW multiaggwexpressions AS SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;".parse().unwrap())
+         CREATE CACHE multiaggwexpressions FROM SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;".parse().unwrap())
     .await
     .unwrap();
 
@@ -5869,7 +5858,7 @@ async fn multiple_aggregate_with_expressions_sharded() {
     let mut g = start_simple("multiple_aggregate_with_expressions_sharded").await;
 
     g.extend_recipe("CREATE TABLE test (number int, value int);
-         CREATE VIEW multiaggwexpressionssharded AS SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;".parse().unwrap())
+         CREATE CACHE multiaggwexpressionssharded FROM SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;".parse().unwrap())
     .await
     .unwrap();
 
@@ -5912,7 +5901,7 @@ async fn multiple_aggregate_reuse() {
     let mut g = start_simple_unsharded("multiple_aggregate_reuse").await;
 
     g.extend_recipe("CREATE TABLE test (number int, value int);
-         CREATE VIEW multiaggfirstquery AS SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;".parse().unwrap())
+         CREATE CACHE multiaggfirstquery FROM SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;".parse().unwrap())
     .await
     .unwrap();
 
@@ -5950,7 +5939,7 @@ async fn multiple_aggregate_reuse() {
     // children to update and not be re-used. We're intentionally re-using the same name for the
     // second aggregate so as much is as similar as possible, to rule out names being different
     // forcing a false re-use.
-    g.extend_recipe("CREATE VIEW multiaggsecondquery AS SELECT sum(value) AS s, max(value) AS a FROM test GROUP BY number;".parse().unwrap())
+    g.extend_recipe("CREATE CACHE multiaggsecondquery FROM SELECT sum(value) AS s, max(value) AS a FROM test GROUP BY number;".parse().unwrap())
     .await
     .unwrap();
 
@@ -6026,7 +6015,7 @@ async fn round_int_to_int() {
 
     g.extend_recipe(
         "CREATE TABLE test (value int);
-         CREATE VIEW roundinttoint AS SELECT round(value, -3) as r FROM test;"
+         CREATE CACHE roundinttoint FROM SELECT round(value, -3) as r FROM test;"
             .parse()
             .unwrap(),
     )
@@ -6058,7 +6047,7 @@ async fn round_float_to_float() {
 
     g.extend_recipe(
         "CREATE TABLE test (value double);
-         CREATE VIEW roundfloattofloat AS SELECT round(value, 2) as r FROM test;"
+         CREATE CACHE roundfloattofloat FROM SELECT round(value, 2) as r FROM test;"
             .parse()
             .unwrap(),
     )
@@ -6090,7 +6079,7 @@ async fn round_float() {
 
     g.extend_recipe(
         "CREATE TABLE test (value double);
-         CREATE VIEW roundfloat AS SELECT round(value, 0) as r FROM test;"
+         CREATE CACHE roundfloat FROM SELECT round(value, 0) as r FROM test;"
             .parse()
             .unwrap(),
     )
@@ -6125,7 +6114,7 @@ async fn round_with_precision_float() {
 
     g.extend_recipe(
         "CREATE TABLE test (value double);
-         CREATE VIEW roundwithprecisionfloat AS SELECT round(value, -1.0) as r FROM test;"
+         CREATE CACHE roundwithprecisionfloat FROM SELECT round(value, -1.0) as r FROM test;"
             .parse()
             .unwrap(),
     )
@@ -6157,7 +6146,7 @@ async fn round_bigint_to_bigint() {
 
     g.extend_recipe(
         "CREATE TABLE test (value bigint);
-         CREATE VIEW roundbiginttobigint AS SELECT round(value, -3) as r FROM test;"
+         CREATE CACHE roundbiginttobigint FROM SELECT round(value, -3) as r FROM test;"
             .parse()
             .unwrap(),
     )
@@ -6189,7 +6178,7 @@ async fn round_unsignedint_to_unsignedint() {
 
     g.extend_recipe(
         "CREATE TABLE test (value int unsigned);
-         CREATE VIEW roundunsignedtounsigned AS SELECT round(value, -3) as r FROM test;"
+         CREATE CACHE roundunsignedtounsigned FROM SELECT round(value, -3) as r FROM test;"
             .parse()
             .unwrap(),
     )
@@ -6221,7 +6210,7 @@ async fn round_unsignedbigint_to_unsignedbitint() {
 
     g.extend_recipe(
         "CREATE TABLE test (value bigint unsigned);
-         CREATE VIEW roundunsignedbiginttounsignedbigint AS SELECT round(value, -3) as r FROM test;".parse()
+         CREATE CACHE roundunsignedbiginttounsignedbigint FROM SELECT round(value, -3) as r FROM test;".parse()
         .unwrap(),
     )
     .await
@@ -6252,7 +6241,7 @@ async fn round_with_no_precision() {
 
     g.extend_recipe(
         "CREATE TABLE test (value bigint unsigned);
-         CREATE VIEW roundwithnoprecision AS SELECT round(value) as r FROM test;"
+         CREATE CACHE roundwithnoprecision FROM SELECT round(value) as r FROM test;"
             .parse()
             .unwrap(),
     )
@@ -6284,7 +6273,7 @@ async fn distinct_select_works() {
 
     g.extend_recipe(
         "CREATE TABLE test (value int);
-         CREATE VIEW distinctselect AS SELECT DISTINCT value as v FROM test;"
+         CREATE CACHE distinctselect FROM SELECT DISTINCT value as v FROM test;"
             .parse()
             .unwrap(),
     )
@@ -6434,7 +6423,7 @@ async fn distinct_select_works_sharded() {
 
     g.extend_recipe(
         "CREATE TABLE test (value int);
-         CREATE VIEW distinctselectsharded AS SELECT DISTINCT value as v FROM test;"
+         CREATE CACHE distinctselectsharded FROM SELECT DISTINCT value as v FROM test;"
             .parse()
             .unwrap(),
     )
@@ -6473,7 +6462,7 @@ async fn distinct_select_multi_col() {
 
     g.extend_recipe(
         "CREATE TABLE test (value int, number int);
-         CREATE VIEW distinctselectmulticol AS SELECT DISTINCT value as v, number as n FROM test;"
+         CREATE CACHE distinctselectmulticol FROM SELECT DISTINCT value as v, number as n FROM test;"
             .parse()
             .unwrap(),
     )
@@ -6515,7 +6504,7 @@ async fn distinct_select_multi_col_sharded() {
     g.extend_recipe(
 
             "CREATE TABLE test (value int, number int);
-         CREATE VIEW distinctselectmulticolsharded AS SELECT DISTINCT value as v, number as n FROM test;".parse()
+         CREATE CACHE distinctselectmulticolsharded FROM SELECT DISTINCT value as v, number as n FROM test;".parse()
         .unwrap(),
     )
     .await
@@ -6552,8 +6541,13 @@ async fn distinct_select_multi_col_sharded() {
 async fn distinct_select_with_builtin() {
     let mut g = start_simple_unsharded("distinct_select_with_builtin").await;
 
-    g.extend_recipe("CREATE TABLE test (value int, number int);
-         CREATE VIEW distinctselectwithbuiltin AS SELECT DISTINCT value as v, number as n, round(value) as r FROM test;".parse().unwrap())
+    g.extend_recipe(
+        "CREATE TABLE test (value int, number int);
+         CREATE CACHE distinctselectwithbuiltin FROM
+         SELECT DISTINCT value as v, number as n, round(value) as r FROM test;"
+            .parse()
+            .unwrap(),
+    )
     .await
     .unwrap();
 
@@ -6595,8 +6589,13 @@ async fn distinct_select_with_builtin() {
 async fn distinct_select_with_builtin_sharded() {
     let mut g = start_simple("distinct_select_with_builtin_sharded").await;
 
-    g.extend_recipe("CREATE TABLE test (value int, number int);
-         CREATE VIEW distinctselectwithbuiltinsharded AS SELECT DISTINCT value as v, number as n, round(value) as r FROM test;".parse().unwrap())
+    g.extend_recipe(
+        "CREATE TABLE test (value int, number int);
+         CREATE CACHE distinctselectwithbuiltinsharded FROM
+         SELECT DISTINCT value as v, number as n, round(value) as r FROM test;"
+            .parse()
+            .unwrap(),
+    )
     .await
     .unwrap();
 
@@ -6737,9 +6736,8 @@ async fn distinct_select_with_agg() {
     let mut g = start_simple_unsharded("distinct_select_with_agg").await;
 
     g.extend_recipe(
-
-            "CREATE TABLE test (value int, number int);
-         CREATE VIEW distinctselectwithagg AS SELECT DISTINCT avg(number) as a FROM test GROUP BY value;".parse()
+        "CREATE TABLE test (value int, number int);
+         CREATE CACHE distinctselectwithagg FROM SELECT DISTINCT avg(number) as a FROM test GROUP BY value;".parse()
         .unwrap(),
     )
     .await
@@ -6776,8 +6774,13 @@ async fn distinct_select_with_agg() {
 async fn distinct_select_with_agg_sharded() {
     let mut g = start_simple("distinct_select_with_agg_sharded").await;
 
-    g.extend_recipe("CREATE TABLE test (value int, number int);
-         CREATE VIEW distinctselectwithaggsharded AS SELECT DISTINCT avg(number) as a FROM test GROUP BY value;".parse().unwrap())
+    g.extend_recipe(
+        "CREATE TABLE test (value int, number int);
+         CREATE CACHE distinctselectwithaggsharded FROM
+         SELECT DISTINCT avg(number) as a FROM test GROUP BY value;"
+            .parse()
+            .unwrap(),
+    )
     .await
     .unwrap();
 
@@ -6811,8 +6814,13 @@ async fn distinct_select_with_agg_sharded() {
 async fn distinct_select_with_multi_agg() {
     let mut g = start_simple_unsharded("distinct_select_with_multi_agg").await;
 
-    g.extend_recipe("CREATE TABLE test (value int, number int);
-         CREATE VIEW distinctselectwithmultiagg AS SELECT DISTINCT avg(number) as a, count(number) as c FROM test GROUP BY value;".parse().unwrap())
+    g.extend_recipe(
+        "CREATE TABLE test (value int, number int);
+         CREATE CACHE distinctselectwithmultiagg FROM
+         SELECT DISTINCT avg(number) as a, count(number) as c FROM test GROUP BY value;"
+            .parse()
+            .unwrap(),
+    )
     .await
     .unwrap();
 
@@ -6848,7 +6856,7 @@ async fn distinct_select_with_multi_agg_sharded() {
     let mut g = start_simple("distinct_select_with_multi_agg_sharded").await;
 
     g.extend_recipe("CREATE TABLE test (value int, number int);
-         CREATE VIEW distinctselectwithmultiaggsharded AS SELECT DISTINCT avg(number) as a, count(number) as c FROM test GROUP BY value;".parse().unwrap())
+         CREATE CACHE distinctselectwithmultiaggsharded FROM SELECT DISTINCT avg(number) as a, count(number) as c FROM test GROUP BY value;".parse().unwrap())
     .await
     .unwrap();
 
@@ -6885,7 +6893,7 @@ async fn distinct_select_with_distinct_agg() {
     let mut g = start_simple_unsharded("distinct_select_with_distinct_agg").await;
 
     g.extend_recipe("CREATE TABLE test (value int, number int);
-         CREATE VIEW distinctselectwithdistinctagg AS SELECT DISTINCT count(DISTINCT number) as c FROM test GROUP BY value;".parse().unwrap())
+         CREATE CACHE distinctselectwithdistinctagg FROM SELECT DISTINCT count(DISTINCT number) as c FROM test GROUP BY value;".parse().unwrap())
     .await
     .unwrap();
 
@@ -6923,7 +6931,7 @@ async fn distinct_select_with_distinct_agg_sharded() {
     let mut g = start_simple("distinct_select_with_distinct_agg_sharded").await;
 
     g.extend_recipe("CREATE TABLE test (value int, number int);
-         CREATE VIEW distinctselectwithdistinctaggsharded AS SELECT DISTINCT count(DISTINCT number) as c FROM test GROUP BY value;".parse().unwrap())
+         CREATE CACHE distinctselectwithdistinctaggsharded FROM SELECT DISTINCT count(DISTINCT number) as c FROM test GROUP BY value;".parse().unwrap())
     .await
     .unwrap();
 
@@ -7418,7 +7426,7 @@ async fn group_by_agg_col_count() {
 
     g.extend_recipe(
         "CREATE TABLE test (value int, number int);
-         CREATE VIEW groupbyaggcolcount AS SELECT count(value) as c FROM test GROUP BY value;"
+         CREATE CACHE groupbyaggcolcount FROM SELECT count(value) as c FROM test GROUP BY value;"
             .parse()
             .unwrap(),
     )
@@ -7461,7 +7469,7 @@ async fn group_by_agg_col_avg() {
 
     g.extend_recipe(
         "CREATE TABLE test (value int, number int);
-         CREATE VIEW groupbyaggcolavg AS SELECT avg(value) as a FROM test GROUP BY value;"
+         CREATE CACHE groupbyaggcolavg FROM SELECT avg(value) as a FROM test GROUP BY value;"
             .parse()
             .unwrap(),
     )
@@ -7504,7 +7512,7 @@ async fn group_by_agg_col_sum() {
 
     g.extend_recipe(
         "CREATE TABLE test (value int, number int);
-         CREATE VIEW groupbyaggcolsum AS SELECT sum(value) as s FROM test GROUP BY value;"
+         CREATE CACHE groupbyaggcolsum FROM SELECT sum(value) as s FROM test GROUP BY value;"
             .parse()
             .unwrap(),
     )
@@ -7546,7 +7554,7 @@ async fn group_by_agg_col_multi() {
     let mut g = start_simple_unsharded("group_by_agg_col_multi").await;
 
     g.extend_recipe("CREATE TABLE test (value int, number int);
-         CREATE VIEW groupbyaggcolmulti AS SELECT count(value) as c, avg(number) as a FROM test GROUP BY value;".parse().unwrap())
+         CREATE CACHE groupbyaggcolmulti FROM SELECT count(value) as c, avg(number) as a FROM test GROUP BY value;".parse().unwrap())
     .await
     .unwrap();
 
@@ -8734,22 +8742,39 @@ async fn drop_view() {
 
     g.extend_recipe(
         "CREATE TABLE t1 (id int);
-         CREATE VIEW t1_view AS SELECT * FROM t1;"
+         CREATE CACHE t1_view FROM SELECT * FROM t1;"
             .parse()
             .unwrap(),
     )
     .await
     .unwrap();
 
-    assert!(g.view("t1_view").await.is_ok());
+    assert!(g
+        .extend_recipe(
+            "CREATE CACHE t1_select FROM SELECT * FROM t1_view"
+                .parse()
+                .unwrap()
+        )
+        .await
+        .is_ok());
+
+    g.extend_recipe("DROP CACHE t1_select;".parse().unwrap())
+        .await
+        .unwrap();
 
     g.extend_recipe("DROP VIEW t1_view;".parse().unwrap())
         .await
         .unwrap();
 
-    let view_res = g.view("t1_view").await;
-    let err = view_res.unwrap_err();
-    assert_eq!(err, ReadySetError::ViewNotFound("t1_view".into()));
+    let select_from_view_res = g
+        .extend_recipe(
+            "CREATE CACHE t1_select FROM SELECT * FROM t1_view"
+                .parse()
+                .unwrap(),
+        )
+        .await;
+    let err = select_from_view_res.unwrap_err();
+    assert!(err.to_string().contains("t1_view does not exist"));
 }
 
 #[tokio::test(flavor = "multi_thread")]

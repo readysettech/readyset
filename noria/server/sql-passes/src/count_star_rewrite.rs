@@ -34,9 +34,11 @@ impl<'ast, 'schema> Visitor<'ast> for CountStarRewriteVisitor<'schema> {
                 .cloned()
                 .ok_or_else(|| internal_err!("Tables should be set first"))?;
 
-            #[allow(clippy::unwrap_used)]
-            // We've already checked that all the tables referenced in the query exist
-            let mut schema_iter = self.schemas.get(&bogo_table.table.name).unwrap().iter();
+            let mut schema_iter = self
+                .schemas
+                .get(&bogo_table.table.name)
+                .ok_or_else(|| ReadySetError::TableNotFound(bogo_table.table.name.clone().into()))?
+                .iter();
             // The columns in the write_schemas map are actually columns as seen from the
             // current mir node. In this case, we've already passed star expansion, which
             // means the list of columns in the passed in write_schemas map contains all
@@ -66,23 +68,29 @@ pub trait CountStarRewrite: Sized {
     ) -> ReadySetResult<Self>;
 }
 
+impl CountStarRewrite for SelectStatement {
+    fn rewrite_count_star(
+        mut self,
+        write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+    ) -> ReadySetResult<Self> {
+        let mut visitor = CountStarRewriteVisitor {
+            schemas: write_schemas,
+            tables: None,
+        };
+
+        visitor.visit_select_statement(&mut self)?;
+        Ok(self)
+    }
+}
+
 impl CountStarRewrite for SqlQuery {
     fn rewrite_count_star(
         self,
         write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
     ) -> ReadySetResult<SqlQuery> {
         match self {
-            SqlQuery::Select(mut sq) => {
-                let mut visitor = CountStarRewriteVisitor {
-                    schemas: write_schemas,
-                    tables: None,
-                };
-
-                visitor.visit_select_statement(&mut sq)?;
-                Ok(SqlQuery::Select(sq))
-            }
-            // nothing to do for other query types, as they cannot have aliases
-            x => Ok(x),
+            SqlQuery::Select(sq) => Ok(SqlQuery::Select(sq.rewrite_count_star(write_schemas)?)),
+            _ => Ok(self),
         }
     }
 }

@@ -9,23 +9,15 @@ use ::mir::reuse::merge_mir_for_queries;
 use ::mir::visualize::GraphViz;
 use ::mir::{reuse as mir_reuse, Column, MirNodeRef};
 use ::serde::{Deserialize, Serialize};
-use launchpad::redacted::Sensitive;
-use nom_sql::analysis::ReferredTables;
 use nom_sql::{
     BinaryOperator, CompoundSelectOperator, CompoundSelectStatement, CreateTableStatement,
-    FieldDefinitionExpr, SelectStatement, SqlIdentifier, SqlQuery, Table, TableExpr,
+    CreateViewStatement, FieldDefinitionExpr, SelectSpecification, SelectStatement, SqlIdentifier,
+    Table, TableExpr,
 };
 use noria::internal::IndexType;
-use noria_errors::{
-    internal, internal_err, invalid_err, unsupported, ReadySetError, ReadySetResult,
-};
+use noria_errors::{internal_err, invalid_err, unsupported, ReadySetError, ReadySetResult};
 use noria_sql_passes::alias_removal::TableAliasRewrite;
-use noria_sql_passes::{
-    contains_aggregate, AliasRemoval, CountStarRewrite, DetectProblematicSelfJoins,
-    ImpliedTableExpansion, KeyDefinitionCoalescing, NormalizeNegation, NormalizeTopKWithAggregate,
-    OrderLimitRemoval, RemoveNumericFieldReferences, RewriteBetween, StarExpansion,
-    StripPostFilters,
-};
+use noria_sql_passes::{contains_aggregate, AliasRemoval, Rewrite, RewriteContext};
 use petgraph::graph::NodeIndex;
 use tracing::{debug, trace, warn};
 
@@ -71,6 +63,12 @@ impl Default for Config {
 /// the dataflow graph `graph`.
 ///
 /// The incorporator shares the lifetime of the dataflow graph it is associated with.
+///
+/// The entrypoints for adding queries to the `SqlIncorporator` are:
+///
+/// * [`add_table`][Self::add_table], to add a new `TABLE`
+/// * [`add_view`][Self::add_view], to add a new `VIEW`
+/// * [`add_query`][Self::add_query], to add a new cached query
 #[derive(Clone, Debug, Default)]
 // crate viz for tests
 pub(crate) struct SqlIncorporator {
@@ -118,24 +116,73 @@ impl SqlIncorporator {
         self.config.reuse_type = Some(reuse_type);
     }
 
-    /// Incorporates a single query into via the flow graph migration in `mig`. The `query`
-    /// argument is a `SqlQuery` structure, and the `name` argument supplies an optional name for
-    /// the query. If no `name` is specified, the table name is used in the case of CREATE TABLE
-    /// queries, and a deterministic, unique name is generated and returned otherwise.
-    ///
-    /// The return value is a tuple containing the query name (specified or computing) and a `Vec`
-    /// of `NodeIndex`es representing the nodes added to support the query.
-    pub(crate) fn add_parsed_query(
+    /// Add a new table, specified by the given `CREATE TABLE` statement, to the graph, using the
+    /// given `mig` to track changes.
+    pub(crate) fn add_table(
         &mut self,
-        query: SqlQuery,
-        name: Option<SqlIdentifier>,
-        is_leaf: bool,
+        statement: CreateTableStatement,
         mig: &mut Migration<'_>,
-    ) -> Result<QueryFlowParts, ReadySetError> {
-        match name {
-            None => self.nodes_for_query(query, is_leaf, mig),
-            Some(n) => self.nodes_for_named_query(query, n, false, is_leaf, mig),
-        }
+    ) -> ReadySetResult<()> {
+        let qfp = self.add_base_via_mir(self.rewrite(statement)?, mig)?;
+        self.leaf_addresses.insert(qfp.name, qfp.query_leaf);
+        Ok(())
+    }
+
+    /// Add a new SQL VIEW, specified by the given `CREATE VIEW` statement, to the graph, using the
+    /// given `mig` to track changes.
+    pub(crate) fn add_view(
+        &mut self,
+        statement: CreateViewStatement,
+        mig: &mut Migration<'_>,
+    ) -> ReadySetResult<()> {
+        let name = statement.name.name; // TODO: schema
+        let qfp = match *statement.definition {
+            SelectSpecification::Compound(query) => {
+                self.add_compound_query(
+                    name.clone(),
+                    query,
+                    /* is_name_required = */ true,
+                    /* is_leaf = */ true,
+                    mig,
+                )?
+            }
+            SelectSpecification::Simple(query) => {
+                self.add_select_query(
+                    name.clone(),
+                    query,
+                    /* is_name_required = */ true,
+                    /* is_leaf = */ true,
+                    mig,
+                )?
+                .0
+            }
+        };
+        self.leaf_addresses.insert(name, qfp.query_leaf);
+        Ok(())
+    }
+
+    /// Add a new query to the graph, using the given `mig` to track changes.
+    ///
+    /// If `name` is provided, will use that as the name for the query to add, otherwise a unique
+    /// name will be generated from the query. In either case, returns the name of the added query.
+    pub(crate) fn add_query(
+        &mut self,
+        name: Option<SqlIdentifier>,
+        stmt: SelectStatement,
+        mig: &mut Migration<'_>,
+    ) -> ReadySetResult<SqlIdentifier> {
+        let name = name.unwrap_or_else(|| format!("q_{}", self.num_queries).into());
+        let (qfp, _) = self.add_select_query(
+            name.clone(),
+            stmt,
+            /* is_name_required = */ false,
+            /* is_leaf = */ true,
+            mig,
+        )?;
+
+        self.leaf_addresses.insert(name.clone(), qfp.query_leaf);
+
+        Ok(name)
     }
 
     pub(super) fn get_base_schema(&self, name: &str) -> Option<CreateTableStatement> {
@@ -458,12 +505,11 @@ impl SqlIncorporator {
 
     fn add_base_via_mir(
         &mut self,
-        query_name: &SqlIdentifier,
         stmt: CreateTableStatement,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<QueryFlowParts> {
         // first, compute the MIR representation of the SQL query
-        let mut mir = self.mir_converter.named_base_to_mir(query_name, &stmt)?;
+        let mut mir = self.mir_converter.named_base_to_mir(&stmt)?;
 
         trace!(base_node_mir = ?mir);
 
@@ -476,41 +522,42 @@ impl SqlIncorporator {
         // on base table schema change, we will overwrite the existing schema here.
         // TODO(malte): this means that requests for this will always return the *latest* schema
         // for a base.
-        self.base_schemas.insert(query_name.clone(), stmt);
+        let name = stmt.table.name.clone();
+        self.base_schemas.insert(name.clone(), stmt);
 
-        self.register_query(query_name, None, &mir);
+        self.register_query(name, None, &mir);
 
         Ok(qfp)
     }
 
     fn add_compound_query(
         &mut self,
-        query_name: &SqlIdentifier,
+        query_name: SqlIdentifier,
+        query: CompoundSelectStatement,
         is_name_required: bool,
-        query: &CompoundSelectStatement,
         is_leaf: bool,
         mig: &mut Migration<'_>,
     ) -> Result<QueryFlowParts, ReadySetError> {
-        let subqueries: Result<Vec<_>, ReadySetError> = query
+        let subqueries = query
             .selects
-            .iter()
+            .into_iter()
             .enumerate()
-            .map(|(i, sq)| {
+            .map(|(i, (_op, stmt))| {
                 Ok(self
                     .add_select_query(
-                        &format!("{}_csq_{}", query_name, i).into(),
+                        format!("{}_csq_{}", query_name, i).into(),
+                        stmt,
                         is_name_required,
-                        &sq.1,
                         false,
                         mig,
                     )?
                     .1)
             })
-            .collect();
+            .collect::<ReadySetResult<Vec<_>>>()?;
 
         let mut combined_mir_query = self.mir_converter.compound_query_to_mir(
-            query_name,
-            subqueries?.iter().collect(),
+            &query_name,
+            subqueries,
             CompoundSelectOperator::Union,
             &query.order,
             &query.limit,
@@ -520,26 +567,26 @@ impl SqlIncorporator {
 
         let qfp = mir_query_to_flow_parts(&mut combined_mir_query, mig)?;
 
-        self.register_query(query_name, None, &combined_mir_query);
+        self.register_query(query_name.clone(), None, &combined_mir_query);
 
         Ok(qfp)
     }
 
     fn select_query_to_mir(
         &mut self,
-        query_name: &SqlIdentifier,
+        query_name: SqlIdentifier,
         is_name_required: bool,
-        sq: &SelectStatement,
+        sq: SelectStatement,
         is_leaf: bool,
     ) -> ReadySetResult<(QueryGraph, MirQuery)> {
-        let (qg, reuse) = self.consider_query_graph(query_name, is_name_required, sq, is_leaf)?;
+        let (qg, reuse) = self.consider_query_graph(&query_name, is_name_required, &sq, is_leaf)?;
 
         let mir_query = match reuse {
             QueryGraphReuse::ExactMatch(mir_query) => mir_query.clone(),
             QueryGraphReuse::ExtendExisting(reuse_mirs) => {
-                let mut new_query_mir = self
-                    .mir_converter
-                    .named_query_to_mir(query_name, sq, &qg, is_leaf)?;
+                let mut new_query_mir =
+                    self.mir_converter
+                        .named_query_to_mir(&query_name, sq, &qg, is_leaf)?;
                 let mut num_reused_nodes = 0;
                 for m in reuse_mirs {
                     if !self.mir_queries.contains_key(&m) {
@@ -559,14 +606,15 @@ impl SqlIncorporator {
                 index_type,
             ) => self.mir_converter.add_leaf_below(
                 final_query_node,
-                query_name,
+                &query_name,
                 &params,
                 index_type,
                 project_columns,
             ),
-            QueryGraphReuse::None => self
-                .mir_converter
-                .named_query_to_mir(query_name, sq, &qg, is_leaf)?,
+            QueryGraphReuse::None => {
+                self.mir_converter
+                    .named_query_to_mir(&query_name, sq, &qg, is_leaf)?
+            }
         };
 
         Ok((qg, mir_query))
@@ -576,9 +624,9 @@ impl SqlIncorporator {
     /// and MIR nodes that were added
     fn add_select_query(
         &mut self,
-        query_name: &SqlIdentifier,
+        query_name: SqlIdentifier,
+        stmt: SelectStatement,
         is_name_required: bool,
-        sq: &SelectStatement,
         is_leaf: bool,
         mig: &mut Migration<'_>,
     ) -> Result<(QueryFlowParts, MirQuery), ReadySetError> {
@@ -587,8 +635,40 @@ impl SqlIncorporator {
             source: Box::new(e),
         };
 
+        let mut stmt = self.rewrite(stmt).map_err(on_err)?;
+        self.num_queries += 1;
+
+        // Remove all table aliases from the query. Create named views in cases where the alias must
+        // be replaced with a view rather than the table itself in order to prevent ambiguity. (This
+        // may occur when a single table is referenced using more than one alias).
+        let table_alias_rewrites = stmt.rewrite_table_aliases(&query_name);
+        for r in table_alias_rewrites {
+            match r {
+                TableAliasRewrite::View {
+                    to_view, for_table, ..
+                } => {
+                    let query = SelectStatement {
+                        tables: vec![TableExpr::from(Table::from(for_table))],
+                        fields: vec![FieldDefinitionExpr::All],
+                        ..Default::default()
+                    };
+                    self.add_select_query(to_view, self.rewrite(query)?, true, false, mig)?;
+                }
+                TableAliasRewrite::Cte {
+                    to_view,
+                    for_statement,
+                    ..
+                } => {
+                    self.add_select_query(to_view, *for_statement, true, false, mig)?;
+                }
+                TableAliasRewrite::Table { .. } => {}
+            }
+        }
+
+        trace!(rewritten_query = %stmt);
+
         let (qg, mir_query) = self
-            .select_query_to_mir(query_name, is_name_required, sq, is_leaf)
+            .select_query_to_mir(query_name.clone(), is_name_required, stmt, is_leaf)
             .map_err(on_err)?;
 
         trace!(pre_opt_mir = %mir_query.to_graphviz());
@@ -674,7 +754,7 @@ impl SqlIncorporator {
 
     fn register_query(
         &mut self,
-        query_name: &SqlIdentifier,
+        query_name: SqlIdentifier,
         qg: Option<QueryGraph>,
         mir: &MirQuery,
     ) {
@@ -690,187 +770,22 @@ impl SqlIncorporator {
                 let qg_hash = qg.signature().hash;
                 self.query_graphs.insert(qg_hash, qg);
                 self.mir_queries.insert(qg_hash, mir.clone());
-                self.named_queries.insert(query_name.clone(), qg_hash);
+                self.named_queries.insert(query_name, qg_hash);
             }
             None => {
-                self.base_mir_queries
-                    .insert(query_name.clone(), mir.clone());
+                self.base_mir_queries.insert(query_name, mir.clone());
             }
         }
     }
 
-    fn nodes_for_query(
-        &mut self,
-        q: SqlQuery,
-        is_leaf: bool,
-        mig: &mut Migration<'_>,
-    ) -> Result<QueryFlowParts, ReadySetError> {
-        let name = match q {
-            SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
-            SqlQuery::CreateView(ref cvq) => cvq.name.name.clone(),
-            SqlQuery::Select(_) | SqlQuery::CompoundSelect(_) => {
-                format!("q_{}", self.num_queries).into()
-            }
-            _ => unsupported!("only CREATE TABLE and SELECT queries can be added to the graph!"),
-        };
-        self.nodes_for_named_query(q, name, false, is_leaf, mig)
-    }
-
-    /// Runs some standard rewrite passes on the query.
-    fn rewrite_query(
-        &mut self,
-        q: SqlQuery,
-        query_name: &SqlIdentifier,
-        mig: &mut Migration<'_>,
-    ) -> Result<SqlQuery, ReadySetError> {
-        // TODO: make this not take &mut self
-
-        // Check that all tables mentioned in the query exist.
-        // This must happen before the rewrite passes are applied because some of them rely on
-        // having the table schema available in `self.view_schemas`.
-        match q {
-            // if we're just about to create the table, we don't need to check if it exists. If it
-            // does, we will amend or reuse it; if it does not, we create it.
-            SqlQuery::CreateTable(_)
-            | SqlQuery::CreateView(_)
-            | SqlQuery::StartTransaction(_)
-            | SqlQuery::Commit(_)
-            | SqlQuery::Rollback(_)
-            | SqlQuery::Use(_)
-            | SqlQuery::Show(_)
-            | SqlQuery::Explain(_)
-            | SqlQuery::DropCache(_)
-            | SqlQuery::DropAllCaches(_)
-            | SqlQuery::DropView(_) => (),
-            // other kinds of queries *do* require their referred tables to exist!
-            ref q @ SqlQuery::CompoundSelect(_)
-            | ref q @ SqlQuery::Select(_)
-            | ref q @ SqlQuery::Set(_)
-            | ref q @ SqlQuery::Update(_)
-            | ref q @ SqlQuery::Delete(_)
-            | ref q @ SqlQuery::DropTable(_)
-            | ref q @ SqlQuery::AlterTable(_)
-            | ref q @ SqlQuery::RenameTable(_)
-            | ref q @ SqlQuery::Insert(_)
-            | ref q @ SqlQuery::CreateCache(_) => {
-                for t in &q.referred_tables() {
-                    if !self.view_schemas.contains_key(&t.name) {
-                        return Err(ReadySetError::TableNotFound(t.name.to_string()));
-                    }
-                }
-            }
-        }
-
-        let mut q = q
-            .rewrite_between()
-            .normalize_negation()
-            .strip_post_filters()
-            .coalesce_key_definitions()
-            .expand_stars(&self.view_schemas)?
-            .expand_implied_tables(&self.view_schemas)?
-            .normalize_topk_with_aggregate()?
-            .rewrite_count_star(&self.view_schemas)?
-            .detect_problematic_self_joins()?
-            .remove_numeric_field_references()?
-            .order_limit_removal(&self.base_schemas)?;
-
-        self.num_queries += 1;
-
-        // Remove all table aliases from 'fq'. Create named views in cases where the alias must be
-        // replaced with a view rather than the table itself in order to prevent ambiguity. (This
-        // may occur when a single table is referenced using more than one alias).
-        let table_alias_rewrites = q.rewrite_table_aliases(query_name);
-        for r in table_alias_rewrites {
-            match r {
-                TableAliasRewrite::View {
-                    to_view, for_table, ..
-                } => {
-                    let query = SqlQuery::Select(SelectStatement {
-                        tables: vec![TableExpr::from(Table::from(for_table))],
-                        fields: vec![FieldDefinitionExpr::All],
-                        ..Default::default()
-                    });
-                    let is_name_required = true;
-                    self.nodes_for_named_query(query, to_view, is_name_required, false, mig)?;
-                }
-                TableAliasRewrite::Cte {
-                    to_view,
-                    for_statement,
-                    ..
-                } => {
-                    let query = SqlQuery::Select(*for_statement);
-                    self.nodes_for_named_query(query, to_view, true, false, mig)?;
-                }
-                TableAliasRewrite::Table { .. } => {}
-            }
-        }
-
-        trace!(rewritten_query = %q);
-
-        Ok(q)
-    }
-
-    fn nodes_for_named_query(
-        &mut self,
-        q: SqlQuery,
-        query_name: SqlIdentifier,
-        is_name_required: bool,
-        is_leaf: bool,
-        mig: &mut Migration<'_>,
-    ) -> Result<QueryFlowParts, ReadySetError> {
-        // short-circuit if we're dealing with a CreateView query; this avoids having to deal with
-        // CreateView in all of our rewrite passes.
-        if let SqlQuery::CreateView(cvq) = q {
-            use nom_sql::SelectSpecification;
-            let name = cvq.name.name.clone();
-            match *cvq.definition {
-                SelectSpecification::Compound(csq) => {
-                    return self.nodes_for_named_query(
-                        SqlQuery::CompoundSelect(csq),
-                        name,
-                        is_name_required,
-                        is_leaf,
-                        mig,
-                    );
-                }
-                SelectSpecification::Simple(sq) => {
-                    return self.nodes_for_named_query(
-                        SqlQuery::Select(sq),
-                        name,
-                        is_name_required,
-                        is_leaf,
-                        mig,
-                    );
-                }
-            }
-        };
-
-        trace!(query = %q, "pre-rewrite");
-        let q = self.rewrite_query(q, &query_name, mig)?;
-        trace!(query = %q, "post-rewrite");
-
-        // if this is a selection, we compute its `QueryGraph` and consider the existing ones we
-        // hold for reuse or extension
-        let qfp = match q {
-            SqlQuery::CompoundSelect(csq) => {
-                // NOTE(malte): We can't currently reuse complete compound select queries, since
-                // our reuse logic operates on `SqlQuery` structures. Their subqueries do get
-                // reused, however.
-                self.add_compound_query(&query_name, is_name_required, &csq, is_leaf, mig)?
-            }
-            SqlQuery::Select(sq) => {
-                self.add_select_query(&query_name, is_name_required, &sq, is_leaf, mig)?
-                    .0
-            }
-            SqlQuery::CreateTable(stmt) => self.add_base_via_mir(&query_name, stmt, mig)?,
-            q => internal!("unhandled query type in recipe: {:?}", Sensitive(&q)),
-        };
-
-        // record info about query
-        self.leaf_addresses
-            .insert(query_name.clone(), qfp.query_leaf);
-
-        Ok(qfp)
+    fn rewrite<S>(&self, stmt: S) -> ReadySetResult<S>
+    where
+        S: Rewrite,
+    {
+        stmt.rewrite(RewriteContext {
+            view_schemas: &self.view_schemas,
+            base_schemas: &self.base_schemas,
+        })
     }
 
     /// Upgrades the schema version for the
@@ -883,7 +798,9 @@ impl SqlIncorporator {
 #[cfg(test)]
 mod tests {
     use dataflow::prelude::*;
-    use nom_sql::{parse_query, Column, Dialect, SqlIdentifier, SqlType};
+    use nom_sql::{
+        parse_create_table, parse_select_statement, Column, Dialect, SqlIdentifier, SqlType,
+    };
     use noria_data::noria_type::Type;
 
     use super::SqlIncorporator;
@@ -957,14 +874,12 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             // Must have a base node for type inference to work, so make one manually
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
                     mig
                 )
                 .is_ok());
@@ -975,10 +890,9 @@ mod tests {
             assert_eq!(get_node(&inc, mig, "users").name(), "users");
 
             assert!(inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "SELECT users.id from users;").unwrap(),
+                .add_query(
                     None,
-                    true,
+                    parse_select_statement(Dialect::MySQL, "SELECT users.id from users;").unwrap(),
                     mig
                 )
                 .is_ok());
@@ -996,33 +910,29 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40), age int);"
                     )
                     .unwrap(),
-                    None,
-                    true,
                     mig
                 )
                 .is_ok());
 
             // Add a new query with a parameter
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT id, name FROM users WHERE users.name = ?;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
-            let qfp = res.unwrap();
-            assert_eq!(qfp.new_nodes.len(), 2);
-            let node = get_node(&inc, mig, &qfp.name);
+            let name = res.unwrap();
+            let node = get_node(&inc, mig, &name);
             // fields should be projected correctly in query order
             assert_eq!(
                 node.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
@@ -1030,7 +940,7 @@ mod tests {
             );
             assert_eq!(node.description(true), "π[0, 1]");
             // reader key column should be correct
-            let n = get_reader(&inc, mig, &qfp.name);
+            let n = get_reader(&inc, mig, &name);
             assert_eq!(n.as_reader().unwrap().key().unwrap(), &[1]);
         })
         .await;
@@ -1045,29 +955,29 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40), age int);"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
 
             // Add a new query with a parameter
-            let res = inc.add_parsed_query(
-                parse_query(Dialect::MySQL, "SELECT id FROM users WHERE users.name = ?;").unwrap(),
+            let res = inc.add_query(
                 None,
-                true,
+                parse_select_statement(
+                    Dialect::MySQL,
+                    "SELECT id FROM users WHERE users.name = ?;",
+                )
+                .unwrap(),
                 mig,
             );
             assert!(res.is_ok());
-            let qfp = res.unwrap();
-            assert_eq!(qfp.new_nodes.len(), 2);
-            let node = get_node(&inc, mig, &qfp.name);
+            let name = res.unwrap();
+            let node = get_node(&inc, mig, &name);
             // fields should be projected correctly in query order, with the
             // absent parameter column included
             assert_eq!(
@@ -1076,7 +986,7 @@ mod tests {
             );
             assert_eq!(node.description(true), "π[0, 1]");
             // reader key column should be correct
-            let n = get_reader(&inc, mig, &qfp.name);
+            let n = get_reader(&inc, mig, &name);
             assert_eq!(n.as_reader().unwrap().key().unwrap(), &[1])
         })
         .await;
@@ -1091,32 +1001,28 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40), age int);"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
 
             // Add a new query with a parameter
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT id, name FROM users WHERE users.age > 20 AND users.name = ?;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
-            let qfp = res.unwrap();
-            assert_eq!(qfp.new_nodes.len(), 3);
+            let name = res.unwrap();
 
             // Check filter node
             let qid = query_id_hash(
@@ -1128,7 +1034,7 @@ mod tests {
             assert_eq!(filter.description(true), "σ[(2 > (lit: 20))]");
 
             // Check projection node
-            let projection = get_node(&inc, mig, &qfp.name);
+            let projection = get_node(&inc, mig, &name);
             // fields should be projected correctly in query order
             assert_eq!(
                 projection
@@ -1144,7 +1050,7 @@ mod tests {
             // println!("graph: {:?}", mig.graph());
 
             // Check reader
-            let n = get_reader(&inc, mig, &qfp.name);
+            let n = get_reader(&inc, mig, &name);
             assert_eq!(n.as_reader().unwrap().key().unwrap(), &[1]);
         })
         .await;
@@ -1158,15 +1064,13 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type for "users"
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
             // Should have source and "users" base table node
@@ -1184,15 +1088,13 @@ mod tests {
 
             // Establish a base write type for "articles"
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE articles (id int, author int, title varchar(255));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
             // Should have source and "users" base table node
@@ -1212,7 +1114,11 @@ mod tests {
             let q = "SELECT users.name, articles.title \
                      FROM articles, users \
                      WHERE users.id = articles.author;";
-            let q = inc.add_parsed_query(parse_query(Dialect::MySQL, q).unwrap(), None, true, mig);
+            let q = inc.add_query(
+                None,
+                parse_select_statement(Dialect::MySQL, q).unwrap(),
+                mig,
+            );
             assert!(q.is_ok());
             let qid = query_id_hash(
                 &["articles", "users"],
@@ -1230,7 +1136,7 @@ mod tests {
                 &["id", "author", "title", "name"]
             );
             // leaf node
-            let new_leaf_view = get_parent_node(&inc, mig, &q.unwrap().name);
+            let new_leaf_view = get_parent_node(&inc, mig, &q.unwrap());
             assert_eq!(
                 new_leaf_view
                     .columns()
@@ -1253,15 +1159,13 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
             // Should have source and "users" base table node
@@ -1278,14 +1182,13 @@ mod tests {
             assert!(get_node(&inc, mig, "users").is_base());
 
             // Try a simple query
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT users.name FROM users WHERE users.id = 42;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok(), "{}", res.err().unwrap());
@@ -1307,7 +1210,7 @@ mod tests {
             );
             assert_eq!(filter.description(true), "σ[(0 = (lit: 42))]");
             // leaf view node
-            let edge = get_parent_node(&inc, mig, &res.unwrap().name);
+            let edge = get_parent_node(&inc, mig, &res.unwrap());
             assert_eq!(
                 edge.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
                 &["name", "bogokey"]
@@ -1325,11 +1228,9 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             // Establish a base write types
             assert!(inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "CREATE TABLE votes (aid int, userid int);")
+                .add_table(
+                    parse_create_table(Dialect::MySQL, "CREATE TABLE votes (aid int, userid int);")
                         .unwrap(),
-                    None,
-                    true,
                     mig
                 )
                 .is_ok());
@@ -1347,15 +1248,14 @@ mod tests {
             assert!(get_node(&inc, mig, "votes").is_base());
 
             // Try a simple COUNT function
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT COUNT(votes.userid) AS votes \
                     FROM votes GROUP BY votes.aid;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
@@ -1381,7 +1281,7 @@ mod tests {
             );
             assert_eq!(agg_view.description(true), "|*| γ[0]");
             // check edge view
-            let edge_view = get_parent_node(&inc, mig, &res.unwrap().name);
+            let edge_view = get_parent_node(&inc, mig, &res.unwrap());
             assert_eq!(
                 edge_view
                     .columns()
@@ -1404,50 +1304,40 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             inc.disable_reuse();
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT id, name FROM users WHERE users.id = 42;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
-            let leaf = res.unwrap().query_leaf;
 
             // Add the same query again; this should NOT reuse here.
             let ncount = mig.graph().node_count();
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT name, id FROM users WHERE users.id = 42;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
-            // should have added nodes for this query, too
-            let qfp = res.unwrap();
-            assert_eq!(qfp.new_nodes.len(), 3);
             // expect three new nodes: filter, project, project (for reorder), reader
             assert_eq!(mig.graph().node_count(), ncount + 4);
-            // should have ended up with a different leaf node
-            assert_ne!(qfp.query_leaf, leaf);
         })
         .await;
     }
@@ -1461,15 +1351,13 @@ mod tests {
             inc.enable_reuse(crate::ReuseConfigType::Finkelstein);
             // Establish a base write type
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
             // Should have source and "users" base table node
@@ -1486,55 +1374,44 @@ mod tests {
             assert!(get_node(&inc, mig, "users").is_base());
 
             // Add a new query
-            let res = inc.add_parsed_query(
-                parse_query(
+            inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT id, name FROM users WHERE users.id = 42;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
-            );
-            let leaf = res.unwrap().query_leaf;
-
+            )
+            .unwrap();
             // Add the same query again
             let ncount = mig.graph().node_count();
-            let res = inc.add_parsed_query(
-                parse_query(
+            inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT id, name FROM users WHERE users.id = 42;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
-            );
-            // should have added no more nodes
-            let qfp = res.unwrap();
-            assert_eq!(qfp.new_nodes, vec![]);
+            )
+            .unwrap();
             assert_eq!(mig.graph().node_count(), ncount);
-            // should have ended up with the same leaf node
-            assert_eq!(qfp.query_leaf, leaf);
 
             // Add the same query again, but project columns in a different order
             let ncount = mig.graph().node_count();
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT name, id FROM users WHERE users.id = 42;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
             // should have added three more nodes (project, reorder project and reader)
-            let qfp = res.unwrap();
             assert_eq!(mig.graph().node_count(), ncount + 3);
-            // should NOT have ended up with the same leaf node
-            assert_ne!(qfp.query_leaf, leaf);
         })
         .await;
     }
@@ -1548,15 +1425,13 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
             // Should have source and "users" base table node
@@ -1573,14 +1448,13 @@ mod tests {
             assert!(get_node(&inc, mig, "users").is_base());
 
             // Add a new query
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT id, name FROM users WHERE users.id = ?;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
@@ -1589,53 +1463,39 @@ mod tests {
             // Project the same columns, so we can reuse the projection that already exists and only
             // add an identity node.
             let ncount = mig.graph().node_count();
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT id, name FROM users WHERE users.name = ?;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok(), "{}", res.err().unwrap());
             // should have added two more nodes: one identity node and one reader node
-            let qfp = res.unwrap();
+            let name = res.unwrap();
             assert_eq!(mig.graph().node_count(), ncount + 2);
             // only the identity node is returned in the vector of new nodes
-            assert_eq!(qfp.new_nodes.len(), 1);
-            assert_eq!(get_node(&inc, mig, &qfp.name).description(true), "≡");
-            // we should be based off the identity as our leaf
-            let id_node = qfp.new_nodes.get(0).unwrap();
-            assert_eq!(qfp.query_leaf, *id_node);
+            assert_eq!(get_node(&inc, mig, &name).description(true), "≡");
 
             // Do it again with a parameter on yet a different column.
             // Project different columns, so we need to add a new projection (not an identity).
             let ncount = mig.graph().node_count();
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT id, name FROM users WHERE users.address = ?;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
             // should have added three more nodes: a projection, a reorder projection and one reader
-            let qfp = res.unwrap();
+            let name = res.unwrap();
             assert_eq!(mig.graph().node_count(), ncount + 3);
-            // only the projection node is returned in the vector of new nodes
-            assert_eq!(qfp.new_nodes.len(), 2);
-            assert_eq!(
-                get_node(&inc, mig, &qfp.name).description(true),
-                "π[0, 1, 2]"
-            );
-            // we should be based off the new projection as our leaf
-            let id_node = qfp.new_nodes.last().unwrap();
-            assert_eq!(qfp.query_leaf, *id_node);
+            assert_eq!(get_node(&inc, mig, &name).description(true), "π[0, 1, 2]");
         })
         .await;
     }
@@ -1651,31 +1511,27 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
-            let base_address = inc.get_flow_node_address(&"users".into(), 0).unwrap();
 
             // Add a new "full table" query. The view is expected to contain projected columns plus
             // the special 'bogokey' literal column.
-            let res = inc.add_parsed_query(
-                parse_query(Dialect::MySQL, "SELECT id, name FROM users;").unwrap(),
+            let res = inc.add_query(
                 None,
-                true,
+                parse_select_statement(Dialect::MySQL, "SELECT id, name FROM users;").unwrap(),
                 mig,
             );
             assert!(res.is_ok());
-            let qfp = res.unwrap();
+            let name = res.unwrap();
             // Check projection
-            let projection = get_node(&inc, mig, &qfp.name);
+            let projection = get_node(&inc, mig, &name);
             assert_eq!(
                 projection
                     .columns()
@@ -1685,28 +1541,26 @@ mod tests {
                 &["id", "name", "bogokey"]
             );
             assert_eq!(projection.description(true), "π[0, 1, 2]");
-            let leaf = qfp.query_leaf;
             // Check reader column
-            let n = get_reader(&inc, mig, &qfp.name);
+            let n = get_reader(&inc, mig, &name);
             assert_eq!(n.as_reader().unwrap().key().unwrap(), &[2]);
 
             // Add the name query again, but with a parameter and project columns in a different
             // order.
             let ncount = mig.graph().node_count();
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT name, id FROM users WHERE users.name = ?;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
-            let qfp = res.unwrap();
+            let name = res.unwrap();
             // Check projection
-            let projection = get_node(&inc, mig, &qfp.name);
+            let projection = get_node(&inc, mig, &name);
             assert_eq!(
                 projection
                     .columns()
@@ -1718,33 +1572,25 @@ mod tests {
             assert_eq!(projection.description(true), "π[0, 1]");
             // should have added three more nodes (project, a reorder project and reader)
             assert_eq!(mig.graph().node_count(), ncount + 3);
-            // should NOT have ended up with the same leaf node
-            assert_ne!(qfp.query_leaf, leaf);
             // Check reader column
-            let n = get_reader(&inc, mig, &qfp.name);
+            let n = get_reader(&inc, mig, &name);
             assert_eq!(n.as_reader().unwrap().key().unwrap(), &[0]);
-
-            // Check that the parent of the projection is the base table, and NOT the earlier
-            // bogokey projection.
-            let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
-            assert_eq!(top_node.ancestors().unwrap(), [base_address]);
 
             // Add a query with a parameter on a new field
             let ncount = mig.graph().node_count();
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT id, name FROM users WHERE users.address = ?;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
-            let qfp = res.unwrap();
+            let name = res.unwrap();
             // Check projection
-            let projection = get_node(&inc, mig, &qfp.name);
+            let projection = get_node(&inc, mig, &name);
             assert_eq!(
                 projection
                     .columns()
@@ -1756,15 +1602,9 @@ mod tests {
             assert_eq!(projection.description(true), "π[0, 1, 2]");
             // should have added two more nodes (project, project reorder and reader)
             assert_eq!(mig.graph().node_count(), ncount + 3);
-            // should NOT have ended up with the same leaf node
-            assert_ne!(qfp.query_leaf, leaf);
             // Check reader column
-            let n = get_reader(&inc, mig, &qfp.name);
+            let n = get_reader(&inc, mig, &name);
             assert_eq!(n.as_reader().unwrap().key().unwrap(), &[2]);
-            // Check that the parent of the projection is the base table, and NOT the earlier
-            // bogokey projection.
-            let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
-            assert_eq!(top_node.ancestors().unwrap(), [base_address]);
         })
         .await;
     }
@@ -1780,34 +1620,30 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
-            let base_address = inc.get_flow_node_address(&"users".into(), 0).unwrap();
 
             // Add a new parameterized query.
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT id, name FROM users WHERE users.id = ?;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
-            let qfp = res.unwrap();
+            let name = res.unwrap();
             // Check projection
-            let projection = get_node(&inc, mig, &qfp.name);
+            let projection = get_node(&inc, mig, &name);
             assert_eq!(
                 projection
                     .columns()
@@ -1818,21 +1654,20 @@ mod tests {
             );
             assert_eq!(projection.description(true), "π[0, 1]");
             // Check reader column
-            let n = get_reader(&inc, mig, &qfp.name);
+            let n = get_reader(&inc, mig, &name);
             assert_eq!(n.as_reader().unwrap().key().unwrap(), &[0]);
 
             // Add a new "full table" query. The view is expected to contain projected columns plus
             // the special 'bogokey' literal column.
-            let res = inc.add_parsed_query(
-                parse_query(Dialect::MySQL, "SELECT id, name FROM users;").unwrap(),
+            let res = inc.add_query(
                 None,
-                true,
+                parse_select_statement(Dialect::MySQL, "SELECT id, name FROM users;").unwrap(),
                 mig,
             );
             assert!(res.is_ok());
-            let qfp = res.unwrap();
+            let name = res.unwrap();
             // Check projection
-            let projection = get_node(&inc, mig, &qfp.name);
+            let projection = get_node(&inc, mig, &name);
             assert_eq!(
                 projection
                     .columns()
@@ -1843,166 +1678,8 @@ mod tests {
             );
             assert_eq!(projection.description(true), "π[0, 1, 2]");
             // Check reader column
-            let n = get_reader(&inc, mig, &qfp.name);
+            let n = get_reader(&inc, mig, &name);
             assert_eq!(n.as_reader().unwrap().key().unwrap(), &[2]);
-
-            // Check that the parent of the projection node is the base table, and NOT the earlier
-            // parameterized projection.
-            let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
-            assert_eq!(top_node.ancestors().unwrap(), [base_address]);
-        })
-        .await;
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn it_reuses_projection_for_non_bogokey_table_query() {
-        // set up graph
-        let mut g = integration_utils::start_simple_unsharded(
-            "it_does_not_reuse_bogokey_projection_with_different_projection",
-        )
-        .await;
-        g.migrate(|mig| {
-            let mut inc = SqlIncorporator::default();
-            // Establish a base write type
-            assert!(inc
-                .add_parsed_query(
-                    parse_query(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
-                    )
-                    .unwrap(),
-                    None,
-                    true,
-                    mig
-                )
-                .is_ok());
-
-            // Add a new parameterized query.
-            let res = inc.add_parsed_query(
-                parse_query(
-                    Dialect::MySQL,
-                    "SELECT id, name FROM users WHERE users.id = ?;",
-                )
-                .unwrap(),
-                None,
-                true,
-                mig,
-            );
-            assert!(res.is_ok());
-            let qfp = res.unwrap();
-            let leaf = qfp.query_leaf;
-            // Check projection
-            let projection = get_node(&inc, mig, &qfp.name);
-            assert_eq!(
-                projection
-                    .columns()
-                    .iter()
-                    .map(|c| c.name())
-                    .collect::<Vec<_>>(),
-                &["id", "name"]
-            );
-            assert_eq!(projection.description(true), "π[0, 1]");
-            // Check reader column
-            let n = get_reader(&inc, mig, &qfp.name);
-            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[0]);
-
-            // Add a new "full table" query as a non leaf query. The view does not contain a
-            // 'bogokey' literal column because it is for a non leaf query.
-            let res = inc.add_parsed_query(
-                parse_query(Dialect::MySQL, "SELECT id, name FROM users;").unwrap(),
-                Some("short_users".into()),
-                false,
-                mig,
-            );
-            assert!(res.is_ok());
-            let qfp = res.unwrap();
-            // Check projection
-            let identity = get_node(&inc, mig, &qfp.name);
-            assert_eq!(
-                identity
-                    .columns()
-                    .iter()
-                    .map(|c| c.name())
-                    .collect::<Vec<_>>(),
-                &["id", "name"]
-            );
-            assert_eq!(identity.description(true), "≡");
-            // should NOT have ended up with the same leaf node
-            assert_ne!(qfp.query_leaf, leaf);
-        })
-        .await;
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    // note: [Ignored HAVING tests]
-    // A previous version of this test (and `it_doesnt_merge_sum_and_filter_on_sum_result`) was
-    // incorrectly using SQL - it used a WHERE clause to filter on the result of an aggregate, which
-    // isn't allowed in sql (you have to use HAVING). These tests have been updated to use HAVING
-    // after moving aggregates above filters, but we don't support HAVING yet! so they're ignored.
-    // See https://app.clubhouse.io/readysettech/story/425
-    #[ignore]
-    async fn it_reuses_by_extending_existing_query() {
-        // set up graph
-        let mut g =
-            integration_utils::start_simple_unsharded("it_reuses_by_extending_existing_query")
-                .await;
-        g.migrate(|mig| {
-            let mut inc = SqlIncorporator::default();
-            // Add base tables
-            assert!(inc
-                .add_parsed_query(
-                    parse_query(
-                        Dialect::MySQL,
-                        "CREATE TABLE articles (id int, title varchar(40));"
-                    )
-                    .unwrap(),
-                    None,
-                    true,
-                    mig
-                )
-                .is_ok());
-            assert!(inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "CREATE TABLE votes (aid int, uid int);").unwrap(),
-                    None,
-                    true,
-                    mig
-                )
-                .is_ok());
-            // Should have source, "articles" and "votes" base tables
-            assert_eq!(mig.graph().node_count(), 3);
-
-            // Add a new query
-            let res = inc.add_parsed_query(
-                parse_query(
-                    Dialect::MySQL,
-                    "SELECT COUNT(uid) AS vc FROM votes GROUP BY aid;",
-                )
-                .unwrap(),
-                Some("votecount".into()),
-                true,
-                mig,
-            );
-            assert!(res.is_ok());
-
-            // Add a query that can reuse votecount by extending it.
-            let ncount = mig.graph().node_count();
-            let res = inc.add_parsed_query(
-                parse_query(
-                    Dialect::MySQL,
-                    "SELECT COUNT(uid) AS vc FROM votes GROUP BY aid HAVING vc > 5;",
-                )
-                .unwrap(),
-                Some("highvotes".into()),
-                true,
-                mig,
-            );
-            assert!(res.is_ok());
-            // should have added three more nodes: a join, a projection, and a reader
-            let qfp = res.unwrap();
-            assert_eq!(mig.graph().node_count(), ncount + 3);
-            // only the join and projection nodes are returned in the vector of new nodes
-            assert_eq!(qfp.new_nodes.len(), 2);
         })
         .await;
     }
@@ -2018,34 +1695,30 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
-            let base_address = inc.get_flow_node_address(&"users".into(), 0).unwrap();
 
             // Add a query with a parameter and a literal projection.
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT id, name, 1 as one FROM users WHERE id = ?;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
-            let qfp = res.unwrap();
+            let name = res.unwrap();
             // Check projection
-            let projection = get_node(&inc, mig, &qfp.name);
+            let projection = get_node(&inc, mig, &name);
             assert_eq!(
                 projection
                     .columns()
@@ -2055,28 +1728,26 @@ mod tests {
                 &["id", "name", "one"]
             );
             assert_eq!(projection.description(true), "π[0, 1, 2]");
-            let leaf = qfp.query_leaf;
             // Check reader column
-            let n = get_reader(&inc, mig, &qfp.name);
+            let n = get_reader(&inc, mig, &name);
             assert_eq!(n.as_reader().unwrap().key().unwrap(), &[0]);
 
             // Add a query with the same literal projection but a different parameter from the base
             // table.
             let ncount = mig.graph().node_count();
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT id, name, 1 as one FROM users WHERE address = ?;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok(), "{}", res.err().unwrap());
-            let qfp = res.unwrap();
+            let name = res.unwrap();
             // Check projection
-            let projection = get_node(&inc, mig, &qfp.name);
+            let projection = get_node(&inc, mig, &name);
             assert_eq!(
                 projection
                     .columns()
@@ -2088,15 +1759,9 @@ mod tests {
             assert_eq!(projection.description(true), "π[0, 1, 3, 2]");
             // should have added two more nodes (identity, project reorder and reader)
             assert_eq!(mig.graph().node_count(), ncount + 3);
-            // should NOT have ended up with the same leaf node
-            assert_ne!(qfp.query_leaf, leaf);
             // Check reader column
-            let n = get_reader(&inc, mig, &qfp.name);
+            let n = get_reader(&inc, mig, &name);
             assert_eq!(n.as_reader().unwrap().key().unwrap(), &[3]);
-            // Check that the parent of the projection is the original table, NOT the earlier
-            // projection.
-            let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
-            assert_eq!(top_node.ancestors().unwrap(), [base_address]);
         })
         .await;
     }
@@ -2111,11 +1776,9 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "CREATE TABLE votes (aid int, userid int);")
+                .add_table(
+                    parse_create_table(Dialect::MySQL, "CREATE TABLE votes (aid int, userid int);")
                         .unwrap(),
-                    None,
-                    true,
                     mig
                 )
                 .is_ok());
@@ -2132,14 +1795,13 @@ mod tests {
             );
             assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function without a GROUP BY clause
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT COUNT(votes.userid) AS count FROM votes;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
@@ -2179,7 +1841,7 @@ mod tests {
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
-            let edge_view = get_parent_node(&inc, mig, &res.unwrap().name);
+            let edge_view = get_parent_node(&inc, mig, &res.unwrap());
             assert_eq!(
                 edge_view
                     .columns()
@@ -2203,11 +1865,9 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "CREATE TABLE votes (userid int, aid int);")
+                .add_table(
+                    parse_create_table(Dialect::MySQL, "CREATE TABLE votes (userid int, aid int);")
                         .unwrap(),
-                    None,
-                    true,
                     mig
                 )
                 .is_ok());
@@ -2224,14 +1884,13 @@ mod tests {
             );
             assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT COUNT(*) AS count FROM votes GROUP BY votes.userid;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
@@ -2260,7 +1919,7 @@ mod tests {
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
-            let edge_view = get_parent_node(&inc, mig, &res.unwrap().name);
+            let edge_view = get_parent_node(&inc, mig, &res.unwrap());
             assert_eq!(
                 edge_view
                     .columns()
@@ -2283,33 +1942,39 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
-            assert!(
-                inc
-                    .add_parsed_query(
-                        parse_query(
-                            Dialect::MySQL,
-                            "CREATE TABLE votes (userid int, aid int);"
-                        ).unwrap(),
-                        None,
-                        true,
-                        mig
-                    )
-                    .is_ok()
-            );
+            assert!(inc
+                .add_table(
+                    parse_create_table(Dialect::MySQL, "CREATE TABLE votes (userid int, aid int);")
+                        .unwrap(),
+                    mig
+                )
+                .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
-            assert_eq!(get_node(&inc, mig, "votes").columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["userid", "aid"]);
+            assert_eq!(
+                get_node(&inc, mig, "votes")
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["userid", "aid"]
+            );
             assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function
-            let res = inc.add_parsed_query(
-parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS count FROM votes GROUP BY votes.userid;").unwrap(),
-                None, true,
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
+                    Dialect::MySQL,
+                    "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS count FROM votes \
+                     GROUP BY votes.userid;",
+                )
+                .unwrap(),
                 mig,
             );
             assert!(res.is_ok());
-            // added a project for the case, the aggregation, a project helper, the edge view, the reorder project and
-            // reader
+            // added a project for the case, the aggregation, a project helper, the edge view, the
+            // reorder project and reader
             assert_eq!(mig.graph().node_count(), 7);
             // check aggregation view
             let qid = query_id_hash(
@@ -2321,16 +1986,30 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
                 }],
             );
             let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
-            assert_eq!(agg_view.columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["userid", "count"]);
+            assert_eq!(
+                agg_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["userid", "count"]
+            );
             assert_eq!(agg_view.description(true), "|*| γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
-            let edge_view = get_parent_node(&inc, mig, &res.unwrap().name);
-            assert_eq!(edge_view.columns().iter().map(|c| c.name()).collect::<Vec<_>>(), &["count", "bogokey"]);
+            let edge_view = get_parent_node(&inc, mig, &res.unwrap());
+            assert_eq!(
+                edge_view
+                    .columns()
+                    .iter()
+                    .map(|c| c.name())
+                    .collect::<Vec<_>>(),
+                &["count", "bogokey"]
+            );
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         })
-            .await;
+        .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2343,15 +2022,13 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE votes (userid int, aid int, sign int);"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
             // Should have source and "users" base table node
@@ -2367,15 +2044,14 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             );
             assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT SUM(CASE WHEN aid = 5 THEN sign END) AS sum FROM votes \
                      GROUP BY votes.userid;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
@@ -2404,7 +2080,7 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
-            let edge_view = get_parent_node(&inc, mig, &res.unwrap().name);
+            let edge_view = get_parent_node(&inc, mig, &res.unwrap());
             assert_eq!(
                 edge_view
                     .columns()
@@ -2429,15 +2105,13 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE votes (userid int, aid int, sign int);"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
             // Should have source and "users" base table node
@@ -2453,15 +2127,14 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             );
             assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT SUM(CASE WHEN aid = 5 THEN sign ELSE 6 END) AS sum FROM votes \
                      GROUP BY votes.userid;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
@@ -2490,7 +2163,7 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
-            let edge_view = get_parent_node(&inc, mig, &res.unwrap().name);
+            let edge_view = get_parent_node(&inc, mig, &res.unwrap());
             assert_eq!(
                 edge_view
                     .columns()
@@ -2513,15 +2186,13 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE votes (userid int, aid int, sign int);"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
             // Should have source and "users" base table node
@@ -2536,14 +2207,13 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
                 &["userid", "aid", "sign"]
             );
             assert!(get_node(&inc, mig, "votes").is_base());
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT SUM(sign) AS sum FROM votes WHERE aid=5 GROUP BY votes.userid;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
@@ -2571,7 +2241,7 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
-            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            let edge_view = get_node(&inc, mig, &res.unwrap());
             assert_eq!(
                 edge_view
                     .columns()
@@ -2596,15 +2266,13 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE votes (userid int, aid int, sign int);"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
             // Should have source and "users" base table node
@@ -2619,14 +2287,13 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
                 &["userid", "aid", "sign"]
             );
             assert!(get_node(&inc, mig, "votes").is_base());
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT SUM(sign) AS sum FROM votes WHERE sign > 0 GROUP BY votes.userid;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
@@ -2648,15 +2315,13 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE votes (userid int, aid int, sign int);"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
             // Should have source and "users" base table node
@@ -2671,14 +2336,13 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
                 &["userid", "aid", "sign"]
             );
             assert!(get_node(&inc, mig, "votes").is_base());
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT SUM(sign) AS sum FROM votes GROUP BY votes.userid HAVING sum>0 ;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
@@ -2707,7 +2371,7 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
-            let edge_view = get_node(&inc, mig, &res.unwrap().name);
+            let edge_view = get_node(&inc, mig, &res.unwrap());
             assert_eq!(
                 edge_view
                     .columns()
@@ -2736,15 +2400,13 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE votes (story_id int, comment_id int, vote int);"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
             // Should have source and "users" base table node
@@ -2760,8 +2422,9 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             );
             assert!(get_node(&inc, mig, "votes").is_base());
             // Try a simple COUNT function
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT
                     COUNT(CASE WHEN votes.story_id IS NULL AND votes.vote = 0 THEN votes.vote END) \
@@ -2770,8 +2433,6 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
                     GROUP BY votes.comment_id;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok(), "!{:?}.is_ok()", res);
@@ -2800,7 +2461,7 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
-            let edge_view = get_parent_node(&inc, mig, &res.unwrap().name);
+            let edge_view = get_parent_node(&inc, mig, &res.unwrap());
             assert_eq!(
                 edge_view
                     .columns()
@@ -2823,35 +2484,30 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             let mut inc = SqlIncorporator::default();
             // Establish base write types for "users" and "articles" and "votes"
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
+                    mig,
+                )
+                .is_ok());
+            assert!(inc
+                .add_table(
+                    parse_create_table(Dialect::MySQL, "CREATE TABLE votes (aid int, uid int);")
+                        .unwrap(),
                     mig
                 )
                 .is_ok());
             assert!(inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "CREATE TABLE votes (aid int, uid int);").unwrap(),
-                    None,
-                    true,
-                    mig
-                )
-                .is_ok());
-            assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE articles (aid int, title varchar(255), author int);"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
 
@@ -2861,8 +2517,13 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
                  JOIN users ON (users.id = articles.author) \
                  JOIN votes ON (votes.aid = articles.aid);";
 
-            let q = inc.add_parsed_query(parse_query(Dialect::MySQL, q).unwrap(), None, true, mig);
-            assert!(q.is_ok());
+            let res = inc.add_query(
+                None,
+                parse_select_statement(Dialect::MySQL, q).unwrap(),
+                mig,
+            );
+            assert!(res.is_ok());
+            let name = res.unwrap();
             let _qid = query_id_hash(
                 &["articles", "users", "votes"],
                 &[
@@ -2880,7 +2541,7 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             // XXX(malte): non-deterministic join ordering make it difficult to assert on the join
             // views
             // leaf view
-            let leaf_view = get_node(&inc, mig, "q_3");
+            let leaf_view = get_node(&inc, mig, &name);
             assert_eq!(
                 leaf_view
                     .columns()
@@ -2902,35 +2563,30 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             let mut inc = SqlIncorporator::default();
             // Establish base write types for "users" and "articles" and "votes"
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
+                    mig,
+                )
+                .is_ok());
+            assert!(inc
+                .add_table(
+                    parse_create_table(Dialect::MySQL, "CREATE TABLE votes (aid int, uid int);")
+                        .unwrap(),
                     mig
                 )
                 .is_ok());
             assert!(inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "CREATE TABLE votes (aid int, uid int);").unwrap(),
-                    None,
-                    true,
-                    mig
-                )
-                .is_ok());
-            assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE articles (aid int, title varchar(255), author int);"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
 
@@ -2940,8 +2596,13 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
                  WHERE users.id = articles.author \
                  AND votes.aid = articles.aid;";
 
-            let q = inc.add_parsed_query(parse_query(Dialect::MySQL, q).unwrap(), None, true, mig);
-            assert!(q.is_ok());
+            let res = inc.add_query(
+                None,
+                parse_select_statement(Dialect::MySQL, q).unwrap(),
+                mig,
+            );
+            assert!(res.is_ok());
+            let name = res.unwrap();
             // XXX(malte): below over-projects into the final leaf, and is thus inconsistent
             // with the explicit JOIN case!
             let qid = query_id_hash(
@@ -2979,7 +2640,7 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
                 &["aid", "title", "author", "name", "uid"]
             );
             // leaf view
-            let leaf_view = get_node(&inc, mig, "q_3");
+            let leaf_view = get_node(&inc, mig, &name);
             assert_eq!(
                 leaf_view
                     .columns()
@@ -3003,33 +2664,33 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE articles (id int, author int, title varchar(255));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
             let q = "SELECT users.id, users.name, articles.author, articles.title \
                      FROM articles, users \
                      WHERE users.id = articles.author;";
-            let q = inc.add_parsed_query(parse_query(Dialect::MySQL, q).unwrap(), None, true, mig);
+            let q = inc.add_query(
+                None,
+                parse_select_statement(Dialect::MySQL, q).unwrap(),
+                mig,
+            );
             assert!(q.is_ok());
             let qid = query_id_hash(
                 &["articles", "users"],
@@ -3052,7 +2713,7 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
                 &["id", "author", "title", "name"]
             );
             // leaf node
-            let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
+            let new_leaf_view = get_node(&inc, mig, &q.unwrap());
             assert_eq!(
                 new_leaf_view
                     .columns()
@@ -3073,11 +2734,12 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "CREATE TABLE friends (id int, friend int);")
-                        .unwrap(),
-                    None,
-                    true,
+                .add_table(
+                    parse_create_table(
+                        Dialect::MySQL,
+                        "CREATE TABLE friends (id int, friend int);"
+                    )
+                    .unwrap(),
                     mig
                 )
                 .is_ok());
@@ -3088,30 +2750,16 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
                      JOIN (SELECT * FROM friends) AS f2 ON (f1.friend = f2.id)
                      WHERE f1.id = ?;";
 
-            let res =
-                inc.add_parsed_query(parse_query(Dialect::MySQL, q).unwrap(), None, true, mig);
+            let res = inc.add_query(
+                None,
+                parse_select_statement(Dialect::MySQL, q).unwrap(),
+                mig,
+            );
             assert!(res.is_ok(), "{}", res.as_ref().unwrap_err());
-            let qfp = res.unwrap();
-
-            eprintln!(
-                "{:?}",
-                qfp.new_nodes
-                    .iter()
-                    .map(|n| mig.graph().node_weight(*n).unwrap().description(true))
-                    .collect::<Vec<_>>()
-            );
-
-            // Check join node
-            // TODO(DAN): Why was this changed from new_nodes[0] to new_nodes[1]?
-            let join = mig.graph().node_weight(qfp.new_nodes[1]).unwrap();
-            assert_eq!(
-                join.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
-                &["id", "friend", "friend"]
-            );
-            assert_eq!(join.description(true), "[1:0, 1:1, 2:1] 1:(1) ⋈ 2:(0)");
+            let name = res.unwrap();
 
             // Check leaf projection node
-            let leaf_view = get_parent_node(&inc, mig, "q_1");
+            let leaf_view = get_parent_node(&inc, mig, &name);
             assert_eq!(
                 leaf_view
                     .columns()
@@ -3133,28 +2781,25 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
 
-            let res = inc.add_parsed_query(
-                parse_query(Dialect::MySQL, "SELECT users.name, 1 FROM users;").unwrap(),
+            let res = inc.add_query(
                 None,
-                true,
+                parse_select_statement(Dialect::MySQL, "SELECT users.name, 1 FROM users;").unwrap(),
                 mig,
             );
             assert!(res.is_ok());
 
             // leaf view node
-            let edge = get_parent_node(&inc, mig, &res.unwrap().name);
+            let edge = get_parent_node(&inc, mig, &res.unwrap());
             assert_eq!(
                 edge.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
                 &["name", "1", "bogokey"]
@@ -3173,28 +2818,26 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "CREATE TABLE users (id int, age int);").unwrap(),
-                    None,
-                    true,
+                .add_table(
+                    parse_create_table(Dialect::MySQL, "CREATE TABLE users (id int, age int);")
+                        .unwrap(),
                     mig
                 )
                 .is_ok());
 
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT 2 * users.age, 2 * 10 as twenty FROM users;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
 
             // leaf view node
-            let edge = get_parent_node(&inc, mig, &res.unwrap().name);
+            let edge = get_parent_node(&inc, mig, &res.unwrap());
 
             assert_eq!(
                 edge.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
@@ -3218,34 +2861,30 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, age int, name varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
 
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT 2 * users.age, 2 * 10 AS twenty FROM users WHERE users.name = ?;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
-            let qfp = res.unwrap();
-            assert_eq!(qfp.new_nodes.len(), 2);
+            let name = res.unwrap();
 
             // Check projection node
-            let node = get_parent_node(&inc, mig, &qfp.name);
+            let node = get_parent_node(&inc, mig, &name);
             assert_eq!(
                 node.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
                 &["name", "(2 * `users`.`age`)", "twenty"]
@@ -3256,7 +2895,7 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             );
 
             // Check reader
-            let n = get_reader(&inc, mig, &qfp.name);
+            let n = get_reader(&inc, mig, &name);
             assert_eq!(n.as_reader().unwrap().key().unwrap(), &[2]);
         })
         .await;
@@ -3271,27 +2910,23 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE articles (id int, author int, title varchar(255));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
 
@@ -3299,8 +2934,12 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
                      FROM articles \
                      JOIN (SELECT * FROM users) AS nested_users \
                      ON (nested_users.id = articles.author);";
-            let q = inc
-                .add_parsed_query(parse_query(Dialect::MySQL, q).unwrap(), None, true, mig)
+            let name = inc
+                .add_query(
+                    None,
+                    parse_select_statement(Dialect::MySQL, q).unwrap(),
+                    mig,
+                )
                 .unwrap();
             let qid = query_id_hash(
                 &["articles", "nested_users"],
@@ -3324,7 +2963,7 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
                 &["id", "author", "title", "name"]
             );
             // leaf node
-            let new_leaf_view = get_parent_node(&inc, mig, &q.name);
+            let new_leaf_view = get_parent_node(&inc, mig, &name);
             assert_eq!(
                 new_leaf_view
                     .columns()
@@ -3347,36 +2986,31 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE articles (id int, author int, title varchar(255));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
 
             // Add a simple query on users, which will be duplicated in the subquery below.
             assert!(inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "SELECT * FROM users;").unwrap(),
+                .add_query(
                     None,
-                    true,
+                    parse_select_statement(Dialect::MySQL, "SELECT * FROM users;").unwrap(),
                     mig
                 )
                 .is_ok());
@@ -3387,7 +3021,11 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
                      FROM articles \
                      JOIN (SELECT * FROM users) AS nested_users \
                      ON (nested_users.id = articles.author);";
-            let q = inc.add_parsed_query(parse_query(Dialect::MySQL, q).unwrap(), None, true, mig);
+            let q = inc.add_query(
+                None,
+                parse_select_statement(Dialect::MySQL, q).unwrap(),
+                mig,
+            );
             assert!(q.is_ok());
             let qid = query_id_hash(
                 &["articles", "nested_users"],
@@ -3411,7 +3049,7 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
                 &["id", "author", "title", "name"]
             );
             // leaf node
-            let new_leaf_view = get_parent_node(&inc, mig, &q.unwrap().name);
+            let new_leaf_view = get_parent_node(&inc, mig, &q.unwrap());
             assert_eq!(
                 new_leaf_view
                     .columns()
@@ -3426,6 +3064,7 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "Unions not currently supported (ENG-1605)"]
     async fn it_incorporates_compound_selection() {
         // set up graph
         let mut g =
@@ -3433,20 +3072,19 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
 
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT users.id, users.name FROM users \
                  WHERE users.id = 32 \
@@ -3455,14 +3093,12 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
                  WHERE users.id = 42 AND users.name = 'bob';",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
 
             // the leaf of this query (node above the reader) is a union
-            let union_view = get_node(&inc, mig, &res.unwrap().name);
+            let union_view = get_node(&inc, mig, &res.unwrap());
             assert_eq!(
                 union_view
                     .columns()
@@ -3484,15 +3120,13 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
             // Should have source and "users" base table node
@@ -3509,35 +3143,29 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             assert!(get_node(&inc, mig, "users").is_base());
 
             // Add a new query
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT id, name FROM users WHERE users.id = 42;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
-            let leaf = res.unwrap().query_leaf;
 
             // Add query with a different predicate
             let ncount = mig.graph().node_count();
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                None,
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT id, name FROM users WHERE users.id = 50;",
                 )
                 .unwrap(),
-                None,
-                true,
                 mig,
             );
             assert!(res.is_ok());
-            let qfp = res.unwrap();
-            // should NOT have ended up with the same leaf node
-            assert_ne!(qfp.query_leaf, leaf);
             // should have added three more nodes (filter, project, reorder project and reader)
             assert_eq!(mig.graph().node_count(), ncount + 4);
         })
@@ -3553,37 +3181,26 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
                 allow_topk: true,
                 ..Default::default()
             });
-            inc.add_parsed_query(
-                parse_query(Dialect::MySQL, "CREATE TABLE things (id int primary key);").unwrap(),
-                None,
-                true,
+            inc.add_table(
+                parse_create_table(Dialect::MySQL, "CREATE TABLE things (id int primary key);")
+                    .unwrap(),
                 mig,
             )
             .unwrap();
             // source -> things
             assert_eq!(mig.graph().node_count(), 2);
 
-            let query = inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "SELECT * FROM things ORDER BY id LIMIT 3")
-                        .unwrap(),
-                    Some("things_by_id_limit_3".into()),
-                    true,
-                    mig,
-                )
-                .unwrap();
+            inc.add_query(
+                Some("things_by_id_limit_3".into()),
+                parse_select_statement(Dialect::MySQL, "SELECT * FROM things ORDER BY id LIMIT 3")
+                    .unwrap(),
+                mig,
+            )
+            .unwrap();
 
             // source -> things -> project bogokey -> topk -> project_columns -> project reorder ->
             // leaf
             assert_eq!(mig.graph().node_count(), 7);
-            assert_eq!(
-                query
-                    .new_nodes
-                    .iter()
-                    .filter(|ni| mig.graph()[**ni].description(true) == "π[0, lit: 0]")
-                    .count(),
-                1
-            );
         })
         .await;
     }
@@ -3595,56 +3212,45 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE users (id int, name varchar(40));"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
             // Add first copy of new query, called "tq1"
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                Some("tq1".into()),
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT id, name FROM users WHERE users.id = 42;",
                 )
                 .unwrap(),
-                Some("tq1".into()),
-                true,
                 mig,
             );
             assert!(res.is_ok());
-            let leaf = res.unwrap().query_leaf;
 
             // Add the same query again, this time as "tq2"
             let ncount = mig.graph().node_count();
-            let res = inc.add_parsed_query(
-                parse_query(
+            let res = inc.add_query(
+                Some("tq2".into()),
+                parse_select_statement(
                     Dialect::MySQL,
                     "SELECT id, name FROM users WHERE users.id = 42;",
                 )
                 .unwrap(),
-                Some("tq2".into()),
-                true,
                 mig,
             );
             assert!(res.is_ok());
-            // should have added no more nodes
-            let qfp = res.unwrap();
-            assert_eq!(qfp.new_nodes, vec![]);
             assert_eq!(mig.graph().node_count(), ncount);
-            // should have ended up with the same leaf node
-            assert_eq!(qfp.query_leaf, leaf);
 
             // Add a query over tq2, which really is tq1
-            let _res = inc.add_parsed_query(
-                parse_query(Dialect::MySQL, "SELECT tq2.id FROM tq2;").unwrap(),
+            let _res = inc.add_query(
                 Some("over_tq2".into()),
-                true,
+                parse_select_statement(Dialect::MySQL, "SELECT tq2.id FROM tq2;").unwrap(),
                 mig,
             );
             // should have added a projection and a reader
@@ -3658,10 +3264,9 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
         let mut g = integration_utils::start_simple_unsharded("count_star_nonexistent_table").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            let res = inc.add_parsed_query(
-                parse_query(Dialect::MySQL, "SELECT count(*) FROM foo;").unwrap(),
+            let res = inc.add_query(
                 None,
-                true,
+                parse_select_statement(Dialect::MySQL, "SELECT count(*) FROM foo;").unwrap(),
                 mig,
             );
             assert!(res.is_err());
@@ -3681,20 +3286,17 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             });
             // Must have a base node for type inference to work, so make one manually
             assert!(inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
+                .add_table(
+                    parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
                         .unwrap(),
-                    None,
-                    true,
                     mig
                 )
                 .is_ok());
 
             let _ = inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "SELECT t1.a from t1 LIMIT 3").unwrap(),
+                .add_query(
                     None,
-                    true,
+                    parse_select_statement(Dialect::MySQL, "SELECT t1.a from t1 LIMIT 3").unwrap(),
                     mig,
                 )
                 .unwrap();
@@ -3728,20 +3330,18 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             });
             // Must have a base node for type inference to work, so make one manually
             assert!(inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
+                .add_table(
+                    parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
                         .unwrap(),
-                    None,
-                    true,
                     mig
                 )
                 .is_ok());
 
             let _ = inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "SELECT t1.a from t1 where t1.a = t1.b").unwrap(),
+                .add_query(
                     None,
-                    true,
+                    parse_select_statement(Dialect::MySQL, "SELECT t1.a from t1 where t1.a = t1.b")
+                        .unwrap(),
                     mig,
                 )
                 .unwrap();
@@ -3774,27 +3374,24 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             });
             // Must have a base node for type inference to work, so make one manually
             assert!(inc
-                .add_parsed_query(
-                    parse_query(
+                .add_table(
+                    parse_create_table(
                         Dialect::MySQL,
                         "CREATE TABLE t1 (a int, b float, c Text, d Text);"
                     )
                     .unwrap(),
-                    None,
-                    true,
-                    mig
+                    mig,
                 )
                 .is_ok());
 
             let _ = inc
-                .add_parsed_query(
-                    parse_query(
+                .add_query(
+                    None,
+                    parse_select_statement(
                         Dialect::MySQL,
                         "SELECT sum(t1.a), max(t1.b), group_concat(c separator ' ') from t1",
                     )
                     .unwrap(),
-                    None,
-                    true,
                     mig,
                 )
                 .unwrap();
@@ -3840,33 +3437,28 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             });
             // Must have a base node for type inference to work, so make one manually
             assert!(inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
+                .add_table(
+                    parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
                         .unwrap(),
-                    None,
-                    true,
                     mig
                 )
                 .is_ok());
             assert!(inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "CREATE TABLE t2 (a int, b float, c Text);")
+                .add_table(
+                    parse_create_table(Dialect::MySQL, "CREATE TABLE t2 (a int, b float, c Text);")
                         .unwrap(),
-                    None,
-                    true,
                     mig
                 )
                 .is_ok());
 
             let _ = inc
-                .add_parsed_query(
-                    parse_query(
+                .add_query(
+                    None,
+                    parse_select_statement(
                         Dialect::MySQL,
                         "SELECT t1.a, t2.a FROM t1 JOIN t2 on t1.c = t2.c where t2.b = ?",
                     )
                     .unwrap(),
-                    None,
-                    true,
                     mig,
                 )
                 .unwrap();
@@ -3891,6 +3483,7 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "Unions not currently supported for CREATE CACHE (ENG-1605)"]
     async fn infers_type_for_union() {
         // set up graph
         let mut g = integration_utils::start_simple_unsharded("infers_type_for_union").await;
@@ -3902,33 +3495,28 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             });
             // Must have a base node for type inference to work, so make one manually
             assert!(inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
+                .add_table(
+                    parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
                         .unwrap(),
-                    None,
-                    true,
                     mig
                 )
                 .is_ok());
             assert!(inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "CREATE TABLE t2 (a int, b float, c Text);")
+                .add_table(
+                    parse_create_table(Dialect::MySQL, "CREATE TABLE t2 (a int, b float, c Text);")
                         .unwrap(),
-                    None,
-                    true,
                     mig
                 )
                 .is_ok());
 
             let _ = inc
-                .add_parsed_query(
-                    parse_query(
+                .add_query(
+                    None,
+                    parse_select_statement(
                         Dialect::MySQL,
                         "SELECT t1.a FROM t1 union select t2.a from t2",
                     )
                     .unwrap(),
-                    None,
-                    true,
                     mig,
                 )
                 .unwrap();
@@ -3959,24 +3547,21 @@ parse_query(Dialect::MySQL, "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS cou
             });
             // Must have a base node for type inference to work, so make one manually
             assert!(inc
-                .add_parsed_query(
-                    parse_query(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
+                .add_table(
+                    parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
                         .unwrap(),
-                    None,
-                    true,
                     mig
                 )
                 .is_ok());
 
             let _ = inc
-                .add_parsed_query(
-                    parse_query(
+                .add_query(
+                    None,
+                    parse_select_statement(
                         Dialect::MySQL,
                         "SELECT cast(t1.b as char), t1.a, t1.a + 1 from t1",
                     )
                     .unwrap(),
-                    None,
-                    true,
                     mig,
                 )
                 .unwrap();

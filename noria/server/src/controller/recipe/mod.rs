@@ -177,34 +177,36 @@ impl Recipe {
         for change in changelist.changes {
             match change {
                 Change::CreateTable(cts) => {
-                    let name = cts.table.name.clone();
-                    match self.registry.get(&name) {
+                    match self.registry.get(&cts.table.name) {
                         Some(RecipeExpr::Table(current_cts)) => {
                             // Table already exists, so check if it has been changed.
                             if current_cts != &cts {
                                 // Table has changed. Drop and recreate.
-                                trace!(%cts.table.name, "table exists and has changed. Dropping and recreating...");
+                                trace!(
+                                    name = %cts.table.name,
+                                    "table exists and has changed. Dropping and recreating..."
+                                );
                                 self.drop_and_recreate(&cts.table.name.clone(), cts, mig);
                                 continue;
                             }
-                            trace!(%cts.table.name, "table exists, but hasn't changed. Ignoring...");
+                            trace!(
+                                name = %cts.table.name,
+                                "table exists, but hasn't changed. Ignoring..."
+                            );
                         }
                         Some(RecipeExpr::View(_)) => {
-                            return Err(ReadySetError::ViewAlreadyExists(name.clone().into()))
+                            return Err(ReadySetError::ViewAlreadyExists(
+                                cts.table.name.clone().into(),
+                            ))
                         }
                         _ => {
-                            let query = SqlQuery::CreateTable(cts.clone());
-                            let qfp =
-                                self.inc
-                                    .add_parsed_query(query, Some(name.clone()), false, mig)?;
+                            self.inc.add_table(cts.clone(), mig)?;
                             self.registry.add_query(RecipeExpr::Table(cts))?;
                         }
                     }
                 }
-                Change::CreateView(cvs) => {
-                    let query = SqlQuery::CreateView(cvs.clone());
-                    let name = cvs.name.name.clone();
-                    let expression = RecipeExpr::View(cvs);
+                Change::CreateView(stmt) => {
+                    let expression = RecipeExpr::View(stmt.clone());
                     if !self.registry.add_query(expression)? {
                         // The expression is already present, and we successfully added
                         // a new alias for it.
@@ -212,23 +214,20 @@ impl Recipe {
                     }
 
                     // add the query
-                    let qfp = self
-                        .inc
-                        .add_parsed_query(query, Some(name.clone()), true, mig)?;
+                    self.inc.add_view(stmt, mig)?;
                 }
                 Change::CreateCache(ccqs) => {
-                    let select = match &ccqs.inner {
+                    let statement = match &ccqs.inner {
                         CacheInner::Statement(box stmt) => stmt.clone(),
                         CacheInner::Id(id) => {
                             error!("attempted to issue CREATE CACHE with an id: {}", id);
                             internal!("CREATE CACHE should've had its ID resolved by the adapter");
                         }
                     };
-                    let query = SqlQuery::Select(select.clone());
-                    if let Some(name) = ccqs.name {
+                    if let Some(name) = &ccqs.name {
                         let expression = RecipeExpr::Cache {
                             name: name.clone(),
-                            statement: select,
+                            statement: statement.clone(),
                             always: ccqs.always,
                         };
                         if !self.registry.add_query(expression)? {
@@ -236,19 +235,14 @@ impl Recipe {
                             // a new alias for it.
                             continue;
                         }
-                        // add the query
-                        let qfp =
-                            self.inc
-                                .add_parsed_query(query, Some(name.clone()), true, mig)?;
-                    } else {
-                        // add the query
-                        let qfp = self.inc.add_parsed_query(query, None, true, mig)?;
-                        self.registry.add_query(RecipeExpr::Cache {
-                            name: qfp.name.clone(),
-                            statement: select,
-                            always: ccqs.always,
-                        })?;
-                    };
+                    }
+
+                    let name = self.inc.add_query(ccqs.name, statement.clone(), mig)?;
+                    self.registry.add_query(RecipeExpr::Cache {
+                        name,
+                        statement,
+                        always: ccqs.always,
+                    })?;
                 }
                 // We process ALTER TABLE statements in the following way:
                 // 1. Create a copy of the table that is being altered. If it doesn't exist, then
@@ -310,10 +304,7 @@ impl Recipe {
                 "attempted to issue ALTER TABLE, but table does not exist");
             return Err(ReadySetError::TableNotFound(name.clone().into()));
         };
-        let query = SqlQuery::CreateTable(new_table.clone());
-        let new_name = new_table.table.name.clone();
-        self.inc
-            .add_parsed_query(query, Some(new_name), false, mig)?;
+        self.inc.add_table(new_table.clone(), mig)?;
         self.registry.add_query(RecipeExpr::Table(new_table))?;
         Ok(())
     }

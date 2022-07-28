@@ -8,13 +8,13 @@ use nom_sql::{Column, FieldDefinitionExpr, SelectStatement, SqlIdentifier, SqlQu
 use noria_errors::{internal, ReadySetError, ReadySetResult};
 use tracing::warn;
 
-use crate::outermost_table_exprs;
+use crate::{outermost_table_exprs, util};
 
-pub trait ImpliedTableExpansion {
+pub trait ImpliedTableExpansion: Sized {
     fn expand_implied_tables(
         self,
         write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
-    ) -> ReadySetResult<SqlQuery>;
+    ) -> ReadySetResult<Self>;
 }
 
 // Sets the table for the `Column` in `f`to `table`. This is mostly useful for CREATE TABLE
@@ -97,7 +97,7 @@ impl<'ast, 'schema> Visitor<'ast> for ExpandImpliedTablesVisitor<'schema> {
         );
         let orig_subquery_schemas = mem::replace(
             &mut self.subquery_schemas,
-            super::subquery_schemas(&select_statement.ctes, &select_statement.join)
+            util::subquery_schemas(&select_statement.ctes, &select_statement.join)
                 .into_iter()
                 .map(|(k, v)| (k.into(), v.into_iter().map(|s| s.into()).collect()))
                 .collect(),
@@ -173,6 +173,15 @@ fn rewrite_select(
     Ok(select_statement)
 }
 
+impl ImpliedTableExpansion for SelectStatement {
+    fn expand_implied_tables(
+        self,
+        write_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+    ) -> ReadySetResult<Self> {
+        rewrite_select(self, write_schemas)
+    }
+}
+
 impl ImpliedTableExpansion for SqlQuery {
     fn expand_implied_tables(
         self,
@@ -188,7 +197,7 @@ impl ImpliedTableExpansion for SqlQuery {
                     .collect::<ReadySetResult<Vec<_>>>()?;
                 SqlQuery::CompoundSelect(csq)
             }
-            SqlQuery::Select(sq) => SqlQuery::Select(rewrite_select(sq, write_schemas)?),
+            SqlQuery::Select(sq) => SqlQuery::Select(sq.expand_implied_tables(write_schemas)?),
             SqlQuery::Insert(mut iq) => {
                 let table = iq.table.clone();
                 // Expand within field list
