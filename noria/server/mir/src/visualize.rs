@@ -290,7 +290,11 @@ impl GraphViz for MirNodeInner {
                 )
             }
             MirNodeInner::Reuse { ref node } => {
-                write!(f, "Reuse | using: {}", node.borrow().versioned_name(),)
+                write!(f, "Reuse | using: {}", node.borrow().versioned_name(),)?;
+                if let Some(flow_node) = &node.borrow().flow_node {
+                    write!(f, " | flow node: {}", flow_node.address().index())?;
+                }
+                Ok(())
             }
             MirNodeInner::Distinct { ref group_by } => {
                 let key_cols = group_by.iter().join(", ");
