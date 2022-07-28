@@ -459,21 +459,26 @@ impl DfState {
 
     /// Obtain a TableBuilder that can be used to construct a Table to perform writes and deletes
     /// from the given named base node.
-    pub(super) fn table_builder(&self, base: &str) -> ReadySetResult<Option<TableBuilder>> {
-        let ni = match self.recipe.node_addr_for(&base.into()) {
-            Ok(ni) => ni,
-            Err(_) => *self
-                .inputs()
-                .get(base)
-                .ok_or_else(|| ReadySetError::TableNotFound {
-                    name: base.into(),
+    pub(super) fn table_builder(&self, name: &str) -> ReadySetResult<Option<TableBuilder>> {
+        let ni =
+            self.recipe
+                .node_addr_for(&name.into())
+                .map_err(|_| ReadySetError::TableNotFound {
+                    name: name.into(),
                     schema: None, /* TODO */
-                })?,
-        };
+                })?;
+        self.table_builder_by_index(ni)
+    }
+
+    pub(super) fn table_builder_by_index(
+        &self,
+        ni: NodeIndex,
+    ) -> ReadySetResult<Option<TableBuilder>> {
         let node = self
             .ingredients
             .node_weight(ni)
             .ok_or_else(|| ReadySetError::NodeNotFound { index: ni.index() })?;
+        let base = node.name();
 
         trace!(%base, "creating table");
 

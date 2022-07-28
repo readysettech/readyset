@@ -444,35 +444,59 @@ impl ControllerHandle {
     }
 
     /// Obtain a `Table` that allows you to perform writes, deletes, and other operations on the
-    /// given base table.
+    /// given base table, looking up the table by its name
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn table<'a>(&'a mut self, name: &str) -> impl Future<Output = ReadySetResult<Table>> + 'a {
-        let domains = self.domains.clone();
         let name = name.to_string();
+        async move {
+            self.request_table(ControllerRequest::new(
+                "table_builder",
+                &name,
+                self.request_timeout,
+            )?)
+            .await?
+            .ok_or(ReadySetError::TableNotFound {
+                name,
+                schema: None, /* TODO fill in schema */
+            })
+        }
+    }
+
+    /// Obtain a `Table` that allows you to perform writes, deletes, and other operations on the
+    /// given base table, looking up the table by its node index
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub async fn table_by_index(&mut self, ni: NodeIndex) -> ReadySetResult<Table> {
+        self.request_table(ControllerRequest::new(
+            "table_builder_by_index",
+            ni,
+            self.request_timeout,
+        )?)
+        .await?
+        .ok_or_else(|| ReadySetError::NoSuchNode(ni.index()))
+    }
+
+    fn request_table(
+        &mut self,
+        req: ControllerRequest,
+    ) -> impl Future<Output = ReadySetResult<Option<Table>>> + '_ {
+        let domains = self.domains.clone();
         async move {
             let body: hyper::body::Bytes = self
                 .handle
                 .ready()
                 .await
                 .map_err(rpc_err!("ControllerHandle::table"))?
-                .call(ControllerRequest::new(
-                    "table_builder",
-                    &name,
-                    self.request_timeout,
-                )?)
+                .call(req)
                 .await
                 .map_err(rpc_err!("ControllerHandle::table"))?;
 
-            match bincode::deserialize::<ReadySetResult<Option<TableBuilder>>>(&body)?
-                .map_err(|e| rpc_err_no_downcast("ControllerHandle::table", e))?
-            {
-                Some(tb) => Ok(tb.build(domains)),
-                None => Err(ReadySetError::TableNotFound {
-                    name,
-                    schema: None, /* TODO fill in schema */
-                }),
-            }
+            Ok(
+                bincode::deserialize::<ReadySetResult<Option<TableBuilder>>>(&body)?
+                    .map_err(|e| rpc_err_no_downcast("ControllerHandle::table", e))?
+                    .map(|tb| tb.build(domains)),
+            )
         }
     }
 

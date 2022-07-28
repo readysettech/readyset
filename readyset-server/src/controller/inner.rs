@@ -314,6 +314,15 @@ impl Leader {
                     let ret = ds.table_builder(body);
                     return_serialized!(ret);
                 }
+                (&Method::POST, "/table_builder_by_index") => {
+                    // NOTE(eta): there is DELIBERATELY no `?` after the `table_builder` call,
+                    // because the receiving end expects a `ReadySetResult` to be serialized.
+                    let body = bincode::deserialize(&body)?;
+                    let ds = futures::executor::block_on(self.dataflow_state_handle.read());
+                    check_quorum!(ds);
+                    let ret = ds.table_builder_by_index(body);
+                    return_serialized!(ret);
+                }
                 (&Method::POST, "/view_builder") => {
                     // NOTE(eta): same as above applies
                     require_leader_ready()?;

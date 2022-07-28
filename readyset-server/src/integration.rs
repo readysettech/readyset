@@ -57,7 +57,7 @@ async fn it_completes() {
 
     let mut g = g;
     // do some stuff (== it_works_basic)
-    let _ = g
+    let (a, b) = g
         .migrate(|mig| {
             let a = mig.add_base(
                 "a",
@@ -76,13 +76,13 @@ async fn it_completes() {
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", make_columns(&["a", "b"]), u);
             mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
-            (a, b, c)
+            (a, b)
         })
         .await;
 
     let mut cq = g.view("c").await.unwrap();
-    let mut muta = g.table("a").await.unwrap();
-    let mut mutb = g.table("b").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
+    let mut mutb = g.table_by_index(b).await.unwrap();
     let id: DfValue = 1.into();
 
     assert_eq!(muta.table_name(), "a");
@@ -132,7 +132,7 @@ async fn test_timestamp_propagation_simple() {
     let mut g = start_simple_unsharded("test_timestamp_propagation_simple").await;
 
     // Create a base table "a" with columns "a", and "b".
-    let _ = g
+    let a = g
         .migrate(|mig| {
             // Adds a base table with fields "a", "b".
             let a = mig.add_base(
@@ -146,12 +146,12 @@ async fn test_timestamp_propagation_simple() {
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", make_columns(&["a"]), u);
             mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
-            (a, c)
+            a
         })
         .await;
 
     let mut cq = g.view("c").await.unwrap();
-    let mut muta = g.table("a").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
 
     // Insert <1, 2> into table "a".
     let id: DfValue = 1.into();
@@ -197,7 +197,7 @@ async fn test_timestamp_propagation_multitable() {
     let mut g = start_simple_unsharded("test_timestamp_propagation_multitable").await;
 
     // Create two base tables "a" and "b" with columns "a", and "b".
-    let _ = g
+    let (a, b) = g
         .migrate(|mig| {
             let a = mig.add_base(
                 "a",
@@ -216,13 +216,13 @@ async fn test_timestamp_propagation_multitable() {
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", make_columns(&["a", "b"]), u);
             mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
-            (a, b, c)
+            (a, b)
         })
         .await;
 
     let mut cq = g.view("c").await.unwrap();
-    let mut muta = g.table("a").await.unwrap();
-    let mut mutb = g.table("b").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
+    let mut mutb = g.table_by_index(b).await.unwrap();
 
     // Insert some data into table a.
     muta.insert(vec![DfValue::Int(1), DfValue::Int(2)])
@@ -289,19 +289,21 @@ async fn sharded_shuffle() {
     // reader that is keyed by a different column. this requires a shuffle. we want to make sure
     // that that shuffle happens correctly.
 
-    g.migrate(|mig| {
-        let a = mig.add_base(
-            "base",
-            make_columns(&["id", "non_id"]),
-            Base::new().with_primary_key([0]),
-        );
-        mig.maintain_anonymous(a, &Index::hash_map(vec![1]));
-    })
-    .await;
+    let a = g
+        .migrate(|mig| {
+            let a = mig.add_base(
+                "base",
+                make_columns(&["id", "non_id"]),
+                Base::new().with_primary_key([0]),
+            );
+            mig.maintain_anonymous(a, &Index::hash_map(vec![1]));
+            a
+        })
+        .await;
 
     eprintln!("{}", g.graphviz().await.unwrap());
 
-    let mut base = g.table("base").await.unwrap();
+    let mut base = g.table_by_index(a).await.unwrap();
     let mut view = g.view("base").await.unwrap();
 
     // make sure there is data on >1 shard, and that we'd get multiple rows by querying the reader
@@ -352,38 +354,40 @@ async fn broad_recursing_upquery() {
     //
     // we're also going to make the join a left join so that we know the upquery will go to base_x.
 
-    g.migrate(|mig| {
-        // bases, both sharded by their first column
-        let x = mig.add_base(
-            "base_x",
-            make_columns(&["base_col", "join_col", "reader_col"]),
-            Base::new().with_primary_key([0]),
-        );
-        let y = mig.add_base(
-            "base_y",
-            make_columns(&["id"]),
-            Base::new().with_primary_key([0]),
-        );
-        // join, sharded by the join column, which is be the second column on x
-        let join = mig.add_ingredient(
-            "join",
-            make_columns(&["base_col", "join_col", "reader_col"]),
-            Join::new(x, y, JoinType::Left, vec![L(0), B(1, 0), L(2)]),
-        );
-        // reader, sharded by the lookup column, which is the third column on x
-        mig.maintain(
-            "reader".into(),
-            join,
-            &Index::hash_map(vec![2]),
-            Default::default(),
-            Default::default(),
-        );
-    })
-    .await;
+    let (x, _y) = g
+        .migrate(|mig| {
+            // bases, both sharded by their first column
+            let x = mig.add_base(
+                "base_x",
+                make_columns(&["base_col", "join_col", "reader_col"]),
+                Base::new().with_primary_key([0]),
+            );
+            let y = mig.add_base(
+                "base_y",
+                make_columns(&["id"]),
+                Base::new().with_primary_key([0]),
+            );
+            // join, sharded by the join column, which is be the second column on x
+            let join = mig.add_ingredient(
+                "join",
+                make_columns(&["base_col", "join_col", "reader_col"]),
+                Join::new(x, y, JoinType::Left, vec![L(0), B(1, 0), L(2)]),
+            );
+            // reader, sharded by the lookup column, which is the third column on x
+            mig.maintain(
+                "reader".into(),
+                join,
+                &Index::hash_map(vec![2]),
+                Default::default(),
+                Default::default(),
+            );
+            (x, y)
+        })
+        .await;
 
     eprintln!("{}", g.graphviz().await.unwrap());
 
-    let mut base_x = g.table("base_x").await.unwrap();
+    let mut base_x = g.table_by_index(x).await.unwrap();
     let mut reader = g.view("reader").await.unwrap();
 
     // we want to make sure that all the upqueries recurse all the way to cause maximum headache
@@ -423,18 +427,20 @@ async fn base_mutation() {
     use readyset::{Modification, Operation};
 
     let mut g = start_simple_unsharded("base_mutation").await;
-    g.migrate(|mig| {
-        let a = mig.add_base(
-            "a",
-            make_columns(&["a", "b"]),
-            Base::new().with_primary_key([0]),
-        );
-        mig.maintain_anonymous(a, &Index::hash_map(vec![0]));
-    })
-    .await;
+    let a = g
+        .migrate(|mig| {
+            let a = mig.add_base(
+                "a",
+                make_columns(&["a", "b"]),
+                Base::new().with_primary_key([0]),
+            );
+            mig.maintain_anonymous(a, &Index::hash_map(vec![0]));
+            a
+        })
+        .await;
 
     let mut read = g.view("a").await.unwrap();
-    let mut write = g.table("a").await.unwrap();
+    let mut write = g.table_by_index(a).await.unwrap();
 
     // insert a new record
     write.insert(vec![1.into(), 2.into()]).await.unwrap();
@@ -512,7 +518,7 @@ async fn base_mutation() {
 async fn shared_interdomain_ancestor() {
     // set up graph
     let mut g = start_simple_unsharded("shared_interdomain_ancestor").await;
-    let _ = g
+    let a = g
         .migrate(|mig| {
             let a = mig.add_base("a", make_columns(&["a", "b"]), Base::default());
 
@@ -526,13 +532,14 @@ async fn shared_interdomain_ancestor() {
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", make_columns(&["a", "b"]), u);
             mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
-            (a, b, c)
+
+            a
         })
         .await;
 
     let mut bq = g.view("b").await.unwrap();
     let mut cq = g.view("c").await.unwrap();
-    let mut muta = g.table("a").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
     let id: DfValue = 1.into();
 
     // send a value on a
@@ -565,7 +572,7 @@ async fn shared_interdomain_ancestor() {
 async fn it_works_w_mat() {
     // set up graph
     let mut g = start_simple_unsharded("it_works_w_mat").await;
-    let _ = g
+    let (a, b) = g
         .migrate(|mig| {
             let a = mig.add_base("a", make_columns(&["a", "b"]), Base::default());
             let b = mig.add_base("b", make_columns(&["a", "b"]), Base::default());
@@ -576,13 +583,13 @@ async fn it_works_w_mat() {
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", make_columns(&["a", "b"]), u);
             mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
-            (a, b, c)
+            (a, b)
         })
         .await;
 
     let mut cq = g.view("c").await.unwrap();
-    let mut muta = g.table("a").await.unwrap();
-    let mut mutb = g.table("b").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
+    let mut mutb = g.table_by_index(b).await.unwrap();
     let id: DfValue = 1.into();
 
     // send a few values on a
@@ -632,7 +639,7 @@ async fn it_works_w_partial_mat() {
         })
         .await;
 
-    let mut muta = g.table("a").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
     let id: DfValue = 1.into();
 
     // send a few values on a
@@ -679,7 +686,7 @@ async fn it_works_w_partial_mat_below_empty() {
     // set up graph with all nodes added in a single migration. The base tables are therefore empty
     // for now.
     let mut g = start_simple_unsharded("it_works_w_partial_mat_below_empty").await;
-    let _ = g
+    let (a, _b) = g
         .migrate(|mig| {
             let a = mig.add_base("a", make_columns(&["a", "b"]), Base::default());
             let b = mig.add_base("b", make_columns(&["a", "b"]), Base::default());
@@ -689,11 +696,11 @@ async fn it_works_w_partial_mat_below_empty() {
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", make_columns(&["a", "b"]), u);
             mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
-            (a, b, c)
+            (a, b)
         })
         .await;
 
-    let mut muta = g.table("a").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
     let id: DfValue = 1.into();
 
     // send a few values on a
@@ -725,7 +732,7 @@ async fn it_works_w_partial_mat_below_empty() {
 async fn it_works_deletion() {
     // set up graph
     let mut g = start_simple_unsharded("it_works_deletion").await;
-    let _ = g
+    let (a, b) = g
         .migrate(|mig| {
             let a = mig.add_base(
                 "a",
@@ -744,13 +751,13 @@ async fn it_works_deletion() {
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", make_columns(&["x", "y"]), u);
             mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
-            (a, b, c)
+            (a, b)
         })
         .await;
 
     let mut cq = g.view("c").await.unwrap();
-    let mut muta = g.table("a").await.unwrap();
-    let mut mutb = g.table("b").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
+    let mut mutb = g.table_by_index(b).await.unwrap();
 
     // send a value on a
     muta.insert(vec![1.into(), 2.into()]).await.unwrap();
@@ -1375,7 +1382,7 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
 #[tokio::test(flavor = "multi_thread")]
 async fn mutator_churn() {
     let mut g = start_simple_unsharded("mutator_churn").await;
-    let _ = g
+    let vote = g
         .migrate(|mig| {
             // migrate
 
@@ -1396,7 +1403,7 @@ async fn mutator_churn() {
                 &Index::hash_map(vec![0]),
                 ReaderProcessing::new(None, None, Some(vec![0, 1]), None, None).unwrap(),
             );
-            (vote, vc)
+            vote
         })
         .await;
 
@@ -1409,7 +1416,7 @@ async fn mutator_churn() {
     let user: DfValue = 0.into();
     for _ in 0..votes {
         for i in 0..ids {
-            g.table("vote")
+            g.table_by_index(vote)
                 .await
                 .unwrap()
                 .insert(vec![user.clone(), i.into()])
@@ -1681,14 +1688,14 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
 async fn it_works_with_simple_arithmetic() {
     let mut g = start_simple_unsharded("it_works_with_simple_arithmetic").await;
 
-    g.migrate(|mig| {
-        let mut recipe = Recipe::blank();
-        let sql = "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
-                   CREATE CACHE CarPrice FROM SELECT 2 * price FROM Car WHERE id = ?;";
-        let changelist = sql.parse().unwrap();
-        recipe.activate(mig, changelist).unwrap();
-    })
-    .await;
+    g.extend_recipe(
+        "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
+         CREATE CACHE CarPrice FROM SELECT 2 * price FROM Car WHERE id = ?;"
+            .parse()
+            .unwrap(),
+    )
+    .await
+    .unwrap();
 
     let mut mutator = g.table("Car").await.unwrap();
     let mut getter = g.view("CarPrice").await.unwrap();
@@ -1809,8 +1816,9 @@ async fn it_works_with_function_arithmetic() {
 #[tokio::test(flavor = "multi_thread")]
 async fn votes() {
     // set up graph
+    readyset_tracing::init_test_logging();
     let mut g = start_simple_unsharded("votes").await;
-    let _ = g
+    let (article1, article2, vote) = g
         .migrate(|mig| {
             // add article base nodes (we use two so we can exercise unions too)
             let article1 =
@@ -1844,7 +1852,7 @@ async fn votes() {
             let end = mig.add_ingredient("end", make_columns(&["id", "title", "votes"]), j);
             mig.maintain_anonymous(end, &Index::hash_map(vec![0]));
 
-            (article1, article2, vote, article, vc, end)
+            (article1, article2, vote)
         })
         .await;
 
@@ -1852,9 +1860,9 @@ async fn votes() {
     let mut vcq = g.view("vc").await.unwrap();
     let mut endq = g.view("end").await.unwrap();
 
-    let mut mut1 = g.table("article1").await.unwrap();
-    let mut mut2 = g.table("article2").await.unwrap();
-    let mut mutv = g.table("vote").await.unwrap();
+    let mut mut1 = g.table_by_index(article1).await.unwrap();
+    let mut mut2 = g.table_by_index(article2).await.unwrap();
+    let mut mutv = g.table_by_index(vote).await.unwrap();
 
     let a1: DfValue = 1.into();
     let a2: DfValue = 2.into();
@@ -1932,7 +1940,7 @@ async fn empty_migration() {
     let mut g = start_simple_unsharded("empty_migration").await;
     g.migrate(|_| {}).await;
 
-    let _ = g
+    let (a, b) = g
         .migrate(|mig| {
             let a = mig.add_base("a", make_columns(&["a", "b"]), Base::default());
             let b = mig.add_base("b", make_columns(&["a", "b"]), Base::default());
@@ -1943,13 +1951,13 @@ async fn empty_migration() {
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", make_columns(&["a", "b"]), u);
             mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
-            (a, b, c)
+            (a, b)
         })
         .await;
 
     let mut cq = g.view("c").await.unwrap();
-    let mut muta = g.table("a").await.unwrap();
-    let mut mutb = g.table("b").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
+    let mut mutb = g.table_by_index(b).await.unwrap();
     let id: DfValue = 1.into();
 
     // send a value on a
@@ -1982,7 +1990,7 @@ async fn simple_migration() {
 
     // set up graph
     let mut g = start_simple_unsharded("simple_migration").await;
-    let _ = g
+    let a = g
         .migrate(|mig| {
             let a = mig.add_base("a", make_columns(&["a", "b"]), Base::default());
             mig.maintain_anonymous(a, &Index::hash_map(vec![0]));
@@ -1991,7 +1999,7 @@ async fn simple_migration() {
         .await;
 
     let mut aq = g.view("a").await.unwrap();
-    let mut muta = g.table("a").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
 
     // send a value on a
     muta.insert(vec![id.clone(), 2.into()]).await.unwrap();
@@ -2006,7 +2014,7 @@ async fn simple_migration() {
     );
 
     // add unrelated node b in a migration
-    let _ = g
+    let b = g
         .migrate(|mig| {
             let b = mig.add_base("b", make_columns(&["a", "b"]), Base::default());
             mig.maintain_anonymous(b, &Index::hash_map(vec![0]));
@@ -2015,7 +2023,7 @@ async fn simple_migration() {
         .await;
 
     let mut bq = g.view("b").await.unwrap();
-    let mut mutb = g.table("b").await.unwrap();
+    let mut mutb = g.table_by_index(b).await.unwrap();
 
     // send a value on b
     mutb.insert(vec![id.clone(), 4.into()]).await.unwrap();
@@ -2048,7 +2056,7 @@ async fn add_columns() {
         })
         .await;
     let mut aq = g.view("a").await.unwrap();
-    let mut muta = g.table("a").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
 
     // send a value on a
     muta.insert(vec![id.clone(), "y".try_into().unwrap()])
@@ -2082,7 +2090,7 @@ async fn add_columns() {
     assert!(res.contains(&vec![id.clone(), "z".try_into().unwrap(), 3.into()]));
 
     // get a new muta and send a new value on it
-    let mut muta = g.table("a").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
     muta.insert(vec![id.clone(), "a".try_into().unwrap(), 10.into()])
         .await
         .unwrap();
@@ -2111,7 +2119,7 @@ async fn migrate_added_columns() {
             )
         })
         .await;
-    let mut muta = g.table("a").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
 
     // send a value on a
     muta.insert(vec![id.clone(), "y".try_into().unwrap()])
@@ -2140,7 +2148,7 @@ async fn migrate_added_columns() {
         .await
         .unwrap();
     // and an entirely new value
-    let mut muta = g.table("a").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
     muta.insert(vec![id.clone(), "a".try_into().unwrap(), 10.into()])
         .await
         .unwrap();
@@ -2352,9 +2360,9 @@ async fn replay_during_replay() {
     // must already be present in the one index that `u` has. let's do some writes and check that
     // nothing crashes.
 
-    let mut muta = g.table("a").await.unwrap();
-    let mut mutu1 = g.table("u1").await.unwrap();
-    let mut mutu2 = g.table("u2").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
+    let mut mutu1 = g.table_by_index(u1).await.unwrap();
+    let mut mutu2 = g.table_by_index(u2).await.unwrap();
 
     // as are numbers
     muta.insert(vec![1.into()]).await.unwrap();
@@ -2620,7 +2628,7 @@ async fn full_aggregation_with_bogokey() {
         .await;
 
     let mut aggq = g.view("agg").await.unwrap();
-    let mut base = g.table("base").await.unwrap();
+    let mut base = g.table_by_index(base).await.unwrap();
 
     // insert some values
     base.insert(vec![1.into()]).await.unwrap();
@@ -2705,41 +2713,42 @@ async fn pkey_then_full_table_with_bogokey() {
 async fn materialization_frontier() {
     // set up graph
     let mut g = start_simple_unsharded("materialization_frontier").await;
-    g.migrate(|mig| {
-        // migrate
+    let (article, vote) = g
+        .migrate(|mig| {
+            // migrate
 
-        // add article base node
-        let article = mig.add_base("article", make_columns(&["id", "title"]), Base::default());
+            // add article base node
+            let article = mig.add_base("article", make_columns(&["id", "title"]), Base::default());
 
-        // add vote base table
-        let vote = mig.add_base(
-            "vote",
-            make_columns(&["user", "id"]),
-            Base::new().with_primary_key([0, 1]),
-        );
+            // add vote base table
+            let vote = mig.add_base(
+                "vote",
+                make_columns(&["user", "id"]),
+                Base::new().with_primary_key([0, 1]),
+            );
 
-        // add vote count
-        let vc = mig.add_ingredient(
-            "votecount",
-            make_columns(&["id", "votes"]),
-            Aggregation::Count { count_nulls: false }
-                .over(vote, 0, &[1], &DfType::Unknown)
-                .unwrap(),
-        );
-        mig.mark_shallow(vc);
+            // add vote count
+            let vc = mig.add_ingredient(
+                "votecount",
+                make_columns(&["id", "votes"]),
+                Aggregation::Count { count_nulls: false }
+                    .over(vote, 0, &[1], &DfType::Unknown)
+                    .unwrap(),
+            );
+            mig.mark_shallow(vc);
 
-        // add final join using first field from article and first from vc
-        let j = Join::new(article, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
-        let end = mig.add_ingredient("awvc", make_columns(&["id", "title", "votes"]), j);
+            // add final join using first field from article and first from vc
+            let j = Join::new(article, vc, JoinType::Left, vec![B(0, 0), L(1), R(1)]);
+            let end = mig.add_ingredient("awvc", make_columns(&["id", "title", "votes"]), j);
 
-        let ri = mig.maintain_anonymous(end, &Index::hash_map(vec![0]));
-        mig.mark_shallow(ri);
-        (article, vote, vc, end)
-    })
-    .await;
+            let ri = mig.maintain_anonymous(end, &Index::hash_map(vec![0]));
+            mig.mark_shallow(ri);
+            (article, vote)
+        })
+        .await;
 
-    let mut a = g.table("article").await.unwrap();
-    let mut v = g.table("vote").await.unwrap();
+    let mut a = g.table_by_index(article).await.unwrap();
+    let mut v = g.table_by_index(vote).await.unwrap();
     let mut r = g.view("awvc").await.unwrap();
 
     // seed votes
@@ -2830,8 +2839,8 @@ async fn crossing_migration() {
             (a, b)
         })
         .await;
-    let mut muta = g.table("a").await.unwrap();
-    let mut mutb = g.table("b").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
+    let mut mutb = g.table_by_index(b).await.unwrap();
 
     let _ = g
         .migrate(move |mig| {
@@ -2874,7 +2883,7 @@ async fn independent_domain_migration() {
 
     // set up graph
     let mut g = start_simple_unsharded("independent_domain_migration").await;
-    let _ = g
+    let a = g
         .migrate(|mig| {
             let a = mig.add_base("a", make_columns(&["a", "b"]), Base::default());
             mig.maintain_anonymous(a, &Index::hash_map(vec![0]));
@@ -2883,7 +2892,7 @@ async fn independent_domain_migration() {
         .await;
 
     let mut aq = g.view("a").await.unwrap();
-    let mut muta = g.table("a").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
 
     // send a value on a
     muta.insert(vec![id.clone(), 2.into()]).await.unwrap();
@@ -2898,7 +2907,7 @@ async fn independent_domain_migration() {
     );
 
     // add unrelated node b in a migration
-    let _ = g
+    let b = g
         .migrate(|mig| {
             let b = mig.add_base("b", make_columns(&["a", "b"]), Base::default());
             mig.maintain_anonymous(b, &Index::hash_map(vec![0]));
@@ -2907,7 +2916,7 @@ async fn independent_domain_migration() {
         .await;
 
     let mut bq = g.view("b").await.unwrap();
-    let mut mutb = g.table("b").await.unwrap();
+    let mut mutb = g.table_by_index(b).await.unwrap();
 
     // send a value on b
     mutb.insert(vec![id.clone(), 4.into()]).await.unwrap();
@@ -2933,8 +2942,8 @@ async fn domain_amend_migration() {
             (a, b)
         })
         .await;
-    let mut muta = g.table("a").await.unwrap();
-    let mut mutb = g.table("b").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
+    let mut mutb = g.table_by_index(b).await.unwrap();
 
     let _ = g
         .migrate(move |mig| {
@@ -3013,7 +3022,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
     } else {
         start_simple_unsharded(&name).await
     };
-    let (article, _vote, vc, _end) = g
+    let (article, vote, vc, _end) = g
         .migrate(|mig| {
             // migrate
 
@@ -3045,8 +3054,8 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
             (article, vote, vc, end)
         })
         .await;
-    let mut muta = g.table("article").await.unwrap();
-    let mut mutv = g.table("vote").await.unwrap();
+    let mut muta = g.table_by_index(article).await.unwrap();
+    let mut mutv = g.table_by_index(vote).await.unwrap();
 
     let n = 250i64;
     let title: DfValue = "foo".try_into().unwrap();
@@ -3076,7 +3085,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
     }
 
     // migrate
-    let _ = g
+    let rating = g
         .migrate(move |mig| {
             // add new "ratings" base table
             let rating = mig.add_base(
@@ -3108,12 +3117,13 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
             let newend =
                 mig.add_ingredient("awr", make_columns(&["id", "title", "ratings", "votes"]), j);
             mig.maintain_anonymous(newend, &Index::hash_map(vec![0]));
-            (rating, newend)
+
+            rating
         })
         .await;
 
     let mut last = g.view("awr").await.unwrap();
-    let mut mutr = g.table("rating").await.unwrap();
+    let mut mutr = g.table_by_index(rating).await.unwrap();
     for i in 0..n {
         if old_puts_after {
             mutv.insert(vec![2.into(), i.into()]).await.unwrap();
@@ -3169,7 +3179,7 @@ async fn full_vote_migration_new_and_old_unsharded() {
 async fn live_writes() {
     readyset_tracing::init_test_logging();
     let mut g = start_simple_unsharded("live_writes").await;
-    let (_vote, vc) = g
+    let (vote, vc) = g
         .migrate(|mig| {
             // migrate
 
@@ -3195,7 +3205,7 @@ async fn live_writes() {
         .await;
 
     let mut vc_state = g.view("votecount").await.unwrap();
-    let mut add = g.table("vote").await.unwrap();
+    let mut add = g.table_by_index(vote).await.unwrap();
 
     let ids = 1000;
     let votes = 7;
@@ -3274,8 +3284,8 @@ async fn state_replay_migration_query() {
             (a, b)
         })
         .await;
-    let mut muta = g.table("a").await.unwrap();
-    let mut mutb = g.table("b").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
+    let mut mutb = g.table_by_index(b).await.unwrap();
 
     // make a couple of records
     muta.insert(vec![1.into(), "a".try_into().unwrap()])
@@ -3542,7 +3552,7 @@ async fn filter_aggregate_lobsters() {
 #[tokio::test(flavor = "multi_thread")]
 async fn node_removal() {
     let mut g = start_simple_unsharded("domain_removal").await;
-    let cid = g
+    let (a, b, cid) = g
         .migrate(|mig| {
             let a = mig.add_base(
                 "a",
@@ -3560,13 +3570,14 @@ async fn node_removal() {
             emits.insert(b, vec![0, 1]);
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", make_columns(&["a", "b"]), u);
-            mig.maintain_anonymous(c, &Index::hash_map(vec![0]))
+            let cid = mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
+            (a, b, cid)
         })
         .await;
 
     let mut cq = g.view("c").await.unwrap();
-    let mut muta = g.table("a").await.unwrap();
-    let mut mutb = g.table("b").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
+    let mut mutb = g.table_by_index(b).await.unwrap();
     let id: DfValue = 1.into();
 
     assert_eq!(muta.table_name(), "a");
@@ -4616,17 +4627,19 @@ async fn non_sql_materialized_range_query() {
     .await
     .unwrap();
 
-    g.migrate(|mig| {
-        let a = mig.add_base(
-            "a",
-            make_columns(&["a", "b"]),
-            Base::new().with_primary_key([0]),
-        );
-        mig.maintain_anonymous(a, &Index::btree_map(vec![0]));
-    })
-    .await;
+    let a = g
+        .migrate(|mig| {
+            let a = mig.add_base(
+                "a",
+                make_columns(&["a", "b"]),
+                Base::new().with_primary_key([0]),
+            );
+            mig.maintain_anonymous(a, &Index::btree_map(vec![0]));
+            a
+        })
+        .await;
 
-    let mut a = g.table("a").await.unwrap();
+    let mut a = g.table_by_index(a).await.unwrap();
     let mut reader = g.view("a").await.unwrap();
     a.insert_many((0i32..10).map(|n| vec![DfValue::from(n), DfValue::from(n)]))
         .await
@@ -4660,17 +4673,19 @@ async fn non_sql_range_upquery() {
     .await
     .unwrap();
 
-    g.migrate(|mig| {
-        let a = mig.add_base(
-            "a",
-            make_columns(&["a", "b"]),
-            Base::new().with_primary_key([0]),
-        );
-        mig.maintain_anonymous(a, &Index::btree_map(vec![0]));
-    })
-    .await;
+    let a = g
+        .migrate(|mig| {
+            let a = mig.add_base(
+                "a",
+                make_columns(&["a", "b"]),
+                Base::new().with_primary_key([0]),
+            );
+            mig.maintain_anonymous(a, &Index::btree_map(vec![0]));
+            a
+        })
+        .await;
 
-    let mut a = g.table("a").await.unwrap();
+    let mut a = g.table_by_index(a).await.unwrap();
     let mut reader = g.view("a").await.unwrap();
     a.insert_many((0i32..10).map(|n| vec![DfValue::from(n), DfValue::from(n)]))
         .await
@@ -4704,52 +4719,55 @@ async fn range_upquery_after_point_queries() {
     .await
     .unwrap();
 
-    g.migrate(|mig| {
-        let a = mig.add_base(
-            "a",
-            make_columns(&["a", "b"]),
-            Base::new().with_primary_key([0]),
-        );
-        let b = mig.add_base(
-            "b",
-            make_columns(&["a", "c"]),
-            Base::new().with_primary_key([0]),
-        );
-        let join = mig.add_ingredient(
-            "join",
-            make_columns(&["a", "a_b", "b_c"]),
-            Join::new(a, b, JoinType::Inner, vec![B(0, 0), L(1), R(1)]),
-        );
+    let (a, b) = g
+        .migrate(|mig| {
+            let a = mig.add_base(
+                "a",
+                make_columns(&["a", "b"]),
+                Base::new().with_primary_key([0]),
+            );
+            let b = mig.add_base(
+                "b",
+                make_columns(&["a", "c"]),
+                Base::new().with_primary_key([0]),
+            );
+            let join = mig.add_ingredient(
+                "join",
+                make_columns(&["a", "a_b", "b_c"]),
+                Join::new(a, b, JoinType::Inner, vec![B(0, 0), L(1), R(1)]),
+            );
 
-        mig.maintain(
-            "btree_reader".into(),
-            join,
-            &Index::btree_map(vec![0]),
-            Default::default(),
-            Default::default(),
-        );
+            mig.maintain(
+                "btree_reader".into(),
+                join,
+                &Index::btree_map(vec![0]),
+                Default::default(),
+                Default::default(),
+            );
 
-        // each node can only have one reader, so add an identity node above the join for the hash
-        // reader
+            // each node can only have one reader, so add an identity node above the join for the
+            // hash reader
 
-        let hash_id = mig.add_ingredient(
-            "hash_id",
-            make_columns(&["a", "a_b", "a_c"]),
-            Identity::new(join),
-        );
+            let hash_id = mig.add_ingredient(
+                "hash_id",
+                make_columns(&["a", "a_b", "a_c"]),
+                Identity::new(join),
+            );
 
-        mig.maintain(
-            "hash_reader".into(),
-            hash_id,
-            &Index::hash_map(vec![0]),
-            Default::default(),
-            Default::default(),
-        );
-    })
-    .await;
+            mig.maintain(
+                "hash_reader".into(),
+                hash_id,
+                &Index::hash_map(vec![0]),
+                Default::default(),
+                Default::default(),
+            );
 
-    let mut a = g.table("a").await.unwrap();
-    let mut b = g.table("b").await.unwrap();
+            (a, b)
+        })
+        .await;
+
+    let mut a = g.table_by_index(a).await.unwrap();
+    let mut b = g.table_by_index(b).await.unwrap();
     let mut btree_reader = g.view("btree_reader").await.unwrap();
     let mut hash_reader = g.view("hash_reader").await.unwrap();
     a.insert_many((0i32..10).map(|n| vec![DfValue::from(n), DfValue::from(n)]))
@@ -4914,28 +4932,30 @@ async fn post_read_ilike() {
     .await
     .unwrap();
 
-    g.migrate(|mig| {
-        let a = mig.add_base(
-            "a",
-            make_columns(&["a", "b"]),
-            Base::new().with_primary_key([0]),
-        );
-        mig.maintain_anonymous_with_reader_processing(
-            a,
-            &Index::btree_map(vec![0]),
-            ReaderProcessing::new(
-                Some(vec![(1, OrderType::OrderAscending)]),
-                None,
-                None,
-                None,
-                None,
-            )
-            .unwrap(),
-        );
-    })
-    .await;
+    let a = g
+        .migrate(|mig| {
+            let a = mig.add_base(
+                "a",
+                make_columns(&["a", "b"]),
+                Base::new().with_primary_key([0]),
+            );
+            mig.maintain_anonymous_with_reader_processing(
+                a,
+                &Index::btree_map(vec![0]),
+                ReaderProcessing::new(
+                    Some(vec![(1, OrderType::OrderAscending)]),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            );
+            a
+        })
+        .await;
 
-    let mut a = g.table("a").await.unwrap();
+    let mut a = g.table_by_index(a).await.unwrap();
     let mut reader = g.view("a").await.unwrap();
     a.insert_many(vec![
         vec![DfValue::try_from("foo").unwrap(), DfValue::from(1i32)],
@@ -7719,19 +7739,13 @@ async fn count_emit_zero() {
     // With no data in the table, we should get a NULL for any columns, and a 0 for COUNT()
     let mut q = g.view("countemitzerowithcolumn").await.unwrap();
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
-    let res = rows
-        .into_iter()
-        .map(|r| Vec::<DfValue>::from(r))
-        .collect::<Vec<Vec<DfValue>>>();
+    let res = rows.into_iter().collect::<Vec<Vec<DfValue>>>();
     assert_eq!(res, vec![vec![DfValue::None, DfValue::Int(0)]]);
 
     // With no data in the table, we should get a 0 for COUNT(), and a NULL for other aggregations
     let mut q = g.view("countemitzerowithotheraggregations").await.unwrap();
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
-    let res = rows
-        .into_iter()
-        .map(|r| Vec::<DfValue>::from(r))
-        .collect::<Vec<Vec<DfValue>>>();
+    let res = rows.into_iter().collect::<Vec<Vec<DfValue>>>();
     assert_eq!(
         res,
         vec![vec![DfValue::Int(0), DfValue::None, DfValue::None]]
@@ -7777,18 +7791,12 @@ async fn count_emit_zero() {
 
     let mut q = g.view("countemitzerowithcolumn").await.unwrap();
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
-    let res = rows
-        .into_iter()
-        .map(|r| Vec::<DfValue>::from(r))
-        .collect::<Vec<Vec<DfValue>>>();
+    let res = rows.into_iter().collect::<Vec<Vec<DfValue>>>();
     assert_eq!(res, vec![vec![DfValue::Int(0), DfValue::Int(3)]]);
 
     let mut q = g.view("countemitzerowithotheraggregations").await.unwrap();
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
-    let res = rows
-        .into_iter()
-        .map(|r| Vec::<DfValue>::from(r))
-        .collect::<Vec<Vec<DfValue>>>();
+    let res = rows.into_iter().collect::<Vec<Vec<DfValue>>>();
     assert_eq!(
         res,
         vec![vec![

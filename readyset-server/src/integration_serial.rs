@@ -39,7 +39,7 @@ async fn it_works_basic() {
     .await
     .unwrap();
 
-    let _ = g
+    let (a, b) = g
         .migrate(|mig| {
             let a = mig.add_base(
                 "a",
@@ -58,14 +58,14 @@ async fn it_works_basic() {
             let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", make_columns(&["a", "b"]), u);
             mig.maintain_anonymous(c, &Index::hash_map(vec![0]));
-            (a, b, c)
+            (a, b)
         })
         .await;
     let mut metrics_client = initialize_metrics(&mut g).await;
 
     let mut cq = g.view("c").await.unwrap();
-    let mut muta = g.table("a").await.unwrap();
-    let mut mutb = g.table("b").await.unwrap();
+    let mut muta = g.table_by_index(a).await.unwrap();
+    let mut mutb = g.table_by_index(b).await.unwrap();
     let id: DfValue = 1.into();
 
     assert_eq!(muta.table_name(), "a");
