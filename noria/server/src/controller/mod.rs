@@ -8,6 +8,8 @@ use anyhow::{format_err, Context};
 use dataflow::node::{self, Column};
 use dataflow::prelude::ChannelCoordinator;
 use failpoint_macros::set_failpoint;
+use futures::future::join_all;
+use futures::stream::FuturesUnordered;
 use futures_util::StreamExt;
 use hyper::http::{Method, StatusCode};
 use launchpad::select;
@@ -563,6 +565,8 @@ impl Controller {
             }
         }
 
+        self.stop_background_tasks().await;
+
         let mut guard = self.inner.write().await;
         if let Some(ref mut inner) = *guard {
             inner.stop().await;
@@ -573,6 +577,23 @@ impl Controller {
             }
         }
         Ok(())
+    }
+
+    async fn stop_background_tasks(&mut self) {
+        let background_tasks = FuturesUnordered::new();
+        if let Some(task) = self.authority_task.take() {
+            task.abort();
+            background_tasks.push(task);
+        }
+        if let Some(task) = self.dry_run_task.take() {
+            task.abort();
+            background_tasks.push(task);
+        }
+        if let Some(task) = self.write_processing_task.take() {
+            task.abort();
+            background_tasks.push(task);
+        }
+        join_all(background_tasks).await;
     }
 }
 

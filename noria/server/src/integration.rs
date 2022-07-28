@@ -8360,34 +8360,36 @@ async fn overwrite_with_changed_recipe() {
 
 /// Tests that whenever we have at least two workers (including the leader), and the leader dies,
 /// then the recovery is successful and all the nodes are correctly materialized.
-// TODO(ENG-947): flaky test, Handle::backend_ready panic.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn it_recovers_fully_materialized() {
     let authority_store = Arc::new(LocalAuthorityStore::new());
-    let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
-        authority_store.clone(),
-    )));
+
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("it_recovers_fully_materialized");
     let persistence_params = PersistenceParameters::new(
         DurabilityMode::Permanent,
-        Some(path.to_string_lossy().into()),
+        Some("it_recovers_fully_materialized".to_string()),
         1,
-        None,
+        Some(dir.path().into()),
     );
 
-    {
+    let start = || {
+        let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
+            authority_store.clone(),
+        )));
+
         let mut g = Builder::for_tests();
         g.set_persistence(persistence_params.clone());
-        let mut g = g.start(authority.clone()).await.unwrap();
+        g.set_sharding(None);
+        g.start(authority)
+    };
+    {
+        let mut g = start().await.unwrap();
         g.backend_ready().await;
 
         {
             let sql = "
                 CREATE TABLE t (x INT);
-                CREATE VIEW tv AS SELECT x, COUNT(*) FROM t GROUP BY x;
-                SELECT * FROM tv;
+                CREATE VIEW tv AS SELECT x, COUNT(*) FROM t GROUP BY x ORDER BY x;
             ";
             g.extend_recipe(sql.parse().unwrap()).await.unwrap();
 
@@ -8402,36 +8404,25 @@ async fn it_recovers_fully_materialized() {
         sleep().await;
         g.shutdown();
         g.wait_done().await;
-        if let Authority::LocalAuthority(l) = authority.as_ref() {
-            l.delete_ephemeral();
-        }
     }
 
-    sleep().await;
-
-    let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
-        authority_store.clone(),
-    )));
-
-    let mut g = Builder::for_tests();
-    g.set_persistence(persistence_params);
-    let mut g = g.start(authority.clone()).await.unwrap();
+    let mut g = start().await.unwrap();
     g.backend_ready().await;
+
     {
         let mut getter = g.view("tv").await.unwrap();
 
         // Make sure that the new graph contains the old writes
         let result = getter.lookup(&[0.into()], true).await.unwrap().into_vec();
         assert_eq!(result.len(), 3);
-        // x = 0
-        assert_eq!(result[0][0], 0.into());
-        assert_eq!(result[0][1], 3.into());
-        // x = 2
-        assert_eq!(result[1][0], 2.into());
-        assert_eq!(result[1][1], 3.into());
-        // x = 1
-        assert_eq!(result[2][0], 1.into());
-        assert_eq!(result[2][1], 3.into());
+        assert_eq!(
+            result,
+            vec![
+                vec![0.into(), 3.into()],
+                vec![1.into(), 3.into()],
+                vec![2.into(), 3.into()],
+            ]
+        );
     }
     // We add more stuff, to be sure everything is still working
     {
@@ -8443,21 +8434,17 @@ async fn it_recovers_fully_materialized() {
     }
     {
         let mut getter = g.view("tv").await.unwrap();
-
         // Make sure that the new graph contains the old writes
         let result = getter.lookup(&[0.into()], true).await.unwrap().into_vec();
-        assert_eq!(result.len(), 3);
-        // x = 2
-        assert_eq!(result[0][0], 2.into());
-        assert_eq!(result[0][1], 6.into());
-        // x = 1
-        assert_eq!(result[1][0], 1.into());
-        assert_eq!(result[1][1], 6.into());
-        // x = 0
-        assert_eq!(result[2][0], 0.into());
-        assert_eq!(result[2][1], 6.into());
+        assert_eq!(
+            result,
+            vec![
+                vec![0.into(), 6.into()],
+                vec![1.into(), 6.into()],
+                vec![2.into(), 6.into()],
+            ]
+        );
     }
-    drop(g);
 }
 
 #[tokio::test(flavor = "multi_thread")]
