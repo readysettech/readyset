@@ -1,5 +1,5 @@
 use nom_sql::analysis::contains_aggregate;
-use nom_sql::{Expr, FieldDefinitionExpr, FieldReference, SqlQuery};
+use nom_sql::{Expr, FieldDefinitionExpr, FieldReference, SelectStatement, SqlQuery};
 use noria_errors::{ReadySetError, ReadySetResult};
 
 pub trait NormalizeTopKWithAggregate: Sized {
@@ -13,71 +13,77 @@ pub trait NormalizeTopKWithAggregate: Sized {
     fn normalize_topk_with_aggregate(self) -> ReadySetResult<Self>;
 }
 
-impl NormalizeTopKWithAggregate for SqlQuery {
+impl NormalizeTopKWithAggregate for SelectStatement {
     fn normalize_topk_with_aggregate(mut self) -> ReadySetResult<Self> {
-        if let SqlQuery::Select(stmt) = &mut self {
-            if let Some(order) = stmt.order.take() {
-                let aggs = stmt
-                    .fields
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, f)| match f {
-                        FieldDefinitionExpr::Expr { expr, alias } if contains_aggregate(expr) => {
-                            Some((i, expr, alias))
-                        }
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>();
+        if let Some(order) = self.order.take() {
+            let aggs = self
+                .fields
+                .iter()
+                .enumerate()
+                .filter_map(|(i, f)| match f {
+                    FieldDefinitionExpr::Expr { expr, alias } if contains_aggregate(expr) => {
+                        Some((i, expr, alias))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
 
-                if !aggs.is_empty() {
-                    match &stmt.group_by {
-                        Some(group_by) => {
-                            // Each field in the order clause...
-                            for (order_field, _) in &order.order_by {
-                                // ...must either appear in the group by clause...
-                                let in_group_by_clause = group_by
-                                    .fields
-                                    .iter()
-                                    .any(|group_by_field| order_field == group_by_field);
+            if !aggs.is_empty() {
+                match &self.group_by {
+                    Some(group_by) => {
+                        // Each field in the order clause...
+                        for (order_field, _) in &order.order_by {
+                            // ...must either appear in the group by clause...
+                            let in_group_by_clause = group_by
+                                .fields
+                                .iter()
+                                .any(|group_by_field| order_field == group_by_field);
 
-                                // ...or reference the result of an aggregate...
-                                let references_aggregate = match order_field {
-                                    // ... by number...
-                                    FieldReference::Numeric(n) => {
-                                        aggs.iter().any(|(i, _, _)| *i == *n as usize)
-                                    }
-                                    // ... or by name
-                                    FieldReference::Expr(expr) => {
-                                        aggs.iter().any(|(_, agg, alias)| {
-                                            *agg == expr
-                                                || matches!(
-                                                    expr,
-                                                    Expr::Column(col)
-                                                        if alias.as_ref() == Some(&col.name)
-                                                )
-                                        })
-                                    }
-                                };
-
-                                if !in_group_by_clause && !references_aggregate {
-                                    return Err(ReadySetError::ExprNotInGroupBy {
-                                        expression: order_field.to_string(),
-                                        position: "ORDER BY".to_owned(),
-                                    });
+                            // ...or reference the result of an aggregate...
+                            let references_aggregate = match order_field {
+                                // ... by number...
+                                FieldReference::Numeric(n) => {
+                                    aggs.iter().any(|(i, _, _)| *i == *n as usize)
                                 }
+                                // ... or by name
+                                FieldReference::Expr(expr) => aggs.iter().any(|(_, agg, alias)| {
+                                    *agg == expr
+                                        || matches!(
+                                            expr,
+                                            Expr::Column(col)
+                                                if alias.as_ref() == Some(&col.name)
+                                        )
+                                }),
+                            };
+
+                            if !in_group_by_clause && !references_aggregate {
+                                return Err(ReadySetError::ExprNotInGroupBy {
+                                    expression: order_field.to_string(),
+                                    position: "ORDER BY".to_owned(),
+                                });
                             }
                         }
-                        None => {
-                            // order taken above, just leave it as None
-                            stmt.limit = None;
-                            return Ok(self);
-                        }
+                    }
+                    None => {
+                        // order taken above, just leave it as None
+                        self.limit = None;
+                        return Ok(self);
                     }
                 }
-                stmt.order = Some(order)
             }
+            self.order = Some(order)
         }
+
         Ok(self)
+    }
+}
+
+impl NormalizeTopKWithAggregate for SqlQuery {
+    fn normalize_topk_with_aggregate(self) -> ReadySetResult<Self> {
+        match self {
+            SqlQuery::Select(stmt) => Ok(SqlQuery::Select(stmt.normalize_topk_with_aggregate()?)),
+            _ => Ok(self),
+        }
     }
 }
 

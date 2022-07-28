@@ -182,19 +182,25 @@ impl<'ast, 'a> Visitor<'ast> for RemoveAliasesVisitor<'a> {
     }
 }
 
+impl AliasRemoval for SelectStatement {
+    fn rewrite_table_aliases(&mut self, query_name: &str) -> Vec<TableAliasRewrite> {
+        let mut visitor = RemoveAliasesVisitor {
+            query_name,
+            table_remap: Default::default(),
+            col_table_remap: Default::default(),
+            out: Default::default(),
+        };
+
+        let Ok(_) = visitor.visit_select_statement(self);
+
+        visitor.out
+    }
+}
+
 impl AliasRemoval for SqlQuery {
     fn rewrite_table_aliases(&mut self, query_name: &str) -> Vec<TableAliasRewrite> {
-        if let SqlQuery::Select(ref mut sq) = self {
-            let mut visitor = RemoveAliasesVisitor {
-                query_name,
-                table_remap: Default::default(),
-                col_table_remap: Default::default(),
-                out: Default::default(),
-            };
-
-            let Ok(_) = visitor.visit_select_statement(sq);
-
-            visitor.out
+        if let SqlQuery::Select(sq) = self {
+            sq.rewrite_table_aliases(query_name)
         } else {
             // nothing to do for other query types, as they cannot have aliases
             vec![]

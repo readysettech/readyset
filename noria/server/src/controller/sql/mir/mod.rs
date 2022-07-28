@@ -387,7 +387,7 @@ impl SqlToMirConverter {
     pub(super) fn compound_query_to_mir(
         &mut self,
         name: &SqlIdentifier,
-        sqs: Vec<&MirQuery>,
+        sqs: Vec<MirQuery>,
         op: CompoundSelectOperator,
         order: &Option<OrderClause>,
         limit: &Option<Literal>,
@@ -545,19 +545,18 @@ impl SqlToMirConverter {
 
     pub(super) fn named_base_to_mir(
         &mut self,
-        name: &SqlIdentifier,
         ctq: &CreateTableStatement,
     ) -> ReadySetResult<MirQuery> {
-        invariant_eq!(ctq.table.name, name);
-        let n = self.make_base_node(name, &ctq.fields, ctq.keys.as_ref())?;
-        let node_id = (name.clone(), self.schema_version);
+        let n = self.make_base_node(&ctq.table.name, &ctq.fields, ctq.keys.as_ref())?;
+        let node_id = (ctq.table.name.clone(), self.schema_version);
         use std::collections::hash_map::Entry;
         if let Entry::Vacant(e) = self.nodes.entry(node_id) {
-            self.current.insert(name.clone(), self.schema_version);
+            self.current
+                .insert(ctq.table.name.clone(), self.schema_version);
             e.insert(n.clone());
         }
         Ok(MirQuery::singleton(
-            name,
+            &ctq.table.name,
             n,
             ctq.fields.iter().map(|cs| cs.column.name.clone()).collect(),
         ))
@@ -617,7 +616,7 @@ impl SqlToMirConverter {
     pub(super) fn named_query_to_mir(
         &mut self,
         name: &SqlIdentifier,
-        sq: &SelectStatement,
+        sq: SelectStatement,
         qg: &QueryGraph,
         has_leaf: bool,
     ) -> ReadySetResult<MirQuery> {
@@ -1464,7 +1463,8 @@ impl SqlToMirConverter {
             Expr::Between { .. } => internal!("BETWEEN should have been removed earlier"),
             Expr::Exists(subquery) => {
                 let qg = to_query_graph(subquery)?;
-                let nodes = self.make_nodes_for_selection(name, subquery, &qg, false)?;
+                let nodes =
+                    self.make_nodes_for_selection(name, (**subquery).clone(), &qg, false)?;
                 let subquery_leaf = nodes
                     .iter()
                     .find(|n| n.borrow().children().is_empty())
@@ -1648,7 +1648,7 @@ impl SqlToMirConverter {
     fn make_nodes_for_selection(
         &self,
         name: &SqlIdentifier,
-        st: &SelectStatement,
+        st: SelectStatement,
         qg: &QueryGraph,
         has_leaf: bool,
     ) -> Result<Vec<MirNodeRef>, ReadySetError> {
@@ -1674,8 +1674,12 @@ impl SqlToMirConverter {
             for rel in &sorted_rels {
                 let base_for_rel = if let Some((subgraph, subquery)) = &qg.relations[*rel].subgraph
                 {
-                    let sub_nodes =
-                        self.make_nodes_for_selection(&rel.name, subquery, subgraph, false)?;
+                    let sub_nodes = self.make_nodes_for_selection(
+                        &rel.name,
+                        subquery.clone(),
+                        subgraph,
+                        false,
+                    )?;
                     let leaf = sub_nodes
                         .iter()
                         .find(|n| n.borrow().children().is_empty())
@@ -2162,7 +2166,7 @@ impl SqlToMirConverter {
                 nodes_added.push(leaf_project_reorder_node.clone());
 
                 let aggregates = if view_key.index_type != IndexType::HashMap {
-                    post_lookup_aggregates(qg, st, name)?
+                    post_lookup_aggregates(qg, &st, name)?
                 } else {
                     None
                 };
@@ -2206,7 +2210,7 @@ impl SqlToMirConverter {
                             .transpose()?,
                         limit: qg.pagination.as_ref().map(|p| p.limit),
                         returned_cols: Some(returned_cols),
-                        default_row: default_row_for_select(st),
+                        default_row: default_row_for_select(&st),
                         aggregates,
                     },
                     vec![MirNodeRef::downgrade(&leaf_project_reorder_node)],

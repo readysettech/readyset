@@ -71,7 +71,7 @@ mod tests {
     use nom_sql::{Expr, GroupByClause, OrderClause, OrderType};
 
     use super::*;
-    use crate::parse_select_statement;
+    use crate::util::parse_select_statement;
 
     #[test]
     fn simple_group_by() {
