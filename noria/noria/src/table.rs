@@ -33,7 +33,7 @@ use vec_map::VecMap;
 use crate::channel::CONNECTION_FROM_BASE;
 use crate::internal::*;
 use crate::replication::ReplicationOffset;
-use crate::{consistency, LocalOrNot, Tagged, Tagger};
+use crate::{consistency, Tagged, Tagger};
 
 // TODO(justin): Make write propagation sample rate configurable.
 const TRACE_SAMPLE_RATE: Duration = Duration::from_secs(1);
@@ -153,12 +153,8 @@ impl From<Vec<DataType>> for TableOperation {
     }
 }
 
-type Transport = AsyncBincodeStream<
-    tokio::net::TcpStream,
-    Tagged<()>,
-    Tagged<LocalOrNot<PacketData>>,
-    AsyncDestination,
->;
+type Transport =
+    AsyncBincodeStream<tokio::net::TcpStream, Tagged<()>, Tagged<PacketData>, AsyncDestination>;
 
 #[derive(Debug)]
 struct Endpoint {
@@ -168,11 +164,8 @@ struct Endpoint {
 
 type InnerService = multiplex::Client<
     multiplex::MultiplexTransport<Transport, Tagger>,
-    tokio_tower::Error<
-        multiplex::MultiplexTransport<Transport, Tagger>,
-        Tagged<LocalOrNot<PacketData>>,
-    >,
-    Tagged<LocalOrNot<PacketData>>,
+    tokio_tower::Error<multiplex::MultiplexTransport<Transport, Tagger>, Tagged<PacketData>>,
+    Tagged<PacketData>,
 >;
 
 impl Service<()> for Endpoint {
@@ -229,10 +222,8 @@ type Discover = impl tower::discover::Discover<Key = usize, Service = InnerServi
     + Unpin
     + Send;
 
-pub(crate) type TableRpc = Buffer<
-    ConcurrencyLimit<Balance<Discover, Tagged<LocalOrNot<PacketData>>>>,
-    Tagged<LocalOrNot<PacketData>>,
->;
+pub(crate) type TableRpc =
+    Buffer<ConcurrencyLimit<Balance<Discover, Tagged<PacketData>>>, Tagged<PacketData>>;
 
 /// Information used to uniquely identify: a packet, and the time a packet entered the
 /// system.
@@ -340,7 +331,6 @@ impl TableBuilder {
             dropped: self.dropped,
             table_name: self.table_name,
             schema: self.schema,
-            dst_is_local: false,
             shard_addrs: addrs,
             shards: conns,
             last_trace_sample: Instant::now(),
@@ -366,7 +356,6 @@ pub struct Table {
     dropped: VecMap<DataType>,
     table_name: SqlIdentifier,
     schema: Option<CreateTableStatement>,
-    dst_is_local: bool,
     shards: Vec<TableRpc>,
     shard_addrs: Vec<SocketAddr>,
     last_trace_sample: Instant,
@@ -384,7 +373,6 @@ impl fmt::Debug for Table {
             .field("dropped", &self.dropped)
             .field("table_name", &self.table_name)
             .field("schema", &self.schema)
-            .field("dst_is_local", &self.dst_is_local)
             .field("shard_addrs", &self.shard_addrs)
             .finish()
     }
@@ -473,8 +461,7 @@ impl Table {
         let nshards = self.shards.len();
         future::Either::Right(match self.shards.first_mut() {
             Some(table_rpc) if nshards == 1 => {
-                let request =
-                    Tagged::from(unsafe { LocalOrNot::new_for_dst(i, self.dst_is_local) });
+                let request = Tagged::from(i);
                 let _guard = span.as_ref().map(tracing::Span::enter);
                 tracing::trace!("submit request");
                 future::Either::Left(future::Either::Right(
@@ -531,8 +518,7 @@ impl Table {
                             trace: i.trace.clone(),
                         };
 
-                        let p = unsafe { LocalOrNot::new_for_dst(new_i, self.dst_is_local) };
-                        let request = Tagged::from(p);
+                        let request = Tagged::from(new_i);
 
                         // make a span per shard
                         let span = if span.is_some() {
@@ -581,8 +567,7 @@ impl Table {
         let nshards = self.shards.len();
         match self.shards.first_mut() {
             Some(table_rpc) if nshards == 1 => {
-                let request =
-                    Tagged::from(unsafe { LocalOrNot::new_for_dst(t, self.dst_is_local) });
+                let request = Tagged::from(t);
                 future::Either::Left(
                     table_rpc
                         .call(request)
@@ -605,8 +590,7 @@ impl Table {
                 // We create a request to each base table shard with the new timestamp.
                 let wait_for = FuturesUnordered::new();
                 for s in &mut self.shards {
-                    let p = unsafe { LocalOrNot::new_for_dst(t.clone(), self.dst_is_local) };
-                    let request = Tagged::from(p);
+                    let request = Tagged::from(t.clone());
                     wait_for.push(s.call(request));
                 }
                 future::Either::Right(future::Either::Right(
@@ -630,7 +614,7 @@ pub enum TableRequest {
 
 impl Service<TableRequest> for Table {
     type Error = ReadySetError;
-    type Response = <TableRpc as Service<Tagged<LocalOrNot<PacketData>>>>::Response;
+    type Response = <TableRpc as Service<Tagged<PacketData>>>::Response;
 
     type Future = impl Future<Output = Result<Tagged<()>, ReadySetError>> + Send;
 
@@ -668,11 +652,6 @@ impl Table {
     /// Get the name of this base table.
     pub fn table_name(&self) -> &str {
         &self.table_name
-    }
-
-    #[doc(hidden)]
-    pub fn i_promise_dst_is_same_process(&mut self) {
-        self.dst_is_local = true;
     }
 
     /// Get the list of columns in this base table.

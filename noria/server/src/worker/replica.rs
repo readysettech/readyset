@@ -14,7 +14,7 @@ use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::StreamExt;
 use futures_util::FutureExt;
 use noria::channel::{self, CONNECTION_FROM_BASE};
-use noria::internal::{LocalOrNot, ReplicaAddress};
+use noria::internal::ReplicaAddress;
 use noria::{KeyComparison, PacketData, PacketPayload, Tagged};
 use strawpoll::Strawpoll;
 use time::Duration;
@@ -27,12 +27,8 @@ use tracing::{debug, error, info_span, instrument, warn, Span};
 use super::ChannelCoordinator;
 use crate::ReadySetResult;
 
-type DualTcpStream = channel::DualTcpStream<
-    BufStream<TcpStream>,
-    Box<Packet>,
-    Tagged<LocalOrNot<PacketData>>,
-    AsyncDestination,
->;
+type DualTcpStream =
+    channel::DualTcpStream<BufStream<TcpStream>, Box<Packet>, Tagged<PacketData>, AsyncDestination>;
 
 type Outputs =
     AHashMap<ReplicaAddress, Box<dyn Sink<Box<Packet>, Error = bincode::Error> + Send + Unpin>>;
@@ -162,9 +158,9 @@ impl Replica {
 
         let tcp = if is_base {
             DualTcpStream::upgrade(BufStream::new(stream), move |Tagged { v, tag }| {
-                let input: LocalOrNot<PacketData> = v;
+                let input: PacketData = v;
                 // Peek at its type.
-                match unsafe { input.deref() }.data {
+                match input.data {
                     PacketPayload::Input(_) => Box::new(Packet::Input {
                         inner: input,
                         src: SourceChannelIdentifier { token, tag },

@@ -9,8 +9,8 @@ These operations are placed in an `Input` wrapping a domain-local node identifie
 
 `Table.input`
 1. Assign table operations to their respective base table shards. If there is one shard all operations are going to the shard.
-2. For each <shard, operation>  pair: create a request that may refer to a domain-local or remote shard. 
-    - A request is just the `Input` wrapped by `LocalOrNot`, this allows the rpcs to go to potentially remote domains.
+2. For each <shard, operation>  pair: create a request that may refer to a domain-local or remote shard.
+    - A request is just the `Input`, this allows the rpcs to go to potentially remote domains.
 3. Issue RPCs to shards corresponding to the request. The shards are each wrapped by a tower_buffer::Buffer to buffer rpc calls. `self.shards[s]` returns the buffer and `call` [[tower_buffer::Buffer::call](https://docs.rs/tower-buffer/0.3.0/tower_buffer/struct.Buffer.html#method.call)] passes the request to the buffer and waits for a response.
     1. The connection here is through replica.rs
 4. A packet will be sent to the relevant domain of the base node. Where depending on the packet type, it will call handle on the packet or append the packet to a group commit queue.
