@@ -1,3 +1,4 @@
+# TODO: remove this line! Added to trigger a rebuild.
 FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/rustlang/rust:nightly
 
 WORKDIR /tmp
