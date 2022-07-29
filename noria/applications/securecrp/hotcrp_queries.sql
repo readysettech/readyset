@@ -1,1 +1,0 @@
-Papers: SELECT * FROM Paper;

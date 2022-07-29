@@ -3881,34 +3881,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "noria-applications"
-version = "0.6.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap 3.0.4",
- "futures-core",
- "futures-util",
- "hdrhistogram",
- "itertools",
- "mysql",
- "mysql_async",
- "nom-sql",
- "noria-data",
- "noria-server",
- "num_cpus",
- "rand 0.7.3",
- "readyset-tracing",
- "regex",
- "tokio",
- "tower-service",
- "tracing",
- "vec1",
- "vec_map",
- "zookeeper",
-]
-
-[[package]]
 name = "noria-client"
 version = "0.1.0"
 dependencies = [

@@ -147,12 +147,6 @@ The sub-crates each serve a distinct role:
    server like [`DataType`](basics/src/data.rs) (Noria's "value"
    type). These are annotated with `#[doc(hidden)]`, and should be easy
    to spot in `noria/src/lib.rs`.
- - [`applications/`](applications/): a collection of various
-   Noria benchmarks. The most frequently used one is `vote`, which runs
-   the vote benchmark from §8.2 of the OSDI paper. You can run it in a
-   bunch of different ways (`--help` should be useful), and with many
-   different backends. The `localsoup` backend is the one that's easiest
-   to get up and running with.
  - [`server/src/`](server/src/): the Noria server, including
    high-level components such as RPC handling, domain scheduling,
    connection management, and all the controller operations (handling
