@@ -1668,9 +1668,7 @@ fn build_view_query(
                         Bound::Included(upper.try_into()?),
                     )))
                 } else {
-                    (k, binop_to_use)
-                        .try_into()
-                        .map_err(|_| ReadySetError::EmptyKey)
+                    KeyComparison::from_key_and_operator(k, binop_to_use)
                 }
             })
             .collect::<ReadySetResult<Vec<_>>>()?

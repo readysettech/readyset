@@ -21,7 +21,7 @@ use launchpad::intervals::{cmp_start_end, BoundPair};
 use launchpad::redacted::Sensitive;
 use nom_sql::{BinaryOperator, Column, ColumnSpecification, SqlIdentifier, SqlType, Table};
 use noria_data::DataType;
-use noria_errors::{internal_err, rpc_err, view_err, ReadySetError, ReadySetResult};
+use noria_errors::{internal_err, rpc_err, unsupported, view_err, ReadySetError, ReadySetResult};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
 use rand::prelude::IteratorRandom;
@@ -322,6 +322,26 @@ pub enum KeyComparison {
 
 #[allow(clippy::len_without_is_empty)] // can never be empty
 impl KeyComparison {
+    /// Attempt to construct a key comparsion comparing the given key using the given binary
+    /// operator
+    pub fn from_key_and_operator(
+        key: Vec<DataType>,
+        operator: BinaryOperator,
+    ) -> ReadySetResult<Self> {
+        use BinaryOperator::*;
+
+        let key = Vec1::try_from(key).map_err(|_| ReadySetError::EmptyKey)?;
+        let inner = match operator {
+            Greater => (Bound::Excluded(key), Bound::Unbounded),
+            GreaterOrEqual => (Bound::Included(key), Bound::Unbounded),
+            Less => (Bound::Unbounded, Bound::Excluded(key)),
+            LessOrEqual => (Bound::Unbounded, Bound::Included(key)),
+            Equal => return Ok(key.into()),
+            _ => unsupported!("Unsupported operator `{operator}` in key"),
+        };
+        Ok(Self::Range(inner))
+    }
+
     /// Project a KeyComparison into an optional equality predicate, or return None if it's a range
     /// predicate. Handles both [`Equal`] and single-length [`Range`]s
     pub fn equal(&self) -> Option<&Vec1<DataType>> {
@@ -563,26 +583,6 @@ impl TryFrom<Vec<DataType>> for KeyComparison {
     /// Converts to a [`KeyComparison::Equal`]. Returns an error if the input vector is empty
     fn try_from(value: Vec<DataType>) -> Result<Self, Self::Error> {
         Ok(Vec1::try_from(value)?.into())
-    }
-}
-
-impl TryFrom<(Vec<DataType>, BinaryOperator)> for KeyComparison {
-    // FIXME(eta): proper error handling here
-    type Error = String;
-
-    fn try_from((value, binop): (Vec<DataType>, BinaryOperator)) -> Result<Self, Self::Error> {
-        use self::BinaryOperator::*;
-
-        let value = Vec1::try_from(value).map_err(|e| e.to_string())?;
-        let inner = match binop {
-            Greater => (Bound::Excluded(value), Bound::Unbounded),
-            GreaterOrEqual => (Bound::Included(value), Bound::Unbounded),
-            Less => (Bound::Unbounded, Bound::Excluded(value)),
-            LessOrEqual => (Bound::Unbounded, Bound::Included(value)),
-            Equal => return Ok(value.into()),
-            _ => return Err("bad binop!".to_string()),
-        };
-        Ok(KeyComparison::Range(inner))
     }
 }
 
