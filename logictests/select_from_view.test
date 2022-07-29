@@ -1,0 +1,19 @@
+statement ok
+create table t1 (x int, y int);
+
+statement ok
+create view t1_view as select * from t1;
+
+statement ok
+insert into t1 (x, y)
+values
+(1, 2),
+(3, 4);
+
+query II rowsort
+select * from t1_view
+----
+1
+2
+3
+4
