@@ -15,14 +15,42 @@ use serde::{Deserialize, Serialize};
 use crate::common::{ws_sep_comma, ws_sep_equals};
 use crate::literal::integer_literal;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Literal};
+use crate::{Dialect, Literal, SqlIdentifier};
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+pub enum CharsetName {
+    Quoted(SqlIdentifier),
+    Unquoted(SqlIdentifier),
+}
+
+impl fmt::Display for CharsetName {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            CharsetName::Quoted(i) | CharsetName::Unquoted(i) => write!(f, "{i}"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+pub enum CollationName {
+    Quoted(SqlIdentifier),
+    Unquoted(SqlIdentifier),
+}
+
+impl fmt::Display for CollationName {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            CollationName::Quoted(i) | CollationName::Unquoted(i) => write!(f, "{i}"),
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub enum CreateTableOption {
     AutoIncrement(u64),
     Engine(Option<String>),
-    Charset(String),
-    Collate(String),
+    Charset(CharsetName),
+    Collate(CollationName),
     Comment(String),
     /// Any currently uncotegorized option falls here
     /// TODO: implement other options
@@ -62,7 +90,7 @@ fn create_option(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTab
             map(create_option_pack_keys, |_| CreateTableOption::Other),
             create_option_engine,
             create_option_auto_increment,
-            create_option_default_charset,
+            create_option_default_charset(dialect),
             create_option_collate(dialect),
             create_option_comment(dialect),
             map(create_option_max_rows, |_| CreateTableOption::Other),
@@ -167,71 +195,63 @@ fn create_option_auto_increment(i: &[u8]) -> IResult<&[u8], CreateTableOption> {
     )(i)
 }
 
-fn create_option_default_charset(i: &[u8]) -> IResult<&[u8], CreateTableOption> {
-    // TODO:  Deduplicate the branch contents
-    map(
+fn charset_name(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CharsetName> {
+    move |i| {
+        alt((
+            map(dialect.identifier(), CharsetName::Unquoted),
+            map(map_res(dialect.string_literal(), String::from_utf8), |s| {
+                CharsetName::Quoted(SqlIdentifier::from(s))
+            }),
+        ))(i)
+    }
+}
+
+fn create_option_default_charset(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTableOption> {
+    move |i| {
         map(
-            map_res(
-                alt((
-                    create_option_equals_pair(
-                        alt((
-                            tag_no_case("default charset"),
-                            tag_no_case("default character set"),
-                        )),
-                        alt((
-                            tag("utf8mb4"),
-                            tag("utf8mb3"),
-                            tag("utf8"),
-                            tag("binary"),
-                            tag("big5"),
-                            tag("ucs2"),
-                            tag("latin1"),
-                        )),
-                    ),
-                    create_option_spaced_pair(
-                        alt((
-                            tag_no_case("default charset"),
-                            tag_no_case("default character set"),
-                        )),
-                        alt((
-                            tag("utf8mb4"),
-                            tag("utf8mb3"),
-                            tag("utf8"),
-                            tag("binary"),
-                            tag("big5"),
-                            tag("ucs2"),
-                            tag("latin1"),
-                        )),
-                    ),
-                )),
-                std::str::from_utf8,
-            ),
-            str::to_string,
-        ),
-        CreateTableOption::Charset,
-    )(i)
+            alt((
+                create_option_equals_pair(
+                    alt((
+                        tag_no_case("default charset"),
+                        tag_no_case("default character set"),
+                    )),
+                    charset_name(dialect),
+                ),
+                create_option_spaced_pair(
+                    alt((
+                        tag_no_case("default charset"),
+                        tag_no_case("default character set"),
+                    )),
+                    charset_name(dialect),
+                ),
+            )),
+            CreateTableOption::Charset,
+        )(i)
+    }
+}
+
+fn collation_name(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CollationName> {
+    move |i| {
+        alt((
+            map(dialect.identifier(), CollationName::Unquoted),
+            map(map_res(dialect.string_literal(), String::from_utf8), |s| {
+                CollationName::Quoted(SqlIdentifier::from(s))
+            }),
+        ))(i)
+    }
 }
 
 fn create_option_collate(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTableOption> {
     move |i| {
         alt((
             map(
-                create_option_equals_pair(
-                    tag_no_case("collate"),
-                    // TODO(malte): imprecise hack, should not accept everything
-                    dialect.identifier(),
-                ),
-                |v| CreateTableOption::Collate(v.to_string()),
+                create_option_equals_pair(tag_no_case("collate"), collation_name(dialect)),
+                CreateTableOption::Collate,
             ),
             map(
-                map_res(
-                    create_option_spaced_pair(
-                        tag_no_case("collate"),
-                        // TODO(malte): imprecise hack, should not accept everything
-                        dialect.string_literal(),
-                    ),
-                    String::from_utf8,
-                ),
+                create_option_spaced_pair(tag_no_case("collate"), collation_name(dialect)),
                 CreateTableOption::Collate,
             ),
         ))(i)
@@ -304,6 +324,54 @@ mod tests {
     }
 
     #[test]
+    fn create_table_charset_collate_spaced_quoted_quoted() {
+        should_parse_all(
+            "DEFAULT CHARSET 'utf8mb4' COLLATE 'utf8mb4_unicode_520_ci'",
+            vec![
+                CreateTableOption::Charset(CharsetName::Quoted("utf8mb4".into())),
+                CreateTableOption::Collate(CollationName::Quoted("utf8mb4_unicode_520_ci".into())),
+            ],
+        );
+    }
+
+    #[test]
+    fn create_table_charset_collate_spaced_quoted_unquoted() {
+        should_parse_all(
+            "DEFAULT CHARSET 'utf8mb4' COLLATE utf8mb4_unicode_520_ci",
+            vec![
+                CreateTableOption::Charset(CharsetName::Quoted("utf8mb4".into())),
+                CreateTableOption::Collate(CollationName::Unquoted(
+                    "utf8mb4_unicode_520_ci".into(),
+                )),
+            ],
+        );
+    }
+
+    #[test]
+    fn create_table_charset_collate_spaced_unquoted_quoted() {
+        should_parse_all(
+            "DEFAULT CHARSET utf8mb4 COLLATE 'utf8mb4_unicode_520_ci'",
+            vec![
+                CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
+                CreateTableOption::Collate(CollationName::Quoted("utf8mb4_unicode_520_ci".into())),
+            ],
+        );
+    }
+
+    #[test]
+    fn create_table_charset_collate_spaced_unquoted_unquoted() {
+        should_parse_all(
+            "DEFAULT CHARSET utf8mb4 COLLATE utf8mb4_unicode_520_ci",
+            vec![
+                CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
+                CreateTableOption::Collate(CollationName::Unquoted(
+                    "utf8mb4_unicode_520_ci".into(),
+                )),
+            ],
+        );
+    }
+
+    #[test]
     fn create_table_option_list() {
         should_parse_all(
             "ENGINE=InnoDB AUTO_INCREMENT=44782967 \
@@ -311,7 +379,7 @@ mod tests {
             vec![
                 CreateTableOption::Engine(Some("InnoDB".to_string())),
                 CreateTableOption::AutoIncrement(44782967),
-                CreateTableOption::Charset("binary".to_string()),
+                CreateTableOption::Charset(CharsetName::Unquoted("binary".into())),
                 CreateTableOption::Other,
                 CreateTableOption::Other,
             ],
