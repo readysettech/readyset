@@ -4219,6 +4219,7 @@ dependencies = [
  "noria-server",
  "paste",
  "proptest",
+ "readyset-tracing",
  "serial_test",
  "streaming-iterator",
  "test-strategy",

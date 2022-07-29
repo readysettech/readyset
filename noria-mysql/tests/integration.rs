@@ -1438,9 +1438,8 @@ async fn multi_keyed_state() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-// Test is ignored due to query reuse issue https://app.clubhouse.io/readysettech/story/380.
-#[ignore]
 async fn reuse_similar_query() {
+    readyset_tracing::init_test_logging();
     let (opts, _handle) = setup(true).await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)")
@@ -1454,7 +1453,7 @@ async fn reuse_similar_query() {
     sleep().await;
 
     let rows: Vec<(i32, i32)> = conn
-        .exec("SELECT x, y FROM test WHERE x = ?", (4,))
+        .exec("SELECT x, y FROM test WHERE x BETWEEN ? AND ?", (4, 5))
         .await
         .unwrap();
     assert_eq!(rows, vec![(4, 2)]);
@@ -1462,7 +1461,7 @@ async fn reuse_similar_query() {
     // This query is not identical to the one above, but Noria is expected to rewrite it and then
     // reuse the same underlying view.
     let rows: Vec<(i32, i32)> = conn
-        .exec("SELECT x, y FROM test WHERE NOT x != ?", (4,))
+        .exec("SELECT x, y FROM test WHERE x >= ? AND x <= ?", (4, 5))
         .await
         .unwrap();
     assert_eq!(rows, vec![(4, 2)]);
