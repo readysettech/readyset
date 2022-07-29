@@ -759,6 +759,7 @@ mod tests {
     use super::*;
     use crate::column::Column;
     use crate::common::type_identifier;
+    use crate::create_table_options::{CharsetName, CollationName};
     use crate::table::Table;
     use crate::{BinaryOperator, ColumnConstraint, Expr, Literal, SqlType, TableExpr};
 
@@ -1646,7 +1647,7 @@ mod tests {
                     if_not_exists: false,
                     options: vec![
                         CreateTableOption::Engine(Some("InnoDB".to_string())),
-                        CreateTableOption::Charset("utf8mb4".to_string())
+                        CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
                     ],
                 }
             );
@@ -2034,7 +2035,7 @@ mod tests {
                     if_not_exists: false,
                     options: vec![
                         CreateTableOption::Engine(Some("InnoDB".to_string())),
-                        CreateTableOption::Charset("utf8mb4".to_string())
+                        CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into()))
                     ],
                 }
             );
@@ -2253,8 +2254,10 @@ mod tests {
                 if_not_exists: false,
                 options: vec![
                     CreateTableOption::Engine(Some("InnoDB".to_string())),
-                    CreateTableOption::Charset("utf8mb4".to_string()),
-                    CreateTableOption::Collate("utf8mb4_unicode_ci".to_string())
+                    CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
+                    CreateTableOption::Collate(CollationName::Unquoted(
+                        "utf8mb4_unicode_ci".into()
+                    ))
                 ],
             }
         )
@@ -2288,8 +2291,8 @@ mod tests {
                 keys: None,
                 if_not_exists: false,
                 options: vec![
-                    CreateTableOption::Charset("utf8mb4".to_string()),
-                    CreateTableOption::Collate("utf8mb4_unicode_ci".to_string())
+                    CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
+                    CreateTableOption::Collate(CollationName::Quoted("utf8mb4_unicode_ci".into()))
                 ],
             }
         )
