@@ -8,7 +8,7 @@ use nom::character::complete::{alphanumeric1, digit1};
 use nom::combinator::{map, map_res, opt};
 use nom::error::ParseError;
 use nom::multi::separated_list0;
-use nom::sequence::tuple;
+use nom::sequence::{separated_pair, tuple};
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 
@@ -206,26 +206,28 @@ fn charset_name(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CharsetNam
     }
 }
 
+fn charset_prefix(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    let (i, _) = whitespace0(i)?;
+    let (i, _) = tag_no_case("default")(i)?;
+    let (i, _) = whitespace0(i)?;
+    alt((
+        tag_no_case("charset"),
+        map(
+            separated_pair(tag_no_case("character"), whitespace1, tag_no_case("set")),
+            |_| "".as_bytes(),
+        ),
+    ))(i)
+    // remaining whitespace is stripped in create_options_spaced_pair
+}
+
 fn create_option_default_charset(
     dialect: Dialect,
 ) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTableOption> {
     move |i| {
         map(
             alt((
-                create_option_equals_pair(
-                    alt((
-                        tag_no_case("default charset"),
-                        tag_no_case("default character set"),
-                    )),
-                    charset_name(dialect),
-                ),
-                create_option_spaced_pair(
-                    alt((
-                        tag_no_case("default charset"),
-                        tag_no_case("default character set"),
-                    )),
-                    charset_name(dialect),
-                ),
+                create_option_equals_pair(charset_prefix, charset_name(dialect)),
+                create_option_spaced_pair(charset_prefix, charset_name(dialect)),
             )),
             CreateTableOption::Charset,
         )(i)
@@ -361,7 +363,7 @@ mod tests {
     #[test]
     fn create_table_charset_collate_spaced_unquoted_unquoted() {
         should_parse_all(
-            "DEFAULT CHARSET utf8mb4 COLLATE utf8mb4_unicode_520_ci",
+            "DEFAULT  CHARSET  utf8mb4  COLLATE  utf8mb4_unicode_520_ci",
             vec![
                 CreateTableOption::Charset(CharsetName::Unquoted("utf8mb4".into())),
                 CreateTableOption::Collate(CollationName::Unquoted(
@@ -383,6 +385,26 @@ mod tests {
                 CreateTableOption::Other,
                 CreateTableOption::Other,
             ],
+        );
+    }
+
+    #[test]
+    fn create_table_charset_extra_spacing() {
+        should_parse_all(
+            "DEFAULT CHARSET  utf8mb4",
+            vec![CreateTableOption::Charset(CharsetName::Unquoted(
+                "utf8mb4".into(),
+            ))],
+        );
+    }
+
+    #[test]
+    fn create_table_character_set_extra_spacing() {
+        should_parse_all(
+            "DEFAULT CHARACTER   SET  utf8mb4",
+            vec![CreateTableOption::Charset(CharsetName::Unquoted(
+                "utf8mb4".into(),
+            ))],
         );
     }
 
