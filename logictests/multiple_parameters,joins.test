@@ -32,8 +32,6 @@ INSERT INTO table_2 (column_1, column_2) VALUES (1, 1), (-1892070865, 2046046887
 statement ok
 INSERT INTO table_3 (column_2, column_1) VALUES (1, 1), (1377277486, 1735622869), (1, 1), (829753859, -586491412), (1, 1)
 
-# Broken: see ENG-244
-halt
 
 query  nosort
 SELECT table_1.column_4, table_2.column_2 FROM table_1 LEFT JOIN table_2 ON table_1.column_3 = table_2.column_1 WHERE table_1.column_1 = ? AND table_1.column_2 = ?
