@@ -104,6 +104,7 @@ pub enum Command<'a> {
     ResetStmtData(u32),
     Prepare(&'a [u8]),
     Init(&'a [u8]),
+    ComSetOption(&'a [u8]),
     Execute {
         stmt: u32,
         params: &'a [u8],
@@ -150,6 +151,10 @@ pub fn parse(i: &[u8]) -> IResult<&[u8], Command<'_>> {
         map(
             preceded(tag(&[CommandByte::COM_INIT_DB as u8]), rest),
             Command::Init,
+        ),
+        map(
+            preceded(tag(&[CommandByte::COM_SET_OPTION as u8]), rest),
+            Command::ComSetOption,
         ),
         map(
             preceded(tag(&[CommandByte::COM_STMT_PREPARE as u8]), rest),

@@ -597,6 +597,15 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                     writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty()).await?;
                     self.writer.flush().await?;
                 }
+                Command::ComSetOption(_) => {
+                    // ReadySet already support multi-statement support for the MySQL protocol, so
+                    // we can simply respond with ok. We parse an incoming query as multiple single
+                    // statements, so failure with any one will be forwarded to the underlying
+                    // database as a single statement, meaning that the underlying database does
+                    // not need to have multi-statement support enabled for this connection.
+                    writers::write_ok_packet(&mut self.writer, 0, 0, StatusFlags::empty()).await?;
+                    self.writer.flush().await?;
+                }
                 Command::Quit => {
                     break;
                 }
