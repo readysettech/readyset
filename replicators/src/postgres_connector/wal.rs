@@ -23,6 +23,7 @@ pub enum WalError {
     CorruptInsert,
     CorruptDelete,
     CorruptTruncate,
+    CorruptMessage,
     TryFromSliceError,
     FloatParseError,
     IntParseError,
@@ -272,6 +273,19 @@ pub enum WalRecord {
         /// tables to truncate.
         relation_ids: Vec<i32>,
     },
+    /// Sent using the [`pg_logical_emit_message`](https://www.postgresql.org/docs/current/functions-admin.html) function
+    Message {
+        /// Flags; Either 0 for no flags or 1 if the logical decoding message is transactional.
+        transactional: bool,
+        /// The LSN of the logical decoding message.
+        lsn: i64,
+        /// The prefix of the logical decoding message.
+        prefix: Bytes,
+        /// Length of the content.
+        len: i32,
+        /// The content of the logical decoding message.
+        payload: Bytes,
+    },
     Unknown(Bytes),
 }
 
@@ -332,6 +346,7 @@ impl TryFrom<Bytes> for WalRecord {
             b'I' => WalRecord::insert(b),
             b'D' => WalRecord::delete(b),
             b'T' => WalRecord::truncate(b),
+            b'M' => WalRecord::message(b),
             _ => Ok(WalRecord::Unknown(b)),
         }
     }
@@ -691,6 +706,35 @@ impl WalRecord {
             n_relations,
             options,
             relation_ids,
+        })
+    }
+
+    /// Parse as Message, assumes b[0] == 'M'
+    fn message(mut b: Bytes) -> Result<Self, WalError> {
+        if b.len() < 10 {
+            return Err(WalError::CorruptMessage);
+        }
+        let transactional = b[1] == 1;
+        let lsn = i64::from_be_bytes(b[2..10].try_into()?);
+        let _ = b.split_to(10);
+        let prefix = Self::consume_string(&mut b)?;
+        if b.len() < 4 {
+            return Err(WalError::CorruptMessage);
+        }
+
+        let len = i32::from_be_bytes(b[0..4].try_into()?);
+        let _ = b.split_to(4);
+
+        if b.len() < len as usize {
+            return Err(WalError::CorruptMessage);
+        }
+
+        Ok(WalRecord::Message {
+            transactional,
+            lsn,
+            prefix,
+            len,
+            payload: b,
         })
     }
 }

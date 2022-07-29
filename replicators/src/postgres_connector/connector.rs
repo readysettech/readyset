@@ -10,7 +10,6 @@ use super::ddl_replication::setup_ddl_replication;
 use super::wal_reader::{WalEvent, WalReader};
 use super::{PostgresPosition, PUBLICATION_NAME, REPLICATION_SLOT};
 use crate::noria_adapter::{Connector, ReplicationAction};
-use crate::postgres_connector::ddl_replication::DdlEvent;
 use crate::Config;
 
 /// A connector that connects to a PostgreSQL server and starts reading WAL from the "noria"
@@ -254,8 +253,14 @@ impl PostgresWalConnector {
         let inner_client = self.client.inner();
 
         let query = format!(
-            "START_REPLICATION SLOT {} LOGICAL {} (\"proto_version\" '1', \"publication_names\" '{}')",
-            slot, self.next_position.unwrap_or_default(), publication
+            "START_REPLICATION SLOT {} LOGICAL {} (
+                \"proto_version\" '1',
+                \"publication_names\" '{}',
+                \"messages\" 'true'
+            )",
+            slot,
+            self.next_position.unwrap_or_default(),
+            publication
         );
 
         let query = pgsql::simple_query::encode(inner_client, &query).unwrap();
@@ -459,10 +464,10 @@ impl Connector for PostgresWalConnector {
                 _ => {}
             }
 
-            // Check if this event is a write to the ddl replication log
-            match DdlEvent::from_wal_event(&event) {
-                Ok(None) => {}
-                Ok(Some(ddl_event)) => {
+            cur_lsn = lsn.into();
+
+            match event {
+                WalEvent::DdlEvent { ddl_event } => {
                     if actions.is_empty() {
                         return Ok((
                             ReplicationAction::SchemaChange {
@@ -472,7 +477,7 @@ impl Connector for PostgresWalConnector {
                             PostgresPosition::from(lsn).into(),
                         ));
                     } else {
-                        self.peek = Some((event, lsn));
+                        self.peek = Some((WalEvent::DdlEvent { ddl_event }, lsn));
                         return Ok((
                             ReplicationAction::TableAction {
                                 namespace: cur_table.ns,
@@ -484,16 +489,6 @@ impl Connector for PostgresWalConnector {
                         ));
                     }
                 }
-                Err(ReadySetError::UnparseableQuery { .. }) => {
-                    error!("Error parsing DDL event, table or view will not be used");
-                    continue;
-                }
-                Err(e) => return Err(e),
-            }
-
-            cur_lsn = lsn.into();
-
-            match event {
                 WalEvent::WantsKeepaliveResponse => {
                     self.send_standy_status_update(last_pos.into())?;
                 }

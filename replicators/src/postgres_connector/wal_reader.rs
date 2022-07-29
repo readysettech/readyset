@@ -14,6 +14,7 @@ use rust_decimal::Decimal;
 use tokio_postgres as pgsql;
 use tracing::{debug, error, trace};
 
+use super::ddl_replication::DdlEvent;
 use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
 
 struct Relation {
@@ -30,7 +31,7 @@ pub struct WalReader {
 }
 
 #[derive(Debug)]
-pub enum WalEvent {
+pub(crate) enum WalEvent {
     WantsKeepaliveResponse,
     Commit,
     Insert {
@@ -59,6 +60,9 @@ pub enum WalEvent {
         table: String,
         key: Vec<DataType>,
         set: Vec<noria::Modification>,
+    },
+    DdlEvent {
+        ddl_event: Box<DdlEvent>,
     },
 }
 
@@ -94,6 +98,7 @@ impl WalReader {
                     continue;
                 }
             };
+
             trace!(?record);
 
             match record {
@@ -243,6 +248,27 @@ impl WalReader {
                     }
                 }
                 WalRecord::Begin { .. } => {}
+                WalRecord::Message {
+                    prefix,
+                    payload,
+                    lsn,
+                    ..
+                } if prefix == b"readyset".as_slice() => {
+                    let ddl_event = match serde_json::from_slice(&payload) {
+                        Err(err) => {
+                            error!(
+                                ?err,
+                                "Error parsing DDL event, table or view will not be used"
+                            );
+                            continue;
+                        }
+                        Ok(ddl_event) => ddl_event,
+                    };
+                    return Ok((WalEvent::DdlEvent { ddl_event }, lsn));
+                }
+                WalRecord::Message { prefix, .. } => {
+                    debug!("Message with ignored prefix {prefix:?}")
+                }
                 msg @ WalRecord::Type { .. } => {
                     // This happens when a `NEW TYPE` is used, unsupported yet
                     error!(?msg, "Unhandled message");
