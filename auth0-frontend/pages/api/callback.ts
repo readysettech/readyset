@@ -10,7 +10,7 @@ const afterCallback = async (req: NextApiRequest, res: NextApiResponse, session,
 
 const callback = async (req: NextApiRequest, res: NextApiResponse) => {
     try {
-        await auth0.handleCallback(req, res)
+        await auth0.handleCallback(req, res, {afterCallback})
     } catch (error) {
         console.error(error)
         const errorMessage =
