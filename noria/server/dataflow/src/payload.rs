@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::fmt::{self, Display};
 
 use itertools::Itertools;
-use noria::internal::LocalOrNot;
 use noria::{self, KeyComparison, PacketData, PacketTrace};
 use serde::{Deserialize, Serialize};
 use strum_macros::{EnumCount, EnumDiscriminants, EnumIter, IntoStaticStr};
@@ -341,7 +340,7 @@ pub enum Packet {
     // Data messages
     /// A write received to the base table
     Input {
-        inner: LocalOrNot<PacketData>,
+        inner: PacketData,
         src: SourceChannelIdentifier,
     },
 
@@ -402,7 +401,7 @@ pub enum Packet {
     Timestamp {
         link: Option<Link>,
         src: SourceChannelIdentifier,
-        timestamp: LocalOrNot<PacketData>,
+        timestamp: PacketData,
     },
 }
 
@@ -415,7 +414,7 @@ impl Packet {
     pub(crate) fn src(&self) -> LocalNodeIndex {
         match *self {
             // inputs come "from" the base table too
-            Packet::Input { ref inner, .. } => unsafe { inner.deref() }.dst,
+            Packet::Input { ref inner, .. } => inner.dst,
             Packet::Message { ref link, .. } => link.src,
             Packet::ReplayPiece { ref link, .. } => link.src,
             // If link is not specified, then we are at a base table node. Use the packet data
@@ -426,7 +425,7 @@ impl Packet {
                 ..
             } => match link {
                 Some(l) => l.src,
-                None => unsafe { timestamp.deref() }.dst,
+                None => timestamp.dst,
             },
             _ => unreachable!(),
         }
@@ -434,7 +433,7 @@ impl Packet {
 
     pub(crate) fn dst(&self) -> LocalNodeIndex {
         match *self {
-            Packet::Input { ref inner, .. } => unsafe { inner.deref() }.dst,
+            Packet::Input { ref inner, .. } => inner.dst,
             Packet::Message { ref link, .. } => link.dst,
             Packet::ReplayPiece { ref link, .. } => link.dst,
             // If link is not specified, then we are at a base table node. Use the packet data
@@ -445,7 +444,7 @@ impl Packet {
                 ..
             } => match link {
                 Some(l) => l.dst,
-                None => unsafe { timestamp.deref() }.dst,
+                None => timestamp.dst,
             },
             _ => unreachable!(),
         }
