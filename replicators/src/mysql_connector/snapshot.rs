@@ -94,7 +94,6 @@ impl MySqlReplicator {
     async fn load_recipe_with_meta_lock(
         &mut self,
         noria: &mut noria::ControllerHandle,
-        install: bool,
     ) -> ReadySetResult<Transaction<'static>> {
         let mut tx = self.pool.start_transaction(tx_opts()).await?;
 
@@ -136,11 +135,6 @@ impl MySqlReplicator {
             // in case
             let metalock = format!("SELECT 1 FROM {} LIMIT 0", tables.iter().join(","));
             tx.query_drop(metalock).await?;
-        }
-
-        if !install {
-            info!("Not loading recipe as replication offset already exists for schema");
-            return Ok(tx);
         }
 
         let mut bad_tables = Vec::new();
@@ -327,12 +321,8 @@ impl MySqlReplicator {
     pub(crate) async fn snapshot_to_noria(
         mut self,
         noria: &mut noria::ControllerHandle,
-        replication_offsets: &ReplicationOffsets,
-        install_recipe: bool,
     ) -> ReadySetResult<()> {
-        let result = self
-            .replicate_to_noria_with_table_locks(noria, replication_offsets, install_recipe)
-            .await;
+        let result = self.replicate_to_noria_with_table_locks(noria).await;
 
         // Wait for all connections to finish, not strictly neccessary
         self.pool.disconnect().await?;
@@ -347,8 +337,6 @@ impl MySqlReplicator {
     async fn replicate_to_noria_with_table_locks(
         &mut self,
         noria: &mut noria::ControllerHandle,
-        replication_offsets: &ReplicationOffsets,
-        install_recipe: bool,
     ) -> ReadySetResult<()> {
         // NOTE: There are two ways to prevent DDL changes in MySQL:
         // `FLUSH TABLES WITH READ LOCK` or `LOCK INSTANCE FOR BACKUP`. Both are not
@@ -376,11 +364,14 @@ impl MySqlReplicator {
         };
 
         let _meta_lock = self
-            .load_recipe_with_meta_lock(noria, install_recipe && !replication_offsets.has_schema())
+            .load_recipe_with_meta_lock(noria)
             .await
             .map_err(log_err)?;
 
-        self.dump_tables(noria, replication_offsets).await
+        // Replication offsets could change following a schema update, so get a new list
+        let replication_offsets = noria.replication_offsets().await?;
+
+        self.dump_tables(noria, &replication_offsets).await
     }
 
     /// Spawns a new tokio task that replicates a given table to noria, returning

@@ -243,6 +243,7 @@ impl TestHandle {
         Ok(())
     }
 
+    #[track_caller]
     async fn check_results(
         &mut self,
         view_name: &str,
@@ -842,6 +843,135 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
     ctx.assert_table_exists("t6").await;
 
     ctx.stop().await;
+    client.stop().await;
+
+    Ok(())
+}
+
+/// Tests that on encountering an ALTER TABLE statement the replicator does a proper resnapshot that
+/// results in the proper schema being present.
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn mysql_replication_resnapshot() -> ReadySetResult<()> {
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await?;
+    client
+        .query(
+            "
+            DROP TABLE IF EXISTS repl1 CASCADE;
+            DROP TABLE IF EXISTS repl2 CASCADE;
+            DROP VIEW IF EXISTS repl1_view;
+            DROP VIEW IF EXISTS repl2_view;
+            CREATE TABLE repl1 (
+                id int,
+                val varchar(255)
+            );
+            CREATE TABLE repl2 (
+                id int,
+                val varchar(255)
+            );
+            CREATE VIEW repl1_view AS SELECT * FROM repl1;
+            CREATE VIEW repl2_view AS SELECT * FROM repl2;",
+        )
+        .await?;
+
+    const ROWS: usize = 20;
+
+    // Populate both tables
+    for i in 0..ROWS {
+        client
+            .query(&format!("INSERT INTO repl1 VALUES ({i}, 'I am a teapot')"))
+            .await?;
+        client
+            .query(&format!("INSERT INTO repl2 VALUES ({i}, 'I am a teapot')"))
+            .await?;
+    }
+
+    let mut ctx = TestHandle::start_noria(url.clone(), None).await?;
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+    // Initial snapshot is done
+    let rs: Vec<_> = (0..ROWS)
+        .map(|i| [DataType::from(i as i32), DataType::from("I am a teapot")])
+        .collect();
+    let rs: Vec<&[DataType]> = rs.iter().map(|r| r.as_slice()).collect();
+    ctx.check_results("repl1_view", "Resnapshot initial", rs.as_slice())
+        .await
+        .unwrap();
+    ctx.check_results("repl2_view", "Resnapshot initial", rs.as_slice())
+        .await
+        .unwrap();
+
+    // Issue a few ALTER TABLE statements
+    client.query("ALTER TABLE repl2 ADD COLUMN x int").await?;
+    client.query("ALTER TABLE repl2 ADD COLUMN y int").await?;
+    // Add some more rows in between
+    for i in 0..ROWS {
+        client
+            .query(&format!("INSERT INTO repl1 VALUES ({i}, 'I am a teapot')"))
+            .await?;
+        client
+            .query(&format!(
+                "INSERT INTO repl2 VALUES ({i}, 'I am a teapot', {i}, {i})"
+            ))
+            .await?;
+    }
+    client.query("ALTER TABLE repl2 DROP COLUMN x").await?;
+
+    // Check everything adds up for both the altered and unaltered tables
+    let rs: Vec<_> = (0..ROWS)
+        .map(|i| {
+            [
+                [DataType::from(i as i32), DataType::from("I am a teapot")],
+                [DataType::from(i as i32), DataType::from("I am a teapot")],
+            ]
+        })
+        .flatten()
+        .collect();
+    let rs: Vec<&[DataType]> = rs.iter().map(|r| r.as_slice()).collect();
+    ctx.check_results("repl1_view", "Resnapshot", rs.as_slice())
+        .await
+        .unwrap();
+
+    // TODO(fran): In theory the view should have been recreated properly, and this step should be
+    // redundant
+    client.query("DROP VIEW repl2_view").await?;
+    client
+        .query("CREATE VIEW repl2_view AS SELECT * FROM repl2")
+        .await?;
+
+    let rs: Vec<_> = (0..ROWS)
+        .map(|i| {
+            [
+                [
+                    DataType::from(i as i32),
+                    DataType::from("I am a teapot"),
+                    DataType::None,
+                ],
+                [
+                    DataType::from(i as i32),
+                    DataType::from("I am a teapot"),
+                    DataType::from(i as i32),
+                ],
+            ]
+        })
+        .flatten()
+        .collect();
+    let rs: Vec<&[DataType]> = rs.iter().map(|r| r.as_slice()).collect();
+    ctx.check_results("repl2_view", "Resnapshot", rs.as_slice())
+        .await
+        .unwrap();
+
+    ctx.stop().await;
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS repl1 CASCADE;
+             DROP TABLE IF EXISTS repl2 CASCADE;
+             DROP VIEW IF EXISTS repl1_view;
+             DROP VIEW IF EXISTS repl2_view;",
+        )
+        .await?;
+
     client.stop().await;
 
     Ok(())

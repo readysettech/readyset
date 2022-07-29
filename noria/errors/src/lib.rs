@@ -569,6 +569,9 @@ pub enum ReadySetError {
     /// Error when parsing a string as a literal for an array value
     #[error("Malformed array literal '{}': {}", Sensitive(&input), message)]
     ArrayParseError { input: String, message: String },
+
+    #[error("Change in DDL requires partial resnapshot")]
+    ResnapshotNeeded,
 }
 
 impl ReadySetError {

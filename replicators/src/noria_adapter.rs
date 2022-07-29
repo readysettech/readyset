@@ -146,6 +146,8 @@ pub struct NoriaAdapter {
     replication_offsets: ReplicationOffsets,
     /// Filters out changes we are not interested in
     table_filter: TableFilter,
+    /// If the connector can partially resnapshot a database
+    supports_resnapshot: bool,
 }
 
 impl NoriaAdapter {
@@ -157,8 +159,9 @@ impl NoriaAdapter {
     pub async fn start(
         noria: ControllerHandle,
         mut config: Config,
-        ready_notify: Option<Arc<Notify>>,
+        mut ready_notify: Option<Arc<Notify>>,
     ) -> ReadySetResult<!> {
+        let mut resnapshot = false;
         let url: DatabaseURL = config
             .replication_url
             .take()
@@ -168,7 +171,21 @@ impl NoriaAdapter {
 
         match url {
             DatabaseURL::MySQL(options) => {
-                NoriaAdapter::start_inner_mysql(options, noria, config, ready_notify).await
+                while let Err(err) = NoriaAdapter::start_inner_mysql(
+                    options.clone(),
+                    noria.clone(),
+                    config.clone(),
+                    &mut ready_notify,
+                    resnapshot,
+                )
+                .await
+                {
+                    match err {
+                        ReadySetError::ResnapshotNeeded => resnapshot = true,
+                        err => return Err(err),
+                    }
+                }
+                unreachable!("`start_inner_mysql` will never stop with an Ok status");
             }
             DatabaseURL::PostgreSQL(options) => {
                 NoriaAdapter::start_inner_postgres(options, noria, config, ready_notify).await
@@ -190,7 +207,8 @@ impl NoriaAdapter {
         mysql_options: mysql::Opts,
         mut noria: ControllerHandle,
         mut config: Config,
-        ready_notify: Option<Arc<Notify>>,
+        ready_notify: &mut Option<Arc<Notify>>,
+        resnapshot: bool,
     ) -> ReadySetResult<!> {
         use crate::mysql_connector::BinlogPosition;
         // Load the replication offset for all tables and the schema from Noria
@@ -202,8 +220,8 @@ impl NoriaAdapter {
             mysql_options.db_name(),
         )?;
 
-        let pos = match replication_offsets.max_offset()? {
-            None => {
+        let pos = match (replication_offsets.max_offset()?, resnapshot) {
+            (None, _) | (_, true) => {
                 let span = info_span!("taking database snapshot");
                 let replicator_options = mysql_options.clone();
                 let pool = mysql::Pool::new(replicator_options);
@@ -222,7 +240,7 @@ impl NoriaAdapter {
 
                 span.in_scope(|| info!("Starting snapshot"));
                 let snapshot_result = replicator
-                    .snapshot_to_noria(&mut noria, &replication_offsets, true)
+                    .snapshot_to_noria(&mut noria)
                     .instrument(span.clone())
                     .await;
 
@@ -248,10 +266,10 @@ impl NoriaAdapter {
                 // (`max_offsets()` returned `None`), that means not *all* tables were already
                 // snapshot before we started up. So we've got some tables at an old offset that
                 // need to catch up to the just-snapshotted tables. We discard
-                // replication events for offsets < the replication offset of that table, so we can
-                // do this "catching up" by just starting replication at the old offset.
-                // Note that at the very least we will always have the schema offset for the
-                // minumum.
+                // replication events for offsets < the replication offset of that table, so we
+                // can do this "catching up" by just starting replication at
+                // the old offset. Note that at the very least we will
+                // always have the schema offset for the minumum.
                 let pos: BinlogPosition = replication_offsets
                     .min_present_offset()?
                     .expect("Minimal offset must be present after snapshot")
@@ -265,24 +283,29 @@ impl NoriaAdapter {
                 );
                 pos
             }
-            Some(pos) => pos.clone().into(),
+            (Some(pos), _) => pos.clone().into(),
         };
 
         // TODO: it is possible that the binlog position from noria is no longer
         // present on the primary, in which case the connection will fail, and we would
         // need to perform a new snapshot
         let connector = Box::new(
-            MySqlBinlogConnector::connect(mysql_options, pos.clone(), config.replication_server_id)
-                .await?,
+            MySqlBinlogConnector::connect(
+                mysql_options.clone(),
+                pos.clone(),
+                config.replication_server_id,
+            )
+            .await?,
         );
 
         let mut adapter = NoriaAdapter {
-            noria,
+            noria: noria.clone(),
             connector,
             replication_offsets,
             mutator_map: HashMap::new(),
             warned_missing_tables: HashSet::new(),
             table_filter,
+            supports_resnapshot: true,
         };
 
         let mut current_pos: ReplicationOffset = pos.try_into()?;
@@ -306,7 +329,7 @@ impl NoriaAdapter {
         info!(binlog_position = %current_pos);
 
         // Let waiters know that the initial snapshotting is complete.
-        if let Some(notify) = ready_notify {
+        if let Some(notify) = ready_notify.take() {
             notify.notify_one();
         }
 
@@ -390,6 +413,7 @@ impl NoriaAdapter {
             mutator_map: HashMap::new(),
             warned_missing_tables: HashSet::new(),
             table_filter,
+            supports_resnapshot: false,
         };
 
         adapter
@@ -421,6 +445,17 @@ impl NoriaAdapter {
             Change::AlterTable(stmt) => self.table_filter.contains(&namespace, &stmt.table.name),
             _ => true,
         });
+
+        if self.supports_resnapshot && changelist.changes.iter().any(Change::requires_resnapshot) {
+            // In case we detect a DDL change that requires a full schema resnapshot exit the loop
+            // with the proper status
+            if let Some(pos) = self.replication_offsets.max_offset()?.cloned() {
+                // Forward all positions to the maximum position (the one prior to this statement)
+                // to avoid needless replay later
+                self.handle_log_position(pos).await?;
+            }
+            return Err(ReadySetError::ResnapshotNeeded);
+        }
 
         match self
             .noria
@@ -594,7 +629,7 @@ impl NoriaAdapter {
 
             let (action, pos) = self.connector.next_action(position, until.as_ref()).await?;
             *position = pos.clone();
-            debug!(?position, "Received replication action");
+            debug!(%position, "Received replication action");
 
             trace!(?action);
 
@@ -604,7 +639,7 @@ impl NoriaAdapter {
                 return Err(err);
             };
             counter!(recorded::REPLICATOR_SUCCESS, 1u64);
-            debug!(?position, "Successfully applied replication action");
+            debug!(%position, "Successfully applied replication action");
         }
     }
 

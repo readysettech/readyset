@@ -218,6 +218,24 @@ impl Change {
             always,
         })
     }
+
+    /// Return true if this change requires noria to resnapshot the database in order to properly
+    /// update the schema
+    pub fn requires_resnapshot(&self) -> bool {
+        let alter_table = match self {
+            Change::AlterTable(a) => a,
+            _ => return false,
+        };
+
+        alter_table.definitions.iter().any(|def| match def {
+            nom_sql::AlterTableDefinition::AddColumn(_)
+            | nom_sql::AlterTableDefinition::AlterColumn { .. }
+            | nom_sql::AlterTableDefinition::DropColumn { .. }
+            | nom_sql::AlterTableDefinition::ChangeColumn { .. }
+            | nom_sql::AlterTableDefinition::RenameColumn { .. } => true,
+            nom_sql::AlterTableDefinition::AddKey(_) => false,
+        })
+    }
 }
 
 impl IntoIterator for ChangeList {
