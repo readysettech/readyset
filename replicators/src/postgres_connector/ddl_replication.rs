@@ -5,31 +5,26 @@
 //! ReadySet to be deployable in situations where users might not be able to install arbitrary
 //! plugins (such as AWS RDS). The method we use to implement streaming replication of DDL for
 //! PostgreSQL under these constraints is to use [event triggers][], which allow registering
-//! arbitrary functions written in PL/PGSQL to be run on DDL change events, to write information
-//! about changes to DDL to a special [`ddl_replication_log` table][table]. Those events are then
-//! replicated as normal, and we [special-case them][handle] in the replication adapter to convert
-//! them to schema change events, which are then handled normally.
+//! arbitrary functions written in PL/PGSQL to be run on DDL change events, and inject information
+//! about changes to DDL into the WAL. Those events are then replicated as a WAL record of type
+//! Message, with a prefix of "readyset" using special json encoding.
 //!
-//! The definition of the `ddl_replication_log` table, and the functions and event triggers which
-//! populate it, are located in `ddl_replication.sql`, in the same directory as this module - this
-//! file is executed on the database by the [`setup_ddl_replication`] function when first starting
-//! up the postgresql replicator.
+//! The definition of the functions and event triggers which populate the WAL, are located in
+//! `ddl_replication.sql`,
+//!in the same directory as this module - this file is executed on the database by the [
+//!`setup_ddl_replication`] function when first starting up the postgresql
+//! replicator.
 //!
 //! [pglogical]: https://github.com/2ndQuadrant/pglogical
 //! [event triggers]: https://www.postgresql.org/docs/current/event-triggers.html
-//! [table]: DDL_REPLICATION_LOG_TABLE
-//! [handle]: DdlEvent::from_wal_event
 //!
 //! # Specifics of different DDL events
 //!
 //! Due to details about how PostgreSQL exposes metadata about the schema of different objects,
 //! different DDL events are replicated in different ways:
 //!
-//! * `DROP TABLE` and `DROP VIEW` are replicated directly as rows in the `ddl_replication_log`
-//!   table, then [`DdlEvent::to_ddl`] constructs the statement directly by constructing an AST
-//!   in-place and converting that to a string. Since neither of these statements have any extra
-//!   information we have to convey, this is the simplest way to avoid having to do any SQL
-//!   [dialect] conversion
+//! * `DROP TABLE` and `DROP VIEW` don't have any extra information we have to convey, this is why
+//!   they are encoded simply with a schema and object information.
 //! * For `CREATE TABLE` and `CREATE VIEW`, the event trigger constructs a postgresql-dialect
 //!   statement *in PL/PGSQL*, which we then convert to the noria-native dialect by parsing it and
 //!   re-converting it to a string. This is necessary because the information provided to us by the
@@ -43,18 +38,12 @@
 //!
 //! [dialect]: nom_sql::Dialect
 
-use std::str::FromStr;
-
-use nom_sql::{parse_query, Dialect, DropTableStatement, DropViewStatement, Table};
-use noria_errors::{internal, internal_err, ReadySetError, ReadySetResult};
+use nom_sql::{parse_query, Dialect, DropTableStatement, DropViewStatement, SqlQuery, Table};
+use noria_errors::ReadySetResult;
 use pgsql::tls::MakeTlsConnect;
+use serde::{Deserialize, Deserializer};
 use tokio_postgres as pgsql;
 use tracing::debug;
-
-use super::wal_reader::WalEvent;
-
-/// The name of the table that DDL replication logs will be written to
-const DDL_REPLICATION_LOG_TABLE: &str = "ddl_replication_log";
 
 /// Setup everything in the database that's necessary for DDL replication.
 ///
@@ -78,8 +67,9 @@ where
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DdlEventKind {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum DdlEventOperation {
     CreateTable,
     DropTable,
     AlterTable,
@@ -87,101 +77,46 @@ pub(crate) enum DdlEventKind {
     DropView,
 }
 
-impl FromStr for DdlEventKind {
-    type Err = ReadySetError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "create_table" => Ok(Self::CreateTable),
-            "drop_table" => Ok(Self::DropTable),
-            "alter_table" => Ok(Self::AlterTable),
-            "create_view" => Ok(Self::CreateView),
-            "drop_view" => Ok(Self::DropView),
-            s => internal!("Unknown DDL event kind `{}`", s),
-        }
-    }
+#[derive(Debug, Deserialize)]
+pub(crate) struct DdlEvent {
+    operation: DdlEventOperation,
+    schema: String,
+    object: String,
+    statement: Option<ParsedStatement>,
 }
 
-#[derive(Debug)]
-pub(crate) struct DdlEvent<'a> {
-    kind: DdlEventKind,
-    schema_name: &'a str,
-    object_name: &'a str,
-    statement: Option<String>,
+/// This is just an ugly wrapper because `deserialize_with` doesn't play well with Options
+#[derive(Debug, Deserialize, Clone)]
+struct ParsedStatement(#[serde(deserialize_with = "parse_pgsql")] SqlQuery);
+
+fn parse_pgsql<'de, D>(deserializer: D) -> Result<SqlQuery, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let query = String::deserialize(deserializer)?;
+    parse_query(Dialect::PostgreSQL, query).map_err(serde::de::Error::custom)
 }
 
-impl<'a> DdlEvent<'a> {
-    /// If the given WAL event represents a DDL change event, attempt to convert that to a
-    /// [`DdlEvent`] and return it, otherwise returns `Ok(None)`. Returns an error if the WAL event
-    /// represents an invalid [`DdlEvent`]
-    pub(crate) fn from_wal_event(wal_event: &'a WalEvent) -> ReadySetResult<Option<Self>> {
-        let tuple = if let WalEvent::Insert { table, tuple, .. } = wal_event {
-            if table != DDL_REPLICATION_LOG_TABLE {
-                return Ok(None);
-            }
-            tuple
-        } else {
-            return Ok(None);
-        };
-
-        // Schema is:
-        // CREATE TABLE IF NOT EXISTS readyset.ddl_replication_log (
-        //     "id" SERIAL PRIMARY KEY,
-        //     "event_type" TEXT NOT NULL,
-        //     "schema_name" TEXT,
-        //     "object_name" TEXT NOT NULL,
-        //     "statement" TEXT,
-        //     "created_at" TIMESTAMP WITHOUT TIME ZONE DEFAULT now()
-        // );
-
-        if tuple.len() != 6 {
-            internal!("Invalid event received from DDL replication log");
-        }
-
-        let kind = DdlEventKind::from_str((&tuple[1]).try_into()?)
-            .map_err(|_| internal_err!("Invalid DDL event kind"))?;
-        let schema_name = (&tuple[2]).try_into()?;
-        let object_name = (&tuple[3]).try_into()?;
-        let statement = if [DdlEventKind::CreateTable, DdlEventKind::CreateView].contains(&kind) {
-            let query = <&str>::try_from(&tuple[4])?;
-            Some(
-                parse_query(Dialect::PostgreSQL, query)
-                    .map_err(|_| ReadySetError::UnparseableQuery {
-                        query: query.into(),
-                    })?
-                    .to_string(),
-            )
-        } else {
-            None
-        };
-
-        Ok(Some(Self {
-            kind,
-            schema_name,
-            object_name,
-            statement,
-        }))
-    }
-
+impl DdlEvent {
     /// Convert this [`DdlEvent`] into a SQL DDL statement that can be sent to Noria directly (using
     /// the Noria-native SQL dialect, not the postgresql dialect!)
     pub(crate) fn to_ddl(&self) -> String {
-        match self.kind {
-            DdlEventKind::CreateTable | DdlEventKind::CreateView | DdlEventKind::AlterTable => {
-                self.statement.clone().unwrap()
-            }
-            DdlEventKind::DropTable => DropTableStatement {
+        match self.operation {
+            DdlEventOperation::CreateTable
+            | DdlEventOperation::CreateView
+            | DdlEventOperation::AlterTable => self.statement.clone().unwrap().0.to_string(),
+            DdlEventOperation::DropTable => DropTableStatement {
                 tables: vec![Table {
-                    schema: Some(self.schema_name.into()),
-                    name: self.object_name.into(),
+                    schema: Some(self.schema.as_str().into()),
+                    name: self.object.as_str().into(),
                 }],
                 // We might be getting a drop table event for a table we don't have, eg if the table
                 // originally failed to parse
                 if_exists: true,
             }
             .to_string(),
-            DdlEventKind::DropView => DropViewStatement {
-                views: vec![self.object_name.into()],
+            DdlEventOperation::DropView => DropViewStatement {
+                views: vec![self.object.as_str().into()],
                 // We might be getting a drop view event for a view we don't have, eg if the view
                 // originally failed to parse
                 if_exists: true,
@@ -191,7 +126,7 @@ impl<'a> DdlEvent<'a> {
     }
 
     pub(crate) fn schema(&self) -> &str {
-        self.schema_name
+        &self.schema
     }
 }
 
@@ -202,8 +137,8 @@ mod tests {
     use std::time::Duration;
 
     use nom_sql::{
-        parse_query, ColumnConstraint, ColumnSpecification, CreateViewStatement, Dialect, Expr,
-        FieldDefinitionExpr, SelectSpecification, SqlQuery, SqlType, TableExpr, TableKey,
+        ColumnConstraint, ColumnSpecification, CreateViewStatement, Expr, FieldDefinitionExpr,
+        SelectSpecification, SqlQuery, SqlType, TableExpr, TableKey,
     };
     use pgsql::NoTls;
     use tokio::task::JoinHandle;
@@ -270,6 +205,7 @@ mod tests {
             .simple_query(&format!("CREATE DATABASE {dbname}"))
             .await
             .unwrap();
+
         handle.abort();
 
         let mut config = config();
@@ -277,11 +213,41 @@ mod tests {
         setup_ddl_replication(config.clone(), NoTls).await.unwrap();
 
         let (client, conn) = config.connect(NoTls).await.unwrap();
+
         let conn_handle = tokio::spawn(conn);
+
+        let _ = client
+            .simple_query(&format!("SELECT pg_drop_replication_slot('{dbname}');"))
+            .await;
+        client
+            .simple_query(&format!(
+                "SELECT pg_create_logical_replication_slot('{dbname}', 'pgoutput');"
+            ))
+            .await
+            .unwrap();
+
         Context {
             client,
             conn_handle,
         }
+    }
+
+    async fn get_last_ddl(client: &Context, dbname: &str) -> DdlEvent {
+        let ddl: Vec<u8> = client
+            .query_one(
+                format!(
+                    "SELECT substring(data, 24)
+                     FROM pg_logical_slot_get_binary_changes('{dbname}',
+                     NULL, NULL, 'proto_version', '1', 'publication_names', '{dbname}', 'messages', 'true')
+                     OFFSET 1 LIMIT 1;"
+                )
+                .as_str(),
+                &[],
+            )
+            .await
+            .unwrap()
+            .get(0);
+        serde_json::from_slice(&ddl).unwrap()
     }
 
     #[tokio::test]
@@ -292,24 +258,13 @@ mod tests {
             .simple_query("create table t1 (id integer primary key, value text, unique(value))")
             .await
             .unwrap();
-        let ddl = client
-            .query_one(
-                "select *
-             from readyset.ddl_replication_log
-             where event_type = 'create_table'
-             order by id desc
-             limit 1",
-                &[],
-            )
-            .await
-            .unwrap();
 
-        assert_eq!(ddl.get::<_, String>("event_type"), "create_table");
-        assert_eq!(ddl.get::<_, String>("schema_name"), "public");
-        assert_eq!(ddl.get::<_, String>("object_name"), "t1");
-        let statement = ddl.get::<_, String>("statement");
-        let statement_parsed = parse_query(Dialect::PostgreSQL, &statement).unwrap();
-        match statement_parsed {
+        let ddl = get_last_ddl(&client, "create_table").await;
+        assert_eq!(ddl.operation, DdlEventOperation::CreateTable);
+        assert_eq!(ddl.schema, "public");
+        assert_eq!(ddl.object, "t1");
+
+        match ddl.statement.unwrap().0 {
             SqlQuery::CreateTable(stmt) => {
                 assert_eq!(stmt.table.name, "t1");
                 assert_eq!(
@@ -344,37 +299,26 @@ mod tests {
                     ]
                 );
             }
-            _ => panic!("Unexpected query type: {:?}", statement_parsed),
+            _ => panic!("Unexpected query type: {:?}", ddl.operation),
         }
     }
 
     #[tokio::test]
     async fn create_table_with_reserved_keyword_as_name() {
+        readyset_tracing::init_test_logging();
         let client = setup("create_table_with_reserved_keyword_as_name").await;
         client
             .simple_query("create table \"table\" (x int)")
             .await
             .unwrap();
-        let ddl = client
-            .query_one(
-                "select *
-             from readyset.ddl_replication_log
-             where event_type = 'create_table'
-             order by id desc
-             limit 1",
-                &[],
-            )
-            .await
-            .unwrap();
 
-        assert_eq!(ddl.get::<_, String>("object_name"), "table");
-        let ddl_parsed =
-            parse_query(Dialect::PostgreSQL, &ddl.get::<_, String>("statement")).unwrap();
-        match ddl_parsed {
+        let ddl = get_last_ddl(&client, "create_table_with_reserved_keyword_as_name").await;
+
+        match ddl.statement.unwrap().0 {
             SqlQuery::CreateTable(stmt) => {
                 assert_eq!(stmt.table.name, "table");
             }
-            _ => panic!("Unexpected query type: {:?}", ddl_parsed),
+            _ => panic!("Unexpected query type: {:?}", ddl.operation),
         }
     }
 
@@ -382,28 +326,20 @@ mod tests {
     async fn alter_table_has_create_table_statement() {
         let client = setup("alter_table_has_create_table_statement").await;
         client.simple_query("create table t (x int)").await.unwrap();
+
+        let _ = get_last_ddl(&client, "alter_table_has_create_table_statement").await;
+
         client
             .simple_query("alter table t add column y int")
             .await
             .unwrap();
-        let ddl = client
-            .query_one(
-                "select *
-             from readyset.ddl_replication_log
-             where event_type = 'alter_table'
-             order by id desc
-             limit 1",
-                &[],
-            )
-            .await
-            .unwrap();
 
-        assert_eq!(ddl.get::<_, String>("event_type"), "alter_table");
-        assert_eq!(ddl.get::<_, String>("schema_name"), "public");
-        assert_eq!(ddl.get::<_, String>("object_name"), "t");
-        let statement = ddl.get::<_, String>("statement");
-        let statement_parsed = parse_query(Dialect::PostgreSQL, &statement).unwrap();
-        match statement_parsed {
+        let ddl = get_last_ddl(&client, "alter_table_has_create_table_statement").await;
+        assert_eq!(ddl.operation, DdlEventOperation::AlterTable);
+        assert_eq!(ddl.schema, "public");
+        assert_eq!(ddl.object, "t");
+
+        match ddl.statement.unwrap().0 {
             SqlQuery::CreateTable(stmt) => {
                 assert_eq!(stmt.table.name, "t");
                 assert_eq!(
@@ -424,7 +360,7 @@ mod tests {
                     ]
                 );
             }
-            _ => panic!("Unexpected query type: {:?}", statement_parsed),
+            _ => panic!("Unexpected query type: {:?}", ddl.operation),
         }
     }
 
@@ -435,28 +371,20 @@ mod tests {
             .simple_query("create table t (x int);")
             .await
             .unwrap();
+
+        let _ = get_last_ddl(&client, "create_view").await;
+
         client
             .simple_query("create view v as select * from t;")
             .await
             .unwrap();
-        let ddl = client
-            .query_one(
-                "select *
-             from readyset.ddl_replication_log
-             where event_type = 'create_view'
-             order by id desc
-             limit 1",
-                &[],
-            )
-            .await
-            .unwrap();
 
-        assert_eq!(ddl.get::<_, String>("event_type"), "create_view");
-        assert_eq!(ddl.get::<_, String>("schema_name"), "public");
-        assert_eq!(ddl.get::<_, String>("object_name"), "v");
-        let statement = ddl.get::<_, String>("statement");
-        let statement_parsed = parse_query(Dialect::PostgreSQL, &statement).unwrap();
-        match statement_parsed {
+        let ddl = get_last_ddl(&client, "create_view").await;
+        assert_eq!(ddl.operation, DdlEventOperation::CreateView);
+        assert_eq!(ddl.schema, "public");
+        assert_eq!(ddl.object, "v");
+
+        match ddl.statement.unwrap().0 {
             SqlQuery::CreateView(CreateViewStatement {
                 name, definition, ..
             }) => {
@@ -475,7 +403,7 @@ mod tests {
                     _ => panic!(),
                 }
             }
-            _ => panic!("Unexpected query type {:?}", statement_parsed),
+            _ => panic!("Unexpected query type {:?}", ddl.operation),
         }
     }
 }
