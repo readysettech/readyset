@@ -19,16 +19,6 @@ steps:
         login: true
         retries: 3
 
-  - label: ':docker: Build readyset-installer build image'
-    key: installer-image
-    command: .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-installer readyset-installer .
-    env:
-      SKIP_IF_UNCHANGED: rust-toolchain
-    plugins:
-      ecr#v2.5.0:
-        login: true
-        retries: 3
-
   - label: ":docker: Build readyset-server debug image"
     key: readyset-server-image
     depends_on:

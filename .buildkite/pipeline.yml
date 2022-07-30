@@ -33,10 +33,6 @@ steps:
             # Since we always want to be able to build docker images, always build the base image.
             - label: ':docker: Build builder base image'
 
-            - label: ':docker: Build readyset-installer builder image'
-              include:
-                - installer/
-
             - label: ':rust: Check rustfmt'
               include:
                 - "[!ops]*"
@@ -369,11 +365,23 @@ steps:
     agents:
       queue: ops
 
+  - label: ':docker: Build readyset-installer build image'
+    key: build-installer-image
+    branches: refs/heads/main
+    depends_on:
+      - start-installer-release
+    command: .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-installer readyset-installer .
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
   - label: ":tux: Build Linux ReadySet Installer Binaries"
     key: build-linux-installer
     branches: refs/heads/main
     depends_on:
       - start-installer-release
+      - build-installer-image
     commands:
       - "echo +++ :computer: running build for Linux ReadySet Installer Binaries"
       - if buildkite-agent meta-data exists release-name; then
