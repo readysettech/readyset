@@ -1,7 +1,7 @@
 use std::str;
 use std::vec::Vec;
 
-use nom_sql::{CacheInner, CreateCacheStatement, CreateTableStatement, SqlIdentifier, SqlQuery};
+use nom_sql::{CacheInner, CreateCacheStatement, CreateTableStatement, SqlQuery, Table};
 use petgraph::graph::NodeIndex;
 use petgraph::visit::Bfs;
 use readyset::recipe::changelist::{Change, ChangeList};
@@ -52,8 +52,8 @@ pub(super) enum Schema {
 #[allow(unused)]
 impl Recipe {
     /// Get the id associated with an alias
-    pub(crate) fn expression_by_alias(&self, alias: &str) -> Option<SqlQuery> {
-        let expr = self.registry.get(&alias.into()).map(|e| match e {
+    pub(crate) fn expression_by_alias(&self, alias: &Table) -> Option<SqlQuery> {
+        let expr = self.registry.get(alias).map(|e| match e {
             RecipeExpr::Table(cts) => SqlQuery::CreateTable(cts.clone()),
             RecipeExpr::View(cvs) => SqlQuery::CreateView(cvs.clone()),
             RecipeExpr::Cache {
@@ -61,7 +61,7 @@ impl Recipe {
                 statement,
                 always,
             } => SqlQuery::CreateCache(CreateCacheStatement {
-                name: Some(name.clone().into()), // TODO: schema
+                name: Some(name.clone()),
                 inner: CacheInner::Statement(Box::new(statement.clone())),
                 always: *always,
             }),
@@ -123,20 +123,17 @@ impl Recipe {
         self.inc.enable_reuse(reuse_type)
     }
 
-    pub(in crate::controller) fn resolve_alias(&self, alias: &str) -> Option<&SqlIdentifier> {
-        self.registry.resolve_alias(&alias.into())
+    pub(in crate::controller) fn resolve_alias(&self, alias: &Table) -> Option<&Table> {
+        self.registry.resolve_alias(alias)
     }
 
     /// Returns a set of all *original names* for all caches in the recipe (not including aliases)
-    pub(in crate::controller) fn cache_names(&self) -> impl Iterator<Item = &SqlIdentifier> + '_ {
+    pub(in crate::controller) fn cache_names(&self) -> impl Iterator<Item = &Table> + '_ {
         self.registry.cache_names()
     }
 
     /// Obtains the `NodeIndex` for the node corresponding to a named query or a write type.
-    pub(in crate::controller) fn node_addr_for(
-        &self,
-        name: &SqlIdentifier,
-    ) -> Result<NodeIndex, String> {
+    pub(in crate::controller) fn node_addr_for(&self, name: &Table) -> Result<NodeIndex, String> {
         // `name` might be an alias for another identical query, so resolve if needed
         let query_name = self.registry.resolve_alias(name).unwrap_or(name);
         match self.inc.get_query_address(query_name) {
@@ -146,7 +143,7 @@ impl Recipe {
     }
 
     /// Get schema for a base table or view in the recipe.
-    pub(super) fn schema_for(&self, name: &str) -> Option<Schema> {
+    pub(super) fn schema_for(&self, name: &Table) -> Option<Schema> {
         match self.inc.get_base_schema(name) {
             None => {
                 let s = match self.resolve_alias(name) {
@@ -174,20 +171,25 @@ impl Recipe {
             named_queries = self.registry.num_aliases(),
         );
 
-        for change in changelist {
+        let ChangeList {
+            changes,
+            schema_search_path,
+        } = changelist;
+
+        for change in changes {
             match change {
                 Change::CreateTable(mut cts) => {
-                    cts = self.inc.rewrite(cts)?;
-                    match self.registry.get(&cts.table.name) {
+                    cts = self.inc.rewrite(cts, &schema_search_path)?;
+                    match self.registry.get(&cts.table) {
                         Some(RecipeExpr::Table(current_cts)) => {
                             // Table already exists, so check if it has been changed.
                             if current_cts != &cts {
                                 // Table has changed. Drop and recreate.
                                 trace!(
-                                    name = %cts.table.name,
+                                    table = %cts.table,
                                     "table exists and has changed. Dropping and recreating..."
                                 );
-                                self.drop_and_recreate(&cts.table.name.clone(), cts, mig);
+                                self.drop_and_recreate_table(&cts.table.clone(), cts, mig);
                                 continue;
                             }
                             trace!(
@@ -207,7 +209,7 @@ impl Recipe {
                     }
                 }
                 Change::CreateView(mut stmt) => {
-                    stmt = self.inc.rewrite(stmt)?;
+                    stmt = self.inc.rewrite(stmt, &schema_search_path)?;
                     let expression = RecipeExpr::View(stmt.clone());
                     if !self.registry.add_query(expression)? {
                         // The expression is already present, and we successfully added
@@ -220,7 +222,9 @@ impl Recipe {
                 }
                 Change::CreateCache(mut ccqs) => {
                     let statement = match &ccqs.inner {
-                        CacheInner::Statement(box stmt) => self.inc.rewrite(stmt.clone())?,
+                        CacheInner::Statement(box stmt) => {
+                            self.inc.rewrite(stmt.clone(), &schema_search_path)?
+                        }
                         CacheInner::Id(id) => {
                             error!("attempted to issue CREATE CACHE with an id: {}", id);
                             internal!("CREATE CACHE should've had its ID resolved by the adapter");
@@ -228,7 +232,7 @@ impl Recipe {
                     };
                     if let Some(name) = &ccqs.name {
                         let expression = RecipeExpr::Cache {
-                            name: name.name.clone(), // TODO: schema
+                            name: name.clone(),
                             statement: statement.clone(),
                             always: ccqs.always,
                         };
@@ -239,11 +243,7 @@ impl Recipe {
                         }
                     }
 
-                    let name = self.inc.add_query(
-                        ccqs.name.map(|t| t.name /* TODO: schema */),
-                        statement.clone(),
-                        mig,
-                    )?;
+                    let name = self.inc.add_query(ccqs.name, statement.clone(), mig)?;
                     self.registry.add_query(RecipeExpr::Cache {
                         name,
                         statement,
@@ -257,14 +257,13 @@ impl Recipe {
                 // statement.
                 // 3. Drop the original table.
                 // 4. Install the new table.
-                Change::AlterTable(mut ats) => {
-                    let original_expression =
-                        self.registry.get(&ats.table.name).ok_or_else(|| {
-                            internal_err!(
-                                "Tried to alter table {}, but table doesn't exist.",
-                                ats.table.name
-                            )
-                        })?;
+                Change::AlterTable(ats) => {
+                    let original_expression = self.registry.get(&ats.table).ok_or_else(|| {
+                        internal_err!(
+                            "Tried to alter table {}, but table doesn't exist.",
+                            ats.table
+                        )
+                    })?;
                     let original_table = match original_expression {
                         RecipeExpr::Table(ref table) => table,
                         _ => internal!(
@@ -274,13 +273,21 @@ impl Recipe {
                     };
                     let new_table = rewrite_table_definition(&ats, original_table.clone())?;
                     let new_table_name = new_table.table.name.clone();
-                    self.drop_and_recreate(&ats.table.name, new_table, mig);
+                    self.drop_and_recreate_table(&ats.table, new_table, mig);
                 }
-                Change::Drop { name, if_exists } => {
+                Change::Drop {
+                    mut name,
+                    if_exists,
+                } => {
+                    if name.schema.is_none() {
+                        if let Some(first_schema) = schema_search_path.first() {
+                            name.schema = Some(first_schema.clone());
+                        }
+                    }
                     let removed_indices = self.remove_expression(&name, mig)?;
                     if removed_indices.is_none() && !if_exists {
-                        error!(table = %name, "attempted to DROP TABLE, but table does not exist");
-                        internal!("attempted to DROP TABLE, but table {} does not exist", name);
+                        error!(%name, "attempted to drop relation, but relation does not exist");
+                        internal!("attempted to drop relation, but relation {name} does not exist",);
                     }
                 }
             }
@@ -298,19 +305,19 @@ impl Recipe {
         &self.inc
     }
 
-    fn drop_and_recreate(
+    fn drop_and_recreate_table(
         &mut self,
-        name: &SqlIdentifier,
+        table: &Table,
         new_table: CreateTableStatement,
         mig: &mut Migration,
     ) -> ReadySetResult<()> {
-        let removed_node_indices = self.remove_expression(name, mig)?;
+        let removed_node_indices = self.remove_expression(table, mig)?;
         if removed_node_indices.is_none() {
-            error!(table = %name,
+            error!(table = %table,
                 "attempted to issue ALTER TABLE, but table does not exist");
             return Err(ReadySetError::TableNotFound {
-                name: name.clone().into(),
-                schema: None, /* TODO */
+                name: table.name.clone().into(),
+                schema: table.schema.clone().map(Into::into),
             });
         };
         self.inc.add_table(new_table.clone(), mig)?;
@@ -336,7 +343,7 @@ impl Recipe {
     //  Would we still need a `Recipe` structure if that's the case?
     pub(super) fn remove_expression(
         &mut self,
-        name_or_alias: &SqlIdentifier,
+        name_or_alias: &Table,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<Option<Vec<NodeIndex>>> {
         let expression = match self.registry.remove_expression(name_or_alias) {

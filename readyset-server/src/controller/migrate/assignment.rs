@@ -220,7 +220,7 @@ pub fn assign(dataflow_state: &mut DfState, new_nodes: &[NodeIndex]) -> ReadySet
                 });
             }
 
-            if graph[node].name().starts_with("BOUNDARY_") {
+            if graph[node].name().name.starts_with("BOUNDARY_") {
                 return next_domain();
             }
 

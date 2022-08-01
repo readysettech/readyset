@@ -275,7 +275,7 @@ pub struct TableBuilder {
     pub key: Vec<usize>,
     pub dropped: VecMap<DfValue>,
 
-    pub table_name: SqlIdentifier,
+    pub table_name: nom_sql::Table,
     pub columns: Vec<SqlIdentifier>,
     pub schema: Option<CreateTableStatement>,
 
@@ -355,7 +355,7 @@ pub struct Table {
     key: Vec<usize>,
     columns: Vec<SqlIdentifier>,
     dropped: VecMap<DfValue>,
-    table_name: SqlIdentifier,
+    table_name: nom_sql::Table,
     schema: Option<CreateTableStatement>,
     shards: Vec<TableRpc>,
     shard_addrs: Vec<SocketAddr>,
@@ -651,7 +651,7 @@ impl Service<TableRequest> for Table {
 
 impl Table {
     /// Get the name of this base table.
-    pub fn table_name(&self) -> &str {
+    pub fn table_name(&self) -> &nom_sql::Table {
         &self.table_name
     }
 

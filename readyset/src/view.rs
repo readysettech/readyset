@@ -825,7 +825,7 @@ impl<D> ReadReply<D> {
 #[doc(hidden)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ViewBuilder {
-    pub name: SqlIdentifier,
+    pub name: Table,
 
     pub node: NodeIndex,
     pub columns: Arc<[SqlIdentifier]>,
@@ -860,7 +860,7 @@ impl ViewBuilder {
         }
         .ok_or_else(|| ReadySetError::ViewReplicaOutOfBounds {
             replica: replica.unwrap_or(0),
-            view_name: self.name.clone().into(),
+            view_name: self.name.clone().to_string(),
             num_replicas: self.replica_shard_addrs.num_rows(),
         })?;
 
@@ -931,7 +931,7 @@ impl ViewBuilder {
 /// share connections to the Soup workers.
 #[derive(Clone)]
 pub struct View {
-    name: SqlIdentifier,
+    name: Table,
     node: NodeIndex,
     columns: Arc<[SqlIdentifier]>,
     schema: Option<ViewSchema>,
@@ -1112,7 +1112,11 @@ impl Service<ViewQuery> for View {
                     // NOTE: Sharded views can't actually work with aggregates, order by, limit or
                     // offset
                     let request = Instrumented::from(Tagged::from(ReadQuery::Normal {
-                        target: (node, name.clone(), shardi).into(),
+                        target: ReaderAddress {
+                            node,
+                            name: name.clone(),
+                            shard: shardi,
+                        },
                         query: ViewQuery {
                             key_comparisons: shard_queries,
                             block: query.block,
@@ -1186,8 +1190,8 @@ impl View {
     }
 
     /// Name associated with the reader associated with the view.
-    pub fn name(&self) -> SqlIdentifier {
-        self.name.clone()
+    pub fn name(&self) -> &Table {
+        &self.name
     }
 
     /// Returns a reference to the list of socket addresses for the view's shards
@@ -1217,7 +1221,11 @@ impl View {
             .enumerate()
             .map(|(shardi, shard)| {
                 shard.call(Instrumented::from(Tagged::from(ReadQuery::Size {
-                    target: (node, name.clone(), shardi).into(),
+                    target: ReaderAddress {
+                        node,
+                        name: name.clone(),
+                        shard: shardi,
+                    },
                 })))
             })
             .collect::<FuturesUnordered<_>>();
@@ -1258,7 +1266,11 @@ impl View {
             .enumerate()
             .map(|(shardi, shard)| {
                 shard.call(Instrumented::from(Tagged::from(ReadQuery::Keys {
-                    target: (node, name.clone(), shardi).into(),
+                    target: ReaderAddress {
+                        node,
+                        name: name.clone(),
+                        shard: shardi,
+                    },
                 })))
             })
             .collect::<FuturesUnordered<_>>();

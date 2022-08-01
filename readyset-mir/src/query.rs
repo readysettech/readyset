@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::{Display, Error, Formatter};
 
-use nom_sql::SqlIdentifier;
+use nom_sql::{SqlIdentifier, Table};
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +13,7 @@ use crate::MirNodeRef;
 /// `Reader` node),
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QueryFlowParts {
-    pub name: SqlIdentifier,
+    pub name: Table,
     pub new_nodes: Vec<NodeIndex>,
     pub reused_nodes: Vec<NodeIndex>,
     pub query_leaf: NodeIndex,
@@ -21,7 +21,7 @@ pub struct QueryFlowParts {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MirQuery {
-    pub name: SqlIdentifier,
+    pub name: Table,
     pub roots: Vec<MirNodeRef>,
     pub leaf: MirNodeRef,
     /// The names of the fields that this query returns, in the original user-specified order.
@@ -31,7 +31,10 @@ pub struct MirQuery {
 }
 
 impl MirQuery {
-    pub fn singleton(name: &str, node: MirNodeRef, fields: Vec<SqlIdentifier>) -> MirQuery {
+    pub fn singleton<N>(name: N, node: MirNodeRef, fields: Vec<SqlIdentifier>) -> MirQuery
+    where
+        N: Into<Table>,
+    {
         MirQuery {
             name: name.into(),
             roots: vec![node.clone()],

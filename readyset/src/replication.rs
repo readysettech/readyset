@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
 
-use nom_sql::SqlIdentifier;
+use nom_sql::Table;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
@@ -94,7 +94,7 @@ pub struct ReplicationOffsets {
     /// Replication offset for each individual table, if any.
     ///
     /// A table with [`None`] as its replication offset has not yet been snapshotted successfully
-    pub tables: HashMap<SqlIdentifier, Option<ReplicationOffset>>,
+    pub tables: HashMap<Table, Option<ReplicationOffset>>,
 }
 
 impl ReplicationOffsets {
@@ -122,7 +122,7 @@ impl ReplicationOffsets {
     /// use readyset::replication::ReplicationOffsets;
     ///
     /// let mut replication_offsets = ReplicationOffsets::default();
-    /// assert!(!replication_offsets.has_table("table_1"));
+    /// assert!(!replication_offsets.has_table(&"table_1".into()));
     /// ```
     ///
     /// A table that is present but set to [`None`] also returns `false`:
@@ -132,7 +132,7 @@ impl ReplicationOffsets {
     ///
     /// let mut replication_offsets = ReplicationOffsets::default();
     /// replication_offsets.tables.insert("table_1".into(), None);
-    /// assert!(!replication_offsets.has_table("table_1"));
+    /// assert!(!replication_offsets.has_table(&"table_1".into()));
     /// ```
     ///
     /// A table that is present returns `true`:
@@ -148,15 +148,15 @@ impl ReplicationOffsets {
     ///         offset: 1,
     ///     }),
     /// );
-    /// assert!(replication_offsets.has_table("table_1"));
+    /// assert!(replication_offsets.has_table(&"table_1".into()));
     /// ```
-    pub fn has_table<T>(&self, table_name: &T) -> bool
+    pub fn has_table<T>(&self, table: &T) -> bool
     where
         T: ?Sized,
-        SqlIdentifier: Borrow<T>,
+        Table: Borrow<T>,
         T: Hash + Eq,
     {
-        self.tables.get(table_name).iter().any(|o| o.is_some())
+        self.tables.get(table).iter().any(|o| o.is_some())
     }
 
     /// If all replication offsets are present (the schema and all tables), returns the minimum of

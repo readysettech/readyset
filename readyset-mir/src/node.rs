@@ -8,7 +8,7 @@ use std::{iter, mem};
 use dataflow::ops;
 use dataflow::prelude::ReadySetError;
 use nom_sql::analysis::ReferredColumns;
-use nom_sql::{ColumnSpecification, SqlIdentifier};
+use nom_sql::{ColumnSpecification, Table};
 use petgraph::graph::NodeIndex;
 use readyset_errors::{internal, internal_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -27,7 +27,7 @@ pub enum GroupedNodeType {
 
 #[derive(Serialize, Deserialize)]
 pub struct MirNode {
-    pub name: SqlIdentifier,
+    pub name: Table,
     pub from_version: usize,
     pub inner: MirNodeInner,
     #[serde(skip)]
@@ -39,7 +39,7 @@ pub struct MirNode {
 
 impl MirNode {
     pub fn new(
-        name: SqlIdentifier,
+        name: Table,
         v: usize,
         inner: MirNodeInner,
         ancestors: Vec<MirNodeWeakRef>,
@@ -309,7 +309,7 @@ impl MirNode {
             MirNodeInner::AliasTable { table } => parent_columns()
                 .iter()
                 .map(|c| Column {
-                    table: Some(table.into()),
+                    table: Some(table.clone()),
                     name: c.name.clone(),
                     aliases: vec![],
                 })
@@ -479,7 +479,7 @@ impl MirNode {
         matches!(self.inner, MirNodeInner::Reuse { .. })
     }
 
-    pub fn name(&self) -> &SqlIdentifier {
+    pub fn name(&self) -> &Table {
         &self.name
     }
 

@@ -373,8 +373,8 @@ where
 
         info!(%listen_address, "Listening for new connections");
 
-        let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
-        let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
+        let auto_increments: Arc<RwLock<HashMap<nom_sql::Table, AtomicUsize>>> = Arc::default();
+        let query_cache: Arc<RwLock<HashMap<SelectStatement, nom_sql::Table>>> = Arc::default();
 
         let rs_connect = span!(Level::INFO, "Connecting to RS server");
         rs_connect.in_scope(|| info!(%options.authority_address, %options.deployment));

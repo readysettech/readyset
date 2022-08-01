@@ -21,7 +21,9 @@ use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::{Column, FlowNode, MirNodeRef};
-use nom_sql::{ColumnConstraint, ColumnSpecification, Expr, OrderType, SqlIdentifier, SqlType};
+use nom_sql::{
+    ColumnConstraint, ColumnSpecification, Expr, OrderType, SqlIdentifier, SqlType, Table,
+};
 use petgraph::graph::NodeIndex;
 use readyset::internal::{Index, IndexType};
 use readyset::ViewPlaceholder;
@@ -130,7 +132,7 @@ fn mir_node_to_flow_parts(
                     #[allow(clippy::unwrap_used)] // checked by above invariant
                     let parent = mir_node.first_ancestor().unwrap();
                     make_grouped_node(
-                        &name,
+                        name,
                         parent,
                         &mir_node.columns(),
                         on,
@@ -146,7 +148,7 @@ fn mir_node_to_flow_parts(
                     ref adapted_over,
                 } => match adapted_over {
                     None => make_base_node(
-                        &name,
+                        name,
                         column_specs.as_mut_slice(),
                         primary_key.as_deref(),
                         unique_keys,
@@ -170,7 +172,7 @@ fn mir_node_to_flow_parts(
                     #[allow(clippy::unwrap_used)] // checked by above invariant
                     let parent = mir_node.first_ancestor().unwrap();
                     make_grouped_node(
-                        &name,
+                        name,
                         parent,
                         &mir_node.columns(),
                         on,
@@ -183,13 +185,13 @@ fn mir_node_to_flow_parts(
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     #[allow(clippy::unwrap_used)] // checked by above invariant
                     let parent = mir_node.first_ancestor().unwrap();
-                    make_filter_node(&name, parent, &mir_node.columns(), conditions.clone(), mig)?
+                    make_filter_node(name, parent, &mir_node.columns(), conditions.clone(), mig)?
                 }
                 MirNodeInner::Identity => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     #[allow(clippy::unwrap_used)] // checked by above invariant
                     let parent = mir_node.first_ancestor().unwrap();
-                    make_identity_node(&name, parent, &mir_node.columns(), mig)?
+                    make_identity_node(name, parent, &mir_node.columns(), mig)?
                 }
                 MirNodeInner::Join {
                     ref on_left,
@@ -202,7 +204,7 @@ fn mir_node_to_flow_parts(
                     #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
                     let right = mir_node.ancestors[1].upgrade().unwrap();
                     make_join_node(
-                        &name,
+                        name,
                         left,
                         right,
                         &mir_node.columns(),
@@ -219,7 +221,7 @@ fn mir_node_to_flow_parts(
                     let left = mir_node.ancestors[0].upgrade().unwrap();
                     #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
                     let right = mir_node.ancestors[1].upgrade().unwrap();
-                    make_join_aggregates_node(&name, left, right, &mir_node.columns(), mig)?
+                    make_join_aggregates_node(name, left, right, &mir_node.columns(), mig)?
                 }
                 MirNodeInner::DependentJoin { .. } => {
                     // See the docstring for MirNodeInner::DependentJoin
@@ -229,7 +231,7 @@ fn mir_node_to_flow_parts(
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     #[allow(clippy::unwrap_used)] // checked by above invariant
                     let parent = mir_node.first_ancestor().unwrap();
-                    make_latest_node(&name, parent, &mir_node.columns(), group_by, mig)?
+                    make_latest_node(name, parent, &mir_node.columns(), group_by, mig)?
                 }
                 MirNodeInner::Leaf {
                     ref keys,
@@ -275,7 +277,7 @@ fn mir_node_to_flow_parts(
                     #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
                     let right = mir_node.ancestors[1].upgrade().unwrap();
                     make_join_node(
-                        &name,
+                        name,
                         left,
                         right,
                         &mir_node.columns(),
@@ -295,7 +297,7 @@ fn mir_node_to_flow_parts(
                     #[allow(clippy::unwrap_used)] // checked by above invariant
                     let parent = mir_node.first_ancestor().unwrap();
                     make_project_node(
-                        &name,
+                        name,
                         parent,
                         &mir_node.columns(),
                         emit,
@@ -324,7 +326,7 @@ fn mir_node_to_flow_parts(
                     invariant_eq!(mir_node.ancestors.len(), emit.len());
                     #[allow(clippy::unwrap_used)]
                     make_union_node(
-                        &name,
+                        name,
                         &mir_node.columns(),
                         emit,
                         &mir_node
@@ -340,7 +342,7 @@ fn mir_node_to_flow_parts(
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     #[allow(clippy::unwrap_used)] // checked by above invariant
                     let parent = mir_node.first_ancestor().unwrap();
-                    make_distinct_node(&name, parent, &mir_node.columns(), group_by, mig)?
+                    make_distinct_node(name, parent, &mir_node.columns(), group_by, mig)?
                 }
                 MirNodeInner::Paginate {
                     ref order,
@@ -357,7 +359,7 @@ fn mir_node_to_flow_parts(
                     #[allow(clippy::unwrap_used)] // checked by above invariant
                     let parent = mir_node.first_ancestor().unwrap();
                     make_paginate_or_topk_node(
-                        &name,
+                        name,
                         parent,
                         &mir_node.columns(),
                         order,
@@ -445,7 +447,7 @@ fn column_names(cs: &[Column]) -> Vec<&str> {
 }
 
 fn make_base_node(
-    name: &str,
+    name: Table,
     column_specs: &mut [(ColumnSpecification, Option<usize>)],
     primary_key: Option<&[Column]>,
     unique_keys: &[Box<[Column]>],
@@ -509,7 +511,7 @@ fn make_base_node(
 }
 
 fn make_union_node(
-    name: &str,
+    name: Table,
     columns: &[Column],
     emit: &[Vec<Column>],
     ancestors: &[MirNodeRef],
@@ -566,7 +568,7 @@ fn make_union_node(
 }
 
 fn make_filter_node(
-    name: &str,
+    name: Table,
     parent: MirNodeRef,
     columns: &[Column],
     conditions: Expr,
@@ -588,7 +590,7 @@ fn make_filter_node(
 }
 
 fn make_grouped_node(
-    name: &str,
+    name: Table,
     parent: MirNodeRef,
     columns: &[Column],
     on: &Column,
@@ -640,7 +642,7 @@ fn make_grouped_node(
             let agg_col = DfColumn::new(
                 over_col_name.clone(),
                 SqlType::Text.into(),
-                Some(name.into()),
+                Some(name.clone()),
             );
             cols.push(agg_col);
             set_names(&column_names(columns), &mut cols)?;
@@ -655,12 +657,12 @@ fn make_grouped_node(
             )?;
             let agg_col = grouped
                 .output_col_type()
-                .map(|ty| DfColumn::new(over_col_name.clone(), ty.into(), Some(name.into())))
+                .map(|ty| DfColumn::new(over_col_name.clone(), ty.into(), Some(name.clone())))
                 .unwrap_or_else(|| {
                     DfColumn::new(
                         over_col_name.clone(),
                         over_col_ty.clone(),
-                        Some(name.into()),
+                        Some(name.clone()),
                     )
                 });
             cols.push(agg_col);
@@ -671,12 +673,12 @@ fn make_grouped_node(
             let grouped = extr.over(parent_na, over_col_indx, group_col_indx.as_slice());
             let agg_col = grouped
                 .output_col_type()
-                .map(|ty| DfColumn::new(over_col_name.clone(), ty.into(), Some(name.into())))
+                .map(|ty| DfColumn::new(over_col_name.clone(), ty.into(), Some(name.clone())))
                 .unwrap_or_else(|| {
                     DfColumn::new(
                         over_col_name.clone(),
                         over_col_ty.clone(),
-                        Some(name.into()),
+                        Some(name.clone()),
                     )
                 });
             cols.push(agg_col);
@@ -688,7 +690,7 @@ fn make_grouped_node(
 }
 
 fn make_identity_node(
-    name: &str,
+    name: Table,
     parent: MirNodeRef,
     columns: &[Column],
     mig: &mut Migration<'_>,
@@ -699,11 +701,7 @@ fn make_identity_node(
     let mut parent_cols = mig.dataflow_state.ingredients[parent_na].columns().to_vec();
     set_names(&column_names(columns), &mut parent_cols)?;
 
-    let node = mig.add_ingredient(
-        String::from(name),
-        parent_cols,
-        ops::identity::Identity::new(parent_na),
-    );
+    let node = mig.add_ingredient(name, parent_cols, ops::identity::Identity::new(parent_na));
     Ok(FlowNode::New(node))
 }
 
@@ -712,7 +710,7 @@ fn make_identity_node(
 /// See [`MirNodeInner::Join`] for documentation on what `on_left`, `on_right`, and `project` mean
 /// here
 fn make_join_node(
-    name: &str,
+    name: Table,
     left: MirNodeRef,
     right: MirNodeRef,
     columns: &[Column],
@@ -793,7 +791,7 @@ fn make_join_node(
             node_columns.push(Column::named("cross_join_bogokey"));
 
             make_project_node(
-                &format!("{}_cross_join_bogokey", node.borrow().name()),
+                format!("{}_cross_join_bogokey", node.borrow().name()).into(),
                 node.clone(),
                 &node_columns,
                 &node.borrow().columns(),
@@ -813,12 +811,12 @@ fn make_join_node(
         cols.push(DfColumn::new(
             "cross_join_bogokey".into(),
             SqlType::BigInt(None).into(),
-            Some(name.into()),
+            Some(name.clone()),
         ));
     }
 
     let j = Join::new(left_na, right_na, kind, emit);
-    let n = mig.add_ingredient(String::from(name), cols, j);
+    let n = mig.add_ingredient(name, cols, j);
 
     Ok(FlowNode::New(n))
 }
@@ -827,7 +825,7 @@ fn make_join_node(
 /// assumed to be group_by columns and all unique columns are considered to be the aggregate
 /// columns themselves.
 fn make_join_aggregates_node(
-    name: &str,
+    name: Table,
     left: MirNodeRef,
     right: MirNodeRef,
     columns: &[Column],
@@ -901,13 +899,13 @@ fn make_join_aggregates_node(
     // Always treated as a JoinType::Inner based on joining on group_by cols, which always match
     // between parents.
     let j = Join::new(left_na, right_na, JoinType::Inner, join_config);
-    let n = mig.add_ingredient(String::from(name), cols, j);
+    let n = mig.add_ingredient(name, cols, j);
 
     Ok(FlowNode::New(n))
 }
 
 fn make_latest_node(
-    name: &str,
+    name: Table,
     parent: MirNodeRef,
     columns: &[Column],
     group_by: &[Column],
@@ -929,11 +927,7 @@ fn make_latest_node(
         unsupported!("latest node doesn't support compound GROUP BY")
     }
     #[allow(clippy::indexing_slicing)] // group_col_indx length checked above
-    let na = mig.add_ingredient(
-        String::from(name),
-        cols,
-        Latest::new(parent_na, group_col_indx[0]),
-    );
+    let na = mig.add_ingredient(name, cols, Latest::new(parent_na, group_col_indx[0]));
     Ok(FlowNode::New(na))
 }
 
@@ -958,7 +952,7 @@ fn lower_expression(
 }
 
 fn make_project_node(
-    name: &str,
+    name: Table,
     parent: MirNodeRef,
     source_columns: &[Column],
     emit: &[Column],
@@ -1024,7 +1018,7 @@ fn make_project_node(
             .iter()
             .chain(literal_types.iter())
             .zip(col_names)
-            .map(|(ty, n)| DfColumn::new(n, ty.clone(), Some(name.into()))),
+            .map(|(ty, n)| DfColumn::new(n, ty.clone(), Some(name.clone()))),
     );
 
     // Check here since we did not check in `set_names()`
@@ -1044,7 +1038,7 @@ fn make_project_node(
 }
 
 fn make_distinct_node(
-    name: &str,
+    name: Table,
     parent: MirNodeRef,
     columns: &[Column],
     group_by: &[Column],
@@ -1083,7 +1077,7 @@ fn make_distinct_node(
     cols.push(DfColumn::new(
         distinct_count_name,
         SqlType::BigInt(None).into(),
-        Some(name.into()),
+        Some(name.clone()),
     ));
     set_names(&column_names(columns), &mut cols)?;
 
@@ -1102,7 +1096,7 @@ fn make_distinct_node(
 
     // make the new operator and record its metadata
     let na = mig.add_ingredient(
-        String::from(name),
+        name,
         cols,
         // We're using Count to implement distinct here, because count already keeps track of how
         // many times we have seen a set of values. This means that if we get a row
@@ -1116,7 +1110,7 @@ fn make_distinct_node(
 }
 
 fn make_paginate_or_topk_node(
-    name: &str,
+    name: Table,
     parent: MirNodeRef,
     columns: &[Column],
     order: &Option<Vec<(Column, OrderType)>>,
@@ -1137,7 +1131,7 @@ fn make_paginate_or_topk_node(
         parent_cols.push(DfColumn::new(
             column_names.last().unwrap().into(),
             SqlType::BigInt(None).into(),
-            Some(name.into()),
+            Some(name.clone()),
         ));
     }
     set_names(&column_names, &mut parent_cols)?;
@@ -1175,13 +1169,13 @@ fn make_paginate_or_topk_node(
     // make the new operator and record its metadata
     let na = if is_topk {
         mig.add_ingredient(
-            String::from(name),
+            name,
             parent_cols,
             ops::topk::TopK::new(parent_na, cmp_rows, group_by_indx, limit),
         )
     } else {
         mig.add_ingredient(
-            String::from(name),
+            name,
             parent_cols,
             ops::paginate::Paginate::new(parent_na, cmp_rows, group_by_indx, limit),
         )
@@ -1237,7 +1231,7 @@ fn make_reader_processing(
 
 fn materialize_leaf_node(
     parent: &MirNodeRef,
-    name: SqlIdentifier,
+    name: Table,
     key_cols: &[(Column, ViewPlaceholder)],
     index_type: IndexType,
     reader_processing: ReaderProcessing,

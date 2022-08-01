@@ -62,6 +62,12 @@ impl From<String> for Table {
     }
 }
 
+impl<'a> From<&'a String> for Table {
+    fn from(s: &'a String) -> Self {
+        Self::from(s.as_str())
+    }
+}
+
 /// An expression for a table in the `FROM` clause of a query, with optional alias
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct TableExpr {

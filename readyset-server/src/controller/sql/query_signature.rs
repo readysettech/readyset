@@ -4,7 +4,6 @@ use std::hash::{Hash, Hasher};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::Column;
 
-use crate::controller::sql::mir::Relation;
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph, QueryGraphEdge};
 
 pub trait Signature {
@@ -94,7 +93,7 @@ impl Signature for QueryGraph {
         let rels = self.relations.keys().map(|r| r.name.as_str()).collect();
 
         // Compute relations part of hash
-        let mut r_vec: Vec<&Relation> = self.relations.keys().collect();
+        let mut r_vec: Vec<_> = self.relations.keys().collect();
         r_vec.sort_unstable();
         for r in r_vec {
             r.hash(&mut hasher);

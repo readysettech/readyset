@@ -5,10 +5,12 @@ use std::future;
 
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
-use nom_sql::{parse_key_specification_string, Dialect, TableKey};
+use nom_sql::{parse_key_specification_string, Dialect, SqlIdentifier, Table, TableKey};
 use postgres_types::{accepts, FromSql, Type};
+use readyset::recipe::changelist::ChangeList;
 use readyset::{ReadySetError, ReadySetResult};
 use readyset_data::DfValue;
+use readyset_errors::internal_err;
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, info_span, trace, Instrument};
 
@@ -49,9 +51,7 @@ struct TableEntry {
 
 #[derive(Debug)]
 struct TableDescription {
-    #[allow(dead_code)]
-    schema: String,
-    name: String,
+    name: Table,
     columns: Vec<ColumnEntry>,
     constraints: Vec<ConstraintEntry>,
 }
@@ -199,8 +199,10 @@ impl TableEntry {
         let constraints = Self::get_constraints(self.oid, transaction).await?;
 
         Ok(TableDescription {
-            schema: self.schema,
-            name: self.name,
+            name: Table {
+                schema: Some(self.schema.into()),
+                name: self.name.into(),
+            },
             columns,
             constraints,
         })
@@ -224,7 +226,7 @@ impl TableEntry {
 
 impl Display for TableDescription {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "CREATE TABLE `{}` (", self.name)?;
+        writeln!(f, "CREATE TABLE {} (", self.name)?;
         write!(
             f,
             "{}",
@@ -241,6 +243,13 @@ impl Display for TableDescription {
 }
 
 impl TableDescription {
+    fn schema(&self) -> ReadySetResult<&SqlIdentifier> {
+        self.name
+            .schema
+            .as_ref()
+            .ok_or_else(|| internal_err!("All tables must have a schema in the replicator"))
+    }
+
     /// Copy a table's contents from PostgreSQL to ReadySet
     async fn dump<'a>(
         &self,
@@ -253,7 +262,8 @@ impl TableDescription {
             .query_one(
                 format!(
                     "SELECT count(*) AS nrows FROM \"{}\".\"{}\"",
-                    self.schema, self.name
+                    self.schema()?,
+                    &self.name.name,
                 )
                 .as_str(),
                 &[],
@@ -264,7 +274,8 @@ impl TableDescription {
         // The most efficient way to copy an entire table is COPY BINARY
         let query = format!(
             "COPY \"{}\".\"{}\" TO stdout BINARY",
-            self.schema, self.name
+            self.schema()?,
+            self.name.name
         );
         let rows = transaction.copy_out(query.as_str()).await?;
 
@@ -392,7 +403,14 @@ impl<'a> PostgresReplicator<'a> {
 
             if let Err(err) = self
                 .noria
-                .extend_recipe_no_leader_ready(view.try_into()?)
+                .extend_recipe_no_leader_ready(ChangeList::try_from(view)?.with_schema_search_path(
+                    vec![
+                        // TODO(grfn): Currently we statically only replicate from the public
+                        // schema - once we start replicating from other
+                        // schemas this should be determined dynamically
+                        "public".into(),
+                    ],
+                ))
                 .await
             {
                 error!(%err, "Error extending CREATE VIEW, view will not be used");
@@ -406,19 +424,18 @@ impl<'a> PostgresReplicator<'a> {
 
         let replication_offsets = self.noria.replication_offsets().await?;
 
-        tables.drain_filter(|t| replication_offsets.has_table(t.name.as_str())).for_each(|t|
+        tables.drain_filter(|t| replication_offsets.has_table(&t.name)).for_each(|t|
             info!(table = %t.name, "Replication offset already exists for table, skipping snapshot")
         );
 
         // Finally copy each table into noria
         for table in &tables {
             // TODO: parallelize with a connection pool if performance here matters
-            // TODO(vlad): should differentiate by schema when implemented
-            let span = info_span!("Replicating table", schema = %table.schema, table = %table.name);
+            let span = info_span!("Replicating table", table = %table.name);
             span.in_scope(|| info!("Replicating table"));
             let mut noria_table = self
                 .noria
-                .table(&table.name)
+                .table(table.name.clone())
                 .instrument(span.clone())
                 .await?;
 
@@ -432,8 +449,7 @@ impl<'a> PostgresReplicator<'a> {
 
         let mut compacting = FuturesUnordered::new();
         for table in tables {
-            // TODO(vlad): should differentiate by schema when implemented
-            let mut noria_table = self.noria.table(&table.name).await?;
+            let mut noria_table = self.noria.table(table.name.clone()).await?;
             let wal_position = wal_position.clone();
             compacting.push(async move {
                 let span = info_span!("Compacting table", table = %table.name);
@@ -499,8 +515,10 @@ mod tests {
     #[test]
     fn table_description_with_reserved_keywords_to_string_parses() {
         let desc = TableDescription {
-            schema: "public".into(),
-            name: "ar_internal_metadata".into(),
+            name: Table {
+                schema: Some("public".into()),
+                name: "ar_internal_metadata".into(),
+            },
             columns: vec![
                 ColumnEntry {
                     name: "key".into(),

@@ -68,7 +68,7 @@ async fn it_works_basic() {
     let mut mutb = g.table_by_index(b).await.unwrap();
     let id: DfValue = 1.into();
 
-    assert_eq!(muta.table_name(), "a");
+    assert_eq!(*muta.table_name(), "a".into());
     assert_eq!(muta.columns(), &["a", "b"]);
 
     // send a value on a
@@ -230,7 +230,7 @@ async fn it_works_basic_standalone() {
     let mut mutb = g.table("b").await.unwrap();
     let id: DfValue = 1.into();
 
-    assert_eq!(muta.table_name(), "a");
+    assert_eq!(*muta.table_name(), "a".into());
     assert_eq!(muta.columns(), &["a", "b"]);
 
     // send a value on a

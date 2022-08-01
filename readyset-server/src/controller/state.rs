@@ -30,7 +30,7 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::{FutureExt, TryStream};
 use lazy_static::lazy_static;
 use metrics::{gauge, histogram};
-use nom_sql::{CacheInner, CreateCacheStatement, SelectStatement, SqlIdentifier, SqlQuery};
+use nom_sql::{CacheInner, CreateCacheStatement, SelectStatement, SqlIdentifier, SqlQuery, Table};
 use petgraph::visit::Bfs;
 use readyset::builders::{TableBuilder, ViewBuilder};
 use readyset::consensus::{Authority, AuthorityControl};
@@ -206,7 +206,7 @@ impl DfState {
     ///
     /// Input nodes are here all nodes of type `Table`. The addresses returned by this function will
     /// all have been returned as a key in the map from `commit` at some point in the past.
-    pub(super) fn inputs(&self) -> BTreeMap<SqlIdentifier, NodeIndex> {
+    pub(super) fn inputs(&self) -> BTreeMap<Table, NodeIndex> {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
@@ -228,12 +228,12 @@ impl DfState {
     ///
     /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
     /// to calling `.maintain` or `.stream` for a node during a migration.
-    pub(super) fn outputs(&self) -> BTreeMap<SqlIdentifier, NodeIndex> {
+    pub(super) fn outputs(&self) -> BTreeMap<Table, NodeIndex> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
                 #[allow(clippy::indexing_slicing)] // just came from self.ingredients
-                let name = self.ingredients[n].name().to_owned();
+                let name = self.ingredients[n].name().clone();
                 #[allow(clippy::indexing_slicing)] // just came from self.ingredients
                 self.ingredients[n].as_reader().map(|r| {
                     // we want to give the the node address that is being materialized not that of
@@ -251,14 +251,14 @@ impl DfState {
     ///
     /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
     /// to calling `.maintain` or `.stream` for a node during a migration
-    pub(super) fn verbose_outputs(&self) -> BTreeMap<SqlIdentifier, (SelectStatement, bool)> {
+    pub(super) fn verbose_outputs(&self) -> BTreeMap<Table, (SelectStatement, bool)> {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
                 #[allow(clippy::indexing_slicing)] // just came from self.ingredients
                 if self.ingredients[n].is_reader() {
                     #[allow(clippy::indexing_slicing)] // just came from self.ingredients
-                    let name = self.ingredients[n].name().to_owned();
+                    let name = self.ingredients[n].name().clone();
 
                     // Alias should always resolve to an id and id should always resolve to an
                     // expression. However, this mapping will not catch bugs that break this
@@ -286,7 +286,7 @@ impl DfState {
     pub(super) fn find_reader_for(
         &self,
         node: NodeIndex,
-        name: &SqlIdentifier,
+        name: &Table,
         filter: &Option<ViewFilter>,
     ) -> Option<NodeIndex> {
         // reader should be a child of the given node. however, due to sharding, it may not be an
@@ -330,13 +330,12 @@ impl DfState {
     ) -> Result<Option<ViewBuilder>, ReadySetError> {
         // first try to resolve the node via the recipe, which handles aliasing between identical
         // queries.
-        let name = view_req.name;
-        let node = match self.recipe.node_addr_for(&name) {
+        let node = match self.recipe.node_addr_for(&view_req.name) {
             Ok(ni) => ni,
             Err(_) => {
                 // if the recipe doesn't know about this query, traverse the graph.
                 // we need this do deal with manually constructed graphs (e.g., in tests).
-                if let Some(res) = self.outputs().get(&name) {
+                if let Some(res) = self.outputs().get(&view_req.name) {
                     *res
                 } else {
                     return Ok(None);
@@ -344,7 +343,10 @@ impl DfState {
             }
         };
 
-        let name = self.recipe.resolve_alias(&name).unwrap_or(&name);
+        let name = self
+            .recipe
+            .resolve_alias(&view_req.name)
+            .unwrap_or(&view_req.name);
 
         let reader_node = if let Some(r) = self.find_reader_for(node, name, &view_req.filter) {
             r
@@ -459,14 +461,14 @@ impl DfState {
 
     /// Obtain a TableBuilder that can be used to construct a Table to perform writes and deletes
     /// from the given named base node.
-    pub(super) fn table_builder(&self, name: &str) -> ReadySetResult<Option<TableBuilder>> {
-        let ni =
-            self.recipe
-                .node_addr_for(&name.into())
-                .map_err(|_| ReadySetError::TableNotFound {
-                    name: name.into(),
-                    schema: None, /* TODO */
-                })?;
+    pub(super) fn table_builder(&self, name: &Table) -> ReadySetResult<Option<TableBuilder>> {
+        let ni = self
+            .recipe
+            .node_addr_for(name)
+            .map_err(|_| ReadySetError::TableNotFound {
+                name: name.name.clone().into(),
+                schema: name.schema.clone().map(Into::into),
+            })?;
         self.table_builder_by_index(ni)
     }
 
@@ -745,7 +747,7 @@ impl DfState {
     }
 
     /// Returns a list of all table names that are currently involved in snapshotting.
-    pub(super) async fn snapshotting_tables(&self) -> ReadySetResult<HashSet<SqlIdentifier>> {
+    pub(super) async fn snapshotting_tables(&self) -> ReadySetResult<HashSet<Table>> {
         let domains = self.domains_with_base_tables().await?;
         let table_indices: Vec<(DomainIndex, LocalNodeIndex)> = self
             .query_domains::<_, Vec<LocalNodeIndex>>(
@@ -768,7 +770,7 @@ impl DfState {
 
         table_indices
             .iter()
-            .map(|(di, lni)| -> ReadySetResult<SqlIdentifier> {
+            .map(|(di, lni)| -> ReadySetResult<Table> {
                 #[allow(clippy::indexing_slicing)] // just came from self.domains
                 let li = *self.domain_nodes[di].get(*lni).ok_or_else(|| {
                     internal_err!("Domain {} returned nonexistent node {}", di, lni)
@@ -964,7 +966,7 @@ impl DfState {
         // do this outside the loop to satisfy the borrow checker as this immutably
         // borrows self.
         for (node_name, shard, restrictions) in new_domain_restrictions {
-            self.set_domain_placement_local(&node_name, shard, restrictions);
+            self.set_domain_placement_local(node_name, shard, restrictions);
         }
 
         // Tell all workers about the new domain(s)
@@ -1049,17 +1051,12 @@ impl DfState {
 
     pub(super) fn set_domain_placement_local(
         &mut self,
-        node_name: &str,
+        node_name: Table,
         shard: usize,
         node_restriction: DomainPlacementRestriction,
     ) {
-        self.node_restrictions.insert(
-            NodeRestrictionKey {
-                node_name: node_name.into(),
-                shard,
-            },
-            node_restriction,
-        );
+        self.node_restrictions
+            .insert(NodeRestrictionKey { node_name, shard }, node_restriction);
     }
 
     pub(super) fn set_schema_replication_offset(&mut self, offset: Option<ReplicationOffset>) {
@@ -1172,7 +1169,7 @@ impl DfState {
         }
     }
 
-    pub(super) async fn remove_query(&mut self, query_name: &str) -> ReadySetResult<()> {
+    pub(super) async fn remove_query(&mut self, query_name: &Table) -> ReadySetResult<()> {
         let name = match self.recipe.resolve_alias(query_name) {
             None => return Ok(()),
             Some(name) => name,
@@ -1195,7 +1192,6 @@ impl DfState {
         let changes = self
             .recipe
             .cache_names()
-            .into_iter()
             .map(|n| Change::Drop {
                 name: n.clone(),
                 if_exists: true,

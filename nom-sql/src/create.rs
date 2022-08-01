@@ -36,7 +36,7 @@ pub struct CreateTableStatement {
 
 impl fmt::Display for CreateTableStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "CREATE TABLE `{}` ", self.table.name)?;
+        write!(f, "CREATE TABLE {} ", self.table)?;
         write!(f, "(")?;
         write!(
             f,

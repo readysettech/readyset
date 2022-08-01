@@ -107,7 +107,7 @@ pub(super) fn column_schema(
         let cs = ColumnSpecification::new(
             Column {
                 name: vn.columns()[column_index].name().into(),
-                table: Some(vn.name().to_owned().into()),
+                table: Some(vn.name().to_owned()),
             },
             // ? in case we found no schema for this column
             col_type,

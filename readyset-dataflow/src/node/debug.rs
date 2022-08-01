@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::fmt;
 
 use itertools::Itertools;
+use lazy_static::lazy_static;
 use readyset::NodeSize;
+use regex::Regex;
 
 use crate::node::{Node, NodeType};
 use crate::prelude::*;
@@ -20,6 +22,16 @@ impl fmt::Debug for Node {
             NodeType::Internal(ref i) => write!(f, "internal {} node", i.description(true)),
         }
     }
+}
+
+fn escape<S>(s: S) -> String
+where
+    S: ToString,
+{
+    lazy_static! {
+        static ref ESCAPE_RE: Regex = Regex::new("([\"|{}])").unwrap();
+    };
+    ESCAPE_RE.replace_all(&s.to_string(), "\\$1").into_owned()
 }
 
 impl Node {
@@ -47,13 +59,13 @@ impl Node {
                 NodeType::Base(..) => {
                     s.push_str(&format!(
                         "[style=bold, shape=tab, label=\"{}\"]\n",
-                        Self::escape(self.name())
+                        escape(self.name())
                     ));
                 }
                 NodeType::Sharder(ref sharder) => {
                     s.push_str(&format!(
                         "[style=bold, shape=Msquare, label=\"shard by {}\"]\n",
-                        Self::escape(&self.columns[sharder.sharded_by()].name),
+                        escape(&self.columns[sharder.sharded_by()].name),
                     ));
                 }
                 NodeType::Reader(_) => {
@@ -64,13 +76,13 @@ impl Node {
                         } else {
                             "#5CBFF9"
                         },
-                        Self::escape(self.name())
+                        escape(&self.name().to_string())
                     ));
                 }
                 NodeType::Internal(ref i) => {
                     s.push_str(&format!(
                         "[label=\"{}\"]\n",
-                        Self::escape(&i.description(detailed))
+                        escape(&i.description(detailed))
                     ));
 
                     match materialization_status {
@@ -167,7 +179,7 @@ impl Node {
                     s.push_str(&format!(
                         "{{ {{ {} / {} | {} {} {} }} | {} | {} }}",
                         addr,
-                        Self::escape(self.name()),
+                        escape(self.name()),
                         "B",
                         materialized,
                         key_count_str,
@@ -200,7 +212,7 @@ impl Node {
                     s.push_str(&format!(
                         "{{ {{ {} / {} {} {} {} }} | (reader / ⚷: {}) | {} }}",
                         addr,
-                        Self::escape(self.name()),
+                        escape(self.name()),
                         materialized,
                         key_count_str,
                         node_size_str,
@@ -215,8 +227,8 @@ impl Node {
                     s.push_str(&format!(
                         "{{ {} / {} | {} {} {} {} }}",
                         addr,
-                        Self::escape(self.name()),
-                        Self::escape(&i.description(detailed)),
+                        escape(self.name()),
+                        escape(&i.description(detailed)),
                         materialized,
                         key_count_str,
                         node_size_str,
@@ -240,14 +252,5 @@ impl Node {
         }
 
         s
-    }
-
-    fn escape(s: &str) -> String {
-        use regex::Regex;
-
-        Regex::new("([\"|{}])")
-            .unwrap()
-            .replace_all(s, "\\$1")
-            .to_string()
     }
 }

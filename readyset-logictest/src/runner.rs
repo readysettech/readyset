@@ -14,7 +14,7 @@ use console::style;
 use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL};
 use itertools::Itertools;
 use mysql_srv::MysqlIntermediary;
-use nom_sql::SelectStatement;
+use nom_sql::{SelectStatement, Table};
 use readyset::consensus::{Authority, LocalAuthorityStore};
 use readyset::ControllerHandle;
 use readyset_client::backend::noria_connector::ReadBehavior;
@@ -494,8 +494,8 @@ impl TestScript {
     ) -> (tokio::task::JoinHandle<()>, DatabaseURL) {
         let database_type = run_opts.database_type;
         let replication_url = run_opts.replication_url.clone();
-        let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
-        let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
+        let auto_increments: Arc<RwLock<HashMap<Table, AtomicUsize>>> = Arc::default();
+        let query_cache: Arc<RwLock<HashMap<SelectStatement, Table>>> = Arc::default();
         let mut retry: usize = 0;
         let listener = loop {
             retry += 1;

@@ -109,7 +109,12 @@ BEGIN
         'operation', 'create_view',
         'schema', object.schema_name,
         'object', cls.relname,
-        'statement', format('CREATE VIEW "%s" AS %s', cls.relname, v.definition)
+        'statement', format(
+            'CREATE VIEW "%s"."%s" AS %s',
+            v.schemaname,
+            cls.relname,
+            v.definition
+        )
     )
     INTO create_message
     FROM pg_event_trigger_ddl_commands() object

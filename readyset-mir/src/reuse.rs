@@ -311,7 +311,7 @@ mod tests {
         };
         let (merged_extension, _) = merge_mir_for_queries(&mq2, &mq1);
         for n in merged_extension.topo_nodes() {
-            match n.borrow().name().as_str() {
+            match n.borrow().name().name.as_str() {
                 // first three nodes (2x base, 1x join) should have been reused
                 "a" | "b" | "c" => assert!(n.borrow().is_reused()),
                 // new projection (e) and leaf node (d) should NOT have been reused

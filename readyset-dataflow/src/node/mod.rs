@@ -81,7 +81,7 @@ impl From<nom_sql::ColumnSpecification> for Column {
 #[must_use]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
-    name: SqlIdentifier,
+    name: nom_sql::Table,
     index: Option<IndexPair>,
     domain: Option<DomainIndex>,
     columns: Vec<Column>,
@@ -111,9 +111,9 @@ pub struct Node {
 
 // constructors
 impl Node {
-    pub fn new<S1, S2, CS, NT>(name: S1, columns: CS, inner: NT) -> Node
+    pub fn new<N, S2, CS, NT>(name: N, columns: CS, inner: NT) -> Node
     where
-        S1: Into<SqlIdentifier>,
+        N: Into<Table>,
         S2: Into<Column>,
         CS: IntoIterator<Item = S2>,
         NT: Into<NodeType>,
@@ -139,7 +139,7 @@ impl Node {
         Self::new(self.name.clone(), self.columns.clone(), n)
     }
 
-    pub fn named_mirror<NT: Into<NodeType>>(&self, n: NT, name: String) -> Node {
+    pub fn named_mirror<NT: Into<NodeType>>(&self, n: NT, name: Table) -> Node {
         Self::new(name, self.columns.clone(), n)
     }
 
@@ -343,7 +343,7 @@ impl Node {
 
 // publicly accessible attributes
 impl Node {
-    pub fn name(&self) -> &SqlIdentifier {
+    pub fn name(&self) -> &Table {
         &self.name
     }
 

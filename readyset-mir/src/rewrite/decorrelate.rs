@@ -62,7 +62,7 @@ fn push_dependent_filter(
                         .non_dependent_columns()
                         .contains(&Column::from(col.clone()))
                     {
-                        col.table = Some(table.clone().into())
+                        col.table = Some(table.clone())
                     }
                 }
             }
@@ -334,7 +334,7 @@ mod tests {
 
     use common::{DfValue, IndexType};
     use dataflow::ops::grouped::aggregate::Aggregation;
-    use nom_sql::{BinaryOperator, ColumnSpecification, Expr, Literal, SqlType};
+    use nom_sql::{BinaryOperator, ColumnSpecification, Expr, Literal, SqlType, Table};
 
     use super::*;
     use crate::node::{MirNode, MirNodeInner};
@@ -553,7 +553,7 @@ mod tests {
                 .unwrap()
                 .borrow()
                 .name(),
-            "t2",
+            &Table::from("t2"),
             "t2_filter should be removed"
         );
 

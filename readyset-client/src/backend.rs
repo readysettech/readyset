@@ -82,7 +82,7 @@ use launchpad::redacted::Sensitive;
 use mysql_common::row::convert::{FromRow, FromRowError};
 use nom_sql::{
     CacheInner, CreateCacheStatement, DeleteStatement, Dialect, DropCacheStatement,
-    InsertStatement, SelectStatement, SetStatement, ShowStatement, SqlIdentifier, SqlQuery,
+    InsertStatement, SelectStatement, SetStatement, ShowStatement, SqlIdentifier, SqlQuery, Table,
     UpdateStatement,
 };
 use readyset::consistency::Timestamp;
@@ -1425,7 +1425,7 @@ where
     /// Forwards a `CREATE CACHE` request to noria
     async fn create_cached_query(
         &mut self,
-        name: Option<&str>,
+        name: Option<&Table>,
         mut stmt: SelectStatement,
         override_schema_search_path: Option<Vec<SqlIdentifier>>,
         always: bool,
@@ -1459,7 +1459,7 @@ where
     /// Forwards a `DROP CACHE` request to noria
     async fn drop_cached_query(
         &mut self,
-        name: &str,
+        name: &Table,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let maybe_select_statement = self.noria.select_statement_from_name(name);
         self.noria.drop_view(name).await?;
@@ -1596,18 +1596,10 @@ where
                         }
                     },
                 };
-                self.create_cached_query(
-                    name.as_ref().map(|t| t.name.as_str() /* TODO: schema */),
-                    stmt,
-                    search_path,
-                    *always,
-                )
-                .await
-            }
-            SqlQuery::DropCache(DropCacheStatement { name }) => {
-                self.drop_cached_query(name.name.as_str() /* TODO: schema */)
+                self.create_cached_query(name.as_ref(), stmt, search_path, *always)
                     .await
             }
+            SqlQuery::DropCache(DropCacheStatement { name }) => self.drop_cached_query(name).await,
             SqlQuery::DropAllCaches(_) => self.drop_all_caches().await,
             SqlQuery::Show(ShowStatement::CachedQueries) => self.noria.verbose_outputs().await,
             SqlQuery::Show(ShowStatement::ReadySetStatus) => self.noria.readyset_status().await,

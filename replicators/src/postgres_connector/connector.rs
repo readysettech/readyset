@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use futures::FutureExt;
 use launchpad::select;
+use nom_sql::Table;
 use readyset::replication::ReplicationOffset;
 use readyset::{ReadySetError, ReadySetResult, TableOperation};
 use tokio_postgres as pgsql;
@@ -402,17 +403,6 @@ impl Drop for PostgresWalConnector {
     }
 }
 
-struct CurTable {
-    ns: String,
-    tbl: String,
-}
-
-impl CurTable {
-    fn is(&self, ns: &str, tbl: &str) -> bool {
-        self.ns == ns && self.tbl == tbl
-    }
-}
-
 #[async_trait]
 impl Connector for PostgresWalConnector {
     /// Process WAL events and batch them into actions
@@ -424,9 +414,9 @@ impl Connector for PostgresWalConnector {
         // Calling the ReadySet API is a bit expensive, therefore we try to queue as many
         // actions as possible before calling into the API.
         const MAX_QUEUED_ACTIONS: usize = 100;
-        let mut cur_table = CurTable {
-            ns: String::new(),
-            tbl: String::new(),
+        let mut cur_table = Table {
+            schema: None,
+            name: "".into(),
         };
         let mut cur_lsn: PostgresPosition = 0.into();
         let mut actions = Vec::with_capacity(MAX_QUEUED_ACTIONS);
@@ -436,8 +426,7 @@ impl Connector for PostgresWalConnector {
             if actions.len() > MAX_QUEUED_ACTIONS {
                 return Ok((
                     ReplicationAction::TableAction {
-                        schema: cur_table.ns,
-                        table: cur_table.tbl,
+                        table: cur_table,
                         actions,
                         txid: None,
                     },
@@ -470,23 +459,23 @@ impl Connector for PostgresWalConnector {
                 | WalEvent::DeleteByKey { schema, table, .. }
                 | WalEvent::UpdateRow { schema, table, .. }
                 | WalEvent::UpdateByKey { schema, table, .. }
-                    if !cur_table.is(schema, table) =>
+                    if cur_table.schema.as_deref() != Some(schema.as_str())
+                        || cur_table.name != table.as_str() =>
                 {
                     if !actions.is_empty() {
                         self.peek = Some((event, lsn));
                         return Ok((
                             ReplicationAction::TableAction {
-                                schema: cur_table.ns,
-                                table: cur_table.tbl,
+                                table: cur_table,
                                 actions,
                                 txid: None,
                             },
                             cur_lsn.into(),
                         ));
                     } else {
-                        cur_table = CurTable {
-                            ns: schema.clone(),
-                            tbl: table.clone(),
+                        cur_table = Table {
+                            schema: Some(schema.into()),
+                            name: table.into(),
                         };
                     }
                 }
@@ -509,8 +498,7 @@ impl Connector for PostgresWalConnector {
                         self.peek = Some((WalEvent::DdlEvent { ddl_event }, lsn));
                         return Ok((
                             ReplicationAction::TableAction {
-                                schema: cur_table.ns,
-                                table: cur_table.tbl,
+                                table: cur_table,
                                 actions,
                                 txid: None,
                             },
@@ -527,8 +515,7 @@ impl Connector for PostgresWalConnector {
                         // comming
                         return Ok((
                             ReplicationAction::TableAction {
-                                schema: cur_table.ns,
-                                table: cur_table.tbl,
+                                table: cur_table,
                                 actions,
                                 txid: None,
                             },

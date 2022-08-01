@@ -332,7 +332,7 @@ impl Leader {
                     let body = bincode::deserialize(&body)?;
                     let ds = futures::executor::block_on(self.dataflow_state_handle.read());
                     check_quorum!(ds);
-                    let ret = ds.table_builder(body);
+                    let ret = ds.table_builder(&body);
                     return_serialized!(ret);
                 }
                 (&Method::POST, "/table_builder_by_index") => {
@@ -458,7 +458,7 @@ impl Leader {
                 let ret = futures::executor::block_on(async move {
                     let mut writer = self.dataflow_state_handle.write().await;
                     check_quorum!(writer.as_ref());
-                    let r = writer.as_mut().remove_query(query_name).await?;
+                    let r = writer.as_mut().remove_query(&query_name).await?;
                     self.dataflow_state_handle.commit(writer, authority).await?;
                     Ok(r)
                 })?;

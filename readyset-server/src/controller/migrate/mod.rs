@@ -39,7 +39,7 @@ use dataflow::node::Column;
 use dataflow::prelude::*;
 use dataflow::{node, DomainRequest, ReaderProcessing};
 use metrics::{counter, histogram};
-use nom_sql::SqlIdentifier;
+use nom_sql::Table;
 use readyset::metrics::recorded;
 use readyset::{KeyColumnIdx, ReadySetError, ViewPlaceholder};
 use tracing::{debug, debug_span, error, info, info_span, instrument, trace};
@@ -444,14 +444,14 @@ impl<'df> Migration<'df> {
     /// The returned identifier can later be used to refer to the added ingredient.
     /// Edges in the data flow graph are automatically added based on the ingredient's reported
     /// `ancestors`.
-    pub fn add_ingredient<S1, S2, CS, I>(&mut self, name: S1, columns: CS, i: I) -> NodeIndex
+    pub fn add_ingredient<N, S2, CS, I>(&mut self, name: N, columns: CS, i: I) -> NodeIndex
     where
-        S1: Into<SqlIdentifier>,
+        N: Into<Table>,
         S2: Into<Column>,
         CS: IntoIterator<Item = S2>,
         I: Into<NodeOperator>,
     {
-        let mut i = node::Node::new::<S1, S2, CS, _>(name, columns, i.into());
+        let mut i = node::Node::new::<N, S2, CS, _>(name, columns, i.into());
         i.on_connected(&self.dataflow_state.ingredients);
         // ancestors() will not return an error since i is an internal node
         #[allow(clippy::unwrap_used)]
@@ -483,16 +483,11 @@ impl<'df> Migration<'df> {
     /// Add the given `Base` to the dataflow graph.
     ///
     /// The returned identifier can later be used to refer to the added ingredient.
-    pub fn add_base<S1, S2, CS>(
-        &mut self,
-        name: S1,
-        columns: CS,
-        b: node::special::Base,
-    ) -> NodeIndex
+    pub fn add_base<N, C, CS>(&mut self, name: N, columns: CS, b: node::special::Base) -> NodeIndex
     where
-        S1: Into<SqlIdentifier>,
-        S2: Into<Column>,
-        CS: IntoIterator<Item = S2>,
+        N: Into<Table>,
+        C: Into<Column>,
+        CS: IntoIterator<Item = C>,
     {
         // add to the graph
         let ni = self
@@ -603,7 +598,7 @@ impl<'df> Migration<'df> {
     fn ensure_reader_for(
         &mut self,
         n: NodeIndex,
-        name: Option<String>,
+        name: Option<Table>,
         reader_processing: ReaderProcessing,
     ) -> NodeIndex {
         use std::collections::hash_map::Entry;
@@ -619,7 +614,7 @@ impl<'df> Migration<'df> {
                 } else {
                     self.dataflow_state.ingredients[n].mirror(r)
                 };
-                if r.name().starts_with("SHALLOW_") {
+                if r.name().name.starts_with("SHALLOW_") {
                     r.purge = true;
                 }
                 let r = self.dataflow_state.ingredients.add_node(r);
@@ -673,13 +668,13 @@ impl<'df> Migration<'df> {
     /// To query into the maintained state, use `Leader::get_getter`.
     pub fn maintain(
         &mut self,
-        name: SqlIdentifier,
+        name: Table,
         n: NodeIndex,
         index: &Index,
         reader_processing: ReaderProcessing,
         placeholder_map: Vec<(ViewPlaceholder, KeyColumnIdx)>,
     ) {
-        let ri = self.ensure_reader_for(n, Some(name.to_string()), reader_processing);
+        let ri = self.ensure_reader_for(n, Some(name), reader_processing);
 
         // we know it's a reader - we just made it!
         #[allow(clippy::indexing_slicing, clippy::unwrap_used)]

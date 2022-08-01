@@ -93,8 +93,7 @@ impl Default for Config {
 #[derive(Debug)]
 pub(crate) enum ReplicationAction {
     TableAction {
-        schema: String,
-        table: String,
+        table: nom_sql::Table,
         actions: Vec<TableOperation>,
         /// The transaction id of a table write operation. Each
         /// table write operation within a transaction should be assigned
@@ -136,9 +135,9 @@ pub struct NoriaAdapter {
     /// The binlog reader
     connector: Box<dyn Connector + Send + Sync>,
     /// A map of cached table mutators
-    mutator_map: HashMap<String, Option<Table>>,
+    mutator_map: HashMap<nom_sql::Table, Option<Table>>,
     /// A HashSet of tables we've already warned about not existing
-    warned_missing_tables: HashSet<String>,
+    warned_missing_tables: HashSet<nom_sql::Table>,
     /// The set of replication offsets for the schema and the tables, obtained from the controller
     /// at startup and maintained during replication.
     ///
@@ -521,7 +520,11 @@ impl NoriaAdapter {
 
         match self
             .noria
-            .extend_recipe_with_offset(changelist, &pos, false)
+            .extend_recipe_with_offset(
+                changelist.with_schema_search_path(vec![schema.into()]),
+                &pos,
+                false,
+            )
             .await
         {
             // ReadySet likely entered an invalid state, fail the replicator.
@@ -557,7 +560,7 @@ impl NoriaAdapter {
             .collect::<Vec<_>>();
 
         for table in tables {
-            if let Some(table) = self.mutator_for_table(table.as_str()).await? {
+            if let Some(table) = self.mutator_for_table(&table).await? {
                 table.set_replication_offset(pos.clone()).await?;
             }
         }
@@ -570,14 +573,11 @@ impl NoriaAdapter {
     /// Send table actions to noria tables, and update the binlog position for the table
     async fn handle_table_actions(
         &mut self,
-        _schema: String,
-        table: String,
+        table: nom_sql::Table,
         mut actions: Vec<TableOperation>,
         txid: Option<u64>,
         pos: ReplicationOffset,
     ) -> ReadySetResult<()> {
-        // TODO(vlad): have to handle schema when mutators support it
-
         // Send the rows as are
         let table_mutator = if let Some(table) = self.mutator_for_table(&table).await? {
             table
@@ -611,9 +611,7 @@ impl NoriaAdapter {
             table_mutator.update_timestamp(timestamp).await?;
         }
 
-        self.replication_offsets
-            .tables
-            .insert(table.into(), Some(pos));
+        self.replication_offsets.tables.insert(table, Some(pos));
 
         Ok(())
     }
@@ -641,8 +639,8 @@ impl NoriaAdapter {
                     _ => {}
                 }
             }
-            ReplicationAction::TableAction { schema, table, .. } => {
-                match self.replication_offsets.tables.get(table.as_str()) {
+            ReplicationAction::TableAction { table, .. } => {
+                match self.replication_offsets.tables.get(table) {
                     Some(Some(cur)) if pos <= *cur => {
                         if !catchup {
                             warn!(%table, %pos, %cur, "Skipping table action for earlier entry");
@@ -652,7 +650,12 @@ impl NoriaAdapter {
                     _ => {}
                 }
 
-                if !self.table_filter.contains(schema.as_str(), table.as_str()) {
+                if !self.table_filter.contains(
+                    table.schema.as_deref().ok_or_else(|| {
+                        internal_err!("All tables should have a schema in the replicator")
+                    })?,
+                    &table.name,
+                ) {
                     return Ok(());
                 }
             }
@@ -663,14 +666,10 @@ impl NoriaAdapter {
                 self.handle_ddl_change(schema, ddl, pos).await
             }
             ReplicationAction::TableAction {
-                schema,
                 table,
                 actions,
                 txid,
-            } => {
-                self.handle_table_actions(schema, table, actions, txid, pos)
-                    .await
-            }
+            } => self.handle_table_actions(table, actions, txid, pos).await,
             ReplicationAction::LogPosition => self.handle_log_position(pos).await,
         }
     }
@@ -713,15 +712,15 @@ impl NoriaAdapter {
     /// from the controller and cache it. Returns None if the table doesn't exist in noria.
     async fn mutator_for_table(
         &mut self,
-        name: impl Into<String> + AsRef<str>,
+        name: &nom_sql::Table,
     ) -> ReadySetResult<Option<&mut Table>> {
-        match self.mutator_map.raw_entry_mut().from_key(name.as_ref()) {
+        match self.mutator_map.raw_entry_mut().from_key(name) {
             hash_map::RawEntryMut::Occupied(o) => Ok(o.into_mut().as_mut()),
-            hash_map::RawEntryMut::Vacant(v) => match self.noria.table(name.as_ref()).await {
-                Ok(table) => Ok(v.insert(name.into(), Some(table)).1.as_mut()),
+            hash_map::RawEntryMut::Vacant(v) => match self.noria.table(name.clone()).await {
+                Ok(table) => Ok(v.insert(name.clone(), Some(table)).1.as_mut()),
                 Err(e) if e.caused_by_table_not_found() => {
                     // Cache the not found result as well as the found result
-                    Ok(v.insert(name.into(), None).1.as_mut())
+                    Ok(v.insert(name.clone(), None).1.as_mut())
                 }
                 Err(e) => Err(e),
             },

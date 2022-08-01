@@ -6,7 +6,7 @@ use dataflow::ops::grouped::extremum::Extremum;
 use dataflow::ops::union;
 use dataflow::PostLookupAggregates;
 use itertools::Itertools;
-use nom_sql::{ColumnSpecification, Expr, OrderType, SqlIdentifier};
+use nom_sql::{ColumnSpecification, Expr, OrderType, SqlIdentifier, Table};
 use readyset::ViewPlaceholder;
 use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -256,7 +256,7 @@ pub enum MirNodeInner {
     /// Alias all columns in the query to change their table
     ///
     /// This node will not be converted into a dataflow node when lowering MIR to dataflow.
-    AliasTable { table: SqlIdentifier },
+    AliasTable { table: Table },
     /// Leaf node of a query, which specifies the columns to index on, and an optional set of
     /// operations to perform post-lookup.
     ///

@@ -161,8 +161,8 @@ where
         handle.backend_ready().await;
     }
 
-    let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
-    let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
+    let auto_increments: Arc<RwLock<HashMap<nom_sql::Table, AtomicUsize>>> = Arc::default();
+    let query_cache: Arc<RwLock<HashMap<SelectStatement, nom_sql::Table>>> = Arc::default();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 

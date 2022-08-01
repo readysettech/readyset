@@ -1783,13 +1783,19 @@ impl Domain {
                         ) {
                             (Some(base), &DurabilityMode::DeleteOnExit)
                             | (Some(base), &DurabilityMode::Permanent) => {
+                                let node = node_ref.borrow();
+                                let node_name = node.name();
                                 let base_name = format!(
-                                    "{}-{}-{}",
+                                    "{}-{}{}-{}",
                                     &self
                                         .persistence_parameters
                                         .db_filename_prefix
                                         .replace('-', "_"),
-                                    node_ref.borrow().name(),
+                                    match &node_name.schema {
+                                        Some(schema) => format!("{schema}-"),
+                                        _ => "".into(),
+                                    },
+                                    node_name.name,
                                     self.shard.unwrap_or(0),
                                 );
 

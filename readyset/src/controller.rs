@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::future;
 use hyper::client::HttpConnector;
-use nom_sql::{SelectStatement, SqlIdentifier};
+use nom_sql::SelectStatement;
 use parking_lot::RwLock;
 use petgraph::graph::NodeIndex;
 use readyset_errors::{
@@ -293,7 +293,7 @@ impl ControllerHandle {
     /// Enumerate all known base tables.
     ///
     /// These have all been created in response to a `CREATE TABLE` statement in a recipe.
-    pub async fn inputs(&mut self) -> ReadySetResult<BTreeMap<String, NodeIndex>> {
+    pub async fn inputs(&mut self) -> ReadySetResult<BTreeMap<nom_sql::Table, NodeIndex>> {
         let body: hyper::body::Bytes = self
             .handle
             .ready()
@@ -311,7 +311,7 @@ impl ControllerHandle {
     /// These have all been created in response to a `CREATE EXT VIEW` statement in a recipe.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub async fn outputs(&mut self) -> ReadySetResult<BTreeMap<String, NodeIndex>> {
+    pub async fn outputs(&mut self) -> ReadySetResult<BTreeMap<nom_sql::Table, NodeIndex>> {
         let body: hyper::body::Bytes = self
             .handle
             .ready()
@@ -333,7 +333,7 @@ impl ControllerHandle {
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub async fn verbose_outputs(
         &mut self,
-    ) -> ReadySetResult<BTreeMap<String, (SelectStatement, bool)>> {
+    ) -> ReadySetResult<BTreeMap<nom_sql::Table, (SelectStatement, bool)>> {
         let body: hyper::body::Bytes = self
             .handle
             .ready()
@@ -353,7 +353,7 @@ impl ControllerHandle {
     /// Obtain a `View` that allows you to query the given external view.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn view<I: Into<SqlIdentifier>>(
+    pub fn view<I: Into<nom_sql::Table>>(
         &mut self,
         name: I,
     ) -> impl Future<Output = ReadySetResult<View>> + '_ {
@@ -368,7 +368,7 @@ impl ControllerHandle {
     /// view.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn view_from_workers<I: Into<SqlIdentifier>>(
+    pub fn view_from_workers<I: Into<nom_sql::Table>>(
         &mut self,
         name: I,
         workers: Vec<Url>,
@@ -383,7 +383,7 @@ impl ControllerHandle {
     /// Obtain the replica of a `View` with the given replica index
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn view_with_replica<I: Into<SqlIdentifier>>(
+    pub fn view_with_replica<I: Into<nom_sql::Table>>(
         &mut self,
         name: I,
         replica: usize,
@@ -447,8 +447,11 @@ impl ControllerHandle {
     /// given base table, looking up the table by its name
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn table<'a>(&'a mut self, name: &str) -> impl Future<Output = ReadySetResult<Table>> + 'a {
-        let name = name.to_string();
+    pub fn table<N>(&mut self, name: N) -> impl Future<Output = ReadySetResult<Table>> + '_
+    where
+        N: Into<nom_sql::Table>,
+    {
+        let name = name.into();
         async move {
             self.request_table(ControllerRequest::new(
                 "table_builder",
@@ -457,8 +460,8 @@ impl ControllerHandle {
             )?)
             .await?
             .ok_or(ReadySetError::TableNotFound {
-                name,
-                schema: None, /* TODO fill in schema */
+                name: name.name.clone().into(),
+                schema: name.schema.clone().map(Into::into),
             })
         }
     }
@@ -581,7 +584,10 @@ impl ControllerHandle {
     /// Remove all nodes related to the query with the given name
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn remove_query(&mut self, name: &str) -> impl Future<Output = ReadySetResult<()>> + '_ {
+    pub fn remove_query(
+        &mut self,
+        name: &nom_sql::Table,
+    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
         self.rpc("remove_query", name, self.migration_timeout)
     }
 

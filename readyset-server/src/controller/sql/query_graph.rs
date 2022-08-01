@@ -21,7 +21,7 @@ use readyset_errors::{
 use readyset_sql_passes::{is_aggregate, is_predicate, map_aggregates, LogicalOp};
 use serde::{Deserialize, Serialize};
 
-use super::mir::{self, Relation, PAGE_NUMBER_COL};
+use super::mir::{self, PAGE_NUMBER_COL};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct LiteralColumn {
@@ -172,8 +172,8 @@ impl OutputColumn {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JoinRef {
-    pub src: Relation,
-    pub dst: Relation,
+    pub src: Table,
+    pub dst: Table,
 }
 
 /// An equality predicate on two expressions, used as the key for a join
@@ -193,7 +193,7 @@ pub struct Parameter {
 
 #[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct QueryGraphNode {
-    pub relation: Relation,
+    pub relation: Table,
     pub predicates: Vec<Expr>,
     pub columns: Vec<Column>,
     pub parameters: Vec<Parameter>,
@@ -233,10 +233,10 @@ pub struct ViewKey {
 // TODO(grfn): impl Arbitrary for this struct so we can make a proptest for that
 pub struct QueryGraph {
     /// Relations mentioned in the query.
-    pub relations: HashMap<Relation, QueryGraphNode>,
+    pub relations: HashMap<Table, QueryGraphNode>,
     /// Joins in the query.
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
-    pub edges: HashMap<(Relation, Relation), QueryGraphEdge>,
+    pub edges: HashMap<(Table, Table), QueryGraphEdge>,
     /// Aggregates in the query, represented as a map from the aggregate function to the alias for
     /// that aggregate function
     ///
@@ -393,10 +393,10 @@ impl QueryGraph {
 impl Hash for QueryGraph {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // sorted iteration over relations, edges to ensure consistent hash
-        let mut rels: Vec<(&Relation, &QueryGraphNode)> = self.relations.iter().collect();
+        let mut rels: Vec<(&Table, &QueryGraphNode)> = self.relations.iter().collect();
         rels.sort_by(|a, b| a.0.cmp(b.0));
         rels.hash(state);
-        let mut edges: Vec<(&(Relation, Relation), &QueryGraphEdge)> = self.edges.iter().collect();
+        let mut edges: Vec<(&(Table, Table), &QueryGraphEdge)> = self.edges.iter().collect();
         edges.sort_by(|(a, _), (b, _)| match a.0.cmp(&b.0) {
             Ordering::Equal => a.1.cmp(&b.1),
             x => x,
@@ -798,7 +798,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     }
 
     // a handy closure for making new relation nodes
-    let new_node = |rel: Relation,
+    let new_node = |rel: Table,
                     preds: Vec<Expr>,
                     st: &SelectStatement|
      -> ReadySetResult<QueryGraphNode> {
@@ -853,24 +853,21 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     // This is needed so that we don't end up with an empty query graph when there are no
     // conditionals, but rather with a one-node query graph that has no predicates.
     for table_expr in &st.tables {
-        let rel: Relation = table_expr.table.clone().into();
+        let rel: Table = table_expr.table.clone();
         qg.relations
             .insert(rel.clone(), new_node(rel, Vec::new(), st)?);
     }
     for jc in &st.join {
         match &jc.right {
             JoinRightSide::Table(table_expr) => {
-                if !qg
-                    .relations
-                    .contains_key(&table_expr.table.name /* TODO: schema */)
-                {
-                    let rel: Relation = table_expr.table.clone().into();
+                if !qg.relations.contains_key(&table_expr.table) {
+                    let name = table_expr.table.clone();
                     qg.relations
-                        .insert(rel.clone(), new_node(rel, Vec::new(), st)?);
+                        .insert(name.clone(), new_node(name, Vec::new(), st)?);
                 }
             }
             JoinRightSide::NestedSelect(subquery, alias) => {
-                let rel: Relation = alias.clone().into();
+                let rel: Table = alias.clone().into();
                 if let Entry::Vacant(e) = qg.relations.entry(rel.clone()) {
                     let mut node = new_node(rel, vec![], st)?;
                     node.subgraph = Some((Box::new(to_query_graph(subquery)?), *subquery.clone()));
@@ -985,9 +982,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
         // add edge for join
         // FIXME(eta): inefficient cloning!
-        if let std::collections::hash_map::Entry::Vacant(e) = qg
-            .edges
-            .entry((left_table.clone().into(), right_table.clone().into()))
+        if let std::collections::hash_map::Entry::Vacant(e) =
+            qg.edges.entry((left_table.clone(), right_table.clone()))
         {
             e.insert(match jc.operator {
                 JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin => {
@@ -1020,19 +1016,19 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         }
 
         // 1. Add local predicates for each node that has them
-        for (rel, preds) in local_predicates {
-            if !qg.relations.contains_key(&rel.name) {
+        for (name, preds) in local_predicates {
+            if !qg.relations.contains_key(&name) {
                 // can't have predicates on tables that do not appear in the FROM part of the
                 // statement
                 internal!(
                     "predicate(s) {:?} on relation {} that is not in query graph",
                     preds,
-                    rel
+                    name
                 );
             } else {
                 #[allow(clippy::unwrap_used)] // checked that this key is in qg.relations
                 qg.relations
-                    .get_mut(&rel.name)
+                    .get_mut(&name)
                     .unwrap()
                     .predicates
                     .extend(preds);
@@ -1044,24 +1040,24 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
             if let Expr::Column(l) = &jp.left {
                 if let Expr::Column(r) = &jp.right {
                     let nn = new_node(
-                        l.table.clone().ok_or_else(|| no_table_for_col())?.into(),
+                        l.table.clone().ok_or_else(|| no_table_for_col())?,
                         Vec::new(),
                         st,
                     )?;
                     // If tables aren't already in the relations, add them.
                     qg.relations
-                        .entry(l.table.clone().ok_or_else(|| no_table_for_col())?.into())
+                        .entry(l.table.clone().ok_or_else(|| no_table_for_col())?)
                         .or_insert_with(|| nn.clone());
 
                     qg.relations
-                        .entry(r.table.clone().ok_or_else(|| no_table_for_col())?.into())
+                        .entry(r.table.clone().ok_or_else(|| no_table_for_col())?)
                         .or_insert_with(|| nn.clone());
 
                     let e = qg
                         .edges
                         .entry((
-                            l.table.clone().ok_or_else(|| no_table_for_col())?.into(),
-                            r.table.clone().ok_or_else(|| no_table_for_col())?.into(),
+                            l.table.clone().ok_or_else(|| no_table_for_col())?,
+                            r.table.clone().ok_or_else(|| no_table_for_col())?,
                         ))
                         .or_insert_with(|| QueryGraphEdge::Join { on: vec![] });
                     match *e {
@@ -1082,16 +1078,13 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                     unsupported!("each parameter's column must have an associated table! (no such column \"{}\")", param.col);
                 }
                 Some(ref table) => {
-                    let rel = qg
-                        .relations
-                        .get_mut(&Relation::from(table.name.clone()))
-                        .ok_or_else(|| {
-                            invalid_err!(
-                                "Column {} references non-existent table {}",
-                                param.col.name,
-                                table
-                            )
-                        })?;
+                    let rel = qg.relations.get_mut(table).ok_or_else(|| {
+                        invalid_err!(
+                            "Column {} references non-existent table {}",
+                            param.col.name,
+                            table
+                        )
+                    })?;
                     if !rel.columns.contains(&param.col) {
                         rel.columns.push(param.col.clone());
                     }
@@ -1263,8 +1256,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
     // create initial join order
     {
-        let mut sorted_edges: Vec<(&(Relation, Relation), &QueryGraphEdge)> =
-            qg.edges.iter().collect();
+        let mut sorted_edges: Vec<(&(Table, Table), &QueryGraphEdge)> = qg.edges.iter().collect();
         // Sort the edges to ensure deterministic join order.
         sorted_edges.sort_by(|&(a, _), &(b, _)| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
 
@@ -1371,7 +1363,7 @@ mod tests {
             HashSet::from(["t".into(), "sq".into()])
         );
 
-        let subquery_rel = qg.relations.get(&Relation::from("sq")).unwrap();
+        let subquery_rel = qg.relations.get(&Table::from("sq")).unwrap();
         assert!(subquery_rel.subgraph.is_some());
     }
 

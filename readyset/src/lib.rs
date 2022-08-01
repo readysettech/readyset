@@ -386,7 +386,7 @@ pub enum ViewFilter {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ViewRequest {
     /// Name of the view being requested.
-    pub name: SqlIdentifier,
+    pub name: nom_sql::Table,
     /// Filter to be applied when searching for a view.
     pub filter: Option<ViewFilter>,
 }
@@ -398,15 +398,9 @@ pub struct ReaderAddress {
     /// The index of the reader node in the dataflow graph
     pub node: petgraph::graph::NodeIndex,
     /// The name of the reader
-    pub name: SqlIdentifier,
+    pub name: nom_sql::Table,
     /// The shard index
     pub shard: usize,
-}
-
-impl From<(petgraph::graph::NodeIndex, SqlIdentifier, usize)> for ReaderAddress {
-    fn from((node, name, shard): (petgraph::graph::NodeIndex, SqlIdentifier, usize)) -> Self {
-        ReaderAddress { node, name, shard }
-    }
 }
 
 /// Use to aggregate various node stats that describe its size

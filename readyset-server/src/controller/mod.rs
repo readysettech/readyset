@@ -14,7 +14,7 @@ use futures_util::StreamExt;
 use hyper::http::{Method, StatusCode};
 use launchpad::select;
 use metrics::{counter, gauge, histogram};
-use nom_sql::SqlIdentifier;
+use nom_sql::Table;
 use readyset::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult,
     WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
@@ -65,11 +65,11 @@ pub struct DomainPlacementRestriction {
     worker_volume: Option<VolumeId>,
 }
 
-/// The key for a DomainPlacemnetRestriction for a dataflow node.
+/// The key for a DomainPlacementRestriction for a dataflow node.
 /// Each dataflow node, shard pair may have a DomainPlacementRestriction.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Debug)]
 pub struct NodeRestrictionKey {
-    node_name: SqlIdentifier,
+    node_name: Table,
     shard: usize,
 }
 
@@ -1086,12 +1086,12 @@ mod tests {
             .unwrap();
 
         let queries = noria.outputs().await.unwrap();
-        assert!(queries.contains_key("test_query"));
+        assert!(queries.contains_key(&"test_query".into()));
 
-        noria.remove_query("test_query").await.unwrap();
+        noria.remove_query(&"test_query".into()).await.unwrap();
 
         let queries = noria.outputs().await.unwrap();
-        assert!(!queries.contains_key("test_query"));
+        assert!(!queries.contains_key(&"test_query".into()));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1109,8 +1109,8 @@ mod tests {
             .unwrap();
 
         let queries = noria.outputs().await.unwrap();
-        assert!(queries.contains_key("q1"));
-        assert!(queries.contains_key("q2"));
+        assert!(queries.contains_key(&"q1".into()));
+        assert!(queries.contains_key(&"q2".into()));
 
         noria.remove_all_queries().await.unwrap();
 
@@ -1162,9 +1162,9 @@ mod tests {
         let offsets = noria.replication_offsets().await.unwrap();
 
         assert_eq!(offsets.schema.unwrap().offset, 1);
-        assert_eq!(offsets.tables["t1"].as_ref().unwrap().offset, 2);
-        assert_eq!(offsets.tables["t2"].as_ref().unwrap().offset, 3);
-        assert_eq!(offsets.tables["t3"], None);
+        assert_eq!(offsets.tables[&"t1".into()].as_ref().unwrap().offset, 2);
+        assert_eq!(offsets.tables[&"t2".into()].as_ref().unwrap().offset, 3);
+        assert_eq!(offsets.tables[&"t3".into()], None);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1185,8 +1185,8 @@ mod tests {
 
         let mut table = noria.table("key_count_test").await.unwrap();
         // The table only contains the local index, so we use `inputs()` to get the global index
-        let table_idx = noria.inputs().await.unwrap()["key_count_test"];
-        let view_idx = noria.view("q1").await.unwrap().node().clone();
+        let table_idx = noria.inputs().await.unwrap()[&"key_count_test".into()];
+        let view_idx = *noria.view("q1").await.unwrap().node();
 
         assert_eq!(
             key_counts[&table_idx].key_count,

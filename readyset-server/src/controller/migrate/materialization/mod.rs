@@ -504,7 +504,7 @@ impl Materializations {
             #[allow(clippy::indexing_slicing)] // child comes from graph
             while let Some(child) = stack.pop() {
                 // allow views to force full (XXX)
-                if graph[child].name().starts_with("FULL_") {
+                if graph[child].name().name.starts_with("FULL_") {
                     stack.clear();
                     able = false;
                 }
@@ -659,10 +659,10 @@ impl Materializations {
             // nodes and the like. It's up to the user to make sure they don't match node names
             // that are, say, above a full materialization.
             if let FrontierStrategy::Match(ref m) = self.config.frontier_strategy {
-                n.purge = n.purge || n.name().contains(m);
+                n.purge = n.purge || n.name().name.contains(m);
                 continue;
             }
-            if n.name().starts_with("SHALLOW_") {
+            if n.name().name.starts_with("SHALLOW_") {
                 n.purge = true;
                 continue;
             }

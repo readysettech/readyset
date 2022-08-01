@@ -25,7 +25,7 @@ use dataflow::utils::{dataflow_column, make_columns};
 use dataflow::{DurabilityMode, Expr as DfExpr, PersistenceParameters, ReaderProcessing};
 use futures::StreamExt;
 use itertools::Itertools;
-use nom_sql::{parse_query, BinaryOperator, Dialect, OrderType, SqlQuery, SqlType};
+use nom_sql::{parse_query, BinaryOperator, Dialect, OrderType, SqlQuery, SqlType, Table};
 use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset::consistency::Timestamp;
 use readyset::internal::LocalNodeIndex;
@@ -85,7 +85,7 @@ async fn it_completes() {
     let mut mutb = g.table_by_index(b).await.unwrap();
     let id: DfValue = 1.into();
 
-    assert_eq!(muta.table_name(), "a");
+    assert_eq!(*muta.table_name(), "a".into());
     assert_eq!(muta.columns(), &["a", "b"]);
 
     muta.insert(vec![id.clone(), 2.into()]).await.unwrap();
@@ -836,7 +836,7 @@ async fn it_works_with_sql_recipe() {
     let mut mutator = g.table("Car").await.unwrap();
     let mut getter = g.view("CountCars").await.unwrap();
 
-    assert_eq!(mutator.table_name(), "Car");
+    assert_eq!(*mutator.table_name(), "Car".into());
     assert_eq!(mutator.columns(), &["id", "brand"]);
 
     let brands = vec!["Volvo", "Volvo", "Volkswagen"];
@@ -1580,7 +1580,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
         ";
             g.extend_recipe(sql.parse().unwrap()).await.unwrap();
             for (i, table) in tables.iter().enumerate() {
-                let mut mutator = g.table(table).await.unwrap();
+                let mut mutator = g.table(*table).await.unwrap();
                 mutator.insert(vec![i.into()]).await.unwrap();
             }
         }
@@ -1650,7 +1650,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
         ";
             g.extend_recipe(sql.parse().unwrap()).await.unwrap();
             for (i, table) in tables.iter().enumerate() {
-                let mut mutator = g.table(table).await.unwrap();
+                let mut mutator = g.table(*table).await.unwrap();
                 mutator.insert(vec![i.into()]).await.unwrap();
             }
         }
@@ -3492,10 +3492,10 @@ async fn finkelstein1982_queries() {
             let q = parse_query(Dialect::MySQL, q).unwrap();
             match q {
                 SqlQuery::CreateTable(stmt) => {
-                    inc.add_table(inc.rewrite(stmt).unwrap(), mig).unwrap();
+                    inc.add_table(inc.rewrite(stmt, &[]).unwrap(), mig).unwrap();
                 }
                 SqlQuery::Select(stmt) => {
-                    inc.add_query(None, inc.rewrite(stmt).unwrap(), mig)
+                    inc.add_query(None, inc.rewrite(stmt, &[]).unwrap(), mig)
                         .unwrap();
                 }
                 _ => panic!("unexpected query type"),
@@ -3581,7 +3581,7 @@ async fn node_removal() {
     let mut mutb = g.table_by_index(b).await.unwrap();
     let id: DfValue = 1.into();
 
-    assert_eq!(muta.table_name(), "a");
+    assert_eq!(*muta.table_name(), "a".into());
     assert_eq!(muta.columns(), &["a", "b"]);
 
     // send a value on a
@@ -8905,4 +8905,55 @@ async fn double_identical_create_table() {
     assert_eq!(results[0][0], 1.into());
     assert_eq!(results[1][0], 2.into());
     assert_eq!(results[2][0], 3.into());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn multiple_schemas_explicit() {
+    readyset_tracing::init_test_logging();
+    let mut g = start_simple_unsharded("multiple_schemas_explicit").await;
+    g.extend_recipe(
+        "CREATE TABLE schema_1.t (id int, val int);
+         CREATE TABLE schema_2.t (id int, val int);
+         CREATE CACHE q FROM
+         SELECT schema_1.t.val AS val1, schema_2.t.val as val2
+         FROM schema_1.t JOIN schema_2.t
+         ON schema_1.t.id = schema_2.t.id"
+            .parse()
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let mut schema_1_t = g
+        .table(Table {
+            schema: Some("schema_1".into()),
+            name: "t".into(),
+        })
+        .await
+        .unwrap();
+    let mut schema_2_t = g
+        .table(Table {
+            schema: Some("schema_2".into()),
+            name: "t".into(),
+        })
+        .await
+        .unwrap();
+    let mut q = g.view("q").await.unwrap();
+
+    schema_1_t
+        .insert(vec![DfValue::from(1), DfValue::from("schema_1")])
+        .await
+        .unwrap();
+    schema_2_t
+        .insert(vec![DfValue::from(1), DfValue::from("schema_2")])
+        .await
+        .unwrap();
+
+    eprintln!("{}", g.graphviz().await.unwrap());
+
+    let res = q.lookup(&[0.into()], true).await.unwrap().into_vec();
+    assert_eq!(
+        res,
+        vec![vec![DfValue::from("schema_1"), DfValue::from("schema_2")]]
+    );
 }

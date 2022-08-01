@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::fmt;
@@ -231,6 +232,16 @@ impl From<SqlIdentifier> for String {
     #[inline]
     fn from(ident: SqlIdentifier) -> Self {
         ident.as_str().to_owned()
+    }
+}
+
+impl<'a> From<Cow<'a, str>> for SqlIdentifier {
+    #[inline]
+    fn from(s: Cow<str>) -> Self {
+        match s {
+            Cow::Borrowed(b) => Self::from(b),
+            Cow::Owned(o) => Self::from(o),
+        }
     }
 }
 

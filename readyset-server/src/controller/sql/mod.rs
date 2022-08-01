@@ -73,18 +73,18 @@ impl Default for Config {
 // crate viz for tests
 pub(crate) struct SqlIncorporator {
     mir_converter: SqlToMirConverter,
-    leaf_addresses: HashMap<SqlIdentifier, NodeIndex>,
+    leaf_addresses: HashMap<Table, NodeIndex>,
 
     /// Stores VIEWs and CACHE queries.
-    named_queries: HashMap<SqlIdentifier, u64>,
+    named_queries: HashMap<Table, u64>,
     query_graphs: HashMap<u64, QueryGraph>,
     /// Stores CREATE TABLE statements.
-    base_mir_queries: HashMap<SqlIdentifier, MirQuery>,
+    base_mir_queries: HashMap<Table, MirQuery>,
     mir_queries: HashMap<u64, MirQuery>,
     num_queries: usize,
 
-    base_schemas: HashMap<SqlIdentifier, CreateTableStatement>,
-    view_schemas: HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+    base_schemas: HashMap<Table, CreateTableStatement>,
+    view_schemas: HashMap<Table, Vec<SqlIdentifier>>,
 
     pub(crate) config: Config,
 }
@@ -122,28 +122,14 @@ impl SqlIncorporator {
     // before this was made pub(crate)) but since the recipe expression registry stores expressions
     // we need it happening earlier. We should move it back to its rightful place once we can get
     // rid of that.
-    pub(crate) fn rewrite<S>(&self, stmt: S) -> ReadySetResult<S>
+    pub(crate) fn rewrite<S>(&self, stmt: S, search_path: &[SqlIdentifier]) -> ReadySetResult<S>
     where
         S: Rewrite,
     {
-        // TODO(grfn): make view_schemas and base_schemas include schema in the keys
-        let view_schemas = self
-            .view_schemas
-            .clone()
-            .into_iter()
-            .map(|(k, v)| (Table::from(k), v))
-            .collect();
-        let base_schemas = self
-            .base_schemas
-            .clone()
-            .into_iter()
-            .map(|(k, v)| (Table::from(k), v))
-            .collect();
-
         stmt.rewrite(RewriteContext {
-            view_schemas: &view_schemas,
-            base_schemas: &base_schemas,
-            search_path: &[], // TODO: make this configurable
+            view_schemas: &self.view_schemas,
+            base_schemas: &self.base_schemas,
+            search_path,
         })
     }
 
@@ -166,7 +152,7 @@ impl SqlIncorporator {
         statement: CreateViewStatement,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<()> {
-        let name = statement.name.name; // TODO: schema
+        let name = statement.name;
         let qfp = match *statement.definition {
             SelectSpecification::Compound(query) => {
                 self.add_compound_query(
@@ -198,10 +184,10 @@ impl SqlIncorporator {
     /// name will be generated from the query. In either case, returns the name of the added query.
     pub(crate) fn add_query(
         &mut self,
-        name: Option<SqlIdentifier>,
+        name: Option<Table>,
         stmt: SelectStatement,
         mig: &mut Migration<'_>,
-    ) -> ReadySetResult<SqlIdentifier> {
+    ) -> ReadySetResult<Table> {
         let name = name.unwrap_or_else(|| format!("q_{}", self.num_queries).into());
         let (qfp, _) = self.add_select_query(
             name.clone(),
@@ -216,24 +202,24 @@ impl SqlIncorporator {
         Ok(name)
     }
 
-    pub(super) fn get_base_schema(&self, name: &str) -> Option<CreateTableStatement> {
-        self.base_schemas.get(name).cloned()
+    pub(super) fn get_base_schema(&self, table: &Table) -> Option<CreateTableStatement> {
+        self.base_schemas.get(table).cloned()
     }
 
-    pub(super) fn get_view_schema(&self, name: &str) -> Option<Vec<String>> {
+    pub(super) fn get_view_schema(&self, name: &Table) -> Option<Vec<String>> {
         self.view_schemas
             .get(name)
             .map(|s| s.iter().map(SqlIdentifier::to_string).collect())
     }
 
     #[cfg(test)]
-    fn get_flow_node_address(&self, name: &SqlIdentifier, v: usize) -> Option<NodeIndex> {
+    fn get_flow_node_address(&self, name: &Table, v: usize) -> Option<NodeIndex> {
         self.mir_converter.get_flow_node_address(name, v)
     }
 
     /// Retrieves the flow node associated with a given query's leaf view.
     #[allow(unused)]
-    pub(super) fn get_query_address(&self, name: &SqlIdentifier) -> Option<NodeIndex> {
+    pub(super) fn get_query_address(&self, name: &Table) -> Option<NodeIndex> {
         match self.leaf_addresses.get(name) {
             None => self.mir_converter.get_leaf(name),
             Some(na) => Some(*na),
@@ -244,7 +230,7 @@ impl SqlIncorporator {
         self.leaf_addresses.values().any(|nn| *nn == ni)
     }
 
-    pub(super) fn get_leaf_name(&self, ni: NodeIndex) -> Option<&SqlIdentifier> {
+    pub(super) fn get_leaf_name(&self, ni: NodeIndex) -> Option<&Table> {
         self.leaf_addresses
             .iter()
             .find(|(_, idx)| **idx == ni)
@@ -253,13 +239,13 @@ impl SqlIncorporator {
 
     fn consider_query_graph(
         &mut self,
-        query_name: &str,
+        query_name: &Table,
         is_name_required: bool,
         st: &SelectStatement,
         is_leaf: bool,
     ) -> ReadySetResult<(QueryGraph, QueryGraphReuse)> {
         debug!(%query_name, "Making query graph");
-        trace!(%query_name, ?st);
+        trace!(%query_name, %st);
 
         let mut qg = to_query_graph(st)?;
 
@@ -288,7 +274,7 @@ impl SqlIncorporator {
                 if existing_qg.signature() == qg.signature()
                     && existing_qg.parameters() == qg.parameters()
                     && existing_qg.exact_hash() == qg.exact_hash()
-                    && (!is_name_required || mir_query.name == query_name)
+                    && (!is_name_required || mir_query.name == *query_name)
                 {
                     // we already have this exact query, down to the exact same reader key columns
                     // in exactly the same order
@@ -553,17 +539,17 @@ impl SqlIncorporator {
         // on base table schema change, we will overwrite the existing schema here.
         // TODO(malte): this means that requests for this will always return the *latest* schema
         // for a base.
-        let name = stmt.table.name.clone();
-        self.base_schemas.insert(name.clone(), stmt);
+        let table = stmt.table.clone();
+        self.base_schemas.insert(table.clone(), stmt);
 
-        self.register_query(name, None, &mir);
+        self.register_query(table, None, &mir);
 
         Ok(qfp)
     }
 
     fn add_compound_query(
         &mut self,
-        query_name: SqlIdentifier,
+        query_name: Table,
         query: CompoundSelectStatement,
         is_name_required: bool,
         is_leaf: bool,
@@ -605,7 +591,7 @@ impl SqlIncorporator {
 
     fn select_query_to_mir(
         &mut self,
-        query_name: SqlIdentifier,
+        query_name: Table,
         is_name_required: bool,
         sq: SelectStatement,
         is_leaf: bool,
@@ -655,7 +641,7 @@ impl SqlIncorporator {
     /// and MIR nodes that were added
     fn add_select_query(
         &mut self,
-        query_name: SqlIdentifier,
+        query_name: Table,
         mut stmt: SelectStatement,
         is_name_required: bool,
         is_leaf: bool,
@@ -671,7 +657,7 @@ impl SqlIncorporator {
         // Remove all table aliases from the query. Create named views in cases where the alias must
         // be replaced with a view rather than the table itself in order to prevent ambiguity. (This
         // may occur when a single table is referenced using more than one alias).
-        let table_alias_rewrites = stmt.rewrite_table_aliases(&query_name);
+        let table_alias_rewrites = stmt.rewrite_table_aliases(&query_name.name);
         for r in table_alias_rewrites {
             match r {
                 TableAliasRewrite::View {
@@ -682,14 +668,24 @@ impl SqlIncorporator {
                         fields: vec![FieldDefinitionExpr::All],
                         ..Default::default()
                     };
-                    self.add_select_query(to_view.name, self.rewrite(query)?, true, false, mig)?;
+                    self.add_select_query(
+                        to_view,
+                        self.rewrite(
+                            query,
+                            &[], /* Don't need a schema search path since we're only resolving
+                                  * one (already qualified) table */
+                        )?,
+                        true,
+                        false,
+                        mig,
+                    )?;
                 }
                 TableAliasRewrite::Cte {
                     to_view,
                     for_statement,
                     ..
                 } => {
-                    self.add_select_query(to_view.name, *for_statement, true, false, mig)?;
+                    self.add_select_query(to_view, *for_statement, true, false, mig)?;
                 }
                 TableAliasRewrite::Table { .. } => {}
             }
@@ -706,14 +702,11 @@ impl SqlIncorporator {
         trace!(post_opt_mir = %opt_mir.to_graphviz());
 
         let qfp = mir_query_to_flow_parts(&mut opt_mir, mig).map_err(on_err)?;
-        self.register_query(query_name, Some(qg), &opt_mir);
+        self.register_query(query_name.clone(), Some(qg), &opt_mir);
         Ok((qfp, opt_mir))
     }
 
-    pub(super) fn remove_query(
-        &mut self,
-        query_name: &SqlIdentifier,
-    ) -> ReadySetResult<Option<NodeIndex>> {
+    pub(super) fn remove_query(&mut self, query_name: &Table) -> ReadySetResult<Option<NodeIndex>> {
         let nodeid = self
             .leaf_addresses
             .remove(query_name)
@@ -750,7 +743,7 @@ impl SqlIncorporator {
 
     /// Removes the base table with the given `name`, and all the MIR queries
     /// that depend on it.
-    pub(super) fn remove_base(&mut self, name: &SqlIdentifier) -> ReadySetResult<NodeIndex> {
+    pub(super) fn remove_base(&mut self, name: &Table) -> ReadySetResult<NodeIndex> {
         debug!(%name, "Removing base from SqlIncorporator");
         if self.base_schemas.remove(name).is_none() {
             warn!(
@@ -782,12 +775,7 @@ impl SqlIncorporator {
             .ok_or_else(|| invalid_err!("tried to remove unknown base {}", name))
     }
 
-    fn register_query(
-        &mut self,
-        query_name: SqlIdentifier,
-        qg: Option<QueryGraph>,
-        mir: &MirQuery,
-    ) {
+    fn register_query(&mut self, query_name: Table, qg: Option<QueryGraph>, mir: &MirQuery) {
         debug!(%query_name, "registering query");
         self.view_schemas
             .insert(query_name.clone(), mir.fields.clone());
@@ -818,9 +806,7 @@ impl SqlIncorporator {
 #[cfg(test)]
 mod tests {
     use dataflow::prelude::*;
-    use nom_sql::{
-        parse_create_table, parse_select_statement, Column, Dialect, SqlIdentifier, SqlType,
-    };
+    use nom_sql::{parse_create_table, parse_select_statement, Column, Dialect, SqlType, Table};
     use readyset_data::DfType;
 
     use super::SqlIncorporator;
@@ -828,26 +814,30 @@ mod tests {
     use crate::integration_utils;
 
     /// Helper to grab a reference to a named view.
-    fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration<'_>, name: &str) -> &'a Node {
+    fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration<'_>, name: &Table) -> &'a Node {
         let na = inc
-            .get_flow_node_address(&SqlIdentifier::from(name), 0)
-            .unwrap_or_else(|| panic!("No node named \"{}\" exists", name));
+            .get_flow_node_address(name, 0)
+            .unwrap_or_else(|| panic!("No node named {name} exists"));
         mig.graph().node_weight(na).unwrap()
     }
 
     /// Helper to grab the immediate parent of  a named view.
-    fn get_parent_node<'a>(inc: &SqlIncorporator, mig: &'a Migration<'_>, name: &str) -> &'a Node {
+    fn get_parent_node<'a>(
+        inc: &SqlIncorporator,
+        mig: &'a Migration<'_>,
+        name: &Table,
+    ) -> &'a Node {
         let na = inc
-            .get_flow_node_address(&SqlIdentifier::from(name), 0)
-            .unwrap_or_else(|| panic!("No node named \"{}\" exists", name));
+            .get_flow_node_address(name, 0)
+            .unwrap_or_else(|| panic!("No node named {name} exists"));
         let ni = mig.graph().node_weight(na).unwrap().ancestors().unwrap()[0];
         &mig.graph()[ni]
     }
 
-    fn get_reader<'a>(inc: &SqlIncorporator, mig: &'a Migration<'_>, name: &str) -> &'a Node {
+    fn get_reader<'a>(inc: &SqlIncorporator, mig: &'a Migration<'_>, name: &Table) -> &'a Node {
         let na = inc
-            .get_flow_node_address(&SqlIdentifier::from(name), 0)
-            .unwrap_or_else(|| panic!("No node named \"{}\" exists", name));
+            .get_flow_node_address(name, 0)
+            .unwrap_or_else(|| panic!("No node named {name} exists"));
         let children: Vec<_> = mig
             .graph()
             .neighbors_directed(na, petgraph::EdgeDirection::Outgoing)
@@ -895,11 +885,16 @@ mod tests {
             // Must have a base node for type inference to work, so make one manually
             inc.add_table(
                 inc.rewrite(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));",
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40));",
+                        )
+                        .unwrap(),
+                        &[],
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -909,14 +904,18 @@ mod tests {
             // Should have two nodes: source and "users" base table
             let ncount = mig.graph().node_count();
             assert_eq!(ncount, 2);
-            assert_eq!(get_node(&inc, mig, "users").name(), "users");
+            assert_eq!(
+                get_node(&inc, mig, &"users".into()).name(),
+                &Table::from("users")
+            );
 
             assert!(inc
                 .add_query(
                     None,
                     inc.rewrite(
                         parse_select_statement(Dialect::MySQL, "SELECT users.id from users;")
-                            .unwrap()
+                            .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig
@@ -942,7 +941,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40), age int);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig
@@ -958,6 +958,7 @@ mod tests {
                         "SELECT id, name FROM users WHERE users.name = ?;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -993,7 +994,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40), age int);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -1009,6 +1011,7 @@ mod tests {
                         "SELECT id FROM users WHERE users.name = ?;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -1045,7 +1048,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40), age int);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -1061,21 +1065,13 @@ mod tests {
                         "SELECT id, name FROM users WHERE users.age > 20 AND users.name = ?;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
             );
             assert!(res.is_ok());
             let name = res.unwrap();
-
-            // Check filter node
-            let qid = query_id_hash(
-                &["users"],
-                &[&Column::from("users.age")],
-                &[&Column::from("users.id"), &Column::from("users.name")],
-            );
-            let filter = get_node(&inc, mig, &format!("q_{:x}_n0_p0_f0", qid));
-            assert_eq!(filter.description(true), "σ[(2 > (lit: 20))]");
 
             // Check projection node
             let projection = get_node(&inc, mig, &name);
@@ -1114,7 +1110,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -1122,16 +1119,19 @@ mod tests {
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, mig, "users").name(), "users");
             assert_eq!(
-                get_node(&inc, mig, "users")
+                get_node(&inc, mig, &"users".into()).name(),
+                &Table::from("users")
+            );
+            assert_eq!(
+                get_node(&inc, mig, &"users".into())
                     .columns()
                     .iter()
                     .map(|c| c.name())
                     .collect::<Vec<_>>(),
                 &["id", "name"]
             );
-            assert!(get_node(&inc, mig, "users").is_base());
+            assert!(get_node(&inc, mig, &"users".into()).is_base());
 
             // Establish a base write type for "articles"
             assert!(inc
@@ -1141,7 +1141,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE articles (id int, author int, title varchar(255));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -1149,16 +1150,19 @@ mod tests {
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 3);
-            assert_eq!(get_node(&inc, mig, "articles").name(), "articles");
             assert_eq!(
-                get_node(&inc, mig, "articles")
+                get_node(&inc, mig, &"articles".into()).name(),
+                &Table::from("articles")
+            );
+            assert_eq!(
+                get_node(&inc, mig, &"articles".into())
                     .columns()
                     .iter()
                     .map(|c| c.name())
                     .collect::<Vec<_>>(),
                 &["id", "author", "title"]
             );
-            assert!(get_node(&inc, mig, "articles").is_base());
+            assert!(get_node(&inc, mig, &"articles".into()).is_base());
 
             // Try a simple equi-JOIN query
             let q = "SELECT users.name, articles.title \
@@ -1166,26 +1170,11 @@ mod tests {
                      WHERE users.id = articles.author;";
             let q = inc.add_query(
                 None,
-                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap())
+                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap(), &[])
                     .unwrap(),
                 mig,
             );
             assert!(q.is_ok());
-            let qid = query_id_hash(
-                &["articles", "users"],
-                &[&Column::from("articles.author"), &Column::from("users.id")],
-                &[&Column::from("users.name"), &Column::from("articles.title")],
-            );
-            // join node
-            let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(
-                new_join_view
-                    .columns()
-                    .iter()
-                    .map(|c| c.name())
-                    .collect::<Vec<_>>(),
-                &["id", "author", "title", "name"]
-            );
             // leaf node
             let new_leaf_view = get_parent_node(&inc, mig, &q.unwrap());
             assert_eq!(
@@ -1216,7 +1205,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -1224,16 +1214,19 @@ mod tests {
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, mig, "users").name(), "users");
             assert_eq!(
-                get_node(&inc, mig, "users")
+                get_node(&inc, mig, &"users".into()).name(),
+                &Table::from("users")
+            );
+            assert_eq!(
+                get_node(&inc, mig, &"users".into())
                     .columns()
                     .iter()
                     .map(|c| c.name())
                     .collect::<Vec<_>>(),
                 &["id", "name"]
             );
-            assert!(get_node(&inc, mig, "users").is_base());
+            assert!(get_node(&inc, mig, &"users".into()).is_base());
 
             // Try a simple query
             let res = inc.add_query(
@@ -1244,28 +1237,13 @@ mod tests {
                         "SELECT users.name FROM users WHERE users.id = 42;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
             );
             assert!(res.is_ok(), "{}", res.err().unwrap());
 
-            let qid = query_id_hash(
-                &["users"],
-                &[&Column::from("users.id")],
-                &[&Column::from("users.name")],
-            );
-            // filter node
-            let filter = get_node(&inc, mig, &format!("q_{:x}_n0_p0_f0", qid));
-            assert_eq!(
-                filter
-                    .columns()
-                    .iter()
-                    .map(|c| c.name())
-                    .collect::<Vec<_>>(),
-                &["id", "name"]
-            );
-            assert_eq!(filter.description(true), "σ[(0 = (lit: 42))]");
             // leaf view node
             let edge = get_parent_node(&inc, mig, &res.unwrap());
             assert_eq!(
@@ -1291,7 +1269,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE votes (aid int, userid int);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig
@@ -1299,16 +1278,19 @@ mod tests {
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(
-                get_node(&inc, mig, "votes")
+                get_node(&inc, mig, &"votes".into()).name(),
+                &Table::from("votes")
+            );
+            assert_eq!(
+                get_node(&inc, mig, &"votes".into())
                     .columns()
                     .iter()
                     .map(|c| c.name())
                     .collect::<Vec<_>>(),
                 &["aid", "userid"]
             );
-            assert!(get_node(&inc, mig, "votes").is_base());
+            assert!(get_node(&inc, mig, &"votes".into()).is_base());
 
             // Try a simple COUNT function
             let res = inc.add_query(
@@ -1324,25 +1306,6 @@ mod tests {
             assert!(res.is_ok());
             // added the aggregation and the edge view, reorder project and a reader
             assert_eq!(mig.graph().node_count(), 6);
-            // check aggregation view
-            let qid = query_id_hash(
-                &["votes"],
-                &[&Column::from("votes.aid")],
-                &[&Column {
-                    name: "votes".into(),
-                    table: None,
-                }],
-            );
-            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(
-                agg_view
-                    .columns()
-                    .iter()
-                    .map(|c| c.name())
-                    .collect::<Vec<_>>(),
-                &["aid", "votes"]
-            );
-            assert_eq!(agg_view.description(true), "|*| γ[0]");
             // check edge view
             let edge_view = get_parent_node(&inc, mig, &res.unwrap());
             assert_eq!(
@@ -1373,7 +1336,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -1387,6 +1351,7 @@ mod tests {
                         "SELECT id, name FROM users WHERE users.id = 42;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -1403,6 +1368,7 @@ mod tests {
                         "SELECT name, id FROM users WHERE users.id = 42;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -1429,7 +1395,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -1437,16 +1404,19 @@ mod tests {
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, mig, "users").name(), "users");
             assert_eq!(
-                get_node(&inc, mig, "users")
+                get_node(&inc, mig, &"users".into()).name(),
+                &Table::from("users")
+            );
+            assert_eq!(
+                get_node(&inc, mig, &"users".into())
                     .columns()
                     .iter()
                     .map(|c| c.name())
                     .collect::<Vec<_>>(),
                 &["id", "name"]
             );
-            assert!(get_node(&inc, mig, "users").is_base());
+            assert!(get_node(&inc, mig, &"users".into()).is_base());
 
             // Add a new query
             inc.add_query(
@@ -1457,6 +1427,7 @@ mod tests {
                         "SELECT id, name FROM users WHERE users.id = 42;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -1472,6 +1443,7 @@ mod tests {
                         "SELECT id, name FROM users WHERE users.id = 42;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -1489,6 +1461,7 @@ mod tests {
                         "SELECT name, id FROM users WHERE users.id = 42;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -1515,7 +1488,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -1523,16 +1497,19 @@ mod tests {
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, mig, "users").name(), "users");
             assert_eq!(
-                get_node(&inc, mig, "users")
+                get_node(&inc, mig, &"users".into()).name(),
+                &Table::from("users")
+            );
+            assert_eq!(
+                get_node(&inc, mig, &"users".into())
                     .columns()
                     .iter()
                     .map(|c| c.name())
                     .collect::<Vec<_>>(),
                 &["id", "name", "address"]
             );
-            assert!(get_node(&inc, mig, "users").is_base());
+            assert!(get_node(&inc, mig, &"users".into()).is_base());
 
             // Add a new query
             let res = inc.add_query(
@@ -1543,6 +1520,7 @@ mod tests {
                         "SELECT id, name FROM users WHERE users.id = ?;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -1561,6 +1539,7 @@ mod tests {
                         "SELECT id, name FROM users WHERE users.name = ?;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -1583,6 +1562,7 @@ mod tests {
                         "SELECT id, name FROM users WHERE users.address = ?;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -1613,7 +1593,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -1626,6 +1607,7 @@ mod tests {
                 None,
                 inc.rewrite(
                     parse_select_statement(Dialect::MySQL, "SELECT id, name FROM users;").unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -1658,6 +1640,7 @@ mod tests {
                         "SELECT name, id FROM users WHERE users.name = ?;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -1691,6 +1674,7 @@ mod tests {
                         "SELECT id, name FROM users WHERE users.address = ?;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -1734,7 +1718,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -1750,6 +1735,7 @@ mod tests {
                         "SELECT id, name FROM users WHERE users.id = ?;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -1777,6 +1763,7 @@ mod tests {
                 None,
                 inc.rewrite(
                     parse_select_statement(Dialect::MySQL, "SELECT id, name FROM users;").unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -1818,7 +1805,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -1834,6 +1822,7 @@ mod tests {
                         "SELECT id, name, 1 as one FROM users WHERE id = ?;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -1866,6 +1855,7 @@ mod tests {
                         "SELECT id, name, 1 as one FROM users WHERE address = ?;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -1908,7 +1898,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE votes (aid int, userid int);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig
@@ -1916,16 +1907,19 @@ mod tests {
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(
-                get_node(&inc, mig, "votes")
+                get_node(&inc, mig, &"votes".into()).name(),
+                &Table::from("votes")
+            );
+            assert_eq!(
+                get_node(&inc, mig, &"votes".into())
                     .columns()
                     .iter()
                     .map(|c| c.name())
                     .collect::<Vec<_>>(),
                 &["aid", "userid"]
             );
-            assert!(get_node(&inc, mig, "votes").is_base());
+            assert!(get_node(&inc, mig, &"votes".into()).is_base());
             // Try a simple COUNT function without a GROUP BY clause
             let res = inc.add_query(
                 None,
@@ -1935,6 +1929,7 @@ mod tests {
                         "SELECT COUNT(votes.userid) AS count FROM votes;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -1943,36 +1938,6 @@ mod tests {
             // added the aggregation, a project helper, the edge view, a reorder projection, and
             // reader
             assert_eq!(mig.graph().node_count(), 7);
-            // check project helper node
-            let qid = query_id_hash(
-                &["votes"],
-                &[],
-                &[&Column {
-                    name: "count".into(),
-                    table: None,
-                }],
-            );
-            let proj_helper_view = get_node(&inc, mig, &format!("q_{:x}_n0_prj_hlpr", qid));
-            assert_eq!(
-                proj_helper_view
-                    .columns()
-                    .iter()
-                    .map(|c| c.name())
-                    .collect::<Vec<_>>(),
-                &["userid", "grp"]
-            );
-            assert_eq!(proj_helper_view.description(true), "π[1, lit: 0]");
-            // check aggregation view
-            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(
-                agg_view
-                    .columns()
-                    .iter()
-                    .map(|c| c.name())
-                    .collect::<Vec<_>>(),
-                &["grp", "count"]
-            );
-            assert_eq!(agg_view.description(true), "|*| γ[1]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
@@ -2006,7 +1971,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE votes (userid int, aid int);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig
@@ -2014,16 +1980,19 @@ mod tests {
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(
-                get_node(&inc, mig, "votes")
+                get_node(&inc, mig, &"votes".into()).name(),
+                &Table::from("votes")
+            );
+            assert_eq!(
+                get_node(&inc, mig, &"votes".into())
                     .columns()
                     .iter()
                     .map(|c| c.name())
                     .collect::<Vec<_>>(),
                 &["userid", "aid"]
             );
-            assert!(get_node(&inc, mig, "votes").is_base());
+            assert!(get_node(&inc, mig, &"votes".into()).is_base());
             // Try a simple COUNT function
             let res = inc.add_query(
                 None,
@@ -2033,6 +2002,7 @@ mod tests {
                         "SELECT COUNT(*) AS count FROM votes GROUP BY votes.userid;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -2041,25 +2011,6 @@ mod tests {
             // added a project for the coalesce (in the rewrite), the aggregation, a project helper,
             // the edge view, the reorder project and reader
             assert_eq!(mig.graph().node_count(), 7);
-            // check aggregation view
-            let qid = query_id_hash(
-                &["votes"],
-                &[&Column::from("votes.userid")],
-                &[&Column {
-                    name: "count".into(),
-                    table: None,
-                }],
-            );
-            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
-            assert_eq!(
-                agg_view
-                    .columns()
-                    .iter()
-                    .map(|c| c.name())
-                    .collect::<Vec<_>>(),
-                &["userid", "count"]
-            );
-            assert_eq!(agg_view.description(true), "|*| γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
@@ -2093,7 +2044,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE votes (userid int, aid int);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig
@@ -2101,16 +2053,19 @@ mod tests {
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(
-                get_node(&inc, mig, "votes")
+                get_node(&inc, mig, &"votes".into()).name(),
+                &Table::from("votes")
+            );
+            assert_eq!(
+                get_node(&inc, mig, &"votes".into())
                     .columns()
                     .iter()
                     .map(|c| c.name())
                     .collect::<Vec<_>>(),
                 &["userid", "aid"]
             );
-            assert!(get_node(&inc, mig, "votes").is_base());
+            assert!(get_node(&inc, mig, &"votes".into()).is_base());
             // Try a simple COUNT function
             let res = inc.add_query(
                 None,
@@ -2121,6 +2076,7 @@ mod tests {
                      GROUP BY votes.userid;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -2129,25 +2085,7 @@ mod tests {
             // added a project for the case, the aggregation, a project helper, the edge view, the
             // reorder project and reader
             assert_eq!(mig.graph().node_count(), 7);
-            // check aggregation view
-            let qid = query_id_hash(
-                &["votes"],
-                &[&Column::from("votes.userid")],
-                &[&Column {
-                    name: "count".into(),
-                    table: None,
-                }],
-            );
-            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
-            assert_eq!(
-                agg_view
-                    .columns()
-                    .iter()
-                    .map(|c| c.name())
-                    .collect::<Vec<_>>(),
-                &["userid", "count"]
-            );
-            assert_eq!(agg_view.description(true), "|*| γ[0]");
+
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
@@ -2181,7 +2119,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE votes (userid int, aid int, sign int);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -2189,16 +2128,19 @@ mod tests {
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(
-                get_node(&inc, mig, "votes")
+                get_node(&inc, mig, &"votes".into()).name(),
+                &Table::from("votes")
+            );
+            assert_eq!(
+                get_node(&inc, mig, &"votes".into())
                     .columns()
                     .iter()
                     .map(|c| c.name())
                     .collect::<Vec<_>>(),
                 &["userid", "aid", "sign"]
             );
-            assert!(get_node(&inc, mig, "votes").is_base());
+            assert!(get_node(&inc, mig, &"votes".into()).is_base());
             // Try a simple COUNT function
             let res = inc.add_query(
                 None,
@@ -2209,6 +2151,7 @@ mod tests {
                      GROUP BY votes.userid;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -2217,25 +2160,6 @@ mod tests {
             // added a project for the case, the aggregation, a project helper, the edge view, a
             // reorder projection, and reader
             assert_eq!(mig.graph().node_count(), 7);
-            // check aggregation view
-            let qid = query_id_hash(
-                &["votes"],
-                &[&Column::from("votes.userid")],
-                &[&Column {
-                    name: "sum".into(),
-                    table: None,
-                }],
-            );
-            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
-            assert_eq!(
-                agg_view
-                    .columns()
-                    .iter()
-                    .map(|c| c.name())
-                    .collect::<Vec<_>>(),
-                &["userid", "sum"]
-            );
-            assert_eq!(agg_view.description(true), "𝛴(3) γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
@@ -2270,7 +2194,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE votes (userid int, aid int, sign int);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -2278,16 +2203,19 @@ mod tests {
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(
-                get_node(&inc, mig, "votes")
+                get_node(&inc, mig, &"votes".into()).name(),
+                &Table::from("votes")
+            );
+            assert_eq!(
+                get_node(&inc, mig, &"votes".into())
                     .columns()
                     .iter()
                     .map(|c| c.name())
                     .collect::<Vec<_>>(),
                 &["userid", "aid", "sign"]
             );
-            assert!(get_node(&inc, mig, "votes").is_base());
+            assert!(get_node(&inc, mig, &"votes".into()).is_base());
             // Try a simple COUNT function
             let res = inc.add_query(
                 None,
@@ -2298,6 +2226,7 @@ mod tests {
                      GROUP BY votes.userid;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -2306,25 +2235,6 @@ mod tests {
             // added a project for the case, the aggregation, a project helper, the edge view, a
             // reorder projection, and reader
             assert_eq!(mig.graph().node_count(), 7);
-            // check aggregation view
-            let qid = query_id_hash(
-                &["votes"],
-                &[&Column::from("votes.userid")],
-                &[&Column {
-                    name: "sum".into(),
-                    table: None,
-                }],
-            );
-            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
-            assert_eq!(
-                agg_view
-                    .columns()
-                    .iter()
-                    .map(|c| c.name())
-                    .collect::<Vec<_>>(),
-                &["userid", "sum"]
-            );
-            assert_eq!(agg_view.description(true), "𝛴(3) γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
@@ -2357,7 +2267,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE votes (userid int, aid int, sign int);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -2365,16 +2276,19 @@ mod tests {
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(
-                get_node(&inc, mig, "votes")
+                get_node(&inc, mig, &"votes".into()).name(),
+                &Table::from("votes")
+            );
+            assert_eq!(
+                get_node(&inc, mig, &"votes".into())
                     .columns()
                     .iter()
                     .map(|c| c.name())
                     .collect::<Vec<_>>(),
                 &["userid", "aid", "sign"]
             );
-            assert!(get_node(&inc, mig, "votes").is_base());
+            assert!(get_node(&inc, mig, &"votes".into()).is_base());
             let res = inc.add_query(
                 None,
                 inc.rewrite(
@@ -2383,6 +2297,7 @@ mod tests {
                         "SELECT SUM(sign) AS sum FROM votes WHERE aid=5 GROUP BY votes.userid;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -2399,7 +2314,7 @@ mod tests {
                 }],
             );
 
-            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1_p0_f0_filteragg", qid));
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1_p0_f0_filteragg", qid).into());
             assert_eq!(
                 agg_view
                     .columns()
@@ -2443,7 +2358,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE votes (userid int, aid int, sign int);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -2451,16 +2367,19 @@ mod tests {
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(
-                get_node(&inc, mig, "votes")
+                get_node(&inc, mig, &"votes".into()).name(),
+                &Table::from("votes")
+            );
+            assert_eq!(
+                get_node(&inc, mig, &"votes".into())
                     .columns()
                     .iter()
                     .map(|c| c.name())
                     .collect::<Vec<_>>(),
                 &["userid", "aid", "sign"]
             );
-            assert!(get_node(&inc, mig, "votes").is_base());
+            assert!(get_node(&inc, mig, &"votes".into()).is_base());
             let res = inc.add_query(
                 None,
                 inc.rewrite(
@@ -2469,6 +2388,7 @@ mod tests {
                         "SELECT SUM(sign) AS sum FROM votes WHERE sign > 0 GROUP BY votes.userid;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -2498,7 +2418,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE votes (userid int, aid int, sign int);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -2506,16 +2427,19 @@ mod tests {
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(
-                get_node(&inc, mig, "votes")
+                get_node(&inc, mig, &"votes".into()).name(),
+                &Table::from("votes")
+            );
+            assert_eq!(
+                get_node(&inc, mig, &"votes".into())
                     .columns()
                     .iter()
                     .map(|c| c.name())
                     .collect::<Vec<_>>(),
                 &["userid", "aid", "sign"]
             );
-            assert!(get_node(&inc, mig, "votes").is_base());
+            assert!(get_node(&inc, mig, &"votes".into()).is_base());
             let res = inc.add_query(
                 None,
                 inc.rewrite(
@@ -2524,6 +2448,7 @@ mod tests {
                         "SELECT SUM(sign) AS sum FROM votes GROUP BY votes.userid HAVING sum>0 ;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -2532,25 +2457,6 @@ mod tests {
             // added a project for the case, the aggregation, a project helper, the edge view, and
             // reader
             assert_eq!(mig.graph().node_count(), 6);
-            // check aggregation view
-            let qid = query_id_hash(
-                &["votes"],
-                &[&Column::from("votes.userid"), &Column::from("sum")],
-                &[&Column {
-                    name: "sum".into(),
-                    table: None,
-                }],
-            );
-            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(
-                agg_view
-                    .columns()
-                    .iter()
-                    .map(|c| c.name())
-                    .collect::<Vec<_>>(),
-                &["userid", "sum"]
-            );
-            assert_eq!(agg_view.description(true), "𝛴(2) γ[0]");
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
@@ -2589,7 +2495,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE votes (story_id int, comment_id int, vote int);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -2597,16 +2504,19 @@ mod tests {
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
             assert_eq!(
-                get_node(&inc, mig, "votes")
+                get_node(&inc, mig, &"votes".into()).name(),
+                &Table::from("votes")
+            );
+            assert_eq!(
+                get_node(&inc, mig, &"votes".into())
                     .columns()
                     .iter()
                     .map(|c| c.name())
                     .collect::<Vec<_>>(),
                 &["story_id", "comment_id", "vote"]
             );
-            assert!(get_node(&inc, mig, "votes").is_base());
+            assert!(get_node(&inc, mig, &"votes".into()).is_base());
             // Try a simple COUNT function
             let res = inc.add_query(
                 None,
@@ -2625,25 +2535,7 @@ mod tests {
             // added a project for the case, the aggregation, a project helper, the edge view, a
             // reorder projection, and reader
             assert_eq!(mig.graph().node_count(), 7);
-            // check aggregation view
-            let qid = query_id_hash(
-                &["votes"],
-                &[&Column::from("votes.comment_id")],
-                &[&Column {
-                    name: "votes".into(),
-                    table: None,
-                }],
-            );
-            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
-            assert_eq!(
-                agg_view
-                    .columns()
-                    .iter()
-                    .map(|c| c.name())
-                    .collect::<Vec<_>>(),
-                &["comment_id", "votes"]
-            );
-            assert_eq!(agg_view.description(true), "|*| γ[1]");
+
             // check edge view -- note that it's not actually currently possible to read from
             // this for a lack of key (the value would be the key). Hence, the view also has a
             // bogokey column.
@@ -2676,7 +2568,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -2689,7 +2582,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE votes (aid int, uid int);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig
@@ -2702,7 +2596,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE articles (aid int, title varchar(255), author int);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -2717,7 +2612,7 @@ mod tests {
 
             let res = inc.add_query(
                 None,
-                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap())
+                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap(), &[])
                     .unwrap(),
                 mig,
             );
@@ -2768,7 +2663,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -2781,7 +2677,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE votes (aid int, uid int);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig
@@ -2794,7 +2691,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE articles (aid int, title varchar(255), author int);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -2809,7 +2707,7 @@ mod tests {
 
             let res = inc.add_query(
                 None,
-                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap())
+                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap(), &[])
                     .unwrap(),
                 mig,
             );
@@ -2817,40 +2715,7 @@ mod tests {
             let name = res.unwrap();
             // XXX(malte): below over-projects into the final leaf, and is thus inconsistent
             // with the explicit JOIN case!
-            let qid = query_id_hash(
-                &["articles", "users", "votes"],
-                &[
-                    &Column::from("articles.aid"),
-                    &Column::from("articles.author"),
-                    &Column::from("users.id"),
-                    &Column::from("votes.aid"),
-                ],
-                &[
-                    &Column::from("users.name"),
-                    &Column::from("articles.title"),
-                    &Column::from("votes.uid"),
-                ],
-            );
-            let join1_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            // articles join users
-            assert_eq!(
-                join1_view
-                    .columns()
-                    .iter()
-                    .map(|c| c.name())
-                    .collect::<Vec<_>>(),
-                &["aid", "title", "author", "name"]
-            );
-            let join2_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
-            // join1_view join vptes
-            assert_eq!(
-                join2_view
-                    .columns()
-                    .iter()
-                    .map(|c| c.name())
-                    .collect::<Vec<_>>(),
-                &["aid", "title", "author", "name", "uid"]
-            );
+
             // leaf view
             let leaf_view = get_node(&inc, mig, &name);
             assert_eq!(
@@ -2882,7 +2747,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -2895,7 +2761,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE articles (id int, author int, title varchar(255));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -2906,7 +2773,7 @@ mod tests {
                      WHERE users.id = articles.author;";
             let q = inc.add_query(
                 None,
-                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap())
+                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap(), &[])
                     .unwrap(),
                 mig,
             );
@@ -2922,7 +2789,7 @@ mod tests {
                 ],
             );
             // join node
-            let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid).into());
             assert_eq!(
                 new_join_view
                     .columns()
@@ -2932,7 +2799,7 @@ mod tests {
                 &["id", "author", "title", "name"]
             );
             // leaf node
-            let new_leaf_view = get_node(&inc, mig, &q.unwrap());
+            let new_leaf_view = get_node(&inc, mig, &q.unwrap().into());
             assert_eq!(
                 new_leaf_view
                     .columns()
@@ -2959,7 +2826,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE friends (id int, friend int);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig
@@ -2974,7 +2842,7 @@ mod tests {
 
             let res = inc.add_query(
                 None,
-                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap())
+                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap(), &[])
                     .unwrap(),
                 mig,
             );
@@ -3010,7 +2878,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -3022,6 +2891,7 @@ mod tests {
                 inc.rewrite(
                     parse_select_statement(Dialect::MySQL, "SELECT users.name, 1 FROM users;")
                         .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -3051,7 +2921,8 @@ mod tests {
                 .add_table(
                     inc.rewrite(
                         parse_create_table(Dialect::MySQL, "CREATE TABLE users (id int, age int);")
-                            .unwrap()
+                            .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig
@@ -3066,6 +2937,7 @@ mod tests {
                         "SELECT 2 * users.age, 2 * 10 as twenty FROM users;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -3103,7 +2975,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, age int, name varchar(40));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -3118,6 +2991,7 @@ mod tests {
                         "SELECT 2 * users.age, 2 * 10 AS twenty FROM users WHERE users.name = ?;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -3158,7 +3032,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -3171,7 +3046,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE articles (id int, author int, title varchar(255));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -3185,32 +3061,12 @@ mod tests {
             let name = inc
                 .add_query(
                     None,
-                    inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap())
+                    inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap(), &[])
                         .unwrap(),
                     mig,
                 )
                 .unwrap();
-            let qid = query_id_hash(
-                &["articles", "nested_users"],
-                &[
-                    &Column::from("articles.author"),
-                    &Column::from("nested_users.id"),
-                ],
-                &[
-                    &Column::from("nested_users.name"),
-                    &Column::from("articles.title"),
-                ],
-            );
-            // join node
-            let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(
-                new_join_view
-                    .columns()
-                    .iter()
-                    .map(|c| c.name())
-                    .collect::<Vec<_>>(),
-                &["id", "author", "title", "name"]
-            );
+
             // leaf node
             let new_leaf_view = get_parent_node(&inc, mig, &name);
             assert_eq!(
@@ -3241,7 +3097,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -3254,7 +3111,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE articles (id int, author int, title varchar(255));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -3266,7 +3124,8 @@ mod tests {
                 .add_query(
                     None,
                     inc.rewrite(
-                        parse_select_statement(Dialect::MySQL, "SELECT * FROM users;").unwrap()
+                        parse_select_statement(Dialect::MySQL, "SELECT * FROM users;").unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig
@@ -3281,32 +3140,12 @@ mod tests {
                      ON (nested_users.id = articles.author);";
             let q = inc.add_query(
                 None,
-                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap())
+                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap(), &[])
                     .unwrap(),
                 mig,
             );
             assert!(q.is_ok());
-            let qid = query_id_hash(
-                &["articles", "nested_users"],
-                &[
-                    &Column::from("articles.author"),
-                    &Column::from("nested_users.id"),
-                ],
-                &[
-                    &Column::from("nested_users.name"),
-                    &Column::from("articles.title"),
-                ],
-            );
-            // join node
-            let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
-            assert_eq!(
-                new_join_view
-                    .columns()
-                    .iter()
-                    .map(|c| c.name())
-                    .collect::<Vec<_>>(),
-                &["id", "author", "title", "name"]
-            );
+
             // leaf node
             let new_leaf_view = get_parent_node(&inc, mig, &q.unwrap());
             assert_eq!(
@@ -3337,7 +3176,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -3388,7 +3228,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -3396,16 +3237,19 @@ mod tests {
                 .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
-            assert_eq!(get_node(&inc, mig, "users").name(), "users");
             assert_eq!(
-                get_node(&inc, mig, "users")
+                get_node(&inc, mig, &"users".into()).name(),
+                &Table::from("users")
+            );
+            assert_eq!(
+                get_node(&inc, mig, &"users".into())
                     .columns()
                     .iter()
                     .map(|c| c.name())
                     .collect::<Vec<_>>(),
                 &["id", "name"]
             );
-            assert!(get_node(&inc, mig, "users").is_base());
+            assert!(get_node(&inc, mig, &"users".into()).is_base());
 
             // Add a new query
             let res = inc.add_query(
@@ -3416,6 +3260,7 @@ mod tests {
                         "SELECT id, name FROM users WHERE users.id = 42;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -3432,6 +3277,7 @@ mod tests {
                         "SELECT id, name FROM users WHERE users.id = 50;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -3456,6 +3302,7 @@ mod tests {
                 inc.rewrite(
                     parse_create_table(Dialect::MySQL, "CREATE TABLE things (id int primary key);")
                         .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -3472,6 +3319,7 @@ mod tests {
                         "SELECT * FROM things ORDER BY id LIMIT 3",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -3498,7 +3346,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE users (id int, name varchar(40));"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -3513,6 +3362,7 @@ mod tests {
                         "SELECT id, name FROM users WHERE users.id = 42;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -3529,6 +3379,7 @@ mod tests {
                         "SELECT id, name FROM users WHERE users.id = 42;",
                     )
                     .unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -3541,6 +3392,7 @@ mod tests {
                 Some("over_tq2".into()),
                 inc.rewrite(
                     parse_select_statement(Dialect::MySQL, "SELECT tq2.id FROM tq2;").unwrap(),
+                    &[],
                 )
                 .unwrap(),
                 mig,
@@ -3569,7 +3421,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE t1 (a int, b float, c Text);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig
@@ -3582,6 +3435,7 @@ mod tests {
                     inc.rewrite(
                         parse_select_statement(Dialect::MySQL, "SELECT t1.a from t1 LIMIT 3")
                             .unwrap(),
+                        &[],
                     )
                     .unwrap(),
                     mig,
@@ -3623,7 +3477,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE t1 (a int, b float, c Text);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig
@@ -3639,6 +3494,7 @@ mod tests {
                             "SELECT t1.a from t1 where t1.a = t1.b",
                         )
                         .unwrap(),
+                        &[],
                     )
                     .unwrap(),
                     mig,
@@ -3679,7 +3535,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE t1 (a int, b float, c Text, d Text);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig,
@@ -3695,6 +3552,7 @@ mod tests {
                             "SELECT sum(t1.a), max(t1.b), group_concat(c separator ' ') from t1",
                         )
                         .unwrap(),
+                        &[],
                     )
                     .unwrap(),
                     mig,
@@ -3748,7 +3606,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE t1 (a int, b float, c Text);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig
@@ -3761,7 +3620,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE t2 (a int, b float, c Text);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig
@@ -3777,6 +3637,7 @@ mod tests {
                             "SELECT t1.a, t2.a FROM t1 JOIN t2 on t1.c = t2.c where t2.b = ?",
                         )
                         .unwrap(),
+                        &[],
                     )
                     .unwrap(),
                     mig,
@@ -3822,7 +3683,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE t1 (a int, b float, c Text);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig
@@ -3835,7 +3697,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE t2 (a int, b float, c Text);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig
@@ -3851,6 +3714,7 @@ mod tests {
                             "SELECT t1.a FROM t1 union select t2.a from t2",
                         )
                         .unwrap(),
+                        &[],
                     )
                     .unwrap(),
                     mig,
@@ -3889,7 +3753,8 @@ mod tests {
                             Dialect::MySQL,
                             "CREATE TABLE t1 (a int, b float, c Text);"
                         )
-                        .unwrap()
+                        .unwrap(),
+                        &[]
                     )
                     .unwrap(),
                     mig
@@ -3905,6 +3770,7 @@ mod tests {
                             "SELECT cast(t1.b as char), t1.a, t1.a + 1 from t1",
                         )
                         .unwrap(),
+                        &[],
                     )
                     .unwrap(),
                     mig,

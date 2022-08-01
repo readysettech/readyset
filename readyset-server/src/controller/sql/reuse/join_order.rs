@@ -1,17 +1,18 @@
 use std::collections::HashSet;
 use std::vec::Vec;
 
+use nom_sql::Table;
+
 use super::super::query_graph::{JoinRef, QueryGraph, QueryGraphEdge};
 use super::helpers::predicate_implication::join_predicates_are_equivalent;
 use super::ReuseType;
-use crate::controller::sql::mir::Relation;
 use crate::controller::sql::query_graph::JoinPredicate;
 use crate::ReadySetResult;
 
 #[derive(Debug, Clone)]
 struct JoinChain {
     join_order: Vec<JoinRef>,
-    relations: HashSet<Relation>,
+    relations: HashSet<Table>,
     stopped: bool,
 }
 
@@ -38,7 +39,7 @@ impl JoinChain {
         !self.relations.is_disjoint(&other.relations)
     }
 
-    fn has_relation(&self, rel: &Relation) -> bool {
+    fn has_relation(&self, rel: &Table) -> bool {
         self.relations.contains(rel)
     }
 

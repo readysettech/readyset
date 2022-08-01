@@ -36,7 +36,7 @@ use std::str::FromStr;
 use nom_sql::{
     AlterTableStatement, CacheInner, CreateCacheStatement, CreateTableStatement,
     CreateViewStatement, DropTableStatement, DropViewStatement, SelectStatement, SqlIdentifier,
-    SqlQuery,
+    SqlQuery, Table,
 };
 use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -113,19 +113,20 @@ impl FromStr for ChangeList {
                             SqlQuery::AlterTable(ats) => changes.push(Change::AlterTable(ats)),
                             SqlQuery::DropTable(dts) => {
                                 let if_exists = dts.if_exists;
-                                changes.extend(dts.tables.into_iter().map(|t| Change::Drop {
-                                    name: t.name,
-                                    if_exists,
-                                }))
+                                changes.extend(
+                                    dts.tables
+                                        .into_iter()
+                                        .map(|name| Change::Drop { name, if_exists }),
+                                )
                             }
                             SqlQuery::DropView(dvs) => {
-                                changes.extend(dvs.views.into_iter().map(|t| Change::Drop {
-                                    name: t.name,
+                                changes.extend(dvs.views.into_iter().map(|name| Change::Drop {
+                                    name,
                                     if_exists: dvs.if_exists,
                                 }))
                             }
                             SqlQuery::DropCache(dcs) => changes.push(Change::Drop {
-                                name: dcs.name.name, // TODO: schema
+                                name: dcs.name,
                                 if_exists: false,
                             }),
                             _ => unsupported!(
@@ -161,8 +162,8 @@ impl From<DropTableStatement> for ChangeList {
             changes: dts
                 .tables
                 .into_iter()
-                .map(|t| Change::Drop {
-                    name: t.name,
+                .map(|name| Change::Drop {
+                    name,
                     if_exists: dts.if_exists,
                 })
                 .collect(),
@@ -177,8 +178,8 @@ impl From<DropViewStatement> for ChangeList {
             changes: dvs
                 .views
                 .into_iter()
-                .map(|t| Change::Drop {
-                    name: t.name,
+                .map(|name| Change::Drop {
+                    name,
                     if_exists: dvs.if_exists,
                 })
                 .collect(),
@@ -256,9 +257,9 @@ pub enum Change {
     AlterTable(AlterTableStatement),
     /// The removal of a [`RecipeExpr`].
     Drop {
-        /// The [`SqlIdentifier`] of the query/view to remove.
-        name: SqlIdentifier,
-        /// If `false`, then an error should be thrown if the query/view is not found.
+        /// The name of the relation to remove.
+        name: Table,
+        /// If `false`, then an error should be thrown if the relation is not found.
         if_exists: bool,
     },
 }
@@ -268,10 +269,10 @@ impl Change {
     /// [`SelectStatement`].
     pub fn create_cache<N>(name: N, statement: SelectStatement, always: bool) -> Self
     where
-        N: Into<SqlIdentifier>,
+        N: Into<Table>,
     {
         Self::CreateCache(CreateCacheStatement {
-            name: Some(name.into().into()), // TODO: schema
+            name: Some(name.into()),
             inner: CacheInner::Statement(Box::new(statement)),
             always,
         })

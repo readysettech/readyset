@@ -233,7 +233,7 @@ pub enum ReadySetError {
     ViewDestroyed,
 
     /// A view couldn't be found.
-    #[error("Could not find view '{0}'")]
+    #[error("Could not find view {0}")]
     ViewNotFound(String),
 
     /// A view couldn't be found in the given pool of worker.

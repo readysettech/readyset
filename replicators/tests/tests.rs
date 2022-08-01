@@ -6,7 +6,9 @@ use std::sync::Arc;
 use launchpad::eventually;
 use mysql_async::prelude::Queryable;
 use mysql_time::MysqlTime;
+use nom_sql::Table;
 use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
+use readyset::recipe::changelist::ChangeList;
 use readyset::{ControllerHandle, ReadySetError, ReadySetResult};
 use readyset_data::{DfValue, TinyText};
 use readyset_server::Builder;
@@ -155,6 +157,7 @@ impl DbConnection {
 
             // Set very low execution time, to make sure we override it later on
             client.query_drop("SET GLOBAL MAX_EXECUTION_TIME=1").await?;
+
             Ok(DbConnection::MySQL(client))
         } else if url.starts_with("postgresql") {
             let opts = tokio_postgres::Config::from_str(url)?;
@@ -321,7 +324,14 @@ impl TestHandle {
     }
 
     async fn check_results_inner(&mut self, view_name: &str) -> ReadySetResult<Vec<Vec<DfValue>>> {
-        let mut getter = self.controller().await.view(view_name).await?;
+        let mut getter = self
+            .controller()
+            .await
+            .view(Table {
+                schema: Some("public".into()),
+                name: view_name.into(),
+            })
+            .await?;
         let results = getter.lookup(&[0.into()], true).await?;
         let mut results = results.into_vec();
         results.sort(); // Simple `lookup` does not sort the results, so we just sort them ourselves
@@ -329,13 +339,25 @@ impl TestHandle {
     }
 
     #[track_caller]
-    async fn assert_table_exists(&mut self, table: &str) {
-        self.noria.table(table).await.unwrap();
+    async fn assert_table_exists(&mut self, schema: &str, name: &str) {
+        self.noria
+            .table(Table {
+                schema: Some(schema.into()),
+                name: name.into(),
+            })
+            .await
+            .unwrap();
     }
 
     #[track_caller]
-    async fn assert_table_missing(&mut self, table: &str) {
-        self.noria.table(table).await.unwrap_err();
+    async fn assert_table_missing(&mut self, schema: &str, name: &str) {
+        self.noria
+            .table(Table {
+                schema: Some(schema.into()),
+                name: name.into(),
+            })
+            .await
+            .unwrap_err();
     }
 }
 
@@ -385,7 +407,7 @@ fn pgsql_url() -> String {
 
 fn mysql_url() -> String {
     format!(
-        "mysql://root:noria@{}:{}/noria",
+        "mysql://root:noria@{}:{}/public",
         env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
         env::var("MYSQL_TCP_PORT").unwrap_or_else(|_| "3306".into()),
     )
@@ -600,8 +622,14 @@ async fn replication_many_tables_inner(url: &str) -> ReadySetResult<()> {
 
     for t in 0..TOTAL_TABLES {
         // Just check that all of the tables are really there
-        let tbl_name = format!("t{}", t);
-        ctx.controller().await.table(&tbl_name).await.unwrap();
+        ctx.controller()
+            .await
+            .table(Table {
+                schema: Some("public".into()),
+                name: format!("t{t}").into(),
+            })
+            .await
+            .unwrap();
     }
 
     ctx.stop().await;
@@ -625,7 +653,7 @@ async fn replication_big_tables_inner(url: &str) -> ReadySetResult<()> {
     let mut client = DbConnection::connect(url).await?;
 
     for t in 0..TOTAL_TABLES {
-        let tbl_name = format!("t{}", t);
+        let tbl_name = format!("t{t}");
         client
             .query(&format!(
                 "DROP TABLE IF EXISTS {tbl_name} CASCADE; CREATE TABLE {tbl_name} (id int);",
@@ -643,15 +671,21 @@ async fn replication_big_tables_inner(url: &str) -> ReadySetResult<()> {
 
     for t in 0..TOTAL_TABLES {
         // Just check that all of the tables are really there
-        let tbl_name = format!("t{}", t);
-        ctx.controller().await.table(&tbl_name).await.unwrap();
+        ctx.controller()
+            .await
+            .table(Table {
+                schema: Some("public".into()),
+                name: format!("t{t}").into(),
+            })
+            .await
+            .unwrap();
     }
 
     ctx.stop().await;
 
     for t in 0..TOTAL_TABLES {
         client
-            .query(&format!("DROP TABLE IF EXISTS t{} CASCADE;", t))
+            .query(&format!("DROP TABLE IF EXISTS t{t} CASCADE;"))
             .await?;
     }
 
@@ -855,14 +889,12 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
         }),
     )
     .await?;
+
     ctx.ready_notify.as_ref().unwrap().notified().await;
-    ctx.assert_table_exists("t1").await;
-    ctx.assert_table_missing("t2").await;
-    ctx.assert_table_exists("t3").await;
-    // TODO(vlad): Currently we can't differentiate between schemas, so table names are all in the
-    // same schema
-    // https://readysettech.atlassian.net/browse/ENG-1447
-    ctx.assert_table_exists("t4").await;
+    ctx.assert_table_exists("public", "t1").await;
+    ctx.assert_table_missing("public", "t2").await;
+    ctx.assert_table_exists("public", "t3").await;
+    ctx.assert_table_exists("noria2", "t4").await;
 
     client
         .query(
@@ -877,10 +909,10 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
         )
         .await?;
 
-    // TODO(vlad): eventually t4 will have a different schema
-    // https://readysettech.atlassian.net/browse/ENG-1447
     ctx.noria
-        .extend_recipe("CREATE VIEW t4_view AS SELECT * FROM t4;".parse().unwrap())
+        .extend_recipe(
+            ChangeList::from_str("CREATE VIEW public.t4_view AS SELECT * FROM noria2.t4;").unwrap(),
+        )
         .await
         .unwrap();
 
@@ -898,8 +930,8 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
         .await
         .expect_err("View should not exist, since viewed table does not exist");
 
-    ctx.assert_table_missing("t5").await;
-    ctx.assert_table_exists("t6").await;
+    ctx.assert_table_missing("public", "t5").await;
+    ctx.assert_table_exists("noria3", "t6").await;
 
     ctx.stop().await;
     client.stop().await;
@@ -1044,20 +1076,32 @@ async fn postgresql_ddl_replicate_drop_table() {
         .unwrap();
     let mut ctx = TestHandle::start_noria(pgsql_url(), None).await.unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
-    ctx.noria.table("t1").await.unwrap();
+    ctx.noria
+        .table(Table {
+            schema: Some("public".into()),
+            name: "t1".into(),
+        })
+        .await
+        .unwrap();
 
     trace!("Dropping table");
     client.query("DROP TABLE t1 CASCADE;").await.unwrap();
 
     eventually! {
-        let res = ctx.noria.table("t1").await;
+        let res = ctx
+            .noria
+            .table(Table {
+                schema: Some("public".into()),
+                name: "t1".into(),
+            })
+            .await;
         matches!(
             res.err(),
             Some(ReadySetError::RpcFailed { source, .. })
                 if matches!(&*source, ReadySetError::TableNotFound{
                     name,
-                    schema: None
-                } if name == "t1")
+                    schema: Some(schema)
+                } if name == "t1" && schema == "public")
         )
     }
 }
@@ -1077,7 +1121,14 @@ async fn postgresql_ddl_replicate_create_table() {
     trace!("Creating table");
     client.query("CREATE TABLE t2 (id int);").await.unwrap();
 
-    eventually!(ctx.noria.table("t2").await.is_ok());
+    eventually!(ctx
+        .noria
+        .table(Table {
+            schema: Some("public".into()),
+            name: "t2".into(),
+        })
+        .await
+        .is_ok());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1088,14 +1139,26 @@ async fn postgresql_ddl_replicate_drop_view() {
     client
         .query(
             "DROP TABLE IF EXISTS t2 CASCADE; CREATE TABLE t2 (id int);
-                DROP VIEW IF EXISTS t2_view; CREATE VIEW t2_view AS SELECT * FROM t2;",
+             DROP VIEW IF EXISTS t2_view; CREATE VIEW t2_view AS SELECT * FROM t2;",
         )
         .await
         .unwrap();
     let mut ctx = TestHandle::start_noria(pgsql_url(), None).await.unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
-    ctx.noria.table("t2").await.unwrap();
-    ctx.noria.view("t2_view").await.unwrap();
+    ctx.noria
+        .table(Table {
+            schema: Some("public".into()),
+            name: "t2".into(),
+        })
+        .await
+        .unwrap();
+    ctx.noria
+        .view(Table {
+            schema: Some("public".into()),
+            name: "t2_view".into(),
+        })
+        .await
+        .unwrap();
 
     trace!("Dropping view");
     client.query("DROP VIEW t2_view;").await.unwrap();
@@ -1104,7 +1167,7 @@ async fn postgresql_ddl_replicate_drop_view() {
         let res = ctx.noria.view("t2_view").await;
         matches!(
             res.err(),
-            Some(ReadySetError::ViewNotFound(view)) if view == "t2_view"
+            Some(ReadySetError::ViewNotFound(view)) if view == "`t2_view`"
         )
     };
 }
@@ -1123,7 +1186,13 @@ async fn postgresql_ddl_replicate_create_view() {
         .unwrap();
     let mut ctx = TestHandle::start_noria(pgsql_url(), None).await.unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
-    ctx.noria.table("t2").await.unwrap();
+    ctx.noria
+        .table(Table {
+            schema: Some("public".into()),
+            name: "t2".into(),
+        })
+        .await
+        .unwrap();
 
     trace!("CREATING view");
     client
@@ -1131,5 +1200,12 @@ async fn postgresql_ddl_replicate_create_view() {
         .await
         .unwrap();
 
-    eventually!(ctx.noria.view("t2_view").await.is_ok());
+    eventually!(ctx
+        .noria
+        .view(Table {
+            schema: Some("public".into()),
+            name: "t2_view".into(),
+        })
+        .await
+        .is_ok());
 }

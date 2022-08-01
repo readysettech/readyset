@@ -80,11 +80,8 @@ impl Column {
         self
     }
 
-    // `Table::schema1 is not currently used/supported. `Table::alias` is not used and is intended
-    // to be removed from `Table`.
-    pub(crate) fn has_table(&self, table: &SqlIdentifier) -> bool {
-        self.table.iter().any(|t| t.name == table)
-            || self.aliases.iter().any(|c| c.has_table(table))
+    pub(crate) fn has_table(&self, table: &Table) -> bool {
+        self.table.iter().any(|t| t == table) || self.aliases.iter().any(|c| c.has_table(table))
     }
 }
 

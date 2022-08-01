@@ -31,7 +31,7 @@ use std::rc::Rc;
 use mir::node::MirNode;
 use mir::query::MirQuery;
 use mir::MirNodeRef;
-use nom_sql::{CreateTableStatement, SqlIdentifier};
+use nom_sql::{CreateTableStatement, SqlIdentifier, Table};
 use petgraph::graph::NodeIndex;
 use readyset_errors::{internal_err, invariant, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize, Serializer};
@@ -46,7 +46,7 @@ use crate::sql::{Config, SqlIncorporator};
 #[derive(Serialize, Deserialize)]
 struct SerializableMirQuery {
     /// The name field of the [`MirQuery`]
-    name: SqlIdentifier,
+    name: Table,
     /// A graph representing the MIR graph of the [`MirQuery`], but centralized.
     graph: petgraph::Graph<MirNode, ()>,
     /// The root field of the [`MirQuery`], but holding the references to the root nodes in the
@@ -128,16 +128,16 @@ impl<'a> TryFrom<&'a MirQuery> for SerializableMirQuery {
 #[derive(Serialize, Deserialize)]
 struct SerializableSqlIncorporator {
     mir_converter: SerializableSqlToMirConverter,
-    leaf_addresses: HashMap<SqlIdentifier, NodeIndex>,
+    leaf_addresses: HashMap<Table, NodeIndex>,
 
-    named_queries: HashMap<SqlIdentifier, u64>,
+    named_queries: HashMap<Table, u64>,
     query_graphs: HashMap<u64, QueryGraph>,
-    base_mir_queries: HashMap<SqlIdentifier, SerializableMirQuery>,
+    base_mir_queries: HashMap<Table, SerializableMirQuery>,
     mir_queries: HashMap<u64, SerializableMirQuery>,
     num_queries: usize,
 
-    base_schemas: HashMap<SqlIdentifier, CreateTableStatement>,
-    view_schemas: HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+    base_schemas: HashMap<Table, CreateTableStatement>,
+    view_schemas: HashMap<Table, Vec<SqlIdentifier>>,
 
     pub(crate) config: Config,
 }
@@ -152,7 +152,7 @@ impl<'a> TryFrom<&'a SqlIncorporator> for SerializableSqlIncorporator {
             .base_mir_queries
             .iter()
             .map(|(name, mir_query)| Ok((name.clone(), SerializableMirQuery::try_from(mir_query)?)))
-            .collect::<ReadySetResult<HashMap<SqlIdentifier, SerializableMirQuery>>>()?;
+            .collect::<ReadySetResult<HashMap<Table, SerializableMirQuery>>>()?;
         let mir_queries = inc
             .mir_queries
             .iter()
@@ -202,7 +202,7 @@ impl<'de> serde::Deserialize<'de> for SqlIncorporator {
 /// used to deserialize the [`SqlToMirConverter`] field later.
 fn deserialize_mir_queries<T, E>(
     mir_queries: HashMap<T, SerializableMirQuery>,
-    all_nodes: &mut HashMap<(SqlIdentifier, usize), MirNodeRef>,
+    all_nodes: &mut HashMap<(Table, usize), MirNodeRef>,
 ) -> Result<HashMap<T, MirQuery>, E>
 where
     T: Eq + Hash + Clone,
@@ -268,7 +268,7 @@ where
 /// used by the original [`SqlToMirConverter`].
 fn deserialize_mir_converter<E>(
     serialized_mir_converter: SerializableSqlToMirConverter,
-    mut nodes: HashMap<(SqlIdentifier, usize), MirNodeRef>,
+    mut nodes: HashMap<(Table, usize), MirNodeRef>,
 ) -> Result<SqlToMirConverter, E> {
     nodes.retain(|node_id, _| serialized_mir_converter.nodes.contains(node_id));
     Ok(SqlToMirConverter {

@@ -11,7 +11,7 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 
-use nom_sql::{ColumnSpecification, SqlIdentifier};
+use nom_sql::{ColumnSpecification, Table};
 use readyset_errors::ReadySetError;
 use serde::{Deserialize, Serialize};
 
@@ -24,9 +24,9 @@ pub(in crate::controller::sql) struct SerializableSqlToMirConverter {
     // crate visibility is needed for the deserialization.
     pub(in crate::controller::sql) config: Config,
     pub(in crate::controller::sql) base_schemas:
-        HashMap<SqlIdentifier, Vec<(usize, Vec<ColumnSpecification>)>>,
-    pub(in crate::controller::sql) current: HashMap<SqlIdentifier, usize>,
-    pub(in crate::controller::sql) nodes: HashSet<(SqlIdentifier, usize)>,
+        HashMap<Table, Vec<(usize, Vec<ColumnSpecification>)>>,
+    pub(in crate::controller::sql) current: HashMap<Table, usize>,
+    pub(in crate::controller::sql) nodes: HashSet<(Table, usize)>,
     pub(in crate::controller::sql) schema_version: usize,
 }
 

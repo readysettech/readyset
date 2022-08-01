@@ -9,6 +9,7 @@ use mysql_async as mysql;
 use mysql_common::binlog;
 use mysql_common::binlog::row::BinlogRow;
 use mysql_common::binlog::value::BinlogValue;
+use nom_sql::Table;
 use readyset::replication::ReplicationOffset;
 use readyset::{ReadySetError, ReadySetResult};
 use readyset_data::DfValue;
@@ -329,8 +330,10 @@ impl MySqlBinlogConnector {
 
                     return Ok((
                         ReplicationAction::TableAction {
-                            schema: tme.database_name().to_string(),
-                            table: tme.table_name().to_string(),
+                            table: Table {
+                                schema: Some(tme.database_name().into()),
+                                name: tme.table_name().into(),
+                            },
                             actions: inserted_rows,
                             txid: self.current_gtid,
                         },
@@ -377,8 +380,10 @@ impl MySqlBinlogConnector {
 
                     return Ok((
                         ReplicationAction::TableAction {
-                            schema: tme.database_name().to_string(),
-                            table: tme.table_name().to_string(),
+                            table: Table {
+                                schema: Some(tme.database_name().into()),
+                                name: tme.table_name().into(),
+                            },
                             actions: updated_rows,
                             txid: self.current_gtid,
                         },
@@ -410,8 +415,10 @@ impl MySqlBinlogConnector {
 
                     return Ok((
                         ReplicationAction::TableAction {
-                            schema: tme.database_name().to_string(),
-                            table: tme.table_name().to_string(),
+                            table: Table {
+                                schema: Some(tme.database_name().into()),
+                                name: tme.table_name().into(),
+                            },
                             actions: deleted_rows,
                             txid: self.current_gtid,
                         },

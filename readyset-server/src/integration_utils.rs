@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dataflow::{DurabilityMode, PersistenceParameters};
+use nom_sql::Table;
 use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset::metrics::client::MetricsClient;
 use readyset::metrics::{DumpedMetric, DumpedMetricValue, MetricsDump};
@@ -191,9 +192,9 @@ where
 
 pub fn assert_view_not_found<T, S>(err: ReadySetResult<T>, view_name: S)
 where
-    S: Into<String> + Display,
+    Table: From<S>,
 {
-    let view_name: String = view_name.into();
+    let view_name = Table::from(view_name);
     match err {
         Err(ReadySetError::ViewNotFound(name))
         | Err(ReadySetError::ViewNotFoundInWorkers { name, .. })
@@ -205,7 +206,7 @@ where
             source: box ReadySetError::ViewNotFoundInWorkers { name, .. },
             ..
         }) => {
-            assert_eq!(*name, view_name)
+            assert_eq!(*name, view_name.to_string())
         }
         _ => panic!("Expected view not found error for view {}", view_name),
     }
