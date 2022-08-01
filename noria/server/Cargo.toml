@@ -116,10 +116,6 @@ test-strategy = "0.2.0"
 rust_decimal = "1.25"
 triomphe = "0.1"
 
-[[bin]]
-name = "noria-zk"
-path = "src/bin/zk.rs"
-
 [[example]]
 name = "local-server"
 
