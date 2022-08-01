@@ -1937,8 +1937,7 @@ impl SqlToMirConverter {
             // 10. Potentially insert TopK or Paginate node below the final node
             // XXX(malte): this adds a bogokey if there are no parameter columns to do the TopK
             // over, but we could end up in a stick place if we reconcile/combine multiple
-            // queries (due to security universes or due to compound select queries) that do
-            // not all have the bogokey!
+            // queries (due to compound select queries) that do not all have the bogokey!
 
             // Indicates whether the final project should include a bogokey. This is required when
             // we have a TopK node that groups on a bogokey. However, it is not required for

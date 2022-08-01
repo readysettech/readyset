@@ -564,7 +564,6 @@ fn classify_conditionals(
                 // atomic selection predicate
                 match **rhs {
                     // right-hand side is a column, so this could be a comma join
-                    // or a security policy using UserContext
                     Expr::Column(ref rf) => {
                         match **lhs {
                             // column/column comparison

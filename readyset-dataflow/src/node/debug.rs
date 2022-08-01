@@ -33,13 +33,7 @@ impl Node {
         let mut s = String::new();
         let border = match self.sharded_by {
             Sharding::ByColumn(_, _) | Sharding::Random(_) => "filled,dashed",
-            _ => {
-                if Self::is_security(self.name()) {
-                    "filled,rounded"
-                } else {
-                    "filled"
-                }
-            }
+            _ => "filled",
         };
 
         if !detailed {
@@ -240,10 +234,6 @@ impl Node {
         }
 
         s
-    }
-
-    fn is_security(name: &str) -> bool {
-        name.starts_with("sp_")
     }
 
     fn escape(s: &str) -> String {

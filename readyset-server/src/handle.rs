@@ -1,12 +1,9 @@
-use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use anyhow::format_err;
 use dataflow::prelude::*;
 use noria::consensus::Authority;
 use noria::prelude::*;
-use readyset_errors::bad_request_err;
 use reqwest::Url;
 use stream_cancel::Trigger;
 use tokio::sync::mpsc::Sender;
@@ -111,43 +108,6 @@ impl Handle {
 
         fin_rx.await.unwrap().unwrap();
         ret_rx.await.unwrap()
-    }
-
-    /// Install a new set of policies on the controller.
-    pub async fn set_security_config(&mut self, p: String) -> Result<(), anyhow::Error> {
-        self.rpc("set_security_config", p, None).await?;
-        Ok(())
-    }
-
-    /// Install a new set of policies on the controller.
-    pub async fn create_universe(
-        &mut self,
-        context: HashMap<String, DataType>,
-    ) -> Result<(), anyhow::Error> {
-        let mut c = self.c.clone().unwrap();
-
-        let uid = context
-            .get("id")
-            .ok_or_else(|| bad_request_err("Universe context must have id"))?
-            .clone();
-        self.rpc::<_, ()>("create_universe", &context, None).await?;
-
-        // Write to Context table
-        let bname = match context.get("group") {
-            None => format!("UserContext_{}", uid),
-            Some(g) => format!("GroupContext_{}_{}", g, uid),
-        };
-
-        let mut fields: Vec<_> = context.keys().collect();
-        fields.sort();
-        let record: Vec<DataType> = fields.iter().map(|&f| context[f].clone()).collect();
-
-        let mut table = c.table(&bname).await?;
-        let fut = table.insert(record);
-        // can't await immediately because of
-        // https://gist.github.com/nikomatsakis/fee0e47e14c09c4202316d8ea51e50a0
-        fut.await
-            .map_err(|e| format_err!("failed to make table: {:?}", e))
     }
 
     /// Inform the local instance that it should exit.
