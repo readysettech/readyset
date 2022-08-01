@@ -131,11 +131,7 @@ where
     where
         IT: IntoIterator<Item = Operation<K, V, M, T>>,
     {
-        // TODO(grfn): Once https://github.com/jonhoo/rust-evmap/pull/86 is merged this can use
-        // `extend`
-        for op in ops {
-            self.handle.append(op);
-        }
+        self.handle.extend(ops);
         self
     }
 
