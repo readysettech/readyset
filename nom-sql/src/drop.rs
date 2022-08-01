@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::common::{statement_terminator, ws_sep_comma};
 use crate::table::{table_list, table_reference, Table};
 use crate::whitespace::whitespace1;
-use crate::{Dialect, SqlIdentifier};
+use crate::Dialect;
 
 fn if_exists(i: &[u8]) -> IResult<&[u8], bool> {
     map(
@@ -70,14 +70,14 @@ pub fn drop_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DropTabl
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DropCacheStatement {
-    pub name: SqlIdentifier,
+    pub name: Table,
 }
 
 impl Display for DropCacheStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DROP CACHE `{}`", self.name)
+        write!(f, "DROP CACHE {}", self.name)
     }
 }
 
@@ -87,7 +87,7 @@ pub fn drop_cached_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], D
         let (i, _) = whitespace1(i)?;
         let (i, _) = tag_no_case("cache")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, name) = dialect.identifier()(i)?;
+        let (i, name) = table_reference(dialect)(i)?;
         let (i, _) = statement_terminator(i)?;
         Ok((i, DropCacheStatement { name }))
     }
@@ -191,7 +191,7 @@ mod tests {
     #[test]
     fn parse_drop_cached_query() {
         let res = test_parse!(drop_cached_query(Dialect::MySQL), b"DROP CACHE test");
-        assert_eq!(res.name, "test");
+        assert_eq!(res.name, "test".into());
     }
 
     #[test]

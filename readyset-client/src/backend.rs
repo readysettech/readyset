@@ -1532,10 +1532,16 @@ where
                         }
                     },
                 };
-                self.create_cached_query(name.as_deref(), st, *always).await
+                self.create_cached_query(
+                    name.as_ref().map(|t| t.name.as_str() /* TODO: schema */),
+                    st,
+                    *always,
+                )
+                .await
             }
             SqlQuery::DropCache(DropCacheStatement { name }) => {
-                self.drop_cached_query(name.as_str()).await
+                self.drop_cached_query(name.name.as_str() /* TODO: schema */)
+                    .await
             }
             SqlQuery::DropAllCaches(_) => self.drop_all_caches().await,
             SqlQuery::Show(ShowStatement::CachedQueries) => self.noria.verbose_outputs().await,

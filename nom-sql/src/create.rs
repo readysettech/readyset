@@ -144,7 +144,7 @@ pub enum CacheInner {
 /// This is a non-standard ReadySet specific extension to SQL
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateCacheStatement {
-    pub name: Option<SqlIdentifier>,
+    pub name: Option<Table>,
     pub inner: CacheInner,
     pub always: bool,
 }
@@ -156,7 +156,7 @@ impl fmt::Display for CreateCacheStatement {
             write!(f, "ALWAYS ")?;
         }
         if let Some(name) = &self.name {
-            write!(f, "`{}` ", name)?;
+            write!(f, "{} ", name)?;
         }
         write!(f, "FROM {}", self.inner)
     }
@@ -739,7 +739,7 @@ pub fn create_cached_query(
         let (i, _) = tag_no_case("cache")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, always) = opt(terminated(tag_no_case("always"), whitespace1))(i)?;
-        let (i, name) = opt(terminated(dialect.identifier(), whitespace1))(i)?;
+        let (i, name) = opt(terminated(table_reference(dialect), whitespace1))(i)?;
         let (i, _) = tag_no_case("from")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, inner) = cached_query_inner(dialect)(i)?;
@@ -1518,7 +1518,7 @@ mod tests {
                 create_cached_query(Dialect::MySQL),
                 b"CREATE CACHE foo FROM q_0123456789ABCDEF"
             );
-            assert_eq!(res.name.unwrap(), "foo");
+            assert_eq!(res.name.unwrap(), Table::from("foo"));
             let id = match res.inner {
                 CacheInner::Id(s) => s,
                 _ => panic!(),

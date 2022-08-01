@@ -61,7 +61,7 @@ impl Recipe {
                 statement,
                 always,
             } => SqlQuery::CreateCache(CreateCacheStatement {
-                name: Some(name.clone()),
+                name: Some(name.clone().into()), // TODO: schema
                 inner: CacheInner::Statement(Box::new(statement.clone())),
                 always: *always,
             }),
@@ -226,7 +226,7 @@ impl Recipe {
                     };
                     if let Some(name) = &ccqs.name {
                         let expression = RecipeExpr::Cache {
-                            name: name.clone(),
+                            name: name.name.clone(), // TODO: schema
                             statement: statement.clone(),
                             always: ccqs.always,
                         };
@@ -237,7 +237,11 @@ impl Recipe {
                         }
                     }
 
-                    let name = self.inc.add_query(ccqs.name, statement.clone(), mig)?;
+                    let name = self.inc.add_query(
+                        ccqs.name.map(|t| t.name /* TODO: schema */),
+                        statement.clone(),
+                        mig,
+                    )?;
                     self.registry.add_query(RecipeExpr::Cache {
                         name,
                         statement,

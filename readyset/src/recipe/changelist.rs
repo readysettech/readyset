@@ -121,7 +121,7 @@ impl FromStr for ChangeList {
                                 }))
                             }
                             SqlQuery::DropCache(dcs) => changes.push(Change::Drop {
-                                name: dcs.name,
+                                name: dcs.name.name, // TODO: schema
                                 if_exists: false,
                             }),
                             _ => unsupported!(
@@ -213,7 +213,7 @@ impl Change {
         N: Into<SqlIdentifier>,
     {
         Self::CreateCache(CreateCacheStatement {
-            name: Some(name.into()),
+            name: Some(name.into().into()), // TODO: schema
             inner: CacheInner::Statement(Box::new(statement)),
             always,
         })
