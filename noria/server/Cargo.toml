@@ -116,9 +116,6 @@ test-strategy = "0.2.0"
 rust_decimal = "1.25"
 triomphe = "0.1"
 
-[[example]]
-name = "local-server"
-
 [[bench]]
 name = "dataflow"
 harness = false

@@ -35,6 +35,3 @@ tracing = "0.1.29"
 [dev-dependencies]
 tokio = { version = "1.15", features = ["macros", "net"] }
 tokio-test = "0.4.1"
-
-[[example]]
-name = "serve_one"
