@@ -1,0 +1,17 @@
+statement ok
+CREATE TABLE notes(
+  id INTEGER PRIMARY KEY,
+  title TINYTEXT
+)
+
+statement ok
+INSERT INTO notes (id, title) VALUES (1, 'test_1')
+
+query IT nosort
+SELECT * FROM notes WHERE id = ?
+? = 1
+----
+1
+test_1
+
+

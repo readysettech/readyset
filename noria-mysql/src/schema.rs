@@ -81,12 +81,7 @@ pub(crate) fn convert_column(
             // TODO(grfn): Make sure that's the case
             MYSQL_TYPE_FLOAT
         }
-        SqlType::Tinytext => {
-            // TODO(grfn): How does the mysql binary protocol handle
-            // tinytext? is it just an alias for tinyblob or is there a flag
-            // we need?
-            unsupported!()
-        }
+        SqlType::Tinytext => MYSQL_TYPE_BLOB,
         SqlType::Date => MYSQL_TYPE_DATE,
         SqlType::Timestamp => MYSQL_TYPE_TIMESTAMP,
         SqlType::TimestampTz => {
