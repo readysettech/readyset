@@ -104,6 +104,3 @@ tempfile = "3.2"
 [lib]
 path = "src/lib.rs"
 name = "noria"
-
-[[example]]
-name = "quickstart"

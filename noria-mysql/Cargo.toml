@@ -48,9 +48,3 @@ test-strategy = "0.2.0"
 vertical_tests = []
 # Redact the display of strings marked sensitive from logs and error messages
 redact_sensitive = ["launchpad/redact_sensitive"]
-
-[[example]]
-name = "basic_demo"
-
-[[example]]
-name = "ryw"
