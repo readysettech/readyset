@@ -15,4 +15,5 @@ provider.tf
 tags
 docker-compose.override.yml
 *.db
+*.auth
 .readyset-history
