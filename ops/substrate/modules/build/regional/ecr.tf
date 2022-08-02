@@ -18,6 +18,7 @@ locals {
     "php",
     "python",
     "ruby",
+    "wordpress",
 
     "debian",
     "alpine",
