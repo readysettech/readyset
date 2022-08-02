@@ -744,7 +744,7 @@ pub enum ReadQuery {
 }
 
 /// The result of a lookup to a view.
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum LookupResult<D> {
     /// The view query was executed in non-blocking mode and resulted in a cache miss.
     NonBlockingMiss,
@@ -875,6 +875,7 @@ impl ViewBuilder {
             let mut rpcs = rpcs
                 .lock()
                 .map_err(|e| internal_err!("mutex was poisoned: '{}'", e))?;
+            #[allow(clippy::significant_drop_in_scrutinee)]
             let s = match rpcs.entry((*shard_addr, shardi)) {
                 Entry::Occupied(e) => e.get().clone(),
                 Entry::Vacant(h) => {
@@ -1158,7 +1159,7 @@ impl Service<ViewQuery> for View {
 impl View {
     /// Get the list of columns in this view.
     pub fn columns(&self) -> &[SqlIdentifier] {
-        &*self.columns
+        &self.columns
     }
 
     /// Get a slice of the columns.

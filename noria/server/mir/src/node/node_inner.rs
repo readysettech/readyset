@@ -513,7 +513,7 @@ impl MirNodeInner {
                 match *other {
                     // both nodes are `Reuse` nodes, so we simply compare the both sides' reuse
                     // target
-                    MirNodeInner::Reuse { ref node } => us.borrow().can_reuse_as(&*node.borrow()),
+                    MirNodeInner::Reuse { ref node } => us.borrow().can_reuse_as(&node.borrow()),
                     // we're a `Reuse`, the other side isn't, so see if our reuse target's `inner`
                     // can be reused for the other side. It's sufficient to check the target's
                     // `inner` because reuse implies that our target has at least a superset of our

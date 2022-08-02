@@ -7,7 +7,7 @@ use nom_sql::{
     Column, CommonTableExpr, JoinRightSide, SelectStatement, SqlIdentifier, SqlQuery, TableExpr,
 };
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum TableAliasRewrite {
     /// An alias to a base table was rewritten
     Table {

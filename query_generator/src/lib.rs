@@ -687,7 +687,7 @@ impl PartialEq for RandomStringGenerator {
     }
 }
 
-impl<'a, S: AsRef<str>> From<S> for RandomStringGenerator {
+impl<S: AsRef<str>> From<S> for RandomStringGenerator {
     fn from(s: S) -> Self {
         let s = s.as_ref();
         Self {
@@ -2731,7 +2731,7 @@ impl<'a> IntoIterator for &'a Operations {
     type IntoIter = <&'a Vec<QueryOperation> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        (&self.0).iter()
+        self.0.iter()
     }
 }
 

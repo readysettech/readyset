@@ -18,7 +18,7 @@ use crate::processing::{
 };
 
 /// Kind of join
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum JoinType {
     /// Left join between two views
     Left,

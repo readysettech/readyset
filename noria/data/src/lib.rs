@@ -433,13 +433,11 @@ impl DataType {
                 _ => Err(mk_err()),
             },
             DataType::Time(_) | DataType::ByteArray(_) | DataType::Max => Err(mk_err()),
-            DataType::PassThrough(ref p) => {
-                return Err(ReadySetError::DataTypeConversionError {
-                    src_type: format!("PassThrough[{}]", p.ty),
-                    target_type: ty.to_string(),
-                    details: "PassThrough items cannot be coerced".into(),
-                })
-            }
+            DataType::PassThrough(ref p) => Err(ReadySetError::DataTypeConversionError {
+                src_type: format!("PassThrough[{}]", p.ty),
+                target_type: ty.to_string(),
+                details: "PassThrough items cannot be coerced".into(),
+            }),
         }
     }
 
@@ -486,9 +484,9 @@ impl PartialEq for DataType {
             use std::slice;
             // if the two datatypes are byte-for-byte identical, they're the same.
             let a: &[u8] =
-                slice::from_raw_parts(&*self as *const _ as *const u8, mem::size_of::<Self>());
+                slice::from_raw_parts(self as *const _ as *const u8, mem::size_of::<Self>());
             let b: &[u8] =
-                slice::from_raw_parts(&*other as *const _ as *const u8, mem::size_of::<Self>());
+                slice::from_raw_parts(other as *const _ as *const u8, mem::size_of::<Self>());
             if a == b {
                 return true;
             }

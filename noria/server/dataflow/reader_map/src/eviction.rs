@@ -184,7 +184,7 @@ impl LRUEviction {
         ctrs_save
             .into_iter()
             .zip(data.iter())
-            .filter_map(move |(ctr, kv)| (ctr <= cutoff).then(|| kv))
+            .filter_map(move |(ctr, kv)| (ctr <= cutoff).then_some(kv))
     }
 }
 
@@ -273,7 +273,7 @@ impl GenerationalEviction {
             .zip(data.iter())
             .filter_map(move |(gen, kv)| match gen {
                 g if g < last_gen_to_evict => Some(kv),
-                g if g == last_gen_to_evict => rng.gen_bool(rand_ratio).then(|| kv),
+                g if g == last_gen_to_evict => rng.gen_bool(rand_ratio).then_some(kv),
                 _ => None,
             })
     }

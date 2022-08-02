@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// assert_eq!(map.get(node_1), Some(&"node 1".to_owned()));
 /// ```
-#[derive(Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct NodeMap<T> {
     /// The number of items in the Map.
     ///

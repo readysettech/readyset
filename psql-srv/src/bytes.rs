@@ -44,7 +44,7 @@ mod tests {
         let mut buf = BytesMut::with_capacity(10);
         buf.put(&b"foo"[..]);
         let s = BytesStr::try_from(buf.freeze());
-        assert!(s.is_ok());
+        s.unwrap();
     }
 
     #[test]
@@ -52,7 +52,7 @@ mod tests {
         let mut buf = BytesMut::with_capacity(10);
         buf.put(&b"foo\xff"[..]);
         let s = BytesStr::try_from(buf.freeze());
-        assert!(s.is_err());
+        s.unwrap_err();
     }
 
     #[test]

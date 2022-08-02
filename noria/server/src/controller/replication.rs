@@ -19,7 +19,7 @@ pub struct ReplicationOptions {
 ///
 /// This configuration is specified for an entire cluster, and can be built from command-line
 /// options by converting from [`ReplicationOptions`].
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReplicationStrategy {
     /// Never replicate domains
     Never,

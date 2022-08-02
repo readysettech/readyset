@@ -543,6 +543,7 @@ fn get_reader_from_cache<'a>(
         // refer to the global_readers.
         entry => {
             let readers = global_readers.lock().unwrap();
+            #[allow(clippy::significant_drop_in_scrutinee)]
             match readers.get(target) {
                 None => {
                     if let Occupied(v) = entry {

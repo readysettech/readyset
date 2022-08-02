@@ -36,14 +36,14 @@ pub type AdapterId = String;
 
 /// A response to a `worker_heartbeat`, to inform the worker of its
 /// status within the system.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum AuthorityWorkerHeartbeatResponse {
     Alive,
     Failed,
 }
 
 /// The set of possible results to retrieving the new leader.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum GetLeaderResult {
     NewLeader(LeaderPayload),
     Unchanged,
@@ -52,7 +52,7 @@ pub enum GetLeaderResult {
 
 /// Restriction for how domains containing a particular kind of node can be scheduled onto a
 /// particular worker.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum NodeTypeSchedulingRestriction {
     /// No restrictions: all domains with or without this node type may be scheduled onto this
     /// worker
@@ -72,7 +72,7 @@ impl Default for NodeTypeSchedulingRestriction {
 /// Configuration for how domains should be scheduled onto a particular worker.
 ///
 /// The [`Default`] value for this struct allows any domain to be scheduled onto any worker.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Default)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Default)]
 pub struct WorkerSchedulingConfig {
     /// Identifier for the persistent volume associated with this worker, if any. This is used to
     /// make sure that once a domain with a particular base table is scheduled onto a worker, that
@@ -86,7 +86,7 @@ pub struct WorkerSchedulingConfig {
 /// Initial registration request body, sent from workers to controllers.
 /// ///
 /// (used for the `/worker_rx/register` route)
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct WorkerDescriptor {
     /// URI at which the worker can be reached.
     pub worker_uri: Url,

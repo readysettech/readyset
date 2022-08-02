@@ -292,7 +292,7 @@ mod tests {
                 ]),
             };
             let res = offsets.max_offset();
-            assert!(res.is_err());
+            res.unwrap_err();
         }
 
         #[test]

@@ -35,7 +35,7 @@ impl FromStr for Command {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
     pub timestamp: DateTime<Utc>,
     pub id: u32,

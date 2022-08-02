@@ -11,10 +11,9 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::lazy::SyncOnceCell;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use anyhow::Error;
@@ -41,7 +40,7 @@ type SharedStateHandle = Arc<SharedState>;
 type SharedStore = Arc<Mutex<HashMap<String, SharedStateHandle>>>;
 /// A singleton shared state store for the process, since all readyset workers inside a given
 /// process are supposed to have access to the same shared state, it is implemented as a static.
-static SHARED_STORE: SyncOnceCell<SharedStore> = SyncOnceCell::new();
+static SHARED_STORE: OnceLock<SharedStore> = OnceLock::new();
 
 struct SharedState {
     db: RwLock<DB>,

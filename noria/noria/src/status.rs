@@ -21,7 +21,7 @@ const SNAPSHOT_STATUS_VARIABLE: &str = "Snapshot Status";
 /// [`SHOW STATUS`](https://dev.mysql.com/doc/refman/8.0/en/show-status.html) in MySQL.
 ///
 /// Returned via the /status RPC and SHOW READYSET STATUS.
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct ReadySetStatus {
     /// The snapshot status of the current leader.
     pub snapshot_status: SnapshotStatus,
@@ -79,7 +79,7 @@ impl TryFrom<Vec<Row>> for ReadySetStatus {
 }
 
 /// Whether or not snapshotting has completed.
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub enum SnapshotStatus {
     /// Snapshotting has not yet completed.
     InProgress,

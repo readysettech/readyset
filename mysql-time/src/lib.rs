@@ -612,7 +612,7 @@ impl ConvIr<MysqlTime> for ParseIr<MysqlTime> {
                     value: v,
                 })
             }
-            Value::Bytes(val_bytes) => match MysqlTime::from_bytes(&*val_bytes) {
+            Value::Bytes(val_bytes) => match MysqlTime::from_bytes(&val_bytes) {
                 Ok(time) => Ok(ParseIr {
                     output: time,
                     value: Value::Bytes(val_bytes),

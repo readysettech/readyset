@@ -1462,8 +1462,8 @@ mod tests {
                 .with_timezone(&target_tz)
                 .naive_local();
             assert_eq!(super::convert_tz(&datetime, src, target).unwrap(), expected);
-            assert!(super::convert_tz(&datetime, "invalid timezone", target).is_err());
-            assert!(super::convert_tz(&datetime, src, "invalid timezone").is_err());
+            super::convert_tz(&datetime, "invalid timezone", target).unwrap_err();
+            super::convert_tz(&datetime, src, "invalid timezone").unwrap_err();
         }
 
         #[proptest]

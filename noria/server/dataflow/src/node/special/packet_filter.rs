@@ -15,7 +15,7 @@ use crate::Packet;
 type ColumnIndexes = Vec<usize>;
 
 /// The set of keys that have been requested for a particular node
-#[derive(Serialize, Deserialize, PartialEq, Clone, Default, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Default, Debug)]
 pub struct NodeKeys {
     /// The allowed keys, grouped by the column indexes they act upon.
     keys: HashMap<ColumnIndexes, HashSet<KeyComparison>>,
@@ -28,7 +28,7 @@ pub struct NodeKeys {
 /// internal allowlist, which is then used to filter regular update messages. Filtering is disabled
 /// by default, and can be enabled by adding the desired destination domain's ingress node to the
 /// filter list.
-#[derive(Serialize, Deserialize, PartialEq, Clone, Default)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Default)]
 pub struct PacketFilter {
     /// Stores the information needed to filter [`Record`]s from [`Packet::Message`]s.
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]

@@ -731,7 +731,7 @@ mod tests {
         assert_eq!(res2.offset, Some(10.into()));
         assert_eq!(res3.limit, Some(10.into()));
         assert_eq!(res3.offset, Some(5.into()));
-        assert!(res3_pgsql.is_err());
+        res3_pgsql.unwrap_err();
     }
 
     #[test]
@@ -1442,11 +1442,11 @@ mod tests {
     fn join_against_nested_select() {
         let t1 = b"(SELECT ol_i_id FROM order_line) AS ids";
 
-        assert!(join_rhs(Dialect::MySQL)(t1).is_ok());
+        join_rhs(Dialect::MySQL)(t1).unwrap();
 
         let t1 = b"JOIN (SELECT ol_i_id FROM order_line) AS ids ON (orders.o_id = ids.ol_i_id)";
 
-        assert!(join_clause(Dialect::MySQL)(t1).is_ok());
+        join_clause(Dialect::MySQL)(t1).unwrap();
 
         let qstr_with_alias = "SELECT o_id, ol_i_id FROM orders JOIN \
                                (SELECT ol_i_id FROM order_line) AS ids \

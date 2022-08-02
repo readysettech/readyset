@@ -98,9 +98,9 @@ fn do_flatten_conditional(
             // WHERE A.a = AND a.b = 2
             // but also bogus stuff like `WHERE 1 = 1 AND 2 = 2`.
             let pre_count = flattened.len();
-            do_flatten_conditional(&*lhs, pkey, flattened)? && {
+            do_flatten_conditional(lhs, pkey, flattened)? && {
                 let count = flattened.len();
-                let valid = do_flatten_conditional(&*rhs, pkey, flattened)?;
+                let valid = do_flatten_conditional(rhs, pkey, flattened)?;
                 valid && (pre_count == flattened.len() || count == flattened.len())
             }
         }
@@ -109,8 +109,8 @@ fn do_flatten_conditional(
             ref lhs,
             ref rhs,
         } => {
-            do_flatten_conditional(&*lhs, pkey, flattened)?
-                && do_flatten_conditional(&*rhs, pkey, flattened)?
+            do_flatten_conditional(lhs, pkey, flattened)?
+                && do_flatten_conditional(rhs, pkey, flattened)?
         }
         _ => false,
     })

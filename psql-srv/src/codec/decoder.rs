@@ -470,7 +470,7 @@ mod tests {
         buf.put_i32(9); // size
         buf.put_i32(80877103); // ssl request code
         buf.put_u8(4); // extra byte
-        assert!(codec.decode(&mut buf).is_err());
+        codec.decode(&mut buf).unwrap_err();
     }
 
     #[test]
@@ -498,7 +498,7 @@ mod tests {
         let mut buf = BytesMut::new();
         buf.put_i32(4 + 2); // size
         buf.put_i16(0); // incomplete protocol version
-        assert!(codec.decode(&mut buf).is_err());
+        codec.decode(&mut buf).unwrap_err();
     }
 
     #[test]
@@ -509,7 +509,7 @@ mod tests {
         buf.put_i32(196608); // standard protocol version
         buf.extend_from_slice(b"user\0");
         buf.extend_from_slice(b"user_name"); // trailing nul missing
-        assert!(codec.decode(&mut buf).is_err());
+        codec.decode(&mut buf).unwrap_err();
     }
 
     #[test]
@@ -520,7 +520,7 @@ mod tests {
         buf.put_i32(196608); // standard protocol version
         buf.extend_from_slice(b"user\0");
         // value of user field is missing
-        assert!(codec.decode(&mut buf).is_err());
+        codec.decode(&mut buf).unwrap_err();
     }
 
     #[test]
@@ -653,7 +653,7 @@ mod tests {
         codec.set_statement_param_types("prepared_statement_name", vec![Type::TEXT]);
         let mut buf = BytesMut::new();
         buf.put_u8(b'B'); // message id
-        buf.put_i32(4 + 12 + 24 + 2 + 1 * 2 + 2 + 4 + 10 + 2); // size
+        buf.put_i32(4 + 12 + 24 + 2 + 2 + 2 + 4 + 10 + 2); // size
         buf.extend_from_slice(b"portal_name\0");
         buf.extend_from_slice(b"prepared_statement_name\0");
         buf.put_i16(1); // number of parameter format codes
@@ -662,7 +662,7 @@ mod tests {
         buf.put_i32(10); // value length
         buf.extend_from_slice(b"some text\0"); // value `some text\0` - nul not allowed
         buf.put_i16(0); // number of result format codes
-        assert!(codec.decode(&mut buf).is_err());
+        codec.decode(&mut buf).unwrap_err();
     }
 
     #[test]
@@ -679,7 +679,7 @@ mod tests {
         buf.put_i16(0); // number of parameter values
         buf.put_i16(1); // number of result format codes
                         // missing format code
-        assert!(codec.decode(&mut buf).is_err());
+        codec.decode(&mut buf).unwrap_err();
     }
 
     #[test]
@@ -721,7 +721,7 @@ mod tests {
         buf.put_i32(4 + 1 + 5); // size
         buf.put_u8(b'I'); // invalid name type
         buf.extend_from_slice(b"name\0");
-        assert!(codec.decode(&mut buf).is_err());
+        codec.decode(&mut buf).unwrap_err();
     }
 
     #[test]
@@ -731,7 +731,7 @@ mod tests {
         let mut buf = BytesMut::new();
         buf.put_u8(b'C'); // message id
         buf.put_i32(4); // size
-        assert!(codec.decode(&mut buf).is_err());
+        codec.decode(&mut buf).unwrap_err();
     }
 
     #[test]
@@ -773,7 +773,7 @@ mod tests {
         buf.put_i32(4 + 1 + 5); // size
         buf.put_u8(b'I'); // invalid name type
         buf.extend_from_slice(b"name\0");
-        assert!(codec.decode(&mut buf).is_err());
+        codec.decode(&mut buf).unwrap_err();
     }
 
     #[test]
@@ -841,7 +841,7 @@ mod tests {
         buf.extend_from_slice(b"SELECT * FROM bar WHERE a = $1 AND b = $2\0");
         buf.put_i16(1); // number of param types
         buf.put_i16(16); // incomplete type oid
-        assert!(codec.decode(&mut buf).is_err());
+        codec.decode(&mut buf).unwrap_err();
     }
 
     #[test]
@@ -856,7 +856,7 @@ mod tests {
         buf.put_i16(2); // number of param types
         buf.put_i32(16); // type oid Bool
                          // missing next type oid
-        assert!(codec.decode(&mut buf).is_err());
+        codec.decode(&mut buf).unwrap_err();
     }
 
     #[test]
@@ -881,7 +881,7 @@ mod tests {
         buf.put_u8(b'Q'); // message id
         buf.put_i32(4 + 17); // size
         buf.extend_from_slice(b"SELECT * FROM foo");
-        assert!(codec.decode(&mut buf).is_err());
+        codec.decode(&mut buf).unwrap_err();
     }
 
     #[test]
@@ -893,7 +893,7 @@ mod tests {
         buf.put_i32(4 + 19); // size
         buf.extend_from_slice(b"SELECT * FROM foo\0");
         buf.put_u8(b'X'); // extra byte
-        assert!(codec.decode(&mut buf).is_err());
+        codec.decode(&mut buf).unwrap_err();
     }
 
     #[test]
@@ -923,7 +923,7 @@ mod tests {
         buf.put_i32(4); // size
 
         // The codec returns an error when attempting to parse the invalid Close message.
-        assert!(codec.decode(&mut buf).is_err());
+        codec.decode(&mut buf).unwrap_err();
 
         // The codec successfully parses the Sync message. (The invalid Close message has been
         // skipped).

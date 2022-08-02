@@ -427,21 +427,21 @@ mod tests {
         fn trim_query() {
             let qstring = "   INSERT INTO users VALUES (42, \"test\");     ";
             let res = parse_query(Dialect::MySQL, qstring);
-            assert!(res.is_ok());
+            res.unwrap();
         }
 
         #[test]
         fn parse_byte_slice() {
             let qstring: &[u8] = b"INSERT INTO users VALUES (42, \"test\");";
             let res = parse_query_bytes(Dialect::MySQL, qstring);
-            assert!(res.is_ok());
+            res.unwrap();
         }
 
         #[test]
         fn parse_byte_vector() {
             let qstring: Vec<u8> = b"INSERT INTO users VALUES (42, \"test\");".to_vec();
             let res = parse_query_bytes(Dialect::MySQL, &qstring);
-            assert!(res.is_ok());
+            res.unwrap();
         }
 
         #[test]
@@ -492,21 +492,21 @@ mod tests {
         fn trim_query() {
             let qstring = "   INSERT INTO users VALUES (42, 'test');     ";
             let res = parse_query(Dialect::PostgreSQL, qstring);
-            assert!(res.is_ok());
+            res.unwrap();
         }
 
         #[test]
         fn parse_byte_slice() {
             let qstring: &[u8] = b"INSERT INTO users VALUES (42, 'test');";
             let res = parse_query_bytes(Dialect::PostgreSQL, qstring);
-            assert!(res.is_ok());
+            res.unwrap();
         }
 
         #[test]
         fn parse_byte_vector() {
             let qstring: Vec<u8> = b"INSERT INTO users VALUES (42, 'test');".to_vec();
             let res = parse_query_bytes(Dialect::PostgreSQL, &qstring);
-            assert!(res.is_ok());
+            res.unwrap();
         }
 
         #[test]

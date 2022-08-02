@@ -192,7 +192,7 @@ impl Ingredient for Paginate {
             self.project_group(&***a)
                 .unwrap_or_default()
                 .cmp(&self.project_group(&***b).unwrap_or_default())
-                .then_with(|| self.order.cmp(&***a, &***b))
+                .then_with(|| self.order.cmp(a, b))
         });
 
         let us = self.our_index.unwrap();

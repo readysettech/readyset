@@ -1314,7 +1314,7 @@ mod tests {
         let authority_new = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
         authority_new.init().await.unwrap();
 
-        assert!(authority_new
+        authority_new
             .update_controller_state(
                 |n: Option<u32>| -> Result<u32, ()> {
                     match n {
@@ -1325,10 +1325,10 @@ mod tests {
                         }),
                     }
                 },
-                |_| ()
+                |_| (),
             )
             .await
-            .is_err());
+            .unwrap_err();
 
         authority.destroy_session().await.unwrap();
 

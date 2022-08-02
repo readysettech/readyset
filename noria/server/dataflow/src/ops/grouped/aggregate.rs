@@ -12,7 +12,7 @@ use crate::ops::grouped::{GroupedOperation, GroupedOperator};
 use crate::prelude::*;
 
 /// Supported aggregation operators.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Aggregation {
     /// Count the number of records for each group. The value for the `over` column is ignored.
     Count {
@@ -77,15 +77,9 @@ impl Aggregation {
     ///
     /// Currently we only ignore nulls in the case of count(*).
     fn count_nulls(&self) -> bool {
-        match self {
-            // Only ignore nulls in the Count case if we've been instructed to. This is
-            // necessary for supporting count(*) where nulls are not ignored.
-            Aggregation::Count { count_nulls } if *count_nulls => true,
-            _ => {
-                // Always ignore nulls for all other agg func types.
-                false
-            }
-        }
+        // Only ignore nulls in the Count case if we've been instructed to. This is
+        // necessary for supporting count(*) where nulls are not ignored.
+        matches!(self, Aggregation::Count { count_nulls } if *count_nulls)
     }
 }
 

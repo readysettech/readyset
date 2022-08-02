@@ -49,7 +49,7 @@ fn check_select_statement<'a>(
             };
         }
 
-        if let Some(tbl) = stmt.tables.iter().find(|t| table_matches(*t)) {
+        if let Some(tbl) = stmt.tables.iter().find(|t| table_matches(t)) {
             Ok(once_ok!(tbl.table.name.as_str(), col.name.as_str()))
         } else {
             let ctes = cte_ctx
@@ -114,7 +114,7 @@ fn check_select_statement<'a>(
                         break;
                     }
                     JoinRightSide::Tables(ts) => {
-                        if let Some(tbl) = ts.iter().find(|t| table_matches(*t)) {
+                        if let Some(tbl) = ts.iter().find(|t| table_matches(t)) {
                             res = Some(once_ok!(tbl.table.name.as_str(), col.name.as_str()));
                             break;
                         }

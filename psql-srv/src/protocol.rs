@@ -1003,7 +1003,7 @@ mod tests {
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
         // A StartupMessage with no database specified triggers an error.
-        assert!(block_on(protocol.on_request(request, &mut backend, &mut channel)).is_err(),);
+        block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap_err();
     }
 
     #[test]
@@ -1013,7 +1013,7 @@ mod tests {
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream, Vec<Value>>::new(NullBytestream);
         // A Sync message cannot be sent until after a StartupMessage has been sent.
-        assert!(block_on(protocol.on_request(request, &mut backend, &mut channel)).is_err(),);
+        block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap_err();
     }
 
     #[test]
@@ -1035,7 +1035,7 @@ mod tests {
             user: Some(bytes_str("user_name")),
             database: Some(bytes_str("database_name")),
         };
-        assert!(block_on(protocol.on_request(request, &mut backend, &mut channel)).is_err(),);
+        block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap_err();
     }
 
     #[test]
@@ -1151,7 +1151,7 @@ mod tests {
         let request = FrontendMessage::Query {
             query: bytes_str("SELECT * FROM test;"),
         };
-        assert!(block_on(protocol.on_request(request, &mut backend, &mut channel)).is_err());
+        block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap_err();
     }
 
     #[test]
@@ -1251,7 +1251,7 @@ mod tests {
             query: bytes_str("SELECT * FROM test WHERE x = $1 AND y = $2;"),
             parameter_data_types: vec![Type::FLOAT8, Type::INT4],
         };
-        assert!(block_on(protocol.on_request(request, &mut backend, &mut channel)).is_err());
+        block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap_err();
     }
 
     #[test]
@@ -1422,7 +1422,7 @@ mod tests {
                 TransferFormat::Binary,
             ],
         };
-        assert!(block_on(protocol.on_request(request, &mut backend, &mut channel)).is_err());
+        block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap_err();
     }
 
     #[test]
@@ -1452,7 +1452,7 @@ mod tests {
             params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
             result_transfer_formats: vec![],
         };
-        assert!(block_on(protocol.on_request(request, &mut backend, &mut channel)).is_err());
+        block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap_err();
     }
 
     #[test]
@@ -1652,7 +1652,7 @@ mod tests {
         let request = FrontendMessage::Describe {
             name: PreparedStatement(bytes_str("prepared_name_does_not_exist")),
         };
-        assert!(block_on(protocol.on_request(request, &mut backend, &mut channel)).is_err());
+        block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap_err();
     }
 
     #[test]
@@ -1735,7 +1735,7 @@ mod tests {
         let request = FrontendMessage::Describe {
             name: Portal(bytes_str("portal_name_does_not_exist")),
         };
-        assert!(block_on(protocol.on_request(request, &mut backend, &mut channel)).is_err());
+        block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap_err();
     }
 
     #[test]
@@ -1835,7 +1835,7 @@ mod tests {
             portal_name: bytes_str("portal1"),
             limit: 0,
         };
-        assert!(block_on(protocol.on_request(request, &mut backend, &mut channel)).is_err());
+        block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap_err();
     }
 
     #[test]

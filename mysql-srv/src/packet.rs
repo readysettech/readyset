@@ -356,7 +356,7 @@ impl<'a> AsRef<[u8]> for Packet<'a> {
         if self.1.is_empty() {
             self.0
         } else {
-            &*self.1
+            &self.1
         }
     }
 }

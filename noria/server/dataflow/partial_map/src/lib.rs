@@ -43,7 +43,7 @@ use merging_interval_tree::IntervalTreeSet;
 /// map.insert_range(0..=10);
 /// assert_eq!(map.get(&1), Some(&vec![]));
 /// ````
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Eq, Clone)]
 pub struct PartialMap<K, V> {
     map: BTreeMap<K, V>,
     // NOTE: duplicating the key here is unfortunate - in the future post profiling we may want to

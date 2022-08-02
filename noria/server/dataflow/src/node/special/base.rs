@@ -18,14 +18,14 @@ use vec_map::VecMap;
 use crate::prelude::*;
 use crate::processing::LookupIndex;
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum SetSnapshotMode {
     EnterSnapshotMode,
     FinishSnapshotMode,
 }
 
 /// A batch of writes to be persisted to the state backing a [`Base`] node
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct BaseWrite {
     /// The records to be written
     pub records: Records,

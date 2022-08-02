@@ -353,8 +353,7 @@ impl Worker {
                 };
                 let dh = self.domains.get_mut(&replica_address).ok_or_else(nsde)?;
                 let (tx, rx) = oneshot::channel();
-                let _ = dh
-                    .req_tx
+                dh.req_tx
                     .send(WrappedDomainRequest {
                         req: *request,
                         done_tx: tx,

@@ -174,7 +174,7 @@ fn increment_epoch(db: &rocksdb::DB) -> PersistentMeta<'static> {
     meta
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub enum SnapshotMode {
     SnapshotModeEnabled,
     SnapshotModeDisabled,
@@ -187,7 +187,7 @@ impl SnapshotMode {
 }
 
 /// Indicates to what degree updates should be persisted.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DurabilityMode {
     /// Don't do any durability
     MemoryOnly,
@@ -215,7 +215,7 @@ impl FromStr for DurabilityMode {
 }
 
 /// Parameters to control the operation of GroupCommitQueue.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PersistenceParameters {
     /// Whether the output files should be deleted when the GroupCommitQueue is dropped.
     pub mode: DurabilityMode,

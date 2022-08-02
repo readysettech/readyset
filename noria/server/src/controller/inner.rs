@@ -134,6 +134,7 @@ impl Leader {
     }
 
     #[failpoint("controller-request")]
+    #[allow(clippy::let_unit_value)]
     pub(super) fn external_request(
         &self,
         method: hyper::Method,

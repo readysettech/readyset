@@ -132,7 +132,7 @@ pub enum InitialState {
     },
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ReplayPieceContext {
     Partial {
         for_keys: HashSet<KeyComparison>,
@@ -149,7 +149,7 @@ pub enum ReplayPieceContext {
     },
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceChannelIdentifier {
     pub token: u64,
     pub tag: u32,
@@ -164,7 +164,7 @@ pub struct SourceChannelIdentifier {
 ///
 /// [`Egress`]: crate::node::special::Egress
 /// [`Sharder`]: crate::node::special::Sharder
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SenderReplication {
     /// Send all messages to the same replica index as the current domain.
     ///
@@ -333,7 +333,7 @@ pub enum DomainRequest {
 /// dataflow code that only know how to handle one kind of packet don't have to panic if they
 /// receive the wrong kind of packet. See
 /// [ENG-455](https://readysettech.atlassian.net/browse/ENG-455)
-#[derive(Clone, Serialize, Deserialize, PartialEq, EnumDiscriminants)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, EnumDiscriminants)]
 #[strum_discriminants(derive(EnumIter, EnumCount, IntoStaticStr))]
 #[allow(clippy::large_enum_variant)]
 pub enum Packet {

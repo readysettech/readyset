@@ -11,7 +11,7 @@ use crate::MirNodeRef;
 /// reflecting a pre-specified name), new nodes added for the query, reused nodes that are part of
 /// the query, and the leaf node that represents the query result (and off whom we've hung a
 /// `Reader` node),
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QueryFlowParts {
     pub name: SqlIdentifier,
     pub new_nodes: Vec<NodeIndex>,

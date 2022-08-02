@@ -406,11 +406,8 @@ where
             futures_util::stream::select(
                 ctrlc
                     .map(|r| {
-                        if let Err(e) = r {
-                            Err(e)
-                        } else {
-                            Err(io::Error::new(io::ErrorKind::Interrupted, "got ctrl-c"))
-                        }
+                        r?;
+                        Err(io::Error::new(io::ErrorKind::Interrupted, "got ctrl-c"))
                     })
                     .into_stream(),
                 sigterm

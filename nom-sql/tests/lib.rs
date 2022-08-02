@@ -104,32 +104,32 @@ fn parse_file(dialect: Dialect, path: &str) -> (i32, i32) {
 #[test]
 #[ignore]
 fn hotcrp_queries() {
-    assert!(test_queries_from_file(
+    test_queries_from_file(
         Dialect::MySQL,
         Path::new("tests/hotcrp-queries.txt"),
-        "HotCRP"
+        "HotCRP",
     )
-    .is_ok());
+    .unwrap();
 }
 
 #[test]
 fn hyrise_test_queries() {
-    assert!(test_queries_from_file(
+    test_queries_from_file(
         Dialect::MySQL,
         Path::new("tests/hyrise-test-queries.txt"),
-        "HyRise"
+        "HyRise",
     )
-    .is_ok());
+    .unwrap();
 }
 
 #[test]
 fn tpcw_test_queries() {
-    assert!(test_queries_from_file(
+    test_queries_from_file(
         Dialect::MySQL,
         Path::new("tests/tpc-w-queries.txt"),
-        "TPC-W"
+        "TPC-W",
     )
-    .is_ok());
+    .unwrap();
 }
 
 #[test]
@@ -139,7 +139,7 @@ fn tpcw_test_tables() {
         Path::new("tests/tpc-w-tables.txt"),
         "TPC-W tables",
     );
-    assert!(res.is_ok());
+    res.unwrap();
     // There are 10 tables
     assert_eq!(res.unwrap(), 10);
 }
@@ -151,7 +151,7 @@ fn exists_test_queries() {
         Path::new("tests/exists-queries.txt"),
         "exists/not-exists queries",
     );
-    assert!(res.is_ok());
+    res.unwrap();
     // There are 4 queries
     assert_eq!(res.unwrap(), 4);
 }
@@ -163,7 +163,7 @@ fn finkelstein82_test_queries() {
         Path::new("tests/finkelstein82.txt"),
         "Finkelstein 1982",
     );
-    assert!(res.is_ok());
+    res.unwrap();
     // There are 3 tables and 6 queries
     assert_eq!(res.unwrap(), 9);
 }

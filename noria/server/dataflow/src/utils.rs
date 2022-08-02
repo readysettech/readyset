@@ -11,7 +11,7 @@ pub fn dataflow_column(name: &str) -> Column {
 pub fn make_columns(names: &[&str]) -> Vec<Column> {
     let mut res = Vec::with_capacity(names.len());
     for name in names {
-        res.push(dataflow_column(*name));
+        res.push(dataflow_column(name));
     }
     res
 }

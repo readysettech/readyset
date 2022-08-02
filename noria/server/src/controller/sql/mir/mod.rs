@@ -1026,7 +1026,7 @@ impl SqlToMirConverter {
                     projected_exprs
                         .get(expr)
                         .cloned()
-                        .ok_or_else(|| mk_error!(&*expr))?,
+                        .ok_or_else(|| mk_error!(expr))?,
                 ),
                 GroupedNodeType::Aggregation(Aggregation::Count { count_nulls }),
                 distinct,
@@ -1045,7 +1045,7 @@ impl SqlToMirConverter {
                     projected_exprs
                         .get(expr)
                         .cloned()
-                        .ok_or_else(|| mk_error!(&*expr))?,
+                        .ok_or_else(|| mk_error!(expr))?,
                 ),
                 GroupedNodeType::Aggregation(Aggregation::Avg),
                 distinct,
@@ -1063,7 +1063,7 @@ impl SqlToMirConverter {
                     projected_exprs
                         .get(expr)
                         .cloned()
-                        .ok_or_else(|| mk_error!(&*expr))?,
+                        .ok_or_else(|| mk_error!(expr))?,
                 ),
                 GroupedNodeType::Extremum(Extremum::Max),
                 false,
@@ -1079,7 +1079,7 @@ impl SqlToMirConverter {
                     projected_exprs
                         .get(expr)
                         .cloned()
-                        .ok_or_else(|| mk_error!(&*expr))?,
+                        .ok_or_else(|| mk_error!(expr))?,
                 ),
                 GroupedNodeType::Extremum(Extremum::Min),
                 false,

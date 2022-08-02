@@ -96,7 +96,7 @@ impl Ingredient for Project {
             Cow::Borrowed(columns)
         };
 
-        let res = self.lookup(*self.src, &*in_cols, key, nodes, states, mode)?;
+        let res = self.lookup(*self.src, &in_cols, key, nodes, states, mode)?;
         Ok(match emit {
             Some(emit) => res.map(move |r| {
                 let r = r?;

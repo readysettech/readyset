@@ -214,7 +214,7 @@ impl MySqlBinlogConnector {
         let packet = self.connection.read_packet().await?;
         // TODO: byte 0 of packet should be zero, unless EOF is reached, however we should never get
         // one without the NON_BLOCKING SQL flag set
-        assert_eq!(packet.get(0), Some(&0));
+        assert_eq!(packet.first(), Some(&0));
         let event = self.reader.read(&packet[1..])?;
         assert!(Self::validate_event_checksum(&event)); // TODO: definitely should never fail a CRC check, but what to do if we do?
         Ok(event)

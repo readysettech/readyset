@@ -98,7 +98,7 @@ impl From<mysql_time::ConvertError> for WalError {
 }
 
 /// `WalData` represents a single [WAL message](https://www.postgresql.org/docs/current/protocol-replication.html)
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum WalData {
     XLogData {
         /// The starting point of the WAL data in this message.
@@ -162,7 +162,7 @@ pub enum WalData {
     Unknown(Bytes),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct RelationMapping {
     /// ID of the relation.
     pub(crate) id: i32,
@@ -185,7 +185,7 @@ pub struct RelationMapping {
 
 /// `WalRecord` represents a [record](https://www.postgresql.org/docs/current/protocol-logicalrep-message-formats.html)
 /// in `WalData::XLogData`
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum WalRecord {
     /// Sent to indicate a transaction block
@@ -290,7 +290,7 @@ pub enum WalRecord {
 }
 
 /// Defines the type and metadata for a single column in a `Relation` mapping
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ColumnSpec {
     /// Flags for the column. Currently can be either 0 for no flags or 1 which marks the column as
     /// part of the key.
@@ -305,13 +305,13 @@ pub struct ColumnSpec {
 
 /// Stores tuple information for `INSERT`, `UPDATE` and `DELETE`.
 /// Tuple is the WAL term for a row, or partial row
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TupleData {
     pub(crate) n_cols: i16,
     pub(crate) cols: Vec<TupleEntry>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TupleEntry {
     Null,        // This is a null value
     Unchanged,   // Keep using the previous value

@@ -240,6 +240,7 @@ impl AuthorityControl for LocalAuthority {
         let mut inner = self.inner_write()?;
         inner.known_leader_epoch = Some(store_inner.leader_epoch);
 
+        #[allow(clippy::significant_drop_in_scrutinee)]
         match store_inner.keys.get(CONTROLLER_KEY) {
             Some(data) => match serde_json::from_slice(data) {
                 Ok(payload) => Ok(payload),

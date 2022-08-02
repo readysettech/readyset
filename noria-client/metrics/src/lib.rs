@@ -1,5 +1,3 @@
-#![feature(derive_default_enum)]
-
 use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
@@ -44,7 +42,7 @@ pub struct QueryExecutionEvent {
     pub cache_misses: Option<u64>,
 }
 
-#[derive(Debug, PartialEq, Serialize, Clone, Copy, Default)]
+#[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Default)]
 pub enum QueryDestination {
     #[default]
     Readyset,

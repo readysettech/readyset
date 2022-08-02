@@ -243,14 +243,14 @@ mod tests {
             let id7 = b"`state-province`";
             let id8 = b"`state\0province`";
 
-            assert!(Dialect::MySQL.identifier()(id1).is_ok());
-            assert!(Dialect::MySQL.identifier()(id2).is_ok());
-            assert!(Dialect::MySQL.identifier()(id3).is_ok());
-            assert!(Dialect::MySQL.identifier()(id4).is_err());
-            assert!(Dialect::MySQL.identifier()(id5).is_err());
-            assert!(Dialect::MySQL.identifier()(id6).is_ok());
-            assert!(Dialect::MySQL.identifier()(id7).is_ok());
-            assert!(Dialect::MySQL.identifier()(id8).is_err());
+            Dialect::MySQL.identifier()(id1).unwrap();
+            Dialect::MySQL.identifier()(id2).unwrap();
+            Dialect::MySQL.identifier()(id3).unwrap();
+            Dialect::MySQL.identifier()(id4).unwrap_err();
+            Dialect::MySQL.identifier()(id5).unwrap_err();
+            Dialect::MySQL.identifier()(id6).unwrap();
+            Dialect::MySQL.identifier()(id7).unwrap();
+            Dialect::MySQL.identifier()(id8).unwrap_err();
         }
 
         #[test]
@@ -291,7 +291,7 @@ mod tests {
 
             // Malformed string
             let res = Dialect::MySQL.bytes_literal()(b"''");
-            assert!(res.is_err());
+            res.unwrap_err();
         }
     }
 
@@ -308,13 +308,13 @@ mod tests {
             let id6 = b"\"primary\"";
             let id7 = b"\"state-province\"";
 
-            assert!(Dialect::PostgreSQL.identifier()(id1).is_ok());
-            assert!(Dialect::PostgreSQL.identifier()(id2).is_ok());
-            assert!(Dialect::PostgreSQL.identifier()(id3).is_ok());
-            assert!(Dialect::PostgreSQL.identifier()(id4).is_err());
-            assert!(Dialect::PostgreSQL.identifier()(id5).is_err());
-            assert!(Dialect::PostgreSQL.identifier()(id6).is_ok());
-            assert!(Dialect::PostgreSQL.identifier()(id7).is_ok());
+            Dialect::PostgreSQL.identifier()(id1).unwrap();
+            Dialect::PostgreSQL.identifier()(id2).unwrap();
+            Dialect::PostgreSQL.identifier()(id3).unwrap();
+            Dialect::PostgreSQL.identifier()(id4).unwrap_err();
+            Dialect::PostgreSQL.identifier()(id5).unwrap_err();
+            Dialect::PostgreSQL.identifier()(id6).unwrap();
+            Dialect::PostgreSQL.identifier()(id7).unwrap();
         }
 
         #[test]
@@ -351,7 +351,7 @@ mod tests {
 
             // Malformed string
             let res = Dialect::PostgreSQL.bytes_literal()(b"E'\\\\'::btea");
-            assert!(res.is_err());
+            res.unwrap_err();
         }
     }
 }

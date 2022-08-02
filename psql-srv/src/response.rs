@@ -12,7 +12,7 @@ use crate::value::Value;
 /// An encapsulation of a complete response produced by a Postgresql backend in response to a
 /// request. The response will be sent to the frontend as a sequence of zero or more
 /// `BackendMessage`s.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 #[warn(variant_size_differences)]
 pub enum Response<R, S> {
     Empty,
@@ -125,7 +125,7 @@ mod tests {
             }
         });
         futures::pin_mut!(validating_sink);
-        assert!(block_on(response.write(&mut validating_sink)).is_ok());
+        block_on(response.write(&mut validating_sink)).unwrap();
     }
 
     #[test]
@@ -143,7 +143,7 @@ mod tests {
             }
         });
         futures::pin_mut!(validating_sink);
-        assert!(block_on(response.write(&mut validating_sink)).is_ok());
+        block_on(response.write(&mut validating_sink)).unwrap();
     }
 
     #[test]
@@ -164,7 +164,7 @@ mod tests {
             }
         });
         futures::pin_mut!(validating_sink);
-        assert!(block_on(response.write(&mut validating_sink)).is_ok());
+        block_on(response.write(&mut validating_sink)).unwrap();
     }
 
     #[test]
@@ -191,7 +191,7 @@ mod tests {
             }
         });
         futures::pin_mut!(validating_sink);
-        assert!(block_on(response.write(&mut validating_sink)).is_ok());
+        block_on(response.write(&mut validating_sink)).unwrap();
     }
 
     #[test]
@@ -256,6 +256,6 @@ mod tests {
             }
         });
         futures::pin_mut!(validating_sink);
-        assert!(block_on(response.write(&mut validating_sink)).is_ok());
+        block_on(response.write(&mut validating_sink)).unwrap();
     }
 }

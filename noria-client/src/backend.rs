@@ -551,7 +551,7 @@ impl FromRow for QueryInfo {
 }
 
 /// How to handle a migration in the adapter.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum MigrationMode {
     /// Handle migrations as part of the query process, if a query has not been
     /// successfully migrated when we are processing the query, attempt to

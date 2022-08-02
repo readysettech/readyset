@@ -303,7 +303,7 @@ async fn replication_test_inner(url: &str) -> ReadySetResult<()> {
 
     for (test_name, test_query, test_results) in TESTS {
         client.query(test_query).await?;
-        ctx.check_results("noria_view", test_name, *test_results)
+        ctx.check_results("noria_view", test_name, test_results)
             .await?;
     }
 
@@ -858,7 +858,7 @@ async fn postgresql_ddl_replicate_drop_table() {
         .unwrap();
     let mut ctx = TestHandle::start_noria(pgsql_url(), None).await.unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
-    assert!(ctx.noria.table("t1").await.is_ok());
+    ctx.noria.table("t1").await.unwrap();
 
     trace!("Dropping table");
     client.query("DROP TABLE t1 CASCADE;").await.unwrap();
@@ -905,8 +905,8 @@ async fn postgresql_ddl_replicate_drop_view() {
         .unwrap();
     let mut ctx = TestHandle::start_noria(pgsql_url(), None).await.unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
-    assert!(ctx.noria.table("t2").await.is_ok());
-    assert!(ctx.noria.view("t2_view").await.is_ok());
+    ctx.noria.table("t2").await.unwrap();
+    ctx.noria.view("t2_view").await.unwrap();
 
     trace!("Dropping view");
     client.query("DROP VIEW t2_view;").await.unwrap();
@@ -934,7 +934,7 @@ async fn postgresql_ddl_replicate_create_view() {
         .unwrap();
     let mut ctx = TestHandle::start_noria(pgsql_url(), None).await.unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
-    assert!(ctx.noria.table("t2").await.is_ok());
+    ctx.noria.table("t2").await.unwrap();
 
     trace!("CREATING view");
     client
@@ -960,7 +960,7 @@ async fn postgresql_ddl_replicate_alter_table() {
         .unwrap();
     let mut ctx = TestHandle::start_noria(pgsql_url(), None).await.unwrap();
     ctx.ready_notify.as_ref().unwrap().notified().await;
-    assert!(ctx.noria.table("t2").await.is_ok());
+    ctx.noria.table("t2").await.unwrap();
 
     trace!("altering table");
     client

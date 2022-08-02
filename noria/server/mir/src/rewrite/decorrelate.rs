@@ -826,6 +826,6 @@ mod tests {
             ),
         };
 
-        assert!(pull_all_required_columns(&mut query).is_ok());
+        pull_all_required_columns(&mut query).unwrap();
     }
 }

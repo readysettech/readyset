@@ -117,7 +117,7 @@ impl<'a> IntoIterator for &'a Records {
     }
 }
 
-#[derive(Clone, Default, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Records(Vec<Record>);
 
 impl Records {

@@ -340,8 +340,7 @@ mod tests {
         let res = handle.get_multi(&[key]).unwrap();
         assert_eq!(
             res.iter()
-                .map(|rs| rs.iter())
-                .flatten()
+                .flat_map(|rs| rs.iter())
                 .cloned()
                 .collect::<Vec<_>>(),
             (2i32..=3)
@@ -390,8 +389,7 @@ mod tests {
         let res = handle.get_multi(&[key]).unwrap();
         assert_eq!(
             res.iter()
-                .map(|rs| rs.iter())
-                .flatten()
+                .flat_map(|rs| rs.iter())
                 .cloned()
                 .collect::<Vec<_>>(),
             (2i32..=3)

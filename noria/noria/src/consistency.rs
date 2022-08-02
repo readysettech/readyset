@@ -11,7 +11,7 @@ use crate::LocalNodeIndex;
 /// identifier, the transaction id of the last transaction executed on the
 /// table. Timestamps may call `satisfies` to verify if another timestamp
 /// is sufficiently up to date to satisfy read-your-write guarentees.
-#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Timestamp {
     /// A map from  a base table's LocalNodeIndex to timestamp.
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]

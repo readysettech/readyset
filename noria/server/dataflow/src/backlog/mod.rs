@@ -646,7 +646,7 @@ mod tests {
 
             w.mark_filled(key.clone().into()).unwrap();
             w.swap();
-            assert!(r.get(&key).is_ok());
+            r.get(&key).unwrap();
         }
 
         #[test]
@@ -672,7 +672,7 @@ mod tests {
             ))
             .unwrap();
             w.swap();
-            assert!(r.get_multi(range_key).is_ok());
+            r.get_multi(range_key).unwrap();
         }
     }
 
@@ -693,7 +693,7 @@ mod tests {
             let key = vec1![DataType::from(0)];
             w.mark_filled(key.clone().into()).unwrap();
             w.swap();
-            assert!(r.get(&key).is_ok());
+            r.get(&key).unwrap();
 
             w.mark_hole(&key.clone().into()).unwrap();
             w.swap();
@@ -721,7 +721,7 @@ mod tests {
             ))
             .unwrap();
             w.swap();
-            assert!(r.get_multi(range_key).is_ok());
+            r.get_multi(range_key).unwrap();
 
             w.mark_hole(&KeyComparison::from_range(
                 &(vec1![DataType::from(0)]..vec1![DataType::from(10)]),

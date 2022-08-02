@@ -85,7 +85,7 @@ impl Sharding {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, clap::ArgEnum)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, clap::ArgEnum)]
 pub enum EvictionKind {
     Random,
     LRU,

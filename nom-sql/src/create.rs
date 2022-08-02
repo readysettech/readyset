@@ -1799,7 +1799,7 @@ mod tests {
         fn create_with_reserved_identifier() {
             let qstring = "CREATE TABLE select ( id integer );";
             let res = creation(Dialect::PostgreSQL)(qstring.as_bytes());
-            assert!(res.is_err());
+            res.unwrap_err();
         }
 
         #[test]
@@ -2127,7 +2127,7 @@ mod tests {
           KEY \"el_index_60\" (\"el_index_60\",\"el_id\"),
           KEY \"el_from_index_60\" (\"el_from\",\"el_index_60\",\"el_id\")
         )";
-            creation(qstring.as_bytes()).unwrap();
+            creation(Dialect::PostgreSQL)(qstring.as_bytes()).unwrap();
         }
     }
 

@@ -782,7 +782,7 @@ mod tests {
         let mut buf = BytesMut::new();
 
         // Attempt to encode a message containing an unserializable value, resulting in an error.
-        assert!(codec
+        codec
             .encode(
                 DataRow {
                     values: vec![UnserializableValue],
@@ -790,7 +790,7 @@ mod tests {
                 },
                 &mut buf,
             )
-            .is_err());
+            .unwrap_err();
 
         // Verify that the serialization buffer does not contain any partial message data from
         // the failed encode request above.

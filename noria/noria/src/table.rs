@@ -227,7 +227,7 @@ pub(crate) type TableRpc =
 
 /// Information used to uniquely identify: a packet, and the time a packet entered the
 /// system.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PacketTrace {
     /// Time that the packet trace was initiated at. Currently used to measure the
     /// end-to-end trace duration. Comparing this value to other recorded system
@@ -238,7 +238,7 @@ pub struct PacketTrace {
 }
 
 /// Wrapper of packet payloads with their destination node.
-#[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PacketData {
     /// The domain identifier of the destination node.
     pub dst: LocalNodeIndex,
@@ -250,7 +250,7 @@ pub struct PacketData {
 
 /// Wrapper around types that can be propagated to base tables
 /// as packets.
-#[derive(Clone, Serialize, Deserialize, TryInto, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, TryInto, PartialEq, Eq)]
 #[try_into(owned, ref, ref_mut)]
 pub enum PacketPayload {
     /// An input update to a base table.
@@ -298,6 +298,7 @@ impl TableBuilder {
             // This can only fail if the mutex is poisoned, in which case we want to panic
             // since there's no way to recover.
             let mut rpcs = rpcs.lock().unwrap();
+            #[allow(clippy::significant_drop_in_scrutinee)]
             let s = match rpcs.entry((addr, shardi)) {
                 Entry::Occupied(e) => e.get().clone(),
                 Entry::Vacant(h) => {
@@ -470,7 +471,7 @@ impl Table {
             }
             _ => {
                 let key_len = self.key.len();
-                let key_col = match self.key.get(0) {
+                let key_col = match self.key.first() {
                     // If it's `None`, then it's empty.
                     None => {
                         return future::Either::Right(future::Either::Left(future::Either::Left(

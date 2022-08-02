@@ -1320,8 +1320,7 @@ fn make_paginate_or_topk_node(
 
     let cmp_rows = match *order {
         Some(ref o) => {
-            let columns = o
-                .iter()
+            o.iter()
                 .map(|&(ref c, ref order_type)| {
                     // SQL and Soup disagree on what ascending and descending order means, so do the
                     // conversion here.
@@ -1334,9 +1333,7 @@ fn make_paginate_or_topk_node(
                         .column_id_for_column(c)
                         .map(|id| (id, reversed_order_type))
                 })
-                .collect::<ReadySetResult<Vec<_>>>()?;
-
-            columns
+                .collect::<ReadySetResult<Vec<_>>>()?
         }
         None => Vec::new(),
     };

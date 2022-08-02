@@ -130,7 +130,7 @@ impl Handle {
             .get("id")
             .ok_or_else(|| bad_request_err("Universe context must have id"))?
             .clone();
-        let _ = self.rpc::<_, ()>("create_universe", &context, None).await?;
+        self.rpc::<_, ()>("create_universe", &context, None).await?;
 
         // Write to Context table
         let bname = match context.get("group") {

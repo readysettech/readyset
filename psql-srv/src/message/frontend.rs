@@ -59,7 +59,7 @@ pub enum FrontendMessage {
     Terminate,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum StatementName {
     Portal(BytesStr),
     PreparedStatement(BytesStr),

@@ -4,7 +4,6 @@
 #![feature(never_type)]
 #![feature(is_sorted)]
 #![feature(if_let_guard)]
-#![feature(bool_to_option)]
 
 pub mod backend;
 pub mod http_router;

@@ -32,7 +32,7 @@ use std::ops::{Bound, Deref, RangeBounds};
 /// A set for storing non-overlapping intervals.
 ///
 /// See [crate documentation](crate) for more details.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct IntervalTreeSet<T> {
     /// The internal storage of [`Endpoint`], where for each non-ovelapping interval two
     /// [`Endpoint`]s are stored: the lower-bound endpoint and the upper-bound endpoint, which are
@@ -157,7 +157,7 @@ where
     fn deref(&self) -> &Self::Target {
         match self {
             OwnedOrBorrowed::Owned(v) => v.borrow(),
-            OwnedOrBorrowed::Ref(p) => *p,
+            OwnedOrBorrowed::Ref(p) => p,
         }
     }
 }
@@ -1032,7 +1032,7 @@ mod tests {
 
     #[track_caller]
     fn test_contains_ranges<R: RangeBounds<usize>>(tree: &IntervalTreeSet<usize>, ranges: &[R]) {
-        assert_invariant(&tree);
+        assert_invariant(tree);
         for i in 0..10000 {
             if ranges.iter().any(|r| r.contains(&i)) {
                 assert!(tree.contains_point(&i), "Should contain {i}");
@@ -1395,8 +1395,8 @@ mod tests {
         let mut tree: IntervalTreeSet<usize> = Default::default();
         tree.insert_interval((Excluded(1), Unbounded));
 
-        let intervals = tree.get_interval_difference(&(Excluded(1), Unbounded));
-        assert!(intervals.collect::<Vec<_>>().is_empty());
+        let mut intervals = tree.get_interval_difference(&(Excluded(1), Unbounded));
+        assert!(intervals.next().is_none());
     }
 
     #[proptest]
@@ -1410,7 +1410,7 @@ mod tests {
                 continue;
             }
 
-            all_intervals.insert(interval.clone());
+            all_intervals.insert(interval);
             tree.insert_interval(interval);
 
             for int in all_intervals.iter() {
@@ -1445,7 +1445,7 @@ mod tests {
                 continue;
             }
 
-            all_intervals.insert(interval.clone());
+            all_intervals.insert(interval);
             tree.remove_interval(&interval);
 
             for int in all_intervals.iter() {

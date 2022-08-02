@@ -170,21 +170,21 @@ impl OutputColumn {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JoinRef {
     pub src: Relation,
     pub dst: Relation,
 }
 
 /// An equality predicate on two expressions, used as the key for a join
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JoinPredicate {
     pub left: Expr,
     pub right: Expr,
 }
 
 /// An individual column on which a query is parameterized
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Parameter {
     pub col: Column,
     pub op: nom_sql::BinaryOperator,
@@ -203,13 +203,13 @@ pub struct QueryGraphNode {
     pub subgraph: Option<(Box<QueryGraph>, SelectStatement)>,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QueryGraphEdge {
     Join { on: Vec<JoinPredicate> },
     LeftJoin { on: Vec<JoinPredicate> },
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pagination {
     pub order: Option<Vec<(Expr, OrderType)>>,
     pub limit: usize,

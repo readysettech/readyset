@@ -117,7 +117,7 @@ impl PermutationGenerator {
                 Either::Left((1..=self.depth).flat_map(move |l| ops.clone().permutations(l))),
             ),
             Some(only) => {
-                let op: &'static str = *SMALL_OPERATIONS
+                let op: &'static str = SMALL_OPERATIONS
                     .iter()
                     .find(|op| ***op == only)
                     .ok_or_else(|| anyhow!("Unknown operation: {}", only))?;

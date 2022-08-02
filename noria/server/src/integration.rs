@@ -25,10 +25,7 @@ use dataflow::utils::{dataflow_column, make_columns};
 use dataflow::{DurabilityMode, Expr as DataflowExpr, PersistenceParameters, ReaderProcessing};
 use futures::StreamExt;
 use itertools::Itertools;
-use nom_sql::{
-    parse_query, BinaryOperator, Column, ColumnConstraint, ColumnSpecification, Dialect, OrderType,
-    SqlQuery, SqlType, TableKey,
-};
+use nom_sql::{parse_query, BinaryOperator, Dialect, OrderType, SqlQuery, SqlType};
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::consistency::Timestamp;
 use noria::internal::LocalNodeIndex;

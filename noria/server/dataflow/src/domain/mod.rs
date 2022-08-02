@@ -41,7 +41,7 @@ use crate::prelude::*;
 use crate::processing::ColumnMiss;
 use crate::{backlog, DomainRequest, Readers};
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Config {
     pub concurrent_replays: usize,
 

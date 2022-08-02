@@ -36,7 +36,7 @@ pub fn merge_mir_for_queries(new_query: &MirQuery, old_query: &MirQuery) -> (Mir
     for old_base in &old_query.roots {
         let mut found = false;
         for new_base in &new_query.roots {
-            if old_base.borrow().can_reuse_as(&*new_base.borrow()) {
+            if old_base.borrow().can_reuse_as(&new_base.borrow()) {
                 found = true;
                 trace!("tracing from reusable base {:?}", old_base);
                 trace_nodes.push_back((old_base.clone(), new_base.clone()));
@@ -82,7 +82,7 @@ pub fn merge_mir_for_queries(new_query: &MirQuery, old_query: &MirQuery) -> (Mir
 
             let mut found = false;
             for old_child in old.borrow().children() {
-                if old_child.borrow().can_reuse_as(&*new_child.borrow()) {
+                if old_child.borrow().can_reuse_as(&new_child.borrow()) {
                     if reused.contains(&old_child.borrow().versioned_name()) {
                         continue;
                     }

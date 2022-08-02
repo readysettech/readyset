@@ -534,13 +534,12 @@ impl DeploymentBuilder {
             upstream_mysql_addr = Some(format!("{}/{}", &root_addr, &self.name));
             let opts = mysql_async::Opts::from_url(&root_addr).unwrap();
             let mut conn = mysql_async::Conn::new(opts).await.unwrap();
-            let _ = conn
-                .query_drop(format!(
-                    "CREATE DATABASE {}; USE {}",
-                    &self.name, &self.name
-                ))
-                .await
-                .unwrap();
+            conn.query_drop(format!(
+                "CREATE DATABASE {}; USE {}",
+                &self.name, &self.name
+            ))
+            .await
+            .unwrap();
 
             for c in cmds {
                 conn.query_drop(&c).await?;

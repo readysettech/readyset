@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-#[derive(PartialEq, Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Default, Serialize, Deserialize)]
 pub struct RequestContext {
     inner: HashMap<String, String>,
 }

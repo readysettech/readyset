@@ -702,14 +702,14 @@ impl NoriaConnector {
                     utils::coerce_params(Some(params), &SqlQuery::Insert(q.clone()), schema)
                         .unwrap()
                         .unwrap();
-                return self.do_insert(q, vec![coerced_params]).await;
+                self.do_insert(q, vec![coerced_params]).await
             }
             _ => {
                 internal!(
                     "Execute_prepared_insert is being called for a non insert prepared statement."
-                );
+                )
             }
-        };
+        }
     }
 
     pub(crate) async fn handle_delete(
@@ -828,11 +828,9 @@ impl NoriaConnector {
 
         trace!("delegate");
         match prep {
-            PreparedStatement::Update(q) => {
-                return self.do_update(Cow::Owned(q), Some(params)).await
-            }
+            PreparedStatement::Update(q) => self.do_update(Cow::Owned(q), Some(params)).await,
             _ => internal!(),
-        };
+        }
     }
 
     pub(crate) async fn prepare_delete(
@@ -891,11 +889,9 @@ impl NoriaConnector {
 
         trace!("delegate");
         match prep {
-            PreparedStatement::Delete(q) => {
-                return self.do_delete(Cow::Owned(q), Some(params)).await
-            }
+            PreparedStatement::Delete(q) => self.do_delete(Cow::Owned(q), Some(params)).await,
             _ => internal!(),
-        };
+        }
     }
 
     /// Calls the `extend_recipe` endpoint on Noria with the given

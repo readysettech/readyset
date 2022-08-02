@@ -9,7 +9,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use test_strategy::Arbitrary;
 use vec1::Vec1;
 
-#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Link {
     pub src: LocalNodeIndex,
     pub dst: LocalNodeIndex,

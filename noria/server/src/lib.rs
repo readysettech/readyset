@@ -472,7 +472,7 @@ use serde::{Deserialize, Serialize};
 // ```
 // cargo run --bin make_config_json
 // ```
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct Config {
     pub(crate) sharding: Option<usize>,
     #[serde(default)]

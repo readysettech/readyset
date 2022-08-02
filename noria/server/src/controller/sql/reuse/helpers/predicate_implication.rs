@@ -149,18 +149,18 @@ pub fn complex_predicate_implies(np: &Expr, ep: &Expr) -> Result<bool, ReadySetE
                     } = np
                     {
                         if n_op == e_op {
-                            return Ok(complex_predicate_implies(&*n_lhs, &*e_lhs)?
-                                && complex_predicate_implies(&*n_rhs, &*e_rhs)?
-                                || (complex_predicate_implies(&*n_lhs, &*e_rhs)?
-                                    && complex_predicate_implies(&*n_rhs, &*e_lhs)?));
+                            return Ok(complex_predicate_implies(n_lhs, e_lhs)?
+                                && complex_predicate_implies(n_rhs, e_rhs)?
+                                || (complex_predicate_implies(n_lhs, e_rhs)?
+                                    && complex_predicate_implies(n_rhs, e_lhs)?));
                         }
                     }
 
                     match logical_op {
-                        LogicalOp::And => Ok(complex_predicate_implies(np, &*e_lhs)?
-                            && complex_predicate_implies(np, &*e_rhs)?),
-                        LogicalOp::Or => Ok(complex_predicate_implies(np, &*e_lhs)?
-                            || complex_predicate_implies(np, &*e_rhs)?),
+                        LogicalOp::And => Ok(complex_predicate_implies(np, e_lhs)?
+                            && complex_predicate_implies(np, e_rhs)?),
+                        LogicalOp::Or => Ok(complex_predicate_implies(np, e_lhs)?
+                            || complex_predicate_implies(np, e_rhs)?),
                     }
                 }
             } else if let BinaryOp {

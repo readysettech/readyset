@@ -100,7 +100,7 @@ impl Ingredient for Filter {
                     Box::new(rs.filter_map(move |r| {
                         match r {
                             Ok(data) => {
-                                match filter(&(*data)) {
+                                match filter(&data) {
                                     Ok(true) => Some(Ok(data)),
                                     Err(e) => {
                                         // If we got an error, we need to combine this result as

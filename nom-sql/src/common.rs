@@ -1215,12 +1215,12 @@ mod tests {
             test_opt_delimited_fn_call("(abc)"),
             IResult::Ok(("".as_bytes(), "abc".as_bytes()))
         );
-        assert!(test_opt_delimited_fn_call("(abc").is_err());
+        test_opt_delimited_fn_call("(abc").unwrap_err();
         assert_eq!(
             test_opt_delimited_fn_call("abc)"),
             IResult::Ok((")".as_bytes(), "abc".as_bytes()))
         );
-        assert!(test_opt_delimited_fn_call("ab").is_err());
+        test_opt_delimited_fn_call("ab").unwrap_err();
     }
 
     #[test]

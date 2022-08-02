@@ -398,10 +398,10 @@ impl ToMysqlValue for [u8] {
 
 impl ToMysqlValue for Vec<u8> {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
-        (&self[..]).to_mysql_text(w)
+        (self[..]).to_mysql_text(w)
     }
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
-        (&self[..]).to_mysql_bin(w, c)
+        (self[..]).to_mysql_bin(w, c)
     }
 }
 

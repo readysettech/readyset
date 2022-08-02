@@ -279,6 +279,7 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
         let guard = self.inner.read().expect("poisoned mutex");
+        #[allow(clippy::significant_drop_in_scrutinee)]
         match guard.addrs.get(key) {
             None => Err(ReadySetError::NoSuchReplica {
                 domain_index: key.domain_index.index(),

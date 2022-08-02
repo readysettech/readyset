@@ -39,7 +39,7 @@ mod rpc;
 ///
 /// A serialized version of this struct is stored in ZooKeeper so that clients can reach the
 /// currently active controller.
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[doc(hidden)]
 pub struct ControllerDescriptor {
     pub controller_uri: Url,
