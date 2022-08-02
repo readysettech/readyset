@@ -38,6 +38,7 @@ images=(
     "alpine:latest"
     "fedora:32"
     "ubuntu:20.04"
+    "wordpress:latest"
 )
 
 echo "steps:"
