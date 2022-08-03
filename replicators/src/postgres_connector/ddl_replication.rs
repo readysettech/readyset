@@ -324,43 +324,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn alter_table_has_create_table_statement() {
-        let client = setup("alter_table_has_create_table_statement").await;
+    async fn alter_table() {
+        let client = setup("alter_table").await;
         client.simple_query("create table t (x int)").await.unwrap();
 
-        let _ = get_last_ddl(&client, "alter_table_has_create_table_statement").await;
+        let _ = get_last_ddl(&client, "alter_table").await;
 
         client
             .simple_query("alter table t add column y int")
             .await
             .unwrap();
 
-        let ddl = get_last_ddl(&client, "alter_table_has_create_table_statement")
-            .await
-            .unwrap();
+        let ddl = get_last_ddl(&client, "alter_table").await.unwrap();
         assert_eq!(ddl.operation, DdlEventOperation::AlterTable);
         assert_eq!(ddl.schema, "public");
         assert_eq!(ddl.object, "t");
 
         match ddl.statement.unwrap().0 {
-            SqlQuery::CreateTable(stmt) => {
+            SqlQuery::AlterTable(stmt) => {
                 assert_eq!(stmt.table.name, "t");
                 assert_eq!(
-                    stmt.fields,
-                    vec![
-                        ColumnSpecification {
-                            column: "t.x".into(),
-                            sql_type: SqlType::Int(None),
-                            constraints: vec![],
-                            comment: None
-                        },
-                        ColumnSpecification {
-                            column: "t.y".into(),
-                            sql_type: SqlType::Int(None),
-                            constraints: vec![],
-                            comment: None
-                        },
-                    ]
+                    stmt.definitions,
+                    vec![nom_sql::AlterTableDefinition::AddColumn(
+                        ColumnSpecification::new("y".into(), SqlType::Int(None),)
+                    ),]
                 );
             }
             _ => panic!("Unexpected query type: {:?}", ddl.operation),

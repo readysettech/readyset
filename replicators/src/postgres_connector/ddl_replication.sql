@@ -2,7 +2,7 @@ CREATE SCHEMA IF NOT EXISTS readyset;
 
 ----
 
-CREATE OR REPLACE FUNCTION readyset.replicate_create_or_alter_table()
+CREATE OR REPLACE FUNCTION readyset.replicate_create_table()
 RETURNS event_trigger
 LANGUAGE plpgsql
 AS $$
@@ -11,10 +11,7 @@ DECLARE
 BEGIN
     SELECT
     json_build_object(
-        'operation', CASE
-                       WHEN object.command_tag = 'CREATE TABLE' THEN 'create_table'
-                       WHEN object.command_tag = 'ALTER TABLE' THEN 'alter_table'
-                     END,
+        'operation', 'create_table',
         'schema', object.schema_name,
         'object', replace(
             replace(object.object_identity, object.SCHEMA_NAME || '.', ''),
@@ -69,11 +66,34 @@ BEGIN
     PERFORM pg_logical_emit_message(true, 'readyset', create_message);
 END $$;
 
-DROP EVENT TRIGGER IF EXISTS readyset_replicate_create_or_alter_table;
-CREATE EVENT TRIGGER readyset_replicate_create_or_alter_table
-    ON ddl_command_end
-    WHEN TAG IN ('CREATE TABLE', 'ALTER TABLE')
-    EXECUTE PROCEDURE readyset.replicate_create_or_alter_table();
+
+CREATE OR REPLACE FUNCTION readyset.replicate_alter_table()
+RETURNS event_trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    alter_message text;
+    query text;
+BEGIN
+    SELECT current_query() INTO query;
+    SELECT
+    json_build_object(
+        'operation', 'alter_table',
+        'schema', object.schema_name,
+        'object', replace(
+            replace(object.object_identity, object.SCHEMA_NAME || '.', ''),
+            -- un-quote identifiers if necessary
+            '"',
+            ''
+        ),
+        'statement', query
+    )
+    INTO alter_message
+    FROM pg_event_trigger_ddl_commands() object
+    WHERE object.object_type = 'table';
+
+    PERFORM pg_logical_emit_message(true, 'readyset', alter_message);
+END $$;
 
 ----
 
@@ -102,12 +122,6 @@ BEGIN
     PERFORM pg_logical_emit_message(true, 'readyset', create_message);
 END $$;
 
-DROP event TRIGGER IF EXISTS readyset_replicate_create_view;
-CREATE EVENT TRIGGER readyset_replicate_create_view
-    ON ddl_command_end
-    WHEN TAG IN ('CREATE VIEW')
-    EXECUTE PROCEDURE readyset.replicate_create_view();
-
 ----
 
 CREATE OR REPLACE FUNCTION readyset.replicate_drop()
@@ -132,6 +146,26 @@ BEGIN
 
     PERFORM pg_logical_emit_message(true, 'readyset', drop_message);
 END $$;
+
+----
+
+DROP EVENT TRIGGER IF EXISTS readyset_replicate_create_table;
+CREATE EVENT TRIGGER readyset_replicate_create_table
+    ON ddl_command_end
+    WHEN TAG IN ('CREATE TABLE')
+    EXECUTE PROCEDURE readyset.replicate_create_table();
+
+DROP EVENT TRIGGER IF EXISTS readyset_replicate_alter_table;
+CREATE EVENT TRIGGER readyset_replicate_alter_table
+    ON ddl_command_end
+    WHEN TAG IN ('ALTER TABLE')
+    EXECUTE PROCEDURE readyset.replicate_alter_table();
+
+DROP event TRIGGER IF EXISTS readyset_replicate_create_view;
+CREATE EVENT TRIGGER readyset_replicate_create_view
+    ON ddl_command_end
+    WHEN TAG IN ('CREATE VIEW')
+    EXECUTE PROCEDURE readyset.replicate_create_view();
 
 DROP EVENT TRIGGER IF EXISTS readyset_replicate_drop;
 CREATE EVENT TRIGGER readyset_replicate_drop
