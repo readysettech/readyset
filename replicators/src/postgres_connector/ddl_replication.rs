@@ -232,7 +232,7 @@ mod tests {
         }
     }
 
-    async fn get_last_ddl(client: &Context, dbname: &str) -> DdlEvent {
+    async fn get_last_ddl(client: &Context, dbname: &str) -> anyhow::Result<DdlEvent> {
         let ddl: Vec<u8> = client
             .query_one(
                 format!(
@@ -244,10 +244,9 @@ mod tests {
                 .as_str(),
                 &[],
             )
-            .await
-            .unwrap()
+            .await?
             .get(0);
-        serde_json::from_slice(&ddl).unwrap()
+        Ok(serde_json::from_slice(&ddl)?)
     }
 
     #[tokio::test]
@@ -259,7 +258,7 @@ mod tests {
             .await
             .unwrap();
 
-        let ddl = get_last_ddl(&client, "create_table").await;
+        let ddl = get_last_ddl(&client, "create_table").await.unwrap();
         assert_eq!(ddl.operation, DdlEventOperation::CreateTable);
         assert_eq!(ddl.schema, "public");
         assert_eq!(ddl.object, "t1");
@@ -312,7 +311,9 @@ mod tests {
             .await
             .unwrap();
 
-        let ddl = get_last_ddl(&client, "create_table_with_reserved_keyword_as_name").await;
+        let ddl = get_last_ddl(&client, "create_table_with_reserved_keyword_as_name")
+            .await
+            .unwrap();
 
         match ddl.statement.unwrap().0 {
             SqlQuery::CreateTable(stmt) => {
@@ -334,7 +335,9 @@ mod tests {
             .await
             .unwrap();
 
-        let ddl = get_last_ddl(&client, "alter_table_has_create_table_statement").await;
+        let ddl = get_last_ddl(&client, "alter_table_has_create_table_statement")
+            .await
+            .unwrap();
         assert_eq!(ddl.operation, DdlEventOperation::AlterTable);
         assert_eq!(ddl.schema, "public");
         assert_eq!(ddl.object, "t");
@@ -379,7 +382,7 @@ mod tests {
             .await
             .unwrap();
 
-        let ddl = get_last_ddl(&client, "create_view").await;
+        let ddl = get_last_ddl(&client, "create_view").await.unwrap();
         assert_eq!(ddl.operation, DdlEventOperation::CreateView);
         assert_eq!(ddl.schema, "public");
         assert_eq!(ddl.object, "v");
@@ -405,5 +408,31 @@ mod tests {
             }
             _ => panic!("Unexpected query type {:?}", ddl.operation),
         }
+    }
+
+    #[tokio::test]
+    async fn rollback_no_ddl() {
+        readyset_tracing::init_test_logging();
+        let client = setup("rollback_no_ddl").await;
+
+        client
+            .simple_query(
+                "begin;
+                 create table v1 (x int);
+                 rollback;",
+            )
+            .await
+            .unwrap();
+        get_last_ddl(&client, "rollback_no_ddl").await.unwrap_err();
+
+        client
+            .simple_query(
+                "begin;
+                 create table v1 (x int);
+                 commit;",
+            )
+            .await
+            .unwrap();
+        get_last_ddl(&client, "rollback_no_ddl").await.unwrap();
     }
 }
