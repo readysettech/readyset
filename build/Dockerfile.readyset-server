@@ -22,8 +22,8 @@ RUN set -eux; \
     apt-get update;\
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         libssl-dev \
-        curl=7.68.0-1ubuntu2.11 \
-        ca-certificates=20210119~20.04.2; \
+        curl \
+        ca-certificates; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /tmp/readyset/target/*/noria-server /usr/local/bin/readyset-server

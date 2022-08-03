@@ -23,7 +23,7 @@ RUN set -eux; \
     apt-get update;\
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         libssl-dev \
-        ca-certificates=20210119~20.04.2 \
+        ca-certificates \
         mariadb-client-10.3=1:10.3.34-0ubuntu0.20.04.1; \
     rm -rf /var/lib/apt/lists/*
 
