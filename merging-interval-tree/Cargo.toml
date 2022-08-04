@@ -1,9 +1,10 @@
 [package]
 name = "merging-interval-tree"
 version = "0.1.0"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 description = "An efficient non-overlapping interval tree that merges overlapping and adjacent intervals to prevent fragmentation"
-publish = false
 
 [dependencies]
 

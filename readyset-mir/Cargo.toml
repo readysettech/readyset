@@ -1,0 +1,27 @@
+[package]
+name = "readyset-mir"
+version = "0.7.0"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+description = "Internal noria-server crate"
+
+[dependencies]
+regex = "1.5"
+lazy_static = "1.4"
+petgraph = { version = "0.5", features = ["serde-1"] }
+itertools = "0.10"
+tracing = { version = "0.1", features = ["release_max_level_debug"] }
+serde = { version = "1.0.8", features = ["rc", "derive"] }
+proptest = "1.0.0"
+
+# local deps
+common = { path = "../readyset-common", package = "readyset-common" }
+dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow" }
+nom-sql = { path = "../nom-sql" }
+readyset = { path = "../readyset" }
+readyset-errors = { path = "../readyset-errors" }
+readyset-data = { path = "../readyset-data" }
+
+[dev-dependencies]
+readyset-tracing = { path = "../readyset-tracing" }

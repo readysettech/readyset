@@ -2,7 +2,7 @@
 name = "metrics-aggregator"
 version = "0.1.0"
 publish = false
-authors = ["Readyset"]
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 build = "src/build.rs"
 
@@ -10,7 +10,7 @@ build = "src/build.rs"
 
 [dependencies]
 anyhow = "1.0"
-noria = { path = "../noria/noria/" }
+readyset = { path = "../readyset" }
 futures-executor = "0.3.14"
 futures-util = "0.3.14"
 lazy_static = "1.0.0"

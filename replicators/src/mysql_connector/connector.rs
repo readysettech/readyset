@@ -11,7 +11,7 @@ use mysql_common::binlog::row::BinlogRow;
 use mysql_common::binlog::value::BinlogValue;
 use noria::replication::ReplicationOffset;
 use noria::{ReadySetError, ReadySetResult};
-use noria_data::DataType;
+use readyset_data::DataType;
 
 use super::BinlogPosition;
 use crate::noria_adapter::{Connector, ReplicationAction};

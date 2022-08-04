@@ -2,12 +2,11 @@
 name = "psql-srv"
 version = "0.1.0"
 publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 description = "Bindings for emulating a PostgreSQL server"
 readme = "README.md"
-
-authors = ["Readyset"]
 
 [dependencies]
 async-trait = "0.1"
@@ -15,7 +14,7 @@ bytes = "1.0.1"
 chrono = "0.4.19"
 futures = "0.3"
 nom-sql = { path = "../nom-sql" }
-noria-data = { path = "../noria/data" }
+readyset-data = { path = "../readyset-data" }
 postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
 postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
 postgres-protocol = { git = "https://github.com/readysettech/rust-postgres.git" }

@@ -49,7 +49,8 @@ notice = "warn"
 # output a note when they are encountered.
 ignore = [
     # Mitigated by disallowed-methods in clippy.toml
-    "RUSTSEC-2020-0071"
+    "RUSTSEC-2020-0071",
+    "RUSTSEC-2020-0159"
 ]
 # Threshold for security vulnerabilities, any vulnerability with a CVSS score
 # lower than the range specified will be ignored. Note that ignored advisories
@@ -78,7 +79,6 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "CC0-1.0",
     "ISC",
-    "OpenSSL",
     "BSL-1.0",
     "Zlib",
 ]
@@ -112,9 +112,6 @@ confidence-threshold = 0.8
 exceptions = [
     # Each entry is the crate and version constraint, and its specific allow
     # list
-    # Temporary exceptions until these can be removed
-    { allow = ["MPL-2.0"], name = "colored", version = "*" },
-    { allow = ["MPL-2.0"], name = "ascii_utils", version = "*" },
 ]
 
 # Some crates don't have (easily) machine readable licensing information,
@@ -181,8 +178,6 @@ deny = [
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
     { name = "heck", version = "0.3.3" },
-    # Depended on by js-client, difficult to patch to be single-version
-    { name = "semver", version = "0.9.0" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
@@ -191,13 +186,11 @@ skip = [
 skip-tree = [
     { name = "rusty-fork", version = "0.3.0" },
     { name = "zookeeper", version = "0.6.1" },
-    { name = "handlebars", version = "4.1" },
     { name = "fail", version = "0.5.0" },
     { name = "rust_decimal", version = "1.17.0" },
     { name = "prometheus-http-query", version = "0.3.0" },
     { name = "mysql_common", version = "0.28.0" },
     { name = "consulrs", version = "0.1.0" },
-    { name = "neon", version = "0.9.1" },
     { name = "ordered-float", version = "1.1.1" },
     { name = "redox_users", version = "0.3.5" }
 ]
@@ -220,7 +213,7 @@ allow-git = []
 
 [sources.allow-org]
 # 1 or more github.com organizations to allow git sources for
-github = ["readysettech", "rust-lang"]
+github = ["readysettech"]
 # 1 or more gitlab.com organizations to allow git sources for
 gitlab = []
 # 1 or more bitbucket.org organizations to allow git sources for

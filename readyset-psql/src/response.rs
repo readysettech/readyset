@@ -1,0 +1,181 @@
+use std::borrow::Cow;
+use std::convert::{TryFrom, TryInto};
+
+use nom_sql::{ColumnSpecification, SqlType};
+use noria::results::{ResultIterator, Results};
+use noria::ColumnSchema;
+use psql_srv as ps;
+use psql_srv::Column;
+use readyset_client::backend::{self as cl, noria_connector, SinglePrepareResult, UpstreamPrepare};
+use upstream::StatementMeta;
+
+use crate::resultset::Resultset;
+use crate::schema::{NoriaSchema, SelectSchema};
+use crate::{upstream, PostgreSqlUpstream};
+
+/// A simple wrapper around `noria_client`'s `PrepareResult`, facilitating conversion to
+/// `psql_srv::PrepareResponse`.
+pub struct PrepareResponse<'a>(pub &'a cl::PrepareResult<PostgreSqlUpstream>);
+
+impl<'a> PrepareResponse<'a> {
+    pub fn try_into_ps(self, prepared_statement_id: u32) -> Result<ps::PrepareResponse, ps::Error> {
+        use readyset_client::backend::noria_connector::PrepareResult::*;
+
+        match self.0.upstream_biased() {
+            SinglePrepareResult::Noria(Select { params, schema, .. }) => Ok(ps::PrepareResponse {
+                prepared_statement_id,
+                param_schema: NoriaSchema(params).try_into()?,
+                row_schema: NoriaSchema(schema).try_into()?,
+            }),
+            SinglePrepareResult::Noria(Insert { params, schema, .. }) => Ok(ps::PrepareResponse {
+                prepared_statement_id,
+                param_schema: NoriaSchema(params).try_into()?,
+                row_schema: NoriaSchema(schema).try_into()?,
+            }),
+            SinglePrepareResult::Noria(Update { params, .. } | Delete { params, .. }) => {
+                Ok(ps::PrepareResponse {
+                    prepared_statement_id,
+                    param_schema: NoriaSchema(params).try_into()?,
+                    row_schema: vec![],
+                })
+            }
+            SinglePrepareResult::Upstream(UpstreamPrepare {
+                meta: StatementMeta { params, schema },
+                ..
+            }) => Ok(ps::PrepareResponse {
+                prepared_statement_id,
+                param_schema: params.to_vec(),
+                row_schema: schema.to_vec(),
+            }),
+        }
+    }
+}
+
+/// A simple wrapper around `noria_client`'s `QueryResult`, facilitating conversion to
+/// `psql_srv::QueryResponse`.
+pub struct QueryResponse<'a>(pub cl::QueryResult<'a, PostgreSqlUpstream>);
+
+impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
+    type Error = ps::Error;
+
+    fn try_from(r: QueryResponse<'a>) -> Result<Self, Self::Error> {
+        use cl::QueryResult::*;
+        use noria_connector::QueryResult as NoriaResult;
+        use ps::QueryResponse::*;
+
+        match r.0 {
+            Noria(NoriaResult::Empty) => Ok(Command),
+            Noria(NoriaResult::Insert {
+                num_rows_inserted, ..
+            }) => Ok(Insert(num_rows_inserted)),
+            Noria(NoriaResult::Select { rows, schema }) => {
+                let select_schema = SelectSchema(schema);
+                let resultset = Resultset::try_new(rows, &select_schema)?;
+                Ok(Select {
+                    schema: select_schema.try_into()?,
+                    resultset,
+                })
+            }
+            Noria(NoriaResult::Update {
+                num_rows_updated, ..
+            }) => Ok(Update(num_rows_updated)),
+            Noria(NoriaResult::Delete { num_rows_deleted }) => Ok(Delete(num_rows_deleted)),
+            Noria(NoriaResult::Meta(vars)) => {
+                let columns = vars.iter().map(|v| v.name.clone()).collect::<Vec<_>>();
+
+                let select_schema = SelectSchema(readyset_client::backend::SelectSchema {
+                    use_bogo: false,
+                    schema: Cow::Owned(
+                        vars.iter()
+                            .map(|v| ColumnSchema {
+                                spec: ColumnSpecification::new(
+                                    nom_sql::Column {
+                                        name: v.name.clone(),
+                                        table: None,
+                                    },
+                                    SqlType::Text,
+                                ),
+                                base: None,
+                            })
+                            .collect(),
+                    ),
+                    columns: Cow::Owned(columns),
+                });
+
+                let resultset = Resultset::try_new(
+                    ResultIterator::owned(vec![Results::new(vec![vars
+                        .into_iter()
+                        .map(|v| readyset_data::DataType::from(v.value))
+                        .collect()])]),
+                    &select_schema,
+                )?;
+                Ok(Select {
+                    schema: select_schema.try_into()?,
+                    resultset,
+                })
+            }
+            Noria(NoriaResult::MetaVariables(vars)) => {
+                let select_schema = SelectSchema(readyset_client::backend::SelectSchema {
+                    use_bogo: false,
+                    schema: Cow::Owned(vec![
+                        ColumnSchema {
+                            spec: ColumnSpecification::new(
+                                nom_sql::Column {
+                                    name: "name".into(),
+                                    table: None,
+                                },
+                                SqlType::Text,
+                            ),
+                            base: None,
+                        },
+                        ColumnSchema {
+                            spec: ColumnSpecification::new(
+                                nom_sql::Column {
+                                    name: "value".into(),
+                                    table: None,
+                                },
+                                SqlType::Text,
+                            ),
+                            base: None,
+                        },
+                    ]),
+                    columns: Cow::Owned(vec!["name".into(), "value".into()]),
+                });
+                let mut rows: Vec<Vec<readyset_data::DataType>> = Vec::new();
+                for v in vars {
+                    rows.push(vec![v.name.as_str().into(), v.value.into()]);
+                }
+
+                let resultset = Resultset::try_new(
+                    ResultIterator::owned(vec![Results::new(rows)]),
+                    &select_schema,
+                )?;
+                Ok(Select {
+                    schema: select_schema.try_into()?,
+                    resultset,
+                })
+            }
+            Upstream(upstream::QueryResult::Read { data: rows }) => {
+                let schema = match rows.first() {
+                    None => vec![],
+                    Some(row) => row
+                        .columns()
+                        .iter()
+                        .map(|c| Column {
+                            name: c.name().to_owned(),
+                            col_type: c.type_().clone(),
+                        })
+                        .collect(),
+                };
+                Ok(ps::QueryResponse::Select {
+                    schema,
+                    resultset: Resultset::try_from(rows)?,
+                })
+            }
+            Upstream(upstream::QueryResult::Write { num_rows_affected }) => {
+                Ok(Insert(num_rows_affected))
+            }
+            Upstream(upstream::QueryResult::Command) => Ok(Command),
+        }
+    }
+}

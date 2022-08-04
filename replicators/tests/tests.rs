@@ -7,8 +7,8 @@ use mysql_async::prelude::Queryable;
 use mysql_time::MysqlTime;
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::{ControllerHandle, ReadySetError, ReadySetResult};
-use noria_data::{DataType, TinyText};
-use noria_server::Builder;
+use readyset_data::{DataType, TinyText};
+use readyset_server::Builder;
 use replicators::{Config, NoriaAdapter};
 use tracing::trace;
 
@@ -105,7 +105,7 @@ const RECONNECT_RESULT: &[&[DataType]] = &[
 
 struct TestHandle {
     url: String,
-    noria: noria_server::Handle,
+    noria: readyset_server::Handle,
     authority: Arc<Authority>,
     // We spin a whole runtime for the replication task because the tokio postgres
     // connection spawns a background task we can only terminate by dropping the runtime
@@ -189,8 +189,8 @@ impl TestHandle {
     ) -> ReadySetResult<TestHandle> {
         readyset_tracing::init_test_logging();
         let mut builder = Builder::for_tests();
-        let mut persistence = noria_server::PersistenceParameters::default();
-        persistence.mode = noria_server::DurabilityMode::DeleteOnExit;
+        let mut persistence = readyset_server::PersistenceParameters::default();
+        persistence.mode = readyset_server::DurabilityMode::DeleteOnExit;
         builder.set_persistence(persistence);
         let noria = builder.start(Arc::clone(&authority)).await.unwrap();
 

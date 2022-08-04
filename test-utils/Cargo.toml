@@ -1,0 +1,9 @@
+[package]
+name = "test-utils"
+version = "0.0.0"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+
+[dependencies]
+# Avoid adding dependencies as this is included in tests.

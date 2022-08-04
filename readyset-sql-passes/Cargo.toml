@@ -1,0 +1,15 @@
+[package]
+name = "readyset-sql-passes"
+version = "0.0.1"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+
+[dependencies]
+itertools = "0.10"
+maplit = "1.0.2"
+tracing = { version = "0.1" }
+
+# Local dependencies
+nom-sql = { path = "../nom-sql" }
+readyset-errors = { path = "../readyset-errors" }

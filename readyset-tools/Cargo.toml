@@ -1,0 +1,40 @@
+[package]
+name = "readyset-tools"
+version = "0.1.0"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.38"
+clap = { version = "3.0", features = ["derive","env"] }
+serde_json = "1.0.69"
+readyset = { path = "../readyset" }
+tokio = { version = "1.15", features = ["macros"] }
+readyset-server = { path = "../readyset-server" }
+hyper = { version = "0.14.10" }
+bincode = "1.3.3"
+
+[[bin]]
+name = "view_checker"
+path = "src/view_checker.rs"
+
+[[bin]]
+name = "query_installer"
+path = "src/query_installer.rs"
+
+[[bin]]
+name = "metrics_dump"
+path = "src/metrics_dump.rs"
+
+[[bin]]
+name = "controller_request"
+path = "src/controller_request.rs"
+
+[[bin]]
+name = "make_config_json"
+path = "src/make_config_json.rs"
+
+[[bin]]
+name = "failpoint"
+path = "src/failpoint.rs"

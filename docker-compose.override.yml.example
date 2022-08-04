@@ -3,9 +3,6 @@
 # use docker-compose as usual to start the dev docker containers.
 version: "3.8"
 services:
-  zookeeper:
-   ports:
-      - '2181:2181'
   consul-server:
     ports:
       - '8500:8500'
@@ -17,6 +14,3 @@ services:
   postgres:
     ports:
       - '5432:5432'
-  redis:
-    ports:
-      - '6379:6379'

@@ -1,0 +1,21 @@
+[package]
+name = "reader-map"
+version = "0.1.0"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+
+[dependencies]
+triomphe = "0.1"
+smallvec = { version = "1.8", default-features = false, features = ["union"] }
+rand = { version = "0.7", default-features = false, features = ["alloc"] }
+left-right = "0.11"
+itertools = "0.10"
+
+readyset = { path = "../readyset" }
+partial-map = { path = "../partial-map" }
+thiserror = "1.0.31"
+
+[dev-dependencies]
+quickcheck = "0.9"
+quickcheck_macros = "0.9"

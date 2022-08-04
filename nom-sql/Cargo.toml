@@ -1,11 +1,10 @@
 [package]
 name = "nom-sql"
 version = "0.0.11"
-authors = ["Malte Schwarzkopf <malte@csail.mit.edu>", "ReadySet Technology, inc."]
-edition = "2021"
 publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
 
-documentation = "https://docs.readyset.io/nom_sql/index.html"
 homepage = "https://github.com/readysettech/readyset/tree/master/nom-sql"
 repository = "https://github.com/readysettech/readyset/tree/master/nom-sql"
 

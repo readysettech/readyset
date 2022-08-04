@@ -1,8 +1,9 @@
 [package]
 name = "readyset-repl"
 version = "0.1.0"
-edition = "2021"
 publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
 
 [dependencies]
 anyhow = "1.0"
@@ -16,5 +17,5 @@ textwrap = "0.14"
 nom = "7.1.1"
 
 database-utils = { path = "../database-utils" }
-noria-data = { path = "../noria/data" }
-noria-errors = { path = "../noria/errors" }
+readyset-data = { path = "../readyset-data" }
+readyset-errors = { path = "../readyset-errors" }

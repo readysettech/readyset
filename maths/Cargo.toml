@@ -2,7 +2,7 @@
 name = "maths"
 version = "0.0.1"
 publish = false
-authors = ["Peter Farr <Peter@PrismaPhonic.com>"]
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

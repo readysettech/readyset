@@ -1,13 +1,12 @@
 [package]
 name = "mysql-srv"
-publish = false
 version = "0.8.8"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 description = "Bindings for emulating a MySQL/MariaDB server"
 readme = "README.md"
-
-authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
 keywords = ["api-bindings", "database", "sql", "mock"]
 categories = ["api-bindings", "network-programming", "database-implementations"]
@@ -34,4 +33,4 @@ mysql = "22.0.0"
 slab = "0.4.2"
 futures = "0.3"
 
-test_utils = { path = "../test_utils" }
+test-utils = { path = "../test-utils" }

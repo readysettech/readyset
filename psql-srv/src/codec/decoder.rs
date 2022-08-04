@@ -6,8 +6,8 @@ use bit_vec::BitVec;
 use bytes::{Buf, Bytes, BytesMut};
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use eui48::MacAddress;
-use noria_data::Array;
 use postgres_types::{FromSql, Kind, Type};
+use readyset_data::Array;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use tokio_util::codec::Decoder;
@@ -344,7 +344,7 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
             Type::JSONB => Ok(Value::Jsonb(serde_json::Value::from_sql(t, buf)?)),
             Type::BIT => Ok(Value::Bit(BitVec::from_sql(t, buf)?)),
             Type::VARBIT => Ok(Value::VarBit(BitVec::from_sql(t, buf)?)),
-            _ => Ok(Value::PassThrough(noria_data::PassThrough {
+            _ => Ok(Value::PassThrough(readyset_data::PassThrough {
                 ty: t.clone(),
                 data: buf.to_vec().into_boxed_slice(),
             })),

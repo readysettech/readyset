@@ -3,7 +3,7 @@ use std::net::IpAddr;
 use bit_vec::BitVec;
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use eui48::MacAddress;
-use noria_data::{Array, Text};
+use readyset_data::{Array, Text};
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
@@ -36,5 +36,5 @@ pub enum Value {
     Bit(BitVec),
     VarBit(BitVec),
     Array(Array, postgres_types::Type),
-    PassThrough(noria_data::PassThrough),
+    PassThrough(readyset_data::PassThrough),
 }

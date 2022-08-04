@@ -2,7 +2,7 @@
 name = "array2"
 version = "0.0.1"
 publish = false
-authors = ["Readyset"]
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]

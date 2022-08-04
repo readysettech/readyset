@@ -1,0 +1,18 @@
+[package]
+name = "readyset-client-metrics"
+version = "0.1.0"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+
+[dependencies]
+metrics = "0.19"
+serde = "1.0.130"
+serde_json = "1.0.67"
+
+#local dependencies
+readyset = { path = "../readyset" }
+nom-sql = { path = "../nom-sql" }
+
+[lib]
+path = "src/lib.rs"

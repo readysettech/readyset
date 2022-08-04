@@ -2,7 +2,7 @@
 name = "launchpad"
 version = "0.1.0"
 publish = false
-authors = ["Readyset"]
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 description = "Extensions to the Rust standard library"
 

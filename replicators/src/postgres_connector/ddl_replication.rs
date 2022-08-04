@@ -39,8 +39,8 @@
 //! [dialect]: nom_sql::Dialect
 
 use nom_sql::{parse_query, Dialect, DropTableStatement, DropViewStatement, SqlQuery, Table};
-use noria_errors::ReadySetResult;
 use pgsql::tls::MakeTlsConnect;
+use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Deserializer};
 use tokio_postgres as pgsql;
 use tracing::debug;

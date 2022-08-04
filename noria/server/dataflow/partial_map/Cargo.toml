@@ -1,9 +1,0 @@
-[package]
-name = "partial_map"
-version = "0.1.0"
-publish = false
-authors = ["Readyset"]
-edition = "2021"
-
-[dependencies]
-merging-interval-tree = { path = "../../../../merging-interval-tree" }

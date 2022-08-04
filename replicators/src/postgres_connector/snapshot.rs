@@ -7,8 +7,8 @@ use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
 use nom_sql::{parse_key_specification_string, Dialect, TableKey};
 use noria::{ReadySetError, ReadySetResult};
-use noria_data::DataType;
 use postgres_types::{accepts, FromSql, Type};
+use readyset_data::DataType;
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, info_span, trace, Instrument};
 

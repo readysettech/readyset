@@ -1,0 +1,9 @@
+[package]
+name = "partial-map"
+version = "0.1.0"
+publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
+edition = "2021"
+
+[dependencies]
+merging-interval-tree = { path = "../merging-interval-tree" }

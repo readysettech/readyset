@@ -2,7 +2,7 @@
 name = "replicators"
 version = "0.1.0"
 publish = false
-authors = ["Vlad Krasnov <vlad@readyset.io>"]
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [dependencies]
@@ -31,14 +31,14 @@ mysql_async = "0.29"
 
 mysql_common = "0.28.0"
 nom-sql = { path = "../nom-sql" }
-noria = { path = "../noria/noria", package = "noria" }
-noria-errors = { path = "../noria/errors" }
+readyset = { path = "../readyset" }
+readyset-errors = { path = "../readyset-errors" }
 launchpad = { path = "../launchpad" }
 readyset-tracing = { path = "../readyset-tracing" }
 mysql-time = { path = "../mysql-time" }
-noria-data = { path = "../noria/data" }
+readyset-data = { path = "../readyset-data" }
 database-utils = { path = "../database-utils" }
 
 [dev-dependencies]
-noria-server = { path = "../noria/server" }
+readyset-server = { path = "../readyset-server" }
 serial_test = "0.5"

@@ -17,7 +17,7 @@ use noria::metrics::recorded::{self, SnapshotStatusTag};
 use noria::recipe::changelist::{Change, ChangeList};
 use noria::replication::{ReplicationOffset, ReplicationOffsets};
 use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table, TableOperation};
-use noria_errors::{internal_err, invalid_err};
+use readyset_errors::{internal_err, invalid_err};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};

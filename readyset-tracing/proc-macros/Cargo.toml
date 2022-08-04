@@ -2,6 +2,7 @@
 name = "readyset-tracing-proc-macros"
 version = "0.1.0"
 publish = false
+authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 [lib]
