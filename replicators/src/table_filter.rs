@@ -136,6 +136,11 @@ impl TableFilter {
             false
         }
     }
+
+    /// Check if the given namespace is mentioned at all in the filter
+    pub(crate) fn contains_namespace(&self, namespace: &str) -> bool {
+        self.tables.contains_key(namespace)
+    }
 }
 
 #[cfg(test)]

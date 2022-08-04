@@ -421,6 +421,18 @@ async fn mysql_replication_filter() -> ReadySetResult<()> {
     replication_filter_inner(&mysql_url()).await
 }
 
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn pgsql_replication_resnapshot() -> ReadySetResult<()> {
+    resnapshot_inner(&pgsql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn mysql_replication_resnapshot() -> ReadySetResult<()> {
+    resnapshot_inner(&mysql_url()).await
+}
+
 /// This test checks that when writes and replication happen in parallel
 /// noria correctly catches up from binlog
 /// NOTE: If this test flakes, please notify Vlad
@@ -700,6 +712,7 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
 }
 
 async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
+    readyset_tracing::init_test_logging();
     let mut client = DbConnection::connect(url).await?;
 
     client
@@ -850,11 +863,8 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
 
 /// Tests that on encountering an ALTER TABLE statement the replicator does a proper resnapshot that
 /// results in the proper schema being present.
-#[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
-async fn mysql_replication_resnapshot() -> ReadySetResult<()> {
-    let url = mysql_url();
-    let mut client = DbConnection::connect(&url).await?;
+async fn resnapshot_inner(url: &str) -> ReadySetResult<()> {
+    let mut client = DbConnection::connect(url).await?;
     client
         .query(
             "
@@ -887,7 +897,7 @@ async fn mysql_replication_resnapshot() -> ReadySetResult<()> {
             .await?;
     }
 
-    let mut ctx = TestHandle::start_noria(url.clone(), None).await?;
+    let mut ctx = TestHandle::start_noria(url.to_string(), None).await?;
     ctx.ready_notify.as_ref().unwrap().notified().await;
     // Initial snapshot is done
     let rs: Vec<_> = (0..ROWS)
@@ -928,7 +938,7 @@ async fn mysql_replication_resnapshot() -> ReadySetResult<()> {
         .flatten()
         .collect();
     let rs: Vec<&[DataType]> = rs.iter().map(|r| r.as_slice()).collect();
-    ctx.check_results("repl1_view", "Resnapshot", rs.as_slice())
+    ctx.check_results("repl1_view", "Resnapshot repl1", rs.as_slice())
         .await
         .unwrap();
 
@@ -957,7 +967,7 @@ async fn mysql_replication_resnapshot() -> ReadySetResult<()> {
         .flatten()
         .collect();
     let rs: Vec<&[DataType]> = rs.iter().map(|r| r.as_slice()).collect();
-    ctx.check_results("repl2_view", "Resnapshot", rs.as_slice())
+    ctx.check_results("repl2_view", "Resnapshot repl2", rs.as_slice())
         .await
         .unwrap();
 
@@ -1073,33 +1083,4 @@ async fn postgresql_ddl_replicate_create_view() {
         .unwrap();
 
     eventually!(ctx.noria.view("t2_view").await.is_ok());
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
-#[ignore = "noria doesn't support alter table yet"]
-async fn postgresql_ddl_replicate_alter_table() {
-    readyset_tracing::init_test_logging();
-    let mut client = DbConnection::connect(&pgsql_url()).await.unwrap();
-    client
-        .query(
-            "DROP TABLE IF EXISTS t2 CASCADE; CREATE TABLE t2 (id int);
-            ",
-        )
-        .await
-        .unwrap();
-    let mut ctx = TestHandle::start_noria(pgsql_url(), None).await.unwrap();
-    ctx.ready_notify.as_ref().unwrap().notified().await;
-    ctx.noria.table("t2").await.unwrap();
-
-    trace!("altering table");
-    client
-        .query("ALTER TABLE t2 ADD COLUMN val TEXT")
-        .await
-        .unwrap();
-
-    eventually! {
-        let table = ctx.noria.table("t2").await.unwrap();
-        table.columns().contains(&"val".into())
-    };
 }

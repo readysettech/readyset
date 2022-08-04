@@ -25,9 +25,11 @@ use {mysql_async as mysql, tokio_postgres as pgsql};
 
 use crate::mysql_connector::{MySqlBinlogConnector, MySqlReplicator};
 use crate::postgres_connector::{
-    PostgresPosition, PostgresReplicator, PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
+    PostgresReplicator, PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
 };
 use crate::table_filter::TableFilter;
+
+const RESNAPSHOT_SLOT: &str = "readyset_resnapshot";
 
 /// Shared configuration for replication.
 ///
@@ -159,7 +161,7 @@ impl NoriaAdapter {
     pub async fn start(
         noria: ControllerHandle,
         mut config: Config,
-        mut ready_notify: Option<Arc<Notify>>,
+        mut notify: Option<Arc<Notify>>,
     ) -> ReadySetResult<!> {
         let mut resnapshot = false;
         let url: DatabaseURL = config
@@ -169,28 +171,26 @@ impl NoriaAdapter {
             .parse()
             .map_err(|e| invalid_err!("Invalid URL supplied to --replication-url: {e}"))?;
 
-        match url {
+        while let Err(err) = match url.clone() {
             DatabaseURL::MySQL(options) => {
-                while let Err(err) = NoriaAdapter::start_inner_mysql(
-                    options.clone(),
-                    noria.clone(),
-                    config.clone(),
-                    &mut ready_notify,
-                    resnapshot,
-                )
-                .await
-                {
-                    match err {
-                        ReadySetError::ResnapshotNeeded => resnapshot = true,
-                        err => return Err(err),
-                    }
-                }
-                unreachable!("`start_inner_mysql` will never stop with an Ok status");
+                let noria = noria.clone();
+                let config = config.clone();
+                NoriaAdapter::start_inner_mysql(options, noria, config, &mut notify, resnapshot)
+                    .await
             }
             DatabaseURL::PostgreSQL(options) => {
-                NoriaAdapter::start_inner_postgres(options, noria, config, ready_notify).await
+                let noria = noria.clone();
+                let config = config.clone();
+                NoriaAdapter::start_inner_postgres(options, noria, config, &mut notify, resnapshot)
+                    .await
+            }
+        } {
+            match err {
+                ReadySetError::ResnapshotNeeded => resnapshot = true,
+                err => return Err(err),
             }
         }
+        unreachable!("inner loop will never stop with an Ok status");
     }
 
     /// Finish the build and begin monitoring the binlog for changes
@@ -342,8 +342,13 @@ impl NoriaAdapter {
         pgsql_opts: pgsql::Config,
         mut noria: ControllerHandle,
         mut config: Config,
-        ready_notify: Option<Arc<Notify>>,
+        ready_notify: &mut Option<Arc<Notify>>,
+        resnapshot: bool,
     ) -> ReadySetResult<!> {
+        let dbname = pgsql_opts.get_dbname().ok_or_else(|| {
+            ReadySetError::ReplicationFailed("No database specified for replication".to_string())
+        })?;
+
         // Attempt to retreive the latest replication offset from noria, if none is present
         // begin the snapshot process
         let replication_offsets = noria.replication_offsets().await?;
@@ -356,20 +361,30 @@ impl NoriaAdapter {
             Some("public"),
         )?;
 
-        if let Some(pos) = pos {
-            info!(wal_position = %pos);
-        }
-
-        let dbname = pgsql_opts.get_dbname().ok_or_else(|| {
-            ReadySetError::ReplicationFailed("No database specified for replication".to_string())
-        })?;
-
         let mut connector =
             Box::new(PostgresWalConnector::connect(pgsql_opts.clone(), dbname, config, pos).await?);
 
         info!("Connected to PostgreSQL");
 
-        if let Some(snapshot) = connector.snapshot_name.as_deref() {
+        let replication_slot = if let Some(slot) = &connector.replication_slot {
+            Some(slot.clone())
+        } else if resnapshot || pos.is_none() {
+            // This is not an initial connection but we need to resnapshot the latest schema,
+            // therefore we create a new replication slot, just so we can get a consistent snapshot
+            // with a WAL position attached. This is more robust than locking and allows us to reuse
+            // the existing snapshotting code.
+            let _ = connector.drop_replication_slot(RESNAPSHOT_SLOT).await;
+            Some(
+                connector
+                    .create_replication_slot(RESNAPSHOT_SLOT, true)
+                    .await?,
+            )
+        } else {
+            None
+        };
+
+        if let Some(replication_slot) = replication_slot {
+            let snapshot_start = Instant::now();
             // If snapshot name exists, it means we need to make a snapshot to noria
             let mut builder = native_tls::TlsConnector::builder();
             if disable_replication_ssl_verification {
@@ -388,15 +403,37 @@ impl NoriaAdapter {
                 PostgresReplicator::new(&mut client, &mut noria, table_filter.clone()).await?;
 
             select! {
-                s = replicator.snapshot_to_noria(snapshot).fuse() => s?,
+                snapshot_result = replicator.snapshot_to_noria(&replication_slot).fuse() =>  {
+                    let status = if snapshot_result.is_err() {
+                        SnapshotStatusTag::Failed.value()
+                    } else {
+                        SnapshotStatusTag::Successful.value()
+                    };
+
+                    counter!(
+                        recorded::REPLICATOR_SNAPSHOT_STATUS,
+                        1u64,
+                        "status" => status
+                    );
+
+                    snapshot_result?;
+                },
                 c = connection_handle.fuse() => c.unwrap()?,
             }
 
             info!("Snapshot finished");
+            histogram!(
+                recorded::REPLICATOR_SNAPSHOT_DURATION,
+                snapshot_start.elapsed().as_micros() as f64
+            );
+
+            if replication_slot.slot_name == RESNAPSHOT_SLOT {
+                let _ = connector.drop_replication_slot(RESNAPSHOT_SLOT).await;
+            }
         }
 
         // Let waiters know that the initial snapshotting is complete.
-        if let Some(notify) = ready_notify {
+        if let Some(notify) = ready_notify.take() {
             notify.notify_one();
         }
 
@@ -406,6 +443,16 @@ impl NoriaAdapter {
 
         info!("Streaming replication started");
 
+        let replication_offsets = noria.replication_offsets().await?;
+        let mut min_pos = replication_offsets
+            .min_present_offset()?
+            .expect("Minimal offset must be present after snapshot")
+            .clone();
+        let max_pos = replication_offsets
+            .max_offset()?
+            .expect("Maximum offset must be present after snapshot")
+            .clone();
+
         let mut adapter = NoriaAdapter {
             noria,
             connector,
@@ -413,12 +460,15 @@ impl NoriaAdapter {
             mutator_map: HashMap::new(),
             warned_missing_tables: HashSet::new(),
             table_filter,
-            supports_resnapshot: false,
+            supports_resnapshot: true,
         };
 
-        adapter
-            .main_loop(&mut PostgresPosition::default().into(), None)
-            .await?;
+        if min_pos != max_pos {
+            info!(start = %min_pos, end = %max_pos, "Catching up");
+            adapter.main_loop(&mut min_pos, Some(max_pos)).await?;
+        }
+
+        adapter.main_loop(&mut min_pos, None).await?;
 
         unreachable!("`main_loop` will never stop with an Ok status if `until = None`");
     }

@@ -35,8 +35,8 @@ pub struct PostgresWalConnector {
     peek: Option<(WalEvent, i64)>,
     /// If we just want to continue reading the log from a previous point
     next_position: Option<PostgresPosition>,
-    /// The name of the snapshot that was created with the replication slot
-    pub(crate) snapshot_name: Option<String>,
+    /// The replication slot if was created for this connector
+    pub(crate) replication_slot: Option<CreatedSlot>,
 }
 
 /// The decoded response to `IDENTIFY_SYSTEM`
@@ -50,27 +50,27 @@ pub(crate) struct ServerIdentity {
     pub(crate) timeline: i8,
     /// Current WAL flush location. Useful to get a known location in the write-ahead log where
     /// streaming can start.
-    pub(crate) xlogpos: String,
+    pub(crate) xlogpos: i64,
     /// Database connected to or null.
     pub(crate) dbname: Option<String>,
 }
 
 /// The decoded response to `CREATE_REPLICATION_SLOT`
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub(crate) struct CreatedSlot {
     /// The name of the newly-created replication slot
     pub(crate) slot_name: String,
     /// The WAL location at which the slot became consistent. This is the earliest location
     /// from which streaming can start on this replication slot.
-    pub(crate) consistent_point: String,
+    pub(crate) consistent_point: i64,
     /// The identifier of the snapshot exported by the command. The snapshot is valid until a
     /// new command is executed on this connection or the replication connection is closed.
     /// Null if the created slot is physical.
-    pub(crate) snapshot_name: Option<String>,
+    pub(crate) snapshot_name: String,
     /// The name of the output plugin used by the newly-created replication slot.
     /// Null if the created slot is physical.
-    pub(crate) output_plugin: Option<String>,
+    pub(crate) output_plugin: String,
 }
 
 impl PostgresWalConnector {
@@ -104,7 +104,7 @@ impl PostgresWalConnector {
             reader: None,
             peek: None,
             next_position,
-            snapshot_name: None,
+            replication_slot: None,
         };
 
         if next_position.is_none() {
@@ -137,8 +137,8 @@ impl PostgresWalConnector {
         // Drop the existing slot if any
         let _ = self.drop_replication_slot(REPLICATION_SLOT).await;
 
-        match self.create_replication_slot(REPLICATION_SLOT).await {
-            Ok(slot) => self.snapshot_name = slot.snapshot_name, /* Created a new slot, */
+        match self.create_replication_slot(REPLICATION_SLOT, false).await {
+            Ok(slot) => self.replication_slot = Some(slot), /* Created a new slot, */
             // everything is good
             Err(err)
                 if err.to_string().contains("replication slot")
@@ -191,7 +191,7 @@ impl PostgresWalConnector {
         let timeline: i8 = row.get(1).unwrap().parse().map_err(|_| {
             ReadySetError::ReplicationFailed("Unable to parse identify system".into())
         })?;
-        let xlogpos = row.get(2).unwrap().to_string();
+        let xlogpos = parse_wal(row.get(2).unwrap())?;
         let dbname = row.get(3).map(Into::into);
 
         Ok(ServerIdentity {
@@ -217,23 +217,28 @@ impl PostgresWalConnector {
     /// output_plugin [ EXPORT_SNAPSHOT | NOEXPORT_SNAPSHOT | USE_SNAPSHOT ] }`
     ///
     /// We use the following options:
-    /// No `TEMPORARY` - we want the slot to persist when connection to primary is down
+    /// `TEMPORARY` - we only use it for a resnapshotting slot, otherwise we want the slot to
+    /// persist when connection to primary is down
     /// `LOGICAL` - we are using logical streaming replication
     /// `pgoutput` - the plugin to use for logical decoding, always available from PG > 10
     /// `EXPORT_SNAPSHOT` -  we want the operation to export a snapshot that can be then used for
-    /// replication
-    async fn create_replication_slot(&mut self, name: &str) -> ReadySetResult<CreatedSlot> {
+    /// snapshotting
+    pub(crate) async fn create_replication_slot(
+        &mut self,
+        name: &str,
+        temporary: bool,
+    ) -> ReadySetResult<CreatedSlot> {
         let query = format!(
-            "CREATE_REPLICATION_SLOT {} LOGICAL pgoutput EXPORT_SNAPSHOT",
-            name
+            "CREATE_REPLICATION_SLOT {name} {} LOGICAL pgoutput EXPORT_SNAPSHOT",
+            if temporary { "TEMPORARY" } else { "" }
         );
 
         let row = self.one_row_query(&query, 4).await?;
 
-        let slot_name = row.get(0).unwrap().to_string(); // Can unwrap because checked by `one_row_query`
-        let consistent_point = row.get(1).unwrap().to_string();
-        let snapshot_name = row.get(2).map(Into::into);
-        let output_plugin = row.get(3).map(Into::into);
+        let slot_name = row.get(0).unwrap().to_string(); // Can unwrap all because checked by `one_row_query`
+        let consistent_point = parse_wal(row.get(1).unwrap())?;
+        let snapshot_name = row.get(2).map(Into::into).unwrap();
+        let output_plugin = row.get(3).map(Into::into).unwrap();
 
         Ok(CreatedSlot {
             slot_name,
@@ -325,7 +330,7 @@ impl PostgresWalConnector {
     /// If the slot is a logical slot that was created in a database other than the database
     /// the walsender is connected to, this command fails.
     /// Not really needed when `TEMPORARY` slot is Used
-    async fn drop_replication_slot(&mut self, name: &str) -> ReadySetResult<()> {
+    pub(crate) async fn drop_replication_slot(&mut self, name: &str) -> ReadySetResult<()> {
         self.simple_query(&format!("DROP_REPLICATION_SLOT {}", name))
             .await
             .map(|_| ())
@@ -367,6 +372,20 @@ impl PostgresWalConnector {
     ) -> ReadySetResult<Vec<pgsql::SimpleQueryMessage>> {
         Ok(self.client.simple_query(query).await?)
     }
+}
+
+fn parse_wal(wal: &str) -> ReadySetResult<i64> {
+    // Internally, an LSN is a 64-bit integer, representing a byte position in the write-ahead log
+    // stream. It is printed as two hexadecimal numbers of up to 8 digits each, separated by a
+    // slash; for example, 16/B374D848
+    let (hi, lo) = wal
+        .split_once('/')
+        .ok_or_else(|| ReadySetError::ReplicationFailed(format!("Invalid wal {wal}")))?;
+    let hi = i64::from_str_radix(hi, 16)
+        .map_err(|e| ReadySetError::ReplicationFailed(format!("Invalid wal {e:?}")))?;
+    let lo = i64::from_str_radix(lo, 16)
+        .map_err(|e| ReadySetError::ReplicationFailed(format!("Invalid wal {e:?}")))?;
+    Ok(hi << 32 | lo)
 }
 
 impl Drop for PostgresWalConnector {

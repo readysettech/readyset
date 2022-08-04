@@ -5,7 +5,6 @@ use std::future;
 
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
-use launchpad::redacted::Sensitive;
 use nom_sql::{parse_key_specification_string, Dialect, TableKey};
 use noria::{ReadySetError, ReadySetResult};
 use noria_data::DataType;
@@ -13,6 +12,7 @@ use postgres_types::{accepts, FromSql, Type};
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, info_span, trace, Instrument};
 
+use super::connector::CreatedSlot;
 use super::PostgresPosition;
 use crate::table_filter::TableFilter;
 
@@ -334,16 +334,18 @@ impl<'a> PostgresReplicator<'a> {
 
     /// Begin the replication process, starting with the recipe for the database, followed
     /// by each table's contents
-    pub async fn snapshot_to_noria<S: AsRef<str>>(
+    pub(crate) async fn snapshot_to_noria(
         &mut self,
-        snapshot_name: S,
+        replication_slot: &CreatedSlot,
     ) -> ReadySetResult<()> {
-        self.set_snapshot(snapshot_name.as_ref()).await?;
+        let wal_position = PostgresPosition::from(replication_slot.consistent_point).into();
+        self.set_snapshot(&replication_slot.snapshot_name).await?;
 
         let mut table_list = self.get_table_list(TableKind::RegularTable).await?;
-        let view_list = self.get_table_list(TableKind::View).await?;
+        let mut view_list = self.get_table_list(TableKind::View).await?;
 
         table_list.retain(|tbl| self.table_filter.contains(&tbl.schema, &tbl.name));
+        view_list.retain(|view| self.table_filter.contains_namespace(&view.schema));
 
         trace!(?table_list, "Loaded table list");
         trace!(?view_list, "Loaded view list");
@@ -351,7 +353,6 @@ impl<'a> PostgresReplicator<'a> {
         // For each table, retreive its structure
         let mut tables = Vec::with_capacity(table_list.len());
         for table in table_list {
-            trace!(table = %table.name, "Looking up table");
             let create_table = match table.get_table(&self.transaction).await {
                 Ok(ct) => ct,
                 Err(error) => {
@@ -362,9 +363,7 @@ impl<'a> PostgresReplicator<'a> {
 
             debug!(%create_table, "Extending recipe");
             match future::ready(create_table.to_string().try_into())
-                .and_then(|changelist| async {
-                    self.noria.extend_recipe_no_leader_ready(changelist).await
-                })
+                .and_then(|changelist| self.noria.extend_recipe_no_leader_ready(changelist))
                 .await
             {
                 Ok(_) => tables.push(create_table),
@@ -386,18 +385,27 @@ impl<'a> PostgresReplicator<'a> {
                 }
             };
 
+            debug!(%view, "Extending recipe");
+
             if let Err(err) = self
                 .noria
                 .extend_recipe_no_leader_ready(view.try_into()?)
                 .await
             {
-                error!(view = %Sensitive(&create_view), %err, "Error extending CREATE VIEW, view will not be used");
+                error!(%err, "Error extending CREATE VIEW, view will not be used");
             }
         }
 
+        // The current schema was replicated, assign the current position
         self.noria
-            .set_schema_replication_offset(Some(&PostgresPosition::default().into()))
+            .set_schema_replication_offset(Some(&wal_position))
             .await?;
+
+        let replication_offsets = self.noria.replication_offsets().await?;
+
+        tables.drain_filter(|t| replication_offsets.has_table(t.name.as_str())).for_each(|t|
+            info!(table = %t.name, "Replication offset already exists for table, skipping snapshot")
+        );
 
         // Finally copy each table into noria
         for table in &tables {
@@ -423,11 +431,12 @@ impl<'a> PostgresReplicator<'a> {
         for table in tables {
             // TODO(vlad): should differentiate by schema when implemented
             let mut noria_table = self.noria.table(&table.name).await?;
+            let wal_position = wal_position.clone();
             compacting.push(async move {
                 let span = info_span!("Compacting table", table = %table.name);
                 span.in_scope(|| info!("Setting replication offset"));
                 if let Err(error) = noria_table
-                    .set_replication_offset(PostgresPosition::default().into())
+                    .set_replication_offset(wal_position)
                     .instrument(span.clone())
                     .await
                 {
@@ -449,7 +458,7 @@ impl<'a> PostgresReplicator<'a> {
         Ok(())
     }
 
-    /// Retreieve a list of tables of the specified kind
+    /// Retreieve a list of tables of the specified kind in the specified namespace
     async fn get_table_list(&mut self, kind: TableKind) -> Result<Vec<TableEntry>, pgsql::Error> {
         let kind_code = match kind {
             TableKind::RegularTable => 'r',
