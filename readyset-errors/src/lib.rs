@@ -595,6 +595,10 @@ pub enum ReadySetError {
 
     #[error("Root certificate must be a valid DER or PEM encoded certificate")]
     InvalidRootCertificate,
+
+    /// Error when a node couldn't be found in MIR.
+    #[error("Could not find MIR node {index}")]
+    MirNodeNotFound { index: usize },
 }
 
 impl ReadySetError {

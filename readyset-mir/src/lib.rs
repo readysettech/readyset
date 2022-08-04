@@ -53,6 +53,7 @@ use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 
 mod column;
+pub mod graph;
 pub mod node;
 pub mod query;
 pub mod reuse;

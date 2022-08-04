@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::Debug;
+use std::vec::Vec;
 
 use ::serde::{Deserialize, Serialize};
 use common::{DfValue, IndexType};
@@ -8,6 +9,7 @@ use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::union;
 use launchpad::redacted::Sensitive;
 use lazy_static::lazy_static;
+use mir::graph::MirGraph;
 use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};
 use mir::query::MirQuery;
@@ -151,6 +153,10 @@ pub(super) struct SqlToMirConverter {
         HashMap<Relation, Vec<(usize, Vec<ColumnSpecification>)>>,
     pub(in crate::controller::sql) current: HashMap<Relation, usize>,
     pub(in crate::controller::sql) nodes: HashMap<(Relation, usize), MirNodeRef>,
+    /// The graph containing all of the MIR base tables, views and cached queries.
+    /// Each of them are a subgraph in the MIR Graph.
+    #[allow(dead_code)]
+    pub(in crate::controller::sql) mir_graph: MirGraph,
     pub(in crate::controller::sql) schema_version: usize,
 }
 

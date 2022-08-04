@@ -621,6 +621,14 @@ impl MirNode {
     }
 }
 
+// TODO(fran): Remove this once we get rid of `MirNodeRef` and
+//  the ancestors/children fields.
+impl Clone for MirNode {
+    fn clone(&self) -> Self {
+        self.clone_without_relations()
+    }
+}
+
 /// A [`Relationship`] that goes towards the [`children`][] of a node
 ///
 /// [`children`]: MirNode::children

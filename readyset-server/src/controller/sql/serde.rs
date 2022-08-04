@@ -28,6 +28,7 @@ use std::convert::{TryFrom, TryInto};
 use std::hash::Hash;
 use std::rc::Rc;
 
+use mir::graph::MirGraph;
 use mir::node::MirNode;
 use mir::query::MirQuery;
 use mir::MirNodeRef;
@@ -282,6 +283,7 @@ fn deserialize_mir_converter<E>(
         base_schemas: serialized_mir_converter.base_schemas,
         current: serialized_mir_converter.current,
         nodes,
+        mir_graph: MirGraph::new(),
         schema_version: serialized_mir_converter.schema_version,
     })
 }
