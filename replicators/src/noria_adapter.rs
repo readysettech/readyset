@@ -325,6 +325,7 @@ impl NoriaAdapter {
         // begin the snapshot process
         let replication_offsets = noria.replication_offsets().await?;
         let pos = replication_offsets.max_offset()?.map(Into::into);
+        let disable_replication_ssl_verification = config.disable_replication_ssl_verification;
 
         let table_filter = TableFilter::try_new(
             nom_sql::Dialect::PostgreSQL,
@@ -347,9 +348,14 @@ impl NoriaAdapter {
 
         if let Some(snapshot) = connector.snapshot_name.as_deref() {
             // If snapshot name exists, it means we need to make a snapshot to noria
+            let mut builder = native_tls::TlsConnector::builder();
+            if disable_replication_ssl_verification {
+                builder.danger_accept_invalid_certs(true);
+            }
+
             let (mut client, connection) = pgsql_opts
                 .connect(postgres_native_tls::MakeTlsConnector::new(
-                    native_tls::TlsConnector::builder().build().unwrap(),
+                    builder.build().unwrap(),
                 ))
                 .await?;
 
