@@ -1,11 +1,10 @@
 use std::fmt;
 
 use nom::bytes::complete::tag_no_case;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::whitespace::whitespace1;
-use crate::{Dialect, SqlIdentifier};
+use crate::{Dialect, SqlIdentifier, Span, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct UseStatement {
@@ -24,7 +23,7 @@ impl fmt::Display for UseStatement {
     }
 }
 
-pub fn use_statement(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], UseStatement> {
+pub fn use_statement(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<UseStatement> {
     move |i| {
         let (i, _) = tag_no_case("use")(i)?;
         let (i, _) = whitespace1(i)?;

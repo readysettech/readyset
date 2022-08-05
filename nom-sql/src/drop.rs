@@ -6,15 +6,14 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::preceded;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{statement_terminator, ws_sep_comma};
 use crate::table::{table_list, table_reference, Table};
 use crate::whitespace::whitespace1;
-use crate::{Dialect, SqlIdentifier};
+use crate::{Dialect, SqlIdentifier, Span, NomSqlResult};
 
-fn if_exists(i: &[u8]) -> IResult<&[u8], bool> {
+fn if_exists(i: Span) -> NomSqlResult<bool> {
     map(
         opt(|i| {
             let (i, _) = tag_no_case("if")(i)?;
@@ -26,7 +25,7 @@ fn if_exists(i: &[u8]) -> IResult<&[u8], bool> {
     )(i)
 }
 
-fn restrict_cascade(i: &[u8]) -> IResult<&[u8], (bool, bool)> {
+fn restrict_cascade(i: Span) -> NomSqlResult<(bool, bool)> {
     let (i, restrict) = opt(preceded(whitespace1, tag_no_case("restrict")))(i)?;
     let (i, cascade) = opt(preceded(whitespace1, tag_no_case("cascade")))(i)?;
     Ok((i, (restrict.is_some(), cascade.is_some())))
@@ -55,7 +54,7 @@ impl Display for DropTableStatement {
     }
 }
 
-pub fn drop_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DropTableStatement> {
+pub fn drop_table(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<DropTableStatement> {
     move |i| {
         let (i, _) = tag_no_case("drop")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -81,7 +80,7 @@ impl Display for DropCacheStatement {
     }
 }
 
-pub fn drop_cached_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DropCacheStatement> {
+pub fn drop_cached_query(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<DropCacheStatement> {
     move |i| {
         let (i, _) = tag_no_case("drop")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -109,7 +108,7 @@ impl Display for DropViewStatement {
     }
 }
 
-pub fn drop_view(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DropViewStatement> {
+pub fn drop_view(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<DropViewStatement> {
     move |i| {
         let (i, _) = tag_no_case("drop")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -132,7 +131,7 @@ impl Display for DropAllCachesStatement {
     }
 }
 
-pub fn drop_all_caches(i: &[u8]) -> IResult<&[u8], DropAllCachesStatement> {
+pub fn drop_all_caches(i: Span) -> NomSqlResult<DropAllCachesStatement> {
     let (i, _) = tag_no_case("drop")(i)?;
     let (i, _) = whitespace1(i)?;
     let (i, _) = tag_no_case("all")(i)?;

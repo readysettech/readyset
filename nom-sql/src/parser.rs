@@ -2,7 +2,6 @@ use std::{fmt, str};
 
 use nom::branch::alt;
 use nom::combinator::map;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::alter::{alter_table_statement, AlterTableStatement};
@@ -28,7 +27,7 @@ use crate::transaction::{
 };
 use crate::update::{updating, UpdateStatement};
 use crate::use_statement::{use_statement, UseStatement};
-use crate::{Dialect, DropAllCachesStatement, TableKey};
+use crate::{Dialect, DropAllCachesStatement, Span, TableKey, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
@@ -126,7 +125,7 @@ impl SqlQuery {
     }
 }
 
-pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery> {
+pub fn sql_query(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<SqlQuery> {
     move |i| {
         alt((
             map(creation(dialect), SqlQuery::CreateTable),
@@ -151,6 +150,7 @@ pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery>
             map(show(dialect), SqlQuery::Show),
             map(explain_statement, SqlQuery::Explain),
         ))(i)
+        .map_err(|e| e.into())
     }
 }
 
@@ -159,7 +159,7 @@ pub fn parse_query_bytes<T>(dialect: Dialect, input: T) -> Result<SqlQuery, &'st
 where
     T: AsRef<[u8]>,
 {
-    match sql_query(dialect)(input.as_ref()) {
+    match sql_query(dialect)(Span::new(input.as_ref())) {
         Ok((_, o)) => Ok(o),
         Err(_) => Err("failed to parse query"),
     }
@@ -182,7 +182,7 @@ pub fn parse_select_statement_bytes<T>(
 where
     T: AsRef<[u8]>,
 {
-    match selection(dialect)(input.as_ref()) {
+    match selection(dialect)(Span::new(input.as_ref())) {
         Ok((remaining, o)) if remaining.is_empty() => Ok(o),
         _ => Err("failed to parse query"),
     }
@@ -207,7 +207,7 @@ pub fn parse_create_table_bytes<T>(
 where
     T: AsRef<[u8]>,
 {
-    match creation(dialect)(input.as_ref()) {
+    match creation(dialect)(Span::new(input.as_ref())) {
         Ok((remaining, o)) if remaining.is_empty() => Ok(o),
         _ => Err("failed to parse query"),
     }
@@ -232,7 +232,7 @@ pub fn parse_alter_table_bytes<T>(
 where
     T: AsRef<[u8]>,
 {
-    match alter_table_statement(dialect)(input.as_ref()) {
+    match alter_table_statement(dialect)(Span::new(input.as_ref())) {
         Ok((remaining, o)) if remaining.is_empty() => Ok(o),
         _ => Err("failed to parse query"),
     }
@@ -254,7 +254,7 @@ pub fn parse_key_specification_bytes<T>(
 where
     T: AsRef<[u8]>,
 {
-    match key_specification(dialect)(input.as_ref()) {
+    match key_specification(dialect)(Span::new(input.as_ref())) {
         Ok((_, o)) => Ok(o),
         Err(_) => Err("failed to parse query"),
     }

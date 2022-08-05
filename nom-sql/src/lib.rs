@@ -6,6 +6,9 @@
 #[macro_use]
 extern crate pretty_assertions;
 
+use nom::error::{ErrorKind, FromExternalError, ParseError};
+use nom::IResult;
+use nom_locate::LocatedSpan;
 pub use sql_identifier::SqlIdentifier;
 
 pub use self::alter::{AlterColumnOperation, AlterTableDefinition, AlterTableStatement};
@@ -75,3 +78,59 @@ mod transaction;
 mod update;
 mod use_statement;
 pub mod whitespace;
+
+type Span<'a> = LocatedSpan<&'a [u8]>;
+type Error<'a> = NomSqlError<Span<'a>>;
+type NomSqlResult<'a, O> = IResult<Span<'a>, O, Error<'a>>;
+
+#[derive(Debug)]
+struct NomSqlError<I> {
+    input: I,
+    kind: ErrorKind,
+    offset: usize,
+    line: u32,
+}
+
+impl<'a> ParseError<Span<'a>> for NomSqlError<Span<'a>> {
+    fn from_error_kind(input: Span<'a>, kind: ErrorKind) -> Self {
+        Self {
+            input,
+            kind,
+            offset: input.location_offset(),
+            line: input.location_line(),
+        }
+    }
+
+    fn append(input: Span<'a>, kind: ErrorKind, other: Self) -> Self {
+        //println!("input: {:?}, kind: {:?}, other: {:?}", input, kind, other);
+        other
+    }
+
+    fn from_char(input: Span<'a>, _: char) -> Self {
+        Self::from_error_kind(input, ErrorKind::Char)
+    }
+
+    // TODO what if both branches got equally far i.e. self.offset == other.offset?
+    fn or(self, other: Self) -> Self {
+        if self.offset > other.offset {
+            self
+        } else {
+            other
+        }
+    }
+}
+
+impl<'a> FromExternalError<Span<'a>, Utf8Error> for NomSqlError<Span<'a>> {
+    
+}
+
+impl<'a> From<nom::error::Error<Span<'a>>> for NomSqlError<Span<'a>> {
+    fn from(e: nom::error::Error<Span<'a>>) -> Self {
+        Self {
+            input: e.input,
+            kind: e.code,
+            offset: e.input.location_offset(),
+            line: e.input.location_line(),
+        }
+    }
+}

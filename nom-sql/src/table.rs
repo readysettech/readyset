@@ -7,11 +7,10 @@ use nom::bytes::complete::tag;
 use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::terminated;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{as_alias, ws_sep_comma};
-use crate::{Dialect, SqlIdentifier};
+use crate::{Dialect, SqlIdentifier, Span, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Table {
@@ -92,7 +91,7 @@ impl From<Table> for TableExpr {
 }
 
 // Parse a reference to a named schema.table
-pub fn table_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Table> {
+pub fn table_reference(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Table> {
     move |i| {
         let (i, schema) = opt(terminated(dialect.identifier(), tag(".")))(i)?;
         let (i, name) = dialect.identifier()(i)?;
@@ -101,11 +100,11 @@ pub fn table_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Tab
 }
 
 // Parse list of table names.
-pub fn table_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Table>> {
+pub fn table_list(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Vec<Table>> {
     move |i| separated_list1(ws_sep_comma, table_reference(dialect))(i)
 }
 
-pub fn table_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableExpr> {
+pub fn table_expr(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<TableExpr> {
     move |i| {
         let (i, table) = table_reference(dialect)(i)?;
         let (i, alias) = opt(as_alias(dialect))(i)?;
@@ -113,13 +112,13 @@ pub fn table_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableExp
     }
 }
 
-pub fn table_expr_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<TableExpr>> {
+pub fn table_expr_list(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Vec<TableExpr>> {
     move |i| separated_list1(ws_sep_comma, table_expr(dialect))(i)
 }
 
 // Parse a reference to a named schema.table or schema.* as used by the replicator to identify
 // tables to replicate
-pub fn replicator_table_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Table> {
+pub fn replicator_table_reference(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Table> {
     move |i| {
         let (i, schema) = opt(terminated(dialect.identifier(), tag(".")))(i)?;
         let (i, name) = alt((
@@ -131,6 +130,6 @@ pub fn replicator_table_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult
 }
 
 // Parse list of table names as used by the replicator to identify tables to replicate
-pub fn replicator_table_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Table>> {
+pub fn replicator_table_list(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Vec<Table>> {
     move |i| separated_list1(ws_sep_comma, replicator_table_reference(dialect))(i)
 }

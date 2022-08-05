@@ -7,14 +7,14 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::{terminated, tuple};
-use nom::{IResult, Parser};
+use nom::Parser;
 use serde::{Deserialize, Serialize};
 
 use crate::common::statement_terminator;
 use crate::expression::expression;
 use crate::literal::literal;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expr, Literal, SqlIdentifier};
+use crate::{Dialect, Expr, Literal, SqlIdentifier, Span, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SetStatement {
@@ -58,7 +58,7 @@ impl Display for PostgresParameterScope {
     }
 }
 
-fn postgres_parameter_scope(i: &[u8]) -> IResult<&[u8], PostgresParameterScope> {
+fn postgres_parameter_scope(i: Span) -> NomSqlResult<PostgresParameterScope> {
     alt((
         map(tag_no_case("session"), |_| PostgresParameterScope::Session),
         map(tag_no_case("local"), |_| PostgresParameterScope::Local),
@@ -80,7 +80,7 @@ impl Display for SetPostgresParameterValue {
     }
 }
 
-fn set_postgres_parameter_value(i: &[u8]) -> IResult<&[u8], SetPostgresParameterValue> {
+fn set_postgres_parameter_value(i: Span) -> NomSqlResult<SetPostgresParameterValue> {
     alt((
         map(tag_no_case("default"), |_| {
             SetPostgresParameterValue::Default
@@ -153,7 +153,7 @@ impl Display for PostgresParameterValue {
     }
 }
 
-fn postgres_parameter_value_inner(i: &[u8]) -> IResult<&[u8], PostgresParameterValueInner> {
+fn postgres_parameter_value_inner(i: Span) -> NomSqlResult<PostgresParameterValueInner> {
     alt((
         map(
             literal(Dialect::PostgreSQL),
@@ -169,7 +169,7 @@ fn postgres_parameter_value_inner(i: &[u8]) -> IResult<&[u8], PostgresParameterV
     ))(i)
 }
 
-fn postgres_parameter_value(i: &[u8]) -> IResult<&[u8], PostgresParameterValue> {
+fn postgres_parameter_value(i: Span) -> NomSqlResult<PostgresParameterValue> {
     let (i, vals) = separated_list1(
         terminated(tag(","), whitespace0),
         postgres_parameter_value_inner,
@@ -205,7 +205,7 @@ impl Display for VariableScope {
     }
 }
 
-pub(crate) fn variable_scope_prefix(i: &[u8]) -> IResult<&[u8], VariableScope> {
+pub(crate) fn variable_scope_prefix(i: Span) -> NomSqlResult<VariableScope> {
     alt((
         map(tag_no_case("@@LOCAL."), |_| VariableScope::Local),
         map(tag_no_case("@@GLOBAL."), |_| VariableScope::Global),
@@ -294,7 +294,7 @@ impl Display for SetPostgresParameter {
     }
 }
 
-fn set_variable_scope_prefix(i: &[u8]) -> IResult<&[u8], VariableScope> {
+fn set_variable_scope_prefix(i: Span) -> NomSqlResult<VariableScope> {
     alt((
         variable_scope_prefix,
         map(terminated(tag_no_case("GLOBAL"), whitespace1), |_| {
@@ -311,7 +311,7 @@ fn set_variable_scope_prefix(i: &[u8]) -> IResult<&[u8], VariableScope> {
 
 /// check for one of three ways to specify scope and reformat to a single formatting. Returns none
 /// if scope is not specified
-fn variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Variable> {
+fn variable(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Variable> {
     move |i| {
         let (i, scope) = set_variable_scope_prefix
             .or(|i| Ok((i, VariableScope::Local)))
@@ -324,7 +324,7 @@ fn variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Variable> {
     }
 }
 
-pub fn set(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetStatement> {
+pub fn set(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<SetStatement> {
     move |i| {
         let (i, _) = tag_no_case("set")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -349,7 +349,7 @@ pub fn set(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetStatement> {
     }
 }
 
-fn set_variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Variable, Expr)> {
+fn set_variable(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<(Variable, Expr)> {
     move |i| {
         let (i, variable) = variable(dialect)(i)?;
         let (i, _) = whitespace0(i)?;
@@ -360,7 +360,7 @@ fn set_variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Variable,
     }
 }
 
-fn set_variables(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetVariables> {
+fn set_variables(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<SetVariables> {
     move |i| {
         let (remaining_input, variables) = terminated(
             separated_list1(
@@ -374,7 +374,7 @@ fn set_variables(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetVariab
     }
 }
 
-fn set_names(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetNames> {
+fn set_names(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<SetNames> {
     move |i| {
         let (i, _) = tag_no_case("names")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -391,7 +391,7 @@ fn set_names(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetNames> {
     }
 }
 
-fn set_postgres_parameter(i: &[u8]) -> IResult<&[u8], SetPostgresParameter> {
+fn set_postgres_parameter(i: Span) -> NomSqlResult<SetPostgresParameter> {
     let (i, scope) = opt(terminated(postgres_parameter_scope, whitespace1))(i)?;
     let (i, name) = Dialect::PostgreSQL.identifier()(i)?;
     let (i, _) = whitespace0(i)?;

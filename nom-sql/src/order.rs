@@ -7,13 +7,12 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::multi::separated_list1;
 use nom::sequence::preceded;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::common::{field_reference, ws_sep_comma};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, FieldReference};
+use crate::{Dialect, FieldReference, Span, NomSqlResult};
 
 #[derive(
     Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary,
@@ -71,7 +70,7 @@ impl fmt::Display for OrderClause {
     }
 }
 
-pub fn order_type(i: &[u8]) -> IResult<&[u8], OrderType> {
+pub fn order_type(i: Span) -> NomSqlResult<OrderType> {
     alt((
         map(tag_no_case("desc"), |_| OrderType::OrderDescending),
         map(tag_no_case("asc"), |_| OrderType::OrderAscending),
@@ -80,7 +79,7 @@ pub fn order_type(i: &[u8]) -> IResult<&[u8], OrderType> {
 
 fn order_field(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], (FieldReference, Option<OrderType>)> {
+) -> impl Fn(Span) -> NomSqlResult<(FieldReference, Option<OrderType>)> {
     move |i| {
         let (i, field) = field_reference(dialect)(i)?;
         let (i, ord_typ) = opt(preceded(whitespace1, order_type))(i)?;
@@ -89,7 +88,7 @@ fn order_field(
 }
 
 // Parse ORDER BY clause
-pub fn order_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], OrderClause> {
+pub fn order_clause(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<OrderClause> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("order")(i)?;

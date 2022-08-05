@@ -3,14 +3,13 @@ use std::{fmt, str};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::{delimited, tuple};
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::statement_terminator;
 use crate::select::where_clause;
 use crate::table::{table_reference, Table};
 use crate::whitespace::whitespace1;
-use crate::{Dialect, Expr};
+use crate::{Dialect, Expr, Span, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct DeleteStatement {
@@ -29,7 +28,7 @@ impl fmt::Display for DeleteStatement {
     }
 }
 
-pub fn deletion(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DeleteStatement> {
+pub fn deletion(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<DeleteStatement> {
     move |i| {
         let (remaining_input, (_, _, table, where_clause, _)) = tuple((
             tag_no_case("delete"),

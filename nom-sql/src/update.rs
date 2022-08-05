@@ -3,7 +3,6 @@ use std::{fmt, str};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::tuple;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::column::Column;
@@ -11,7 +10,7 @@ use crate::common::{assignment_expr_list, statement_terminator};
 use crate::select::where_clause;
 use crate::table::{table_reference, Table};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expr};
+use crate::{Dialect, Expr, Span, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct UpdateStatement {
@@ -41,7 +40,7 @@ impl fmt::Display for UpdateStatement {
     }
 }
 
-pub fn updating(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], UpdateStatement> {
+pub fn updating(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<UpdateStatement> {
     move |i| {
         let (remaining_input, (_, _, table, _, _, _, fields, _, where_clause, _)) = tuple((
             tag_no_case("update"),

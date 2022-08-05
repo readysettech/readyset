@@ -5,14 +5,13 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
 use nom::multi::many1;
 use nom::sequence::{delimited, preceded, tuple};
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{opt_delimited, terminated_with_statement_terminator};
 use crate::order::{order_clause, OrderClause};
 use crate::select::{limit_offset_clause, nested_selection, SelectStatement};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Literal};
+use crate::{Dialect, Literal, NomSqlResult, Span};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub enum CompoundSelectOperator {
@@ -63,7 +62,7 @@ impl fmt::Display for CompoundSelectStatement {
 }
 
 // Parse compound operator
-fn compound_op(i: &[u8]) -> IResult<&[u8], CompoundSelectOperator> {
+fn compound_op(i: Span) -> NomSqlResult<CompoundSelectOperator> {
     alt((
         map(
             preceded(
@@ -97,7 +96,7 @@ fn compound_op(i: &[u8]) -> IResult<&[u8], CompoundSelectOperator> {
 
 fn other_selects(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], (Option<CompoundSelectOperator>, SelectStatement)> {
+) -> impl Fn(Span) -> NomSqlResult<(Option<CompoundSelectOperator>, SelectStatement)> {
     move |i| {
         let (remaining_input, (_, op, _, select)) = tuple((
             whitespace0,
@@ -116,14 +115,14 @@ fn other_selects(
 
 pub fn compound_selection(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], CompoundSelectStatement> {
+) -> impl Fn(Span) -> NomSqlResult<CompoundSelectStatement> {
     move |i| terminated_with_statement_terminator(nested_compound_selection(dialect))(i)
 }
 
 // Parse compound selection
 pub fn nested_compound_selection(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], CompoundSelectStatement> {
+) -> impl Fn(Span) -> NomSqlResult<CompoundSelectStatement> {
     move |i| {
         let (remaining_input, (first_select, other_selects, _, order, limit_offset)) =
             tuple((

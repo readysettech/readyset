@@ -4,11 +4,10 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::sequence::tuple;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::Dialect;
+use crate::{Dialect, Span, NomSqlResult};
 
 // TODO(peter): Handle dialect differences.
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -42,7 +41,7 @@ impl fmt::Display for RollbackStatement {
 // TODO(peter): Handle dialect differences.
 pub fn start_transaction(
     _: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], StartTransactionStatement> {
+) -> impl Fn(Span) -> NomSqlResult<StartTransactionStatement> {
     move |i| {
         let (remaining_input, (_, _)) = tuple((
             whitespace0,
@@ -71,7 +70,7 @@ pub fn start_transaction(
 
 // Parse rule for a COMMIT query.
 // TODO(peter): Handle dialect differences.
-pub fn commit(_: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CommitStatement> {
+pub fn commit(_: Dialect) -> impl Fn(Span) -> NomSqlResult<CommitStatement> {
     move |i| {
         let (remaining_input, (_, _)) = tuple((
             whitespace0,
@@ -87,7 +86,7 @@ pub fn commit(_: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CommitStatement> {
 
 // Parse rule for a COMMIT query.
 // TODO(peter): Handle dialect differences.
-pub fn rollback(_: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], RollbackStatement> {
+pub fn rollback(_: Dialect) -> impl Fn(Span) -> NomSqlResult<RollbackStatement> {
     move |i| {
         let (remaining_input, (_, _)) = tuple((
             whitespace0,

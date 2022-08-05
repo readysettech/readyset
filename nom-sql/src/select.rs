@@ -7,7 +7,6 @@ use nom::combinator::{map, opt};
 use nom::error::ErrorKind;
 use nom::multi::{many0, separated_list1};
 use nom::sequence::{delimited, preceded, terminated, tuple};
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
@@ -20,7 +19,10 @@ use crate::literal::literal;
 use crate::order::{order_clause, OrderClause};
 use crate::table::{table_expr, table_expr_list};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expr, FieldReference, FunctionExpr, Literal, SqlIdentifier, TableExpr};
+use crate::{
+    Dialect, Expr, FieldReference, FunctionExpr, Literal, NomSqlError, NomSqlResult, Span,
+    SqlIdentifier, TableExpr,
+};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Default, Serialize, Deserialize)]
 pub struct GroupByClause {
@@ -166,7 +168,7 @@ impl fmt::Display for SelectStatement {
     }
 }
 
-fn having_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn having_clause(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Expr> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("having")(i)?;
@@ -178,8 +180,8 @@ fn having_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
 }
 
 // Parse GROUP BY clause
-pub fn group_by_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], GroupByClause> {
-    move |i| -> Result<(&[u8], GroupByClause), _> {
+pub fn group_by_clause(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<GroupByClause> {
+    move |i| -> Result<(Span, GroupByClause), _> {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("group")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -190,7 +192,7 @@ pub fn group_by_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Gro
     }
 }
 
-fn offset_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
+fn offset_clause(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Literal> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("offset")(i)?;
@@ -202,7 +204,7 @@ fn offset_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> 
 // Parses a generic SQL `{limit} [OFFSET {offset}]`
 fn limit_offset_generic(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], (Option<Literal>, Option<Literal>)> {
+) -> impl Fn(Span) -> NomSqlResult<(Option<Literal>, Option<Literal>)> {
     move |i| {
         let (i, limit) = literal(dialect)(i)?;
         let (i, offset) = opt(offset_clause(dialect))(i)?;
@@ -213,7 +215,7 @@ fn limit_offset_generic(
 // Parse LIMIT [OFFSET] clause
 fn limit_offset(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], (Option<Literal>, Option<Literal>)> {
+) -> impl Fn(Span) -> NomSqlResult<(Option<Literal>, Option<Literal>)> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("limit")(i)?;
@@ -227,7 +229,7 @@ fn limit_offset(
 // Parse LIMIT [OFFSET] clause or a bare OFFSET clause
 pub(crate) fn limit_offset_clause(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], (Option<Literal>, Option<Literal>)> {
+) -> impl Fn(Span) -> NomSqlResult<(Option<Literal>, Option<Literal>)> {
     move |i| {
         alt((
             limit_offset(dialect),
@@ -236,7 +238,7 @@ pub(crate) fn limit_offset_clause(
     }
 }
 
-fn join_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinConstraint> {
+fn join_constraint(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<JoinConstraint> {
     move |i| {
         let using_clause = map(
             tuple((
@@ -267,7 +269,7 @@ fn join_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinCon
 }
 
 // Parse JOIN clause
-fn join_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinClause> {
+fn join_clause(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<JoinClause> {
     move |i| {
         let (remaining_input, (_, _natural, operator, _, right, _, constraint)) = tuple((
             whitespace0,
@@ -290,7 +292,7 @@ fn join_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinClause>
     }
 }
 
-fn join_rhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinRightSide> {
+fn join_rhs(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<JoinRightSide> {
     move |i| {
         let nested_select = map(
             tuple((
@@ -313,7 +315,7 @@ fn join_rhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinRightSide>
 }
 
 // Parse WHERE clause of a selection
-pub fn where_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+pub fn where_clause(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Expr> {
     move |i| {
         let (remaining_input, (_, _, _, where_condition)) = tuple((
             whitespace0,
@@ -327,7 +329,7 @@ pub fn where_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> 
 }
 
 // Parse rule for a SQL selection query.
-pub fn selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SelectStatement> {
+pub fn selection(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<SelectStatement> {
     move |i| terminated_with_statement_terminator(nested_selection(dialect))(i)
 }
 
@@ -381,7 +383,7 @@ impl FromClause {
     }
 }
 
-fn nested_select(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause> {
+fn nested_select(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<FromClause> {
     move |i| {
         let (i, _) = tag("(")(i)?;
         let (i, _) = whitespace0(i)?;
@@ -394,7 +396,7 @@ fn nested_select(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClaus
     }
 }
 
-fn from_clause_join(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause> {
+fn from_clause_join(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<FromClause> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, lhs) = nested_from_clause(dialect)(i)?;
@@ -410,7 +412,7 @@ fn from_clause_join(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromCl
     }
 }
 
-fn nested_from_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause> {
+fn nested_from_clause(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<FromClause> {
     move |i| {
         alt((
             delimited(tag("("), from_clause_join(dialect), tag(")")),
@@ -420,7 +422,7 @@ fn nested_from_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], From
     }
 }
 
-fn from_clause_tree(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause> {
+fn from_clause_tree(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<FromClause> {
     move |i| {
         alt((
             delimited(tag("("), from_clause_join(dialect), tag(")")),
@@ -431,7 +433,7 @@ fn from_clause_tree(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromCl
     }
 }
 
-fn from_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause> {
+fn from_clause(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<FromClause> {
     move |i| {
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag_no_case("from")(i)?;
@@ -440,7 +442,7 @@ fn from_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FromClause>
     }
 }
 
-fn cte(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CommonTableExpr> {
+fn cte(dialect: Dialect) -> impl Fn(Span<'_>) -> NomSqlResult<'_, CommonTableExpr> {
     move |i| {
         let (i, name) = dialect.identifier()(i)?;
         let (i, _) = whitespace1(i)?;
@@ -457,7 +459,7 @@ fn cte(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CommonTableExpr> {
     }
 }
 
-fn ctes(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<CommonTableExpr>> {
+fn ctes(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Vec<CommonTableExpr>> {
     move |i| {
         let (i, _) = tag_no_case("with")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -468,7 +470,7 @@ fn ctes(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<CommonTableExp
     }
 }
 
-pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SelectStatement> {
+pub fn nested_selection(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<SelectStatement> {
     move |i| {
         let (i, ctes) = opt(ctes(dialect))(i)?;
         let (i, _) = tag_no_case("select")(i)?;
@@ -512,9 +514,14 @@ pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Se
         if let Some((from, extra_joins, where_clause, having, group_by, order, limit, offset)) =
             from_clause
         {
-            let (tables, mut join) = from
-                .into_tables_and_joins()
-                .map_err(|_| nom::Err::Error(nom::error::Error::new(i, ErrorKind::Tag)))?;
+            let (tables, mut join) = from.into_tables_and_joins().map_err(|_| {
+                nom::Err::Error(NomSqlError {
+                    input: i,
+                    kind: ErrorKind::Tag,
+                    offset: i.location_offset(),
+                    line: i.location_line(),
+                })
+            })?;
 
             join.extend(extra_joins);
 
@@ -696,7 +703,7 @@ mod tests {
     }
 
     fn where_clause_with_variable_placeholder(qstring: &str, literal: Literal) {
-        let res = selection(Dialect::MySQL)(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(Span::new(qstring.as_bytes()));
 
         let expected_where_cond = Some(Expr::BinaryOp {
             lhs: Box::new(Expr::Column("email".into())),

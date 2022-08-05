@@ -8,12 +8,11 @@ use nom::character::complete::digit1;
 use nom::combinator::{map, map_res, opt};
 use nom::multi::many0;
 use nom::sequence::{delimited, preceded, terminated, tuple};
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{column_identifier_no_alias, parse_comment, type_identifier, SqlType};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Double, Literal, SqlIdentifier, Table};
+use crate::{Dialect, Double, Literal, SqlIdentifier, Table, Span, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Column {
@@ -150,14 +149,14 @@ impl ColumnSpecification {
     }
 }
 
-fn fixed_point(i: &[u8]) -> IResult<&[u8], Literal> {
+fn fixed_point(i: Span) -> NomSqlResult<Literal> {
     let (remaining_input, (int, _, f)) = tuple((
-        map_res(map_res(digit1, str::from_utf8), i32::from_str),
+        map_res(map_res(map(digit1, |x: Span| *x), str::from_utf8), i32::from_str),
         tag("."),
         digit1,
     ))(i)?;
     let precision = f.len();
-    let dec = map_res(map_res(digit1, str::from_utf8), i32::from_str)(f)?.1;
+    let dec = map_res(map_res(map(digit1, |x: Span| *x), str::from_utf8), i32::from_str)(f)?.1;
     let value = (int as f64) + (dec as f64) / 10.0_f64.powf(precision as f64);
     Ok((
         remaining_input,
@@ -168,7 +167,7 @@ fn fixed_point(i: &[u8]) -> IResult<&[u8], Literal> {
     ))
 }
 
-fn default(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
+fn default(i: Span) -> NomSqlResult<ColumnConstraint> {
     let (remaining_input, (_, _, _, def, _)) = tuple((
         whitespace0,
         tag_no_case("default"),
@@ -203,7 +202,7 @@ fn default(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
     Ok((remaining_input, ColumnConstraint::DefaultValue(def)))
 }
 
-pub fn on_update_current_timestamp(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
+pub fn on_update_current_timestamp(i: Span) -> NomSqlResult<ColumnConstraint> {
     let (i, _) = tag_no_case("on")(i)?;
     let (i, _) = whitespace1(i)?;
     let (i, _) = tag_no_case("update")(i)?;
@@ -218,7 +217,7 @@ pub fn on_update_current_timestamp(i: &[u8]) -> IResult<&[u8], ColumnConstraint>
     Ok((i, ColumnConstraint::OnUpdateCurrentTimestamp))
 }
 
-pub fn column_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ColumnConstraint> {
+pub fn column_constraint(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<ColumnConstraint> {
     move |i| {
         let not_null = map(
             delimited(whitespace0, tag_no_case("not null"), whitespace0),
@@ -282,7 +281,7 @@ pub fn column_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], C
 /// Parse rule for a column specification
 pub fn column_specification(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], ColumnSpecification> {
+) -> impl Fn(Span) -> NomSqlResult<ColumnSpecification> {
     move |i| {
         let (remaining_input, (column, field_type, constraints, comment)) = tuple((
             column_identifier_no_alias(dialect),

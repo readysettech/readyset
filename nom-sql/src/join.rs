@@ -4,13 +4,12 @@ use itertools::Itertools;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
 use crate::column::Column;
 use crate::select::SelectStatement;
-use crate::{Expr, SqlIdentifier, TableExpr};
+use crate::{Expr, SqlIdentifier, TableExpr, Span, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum JoinRightSide {
@@ -94,7 +93,7 @@ impl fmt::Display for JoinConstraint {
 }
 
 // Parse binary comparison operators
-pub fn join_operator(i: &[u8]) -> IResult<&[u8], JoinOperator> {
+pub fn join_operator(i: Span) -> NomSqlResult<JoinOperator> {
     alt((
         map(tag_no_case("join"), |_| JoinOperator::Join),
         map(tag_no_case("left join"), |_| JoinOperator::LeftJoin),

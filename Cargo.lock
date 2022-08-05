@@ -1068,6 +1068,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f1e260c3a9040a7c19a12468758f4c16f31a81a1fe087482be9570ec864bb6c"
 
 [[package]]
+name = "bytecount"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c676a478f63e9fa2dd5368a42f28bba0d6c560b775f38583c8bbaa7fcd67c9c"
+
+[[package]]
 name = "byteorder"
 version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3791,6 +3797,7 @@ dependencies = [
  "lazy_static",
  "maplit",
  "nom 7.1.1",
+ "nom_locate",
  "pratt",
  "pretty_assertions",
  "proptest",
@@ -3801,6 +3808,17 @@ dependencies = [
  "thiserror",
  "triomphe",
  "uuid 0.8.2",
+]
+
+[[package]]
+name = "nom_locate"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37794436ca3029a3089e0b95d42da1f0b565ad271e4d3bb4bad0c7bb70b10605"
+dependencies = [
+ "bytecount",
+ "memchr",
+ "nom 7.1.1",
 ]
 
 [[package]]

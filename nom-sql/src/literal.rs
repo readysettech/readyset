@@ -12,21 +12,20 @@ use launchpad::arbitrary::{
     arbitrary_positive_naive_date, arbitrary_timestamp_naive_date_time, arbitrary_uuid,
 };
 use nom::branch::alt;
-use nom::bytes::complete::{is_not, tag, tag_no_case, take};
+use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_while};
 use nom::character::complete::digit1;
 use nom::combinator::{map, map_parser, map_res, opt, peek, recognize};
 use nom::error::ErrorKind;
 use nom::multi::{fold_many0, separated_list0};
 use nom::sequence::{delimited, pair, preceded, tuple};
-use nom::IResult;
 use proptest::strategy::Strategy;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::common::ws_sep_comma;
+use crate::common::{str_from_utf8_span, ws_sep_comma};
 use crate::whitespace::whitespace0;
-use crate::{Dialect, SqlType};
+use crate::{Dialect, NomSqlResult, Span, SqlType};
 
 #[derive(Clone, Debug, PartialOrd, Serialize, Deserialize, Arbitrary)]
 pub struct Float {
@@ -334,7 +333,7 @@ impl Literal {
 }
 
 // Integer literal value
-pub fn integer_literal(i: &[u8]) -> IResult<&[u8], Literal> {
+pub fn integer_literal(i: Span) -> NomSqlResult<Literal> {
     let (i, sign) = opt(tag("-"))(i)?;
     let (i, num) = map_parser(digit1, nom::character::complete::u64)(i)?;
     let num = num as i64;
@@ -342,17 +341,20 @@ pub fn integer_literal(i: &[u8]) -> IResult<&[u8], Literal> {
 }
 
 #[allow(clippy::type_complexity)]
-pub fn float(i: &[u8]) -> IResult<&[u8], (Option<&[u8]>, &[u8], &[u8], &[u8])> {
+pub fn float(i: Span) -> NomSqlResult<(Option<Span>, Span, Span, Span)> {
     tuple((opt(tag("-")), digit1, tag("."), digit1))(i)
 }
 
 // Floating point literal value
 #[allow(clippy::type_complexity)]
-pub fn float_literal(i: &[u8]) -> IResult<&[u8], Literal> {
+pub fn float_literal(i: Span) -> NomSqlResult<Literal> {
     map(
         pair(
             peek(float),
-            map_res(map_res(recognize(float), str::from_utf8), f64::from_str),
+            map_res(
+                map_res(map(recognize(float), |x: Span| *x), str::from_utf8),
+                f64::from_str,
+            ),
         ),
         |f| {
             let (_, _, _, frac) = f.0;
@@ -364,7 +366,7 @@ pub fn float_literal(i: &[u8]) -> IResult<&[u8], Literal> {
     )(i)
 }
 
-fn boolean_literal(i: &[u8]) -> IResult<&[u8], Literal> {
+fn boolean_literal(i: Span) -> NomSqlResult<Literal> {
     alt((
         map(tag_no_case("true"), |_| Literal::Boolean(true)),
         map(tag_no_case("false"), |_| Literal::Boolean(false)),
@@ -375,7 +377,7 @@ fn boolean_literal(i: &[u8]) -> IResult<&[u8], Literal> {
 fn raw_string_quoted(
     quote: &'static [u8],
     escape_quote: &'static [u8],
-) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<u8>> {
+) -> impl Fn(Span) -> NomSqlResult<Vec<u8>> {
     move |i| {
         delimited(
             tag(quote),
@@ -393,8 +395,8 @@ fn raw_string_quoted(
                     preceded(tag("\\"), take(1usize)),
                 )),
                 Vec::new,
-                |mut acc: Vec<u8>, bytes: &[u8]| {
-                    acc.extend(bytes);
+                |mut acc: Vec<u8>, bytes: Span| {
+                    acc.extend(*bytes);
                     acc
                 },
             ),
@@ -403,11 +405,11 @@ fn raw_string_quoted(
     }
 }
 
-fn raw_string_single_quoted(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
+fn raw_string_single_quoted(i: Span) -> NomSqlResult<Vec<u8>> {
     raw_string_quoted(b"'", b"\\'")(i)
 }
 
-fn raw_string_double_quoted(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
+fn raw_string_double_quoted(i: Span) -> NomSqlResult<Vec<u8>> {
     raw_string_quoted(b"\"", b"\\\"")(i)
 }
 
@@ -423,9 +425,7 @@ pub enum QuotingStyle {
 }
 
 /// Parse a raw (binary) string literal using the given [`QuotingStyle`]
-pub fn raw_string_literal(
-    quoting_style: QuotingStyle,
-) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<u8>> {
+pub fn raw_string_literal(quoting_style: QuotingStyle) -> impl Fn(Span) -> NomSqlResult<Vec<u8>> {
     move |i| match quoting_style {
         QuotingStyle::Single => raw_string_single_quoted(i),
         QuotingStyle::Double => raw_string_double_quoted(i),
@@ -436,9 +436,7 @@ pub fn raw_string_literal(
 }
 
 /// Parse a utf8 string literal using the given [`QuotingStyle`]
-pub fn utf8_string_literal(
-    quoting_style: QuotingStyle,
-) -> impl Fn(&[u8]) -> IResult<&[u8], String> {
+pub fn utf8_string_literal(quoting_style: QuotingStyle) -> impl Fn(Span) -> NomSqlResult<String> {
     move |i| {
         map_res(raw_string_literal(quoting_style), |bytes| {
             String::from_utf8(bytes)
@@ -447,7 +445,7 @@ pub fn utf8_string_literal(
     }
 }
 
-fn simple_literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
+fn simple_literal(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Literal> {
     move |i| {
         alt((
             float_literal,
@@ -467,7 +465,7 @@ fn simple_literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal>
     }
 }
 
-fn literal_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Literal>> {
+fn literal_list(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Vec<Literal>> {
     move |i| {
         let (i, _) = tag("[")(i)?;
         let (i, _) = whitespace0(i)?;
@@ -484,7 +482,7 @@ fn literal_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Litera
     }
 }
 
-fn array_literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
+fn array_literal(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Literal> {
     move |i| {
         let (i, _) = tag_no_case("array")(i)?;
         let (i, _) = whitespace0(i)?;
@@ -492,7 +490,7 @@ fn array_literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> 
     }
 }
 
-fn non_nested_literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
+fn non_nested_literal(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Literal> {
     move |i| {
         alt((
             simple_literal(dialect),
@@ -525,7 +523,7 @@ fn non_nested_literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Lite
 }
 
 /// Parser for any literal value, including placeholders
-pub fn literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
+pub fn literal(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Literal> {
     move |i| alt((non_nested_literal(dialect), array_literal(dialect)))(i)
 }
 
@@ -535,7 +533,7 @@ pub fn literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
 pub fn embedded_literal(
     dialect: Dialect,
     quoting_style: QuotingStyle,
-) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
+) -> impl Fn(Span) -> NomSqlResult<Literal> {
     move |i| {
         alt((
             simple_literal(dialect),

@@ -4,9 +4,9 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::sequence::{terminated, tuple};
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 
+use crate::{Span, NomSqlResult};
 use crate::common::statement_terminator;
 use crate::whitespace::whitespace1;
 
@@ -36,7 +36,7 @@ impl Display for ExplainStatement {
     }
 }
 
-fn explain_graphviz(i: &[u8]) -> IResult<&[u8], ExplainStatement> {
+fn explain_graphviz(i: Span) -> NomSqlResult<ExplainStatement> {
     let (i, simplified) = opt(terminated(tag_no_case("simplified"), whitespace1))(i)?;
     let (i, _) = tag_no_case("graphviz")(i)?;
     Ok((
@@ -47,7 +47,7 @@ fn explain_graphviz(i: &[u8]) -> IResult<&[u8], ExplainStatement> {
     ))
 }
 
-pub(crate) fn explain_statement(i: &[u8]) -> IResult<&[u8], ExplainStatement> {
+pub(crate) fn explain_statement(i: Span) -> NomSqlResult<ExplainStatement> {
     let (i, _) = tag_no_case("explain")(i)?;
     let (i, _) = whitespace1(i)?;
     let (i, stmt) = alt((

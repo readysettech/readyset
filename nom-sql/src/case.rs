@@ -1,13 +1,12 @@
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::{delimited, terminated, tuple};
-use nom::IResult;
 
 use crate::expression::expression;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expr};
+use crate::{Dialect, Expr, Span, NomSqlResult};
 
-pub fn case_when(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+pub fn case_when(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Expr> {
     move |i| {
         let (remaining_input, (_, _, _, _, condition, _, _, _, then_expr, _, else_expr, _)) =
             tuple((

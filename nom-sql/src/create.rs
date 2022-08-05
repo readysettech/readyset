@@ -8,7 +8,6 @@ use nom::character::complete::digit1;
 use nom::combinator::{map, map_res, opt};
 use nom::multi::{separated_list0, separated_list1};
 use nom::sequence::{delimited, preceded, terminated, tuple};
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::column::{column_specification, Column, ColumnSpecification};
@@ -23,7 +22,7 @@ use crate::order::{order_type, OrderType};
 use crate::select::{nested_selection, selection, SelectStatement};
 use crate::table::{table_reference, Table};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{ColumnConstraint, Dialect, SqlIdentifier};
+use crate::{ColumnConstraint, Dialect, NomSqlResult, Span, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateTableStatement {
@@ -166,13 +165,16 @@ impl fmt::Display for CreateCacheStatement {
 #[allow(clippy::type_complexity)]
 pub fn index_col_name(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], (Column, Option<u16>, Option<OrderType>)> {
+) -> impl Fn(Span) -> NomSqlResult<(Column, Option<u16>, Option<OrderType>)> {
     move |i| {
         let (remaining_input, (column, len_u8, order)) = tuple((
             terminated(column_identifier_no_alias(dialect), whitespace0),
             opt(delimited(
                 tag("("),
-                map_res(map_res(digit1, str::from_utf8), u16::from_str),
+                map_res(
+                    map_res(map_res(digit1, Span::as_bytes), str::from_utf8),
+                    u16::from_str,
+                ),
                 tag(")"),
             )),
             opt(order_type),
@@ -183,7 +185,7 @@ pub fn index_col_name(
 }
 
 // Helper for list of index columns
-pub fn index_col_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Column>> {
+pub fn index_col_list(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Vec<Column>> {
     move |i| {
         separated_list0(
             ws_sep_comma,
@@ -197,7 +199,7 @@ pub fn index_col_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<
 }
 
 // Parse rule for an individual key specification.
-pub fn key_specification(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
+pub fn key_specification(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<TableKey> {
     move |i| {
         alt((
             check_constraint(dialect),
@@ -210,7 +212,7 @@ pub fn key_specification(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], T
     }
 }
 
-fn full_text_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
+fn full_text_key(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<TableKey> {
     move |i| {
         let (remaining_input, (_, _, _, _, name, _, columns)) = tuple((
             tag_no_case("fulltext"),
@@ -245,7 +247,7 @@ fn full_text_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey>
     }
 }
 
-fn primary_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
+fn primary_key(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<TableKey> {
     move |i| {
         let (remaining_input, (_, name, _, columns, _)) = tuple((
             tag_no_case("primary key"),
@@ -266,7 +268,7 @@ fn primary_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     }
 }
 
-fn referential_action(i: &[u8]) -> IResult<&[u8], ReferentialAction> {
+fn referential_action(i: Span) -> NomSqlResult<ReferentialAction> {
     alt((
         map(tag_no_case("cascade"), |_| ReferentialAction::Cascade),
         map(
@@ -285,7 +287,7 @@ fn referential_action(i: &[u8]) -> IResult<&[u8], ReferentialAction> {
     ))(i)
 }
 
-fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
+fn foreign_key(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<TableKey> {
     move |i| {
         // constraint users_group foreign key (group_id) references `groups` (id),
         // CONSTRAINT identifier
@@ -363,21 +365,21 @@ fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     }
 }
 
-fn index_type(i: &[u8]) -> IResult<&[u8], IndexType> {
+fn index_type(i: Span) -> NomSqlResult<IndexType> {
     alt((
         map(tag_no_case("btree"), |_| IndexType::BTree),
         map(tag_no_case("hash"), |_| IndexType::Hash),
     ))(i)
 }
 
-fn using_index(i: &[u8]) -> IResult<&[u8], IndexType> {
+fn using_index(i: Span) -> NomSqlResult<IndexType> {
     let (i, _) = whitespace1(i)?;
     let (i, _) = tag_no_case("using")(i)?;
     let (i, _) = whitespace1(i)?;
     index_type(i)
 }
 
-fn unique(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
+fn unique(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<TableKey> {
     move |i| {
         let (i, _) = tag_no_case("unique")(i)?;
         let (i, _) = opt(preceded(
@@ -405,7 +407,7 @@ fn unique(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     }
 }
 
-fn key_or_index(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
+fn key_or_index(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<TableKey> {
     move |i| {
         let (i, _) = alt((tag_no_case("key"), tag_no_case("index")))(i)?;
         let (i, _) = whitespace0(i)?;
@@ -429,7 +431,7 @@ fn key_or_index(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> 
     }
 }
 
-fn check_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
+fn check_constraint(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<TableKey> {
     move |i| {
         let (i, name) = map(
             opt(preceded(
@@ -467,14 +469,14 @@ fn check_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableK
 }
 
 // Parse rule for a comma-separated list.
-pub fn key_specification_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<TableKey>> {
+pub fn key_specification_list(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Vec<TableKey>> {
     move |i| separated_list1(ws_sep_comma, key_specification(dialect))(i)
 }
 
 // Parse rule for a comma-separated list.
 pub fn field_specification_list(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<ColumnSpecification>> {
+) -> impl Fn(Span) -> NomSqlResult<Vec<ColumnSpecification>> {
     move |i| separated_list1(ws_sep_comma, column_specification(dialect))(i)
 }
 
@@ -482,7 +484,7 @@ pub fn field_specification_list(
 
 // Parse rule for a SQL CREATE TABLE query.
 // TODO(malte): support types, TEMPORARY tables, AS stmt
-pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTableStatement> {
+pub fn creation(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<CreateTableStatement> {
     move |i| {
         let (
             remaining_input,
@@ -621,7 +623,7 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
 
 // Parse the optional CREATE VIEW parameters and discard, ideally we would want to check user
 // permissions
-pub fn create_view_params(i: &[u8]) -> IResult<&[u8], ()> {
+pub fn create_view_params(i: Span) -> NomSqlResult<()> {
     /*
     [ALGORITHM = {UNDEFINED | MERGE | TEMPTABLE}]
     [DEFINER = user]
@@ -668,7 +670,7 @@ pub fn create_view_params(i: &[u8]) -> IResult<&[u8], ()> {
 }
 
 // Parse rule for a SQL CREATE VIEW query.
-pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateViewStatement> {
+pub fn view_creation(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<CreateViewStatement> {
     /*
        CREATE
        [OR REPLACE]
@@ -720,7 +722,7 @@ pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Creat
 
 /// Extract the [`SelectStatement`] or Query ID from a CREATE CACHE statement. Query ID is
 /// parsed as a SqlIdentifier
-pub fn cached_query_inner(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CacheInner> {
+pub fn cached_query_inner(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<CacheInner> {
     move |i| {
         alt((
             map(map(selection(dialect), Box::new), CacheInner::from),
@@ -732,7 +734,7 @@ pub fn cached_query_inner(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], 
 /// Parse a [`CreateCacheStatement`]
 pub fn create_cached_query(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], CreateCacheStatement> {
+) -> impl Fn(Span) -> NomSqlResult<CreateCacheStatement> {
     move |i| {
         let (i, _) = tag_no_case("create")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -1308,7 +1310,7 @@ mod tests {
         fn double_precision_column() {
             let (rem, res) =
                 creation(Dialect::MySQL)(b"create table t(x double precision)").unwrap();
-            assert_eq!(str::from_utf8(rem).unwrap(), "");
+            assert_eq!(str::from_utf8(*rem).unwrap(), "");
             assert_eq!(
                 res,
                 CreateTableStatement {
@@ -1788,7 +1790,7 @@ mod tests {
         fn double_precision_column() {
             let (rem, res) =
                 creation(Dialect::PostgreSQL)(b"create table t(x double precision)").unwrap();
-            assert_eq!(str::from_utf8(rem).unwrap(), "");
+            assert_eq!(str::from_utf8(*rem).unwrap(), "");
             assert_eq!(
                 res,
                 CreateTableStatement {

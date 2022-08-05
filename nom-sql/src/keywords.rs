@@ -6,15 +6,15 @@ use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::peek;
 use nom::sequence::terminated;
-use nom::IResult;
 
+use crate::{Span, NomSqlResult};
 use crate::common::eof;
 
 // NOTE: Each keyword_$start_letter_to_$end_letter function uses `alt`,
 // which is implemented for tuples sizes up to 21. Because of this constraint
 // on maximum tuple sizes, keywords are aggregated into groups of 20
 
-fn keyword_follow_char(i: &[u8]) -> IResult<&[u8], &[u8]> {
+fn keyword_follow_char(i: Span) -> NomSqlResult<&[u8]> {
     peek(alt((
         tag(" "),
         tag("\n"),
@@ -28,7 +28,7 @@ fn keyword_follow_char(i: &[u8]) -> IResult<&[u8], &[u8]> {
     )))(i)
 }
 
-fn keyword_a_to_c(i: &[u8]) -> IResult<&[u8], &[u8]> {
+fn keyword_a_to_c(i: Span) -> NomSqlResult<&[u8]> {
     alt((
         terminated(tag_no_case("ABORT"), keyword_follow_char),
         terminated(tag_no_case("ACTION"), keyword_follow_char),
@@ -54,7 +54,7 @@ fn keyword_a_to_c(i: &[u8]) -> IResult<&[u8], &[u8]> {
     ))(i)
 }
 
-fn keyword_c_to_e(i: &[u8]) -> IResult<&[u8], &[u8]> {
+fn keyword_c_to_e(i: Span) -> NomSqlResult<&[u8]> {
     alt((
         terminated(tag_no_case("COLLATE"), keyword_follow_char),
         terminated(tag_no_case("COLUMN"), keyword_follow_char),
@@ -80,7 +80,7 @@ fn keyword_c_to_e(i: &[u8]) -> IResult<&[u8], &[u8]> {
     ))(i)
 }
 
-fn keyword_e_to_i(i: &[u8]) -> IResult<&[u8], &[u8]> {
+fn keyword_e_to_i(i: Span) -> NomSqlResult<&[u8]> {
     alt((
         terminated(tag_no_case("EXPLAIN"), keyword_follow_char),
         terminated(tag_no_case("FAIL"), keyword_follow_char),
@@ -106,7 +106,7 @@ fn keyword_e_to_i(i: &[u8]) -> IResult<&[u8], &[u8]> {
     ))(i)
 }
 
-fn keyword_i_to_p(i: &[u8]) -> IResult<&[u8], &[u8]> {
+fn keyword_i_to_p(i: Span) -> NomSqlResult<&[u8]> {
     alt((
         terminated(tag_no_case("INTO"), keyword_follow_char),
         terminated(tag_no_case("IS"), keyword_follow_char),
@@ -132,7 +132,7 @@ fn keyword_i_to_p(i: &[u8]) -> IResult<&[u8], &[u8]> {
     ))(i)
 }
 
-fn keyword_p_to_t(i: &[u8]) -> IResult<&[u8], &[u8]> {
+fn keyword_p_to_t(i: Span) -> NomSqlResult<&[u8]> {
     alt((
         terminated(tag_no_case("PRIMARY"), keyword_follow_char),
         terminated(tag_no_case("QUERY"), keyword_follow_char),
@@ -158,7 +158,7 @@ fn keyword_p_to_t(i: &[u8]) -> IResult<&[u8], &[u8]> {
     ))(i)
 }
 
-fn keyword_t_to_z(i: &[u8]) -> IResult<&[u8], &[u8]> {
+fn keyword_t_to_z(i: Span) -> NomSqlResult<&[u8]> {
     alt((
         terminated(tag_no_case("TRANSACTION"), keyword_follow_char),
         terminated(tag_no_case("TRIGGER"), keyword_follow_char),
@@ -176,7 +176,7 @@ fn keyword_t_to_z(i: &[u8]) -> IResult<&[u8], &[u8]> {
     ))(i)
 }
 
-fn builtin_function_a_to_z(i: &[u8]) -> IResult<&[u8], &[u8]> {
+fn builtin_function_a_to_z(i: Span) -> NomSqlResult<&[u8]> {
     alt((
         terminated(tag_no_case("CURRENT_DATE"), keyword_follow_char),
         terminated(tag_no_case("CURRENT_TIME"), keyword_follow_char),
@@ -195,7 +195,7 @@ fn builtin_function_a_to_z(i: &[u8]) -> IResult<&[u8], &[u8]> {
 }
 
 // Matches any SQL reserved keyword
-pub fn sql_keyword(i: &[u8]) -> IResult<&[u8], &[u8]> {
+pub fn sql_keyword(i: Span) -> NomSqlResult<&[u8]> {
     alt((
         keyword_a_to_c,
         keyword_c_to_e,
@@ -207,12 +207,12 @@ pub fn sql_keyword(i: &[u8]) -> IResult<&[u8], &[u8]> {
 }
 
 // Matches any built-in SQL function
-pub fn sql_builtin_function(i: &[u8]) -> IResult<&[u8], &[u8]> {
+pub fn sql_builtin_function(i: Span) -> NomSqlResult<&[u8]> {
     builtin_function_a_to_z(i)
 }
 
 // Matches any SQL reserved keyword _or_ built-in function
-pub fn sql_keyword_or_builtin_function(i: &[u8]) -> IResult<&[u8], &[u8]> {
+pub fn sql_keyword_or_builtin_function(i: Span) -> NomSqlResult<&[u8]> {
     alt((sql_keyword, sql_builtin_function))(i)
 }
 

@@ -4,12 +4,11 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::sequence::tuple;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::expression;
 use crate::whitespace::whitespace1;
-use crate::{Dialect, Expr};
+use crate::{Dialect, Expr, Span, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ShowStatement {
@@ -33,7 +32,7 @@ impl fmt::Display for ShowStatement {
     }
 }
 
-pub fn show(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ShowStatement> {
+pub fn show(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<ShowStatement> {
     move |i| {
         let (i, _) = tag_no_case("show")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -78,7 +77,7 @@ impl fmt::Display for Tables {
     }
 }
 
-fn show_tables(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Tables> {
+fn show_tables(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Tables> {
     move |i| {
         let (i, full) = map(opt(tuple((tag_no_case("full"), whitespace1))), |full| {
             full.is_some()
@@ -120,7 +119,7 @@ impl fmt::Display for FilterPredicate {
     }
 }
 
-fn filter_predicate(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FilterPredicate> {
+fn filter_predicate(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<FilterPredicate> {
     move |i| {
         let (i, _) = whitespace1(i)?;
         let (i, predicate) = alt((

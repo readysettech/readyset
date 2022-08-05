@@ -14,6 +14,7 @@ description = "A SQL parser written using nom."
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 nom = "7.1"
+nom_locate = "4.0.0"
 itertools = "0.10"
 derive_more = "0.99.13"
 pratt = "0.3.0"

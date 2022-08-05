@@ -9,13 +9,13 @@ use nom::combinator::{map, map_res, not, opt, peek};
 use nom::error::ErrorKind;
 use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded};
-use nom::IResult;
 use thiserror::Error;
 
+use crate::common::str_from_utf8_span;
 use crate::keywords::{sql_keyword, sql_keyword_or_builtin_function, POSTGRES_NOT_RESERVED};
 use crate::literal::{raw_string_literal, QuotingStyle};
 use crate::whitespace::whitespace0;
-use crate::{literal, Literal, SqlIdentifier};
+use crate::{literal, Literal, NomSqlResult, Span, SqlIdentifier, NomSqlError};
 
 #[inline]
 fn is_sql_identifier(chr: u8) -> bool {
@@ -23,18 +23,18 @@ fn is_sql_identifier(chr: u8) -> bool {
 }
 
 /// Byte array literal value (PostgreSQL)
-fn raw_hex_bytes_psql(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
+fn raw_hex_bytes_psql(input: Span) -> NomSqlResult<Vec<u8>> {
     delimited(tag("E'\\\\x"), hex_bytes, tag("'::bytea"))(input)
 }
 
 /// Blob literal value (MySQL)
-fn raw_hex_bytes_mysql(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
+fn raw_hex_bytes_mysql(input: Span) -> NomSqlResult<Vec<u8>> {
     delimited(tag("X'"), hex_bytes, tag("'"))(input)
 }
 
-fn hex_bytes(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
+fn hex_bytes(input: Span) -> NomSqlResult<Vec<u8>> {
     fold_many0(
-        map_res(take(2_usize), hex::decode),
+        map_res(map(take(2_usize), |x: Span| *x), hex::decode),
         Vec::new,
         |mut acc: Vec<u8>, bytes: Vec<u8>| {
             acc.extend(bytes);
@@ -44,11 +44,11 @@ fn hex_bytes(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
 }
 
 /// Bit vector literal value (PostgreSQL)
-fn raw_bit_vector_psql(input: &[u8]) -> IResult<&[u8], BitVec> {
+fn raw_bit_vector_psql(input: Span) -> NomSqlResult<BitVec> {
     delimited(tag_no_case("b'"), bits, tag("'"))(input)
 }
 
-fn bits(input: &[u8]) -> IResult<&[u8], BitVec> {
+fn bits(input: Span) -> NomSqlResult<BitVec> {
     fold_many0(
         map(alt((char('0'), char('1'))), |i: char| i == '1'),
         BitVec::new,
@@ -95,7 +95,7 @@ impl FromStr for Dialect {
 
 impl Dialect {
     /// Parse a SQL identifier using this Dialect
-    pub fn identifier(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], SqlIdentifier> {
+    pub fn identifier(self) -> impl Fn(Span) -> NomSqlResult<SqlIdentifier> {
         move |i| match self {
             Dialect::MySQL => map_res(
                 alt((
@@ -106,7 +106,7 @@ impl Dialect {
                     delimited(tag("`"), take_while1(|c| c != 0 && c != b'`'), tag("`")),
                     delimited(tag("["), take_while1(is_sql_identifier), tag("]")),
                 )),
-                |v| str::from_utf8(v).map(Into::into),
+                |v| str::from_utf8(*v).map(Into::into),
             )(i),
             Dialect::PostgreSQL => alt((
                 map_res(
@@ -121,7 +121,8 @@ impl Dialect {
                         take_while1(is_sql_identifier),
                     ),
                     |v| {
-                        str::from_utf8(v)
+                        v.as_bytes()
+                            .map(str::from_utf8)
                             .map(str::to_ascii_lowercase)
                             .map(Into::into)
                     },
@@ -135,7 +136,7 @@ impl Dialect {
     }
 
     /// Parse a SQL function identifier using this Dialect
-    pub fn function_identifier(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], &'a str> {
+    pub fn function_identifier(self) -> impl Fn(Span) -> NomSqlResult<&str> {
         move |i| match self {
             Dialect::MySQL => map_res(
                 alt((
@@ -143,14 +144,14 @@ impl Dialect {
                     delimited(tag("`"), take_while1(is_sql_identifier), tag("`")),
                     delimited(tag("["), take_while1(is_sql_identifier), tag("]")),
                 )),
-                str::from_utf8,
+                str_from_utf8_span,
             )(i),
             Dialect::PostgreSQL => map_res(
                 alt((
                     preceded(not(peek(sql_keyword)), take_while1(is_sql_identifier)),
                     delimited(tag("\""), take_while1(is_sql_identifier), tag("\"")),
                 )),
-                str::from_utf8,
+                str_from_utf8_span,
             )(i),
         }
     }
@@ -164,7 +165,7 @@ impl Dialect {
     }
 
     /// Parse the raw (byte) content of a string literal using this Dialect
-    pub fn string_literal(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], Vec<u8>> {
+    pub fn string_literal(self) -> impl Fn(Span) -> NomSqlResult<Vec<u8>> {
         move |i| match self {
             Dialect::PostgreSQL => raw_string_literal(self.quoting_style())(i),
             Dialect::MySQL => preceded(
@@ -174,10 +175,10 @@ impl Dialect {
         }
     }
 
-    pub fn utf8_string_literal(self) -> impl Fn(&[u8]) -> IResult<&[u8], String> {
+    pub fn utf8_string_literal(self) -> impl Fn(Span) -> NomSqlResult<String> {
         move |i| {
             map_res(self.string_literal(), |bytes| {
-                String::from_utf8(bytes)
+                String::from_utf8(bytes.as_str())
                     .map_err(|_| nom::Err::Error(nom::error::Error::new(i, ErrorKind::Fail)))
             })(i)
         }
@@ -186,7 +187,7 @@ impl Dialect {
     /// Parse the raw (byte) content of a bytes literal using this Dialect.
     // TODO(fran): Improve this. This is very naive, and for Postgres specifically, it only
     //  parses the hex-formatted byte array. We need to also add support for the escaped format.
-    pub fn bytes_literal(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], Vec<u8>> {
+    pub fn bytes_literal(self) -> impl Fn(Span) -> NomSqlResult<Vec<u8>> {
         move |i| match self {
             Dialect::PostgreSQL => raw_hex_bytes_psql(i),
             Dialect::MySQL => raw_hex_bytes_mysql(i),
@@ -194,23 +195,23 @@ impl Dialect {
     }
 
     /// Parse the raw (byte) content of a bit vector literal using this Dialect.
-    pub fn bitvec_literal(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], BitVec> {
+    pub fn bitvec_literal(self) -> impl Fn(Span) -> NomSqlResult<BitVec> {
         move |i| match self {
             Dialect::PostgreSQL => raw_bit_vector_psql(i),
-            Dialect::MySQL => Err(nom::Err::Error(nom::error::Error::new(
-                i,
-                nom::error::ErrorKind::Many0,
-            ))),
+            Dialect::MySQL => Err(nom::Err::Error(NomSqlError {
+                input: i,
+                kind: ErrorKind::Many0,
+                offset: i.location_offset(),
+                line: i.location_line(),
+            })),
         }
     }
 
     /// Parses the MySQL specific `{offset}, {limit}` part in a `LIMIT` clause
-    pub fn offset_limit(
-        self,
-    ) -> impl Fn(&[u8]) -> IResult<&[u8], (Option<Literal>, Option<Literal>)> {
+    pub fn offset_limit(self) -> impl Fn(Span) -> NomSqlResult<(Option<Literal>, Option<Literal>)> {
         move |i| {
             if self == Dialect::PostgreSQL {
-                return Err(nom::Err::Error(nom::error::Error::new(i, ErrorKind::Fail)));
+                return Err(nom::Err::Error(NomSqlError{ input: i, kind: ErrorKind::Fail, offset: i.location_offset(), line: i.location_line()));
             }
 
             let (i, _) = whitespace0(i)?;

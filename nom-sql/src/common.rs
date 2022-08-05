@@ -1,8 +1,7 @@
 use std::fmt::{self, Display};
 use std::hash::Hash;
 use std::ops::{Range, RangeFrom, RangeTo};
-use std::str;
-use std::str::FromStr;
+use std::str::{self, FromStr, Utf8Error};
 
 use itertools::Itertools;
 use nom::branch::alt;
@@ -23,7 +22,7 @@ use crate::dialect::Dialect;
 use crate::expression::expression;
 use crate::table::Table;
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{literal, Expr, FunctionExpr, Literal, SqlIdentifier};
+use crate::{literal, Expr, FunctionExpr, Literal, NomSqlResult, Span, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Serialize, Deserialize, Arbitrary)]
 pub enum SqlType {
@@ -187,7 +186,7 @@ impl FromStr for SqlType {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        type_identifier(Dialect::MySQL)(s.as_bytes())
+        type_identifier(Dialect::MySQL)(Span::new(s.as_bytes()))
             .map(|(_, s)| s)
             .map_err(|_| "failed to parse")
     }
@@ -482,8 +481,8 @@ impl Display for FieldReference {
     }
 }
 
-fn digit_as_u16(len: &[u8]) -> IResult<&[u8], u16> {
-    match str::from_utf8(len) {
+fn digit_as_u16(len: Span) -> NomSqlResult<u16> {
+    match str::from_utf8(*len) {
         Ok(s) => match u16::from_str(s) {
             Ok(v) => Ok((len, v)),
             Err(_) => Err(nom::Err::Error(ParseError::from_error_kind(
@@ -498,8 +497,8 @@ fn digit_as_u16(len: &[u8]) -> IResult<&[u8], u16> {
     }
 }
 
-fn digit_as_u8(len: &[u8]) -> IResult<&[u8], u8> {
-    match str::from_utf8(len) {
+fn digit_as_u8(len: Span) -> NomSqlResult<u8> {
+    match str::from_utf8(*len) {
         Ok(s) => match u8::from_str(s) {
             Ok(v) => Ok((len, v)),
             Err(_) => Err(nom::Err::Error(ParseError::from_error_kind(
@@ -512,6 +511,10 @@ fn digit_as_u8(len: &[u8]) -> IResult<&[u8], u8> {
             ErrorKind::LengthValue,
         ))),
     }
+}
+
+pub fn str_from_utf8_span(i: Span) -> Result<&str, Utf8Error> {
+    str::from_utf8(*i)
 }
 
 pub(crate) fn opt_delimited<I: Clone, O1, O2, O3, E: ParseError<I>, F, G, H>(
@@ -538,7 +541,7 @@ where
     }
 }
 
-fn precision_helper(i: &[u8]) -> IResult<&[u8], (u8, Option<u8>)> {
+fn precision_helper(i: Span) -> NomSqlResult<(u8, Option<u8>)> {
     let (remaining_input, (m, d)) = tuple((
         digit1,
         opt(preceded(tag(","), preceded(whitespace0, digit1))),
@@ -555,15 +558,15 @@ fn precision_helper(i: &[u8]) -> IResult<&[u8], (u8, Option<u8>)> {
     Ok((remaining_input, (m, d)))
 }
 
-pub fn precision(i: &[u8]) -> IResult<&[u8], (u8, Option<u8>)> {
+pub fn precision(i: Span) -> NomSqlResult<(u8, Option<u8>)> {
     delimited(tag("("), precision_helper, tag(")"))(i)
 }
 
-pub fn numeric_precision(i: &[u8]) -> IResult<&[u8], (u16, Option<u8>)> {
+pub fn numeric_precision(i: Span) -> NomSqlResult<(u16, Option<u8>)> {
     delimited(tag("("), numeric_precision_inner, tag(")"))(i)
 }
 
-pub fn numeric_precision_inner(i: &[u8]) -> IResult<&[u8], (u16, Option<u8>)> {
+pub fn numeric_precision_inner(i: Span) -> NomSqlResult<(u16, Option<u8>)> {
     let (remaining_input, (m, _, d)) = tuple((
         digit1,
         whitespace0,
@@ -576,18 +579,18 @@ pub fn numeric_precision_inner(i: &[u8]) -> IResult<&[u8], (u16, Option<u8>)> {
         .map(|v| (remaining_input, (m, v.map(|digit| digit.1))))
 }
 
-fn opt_signed(i: &[u8]) -> IResult<&[u8], Option<Sign>> {
+fn opt_signed(i: Span) -> NomSqlResult<Option<Sign>> {
     opt(alt((
         map(tag_no_case("unsigned"), |_| Sign::Unsigned),
         map(tag_no_case("signed"), |_| Sign::Signed),
     )))(i)
 }
 
-fn delim_digit(i: &[u8]) -> IResult<&[u8], &[u8]> {
+fn delim_digit(i: Span) -> NomSqlResult<Span> {
     delimited(tag("("), digit1, tag(")"))(i)
 }
 
-fn delim_u16(i: &[u8]) -> IResult<&[u8], u16> {
+fn delim_u16(i: Span) -> NomSqlResult<u16> {
     map_parser(delim_digit, digit_as_u16)(i)
 }
 
@@ -595,8 +598,8 @@ fn int_type<'a, F, G>(
     tag: &str,
     mk_unsigned: F,
     mk_signed: G,
-    i: &'a [u8],
-) -> IResult<&'a [u8], SqlType>
+    i: Span<'a>,
+) -> NomSqlResult<'a, SqlType>
 where
     F: Fn(Option<u16>) -> SqlType + 'static,
     G: Fn(Option<u16>) -> SqlType + 'static,
@@ -614,7 +617,7 @@ where
 // TODO(malte): not strictly ok to treat DECIMAL and NUMERIC as identical; the
 // former has "at least" M precision, the latter "exactly".
 // See https://dev.mysql.com/doc/refman/5.7/en/precision-math-decimal-characteristics.html
-fn decimal_or_numeric(i: &[u8]) -> IResult<&[u8], SqlType> {
+fn decimal_or_numeric(i: Span) -> NomSqlResult<SqlType> {
     let (remaining_input, precision) = delimited(
         alt((tag_no_case("decimal"), tag_no_case("numeric"))),
         opt(precision),
@@ -628,7 +631,7 @@ fn decimal_or_numeric(i: &[u8]) -> IResult<&[u8], SqlType> {
     }
 }
 
-fn opt_without_time_zone(i: &[u8]) -> IResult<&[u8], ()> {
+fn opt_without_time_zone(i: Span) -> NomSqlResult<()> {
     map(
         opt(preceded(
             whitespace1,
@@ -644,7 +647,7 @@ fn opt_without_time_zone(i: &[u8]) -> IResult<&[u8], ()> {
     )(i)
 }
 
-fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
+fn type_identifier_first_half(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<SqlType> {
     move |i| {
         alt((
             |i| int_type("tinyint", SqlType::UnsignedTinyint, SqlType::Tinyint, i),
@@ -726,18 +729,21 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
             map(
                 tuple((
                     alt((
-                        // The alt expects the same type to be returned for both entries,
-                        // so both have to be tuples with same number of elements
-                        tuple((
-                            tag_no_case("varchar"),
-                            map(whitespace0, |_| "".as_bytes()),
-                            map(whitespace0, |_| "".as_bytes()),
-                        )),
-                        tuple((
-                            tag_no_case("character"),
-                            map(whitespace1, |_| "".as_bytes()),
-                            tag_no_case("varying"),
-                        )),
+                        map(
+                            tuple((
+                                map(tag_no_case("varchar"), |x: Span| *x),
+                                map(whitespace0, |_| "".as_bytes()),
+                            )),
+                            |_| (),
+                        ),
+                        map(
+                            tuple((
+                                map(tag_no_case("character"), |x: Span| *x),
+                                map(whitespace1, |_| "".as_bytes()),
+                                map(tag_no_case("varying"), |x: Span| *x),
+                            )),
+                            |_| (),
+                        ),
                     )),
                     opt(delim_u16),
                     whitespace0,
@@ -758,7 +764,7 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
     }
 }
 
-fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
+fn type_identifier_second_half(i: Span) -> NomSqlResult<SqlType> {
     alt((
         map(
             terminated(tag_no_case("time"), opt_without_time_zone),
@@ -814,7 +820,7 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
     ))(i)
 }
 
-fn array_suffix(i: &[u8]) -> IResult<&[u8], ()> {
+fn array_suffix(i: Span) -> NomSqlResult<()> {
     let (i, _) = tag("[")(i)?;
     let (i, _) = opt(whitespace0)(i)?;
     let (i, _len) = opt(digit1)(i)?;
@@ -823,7 +829,7 @@ fn array_suffix(i: &[u8]) -> IResult<&[u8], ()> {
     Ok((i, ()))
 }
 
-fn type_identifier_no_arrays(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
+fn type_identifier_no_arrays(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<SqlType> {
     move |i| {
         alt((
             type_identifier_first_half(dialect),
@@ -833,7 +839,7 @@ fn type_identifier_no_arrays(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8
 }
 
 // A SQL type specifier.
-pub fn type_identifier(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
+pub fn type_identifier(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<SqlType> {
     move |i| {
         // need to pull a bit of a trick here to properly recursive-descent arrays since they're a
         // suffix. First, we parse the type, then we parse any number of `[]` or `[<n>]` suffixes,
@@ -849,7 +855,7 @@ pub fn type_identifier(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Sql
 
 // Parses the arguments for an aggregation function, and also returns whether the distinct flag is
 // present.
-pub fn agg_function_arguments(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Expr, bool)> {
+pub fn agg_function_arguments(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<(Expr, bool)> {
     move |i| {
         let distinct_parser = opt(tuple((tag_no_case("distinct"), whitespace1)));
         let (remaining_input, (distinct, args)) = tuple((distinct_parser, expression(dialect)))(i)?;
@@ -857,7 +863,7 @@ pub fn agg_function_arguments(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
     }
 }
 
-fn group_concat_fx_helper(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], String> {
+fn group_concat_fx_helper(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<String> {
     move |i| {
         let ws_sep = delimited(whitespace0, tag_no_case("separator"), whitespace0);
         let (i, sep) = delimited(
@@ -873,7 +879,7 @@ fn group_concat_fx_helper(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], 
     }
 }
 
-fn group_concat_fx(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Column, Option<String>)> {
+fn group_concat_fx(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<(Column, Option<String>)> {
     move |i| {
         pair(
             column_identifier_no_alias(dialect),
@@ -882,11 +888,11 @@ fn group_concat_fx(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Column
     }
 }
 
-fn agg_fx_args(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Expr, bool)> {
+fn agg_fx_args(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<(Expr, bool)> {
     move |i| delimited(tag("("), agg_function_arguments(dialect), tag(")"))(i)
 }
 
-fn delim_fx_args(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Expr>> {
+fn delim_fx_args(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Vec<Expr>> {
     move |i| {
         delimited(
             tag("("),
@@ -899,7 +905,7 @@ fn delim_fx_args(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Expr>
     }
 }
 
-pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FunctionExpr> {
+pub fn column_function(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<FunctionExpr> {
     move |i| {
         alt((
             map(tag_no_case("count(*)"), |_| FunctionExpr::CountStar),
@@ -963,7 +969,7 @@ pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Fun
 }
 
 // Parses a SQL column identifier in the db/schema.table.column format
-pub fn column_identifier_no_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Column> {
+pub fn column_identifier_no_alias(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Column> {
     move |i| {
         let (i, id1) = opt(terminated(
             dialect.identifier(),
@@ -997,7 +1003,7 @@ pub(crate) fn eof<I: Copy + InputLength, E: ParseError<I>>(input: I) -> IResult<
 }
 
 // Parse a terminator that ends a SQL statement.
-pub fn statement_terminator(i: &[u8]) -> IResult<&[u8], ()> {
+pub fn statement_terminator(i: Span) -> NomSqlResult<()> {
     let (remaining_input, _) =
         delimited(whitespace0, alt((tag(";"), line_ending, eof)), whitespace0)(i)?;
 
@@ -1006,17 +1012,15 @@ pub fn statement_terminator(i: &[u8]) -> IResult<&[u8], ()> {
 
 /// Parser combinator that applies the given parser,
 /// and then tries to match for a statement terminator.
-pub fn terminated_with_statement_terminator<F, O>(
-    parser: F,
-) -> impl FnOnce(&[u8]) -> IResult<&[u8], O>
+pub fn terminated_with_statement_terminator<F, O>(parser: F) -> impl FnOnce(Span) -> NomSqlResult<O>
 where
-    F: Fn(&[u8]) -> IResult<&[u8], O>,
+    F: Fn(Span) -> NomSqlResult<O>,
 {
     move |i| terminated(parser, statement_terminator)(i)
 }
 
 // Parse rule for AS-based aliases for SQL entities.
-pub fn as_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlIdentifier> {
+pub fn as_alias(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<SqlIdentifier> {
     move |i| {
         map(
             tuple((
@@ -1029,7 +1033,7 @@ pub fn as_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlIdentif
     }
 }
 
-fn assignment_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Column, Expr)> {
+fn assignment_expr(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<(Column, Expr)> {
     move |i| {
         separated_pair(
             column_identifier_no_alias(dialect),
@@ -1040,46 +1044,26 @@ fn assignment_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Column
 }
 
 /// Whitespace surrounded optionally on either side by a comma
-pub(crate) fn ws_sep_comma(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    delimited(whitespace0, tag(","), whitespace0)(i)
+pub(crate) fn ws_sep_comma(i: Span) -> NomSqlResult<()> {
+    map_res(delimited(whitespace0, tag(","), whitespace0), |_| Ok(()))(i)
 }
 
-pub(crate) fn ws_sep_equals<I, E>(i: I) -> IResult<I, I, E>
-where
-    E: ParseError<I>,
-    I: nom::InputTakeAtPosition
-        + nom::InputTake
-        + nom::Compare<&'static str>
-        + nom::FindSubstring<&'static str>
-        + nom::Slice<Range<usize>>
-        + nom::Slice<RangeTo<usize>>
-        + nom::Slice<RangeFrom<usize>>
-        + nom::InputIter
-        + InputLength
-        + Default
-        + Clone
-        + PartialEq,
-    &'static str: nom::FindToken<<I as nom::InputTakeAtPosition>::Item>,
-    <I as nom::InputIter>::Item: nom::AsChar + Clone,
-    // Compare required by tag
-    <I as nom::InputTakeAtPosition>::Item: nom::AsChar + Clone,
-    // AsChar and Clone required by whitespace0
-{
-    delimited(whitespace0, tag("="), whitespace0)(i)
+pub(crate) fn ws_sep_equals(i: Span) -> NomSqlResult<()> {
+    map_res(delimited(whitespace0, tag("="), whitespace0), |_| Ok(()))(i)
 }
 
 pub fn assignment_expr_list(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(Column, Expr)>> {
+) -> impl Fn(Span) -> NomSqlResult<Vec<(Column, Expr)>> {
     move |i| separated_list1(ws_sep_comma, assignment_expr(dialect))(i)
 }
 
 // Parse rule for a comma-separated list of fields without aliases.
-pub fn field_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Column>> {
+pub fn field_list(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Vec<Column>> {
     move |i| separated_list0(ws_sep_comma, column_identifier_no_alias(dialect))(i)
 }
 
-fn expression_field(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FieldDefinitionExpr> {
+fn expression_field(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<FieldDefinitionExpr> {
     move |i| {
         let (i, expr) = expression(dialect)(i)?;
         let (i, alias) = opt(as_alias(dialect))(i)?;
@@ -1087,7 +1071,7 @@ fn expression_field(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FieldD
     }
 }
 
-fn all_in_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FieldDefinitionExpr> {
+fn all_in_table(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<FieldDefinitionExpr> {
     move |i| {
         let (i, ident1) = terminated(dialect.identifier(), tag("."))(i)?;
         let (i, ident2) = opt(terminated(dialect.identifier(), tag(".")))(i)?;
@@ -1111,7 +1095,7 @@ fn all_in_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FieldDefin
 // Parse list of column/field definitions.
 pub fn field_definition_expr(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<FieldDefinitionExpr>> {
+) -> impl Fn(Span) -> NomSqlResult<Vec<FieldDefinitionExpr>> {
     move |i| {
         terminated(
             separated_list0(
@@ -1128,11 +1112,11 @@ pub fn field_definition_expr(
 }
 
 // Parse a list of values (e.g., for INSERT syntax).
-pub fn value_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Literal>> {
+pub fn value_list(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Vec<Literal>> {
     move |i| separated_list0(ws_sep_comma, literal(dialect))(i)
 }
 
-pub(crate) fn if_not_exists(i: &[u8]) -> IResult<&[u8], bool> {
+pub(crate) fn if_not_exists(i: Span) -> NomSqlResult<bool> {
     let (i, s) = opt(move |i| {
         let (i, _) = tag_no_case("if")(i)?;
         let (i, _) = whitespace1(i)?;
@@ -1148,12 +1132,12 @@ pub(crate) fn if_not_exists(i: &[u8]) -> IResult<&[u8], bool> {
 }
 
 // Parse rule for a comment part.
-pub fn parse_comment(i: &[u8]) -> IResult<&[u8], String> {
+pub fn parse_comment(i: Span) -> NomSqlResult<String> {
     map(
         preceded(
             delimited(whitespace0, tag_no_case("comment"), whitespace1),
             map_res(
-                delimited(tag("'"), take_until("'"), tag("'")),
+                map(delimited(tag("'"), take_until("'"), tag("'")), |x| *x),
                 str::from_utf8,
             ),
         ),
@@ -1161,7 +1145,7 @@ pub fn parse_comment(i: &[u8]) -> IResult<&[u8], String> {
     )(i)
 }
 
-pub fn field_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FieldReference> {
+pub fn field_reference(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<FieldReference> {
     move |i| {
         match dialect {
             Dialect::PostgreSQL => map(expression(dialect), FieldReference::Expr)(i),
@@ -1169,7 +1153,10 @@ pub fn field_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Fie
             // literals, I'm pretty sure)
             Dialect::MySQL => alt((
                 map(
-                    map_res(map_res(digit1, str::from_utf8), u64::from_str),
+                    map_res(
+                        map_res(map(digit1, |x: Span| *x), str::from_utf8),
+                        u64::from_str,
+                    ),
                     FieldReference::Numeric,
                 ),
                 map(expression(dialect), FieldReference::Expr),
@@ -1180,7 +1167,7 @@ pub fn field_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Fie
 
 pub fn field_reference_list(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<FieldReference>> {
+) -> impl Fn(Span) -> NomSqlResult<Vec<FieldReference>> {
     move |i| separated_list0(ws_sep_comma, field_reference(dialect))(i)
 }
 

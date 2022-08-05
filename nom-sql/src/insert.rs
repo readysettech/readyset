@@ -4,7 +4,6 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::opt;
 use nom::multi::separated_list1;
 use nom::sequence::{delimited, preceded, terminated, tuple};
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 
 use crate::column::Column;
@@ -13,7 +12,7 @@ use crate::common::{
 };
 use crate::table::{table_reference, Table};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Dialect, Expr, Literal};
+use crate::{Dialect, Expr, Literal, Span, NomSqlResult};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct InsertStatement {
@@ -57,7 +56,7 @@ impl fmt::Display for InsertStatement {
     }
 }
 
-fn fields(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Column>> {
+fn fields(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Vec<Column>> {
     move |i| {
         delimited(
             preceded(tag("("), whitespace0),
@@ -67,7 +66,7 @@ fn fields(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Column>> {
     }
 }
 
-fn data(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Literal>> {
+fn data(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Vec<Literal>> {
     move |i| {
         delimited(
             terminated(tag("("), whitespace0),
@@ -77,7 +76,7 @@ fn data(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Literal>> {
     }
 }
 
-fn on_duplicate(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(Column, Expr)>> {
+fn on_duplicate(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Vec<(Column, Expr)>> {
     move |i| {
         preceded(
             whitespace0,
@@ -91,7 +90,7 @@ fn on_duplicate(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(Colum
 
 // Parse rule for a SQL insert query.
 // TODO(malte): support REPLACE, nested selection, DEFAULT VALUES
-pub fn insertion(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], InsertStatement> {
+pub fn insertion(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<InsertStatement> {
     move |i| {
         let (
             remaining_input,

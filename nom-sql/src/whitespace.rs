@@ -10,14 +10,16 @@ use std::ops::{Range, RangeFrom, RangeTo};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take_until};
 use nom::character::complete::{line_ending, not_line_ending};
-use nom::combinator::value;
-use nom::error::ParseError;
+use nom::combinator::{map, map_res, value};
+use nom::error::{ErrorKind, ParseError};
 use nom::multi::{many0, many1};
 use nom::sequence::delimited;
 use nom::{
     AsChar, Compare, FindSubstring, FindToken, IResult, InputIter, InputLength, InputTake,
     InputTakeAtPosition, Slice,
 };
+
+use crate::{NomSqlResult, Span};
 
 /// Recognizes a multiline comment of the form `/* ... */`, skipping the `/*` and `*/`,
 /// to return the comment content.
@@ -43,11 +45,11 @@ use nom::{
 ///     Err(Err::Error(nom::error::Error::new("Z21c", ErrorKind::Tag)))
 /// );
 /// ```
-pub fn multiline_comment<I, E: ParseError<I>>(input: I) -> IResult<I, I, E>
-where
-    I: InputTake + Compare<&'static str> + FindSubstring<&'static str>,
-{
-    delimited(tag_no_case("/*"), take_until("*/"), tag_no_case("*/"))(input)
+pub fn multiline_comment(input: Span) -> NomSqlResult<&[u8]> {
+    map(
+        delimited(tag_no_case("/*"), take_until("*/"), tag_no_case("*/")),
+        |x: Span| *x,
+    )(input)
 }
 
 /// Recognizes a EOL style comment of the form `# ...` (in case the start tag is '#'), skipping the
@@ -73,24 +75,14 @@ where
 ///     Err(Err::Error(nom::error::Error::new("\rZ21c", ErrorKind::Tag)))
 /// );
 /// ```
-pub fn eol_comment<'a, I, T, E: ParseError<I>>(tag: T) -> impl Fn(I) -> IResult<I, I, E>
-where
-    I: InputTake
-        + InputTakeAtPosition
-        + Compare<&'static str>
-        + Compare<T>
-        + FindSubstring<&'a str>
-        + Slice<Range<usize>>
-        + Slice<RangeTo<usize>>
-        + Slice<RangeFrom<usize>>
-        + InputIter
-        + InputLength
-        + Clone,
-    <I as InputIter>::Item: AsChar,
-    &'a str: FindToken<<I as InputTakeAtPosition>::Item>,
-    T: InputLength + Clone,
-{
-    move |input: I| delimited(tag_no_case(tag.clone()), not_line_ending, line_ending)(input)
+pub fn eol_comment(tag: &'static str) -> impl Fn(Span) -> NomSqlResult<&[u8]> {
+    move |input| {
+        delimited(
+            tag_no_case(tag),
+            map(not_line_ending, |x: Span| *x),
+            line_ending,
+        )(input)
+    }
 }
 
 /// Recognizes what we consider a whitespace in SQL. A whitespace can be:
@@ -127,31 +119,15 @@ where
 /// );
 /// assert_eq!(parser("# comment\nZ21c"), Ok(("Z21c", " comment")));
 /// ```
-pub fn whitespace<I, T, E: ParseError<I>>(input: I) -> IResult<I, I, E>
-where
-    I: InputTake
-        + InputTakeAtPosition<Item = T>
-        + Compare<&'static str>
-        + FindSubstring<&'static str>
-        + Slice<RangeFrom<usize>>
-        + Slice<Range<usize>>
-        + Slice<RangeTo<usize>>
-        + Slice<RangeFrom<usize>>
-        + InputIter
-        + InputLength
-        + Default
-        + Clone,
-    <I as InputIter>::Item: AsChar + Clone,
-    &'static str: FindToken<<I as InputTakeAtPosition>::Item>,
-{
+pub fn whitespace(input: Span) -> NomSqlResult<&[u8]> {
     alt((
         multiline_comment,
         eol_comment("#"),
         eol_comment("--"),
-        value(I::default(), tag(" ")),
-        value(I::default(), tag("\t")),
-        value(I::default(), tag("\r")),
-        value(I::default(), tag("\n")),
+        value(Default::default(), tag(" ")),
+        value(Default::default(), tag("\t")),
+        value(Default::default(), tag("\r")),
+        value(Default::default(), tag("\n")),
     ))(input)
 }
 
@@ -179,23 +155,7 @@ where
 ///     Ok(("Z21c", vec![" comment", " other comment "]))
 /// );
 /// ```
-pub fn whitespace0<I, T, E: ParseError<I>>(input: I) -> IResult<I, Vec<I>, E>
-where
-    I: InputTake
-        + InputTakeAtPosition<Item = T>
-        + Compare<&'static str>
-        + FindSubstring<&'static str>
-        + Slice<Range<usize>>
-        + Slice<RangeTo<usize>>
-        + Slice<RangeFrom<usize>>
-        + InputIter
-        + InputLength
-        + Default
-        + Clone
-        + PartialEq,
-    <I as InputIter>::Item: AsChar + Clone,
-    &'static str: FindToken<<I as InputTakeAtPosition>::Item>,
-{
+pub fn whitespace0(input: Span) -> NomSqlResult<Vec<&[u8]>> {
     many0(whitespace)(input).map(|(remaining, mut output)| {
         output.retain(|item| item.input_len() > 0);
         (remaining, output)
@@ -229,22 +189,7 @@ where
 ///     Ok(("Z21c", vec![" comment", " other comment "]))
 /// );
 /// ```
-pub fn whitespace1<I, T, E: ParseError<I>>(input: I) -> IResult<I, Vec<I>, E>
-where
-    I: InputTake
-        + InputTakeAtPosition<Item = T>
-        + Compare<&'static str>
-        + FindSubstring<&'static str>
-        + Slice<Range<usize>>
-        + Slice<RangeTo<usize>>
-        + Slice<RangeFrom<usize>>
-        + InputIter
-        + InputLength
-        + Default
-        + Clone,
-    <I as InputIter>::Item: AsChar + Clone,
-    &'static str: FindToken<<I as InputTakeAtPosition>::Item>,
-{
+pub fn whitespace1(input: Span) -> NomSqlResult<Vec<&[u8]>> {
     many1(whitespace)(input).map(|(remaining, mut output)| {
         output.retain(|item| item.input_len() > 0);
         (remaining, output)
@@ -283,10 +228,8 @@ mod tests {
 
     #[test]
     fn test_eol_comment() {
-        fn parser(
-            tag: &'static str,
-        ) -> impl Fn(&'static str) -> IResult<&'static str, &'static str> {
-            move |input| eol_comment(tag)(input)
+        fn parser(tag: &'static str) -> impl Fn(Span) -> NomSqlResult<&[u8]> {
+            move |input| eol_comment(tag)(Span::new(&input))
         }
 
         // New line

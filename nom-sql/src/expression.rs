@@ -9,7 +9,7 @@ use nom::character::complete::char;
 use nom::combinator::{complete, map, opt};
 use nom::multi::{many0, separated_list0};
 use nom::sequence::{delimited, pair, preceded, terminated, tuple};
-use nom::{IResult, Parser};
+use nom::Parser;
 use pratt::{Affix, Associativity, PrattParser, Precedence};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -20,7 +20,7 @@ use crate::literal::literal;
 use crate::select::nested_selection;
 use crate::set::{variable_scope_prefix, Variable};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{Column, Dialect, Literal, SelectStatement, SqlType};
+use crate::{Column, Dialect, Literal, SelectStatement, SqlType, Span, NomSqlResult};
 
 /// Function call expressions
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
@@ -400,7 +400,7 @@ enum TokenTree {
 // should parse the same as:
 //     (foo between (1 + 2) and 8) and bar
 
-fn infix_no_and_or(i: &[u8]) -> IResult<&[u8], TokenTree> {
+fn infix_no_and_or(i: Span) -> NomSqlResult<TokenTree> {
     let (i, operator) = alt((
         map(terminated(tag_no_case("like"), whitespace1), |_| {
             BinaryOperator::Like
@@ -452,7 +452,7 @@ fn infix_no_and_or(i: &[u8]) -> IResult<&[u8], TokenTree> {
     Ok((i, TokenTree::Infix(operator)))
 }
 
-fn infix(i: &[u8]) -> IResult<&[u8], TokenTree> {
+fn infix(i: Span) -> NomSqlResult<TokenTree> {
     complete(alt((
         map(terminated(tag_no_case("and"), whitespace1), |_| {
             TokenTree::Infix(BinaryOperator::And)
@@ -464,7 +464,7 @@ fn infix(i: &[u8]) -> IResult<&[u8], TokenTree> {
     )))(i)
 }
 
-fn prefix(i: &[u8]) -> IResult<&[u8], TokenTree> {
+fn prefix(i: Span) -> NomSqlResult<TokenTree> {
     map(
         alt((
             map(complete(char('-')), |_| UnaryOperator::Neg),
@@ -476,7 +476,7 @@ fn prefix(i: &[u8]) -> IResult<&[u8], TokenTree> {
     )(i)
 }
 
-fn primary_inner(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TokenTree> {
+fn primary_inner(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<TokenTree> {
     move |i| {
         alt((
             move |i| {
@@ -497,7 +497,7 @@ fn primary_inner(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TokenTree
     }
 }
 
-fn primary(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TokenTree> {
+fn primary(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<TokenTree> {
     move |i| {
         let (i, expr) = primary_inner(dialect)(i)?;
         let (i, t) = opt(move |i| {
@@ -517,7 +517,7 @@ fn primary(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TokenTree> {
 
 fn rest(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(TokenTree, Vec<TokenTree>, TokenTree)>> {
+) -> impl Fn(Span) -> NomSqlResult<Vec<(TokenTree, Vec<TokenTree>, TokenTree)>> {
     move |i| {
         many0(move |i| {
             let (i, _) = whitespace0(i)?;
@@ -532,7 +532,7 @@ fn rest(
     }
 }
 
-fn token_tree(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<TokenTree>> {
+fn token_tree(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Vec<TokenTree>> {
     move |i| {
         let (i, prefix) = many0(prefix)(i)?;
         let (i, primary) = primary(dialect)(i)?;
@@ -550,7 +550,7 @@ fn token_tree(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<TokenTre
 
 fn rest_no_and_or(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(TokenTree, Vec<TokenTree>, TokenTree)>> {
+) -> impl Fn(Span) -> NomSqlResult<Vec<(TokenTree, Vec<TokenTree>, TokenTree)>> {
     move |i| {
         many0(tuple((
             preceded(whitespace0, infix_no_and_or),
@@ -560,7 +560,7 @@ fn rest_no_and_or(
     }
 }
 
-fn token_tree_no_and_or(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<TokenTree>> {
+fn token_tree_no_and_or(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Vec<TokenTree>> {
     move |i| {
         let (i, prefix) = many0(prefix)(i)?;
         let (i, primary) = primary(dialect)(i)?;
@@ -680,7 +680,7 @@ where
     }
 }
 
-fn in_lhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn in_lhs(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Expr> {
     move |i| {
         alt((
             map(column_function(dialect), Expr::Call),
@@ -691,7 +691,7 @@ fn in_lhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     }
 }
 
-fn in_rhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], InValue> {
+fn in_rhs(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<InValue> {
     move |i| {
         alt((
             map(nested_selection(dialect), |sel| {
@@ -705,7 +705,7 @@ fn in_rhs(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], InValue> {
     }
 }
 
-fn in_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn in_expr(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Expr> {
     move |i| {
         let (i, lhs) = terminated(in_lhs(dialect), whitespace1)(i)?;
 
@@ -730,7 +730,7 @@ fn in_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     }
 }
 
-fn between_operand(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn between_operand(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Expr> {
     move |i| {
         alt((
             parenthesized_expr(dialect),
@@ -742,7 +742,7 @@ fn between_operand(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     }
 }
 
-fn between_max(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn between_max(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Expr> {
     move |i| {
         alt((
             map(token_tree_no_and_or(dialect), |tt| {
@@ -753,7 +753,7 @@ fn between_max(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     }
 }
 
-fn between_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn between_expr(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Expr> {
     move |i| {
         let (i, operand) = map(between_operand(dialect), Box::new)(i)?;
         let (i, _) = whitespace1(i)?;
@@ -778,7 +778,7 @@ fn between_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     }
 }
 
-fn exists_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn exists_expr(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Expr> {
     move |i| {
         let (i, _) = tag_no_case("exists")(i)?;
         let (i, _) = whitespace0(i)?;
@@ -793,7 +793,7 @@ fn exists_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     }
 }
 
-fn cast(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn cast(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Expr> {
     move |i| {
         let (i, _) = tag_no_case("cast")(i)?;
         let (i, _) = whitespace0(i)?;
@@ -819,7 +819,7 @@ fn cast(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     }
 }
 
-fn nested_select(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn nested_select(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Expr> {
     move |i| {
         let (i, _) = char('(')(i)?;
         let (i, _) = whitespace0(i)?;
@@ -831,7 +831,7 @@ fn nested_select(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
     }
 }
 
-fn parenthesized_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+fn parenthesized_expr(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Expr> {
     move |i| {
         let (i, _) = char('(')(i)?;
         let (i, _) = whitespace0(i)?;
@@ -843,7 +843,7 @@ fn parenthesized_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr
     }
 }
 
-pub(crate) fn scoped_var(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Variable> {
+pub(crate) fn scoped_var(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Variable> {
     move |i| {
         let (i, scope) = variable_scope_prefix(i)?;
         let (i, name) = dialect
@@ -856,7 +856,7 @@ pub(crate) fn scoped_var(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], V
 }
 
 // Expressions without (binary or unary) operators
-pub(crate) fn simple_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+pub(crate) fn simple_expr(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Expr> {
     move |i| {
         alt((
             parenthesized_expr(dialect),
@@ -874,7 +874,7 @@ pub(crate) fn simple_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], 
     }
 }
 
-pub(crate) fn expression(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expr> {
+pub(crate) fn expression(dialect: Dialect) -> impl Fn(Span) -> NomSqlResult<Expr> {
     move |i| {
         alt((
             map(token_tree(dialect), |tt| {
