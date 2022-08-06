@@ -104,12 +104,7 @@ pub struct ColumnSpecification {
 impl fmt::Display for ColumnSpecification {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "`{}` {}", &self.column.name, self.sql_type)?;
-        for constraint in self
-            .constraints
-            .iter()
-            // Don't output PRIMARY KEY, because it will be formatted as table level key instead
-            .filter(|c| !matches!(c, ColumnConstraint::PrimaryKey))
-        {
+        for constraint in &self.constraints {
             write!(f, " {}", constraint)?;
         }
         if let Some(ref comment) = self.comment {

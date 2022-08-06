@@ -117,6 +117,7 @@ pub(super) fn rewrite_table_definition(
 #[cfg(test)]
 mod tests {
     use nom_sql::{CreateTableStatement, Dialect, Literal, SqlIdentifier, SqlType};
+    use readyset_sql_passes::CreateTableColumns;
 
     use super::*;
 
@@ -130,6 +131,7 @@ mod tests {
             );",
         )
         .unwrap()
+        .normalize_create_table_columns()
     }
 
     #[test]

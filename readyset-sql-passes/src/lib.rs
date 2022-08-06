@@ -2,6 +2,7 @@
 
 pub mod alias_removal;
 mod count_star_rewrite;
+mod create_table_columns;
 mod detect_problematic_self_joins;
 mod implied_tables;
 mod key_def_coalescing;
@@ -22,6 +23,7 @@ use readyset_errors::ReadySetResult;
 
 pub use crate::alias_removal::AliasRemoval;
 pub use crate::count_star_rewrite::CountStarRewrite;
+pub use crate::create_table_columns::CreateTableColumns;
 pub use crate::detect_problematic_self_joins::DetectProblematicSelfJoins;
 pub use crate::implied_tables::ImpliedTableExpansion;
 pub use crate::key_def_coalescing::KeyDefinitionCoalescing;
@@ -63,7 +65,9 @@ pub trait Rewrite: Sized {
 
 impl Rewrite for CreateTableStatement {
     fn rewrite(self, _context: RewriteContext) -> ReadySetResult<Self> {
-        Ok(self.coalesce_key_definitions())
+        Ok(self
+            .normalize_create_table_columns()
+            .coalesce_key_definitions())
     }
 }
 

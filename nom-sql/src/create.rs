@@ -23,7 +23,7 @@ use crate::order::{order_type, OrderType};
 use crate::select::{nested_selection, selection, SelectStatement};
 use crate::table::{table_reference, Table};
 use crate::whitespace::{whitespace0, whitespace1};
-use crate::{ColumnConstraint, Dialect, SqlIdentifier};
+use crate::{Dialect, SqlIdentifier};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct CreateTableStatement {
@@ -471,149 +471,42 @@ pub fn key_specification_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
     move |i| separated_list1(ws_sep_comma, key_specification(dialect))(i)
 }
 
-// Parse rule for a comma-separated list.
+// Parse rule for a comma-separated list of fields.
 pub fn field_specification_list(
     dialect: Dialect,
 ) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<ColumnSpecification>> {
     move |i| separated_list1(ws_sep_comma, column_specification(dialect))(i)
 }
 
-// Parse rule for a column definition constraint.
-
-// Parse rule for a SQL CREATE TABLE query.
-// TODO(malte): support types, TEMPORARY tables, AS stmt
-pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTableStatement> {
+/// Parse rule for a SQL CREATE TABLE query.
+pub fn create_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTableStatement> {
     move |i| {
-        let (
-            remaining_input,
-            (_, _, _, _, if_not_exists, table, _, _, _, fields_list, _, keys_list, _, _, _, opt, _),
-        ) = tuple((
-            tag_no_case("create"),
-            whitespace1,
-            tag_no_case("table"),
-            whitespace1,
-            if_not_exists,
-            table_reference(dialect),
-            whitespace0,
-            tag("("),
-            whitespace0,
-            field_specification_list(dialect),
-            whitespace0,
-            opt(preceded(ws_sep_comma, key_specification_list(dialect))),
-            whitespace0,
-            tag(")"),
-            whitespace0,
-            table_options(dialect),
-            statement_terminator,
-        ))(i)?;
-
-        let mut primary_key = None;
-
-        // attach table names to columns:
-        let fields = fields_list
-            .into_iter()
-            .map(|field| {
-                let column = Column {
-                    table: Some(table.name.as_str().into()),
-                    ..field.column
-                };
-
-                if field.constraints.contains(&ColumnConstraint::PrimaryKey) {
-                    // If there is a row that was defined with the PRIMARY KEY constraint, then it
-                    // will be the primary key there can only be one such key,
-                    // but we don't check this is the case
-                    primary_key.replace(TableKey::PrimaryKey {
-                        name: None,
-                        columns: vec![column.clone()],
-                    });
-                }
-
-                ColumnSpecification { column, ..field }
-            })
-            .collect();
-
-        // and to keys:
-        let mut keys: Option<Vec<_>> = keys_list.map(|ks| {
-            ks.into_iter()
-                .map(|key| {
-                    let attach_names = |columns: Vec<Column>| {
-                        columns
-                            .into_iter()
-                            .map(|column| Column {
-                                table: Some(table.name.as_str().into()),
-                                ..column
-                            })
-                            .collect()
-                    };
-
-                    match key {
-                        TableKey::PrimaryKey { name, columns } => TableKey::PrimaryKey {
-                            name,
-                            columns: attach_names(columns),
-                        },
-                        TableKey::UniqueKey {
-                            name,
-                            columns,
-                            index_type,
-                        } => TableKey::UniqueKey {
-                            name,
-                            columns: attach_names(columns),
-                            index_type,
-                        },
-                        TableKey::FulltextKey { name, columns } => TableKey::FulltextKey {
-                            name,
-                            columns: attach_names(columns),
-                        },
-                        TableKey::Key {
-                            name,
-                            columns,
-                            index_type,
-                        } => TableKey::Key {
-                            name,
-                            columns: attach_names(columns),
-                            index_type,
-                        },
-                        TableKey::ForeignKey {
-                            name,
-                            columns: column,
-                            target_table,
-                            target_columns: target_column,
-                            index_name,
-                            on_delete,
-                            on_update,
-                        } => TableKey::ForeignKey {
-                            name,
-                            columns: attach_names(column),
-                            target_table,
-                            target_columns: target_column,
-                            index_name,
-                            on_delete,
-                            on_update,
-                        },
-                        constraint => constraint,
-                    }
-                })
-                .collect()
-        });
-
-        // Add the previously found key to the list
-        if let Some(primary_key) = primary_key {
-            if let Some(keys) = &mut keys {
-                keys.push(primary_key);
-            } else {
-                keys = Some(vec![primary_key]);
-            }
-        }
-        // TODO: check that there is only one PRIMARY KEY?
+        let (i, _) = tag_no_case("create")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("table")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, if_not_exists) = if_not_exists(i)?;
+        let (i, table) = table_reference(dialect)(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = tag("(")(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, fields) = field_specification_list(dialect)(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, keys) = opt(preceded(ws_sep_comma, key_specification_list(dialect)))(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, _) = tag(")")(i)?;
+        let (i, _) = whitespace0(i)?;
+        let (i, options) = table_options(dialect)(i)?;
+        let (i, _) = statement_terminator(i)?;
 
         Ok((
-            remaining_input,
+            i,
             CreateTableStatement {
                 table,
                 fields,
                 keys,
                 if_not_exists,
-                options: opt,
+                options,
             },
         ))
     }
@@ -802,21 +695,15 @@ mod tests {
     fn simple_create() {
         let qstring = "CREATE TABLE if Not  ExistS users (id bigint(20), name varchar(255), email varchar(255));";
 
-        let res = creation(Dialect::MySQL)(qstring.as_bytes());
+        let res = create_table(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
                 table: Table::from("users"),
                 fields: vec![
-                    ColumnSpecification::new(Column::from("users.id"), SqlType::Bigint(Some(20))),
-                    ColumnSpecification::new(
-                        Column::from("users.name"),
-                        SqlType::Varchar(Some(255))
-                    ),
-                    ColumnSpecification::new(
-                        Column::from("users.email"),
-                        SqlType::Varchar(Some(255))
-                    ),
+                    ColumnSpecification::new(Column::from("id"), SqlType::Bigint(Some(20))),
+                    ColumnSpecification::new(Column::from("name"), SqlType::Varchar(Some(255))),
+                    ColumnSpecification::new(Column::from("email"), SqlType::Varchar(Some(255))),
                 ],
                 if_not_exists: true,
                 keys: None,
@@ -828,13 +715,13 @@ mod tests {
     #[test]
     fn create_without_space_after_tablename() {
         let qstring = "CREATE TABLE t(x integer);";
-        let res = creation(Dialect::MySQL)(qstring.as_bytes());
+        let res = create_table(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
                 table: Table::from("t"),
                 fields: vec![ColumnSpecification::new(
-                    Column::from("t.x"),
+                    Column::from("x"),
                     SqlType::Int(None)
                 ),],
                 keys: None,
@@ -847,7 +734,7 @@ mod tests {
     #[test]
     fn create_tablename_with_schema() {
         let qstring = "CREATE TABLE db1.t(x integer);";
-        let res = creation(Dialect::MySQL)(qstring.as_bytes());
+        let res = create_table(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
@@ -856,7 +743,7 @@ mod tests {
                     name: "t".into(),
                 },
                 fields: vec![ColumnSpecification::new(
-                    Column::from("t.x"),
+                    Column::from("x"),
                     SqlType::Int(None)
                 ),],
                 keys: None,
@@ -872,25 +759,19 @@ mod tests {
         let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255), \
                        PRIMARY KEY (id));";
 
-        let res = creation(Dialect::MySQL)(qstring.as_bytes());
+        let res = create_table(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
                 table: Table::from("users"),
                 fields: vec![
-                    ColumnSpecification::new(Column::from("users.id"), SqlType::Bigint(Some(20))),
-                    ColumnSpecification::new(
-                        Column::from("users.name"),
-                        SqlType::Varchar(Some(255))
-                    ),
-                    ColumnSpecification::new(
-                        Column::from("users.email"),
-                        SqlType::Varchar(Some(255))
-                    ),
+                    ColumnSpecification::new(Column::from("id"), SqlType::Bigint(Some(20))),
+                    ColumnSpecification::new(Column::from("name"), SqlType::Varchar(Some(255))),
+                    ColumnSpecification::new(Column::from("email"), SqlType::Varchar(Some(255))),
                 ],
                 keys: Some(vec![TableKey::PrimaryKey {
                     name: None,
-                    columns: vec![Column::from("users.id")]
+                    columns: vec![Column::from("id")]
                 }]),
                 if_not_exists: false,
                 options: vec![]
@@ -901,25 +782,19 @@ mod tests {
         let qstring = "CREATE TABLE users (id bigint(20), name varchar(255), email varchar(255), \
                        UNIQUE KEY id_k (id));";
 
-        let res = creation(Dialect::MySQL)(qstring.as_bytes());
+        let res = create_table(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             CreateTableStatement {
                 table: Table::from("users"),
                 fields: vec![
-                    ColumnSpecification::new(Column::from("users.id"), SqlType::Bigint(Some(20))),
-                    ColumnSpecification::new(
-                        Column::from("users.name"),
-                        SqlType::Varchar(Some(255))
-                    ),
-                    ColumnSpecification::new(
-                        Column::from("users.email"),
-                        SqlType::Varchar(Some(255))
-                    ),
+                    ColumnSpecification::new(Column::from("id"), SqlType::Bigint(Some(20))),
+                    ColumnSpecification::new(Column::from("name"), SqlType::Varchar(Some(255))),
+                    ColumnSpecification::new(Column::from("email"), SqlType::Varchar(Some(255))),
                 ],
                 keys: Some(vec![TableKey::UniqueKey {
                     name: Some("id_k".into()),
-                    columns: vec![Column::from("users.id")],
+                    columns: vec![Column::from("id")],
                     index_type: None
                 },]),
                 if_not_exists: false,
@@ -977,28 +852,24 @@ mod tests {
           constraint users_group foreign key (group_id) references `groups` (id)
         ) AUTO_INCREMENT=1000";
 
-        let (rem, res) = creation(Dialect::MySQL)(qstring).unwrap();
+        let (rem, res) = create_table(Dialect::MySQL)(qstring).unwrap();
         assert!(rem.is_empty());
-        let col = |n: &str| Column {
-            name: n.into(),
-            table: Some("users".into()),
-        };
         assert_eq!(
             res,
             CreateTableStatement {
                 table: "users".into(),
                 fields: vec![
-                    ColumnSpecification::new(col("id"), SqlType::Int(None),),
-                    ColumnSpecification::new(col("group_id"), SqlType::Int(None),),
+                    ColumnSpecification::new("id".into(), SqlType::Int(None),),
+                    ColumnSpecification::new("group_id".into(), SqlType::Int(None),),
                 ],
                 keys: Some(vec![
                     TableKey::PrimaryKey {
                         name: None,
-                        columns: vec![col("id")],
+                        columns: vec!["id".into()],
                     },
                     TableKey::ForeignKey {
                         name: Some("users_group".into()),
-                        columns: vec![col("group_id")],
+                        columns: vec!["group_id".into()],
                         target_table: "groups".into(),
                         target_columns: vec!["id".into()],
                         index_name: None,
@@ -1027,14 +898,10 @@ mod tests {
                         FOREIGN KEY (customer_id) REFERENCES customers(id) )
                         AUTO_INCREMENT = 10";
 
-        let (rem, res) = creation(Dialect::MySQL)(qstring).unwrap();
+        let (rem, res) = create_table(Dialect::MySQL)(qstring).unwrap();
         assert!(rem.is_empty());
-        let col = |n: &str| Column {
-            name: n.into(),
-            table: Some("addresses".into()),
-        };
         let non_null_col = |n: &str, t: SqlType| {
-            ColumnSpecification::with_constraints(col(n), t, vec![ColumnConstraint::NotNull])
+            ColumnSpecification::with_constraints(n.into(), t, vec![ColumnConstraint::NotNull])
         };
 
         assert_eq!(
@@ -1043,7 +910,7 @@ mod tests {
                 table: "addresses".into(),
                 fields: vec![
                     ColumnSpecification::with_constraints(
-                        col("id"),
+                        "id".into(),
                         SqlType::Int(None),
                         vec![
                             ColumnConstraint::NotNull,
@@ -1065,21 +932,15 @@ mod tests {
                         ]),
                     ),
                 ],
-                keys: Some(vec![
-                    TableKey::ForeignKey {
-                        name: None,
-                        columns: vec![col("customer_id")],
-                        target_table: "customers".into(),
-                        target_columns: vec!["id".into()],
-                        index_name: None,
-                        on_delete: None,
-                        on_update: None,
-                    },
-                    TableKey::PrimaryKey {
-                        name: None,
-                        columns: vec![col("id")]
-                    },
-                ]),
+                keys: Some(vec![TableKey::ForeignKey {
+                    name: None,
+                    columns: vec!["customer_id".into()],
+                    target_table: "customers".into(),
+                    target_columns: vec!["id".into()],
+                    index_name: None,
+                    on_delete: None,
+                    on_update: None,
+                },]),
                 if_not_exists: false,
                 options: vec![CreateTableOption::AutoIncrement(10)],
             }
@@ -1096,12 +957,8 @@ mod tests {
                         FOREIGN KEY order_customer (purchaser) REFERENCES customers(id),
                         FOREIGN KEY ordered_product (product_id) REFERENCES products(id) )";
 
-        let (rem, res) = creation(Dialect::MySQL)(qstring).unwrap();
+        let (rem, res) = create_table(Dialect::MySQL)(qstring).unwrap();
         assert!(rem.is_empty());
-        let col = |n: &str| Column {
-            name: n.into(),
-            table: Some("orders".into()),
-        };
 
         assert_eq!(
             res,
@@ -1109,7 +966,7 @@ mod tests {
                 table: "orders".into(),
                 fields: vec![
                     ColumnSpecification::with_constraints(
-                        col("order_number"),
+                        "order_number".into(),
                         SqlType::Int(None),
                         vec![
                             ColumnConstraint::NotNull,
@@ -1118,12 +975,12 @@ mod tests {
                         ]
                     ),
                     ColumnSpecification::with_constraints(
-                        col("purchaser"),
+                        "purchaser".into(),
                         SqlType::Int(None),
                         vec![ColumnConstraint::NotNull]
                     ),
                     ColumnSpecification::with_constraints(
-                        col("product_id"),
+                        "product_id".into(),
                         SqlType::Int(None),
                         vec![ColumnConstraint::NotNull]
                     ),
@@ -1131,7 +988,7 @@ mod tests {
                 keys: Some(vec![
                     TableKey::ForeignKey {
                         name: None,
-                        columns: vec![col("purchaser")],
+                        columns: vec!["purchaser".into()],
                         target_table: "customers".into(),
                         target_columns: vec!["id".into()],
                         index_name: Some("order_customer".into()),
@@ -1140,16 +997,12 @@ mod tests {
                     },
                     TableKey::ForeignKey {
                         name: None,
-                        columns: vec![col("product_id")],
+                        columns: vec!["product_id".into()],
                         target_table: "products".into(),
                         target_columns: vec!["id".into()],
                         index_name: Some("ordered_product".into()),
                         on_delete: None,
                         on_update: None,
-                    },
-                    TableKey::PrimaryKey {
-                        name: None,
-                        columns: vec![col("order_number")]
                     },
                 ]),
                 if_not_exists: false,
@@ -1167,12 +1020,8 @@ mod tests {
                         email VARCHAR(255) NOT NULL UNIQUE KEY )
                         AUTO_INCREMENT=1001";
 
-        let (rem, res) = creation(Dialect::MySQL)(qstring).unwrap();
+        let (rem, res) = create_table(Dialect::MySQL)(qstring).unwrap();
         assert!(rem.is_empty());
-        let col = |n: &str| Column {
-            name: n.into(),
-            table: Some("customers".into()),
-        };
 
         assert_eq!(
             res,
@@ -1180,7 +1029,7 @@ mod tests {
                 table: "customers".into(),
                 fields: vec![
                     ColumnSpecification::with_constraints(
-                        col("id"),
+                        "id".into(),
                         SqlType::Int(None),
                         vec![
                             ColumnConstraint::NotNull,
@@ -1189,20 +1038,17 @@ mod tests {
                         ]
                     ),
                     ColumnSpecification::with_constraints(
-                        col("last_name"),
+                        "last_name".into(),
                         SqlType::Varchar(Some(255)),
                         vec![ColumnConstraint::NotNull, ColumnConstraint::Unique,]
                     ),
                     ColumnSpecification::with_constraints(
-                        col("email"),
+                        "email".into(),
                         SqlType::Varchar(Some(255)),
                         vec![ColumnConstraint::NotNull, ColumnConstraint::Unique,]
                     ),
                 ],
-                keys: Some(vec![TableKey::PrimaryKey {
-                    name: None,
-                    columns: vec![col("id")]
-                },]),
+                keys: None,
                 if_not_exists: false,
                 options: vec![CreateTableOption::AutoIncrement(1001)],
             }
@@ -1212,7 +1058,7 @@ mod tests {
     #[test]
     fn key_with_index_type() {
         let res = test_parse!(
-            creation(Dialect::MySQL),
+            create_table(Dialect::MySQL),
             b"CREATE TABLE users (
                   age INTEGER,
                   KEY age_key (age) USING BTREE
@@ -1222,7 +1068,7 @@ mod tests {
             res.keys,
             Some(vec![TableKey::Key {
                 name: "age_key".into(),
-                columns: vec!["users.age".into()],
+                columns: vec!["age".into()],
                 index_type: Some(IndexType::BTree),
             }])
         );
@@ -1301,14 +1147,14 @@ mod tests {
         #[test]
         fn double_precision_column() {
             let (rem, res) =
-                creation(Dialect::MySQL)(b"create table t(x double precision)").unwrap();
+                create_table(Dialect::MySQL)(b"create table t(x double precision)").unwrap();
             assert_eq!(str::from_utf8(rem).unwrap(), "");
             assert_eq!(
                 res,
                 CreateTableStatement {
                     table: "t".into(),
                     fields: vec![ColumnSpecification {
-                        column: "t.x".into(),
+                        column: "x".into(),
                         sql_type: SqlType::Double,
                         constraints: vec![],
                         comment: None,
@@ -1331,14 +1177,14 @@ mod tests {
                        `object_repr` varchar(200) NOT NULL,
                        `action_flag` smallint UNSIGNED NOT NULL,
                        `change_message` longtext NOT NULL);";
-            let res = creation(Dialect::MySQL)(qstring.as_bytes());
+            let res = create_table(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
                     table: Table::from("django_admin_log"),
                     fields: vec![
                         ColumnSpecification::with_constraints(
-                            Column::from("django_admin_log.id"),
+                            Column::from("id"),
                             SqlType::Int(None),
                             vec![
                                 ColumnConstraint::AutoIncrement,
@@ -1347,46 +1193,37 @@ mod tests {
                             ],
                         ),
                         ColumnSpecification::with_constraints(
-                            Column::from("django_admin_log.action_time"),
+                            Column::from("action_time"),
                             SqlType::DateTime(None),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::with_constraints(
-                            Column::from("django_admin_log.user_id"),
+                            Column::from("user_id"),
                             SqlType::Int(None),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::new(
-                            Column::from("django_admin_log.content_type_id"),
+                            Column::from("content_type_id"),
                             SqlType::Int(None),
                         ),
-                        ColumnSpecification::new(
-                            Column::from("django_admin_log.object_id"),
-                            SqlType::Longtext,
-                        ),
+                        ColumnSpecification::new(Column::from("object_id"), SqlType::Longtext,),
                         ColumnSpecification::with_constraints(
-                            Column::from("django_admin_log.object_repr"),
+                            Column::from("object_repr"),
                             SqlType::Varchar(Some(200)),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::with_constraints(
-                            Column::from("django_admin_log.action_flag"),
+                            Column::from("action_flag"),
                             SqlType::UnsignedSmallint(None),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::with_constraints(
-                            Column::from("django_admin_log.change_message"),
+                            Column::from("change_message"),
                             SqlType::Longtext,
                             vec![ColumnConstraint::NotNull],
                         ),
                     ],
-                    keys: Some(vec![TableKey::PrimaryKey {
-                        name: None,
-                        columns: vec![Column {
-                            name: "id".into(),
-                            table: Some("django_admin_log".into()),
-                        }]
-                    }]),
+                    keys: None,
                     if_not_exists: false,
                     options: vec![],
                 }
@@ -1395,14 +1232,14 @@ mod tests {
             let qstring = "CREATE TABLE `auth_group` (
                        `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
                        `name` varchar(80) NOT NULL UNIQUE)";
-            let res = creation(Dialect::MySQL)(qstring.as_bytes());
+            let res = create_table(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
                     table: Table::from("auth_group"),
                     fields: vec![
                         ColumnSpecification::with_constraints(
-                            Column::from("auth_group.id"),
+                            Column::from("id"),
                             SqlType::Int(None),
                             vec![
                                 ColumnConstraint::AutoIncrement,
@@ -1411,18 +1248,12 @@ mod tests {
                             ],
                         ),
                         ColumnSpecification::with_constraints(
-                            Column::from("auth_group.name"),
+                            Column::from("name"),
                             SqlType::Varchar(Some(80)),
                             vec![ColumnConstraint::NotNull, ColumnConstraint::Unique],
                         ),
                     ],
-                    keys: Some(vec![TableKey::PrimaryKey {
-                        name: None,
-                        columns: vec![Column {
-                            name: "id".into(),
-                            table: Some("auth_group".into()),
-                        }]
-                    }]),
+                    keys: None,
                     if_not_exists: false,
                     options: vec![],
                 }
@@ -1436,10 +1267,10 @@ mod tests {
                        `name` varchar(80) NOT NULL UNIQUE) ENGINE=InnoDB AUTO_INCREMENT=495209 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
             // TODO(malte): INTEGER isn't quite reflected right here, perhaps
             let expected = "CREATE TABLE `auth_group` (\
-                        `id` INT AUTO_INCREMENT NOT NULL, \
-                        `name` VARCHAR(80) NOT NULL UNIQUE, PRIMARY KEY (`id`))\
+                        `id` INT AUTO_INCREMENT NOT NULL PRIMARY KEY, \
+                        `name` VARCHAR(80) NOT NULL UNIQUE)\
                         ENGINE=InnoDB, AUTO_INCREMENT=495209, DEFAULT CHARSET=utf8mb4, COLLATE=utf8mb4_unicode_ci";
-            let res = creation(Dialect::MySQL)(qstring.as_bytes());
+            let res = create_table(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(format!("{}", res.unwrap().1), expected);
         }
 
@@ -1583,14 +1414,14 @@ mod tests {
             INDEX `thread_id`  (`thread_id`),
             INDEX `index_comments_on_user_id`  (`user_id`))
             ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
-            let res = creation(Dialect::MySQL)(qstring.as_bytes());
+            let res = create_table(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
                     table: Table::from("comments"),
                     fields: vec![
                         ColumnSpecification::with_constraints(
-                            Column::from("comments.id"),
+                            Column::from("id"),
                             SqlType::UnsignedInt(None),
                             vec![
                                 ColumnConstraint::NotNull,
@@ -1598,50 +1429,37 @@ mod tests {
                                 ColumnConstraint::PrimaryKey,
                             ],
                         ),
-                        ColumnSpecification::new(
-                            Column::from("comments.hat_id"),
-                            SqlType::Int(None),
-                        ),
+                        ColumnSpecification::new(Column::from("hat_id"), SqlType::Int(None),),
                     ],
                     keys: Some(vec![
                         TableKey::FulltextKey {
                             name: Some("index_comments_on_comment".into()),
-                            columns: vec![Column::from("comments.comment")]
+                            columns: vec![Column::from("comment")]
                         },
                         TableKey::Key {
                             name: "confidence_idx".into(),
-                            columns: vec![Column::from("comments.confidence")],
+                            columns: vec![Column::from("confidence")],
                             index_type: None
                         },
                         TableKey::UniqueKey {
                             name: Some("short_id".into()),
-                            columns: vec![Column::from("comments.short_id")],
+                            columns: vec![Column::from("short_id")],
                             index_type: None
                         },
                         TableKey::Key {
                             name: "story_id_short_id".into(),
-                            columns: vec![
-                                Column::from("comments.story_id"),
-                                Column::from("comments.short_id")
-                            ],
+                            columns: vec![Column::from("story_id"), Column::from("short_id")],
                             index_type: None
                         },
                         TableKey::Key {
                             name: "thread_id".into(),
-                            columns: vec![Column::from("comments.thread_id")],
+                            columns: vec![Column::from("thread_id")],
                             index_type: None,
                         },
                         TableKey::Key {
                             name: "index_comments_on_user_id".into(),
-                            columns: vec![Column::from("comments.user_id")],
+                            columns: vec![Column::from("user_id")],
                             index_type: None
-                        },
-                        TableKey::PrimaryKey {
-                            name: None,
-                            columns: vec![Column {
-                                name: "id".into(),
-                                table: Some("comments".into()),
-                            }]
                         },
                     ]),
                     if_not_exists: false,
@@ -1658,14 +1476,14 @@ mod tests {
             let qstring =
                 "CREATE TABLE user_newtalk (  user_id int(5) NOT NULL default '0',  user_ip \
                        varchar(40) NOT NULL default '') TYPE=MyISAM;";
-            let res = creation(Dialect::MySQL)(qstring.as_bytes());
+            let res = create_table(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
                     table: Table::from("user_newtalk"),
                     fields: vec![
                         ColumnSpecification::with_constraints(
-                            Column::from("user_newtalk.user_id"),
+                            Column::from("user_id"),
                             SqlType::Int(Some(5)),
                             vec![
                                 ColumnConstraint::NotNull,
@@ -1673,7 +1491,7 @@ mod tests {
                             ],
                         ),
                         ColumnSpecification::with_constraints(
-                            Column::from("user_newtalk.user_ip"),
+                            Column::from("user_ip"),
                             SqlType::Varchar(Some(40)),
                             vec![
                                 ColumnConstraint::NotNull,
@@ -1708,7 +1526,7 @@ mod tests {
                         user_password_expires varbinary(14) DEFAULT NULL
                        ) ENGINE=, DEFAULT CHARSET=utf8";
             if let Err(nom::Err::Error(nom::error::Error { input, .. })) =
-                creation(Dialect::MySQL)(qstring.as_bytes())
+                create_table(Dialect::MySQL)(qstring.as_bytes())
             {
                 panic!("{}", std::str::from_utf8(input).unwrap());
             }
@@ -1724,7 +1542,7 @@ mod tests {
  iw_local bool NOT NULL,
  iw_trans tinyint NOT NULL default 0
  ) ENGINE=, DEFAULT CHARSET=utf8";
-            creation(Dialect::MySQL)(qstring.as_bytes()).unwrap();
+            create_table(Dialect::MySQL)(qstring.as_bytes()).unwrap();
         }
 
         #[test]
@@ -1744,7 +1562,7 @@ mod tests {
           KEY `el_index_60` (`el_index_60`,`el_id`),
           KEY `el_from_index_60` (`el_from`,`el_index_60`,`el_id`)
         )";
-            creation(Dialect::MySQL)(qstring.as_bytes()).unwrap();
+            create_table(Dialect::MySQL)(qstring.as_bytes()).unwrap();
         }
     }
 
@@ -1757,14 +1575,14 @@ mod tests {
         #[test]
         fn double_precision_column() {
             let (rem, res) =
-                creation(Dialect::PostgreSQL)(b"create table t(x double precision)").unwrap();
+                create_table(Dialect::PostgreSQL)(b"create table t(x double precision)").unwrap();
             assert_eq!(str::from_utf8(rem).unwrap(), "");
             assert_eq!(
                 res,
                 CreateTableStatement {
                     table: "t".into(),
                     fields: vec![ColumnSpecification {
-                        column: "t.x".into(),
+                        column: "x".into(),
                         sql_type: SqlType::Double,
                         constraints: vec![],
                         comment: None,
@@ -1779,13 +1597,13 @@ mod tests {
         #[test]
         fn create_with_non_reserved_identifier() {
             let qstring = "CREATE TABLE groups ( id integer );";
-            let res = creation(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = create_table(Dialect::PostgreSQL)(qstring.as_bytes());
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
                     table: Table::from("groups"),
                     fields: vec![ColumnSpecification::new(
-                        Column::from("groups.id"),
+                        Column::from("id"),
                         SqlType::Int(None)
                     ),],
                     keys: None,
@@ -1798,7 +1616,7 @@ mod tests {
         #[test]
         fn create_with_reserved_identifier() {
             let qstring = "CREATE TABLE select ( id integer );";
-            let res = creation(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = create_table(Dialect::PostgreSQL)(qstring.as_bytes());
             res.unwrap_err();
         }
 
@@ -1813,14 +1631,14 @@ mod tests {
                        \"object_repr\" varchar(200) NOT NULL,
                        \"action_flag\" smallint UNSIGNED NOT NULL,
                        \"change_message\" longtext NOT NULL);";
-            let res = creation(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = create_table(Dialect::PostgreSQL)(qstring.as_bytes());
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
                     table: Table::from("django_admin_log"),
                     fields: vec![
                         ColumnSpecification::with_constraints(
-                            Column::from("django_admin_log.id"),
+                            Column::from("id"),
                             SqlType::Int(None),
                             vec![
                                 ColumnConstraint::AutoIncrement,
@@ -1829,46 +1647,37 @@ mod tests {
                             ],
                         ),
                         ColumnSpecification::with_constraints(
-                            Column::from("django_admin_log.action_time"),
+                            Column::from("action_time"),
                             SqlType::DateTime(None),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::with_constraints(
-                            Column::from("django_admin_log.user_id"),
+                            Column::from("user_id"),
                             SqlType::Int(None),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::new(
-                            Column::from("django_admin_log.content_type_id"),
+                            Column::from("content_type_id"),
                             SqlType::Int(None),
                         ),
-                        ColumnSpecification::new(
-                            Column::from("django_admin_log.object_id"),
-                            SqlType::Longtext,
-                        ),
+                        ColumnSpecification::new(Column::from("object_id"), SqlType::Longtext,),
                         ColumnSpecification::with_constraints(
-                            Column::from("django_admin_log.object_repr"),
+                            Column::from("object_repr"),
                             SqlType::Varchar(Some(200)),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::with_constraints(
-                            Column::from("django_admin_log.action_flag"),
+                            Column::from("action_flag"),
                             SqlType::UnsignedSmallint(None),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::with_constraints(
-                            Column::from("django_admin_log.change_message"),
+                            Column::from("change_message"),
                             SqlType::Longtext,
                             vec![ColumnConstraint::NotNull],
                         ),
                     ],
-                    keys: Some(vec![TableKey::PrimaryKey {
-                        name: None,
-                        columns: vec![Column {
-                            name: "id".into(),
-                            table: Some("django_admin_log".into()),
-                        }]
-                    }]),
+                    keys: None,
                     if_not_exists: false,
                     options: vec![],
                 }
@@ -1877,14 +1686,14 @@ mod tests {
             let qstring = "CREATE TABLE \"auth_group\" (
                        \"id\" integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
                        \"name\" varchar(80) NOT NULL UNIQUE)";
-            let res = creation(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = create_table(Dialect::PostgreSQL)(qstring.as_bytes());
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
                     table: Table::from("auth_group"),
                     fields: vec![
                         ColumnSpecification::with_constraints(
-                            Column::from("auth_group.id"),
+                            Column::from("id"),
                             SqlType::Int(None),
                             vec![
                                 ColumnConstraint::AutoIncrement,
@@ -1893,18 +1702,12 @@ mod tests {
                             ],
                         ),
                         ColumnSpecification::with_constraints(
-                            Column::from("auth_group.name"),
+                            Column::from("name"),
                             SqlType::Varchar(Some(80)),
                             vec![ColumnConstraint::NotNull, ColumnConstraint::Unique],
                         ),
                     ],
-                    keys: Some(vec![TableKey::PrimaryKey {
-                        name: None,
-                        columns: vec![Column {
-                            name: "id".into(),
-                            table: Some("auth_group".into()),
-                        }],
-                    }]),
+                    keys: None,
                     if_not_exists: false,
                     options: vec![],
                 }
@@ -1918,9 +1721,9 @@ mod tests {
                        \"name\" varchar(80) NOT NULL UNIQUE)";
             // TODO(malte): INTEGER isn't quite reflected right here, perhaps
             let expected = "CREATE TABLE `auth_group` (\
-                        `id` INT AUTO_INCREMENT NOT NULL, \
-                        `name` VARCHAR(80) NOT NULL UNIQUE, PRIMARY KEY (`id`))";
-            let res = creation(Dialect::PostgreSQL)(qstring.as_bytes());
+                        `id` INT AUTO_INCREMENT NOT NULL PRIMARY KEY, \
+                        `name` VARCHAR(80) NOT NULL UNIQUE)";
+            let res = create_table(Dialect::PostgreSQL)(qstring.as_bytes());
             assert_eq!(format!("{}", res.unwrap().1), expected);
         }
 
@@ -1971,14 +1774,14 @@ mod tests {
             INDEX \"thread_id\"  (\"thread_id\"),
             INDEX \"index_comments_on_user_id\"  (\"user_id\"))
             ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
-            let res = creation(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = create_table(Dialect::PostgreSQL)(qstring.as_bytes());
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
                     table: Table::from("comments"),
                     fields: vec![
                         ColumnSpecification::with_constraints(
-                            Column::from("comments.id"),
+                            Column::from("id"),
                             SqlType::UnsignedInt(None),
                             vec![
                                 ColumnConstraint::NotNull,
@@ -1986,50 +1789,37 @@ mod tests {
                                 ColumnConstraint::PrimaryKey,
                             ],
                         ),
-                        ColumnSpecification::new(
-                            Column::from("comments.hat_id"),
-                            SqlType::Int(None),
-                        ),
+                        ColumnSpecification::new(Column::from("hat_id"), SqlType::Int(None),),
                     ],
                     keys: Some(vec![
                         TableKey::FulltextKey {
                             name: Some("index_comments_on_comment".into()),
-                            columns: vec![Column::from("comments.comment")]
+                            columns: vec![Column::from("comment")]
                         },
                         TableKey::Key {
                             name: "confidence_idx".into(),
-                            columns: vec![Column::from("comments.confidence")],
+                            columns: vec![Column::from("confidence")],
                             index_type: None
                         },
                         TableKey::UniqueKey {
                             name: Some("short_id".into()),
-                            columns: vec![Column::from("comments.short_id")],
+                            columns: vec![Column::from("short_id")],
                             index_type: None,
                         },
                         TableKey::Key {
                             name: "story_id_short_id".into(),
-                            columns: vec![
-                                Column::from("comments.story_id"),
-                                Column::from("comments.short_id")
-                            ],
+                            columns: vec![Column::from("story_id"), Column::from("short_id")],
                             index_type: None
                         },
                         TableKey::Key {
                             name: "thread_id".into(),
-                            columns: vec![Column::from("comments.thread_id")],
+                            columns: vec![Column::from("thread_id")],
                             index_type: None
                         },
                         TableKey::Key {
                             name: "index_comments_on_user_id".into(),
-                            columns: vec![Column::from("comments.user_id")],
+                            columns: vec![Column::from("user_id")],
                             index_type: None
-                        },
-                        TableKey::PrimaryKey {
-                            name: None,
-                            columns: vec![Column {
-                                name: "id".into(),
-                                table: Some("comments".into()),
-                            }]
                         },
                     ]),
                     if_not_exists: false,
@@ -2046,14 +1836,14 @@ mod tests {
             let qstring =
                 "CREATE TABLE user_newtalk (  user_id int(5) NOT NULL default '0',  user_ip \
                        varchar(40) NOT NULL default '') TYPE=MyISAM;";
-            let res = creation(Dialect::PostgreSQL)(qstring.as_bytes());
+            let res = create_table(Dialect::PostgreSQL)(qstring.as_bytes());
             assert_eq!(
                 res.unwrap().1,
                 CreateTableStatement {
                     table: Table::from("user_newtalk"),
                     fields: vec![
                         ColumnSpecification::with_constraints(
-                            Column::from("user_newtalk.user_id"),
+                            Column::from("user_id"),
                             SqlType::Int(Some(5)),
                             vec![
                                 ColumnConstraint::NotNull,
@@ -2061,7 +1851,7 @@ mod tests {
                             ],
                         ),
                         ColumnSpecification::with_constraints(
-                            Column::from("user_newtalk.user_ip"),
+                            Column::from("user_ip"),
                             SqlType::Varchar(Some(40)),
                             vec![
                                 ColumnConstraint::NotNull,
@@ -2095,7 +1885,7 @@ mod tests {
                         user_editcount int,
                         user_password_expires varbinary(14) DEFAULT NULL
                        ) ENGINE=, DEFAULT CHARSET=utf8";
-            creation(Dialect::PostgreSQL)(qstring.as_bytes()).unwrap();
+            create_table(Dialect::PostgreSQL)(qstring.as_bytes()).unwrap();
         }
 
         #[test]
@@ -2108,7 +1898,7 @@ mod tests {
  iw_local bool NOT NULL,
  iw_trans tinyint NOT NULL default 0
  ) ENGINE=, DEFAULT CHARSET=utf8";
-            creation(Dialect::PostgreSQL)(qstring.as_bytes()).unwrap();
+            create_table(Dialect::PostgreSQL)(qstring.as_bytes()).unwrap();
         }
 
         #[test]
@@ -2127,7 +1917,7 @@ mod tests {
           KEY \"el_index_60\" (\"el_index_60\",\"el_id\"),
           KEY \"el_from_index_60\" (\"el_from\",\"el_index_60\",\"el_id\")
         )";
-            creation(Dialect::PostgreSQL)(qstring.as_bytes()).unwrap();
+            create_table(Dialect::PostgreSQL)(qstring.as_bytes()).unwrap();
         }
     }
 
@@ -2149,11 +1939,7 @@ mod tests {
   KEY `access_tokens_type_index` (`type`),
   CONSTRAINT `access_tokens_user_id_foreign` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
-        let res = test_parse!(creation(Dialect::MySQL), qstring);
-        let col = |n: &str| Column {
-            name: n.into(),
-            table: Some("access_tokens".into()),
-        };
+        let res = test_parse!(create_table(Dialect::MySQL), qstring);
 
         assert_eq!(
             res,
@@ -2161,12 +1947,12 @@ mod tests {
                 table: "access_tokens".into(),
                 fields: vec![
                     ColumnSpecification::with_constraints(
-                        col("id"),
+                        "id".into(),
                         SqlType::UnsignedInt(Some(10)),
                         vec![ColumnConstraint::NotNull, ColumnConstraint::AutoIncrement,]
                     ),
                     ColumnSpecification::with_constraints(
-                        col("token"),
+                        "token".into(),
                         SqlType::Varchar(Some(40)),
                         vec![
                             ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
@@ -2174,22 +1960,22 @@ mod tests {
                         ]
                     ),
                     ColumnSpecification::with_constraints(
-                        col("user_id"),
+                        "user_id".into(),
                         SqlType::UnsignedInt(Some(10)),
                         vec![ColumnConstraint::NotNull]
                     ),
                     ColumnSpecification::with_constraints(
-                        col("last_activity_at"),
+                        "last_activity_at".into(),
                         SqlType::DateTime(None),
                         vec![ColumnConstraint::NotNull]
                     ),
                     ColumnSpecification::with_constraints(
-                        col("created_at"),
+                        "created_at".into(),
                         SqlType::DateTime(None),
                         vec![ColumnConstraint::NotNull],
                     ),
                     ColumnSpecification::with_constraints(
-                        col("type"),
+                        "type".into(),
                         SqlType::Varchar(Some(100)),
                         vec![
                             ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
@@ -2197,7 +1983,7 @@ mod tests {
                         ]
                     ),
                     ColumnSpecification::with_constraints(
-                        col("title"),
+                        "title".into(),
                         SqlType::Varchar(Some(150)),
                         vec![
                             ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
@@ -2205,7 +1991,7 @@ mod tests {
                         ]
                     ),
                     ColumnSpecification::with_constraints(
-                        col("last_ip_address"),
+                        "last_ip_address".into(),
                         SqlType::Varchar(Some(45)),
                         vec![
                             ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
@@ -2213,7 +1999,7 @@ mod tests {
                         ]
                     ),
                     ColumnSpecification::with_constraints(
-                        col("last_user_agent"),
+                        "last_user_agent".into(),
                         SqlType::Varchar(Some(255)),
                         vec![
                             ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
@@ -2224,26 +2010,26 @@ mod tests {
                 keys: Some(vec![
                     TableKey::PrimaryKey {
                         name: None,
-                        columns: vec![col("id")]
+                        columns: vec!["id".into()]
                     },
                     TableKey::UniqueKey {
                         name: Some("access_tokens_token_unique".into()),
-                        columns: vec![col("token")],
+                        columns: vec!["token".into()],
                         index_type: None,
                     },
                     TableKey::Key {
                         name: "access_tokens_user_id_foreign".into(),
-                        columns: vec![col("user_id")],
+                        columns: vec!["user_id".into()],
                         index_type: None,
                     },
                     TableKey::Key {
                         name: "access_tokens_type_index".into(),
-                        columns: vec![col("type")],
+                        columns: vec!["type".into()],
                         index_type: None,
                     },
                     TableKey::ForeignKey {
                         name: Some("access_tokens_user_id_foreign".into()),
-                        columns: vec![col("user_id")],
+                        columns: vec!["user_id".into()],
                         target_table: "users".into(),
                         target_columns: vec!["id".into()],
                         index_name: None,
@@ -2266,11 +2052,7 @@ mod tests {
     #[test]
     fn flarum_create_2() {
         let qstring = b"create table `mentions_posts` (`post_id` int unsigned not null, `mentions_id` int unsigned not null) default character set utf8mb4 collate 'utf8mb4_unicode_ci'";
-        let res = test_parse!(creation(Dialect::MySQL), qstring);
-        let col = |n: &str| Column {
-            name: n.into(),
-            table: Some("mentions_posts".into()),
-        };
+        let res = test_parse!(create_table(Dialect::MySQL), qstring);
 
         assert_eq!(
             res,
@@ -2278,12 +2060,12 @@ mod tests {
                 table: "mentions_posts".into(),
                 fields: vec![
                     ColumnSpecification::with_constraints(
-                        col("post_id"),
+                        "post_id".into(),
                         SqlType::UnsignedInt(None),
                         vec![ColumnConstraint::NotNull],
                     ),
                     ColumnSpecification::with_constraints(
-                        col("mentions_id"),
+                        "mentions_id".into(),
                         SqlType::UnsignedInt(None),
                         vec![ColumnConstraint::NotNull],
                     ),
@@ -2309,7 +2091,7 @@ mod tests {
              PRIMARY KEY (`id`),
              UNIQUE KEY `index_action_mailbox_inbound_emails_uniqueness` (`message_id`,`message_checksum`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3";
-        test_parse!(creation(Dialect::MySQL), qstring);
+        test_parse!(create_table(Dialect::MySQL), qstring);
     }
 
     #[test]
@@ -2320,7 +2102,7 @@ mod tests {
 `created_at` timestamp(6) without time zone NOT NULL,
 `updated_at` timestamp(6) without time zone NOT NULL,
 PRIMARY KEY (`key`));";
-        let res = test_parse!(creation(Dialect::MySQL), qstring_orig);
+        let res = test_parse!(create_table(Dialect::MySQL), qstring_orig);
         assert_eq!(res.table.name, "ar_internal_metadata");
     }
 
@@ -2351,7 +2133,7 @@ PRIMARY KEY (`key`));";
 `security_last_changed_at` timestamp without time zone,
 `security_last_changed_reason` character varying,
 PRIMARY KEY (`id`));";
-        let res = test_parse!(creation(Dialect::MySQL), qstring);
+        let res = test_parse!(create_table(Dialect::MySQL), qstring);
         assert_eq!(res.table.name, "uploads");
         assert_eq!(res.fields.len(), 23);
     }
@@ -2365,7 +2147,7 @@ PRIMARY KEY (`id`));";
 `zone_members_count` int DEFAULT 0,
 `created_at` datetime(6), `updated_at` datetime(6)) ENGINE=InnoDB;";
 
-        let res = test_parse!(creation(Dialect::MySQL), qstring);
+        let res = test_parse!(create_table(Dialect::MySQL), qstring);
         assert_eq!(res.table.name, "spree_zones");
     }
 }

@@ -270,13 +270,13 @@ mod tests {
                     stmt.fields,
                     vec![
                         ColumnSpecification {
-                            column: "t1.id".into(),
+                            column: "id".into(),
                             sql_type: SqlType::Int(None),
                             constraints: vec![ColumnConstraint::NotNull],
                             comment: None
                         },
                         ColumnSpecification {
-                            column: "t1.value".into(),
+                            column: "value".into(),
                             sql_type: SqlType::Text,
                             constraints: vec![],
                             comment: None
@@ -288,11 +288,11 @@ mod tests {
                     vec![
                         TableKey::PrimaryKey {
                             name: None,
-                            columns: vec!["t1.id".into()]
+                            columns: vec!["id".into()]
                         },
                         TableKey::UniqueKey {
                             name: None,
-                            columns: vec!["t1.value".into()],
+                            columns: vec!["value".into()],
                             index_type: None
                         }
                     ]

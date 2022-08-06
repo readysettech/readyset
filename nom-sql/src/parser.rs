@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::alter::{alter_table_statement, AlterTableStatement};
 use crate::compound_select::{compound_selection, CompoundSelectStatement};
 use crate::create::{
-    create_cached_query, creation, key_specification, view_creation, CreateCacheStatement,
+    create_cached_query, create_table, key_specification, view_creation, CreateCacheStatement,
     CreateTableStatement, CreateViewStatement,
 };
 use crate::delete::{deletion, DeleteStatement};
@@ -129,7 +129,7 @@ impl SqlQuery {
 pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery> {
     move |i| {
         alt((
-            map(creation(dialect), SqlQuery::CreateTable),
+            map(create_table(dialect), SqlQuery::CreateTable),
             map(insertion(dialect), SqlQuery::Insert),
             map(compound_selection(dialect), SqlQuery::CompoundSelect),
             map(selection(dialect), SqlQuery::Select),
@@ -207,7 +207,7 @@ pub fn parse_create_table_bytes<T>(
 where
     T: AsRef<[u8]>,
 {
-    match creation(dialect)(input.as_ref()) {
+    match create_table(dialect)(input.as_ref()) {
         Ok((remaining, o)) if remaining.is_empty() => Ok(o),
         _ => Err("failed to parse query"),
     }
