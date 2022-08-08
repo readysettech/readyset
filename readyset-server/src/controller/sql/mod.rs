@@ -2954,10 +2954,7 @@ mod tests {
                 edge.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
                 &["(2 * `users`.`age`)", "twenty", "bogokey"]
             );
-            assert_eq!(
-                edge.description(true),
-                "π[((lit: 2) * 1), ((lit: 2) * (lit: 10)), lit: 0]"
-            );
+            assert_eq!(edge.description(true), "π[((lit: 2) * 1), lit: 20, lit: 0]");
         })
         .await;
     }
@@ -3008,10 +3005,7 @@ mod tests {
                 node.columns().iter().map(|c| c.name()).collect::<Vec<_>>(),
                 &["name", "(2 * `users`.`age`)", "twenty"]
             );
-            assert_eq!(
-                node.description(true),
-                "π[2, ((lit: 2) * 1), ((lit: 2) * (lit: 10))]"
-            );
+            assert_eq!(node.description(true), "π[2, ((lit: 2) * 1), lit: 20]");
 
             // Check reader
             let n = get_reader(&inc, mig, &name);

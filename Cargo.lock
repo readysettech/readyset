@@ -4265,9 +4265,11 @@ dependencies = [
 name = "readyset-sql-passes"
 version = "0.0.1"
 dependencies = [
+ "dataflow-expression",
  "itertools",
  "maplit",
  "nom-sql",
+ "readyset-data",
  "readyset-errors",
  "tracing",
 ]

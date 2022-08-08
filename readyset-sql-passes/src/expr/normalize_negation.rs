@@ -1,11 +1,7 @@
 use std::mem;
 
 use nom_sql::analysis::visit::{self, Visitor};
-use nom_sql::{BinaryOperator, Expr, Literal, SelectStatement, SqlQuery, UnaryOperator};
-
-pub trait NormalizeNegation {
-    fn normalize_negation(self) -> Self;
-}
+use nom_sql::{BinaryOperator, Expr, Literal, UnaryOperator};
 
 /// Attempt to replace `expr` with the equivalent expression negated. Returns `true` if that was
 /// doable, or `false` if it was impossible. If this function returns `false`, `expr` was not
@@ -95,25 +91,13 @@ impl<'ast> Visitor<'ast> for NormalizeNegationVisitor {
     }
 }
 
-impl NormalizeNegation for SelectStatement {
-    fn normalize_negation(mut self) -> SelectStatement {
-        let Ok(()) = NormalizeNegationVisitor.visit_select_statement(&mut self);
-        self
-    }
-}
-
-impl NormalizeNegation for SqlQuery {
-    fn normalize_negation(self) -> SqlQuery {
-        match self {
-            SqlQuery::Select(stmt) => SqlQuery::Select(stmt.normalize_negation()),
-            _ => self,
-        }
-    }
+pub fn normalize_negation(expr: &mut Expr) {
+    let Ok(()) = NormalizeNegationVisitor.visit_expr(expr);
 }
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, Dialect};
+    use nom_sql::{parse_expr, Dialect};
 
     use super::*;
 
@@ -156,31 +140,25 @@ mod tests {
 
     #[test]
     fn normalize_in_with_not() {
-        let statement =
-            parse_query(Dialect::MySQL, "SELECT * FROM t WHERE NOT id IN (1, 2)").unwrap();
-        let expected =
-            parse_query(Dialect::MySQL, "SELECT * FROM t WHERE id NOT IN (1, 2)").unwrap();
-        let res = statement.normalize_negation();
-        assert_eq!(res, expected)
+        let mut expr = parse_expr(Dialect::MySQL, "NOT id IN (1, 2)").unwrap();
+        let expected = parse_expr(Dialect::MySQL, "id NOT IN (1, 2)").unwrap();
+        normalize_negation(&mut expr);
+        assert_eq!(expr, expected)
     }
 
     #[test]
     fn normalize_in_without_not() {
-        let statement = parse_query(Dialect::MySQL, "SELECT * FROM t WHERE id IN (1, 2)").unwrap();
-        let expected = statement.clone();
-        let res = statement.normalize_negation();
-        assert_eq!(res, expected)
+        let mut expr = parse_expr(Dialect::MySQL, "id IN (1, 2)").unwrap();
+        let expected = expr.clone();
+        normalize_negation(&mut expr);
+        assert_eq!(expr, expected)
     }
 
     #[test]
     fn non_negatable_rhs() {
-        let statement = parse_query(
-            Dialect::MySQL,
-            "SELECT * FROM t WHERE NOT (x = 1 OR some_function(z))",
-        )
-        .unwrap();
-        let expected = statement.clone();
-        let res = statement.normalize_negation();
-        assert_eq!(res, expected);
+        let mut expr = parse_expr(Dialect::MySQL, "NOT (x = 1 OR some_function(z))").unwrap();
+        let expected = expr.clone();
+        normalize_negation(&mut expr);
+        assert_eq!(expr, expected);
     }
 }

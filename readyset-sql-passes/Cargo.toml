@@ -13,3 +13,5 @@ tracing = { version = "0.1" }
 # Local dependencies
 nom-sql = { path = "../nom-sql" }
 readyset-errors = { path = "../readyset-errors" }
+readyset-data = { path = "../readyset-data" }
+dataflow-expression = { path = "../dataflow-expression" }

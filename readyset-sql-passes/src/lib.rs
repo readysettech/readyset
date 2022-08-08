@@ -4,9 +4,9 @@ pub mod alias_removal;
 mod count_star_rewrite;
 mod create_table_columns;
 mod detect_problematic_self_joins;
+pub mod expr;
 mod implied_tables;
 mod key_def_coalescing;
-mod normalize_negation;
 mod normalize_topk_with_aggregate;
 mod order_limit_removal;
 mod remove_numeric_field_references;
@@ -29,9 +29,9 @@ pub use crate::alias_removal::AliasRemoval;
 pub use crate::count_star_rewrite::CountStarRewrite;
 pub use crate::create_table_columns::CreateTableColumns;
 pub use crate::detect_problematic_self_joins::DetectProblematicSelfJoins;
+pub use crate::expr::ScalarOptimizeExpressions;
 pub use crate::implied_tables::ImpliedTableExpansion;
 pub use crate::key_def_coalescing::KeyDefinitionCoalescing;
-pub use crate::normalize_negation::NormalizeNegation;
 pub use crate::normalize_topk_with_aggregate::NormalizeTopKWithAggregate;
 pub use crate::order_limit_removal::OrderLimitRemoval;
 pub use crate::remove_numeric_field_references::RemoveNumericFieldReferences;
@@ -97,7 +97,7 @@ impl Rewrite for CreateTableStatement {
 impl Rewrite for SelectStatement {
     fn rewrite(self, context: RewriteContext) -> ReadySetResult<Self> {
         self.rewrite_between()
-            .normalize_negation()
+            .scalar_optimize_expressions()
             .strip_post_filters()
             .resolve_schemas(context.tables(), context.search_path)
             .expand_stars(context.view_schemas)?
