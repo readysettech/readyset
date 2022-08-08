@@ -154,7 +154,7 @@ impl DataType {
             DataType::Text(_) | DataType::TinyText(_) => DataType::TinyText("".try_into().unwrap()), /* Safe because fits in length */
             DataType::TimestampTz(_) => DataType::from(
                 FixedOffset::west(-MAX_SECONDS_DATETIME_OFFSET).from_utc_datetime(
-                    &NaiveDateTime::new(chrono::naive::MIN_DATE, NaiveTime::from_hms(0, 0, 0)),
+                    &NaiveDateTime::new(NaiveDate::MIN, NaiveTime::from_hms(0, 0, 0)),
                 ),
             ),
             DataType::Float(..) => DataType::Float(f32::MIN),
@@ -180,7 +180,7 @@ impl DataType {
             DataType::None => DataType::None,
             DataType::TimestampTz(_) => DataType::from(
                 FixedOffset::east(MAX_SECONDS_DATETIME_OFFSET).from_utc_datetime(
-                    &NaiveDateTime::new(chrono::naive::MAX_DATE, NaiveTime::from_hms(23, 59, 59)),
+                    &NaiveDateTime::new(NaiveDate::MAX, NaiveTime::from_hms(23, 59, 59)),
                 ),
             ),
             DataType::Float(..) => DataType::Float(f32::MAX),
