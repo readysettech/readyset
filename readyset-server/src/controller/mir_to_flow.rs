@@ -16,18 +16,12 @@ use dataflow::ops::grouped::concat::GroupConcat;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::project::Project;
-use dataflow::{
-    node, ops, BuiltinFunction, Expr as DfExpr, PostLookupAggregates, ReaderProcessing,
-};
-use launchpad::redacted::Sensitive;
+use dataflow::{node, ops, Expr as DfExpr, PostLookupAggregates, ReaderProcessing};
 use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::{Column, FlowNode, MirNodeRef};
-use nom_sql::{
-    BinaryOperator, ColumnConstraint, ColumnSpecification, Expr, FunctionExpr, InValue, OrderType,
-    SqlIdentifier, SqlType, UnaryOperator,
-};
+use nom_sql::{ColumnConstraint, ColumnSpecification, Expr, OrderType, SqlIdentifier, SqlType};
 use petgraph::graph::NodeIndex;
 use readyset::internal::{Index, IndexType};
 use readyset::ViewPlaceholder;
@@ -943,177 +937,24 @@ fn make_latest_node(
     Ok(FlowNode::New(na))
 }
 
-/// Lower the given `nom_sql` AST expression to a `DfExpr`.
-///
-/// Currently, this involves:
-///
-/// - Literals being replaced with their corresponding [`DfValue`]
-/// - [Column references](nom_sql::Column) being resolved into column indices in the parent node.
-/// - Function calls being resolved to built-in functions, and arities checked
-/// - Desugaring x IN (y, z, ...) to `x = y OR x = z OR ...` and x NOT IN (y, z, ...) to `x != y AND
-///   x != z AND ...`
-/// - Replacing NEG with (expr * -1)
-/// - Replacing NOT with (expr != 1)
-/// - Inferring the type of each node in the expression AST.
+/// Lower the given nom_sql AST expression to a `DfExpr`, resolving columns by looking their
+/// index up in the given parent node.
 fn lower_expression(
     parent: &MirNodeRef,
     expr: Expr,
     parent_cols: &[DfColumn],
 ) -> ReadySetResult<DfExpr> {
-    match expr {
-        Expr::Call(FunctionExpr::Call {
-            name: fname,
-            arguments,
-        }) => {
-            let args = arguments
-                .into_iter()
-                .map(|arg| lower_expression(parent, arg, parent_cols))
-                .collect::<Result<Vec<_>, _>>()?;
-            let (func, ty) = BuiltinFunction::from_name_and_args(&fname, args)?;
-            Ok(DfExpr::Call {
-                func: Box::new(func),
-                ty,
-            })
-        }
-        Expr::Call(call) => internal!(
-            "Unexpected (aggregate?) call node in project expression: {:?}",
-            Sensitive(&call)
-        ),
-        Expr::Literal(lit) => {
-            let val: DfValue = lit.try_into()?;
-            // TODO: Infer type from SQL
-            let ty = val.sql_type().into();
-
-            Ok(DfExpr::Literal { val, ty })
-        }
-        Expr::Column(nom_sql::Column { name, table, .. }) => {
-            let index = parent
-                .borrow()
-                .column_id_for_column(&Column::new(table, &name))?;
-            let ty = parent_cols
-                .get(index)
-                .ok_or_else(|| internal_err!("Index exceeds length of parent cols, idx={}", index))?
-                .ty()
-                .clone();
-            Ok(DfExpr::Column { index, ty })
-        }
-        Expr::BinaryOp { lhs, op, rhs } => {
-            // TODO: Consider rhs and op when inferring type
-            let left = Box::new(lower_expression(parent, *lhs, parent_cols)?);
-            let ty = left.ty().clone();
-            Ok(DfExpr::Op {
-                op,
-                left,
-                right: Box::new(lower_expression(parent, *rhs, parent_cols)?),
-                ty,
-            })
-        }
-        Expr::UnaryOp {
-            op: UnaryOperator::Neg,
-            rhs,
-        } => {
-            let left = Box::new(lower_expression(parent, *rhs, parent_cols)?);
-            // TODO: Negation may change type to signed
-            let ty = left.ty().clone();
-            Ok(DfExpr::Op {
-                op: BinaryOperator::Multiply,
-                left,
-                right: Box::new(DfExpr::Literal {
-                    val: DfValue::Int(-1),
-                    ty: DfType::Sql(SqlType::Int(None)),
-                }),
-                ty,
-            })
-        }
-        Expr::UnaryOp {
-            op: UnaryOperator::Not,
-            rhs,
-        } => Ok(DfExpr::Op {
-            op: BinaryOperator::NotEqual,
-            left: Box::new(lower_expression(parent, *rhs, parent_cols)?),
-            right: Box::new(DfExpr::Literal {
-                val: DfValue::Int(1),
-                ty: DfType::Sql(SqlType::Int(None)),
-            }),
-            ty: DfType::Sql(SqlType::Bool), // type of NE is always bool
-        }),
-        Expr::Cast { expr, ty, .. } => Ok(DfExpr::Cast {
-            expr: Box::new(lower_expression(parent, *expr, parent_cols)?),
-            to_type: ty.clone(),
-            ty: ty.into(),
-        }),
-        Expr::CaseWhen {
-            condition,
-            then_expr,
-            else_expr,
-        } => {
-            let then_expr = Box::new(lower_expression(parent, *then_expr, parent_cols)?);
-            let ty = then_expr.ty().clone();
-            Ok(DfExpr::CaseWhen {
-                // TODO: Do case arm types have to match? See if type is inferred at runtime
-                condition: Box::new(lower_expression(parent, *condition, parent_cols)?),
-                then_expr,
-                else_expr: match else_expr {
-                    Some(else_expr) => Box::new(lower_expression(parent, *else_expr, parent_cols)?),
-                    None => Box::new(DfExpr::Literal {
-                        val: DfValue::None,
-                        ty: DfType::Unknown,
-                    }),
-                },
-                ty,
-            })
-        }
-        Expr::In {
-            lhs,
-            rhs: InValue::List(exprs),
-            negated,
-        } => {
-            let mut exprs = exprs.into_iter();
-            if let Some(fst) = exprs.next() {
-                let (comparison_op, logical_op) = if negated {
-                    (BinaryOperator::NotEqual, BinaryOperator::And)
-                } else {
-                    (BinaryOperator::Equal, BinaryOperator::Or)
-                };
-
-                let lhs = lower_expression(parent, *lhs, parent_cols)?;
-                let make_comparison = |rhs| -> ReadySetResult<_> {
-                    Ok(DfExpr::Op {
-                        left: Box::new(lhs.clone()),
-                        op: comparison_op,
-                        right: Box::new(lower_expression(parent, rhs, parent_cols)?),
-                        ty: DfType::Sql(SqlType::Bool), // type of =/!= is always bool
-                    })
-                };
-
-                exprs.try_fold(make_comparison(fst)?, |acc, rhs| {
-                    Ok(DfExpr::Op {
-                        left: Box::new(acc),
-                        op: logical_op,
-                        right: Box::new(make_comparison(rhs)?),
-                        ty: DfType::Sql(SqlType::Bool), // type of =/!= is always bool
-                    })
-                })
-            } else if negated {
-                // x IN () is always false
-                Ok(DfExpr::Literal {
-                    val: DfValue::None,
-                    ty: DfType::Sql(SqlType::Bool),
-                })
-            } else {
-                // x NOT IN () is always false
-                Ok(DfExpr::Literal {
-                    val: DfValue::from(1),
-                    ty: DfType::Sql(SqlType::Bool),
-                })
-            }
-        }
-        Expr::Exists(_) => unsupported!("EXISTS not currently supported"),
-        Expr::Variable(_) => unsupported!("Variables not currently supported"),
-        Expr::Between { .. } | Expr::NestedSelect(_) | Expr::In { .. } => {
-            internal!("Expression should have been desugared earlier: {}", expr)
-        }
-    }
+    DfExpr::lower(expr, |nom_sql::Column { name, table, .. }| {
+        let index = parent
+            .borrow()
+            .column_id_for_column(&Column::new(table, name))?;
+        let ty = parent_cols
+            .get(index)
+            .ok_or_else(|| internal_err!("Index exceeds length of parent cols, idx={}", index))?
+            .ty()
+            .clone();
+        Ok((index, ty))
+    })
 }
 
 fn make_project_node(

@@ -8,9 +8,12 @@ pub mod utils;
 use std::fmt;
 use std::fmt::Formatter;
 
-use nom_sql::{BinaryOperator, SqlType};
+use launchpad::redacted::Sensitive;
+use nom_sql::{
+    BinaryOperator, Column, Expr as AstExpr, FunctionExpr, InValue, SqlType, UnaryOperator,
+};
 use readyset_data::{DfType, DfValue};
-use readyset_errors::ReadySetError;
+use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 pub use crate::post_lookup::{
@@ -280,6 +283,173 @@ impl fmt::Display for Expr {
 }
 
 impl Expr {
+    /// Lower the given nom_sql AST expression to a dataflow expression, given a function to lookup
+    /// the index and type of a column by name.
+    ///
+    /// Currently, this involves:
+    ///
+    /// - Literals being replaced with their corresponding [`DfValue`]
+    /// - [Column references](nom_sql::Column) being resolved into column indices in the parent
+    ///   node.
+    /// - Function calls being resolved to built-in functions, and arities checked
+    /// - Desugaring x IN (y, z, ...) to `x = y OR x = z OR ...` and x NOT IN (y, z, ...) to `x != y
+    ///   AND x != z AND ...`
+    /// - Replacing unary negation with `(expr * -1)`
+    /// - Replacing unary NOT with `(expr != 1)`
+    /// - Inferring the type of each node in the expression AST.
+    pub fn lower<F>(expr: AstExpr, mut resolve_column: F) -> ReadySetResult<Self>
+    where
+        F: FnMut(Column) -> ReadySetResult<(usize, DfType)> + Copy,
+    {
+        match expr {
+            AstExpr::Call(FunctionExpr::Call {
+                name: fname,
+                arguments,
+            }) => {
+                let args = arguments
+                    .into_iter()
+                    .map(|arg| Self::lower(arg, resolve_column))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let (func, ty) = BuiltinFunction::from_name_and_args(&fname, args)?;
+                Ok(Self::Call {
+                    func: Box::new(func),
+                    ty,
+                })
+            }
+            AstExpr::Call(call) => internal!(
+                "Unexpected (aggregate?) call node in project expression: {:?}",
+                Sensitive(&call)
+            ),
+            AstExpr::Literal(lit) => {
+                let val: DfValue = lit.try_into()?;
+                // TODO: Infer type from SQL
+                let ty = val.sql_type().into();
+
+                Ok(Self::Literal { val, ty })
+            }
+            AstExpr::Column(col) => {
+                let (index, ty) = resolve_column(col)?;
+                Ok(Self::Column { index, ty })
+            }
+            AstExpr::BinaryOp { lhs, op, rhs } => {
+                // TODO: Consider rhs and op when inferring type
+                let left = Box::new(Self::lower(*lhs, resolve_column)?);
+                let ty = left.ty().clone();
+                Ok(Self::Op {
+                    op,
+                    left,
+                    right: Box::new(Self::lower(*rhs, resolve_column)?),
+                    ty,
+                })
+            }
+            AstExpr::UnaryOp {
+                op: UnaryOperator::Neg,
+                rhs,
+            } => {
+                let left = Box::new(Self::lower(*rhs, resolve_column)?);
+                // TODO: Negation may change type to signed
+                let ty = left.ty().clone();
+                Ok(Self::Op {
+                    op: BinaryOperator::Multiply,
+                    left,
+                    right: Box::new(Self::Literal {
+                        val: DfValue::Int(-1),
+                        ty: DfType::Sql(SqlType::Int(None)),
+                    }),
+                    ty,
+                })
+            }
+            AstExpr::UnaryOp {
+                op: UnaryOperator::Not,
+                rhs,
+            } => Ok(Self::Op {
+                op: BinaryOperator::NotEqual,
+                left: Box::new(Self::lower(*rhs, resolve_column)?),
+                right: Box::new(Self::Literal {
+                    val: DfValue::Int(1),
+                    ty: DfType::Sql(SqlType::Int(None)),
+                }),
+                ty: DfType::Sql(SqlType::Bool), // type of NE is always bool
+            }),
+            AstExpr::Cast { expr, ty, .. } => Ok(Self::Cast {
+                expr: Box::new(Self::lower(*expr, resolve_column)?),
+                to_type: ty.clone(),
+                ty: ty.into(),
+            }),
+            AstExpr::CaseWhen {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                let then_expr = Box::new(Self::lower(*then_expr, resolve_column)?);
+                let ty = then_expr.ty().clone();
+                Ok(Self::CaseWhen {
+                    // TODO: Do case arm types have to match? See if type is inferred at runtime
+                    condition: Box::new(Self::lower(*condition, resolve_column)?),
+                    then_expr,
+                    else_expr: match else_expr {
+                        Some(else_expr) => Box::new(Self::lower(*else_expr, resolve_column)?),
+                        None => Box::new(Self::Literal {
+                            val: DfValue::None,
+                            ty: DfType::Unknown,
+                        }),
+                    },
+                    ty,
+                })
+            }
+            AstExpr::In {
+                lhs,
+                rhs: InValue::List(exprs),
+                negated,
+            } => {
+                let mut exprs = exprs.into_iter();
+                if let Some(fst) = exprs.next() {
+                    let (comparison_op, logical_op) = if negated {
+                        (BinaryOperator::NotEqual, BinaryOperator::And)
+                    } else {
+                        (BinaryOperator::Equal, BinaryOperator::Or)
+                    };
+
+                    let lhs = Self::lower(*lhs, resolve_column)?;
+                    let make_comparison = |rhs| -> ReadySetResult<_> {
+                        Ok(Self::Op {
+                            left: Box::new(lhs.clone()),
+                            op: comparison_op,
+                            right: Box::new(Self::lower(rhs, resolve_column)?),
+                            ty: DfType::Sql(SqlType::Bool), // type of =/!= is always bool
+                        })
+                    };
+
+                    exprs.try_fold(make_comparison(fst)?, |acc, rhs| {
+                        Ok(Self::Op {
+                            left: Box::new(acc),
+                            op: logical_op,
+                            right: Box::new(make_comparison(rhs)?),
+                            ty: DfType::Sql(SqlType::Bool), // type of =/!= is always bool
+                        })
+                    })
+                } else if negated {
+                    // x IN () is always false
+                    Ok(Self::Literal {
+                        val: DfValue::None,
+                        ty: DfType::Sql(SqlType::Bool),
+                    })
+                } else {
+                    // x NOT IN () is always false
+                    Ok(Self::Literal {
+                        val: DfValue::from(1),
+                        ty: DfType::Sql(SqlType::Bool),
+                    })
+                }
+            }
+            AstExpr::Exists(_) => unsupported!("EXISTS not currently supported"),
+            AstExpr::Variable(_) => unsupported!("Variables not currently supported"),
+            AstExpr::Between { .. } | AstExpr::NestedSelect(_) | AstExpr::In { .. } => {
+                internal!("Expression should have been desugared earlier: {expr}")
+            }
+        }
+    }
+
     pub fn ty(&self) -> &DfType {
         match self {
             Expr::Column { ty, .. }
@@ -288,6 +458,34 @@ impl Expr {
             | Expr::Call { ty, .. }
             | Expr::CaseWhen { ty, .. }
             | Expr::Cast { ty, .. } => ty,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod lower {
+        use super::*;
+        #[test]
+        fn simple_column_reference() {
+            let input = AstExpr::Column("t.x".into());
+            let result = Expr::lower(input, |c| {
+                if c == "t.x".into() {
+                    Ok((0, DfType::Sql(SqlType::Int(None))))
+                } else {
+                    internal!("what's this column!?")
+                }
+            })
+            .unwrap();
+            assert_eq!(
+                result,
+                Expr::Column {
+                    index: 0,
+                    ty: DfType::Sql(SqlType::Int(None))
+                }
+            );
         }
     }
 }
