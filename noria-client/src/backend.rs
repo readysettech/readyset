@@ -434,7 +434,7 @@ where
     /// we are attempting to execute.
     /// WARNING: This will also mutate execution info timestamp if we have exceeded the supplied
     /// recovery period.
-    pub fn in_fallback_recovery(
+    pub(crate) fn in_fallback_recovery(
         &mut self,
         query_max_failure_duration: Duration,
         fallback_recovery_duration: Duration,
@@ -447,7 +447,7 @@ where
         }
     }
 
-    pub fn is_unsupported_execute(&self) -> bool {
+    pub(crate) fn is_unsupported_execute(&self) -> bool {
         if let Some(info) = self.execution_info.as_ref() {
             matches!(info.state, ExecutionState::Unsupported)
         } else {
