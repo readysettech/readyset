@@ -834,6 +834,7 @@ mod tests {
                         table: String::new(),
                         column: String::new(),
                         coltype: $ct,
+                        column_length: None,
                         colflags: ColumnFlags::empty(),
                         character_set: 33,
                     };

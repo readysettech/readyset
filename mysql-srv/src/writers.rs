@@ -110,19 +110,37 @@ fn col_enc_len(c: &Column) -> usize {
         + (1 + 2 + 4 + 1 + 2 + 1 + 2)
 }
 
+// See https://dev.mysql.com/doc/internals/en/com-query-response.html for documentation
 fn write_column_defintion(c: &Column, buf: &mut Vec<u8>) {
     // The following unwraps are fine because writes to a Vec can't fail
+
+    // Catalog (lenenc)
     buf.write_lenenc_str(b"def").unwrap();
+    // Schema (lenenc)
     buf.write_lenenc_str(b"").unwrap();
+    // Table (lenenc)
     buf.write_lenenc_str(c.table.as_bytes()).unwrap();
+    // Original Table (lenenc)
     buf.write_lenenc_str(b"").unwrap();
+    // Name (lenenc)
     buf.write_lenenc_str(c.column.as_bytes()).unwrap();
+    // Original Name (lenenc)
     buf.write_lenenc_str(b"").unwrap();
-    buf.write_lenenc_int(0xC).unwrap();
+    // Next Length (lenenc) - always 0x0c
+    buf.write_lenenc_int(0x0C).unwrap();
+    // Character Set (2 Bytes)
     buf.write_u16::<LittleEndian>(c.character_set).unwrap();
-    buf.write_u32::<LittleEndian>(1024).unwrap();
+    // Column Length (4 bytes) - maximum display length
+    //
+    // TODO: `column_length` should not be an option. Using 1024 as a default is not necessarily
+    // correct
+    buf.write_u32::<LittleEndian>(c.column_length.unwrap_or(1024))
+        .unwrap();
+    // Column Type (1 byte)
     buf.write_u8(c.coltype as u8).unwrap();
+    // Column Flags (2 bytes)
     buf.write_u16::<LittleEndian>(c.colflags.bits()).unwrap();
+    // Decimals (1 byte) - maximum shown decimal digits
     buf.write_all(&[0x00]).unwrap(); // decimals
     buf.write_all(&[0x00, 0x00]).unwrap(); // unused
 }

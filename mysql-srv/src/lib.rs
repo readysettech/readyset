@@ -63,6 +63,7 @@
 //!                         table: String::new(),
 //!                         column: "@@max_allowed_packet".to_owned(),
 //!                         coltype: myc::constants::ColumnType::MYSQL_TYPE_LONG,
+//!                         column_length: None,
 //!                         colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
 //!                         character_set: myc::constants::UTF8_GENERAL_CI,
 //!                     }];
@@ -78,6 +79,7 @@
 //!                     table: "foo".to_string(),
 //!                     column: "a".to_string(),
 //!                     coltype: ColumnType::MYSQL_TYPE_LONGLONG,
+//!                     column_length: None,
 //!                     colflags: ColumnFlags::empty(),
 //!                     character_set: myc::constants::UTF8_GENERAL_CI,
 //!                 },
@@ -85,6 +87,7 @@
 //!                     table: "foo".to_string(),
 //!                     column: "b".to_string(),
 //!                     coltype: ColumnType::MYSQL_TYPE_STRING,
+//!                     column_length: None,
 //!                     colflags: ColumnFlags::empty(),
 //!                     character_set: myc::constants::UTF8_GENERAL_CI,
 //!                 },
@@ -194,8 +197,10 @@ pub struct Column {
     ///
     /// Note that this is *technically* the column's alias.
     pub column: String,
-    /// This column's type>
+    /// This column's type.
     pub coltype: ColumnType,
+    /// This column's display length.
+    pub column_length: Option<u32>,
     /// Holds the character set for this column.
     pub character_set: u16,
     /// Any flags associated with this column.
@@ -210,6 +215,7 @@ impl From<&mysql_async::Column> for Column {
             table: c.table_str().to_string(),
             column: c.name_str().to_string(),
             coltype: c.column_type(),
+            column_length: Some(c.column_length()),
             character_set: c.character_set(),
             colflags: c.flags(),
         }

@@ -148,6 +148,7 @@ async fn write_meta_table<W: AsyncWrite + Unpin>(
             table: "".to_owned(),
             column: v.name.to_string(),
             coltype: ColumnType::MYSQL_TYPE_STRING,
+            column_length: None,
             colflags: ColumnFlags::empty(),
             character_set: DEFAULT_CHARACTER_SET,
         })
@@ -175,6 +176,7 @@ async fn write_meta_variables<W: AsyncWrite + Unpin>(
             table: "".to_owned(),
             column: "Variable_name".to_string(),
             coltype: ColumnType::MYSQL_TYPE_STRING,
+            column_length: None,
             colflags: ColumnFlags::empty(),
             character_set: DEFAULT_CHARACTER_SET,
         },
@@ -182,6 +184,7 @@ async fn write_meta_variables<W: AsyncWrite + Unpin>(
             table: "".to_owned(),
             column: "Value".to_string(),
             coltype: ColumnType::MYSQL_TYPE_STRING,
+            column_length: None,
             colflags: ColumnFlags::empty(),
             character_set: DEFAULT_CHARACTER_SET,
         },

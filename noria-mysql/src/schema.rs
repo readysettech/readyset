@@ -142,6 +142,21 @@ pub(crate) fn convert_column(
         }
     }
 
+    // TODO: All columns have a default display length, so `column_length` should not be an option.
+    let column_length = match col.sql_type {
+        SqlType::Char(l)
+        | SqlType::Varchar(l)
+        | SqlType::Int(l)
+        | SqlType::UnsignedInt(l)
+        | SqlType::Bigint(l)
+        | SqlType::UnsignedBigint(l)
+        | SqlType::Tinyint(l)
+        | SqlType::UnsignedTinyint(l)
+        | SqlType::Smallint(l)
+        | SqlType::UnsignedSmallint(l) => l.map(|l| l.into()),
+        _ => None,
+    };
+
     Ok(mysql_srv::Column {
         table: col
             .column
@@ -154,6 +169,7 @@ pub(crate) fn convert_column(
             .to_string(),
         column: col.column.name.to_string(),
         coltype,
+        column_length,
         colflags,
         character_set: DEFAULT_CHARACTER_SET,
     })
