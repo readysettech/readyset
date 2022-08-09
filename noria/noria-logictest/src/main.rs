@@ -11,7 +11,7 @@ use std::{env, io, process};
 
 use anyhow::{anyhow, bail, Context};
 use clap::Parser;
-use colored::Colorize;
+use console::style;
 use database_utils::{DatabaseType, DatabaseURL};
 use futures::stream::futures_unordered::FuturesUnordered;
 use futures::StreamExt;
@@ -321,7 +321,7 @@ impl Display for VerifyResult {
             writeln!(
                 f,
                 "{}",
-                format!("Successfully ran {}\n", n_scripts(self.passes)).green()
+                style(format!("Successfully ran {}\n", n_scripts(self.passes))).green()
             )?;
         }
 
@@ -440,22 +440,22 @@ impl Verify {
                 if script_result.is_ok() {
                     println!(
                         "{}",
-                        format!(
+                        style(format!(
                             "==> {} successfully ran {} operations in {:.1} seconds",
                             script.name(),
                             script.len(),
                             test_started.elapsed().as_secs_f64()
-                        )
+                        ))
                         .bold()
                     );
                 } else {
                     println!(
                         "{}",
-                        format!(
+                        style(format!(
                             "==> {} failed in {:.1} seconds",
                             script.name(),
                             test_started.elapsed().as_secs_f64()
-                        )
+                        ))
                         .bold()
                     );
                 }

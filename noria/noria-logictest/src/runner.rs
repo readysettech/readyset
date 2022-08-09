@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use std::{io, mem};
 
 use anyhow::{anyhow, bail, Context};
-use colored::*;
+use console::style;
 use database_utils::{DatabaseConnection, DatabaseType, DatabaseURL};
 use itertools::Itertools;
 use mysql_srv::MysqlIntermediary;
@@ -148,12 +148,14 @@ impl TestScript {
     pub async fn run(&mut self, opts: RunOptions, noria_opts: NoriaOptions) -> anyhow::Result<()> {
         println!(
             "==> {} {}",
-            "Running test script".bold(),
-            self.path
-                .canonicalize()
-                .unwrap_or_else(|_| "".into())
-                .to_string_lossy()
-                .blue()
+            style("Running test script").bold(),
+            style(
+                self.path
+                    .canonicalize()
+                    .unwrap_or_else(|_| "".into())
+                    .to_string_lossy()
+            )
+            .blue()
         );
 
         if let Some(upstream_url) = &opts.upstream_database_url {
@@ -305,10 +307,10 @@ impl TestScript {
                         let duration = start_time.elapsed();
                         println!(
                             "{} {} {} {}",
-                            "  > Query".bold(),
-                            label.blue(),
-                            "ran in".bold(),
-                            humantime::format_duration(duration).to_string().blue()
+                            style("  > Query").bold(),
+                            style(label).blue(),
+                            style("ran in").bold(),
+                            style(humantime::format_duration(duration).to_string()).blue()
                         );
                     }
                 }

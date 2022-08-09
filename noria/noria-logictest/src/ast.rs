@@ -13,7 +13,6 @@ use std::str::FromStr;
 use std::{cmp, vec};
 
 use anyhow::{anyhow, bail};
-use ascii_utils::Check;
 use bit_vec::BitVec;
 use chrono::{NaiveDate, NaiveTime, Utc};
 use derive_more::{From, TryInto};
@@ -413,7 +412,8 @@ impl Display for Value {
                     write!(f, "(empty)")
                 } else {
                     for chr in s.chars() {
-                        if chr.is_printable() {
+                        let code = chr as u8;
+                        if (0x20..0x7f).contains(&code) {
                             write!(f, "{}", chr)?;
                         } else {
                             write!(f, "@")?;

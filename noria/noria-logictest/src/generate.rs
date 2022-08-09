@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Context};
 use clap::Parser;
-use colored::Colorize;
+use console::style;
 use database_utils::{DatabaseConnection, DatabaseURL};
 use itertools::Itertools;
 use nom_sql::{
@@ -186,7 +186,7 @@ async fn run_queries(
 ) -> anyhow::Result<Vec<Record>> {
     eprintln!(
         "{}",
-        format!("==> Running {} queries", queries.len()).bold()
+        style(format!("==> Running {} queries", queries.len())).bold()
     );
 
     let mut ret = Vec::new();
@@ -234,7 +234,11 @@ impl Seed {
 
         eprintln!(
             "{}",
-            format!("==> Dropping {} relations", self.relations_to_drop.len()).bold()
+            style(format!(
+                "==> Dropping {} relations",
+                self.relations_to_drop.len()
+            ))
+            .bold()
         );
         self.relations_to_drop.reverse();
         for relation in &self.relations_to_drop {
@@ -292,14 +296,18 @@ impl Seed {
             })
             .collect::<Vec<_>>();
 
-        eprintln!("{}", "==> Running original test script".bold());
+        eprintln!("{}", style("==> Running original test script").bold());
         self.script
             .run_on_database(&Default::default(), &mut conn, None)
             .await?;
 
         eprintln!(
             "{}",
-            format!("==> Running {} insert statements", insert_statements.len()).bold()
+            style(format!(
+                "==> Running {} insert statements",
+                insert_statements.len()
+            ))
+            .bold()
         );
         for insert_statement in &insert_statements {
             if opts.verbose {
@@ -364,7 +372,11 @@ impl Seed {
 
             eprintln!(
                 "{}",
-                format!("==> Running {} delete statements", delete_statements.len()).bold()
+                style(format!(
+                    "==> Running {} delete statements",
+                    delete_statements.len()
+                ))
+                .bold()
             );
 
             for delete_statement in &delete_statements {
