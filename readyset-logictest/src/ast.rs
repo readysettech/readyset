@@ -183,6 +183,8 @@ impl Display for SortMode {
 }
 
 /// A SQL literal value, used for expected result values and values for parameters
+///
+/// TODO: Add an unsigned integer literal to support values between i64::max and u64::max
 #[derive(Debug, Eq, PartialEq, Clone, TryInto, From)]
 pub enum Value {
     Text(String),
@@ -265,6 +267,8 @@ impl TryFrom<Literal> for Value {
             Literal::Null => Value::Null,
             Literal::Boolean(b) => Value::Integer(if b { 1 } else { 0 }),
             Literal::Integer(v) => Value::Integer(v),
+            // TODO: Support Value::UnsignedInteger
+            Literal::UnsignedInteger(v) => Value::Integer(v as i64),
             Literal::Float(float) => real_value!(float.value, float.precision),
             Literal::Double(double) => real_value!(double.value, double.precision),
             Literal::Numeric(mantissa, scale) => Decimal::try_from_i128_with_scale(mantissa, scale)

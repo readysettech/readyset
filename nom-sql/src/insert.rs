@@ -170,7 +170,7 @@ mod tests {
                 InsertStatement {
                     table: Table::from("users"),
                     fields: None,
-                    data: vec![vec![42.into(), "test".into()]],
+                    data: vec![vec![42_u32.into(), "test".into()]],
                     on_duplicate: None,
                     ignore: false
                 }
@@ -188,7 +188,7 @@ mod tests {
                     table: Table::from("users"),
                     fields: None,
                     data: vec![vec![
-                        42.into(),
+                        42_u32.into(),
                         "test".into(),
                         "test".into(),
                         Literal::CurrentTimestamp,
@@ -209,7 +209,7 @@ mod tests {
                 InsertStatement {
                     table: Table::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
-                    data: vec![vec![42.into(), "test".into()]],
+                    data: vec![vec![42_u32.into(), "test".into()]],
                     on_duplicate: None,
                     ignore: false
                 }
@@ -227,7 +227,7 @@ mod tests {
                 InsertStatement {
                     table: Table::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
-                    data: vec![vec![42.into(), "test".into()]],
+                    data: vec![vec![42_u32.into(), "test".into()]],
                     on_duplicate: None,
                     ignore: false
                 }
@@ -247,7 +247,7 @@ mod tests {
                         name: "users".into(),
                     },
                     fields: None,
-                    data: vec![vec![42.into(), "test".into()]],
+                    data: vec![vec![42_u32.into(), "test".into()]],
                     on_duplicate: None,
                     ignore: false,
                 }
@@ -265,8 +265,8 @@ mod tests {
                     table: Table::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
                     data: vec![
-                        vec![42.into(), "test".into()],
-                        vec![21.into(), "test2".into()],
+                        vec![42_u32.into(), "test".into()],
+                        vec![21_u32.into(), "test2".into()],
                     ],
                     on_duplicate: None,
                     ignore: false,
@@ -294,7 +294,7 @@ mod tests {
                         Expr::BinaryOp {
                             op: BinaryOperator::Add,
                             lhs: Box::new(Expr::Column(Column::from("value"))),
-                            rhs: Box::new(Expr::Literal(1.into()))
+                            rhs: Box::new(Expr::Literal(1_u32.into()))
                         },
                     )]),
                     ignore: false,
@@ -312,7 +312,7 @@ mod tests {
                 InsertStatement {
                     table: Table::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
-                    data: vec![vec![42.into(), "test".into()]],
+                    data: vec![vec![42_u32.into(), "test".into()]],
                     on_duplicate: None,
                     ignore: false,
                 }
@@ -345,7 +345,7 @@ mod tests {
                 InsertStatement {
                     table: Table::from("users"),
                     fields: None,
-                    data: vec![vec![42.into(), "test".into()]],
+                    data: vec![vec![42_u32.into(), "test".into()]],
                     on_duplicate: None,
                     ignore: false,
                 }
@@ -363,7 +363,7 @@ mod tests {
                     table: Table::from("users"),
                     fields: None,
                     data: vec![vec![
-                        42.into(),
+                        42_u32.into(),
                         "test".into(),
                         "test".into(),
                         Literal::CurrentTimestamp,
@@ -384,7 +384,7 @@ mod tests {
                 InsertStatement {
                     table: Table::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
-                    data: vec![vec![42.into(), "test".into()]],
+                    data: vec![vec![42_u32.into(), "test".into()]],
                     on_duplicate: None,
                     ignore: false,
                 }
@@ -402,7 +402,7 @@ mod tests {
                 InsertStatement {
                     table: Table::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
-                    data: vec![vec![42.into(), "test".into()]],
+                    data: vec![vec![42_u32.into(), "test".into()]],
                     on_duplicate: None,
                     ignore: false,
                 }
@@ -422,7 +422,7 @@ mod tests {
                         name: "users".into(),
                     },
                     fields: None,
-                    data: vec![vec![42.into(), "test".into()]],
+                    data: vec![vec![42_u32.into(), "test".into()]],
                     on_duplicate: None,
                     ignore: false,
                 }
@@ -440,8 +440,8 @@ mod tests {
                     table: Table::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
                     data: vec![
-                        vec![42.into(), "test".into()],
-                        vec![21.into(), "test2".into()],
+                        vec![42_u32.into(), "test".into()],
+                        vec![21_u32.into(), "test2".into()],
                     ],
                     ignore: false,
                     on_duplicate: None
@@ -469,7 +469,7 @@ mod tests {
                         Expr::BinaryOp {
                             op: BinaryOperator::Add,
                             lhs: Box::new(Expr::Column(Column::from("value"))),
-                            rhs: Box::new(Expr::Literal(1.into()))
+                            rhs: Box::new(Expr::Literal(1_u32.into()))
                         },
                     ),]),
                     ignore: false
@@ -487,7 +487,7 @@ mod tests {
                 InsertStatement {
                     table: Table::from("users"),
                     fields: Some(vec![Column::from("id"), Column::from("name")]),
-                    data: vec![vec![42.into(), "test".into()]],
+                    data: vec![vec![42_u32.into(), "test".into()]],
                     ignore: false,
                     on_duplicate: None
                 }

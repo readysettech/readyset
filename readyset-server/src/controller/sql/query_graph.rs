@@ -760,6 +760,7 @@ pub(crate) fn extract_limit_offset(
     };
 
     let limit = match limit {
+        Literal::UnsignedInteger(val) => *val,
         Literal::Integer(val) => u64::try_from(*val)
             .map_err(|_| unsupported_err!("LIMIT field cannot have a negative value"))?,
         Literal::Placeholder(_) => {
@@ -771,7 +772,7 @@ pub(crate) fn extract_limit_offset(
     let offset = offset
         .as_ref()
         // For now, remove offset if it is a literal 0
-        .filter(|offset| !matches!(offset, Literal::Integer(0)))
+        .filter(|offset| !matches!(offset, Literal::UnsignedInteger(0)))
         .map(|offset| -> ReadySetResult<ViewPlaceholder> {
             match offset {
                 Literal::Placeholder(ItemPlaceholder::DollarNumber(idx)) => {

@@ -453,7 +453,7 @@ mod tests {
             let expected = SqlQuery::Insert(InsertStatement {
                 table: Table::from("users"),
                 fields: None,
-                data: vec![vec![42.into(), "test".into()]],
+                data: vec![vec![42_u32.into(), "test".into()]],
                 ignore: false,
                 on_duplicate: None,
             });
@@ -518,7 +518,7 @@ mod tests {
             let expected = SqlQuery::Insert(InsertStatement {
                 table: Table::from("users"),
                 fields: None,
-                data: vec![vec![42.into(), "test".into()]],
+                data: vec![vec![42_u32.into(), "test".into()]],
                 ignore: false,
                 on_duplicate: None,
             });

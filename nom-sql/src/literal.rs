@@ -91,7 +91,14 @@ impl ToString for ItemPlaceholder {
 pub enum Literal {
     Null,
     Boolean(bool),
+    /// Signed integer literals
+    ///
+    /// When parsing, we only return an integer when the value is negative
     Integer(i64),
+    /// Unsigned integer literals
+    ///
+    /// When parsing, we default to unsigned integer if the integer value has no sign
+    UnsignedInteger(u64),
     /// Represents an `f32` floating-point number.
     /// This distinction was introduced to avoid numeric error when transforming
     /// a `[Literal]` into another type (`[DataType]` or `[mysql::Value]`), an back.
@@ -134,7 +141,7 @@ impl From<i64> for Literal {
 
 impl From<u64> for Literal {
     fn from(i: u64) -> Self {
-        Literal::Integer(i as _)
+        Literal::UnsignedInteger(i as _)
     }
 }
 
@@ -146,7 +153,7 @@ impl From<i32> for Literal {
 
 impl From<u32> for Literal {
     fn from(i: u32) -> Self {
-        Literal::Integer(i.into())
+        Literal::UnsignedInteger(i.into())
     }
 }
 
@@ -182,6 +189,7 @@ impl Display for Literal {
             Literal::Boolean(true) => write!(f, "TRUE"),
             Literal::Boolean(false) => write!(f, "FALSE"),
             Literal::Integer(i) => write!(f, "{}", i),
+            Literal::UnsignedInteger(i) => write!(f, "{}", i),
             Literal::Float(float) => write_real!(float.value, float.precision),
             Literal::Double(double) => write_real!(double.value, double.precision),
             Literal::Numeric(val, scale) => {
@@ -258,15 +266,21 @@ impl Literal {
             | SqlType::Longtext
             | SqlType::Text => any::<String>().prop_map(Self::String).boxed(),
             SqlType::Int(_) => any::<i32>().prop_map(|i| Self::Integer(i as _)).boxed(),
-            SqlType::UnsignedInt(_) => any::<u32>().prop_map(|i| Self::Integer(i as _)).boxed(),
+            SqlType::UnsignedInt(_) => any::<u32>()
+                .prop_map(|i| Self::UnsignedInteger(i as _))
+                .boxed(),
             SqlType::Bigint(_) => any::<i64>().prop_map(|i| Self::Integer(i as _)).boxed(),
-            SqlType::UnsignedBigint(_) => any::<u64>().prop_map(|i| Self::Integer(i as _)).boxed(),
+            SqlType::UnsignedBigint(_) => any::<u64>()
+                .prop_map(|i| Self::UnsignedInteger(i as _))
+                .boxed(),
             SqlType::Tinyint(_) => any::<i8>().prop_map(|i| Self::Integer(i as _)).boxed(),
-            SqlType::UnsignedTinyint(_) => any::<u8>().prop_map(|i| Self::Integer(i as _)).boxed(),
+            SqlType::UnsignedTinyint(_) => any::<u8>()
+                .prop_map(|i| Self::UnsignedInteger(i as _))
+                .boxed(),
             SqlType::Smallint(_) => any::<i16>().prop_map(|i| Self::Integer(i as _)).boxed(),
-            SqlType::UnsignedSmallint(_) => {
-                any::<u16>().prop_map(|i| Self::Integer(i as _)).boxed()
-            }
+            SqlType::UnsignedSmallint(_) => any::<u16>()
+                .prop_map(|i| Self::UnsignedInteger(i as _))
+                .boxed(),
             SqlType::Blob
             | SqlType::ByteArray
             | SqlType::Longblob
@@ -337,8 +351,15 @@ impl Literal {
 pub fn integer_literal(i: &[u8]) -> IResult<&[u8], Literal> {
     let (i, sign) = opt(tag("-"))(i)?;
     let (i, num) = map_parser(digit1, nom::character::complete::u64)(i)?;
-    let num = num as i64;
-    Ok((i, Literal::Integer(if sign.is_some() { -num } else { num })))
+
+    // Default to Unsigned unless the value is negative
+    let res = if sign.is_some() {
+        Literal::Integer(-(num as i64))
+    } else {
+        Literal::UnsignedInteger(num)
+    };
+
+    Ok((i, res))
 }
 
 #[allow(clippy::type_complexity)]
@@ -605,6 +626,14 @@ mod tests {
                 let s = lit.to_string();
                 assert_eq!(literal(Dialect::PostgreSQL)(s.as_bytes()).unwrap().1, lit)
             }
+            // Positive integers are parsed as Unsigned
+            Literal::Integer(i) if i > 0 => {
+                let s = lit.to_string();
+                assert_eq!(
+                    literal(Dialect::PostgreSQL)(s.as_bytes()).unwrap().1,
+                    Literal::UnsignedInteger(i as u64)
+                )
+            }
             _ => {
                 for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
                     let s = lit.to_string();
@@ -667,8 +696,8 @@ mod tests {
         assert_eq!(
             res,
             Literal::Array(vec![
-                Literal::Array(vec![1.into(), 2.into(), 3.into()]),
-                Literal::Array(vec![4.into(), 5.into(), 6.into()]),
+                Literal::Array(vec![1_u32.into(), 2_u32.into(), 3_u32.into()]),
+                Literal::Array(vec![4_u32.into(), 5_u32.into(), 6_u32.into()]),
             ])
         );
     }

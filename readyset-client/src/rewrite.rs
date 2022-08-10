@@ -121,6 +121,7 @@ impl ProcessedQueryParams {
                 Literal::Integer(v) => {
                     usize::try_from(*v).map_err(|_| invalid_err!("Non negative integer expected"))
                 }
+                Literal::UnsignedInteger(v) => Ok(*v as usize),
                 Literal::Null => Ok(0), // Invalid in MySQL but 0 for Postgres
                 Literal::Float(_)
                 | Literal::Double(_)
@@ -1113,7 +1114,7 @@ mod tests {
             test_auto_parametrize(
                 "SELECT id FROM users WHERE id = 1",
                 "SELECT id FROM users WHERE id = ?",
-                vec![(0, 1.into())],
+                vec![(0, 1_u32.into())],
             );
         }
 
@@ -1122,7 +1123,7 @@ mod tests {
             test_auto_parametrize(
                 "SELECT id FROM users WHERE id = 1 AND name = \"bob\"",
                 "SELECT id FROM users WHERE id = ? AND name = ?",
-                vec![(0, 1.into()), (1, "bob".into())],
+                vec![(0, 1_u32.into()), (1, "bob".into())],
             );
         }
 
@@ -1131,7 +1132,7 @@ mod tests {
             test_auto_parametrize(
                 "SELECT id FROM users WHERE x = ? AND id = 1 AND name = \"bob\"",
                 "SELECT id FROM users WHERE x = ? AND id = ? AND name = ?",
-                vec![(1, 1.into()), (2, "bob".into())],
+                vec![(1, 1_u32.into()), (2, "bob".into())],
             );
         }
 
@@ -1140,7 +1141,7 @@ mod tests {
             test_auto_parametrize(
                 "SELECT id FROM users WHERE id = 1 AND name = \"bob\" AND x = ?",
                 "SELECT id FROM users WHERE id = ? AND name = ? AND x = ?",
-                vec![(0, 1.into()), (1, "bob".into())],
+                vec![(0, 1_u32.into()), (1, "bob".into())],
             );
         }
 
@@ -1149,7 +1150,7 @@ mod tests {
             test_auto_parametrize(
                 "SELECT id FROM users WHERE id = 1 AND x = ? AND name = \"bob\"",
                 "SELECT id FROM users WHERE id = ? AND x = ? AND name = ?",
-                vec![(0, 1.into()), (2, "bob".into())],
+                vec![(0, 1_u32.into()), (2, "bob".into())],
             );
         }
 
@@ -1167,7 +1168,7 @@ mod tests {
             test_auto_parametrize(
                 "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id = 1",
                 "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id = ?",
-                vec![(0, 1.into())],
+                vec![(0, 1_u32.into())],
             )
         }
 
@@ -1176,7 +1177,7 @@ mod tests {
             test_auto_parametrize(
                 "SELECT id + 1 FROM users WHERE id = 1",
                 "SELECT id + 1 FROM users WHERE id = ?",
-                vec![(0, 1.into())],
+                vec![(0, 1_u32.into())],
             )
         }
 
@@ -1185,7 +1186,7 @@ mod tests {
             test_auto_parametrize(
                 "select hashtags.*, from hashtags inner join invites_hashtags on hashtags.id = invites_hashtags.hashtag_id where invites_hashtags.invite_id in (10,20,31)",
                 "select hashtags.*, from hashtags inner join invites_hashtags on hashtags.id = invites_hashtags.hashtag_id where invites_hashtags.invite_id in (?,?,?)",
-                    vec![(0, 10.into()), (1, 20.into()), (2, 31.into())],
+                    vec![(0, 10_u32.into()), (1, 20_u32.into()), (2, 31_u32.into())],
             );
         }
 
@@ -1194,7 +1195,7 @@ mod tests {
             test_auto_parametrize(
                 "SELECT id FROM users WHERE id in (1, 2) AND name = 'bob'",
                 "SELECT id FROM users WHERE id in (?, ?) AND name = ?",
-                vec![(0, 1.into()), (1, 2.into()), (2, "bob".into())],
+                vec![(0, 1_u32.into()), (1, 2_u32.into()), (2, "bob".into())],
             );
         }
 
@@ -1205,8 +1206,8 @@ mod tests {
                 "SELECT id FROM users WHERE x = ? AND id in (?, ?) AND name = ?",
                 vec![
                     (0, "foo".into()),
-                    (1, 1.into()),
-                    (2, 2.into()),
+                    (1, 1_u32.into()),
+                    (2, 2_u32.into()),
                     (3, "bob".into()),
                 ],
             );
@@ -1217,7 +1218,7 @@ mod tests {
             test_auto_parametrize(
                 "SELECT count(*) FROM users WHERE id = 1 AND x IN (1, 2)",
                 "SELECT count(*) FROM users WHERE id = ? AND x IN (1, 2)",
-                vec![(0, 1.into())],
+                vec![(0, 1_u32.into())],
             );
         }
 
@@ -1226,7 +1227,7 @@ mod tests {
             test_auto_parametrize(
                 "SELECT * FROM users WHERE 1 = id",
                 "SELECT * FROM users WHERE id = ?",
-                vec![(0, 1.into())],
+                vec![(0, 1_u32.into())],
             );
         }
 
@@ -1244,7 +1245,7 @@ mod tests {
             test_auto_parametrize(
                 "SELECT * FROM posts WHERE id = 1 ORDER BY SCORE ASC LIMIT 3 OFFSET 6",
                 "SELECT * FROM posts WHERE id = ? ORDER BY SCORE ASC LIMIT 3 OFFSET ?",
-                vec![(0, 1.into()), (1, 6.into())],
+                vec![(0, 1_u32.into()), (1, 6_u32.into())],
             );
         }
     }

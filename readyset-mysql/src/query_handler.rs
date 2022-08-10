@@ -933,7 +933,9 @@ impl QueryHandler for MySqlQueryHandler {
             nom_sql::SetStatement::Variable(set) => {
                 for (var, val) in set.variables.iter() {
                     if var.name.as_str().eq_ignore_ascii_case("autocommit") {
-                        return Some(matches!(val, Expr::Literal(Literal::Integer(i)) if *i == 1));
+                        return Some(
+                            matches!(val, Expr::Literal(Literal::UnsignedInteger(i)) if *i == 1),
+                        );
                     }
                 }
                 None

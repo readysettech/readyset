@@ -987,7 +987,8 @@ impl<'a> TryFrom<&'a Literal> for DataType {
         match l {
             Literal::Null => Ok(DataType::None),
             Literal::Boolean(b) => Ok(DataType::from(*b)),
-            Literal::Integer(i) => Ok((*i as i64).into()),
+            Literal::Integer(i) => Ok((*i).into()),
+            Literal::UnsignedInteger(i) => Ok((*i).into()),
             Literal::String(s) => Ok(s.as_str().into()),
             Literal::CurrentTimestamp | Literal::CurrentTime => {
                 let ts = time::OffsetDateTime::now_utc();

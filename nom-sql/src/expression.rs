@@ -940,7 +940,7 @@ mod tests {
                 Expr::UnaryOp {
                     op: UnaryOperator::Neg,
                     rhs: Box::new(Expr::Cast {
-                        expr: Box::new(Expr::Literal(Literal::Integer(128))),
+                        expr: Box::new(Expr::Literal(Literal::UnsignedInteger(128))),
                         ty: SqlType::Int(None),
                         postgres_style: true
                     }),
@@ -952,9 +952,9 @@ mod tests {
                 res.unwrap().1,
                 Expr::BinaryOp {
                     op: BinaryOperator::Multiply,
-                    lhs: Box::new(Expr::Literal(Literal::Integer(515))),
+                    lhs: Box::new(Expr::Literal(Literal::UnsignedInteger(515))),
                     rhs: Box::new(Expr::Cast {
-                        expr: Box::new(Expr::Literal(Literal::Integer(128))),
+                        expr: Box::new(Expr::Literal(Literal::UnsignedInteger(128))),
                         ty: SqlType::Text,
                         postgres_style: true
                     }),
@@ -967,8 +967,8 @@ mod tests {
                 Expr::Cast {
                     expr: Box::new(Expr::BinaryOp {
                         op: BinaryOperator::Multiply,
-                        lhs: Box::new(Expr::Literal(Literal::Integer(515))),
-                        rhs: Box::new(Expr::Literal(Literal::Integer(128)))
+                        lhs: Box::new(Expr::Literal(Literal::UnsignedInteger(515))),
+                        rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(128)))
                     }),
                     ty: SqlType::Text,
                     postgres_style: true,
@@ -980,7 +980,7 @@ mod tests {
                 res.unwrap().1,
                 Expr::BinaryOp {
                     op: BinaryOperator::Multiply,
-                    lhs: Box::new(Expr::Literal(Literal::Integer(200))),
+                    lhs: Box::new(Expr::Literal(Literal::UnsignedInteger(200))),
                     rhs: Box::new(Expr::Cast {
                         expr: Box::new(Expr::Column(Column::from("postgres.column"))),
                         ty: SqlType::Double,
@@ -1052,7 +1052,7 @@ mod tests {
             let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(
                 res.unwrap().1,
-                x_operator_value(BinaryOperator::Add, 3.into())
+                x_operator_value(BinaryOperator::Add, 3_u32.into())
             );
         }
 
@@ -1063,7 +1063,7 @@ mod tests {
             let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(
                 res.unwrap().1,
-                x_operator_value(BinaryOperator::Subtract, 2.into())
+                x_operator_value(BinaryOperator::Subtract, 2_u32.into())
             );
         }
 
@@ -1074,7 +1074,7 @@ mod tests {
             let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(
                 res.unwrap().1,
-                x_operator_value(BinaryOperator::Multiply, 5.into())
+                x_operator_value(BinaryOperator::Multiply, 5_u32.into())
             );
         }
 
@@ -1087,8 +1087,8 @@ mod tests {
                 res.unwrap().1,
                 Expr::BinaryOp {
                     op: BinaryOperator::Equal,
-                    lhs: Box::new(x_operator_value(BinaryOperator::Multiply, 3.into())),
-                    rhs: Box::new(Expr::Literal(21.into()))
+                    lhs: Box::new(x_operator_value(BinaryOperator::Multiply, 3_u32.into())),
+                    rhs: Box::new(Expr::Literal(21_u32.into()))
                 }
             );
         }
@@ -1101,8 +1101,8 @@ mod tests {
                 res.unwrap().1,
                 Expr::BinaryOp {
                     op: BinaryOperator::Equal,
-                    lhs: Box::new(x_operator_value(BinaryOperator::Subtract, 7.into())),
-                    rhs: Box::new(Expr::Literal(15.into()))
+                    lhs: Box::new(x_operator_value(BinaryOperator::Subtract, 7_u32.into())),
+                    rhs: Box::new(Expr::Literal(15_u32.into()))
                 }
             );
         }
@@ -1116,8 +1116,8 @@ mod tests {
                 res.unwrap().1,
                 Expr::BinaryOp {
                     op: BinaryOperator::Equal,
-                    lhs: Box::new(x_operator_value(BinaryOperator::Add, 2.into())),
-                    rhs: Box::new(Expr::Literal(15.into()))
+                    lhs: Box::new(x_operator_value(BinaryOperator::Add, 2_u32.into())),
+                    rhs: Box::new(Expr::Literal(15_u32.into()))
                 }
             );
         }
@@ -1131,8 +1131,8 @@ mod tests {
                 res.unwrap().1,
                 Expr::BinaryOp {
                     op: BinaryOperator::Equal,
-                    lhs: Box::new(x_operator_value(BinaryOperator::Add, 2.into())),
-                    rhs: Box::new(x_operator_value(BinaryOperator::Multiply, 3.into()))
+                    lhs: Box::new(x_operator_value(BinaryOperator::Add, 2_u32.into())),
+                    rhs: Box::new(x_operator_value(BinaryOperator::Multiply, 3_u32.into()))
                 }
             );
         }
@@ -1148,7 +1148,7 @@ mod tests {
                 Expr::BinaryOp {
                     lhs: Box::new(Expr::Column(Column::from("foo"))),
                     op: BinaryOperator::GreaterOrEqual,
-                    rhs: Box::new(Expr::Literal(Literal::Integer(42)))
+                    rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(42)))
                 }
             );
 
@@ -1158,7 +1158,7 @@ mod tests {
                 Expr::BinaryOp {
                     lhs: Box::new(Expr::Column(Column::from("foo"))),
                     op: BinaryOperator::LessOrEqual,
-                    rhs: Box::new(Expr::Literal(Literal::Integer(5)))
+                    rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(5)))
                 }
             );
         }
@@ -1193,7 +1193,7 @@ mod tests {
             let b = Expr::BinaryOp {
                 op: BinaryOperator::Equal,
                 lhs: Box::new(Expr::Column("bar".into())),
-                rhs: Box::new(Expr::Literal(Literal::Integer(12.into()))),
+                rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(12))),
             };
 
             let left = Expr::BinaryOp {
@@ -1233,7 +1233,7 @@ mod tests {
             let b = Expr::BinaryOp {
                 op: BinaryOperator::Equal,
                 lhs: Box::new(Expr::Column("bar".into())),
-                rhs: Box::new(Expr::Literal(Literal::Integer(12.into()))),
+                rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(12))),
             };
 
             let left = Expr::BinaryOp {
@@ -1267,7 +1267,7 @@ mod tests {
                 rhs: Box::new(Expr::BinaryOp {
                     op: BinaryOperator::Equal,
                     lhs: Box::new(Expr::Column("bar".into())),
-                    rhs: Box::new(Expr::Literal(Literal::Integer(12.into()))),
+                    rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(12))),
                 }),
             };
 
@@ -1378,7 +1378,7 @@ mod tests {
             let right = Expr::BinaryOp {
                 lhs: Box::new(Expr::Column("size".into())),
                 op: BinaryOperator::Greater,
-                rhs: Box::new(Expr::Literal(0.into())),
+                rhs: Box::new(Expr::Literal(0_u32.into())),
             };
 
             let expected = Expr::BinaryOp {
@@ -1398,7 +1398,10 @@ mod tests {
 
             let expected = Expr::In {
                 lhs: Box::new(Expr::Column("bar".into())),
-                rhs: InValue::List(vec![Expr::Literal(0.into()), Expr::Literal(1.into())]),
+                rhs: InValue::List(vec![
+                    Expr::Literal(0_u32.into()),
+                    Expr::Literal(1_u32.into()),
+                ]),
                 negated: false,
             };
 
@@ -1440,7 +1443,10 @@ mod tests {
             let c1 = res1.unwrap().1;
             let expected1 = Expr::In {
                 lhs: Box::new(Expr::Column("id".into())),
-                rhs: InValue::List(vec![Expr::Literal(1.into()), Expr::Literal(2.into())]),
+                rhs: InValue::List(vec![
+                    Expr::Literal(1_u32.into()),
+                    Expr::Literal(2_u32.into()),
+                ]),
                 negated: true,
             };
             assert_eq!(c1, expected1);
@@ -1454,8 +1460,8 @@ mod tests {
             let qs = b"foo between 1 and 2";
             let expected = Expr::Between {
                 operand: Box::new(Expr::Column("foo".into())),
-                min: Box::new(Expr::Literal(1.into())),
-                max: Box::new(Expr::Literal(2.into())),
+                min: Box::new(Expr::Literal(1_u32.into())),
+                max: Box::new(Expr::Literal(2_u32.into())),
                 negated: false,
             };
             let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
@@ -1468,8 +1474,8 @@ mod tests {
             let qs = b"foo not between 1 and 2";
             let expected = Expr::Between {
                 operand: Box::new(Expr::Column("foo".into())),
-                min: Box::new(Expr::Literal(1.into())),
-                max: Box::new(Expr::Literal(2.into())),
+                min: Box::new(Expr::Literal(1_u32.into())),
+                max: Box::new(Expr::Literal(2_u32.into())),
                 negated: true,
             };
             let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
@@ -1488,8 +1494,8 @@ mod tests {
                         Expr::Column(Column::from("bar")),
                     ],
                 })),
-                min: Box::new(Expr::Literal(1.into())),
-                max: Box::new(Expr::Literal(2.into())),
+                min: Box::new(Expr::Literal(1_u32.into())),
+                max: Box::new(Expr::Literal(2_u32.into())),
                 negated: false,
             };
             let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
@@ -1504,13 +1510,13 @@ mod tests {
                 operand: Box::new(Expr::Column("foo".into())),
                 min: Box::new(Expr::BinaryOp {
                     op: BinaryOperator::Add,
-                    lhs: Box::new(Expr::Literal(Literal::Integer(1))),
-                    rhs: Box::new(Expr::Literal(Literal::Integer(2))),
+                    lhs: Box::new(Expr::Literal(Literal::UnsignedInteger(1))),
+                    rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(2))),
                 }),
                 max: Box::new(Expr::BinaryOp {
                     op: BinaryOperator::Add,
-                    lhs: Box::new(Expr::Literal(Literal::Integer(3))),
-                    rhs: Box::new(Expr::Literal(Literal::Integer(5))),
+                    lhs: Box::new(Expr::Literal(Literal::UnsignedInteger(3))),
+                    rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(5))),
                 }),
                 negated: false,
             };
@@ -1561,7 +1567,7 @@ mod tests {
             let qs = b"-256";
             let expected = Expr::UnaryOp {
                 op: UnaryOperator::Neg,
-                rhs: Box::new(Expr::Literal(Literal::Integer(256))),
+                rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(256))),
             };
             let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
@@ -1606,7 +1612,7 @@ mod tests {
                 op: UnaryOperator::Not,
                 rhs: Box::new(Expr::UnaryOp {
                     op: UnaryOperator::Neg,
-                    rhs: Box::new(Expr::Literal(Literal::Integer(1))),
+                    rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(1))),
                 }),
             };
             let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
@@ -1621,7 +1627,7 @@ mod tests {
                 op: UnaryOperator::Neg,
                 rhs: Box::new(Expr::UnaryOp {
                     op: UnaryOperator::Neg,
-                    rhs: Box::new(Expr::Literal(Literal::Integer(1))),
+                    rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(1))),
                 }),
             };
             let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
@@ -1673,7 +1679,7 @@ mod tests {
                     lhs: Box::new(Expr::BinaryOp {
                         lhs: Box::new(Expr::Column("read_ribbons.is_following".into())),
                         op: BinaryOperator::Equal,
-                        rhs: Box::new(Expr::Literal(1.into())),
+                        rhs: Box::new(Expr::Literal(1_u32.into())),
                     }),
                     rhs: Box::new(Expr::BinaryOp {
                         op: BinaryOperator::And,
@@ -1687,7 +1693,7 @@ mod tests {
                             lhs: Box::new(Expr::BinaryOp {
                                 lhs: Box::new(Expr::Column("saldo".into())),
                                 op: BinaryOperator::GreaterOrEqual,
-                                rhs: Box::new(Expr::Literal(0.into())),
+                                rhs: Box::new(Expr::Literal(0_u32.into())),
                             }),
                             rhs: Box::new(Expr::BinaryOp {
                                 op: BinaryOperator::And,
@@ -1732,7 +1738,7 @@ mod tests {
                                         rhs: Box::new(Expr::BinaryOp {
                                             lhs: Box::new(Expr::Column("saldo".into())),
                                             op: BinaryOperator::GreaterOrEqual,
-                                            rhs: Box::new(Expr::Literal(0.into())),
+                                            rhs: Box::new(Expr::Literal(0_u32.into())),
                                         }),
                                     }),
                                     rhs: Box::new(Expr::BinaryOp {
@@ -1763,7 +1769,7 @@ mod tests {
                     Expr::BinaryOp {
                         lhs: Box::new(Expr::Column(Column::from("foo"))),
                         op: BinaryOperator::Equal,
-                        rhs: Box::new(Expr::Literal(Literal::Integer(42_i64)))
+                        rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(42)))
                     }
                 );
 
@@ -1823,7 +1829,7 @@ mod tests {
                     lhs: Box::new(Expr::BinaryOp {
                         lhs: Box::new(Expr::Column("read_ribbons.is_following".into())),
                         op: BinaryOperator::Equal,
-                        rhs: Box::new(Expr::Literal(1.into())),
+                        rhs: Box::new(Expr::Literal(1_u32.into())),
                     }),
                     rhs: Box::new(Expr::BinaryOp {
                         op: BinaryOperator::And,
@@ -1837,7 +1843,7 @@ mod tests {
                             lhs: Box::new(Expr::BinaryOp {
                                 lhs: Box::new(Expr::Column("saldo".into())),
                                 op: BinaryOperator::GreaterOrEqual,
-                                rhs: Box::new(Expr::Literal(0.into())),
+                                rhs: Box::new(Expr::Literal(0_u32.into())),
                             }),
                             rhs: Box::new(Expr::BinaryOp {
                                 op: BinaryOperator::And,
@@ -1882,7 +1888,7 @@ mod tests {
                                         rhs: Box::new(Expr::BinaryOp {
                                             lhs: Box::new(Expr::Column("saldo".into())),
                                             op: BinaryOperator::GreaterOrEqual,
-                                            rhs: Box::new(Expr::Literal(0.into())),
+                                            rhs: Box::new(Expr::Literal(0_u32.into())),
                                         }),
                                     }),
                                     rhs: Box::new(Expr::BinaryOp {
@@ -1913,7 +1919,7 @@ mod tests {
                     Expr::BinaryOp {
                         lhs: Box::new(Expr::Column(Column::from("foo"))),
                         op: BinaryOperator::Equal,
-                        rhs: Box::new(Expr::Literal(Literal::Integer(42_i64)))
+                        rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(42)))
                     }
                 );
 

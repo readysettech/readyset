@@ -184,7 +184,7 @@ mod tests {
                             count_nulls: true,
                         })),
                         op: BinaryOperator::Add,
-                        rhs: Box::new(Expr::Literal(Literal::Integer(1)))
+                        rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(1)))
                     })]
                 );
             }

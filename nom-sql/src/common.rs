@@ -1314,7 +1314,7 @@ mod tests {
                 name: "ifnull".to_owned(),
                 arguments: vec![
                     Expr::Column(Column::from("x")),
-                    Expr::Literal(Literal::Integer(0))
+                    Expr::Literal(Literal::UnsignedInteger(0))
                 ]
             }
         );

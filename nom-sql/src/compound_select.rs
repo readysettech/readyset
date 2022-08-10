@@ -172,7 +172,7 @@ mod tests {
             tables: vec![TableExpr::from(Table::from("Vote"))],
             fields: vec![
                 FieldDefinitionExpr::from(Column::from("id")),
-                FieldDefinitionExpr::from(Expr::Literal(Literal::Integer(1))),
+                FieldDefinitionExpr::from(Expr::Literal(Literal::UnsignedInteger(1))),
             ],
             ..Default::default()
         };
@@ -244,7 +244,7 @@ mod tests {
             tables: vec![TableExpr::from(Table::from("Vote"))],
             fields: vec![
                 FieldDefinitionExpr::from(Column::from("id")),
-                FieldDefinitionExpr::from(Expr::Literal(Literal::Integer(1))),
+                FieldDefinitionExpr::from(Expr::Literal(Literal::UnsignedInteger(1))),
             ],
             ..Default::default()
         };
@@ -259,8 +259,8 @@ mod tests {
         let third_select = SelectStatement {
             tables: vec![TableExpr::from(Table::from("Vote"))],
             fields: vec![
-                FieldDefinitionExpr::from(Expr::Literal(Literal::Integer(42))),
-                FieldDefinitionExpr::from(Expr::Literal(Literal::Integer(5))),
+                FieldDefinitionExpr::from(Expr::Literal(Literal::UnsignedInteger(42))),
+                FieldDefinitionExpr::from(Expr::Literal(Literal::UnsignedInteger(5))),
             ],
             ..Default::default()
         };
@@ -288,7 +288,7 @@ mod tests {
             tables: vec![TableExpr::from(Table::from("Vote"))],
             fields: vec![
                 FieldDefinitionExpr::from(Column::from("id")),
-                FieldDefinitionExpr::from(Expr::Literal(Literal::Integer(1))),
+                FieldDefinitionExpr::from(Expr::Literal(Literal::UnsignedInteger(1))),
             ],
             ..Default::default()
         };

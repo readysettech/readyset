@@ -1086,7 +1086,7 @@ mod tests {
                     expr: Expr::BinaryOp {
                         lhs: Box::new(Expr::Column("x".into())),
                         op: BinaryOperator::Greater,
-                        rhs: Box::new(Expr::Literal(1.into())),
+                        rhs: Box::new(Expr::Literal(1_u32.into())),
                     },
                     enforced: None
                 }
@@ -1105,7 +1105,7 @@ mod tests {
                 expr: Expr::BinaryOp {
                     lhs: Box::new(Expr::Column("x".into())),
                     op: BinaryOperator::Greater,
-                    rhs: Box::new(Expr::Literal(1.into())),
+                    rhs: Box::new(Expr::Literal(1_u32.into())),
                 },
                 enforced: None
             }
@@ -1123,7 +1123,7 @@ mod tests {
                 expr: Expr::BinaryOp {
                     lhs: Box::new(Expr::Column("x".into())),
                     op: BinaryOperator::Greater,
-                    rhs: Box::new(Expr::Literal(1.into())),
+                    rhs: Box::new(Expr::Literal(1_u32.into())),
                 },
                 enforced: Some(false)
             }

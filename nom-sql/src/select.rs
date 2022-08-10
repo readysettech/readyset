@@ -576,7 +576,7 @@ mod tests {
             res.unwrap().1,
             SelectStatement {
                 fields: vec![FieldDefinitionExpr::Expr {
-                    expr: Expr::Literal(Literal::Integer(1)),
+                    expr: Expr::Literal(Literal::UnsignedInteger(1)),
                     alias: None
                 }],
                 ..Default::default()
@@ -725,12 +725,12 @@ mod tests {
         let res3 = test_parse!(selection(Dialect::MySQL), qstring3.as_bytes());
         let res3_pgsql = selection(Dialect::PostgreSQL)(qstring3.as_bytes());
 
-        assert_eq!(res1.limit, Some(10.into()));
+        assert_eq!(res1.limit, Some(10_u32.into()));
         assert_eq!(res1.offset, None);
-        assert_eq!(res2.limit, Some(10.into()));
-        assert_eq!(res2.offset, Some(10.into()));
-        assert_eq!(res3.limit, Some(10.into()));
-        assert_eq!(res3.offset, Some(5.into()));
+        assert_eq!(res2.limit, Some(10_u32.into()));
+        assert_eq!(res2.offset, Some(10_u32.into()));
+        assert_eq!(res3.limit, Some(10_u32.into()));
+        assert_eq!(res3.offset, Some(5_u32.into()));
         res3_pgsql.unwrap_err();
     }
 
@@ -926,7 +926,7 @@ mod tests {
                 tables: vec![TableExpr::from(Table::from("users"))],
                 fields: vec![FieldDefinitionExpr::All],
                 where_clause: expected_where_cond,
-                limit: Some(10.into()),
+                limit: Some(10_u32.into()),
                 ..Default::default()
             }
         );
@@ -1021,7 +1021,7 @@ mod tests {
         let filter_cond = Expr::BinaryOp {
             lhs: Box::new(Expr::Column(Column::from("vote_id"))),
             op: BinaryOperator::Greater,
-            rhs: Box::new(Expr::Literal(Literal::Integer(10.into()))),
+            rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(10))),
         };
         let agg_expr = FunctionExpr::Count {
             expr: Box::new(Expr::CaseWhen {
@@ -1052,7 +1052,7 @@ mod tests {
         let filter_cond = Expr::BinaryOp {
             lhs: Box::new(Expr::Column(Column::from("sign"))),
             op: BinaryOperator::Equal,
-            rhs: Box::new(Expr::Literal(Literal::Integer(1.into()))),
+            rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(1))),
         };
         let agg_expr = FunctionExpr::Sum {
             expr: Box::new(Expr::CaseWhen {
@@ -1083,12 +1083,12 @@ mod tests {
         let filter_cond = Expr::BinaryOp {
             lhs: Box::new(Expr::Column(Column::from("sign"))),
             op: BinaryOperator::Equal,
-            rhs: Box::new(Expr::Literal(Literal::Integer(1.into()))),
+            rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(1))),
         };
         let agg_expr = FunctionExpr::Sum {
             expr: Box::new(Expr::CaseWhen {
                 then_expr: Box::new(Expr::Column(Column::from("vote_id"))),
-                else_expr: Some(Box::new(Expr::Literal(Literal::Integer(6)))),
+                else_expr: Some(Box::new(Expr::Literal(Literal::UnsignedInteger(6)))),
                 condition: Box::new(filter_cond),
             }),
             distinct: false,
@@ -1122,7 +1122,7 @@ mod tests {
             rhs: Box::new(Expr::BinaryOp {
                 lhs: Box::new(Expr::Column(Column::from("votes.vote"))),
                 op: BinaryOperator::Equal,
-                rhs: Box::new(Expr::Literal(Literal::Integer(0))),
+                rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(0))),
             }),
             op: BinaryOperator::And,
         };
@@ -1226,7 +1226,7 @@ mod tests {
                         None
                     )],
                 }),
-                limit: Some(50.into()),
+                limit: Some(50_u32.into()),
                 ..Default::default()
             }
         );
@@ -1490,7 +1490,7 @@ mod tests {
                     "o_id".into(),
                 ))))),
                 op: BinaryOperator::Subtract,
-                rhs: Box::new(Expr::Literal(3333.into())),
+                rhs: Box::new(Expr::Literal(3333_u32.into())),
             })],
             ..Default::default()
         };
@@ -1512,7 +1512,7 @@ mod tests {
                         "o_id".into(),
                     ))))),
                     op: BinaryOperator::Multiply,
-                    rhs: Box::new(Expr::Literal(2.into())),
+                    rhs: Box::new(Expr::Literal(2_u32.into())),
                 },
             }],
             ..Default::default()
@@ -1645,7 +1645,7 @@ mod tests {
             Some(Expr::BinaryOp {
                 lhs: Box::new(Expr::Call(FunctionExpr::CountStar)),
                 op: BinaryOperator::Greater,
-                rhs: Box::new(Expr::Literal(1.into()))
+                rhs: Box::new(Expr::Literal(1_u32.into()))
             })
         );
         let stringified = res.to_string();
@@ -1704,7 +1704,7 @@ mod tests {
                     tables: vec![TableExpr::from(Table::from("users"))],
                     fields: vec![
                         FieldDefinitionExpr::from(Expr::Literal(Literal::Null,)),
-                        FieldDefinitionExpr::from(Expr::Literal(Literal::Integer(1),)),
+                        FieldDefinitionExpr::from(Expr::Literal(Literal::UnsignedInteger(1),)),
                         FieldDefinitionExpr::from(
                             Expr::Literal(Literal::String("foo".to_owned()),)
                         ),
@@ -1728,7 +1728,7 @@ mod tests {
                 lhs: Box::new(Expr::Column(Column::from(
                     "auth_permission.content_type_id",
                 ))),
-                rhs: InValue::List(vec![Expr::Literal(0.into())]),
+                rhs: InValue::List(vec![Expr::Literal(0_u32.into())]),
                 negated: false,
             });
 
@@ -1833,7 +1833,7 @@ mod tests {
                     tables: vec![TableExpr::from(Table::from("users"))],
                     fields: vec![
                         FieldDefinitionExpr::from(Expr::Literal(Literal::Null,)),
-                        FieldDefinitionExpr::from(Expr::Literal(Literal::Integer(1),)),
+                        FieldDefinitionExpr::from(Expr::Literal(Literal::UnsignedInteger(1),)),
                         FieldDefinitionExpr::from(
                             Expr::Literal(Literal::String("foo".to_owned()),)
                         ),
@@ -1857,7 +1857,7 @@ mod tests {
                 lhs: Box::new(Expr::Column(Column::from(
                     "auth_permission.content_type_id",
                 ))),
-                rhs: InValue::List(vec![Expr::Literal(0.into())]),
+                rhs: InValue::List(vec![Expr::Literal(0_u32.into())]),
                 negated: false,
             });
 

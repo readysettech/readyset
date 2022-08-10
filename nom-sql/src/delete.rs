@@ -92,7 +92,7 @@ mod tests {
         let expected_left = Expr::Column(Column::from("id"));
         let expected_where_cond = Some(Expr::BinaryOp {
             lhs: Box::new(expected_left),
-            rhs: Box::new(Expr::Literal(Literal::Integer(1))),
+            rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(1))),
             op: BinaryOperator::Equal,
         });
         assert_eq!(

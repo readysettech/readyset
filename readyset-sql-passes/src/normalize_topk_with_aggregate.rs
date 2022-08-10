@@ -170,7 +170,7 @@ mod tests {
                     })
                 );
 
-                assert_eq!(stmt.limit, Some(4.into()));
+                assert_eq!(stmt.limit, Some(4_u32.into()));
             }
             _ => panic!("Invalid query returned: {:?}", result),
         }

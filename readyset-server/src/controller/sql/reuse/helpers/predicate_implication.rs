@@ -198,6 +198,21 @@ fn predicate_implies(
         },
         Expr::Literal(Literal::Integer(ref nv)) => match e_rhs {
             Expr::Literal(Literal::Integer(ref ev)) => check_op_elimination(nv, ev, n_op, e_op),
+            // Cast to i128 to compare u64 with i64
+            Expr::Literal(Literal::UnsignedInteger(ref ev)) => {
+                check_op_elimination(*nv as i128, *ev as i128, n_op, e_op)
+            }
+            Expr::Literal(_) => Ok(false),
+            _ => unsupported!(),
+        },
+        Expr::Literal(Literal::UnsignedInteger(ref nv)) => match e_rhs {
+            // Cast to i128 to compare u64 with i64
+            Expr::Literal(Literal::Integer(ref ev)) => {
+                check_op_elimination(*nv as i128, *ev as i128, n_op, e_op)
+            }
+            Expr::Literal(Literal::UnsignedInteger(ref ev)) => {
+                check_op_elimination(nv, ev, n_op, e_op)
+            }
             Expr::Literal(_) => Ok(false),
             _ => unsupported!(),
         },
@@ -242,6 +257,24 @@ mod tests {
         assert!(!predicate_implies(pb, pa).unwrap());
         assert!(!predicate_implies(pa, pc).unwrap());
         assert!(predicate_implies(pc, pa).unwrap());
+    }
+
+    #[test]
+    fn predicate_implication_mixed_sign() {
+        let pa = (
+            BinaryOperator::Less,
+            &Expr::Literal(Literal::UnsignedInteger(10_u64)),
+        );
+        let pb = (BinaryOperator::Less, &Expr::Literal(Literal::Integer(20)));
+        let pc = (BinaryOperator::Equal, &Expr::Literal(Literal::Integer(5)));
+        let pd = (BinaryOperator::Less, &Expr::Literal(Literal::Integer(-5)));
+
+        assert!(predicate_implies(pa, pb).unwrap());
+        assert!(!predicate_implies(pb, pa).unwrap());
+        assert!(!predicate_implies(pa, pc).unwrap());
+        assert!(predicate_implies(pc, pa).unwrap());
+        assert!(predicate_implies(pd, pa).unwrap());
+        assert!(!predicate_implies(pa, pd).unwrap());
     }
 
     #[test]
