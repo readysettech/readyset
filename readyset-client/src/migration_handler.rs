@@ -18,7 +18,7 @@ use tokio::select;
 use tracing::{error, info, instrument, warn};
 
 use crate::backend::{noria_connector, NoriaConnector};
-use crate::query_status_cache::{MigrationState, QueryStatusCache};
+use crate::query_status_cache::{MigrationState, Query, QueryStatusCache};
 use crate::upstream_database::{IsFatalError, NoriaCompare};
 use crate::{utils, UpstreamDatabase};
 
@@ -94,14 +94,19 @@ where
                 _ = interval.tick() => {
                     let to_process = self.query_status_cache.pending_migration();
                     let len = to_process.len();
-                    if self.controller.is_some() {
-                        // Dry run mode because we were given a controller handle.
-                        for q in to_process {
-                            self.perform_dry_run_migration(&q.0).await
-                        }
-                    } else {
-                        for q in to_process {
-                            self.perform_migration(&q.0).await
+                    let has_controller = self.controller.is_some();
+                    for q in to_process {
+                        match &q.0 {
+                            Query::Parsed(ref stmt) => {
+                                if has_controller {
+                                    self.perform_dry_run_migration(stmt).await
+                                } else {
+                                    self.perform_migration(stmt).await
+                                }
+                            }
+                            Query::ParseFailed(_) => {
+                                error!("Should not be migrating query that failed to parse. Ignoring");
+                            },
                         }
                     }
 

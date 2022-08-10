@@ -1045,16 +1045,18 @@ mod tests {
 
     mod anonymize {
         use super::*;
+        use crate::query_status_cache::Query;
 
         #[test]
         fn simple_query() {
-            let mut query = parse_select_statement(
+            let query: Query = parse_select_statement(
                 "SELECT id + 3 FROM users WHERE credit_card_number = \"look at this PII\"",
-            );
+            )
+            .into();
             let expected = parse_select_statement(
                 "SELECT id + \"<anonymized>\" FROM users WHERE credit_card_number = \"<anonymized>\""
-            );
-            anonymize_literals(&mut query);
+            ).to_string();
+            let query = query.to_anonymized_string();
             assert_eq!(query, expected);
         }
 

@@ -160,6 +160,7 @@ where
 {
     let mut last: Option<(Vec<T>, bool)> = None;
     let start = Instant::now();
+    let mut first_query = true;
     loop {
         // Check if we have timed out, if we have not execute the query against the connection
         // with up to as long as we have left in the timeout. We timeout any query after 5
@@ -182,13 +183,14 @@ where
             QueryExecution::Query(q) => tokio::time::timeout(remaining, conn.query(q)).await,
         };
 
-        //
         match result {
             Ok(Ok(r)) => {
+                dbg!(&r);
                 let correct_source = match &mut source {
                     ResultSource::FromAnywhere => true,
                     ResultSource::FromNoria(metrics) => {
-                        get_num_view_queries(metrics).await > num_noria_queries_before
+                        first_query
+                            || get_num_view_queries(metrics).await > num_noria_queries_before
                     }
                 };
                 let has_expected_result = equal_rows(&r, &results.expected);
@@ -215,6 +217,7 @@ where
             }
         }
 
+        first_query = false;
         sleep(Duration::from_millis(100)).await;
     }
 }

@@ -1,6 +1,8 @@
+use launchpad::hash::hash;
 use mysql_async::prelude::*;
 use readyset_client::backend::noria_connector::ReadBehavior;
 use readyset_client::backend::UnsupportedSetMode;
+use readyset_client::query_status_cache::hash_to_query_id;
 use readyset_client::BackendBuilder;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
@@ -367,5 +369,30 @@ async fn transaction_proxies() {
     assert_eq!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Readyset
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn parsing_failed_shows_proxied() {
+    let (opts, _handle) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+
+    let q = "this isn't valid SQL".to_string();
+    let _ = conn.query_drop(q.clone()).await;
+    let proxied_queries = conn
+        .query::<(String, String, String), _>("SHOW PROXIED QUERIES;")
+        .await
+        .unwrap();
+
+    let id = hash_to_query_id(hash(&q));
+    assert!(
+        proxied_queries.contains(&(
+            id,
+            "this isn't valid SQL".to_owned(),
+            "unsupported".to_owned()
+        )),
+        "proxied_queries = {:?}",
+        proxied_queries,
     );
 }

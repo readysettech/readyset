@@ -17,7 +17,6 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
 
 use crate::query_status_cache::{DeniedQuery, QueryStatusCache};
-use crate::rewrite;
 
 /// Routes requests from an HTTP server to expose metrics data from the adapter.
 /// To see the supported http requests and their respective routing, see
@@ -225,10 +224,7 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
                     let deny_list = query_cache
                         .deny_list()
                         .into_iter()
-                        .map(|DeniedQuery { mut query, .. }| {
-                            rewrite::anonymize_literals(&mut query);
-                            query.to_string()
-                        })
+                        .map(|DeniedQuery { query, .. }| query.to_anonymized_string())
                         .collect::<Vec<_>>();
                     let res = match serde_json::to_string(&deny_list) {
                         Ok(json) => res

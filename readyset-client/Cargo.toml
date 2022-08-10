@@ -52,6 +52,10 @@ dataflow-expression = { path = "../dataflow-expression" }
 readyset-tracing = { path = "../readyset-tracing" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 
+[dev-dependencies]
+proptest = "1.0.0"
+test-strategy = "0.2.0"
+
 [lib]
 path = "src/lib.rs"
 

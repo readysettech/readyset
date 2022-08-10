@@ -99,8 +99,10 @@ use tracing::{error, instrument, trace, warn};
 
 use crate::backend::noria_connector::ExecuteSelectContext;
 use crate::query_status_cache::{
-    DeniedQuery, ExecutionInfo, ExecutionState, MigrationState, QueryStatus, QueryStatusCache,
+    DeniedQuery, ExecutionInfo, ExecutionState, MigrationState, Query, QueryStatus,
+    QueryStatusCache,
 };
+use crate::rewrite::anonymize_literals;
 use crate::upstream_database::NoriaCompare;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::{rewrite, QueryHandler, UpstreamDatabase};
@@ -1474,26 +1476,25 @@ where
 
         let data = queries
             .into_iter()
-            .map(
-                |DeniedQuery {
-                     id,
-                     mut query,
-                     status,
-                 }| {
-                    let s = match status.migration_state {
-                        MigrationState::DryRunSucceeded | MigrationState::Successful => "yes",
-                        MigrationState::Pending => "pending",
-                        MigrationState::Unsupported => "unsupported",
+            .map(|DeniedQuery { id, query, status }| {
+                let s = match status.migration_state {
+                    MigrationState::DryRunSucceeded | MigrationState::Successful => "yes",
+                    MigrationState::Pending => "pending",
+                    MigrationState::Unsupported => "unsupported",
+                }
+                .to_string();
+
+                let query = match &query {
+                    Query::Parsed(ref stmt) => {
+                        let mut stmt = SelectStatement::clone(stmt);
+                        anonymize_literals(&mut stmt);
+                        stmt.to_string()
                     }
-                    .to_string();
-                    rewrite::anonymize_literals(&mut query);
-                    vec![
-                        DataType::from(id),
-                        DataType::from(query.to_string()),
-                        DataType::from(s),
-                    ]
-                },
-            )
+                    Query::ParseFailed(ref s) => s.to_string(),
+                };
+
+                vec![DataType::from(id), DataType::from(query), DataType::from(s)]
+            })
             .collect::<Vec<_>>();
         Ok(noria_connector::QueryResult::from_owned(
             select_schema,
@@ -1526,7 +1527,14 @@ where
                 let st = match inner {
                     CacheInner::Statement(st) => *st.clone(),
                     CacheInner::Id(id) => match self.query_status_cache.query(id.as_str()) {
-                        Some(st) => st,
+                        Some(q) => match q {
+                            Query::Parsed(stmt) => SelectStatement::clone(&stmt),
+                            Query::ParseFailed(_) => {
+                                return Some(Err(ReadySetError::NoQueryForId {
+                                    id: id.to_string(),
+                                }))
+                            }
+                        },
                         None => {
                             return Some(Err(ReadySetError::NoQueryForId { id: id.to_string() }))
                         }
@@ -1808,9 +1816,12 @@ where
                 trace!("Parsing query");
                 match nom_sql::parse_query(self.dialect, query) {
                     Ok(parsed_query) => Ok(entry.insert(parsed_query).clone()),
-                    Err(_) => Err(ReadySetError::UnparseableQuery {
-                        query: query.to_string(),
-                    }),
+                    Err(_) => {
+                        self.query_status_cache.insert(query);
+                        Err(ReadySetError::UnparseableQuery {
+                            query: query.to_string(),
+                        })
+                    }
                 }
             }
         }
