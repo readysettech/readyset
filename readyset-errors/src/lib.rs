@@ -142,13 +142,11 @@ pub enum ReadySetError {
         source: Box<ReadySetError>,
     },
 
-    /// A MIR node couldn't be created.
-    #[error("MIR node '{name}' (vers {from_version}) couldn't be made: {source}")]
-    MirNodeCreationFailed {
-        /// The name of the MIR node that couldn't be made.
-        name: String,
-        /// The recipe version the MIR node is from.
-        from_version: usize,
+    #[error("MIR node '{index:?}' couldn't be made: {source}")]
+    MirNodeToDataflowFailed {
+        /// The index (within the MirGraph) of the MIR node that couldn't
+        /// be made.
+        index: NodeIndex,
         /// The error encountered while adding the MIR node.
         source: Box<ReadySetError>,
     },
@@ -601,6 +599,10 @@ pub enum ReadySetError {
     /// Error when a node couldn't be found in MIR.
     #[error("Could not find MIR node {index}")]
     MirNodeNotFound { index: usize },
+
+    /// Error when a relation couldn't be found in MIR.
+    #[error("Could not find MIR node for relation '{relation}'")]
+    RelationNotFound { relation: String },
 }
 
 impl ReadySetError {

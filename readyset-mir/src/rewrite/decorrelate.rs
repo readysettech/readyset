@@ -3,12 +3,13 @@ use std::iter;
 use itertools::{Either, Itertools};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{BinaryOperator, Expr};
-use readyset_errors::{internal, unsupported, ReadySetResult};
+use petgraph::graph::NodeIndex;
+use readyset_errors::{internal, invariant, unsupported, ReadySetResult};
 use tracing::{instrument, trace};
 
-use crate::node::{MirNode, MirNodeInner};
+use crate::node::MirNodeInner;
 use crate::query::MirQuery;
-use crate::{Column, MirNodeRef};
+use crate::Column;
 
 /// Push the given `node`, which should be a [filter][] node with the given `dependency` on columns
 /// on the left-hand side of the given `dependent_join`, one step towards being below that dependent
@@ -35,27 +36,25 @@ use crate::{Column, MirNodeRef};
 /// [unsupported error]: noria_errors::ReadySetError::Unsupported
 /// [`pull_all_required_columns`]: noria_mir::rewrite::pull_columns::pull_all_required_columns
 fn push_dependent_filter(
-    node: MirNodeRef,
-    dependent_join: MirNodeRef,
+    query: &mut MirQuery<'_>,
+    node_idx: NodeIndex,
+    dependent_join_idx: NodeIndex,
     dependency: DependentCondition,
 ) -> ReadySetResult<()> {
-    if node.borrow().children().len() != 1 {
+    let children = query.descendants(node_idx)?;
+    if children.len() != 1 {
         // TODO: this probably happens for unions; we should try to deal with that at some point
         // (see what the HyPer and SQL Server papers say about disjunctive predicates)
         unsupported!();
     }
 
-    // TODO(grfn): Using cyclical Rc<_> here makes this whole thing *extremely* annoying to
-    // deal with without getting crazy runtime borrow errors - this is a prime candidate for
-    // completely rewriting once MIR is in a proper graph data structure like petgraph
-
-    let child = node.borrow().children().first().unwrap().clone();
-    MirNode::remove(node.clone());
+    let child_idx = *children.get(0).unwrap();
 
     // If we're lifting past an AliasTable node, rewrite all columns referenced by the filter
     // condition that should resolve in that AliasTable node to use the correct table name
-    if let MirNodeInner::AliasTable { table } = &child.borrow().inner {
-        match &mut node.borrow_mut().inner {
+    if let MirNodeInner::AliasTable { table } = &query.get_node(child_idx).unwrap().inner {
+        let table = table.clone();
+        match &mut query.get_node_mut(node_idx).unwrap().inner {
             MirNodeInner::Filter { conditions } => {
                 for col in conditions.referred_columns_mut() {
                     if dependency
@@ -69,28 +68,28 @@ fn push_dependent_filter(
             _ => internal!("The node passed to push_dependent_filter must be a filter"),
         }
     }
-    if matches!(child.borrow().inner, MirNodeInner::AliasTable { .. }) {
+
+    if matches!(
+        query.get_node(child_idx).unwrap().inner,
+        MirNodeInner::AliasTable { .. }
+    ) {
         for col in dependency.non_dependent_columns() {
-            child.borrow_mut().add_column(col.clone())?;
+            query.graph.add_column(child_idx, col.clone())?;
         }
     }
 
-    let dependent_join_name = dependent_join.borrow().versioned_name();
-    let mut child_ref = child.borrow_mut();
-    let child_name = child_ref.versioned_name();
-
     trace!(
         "Lifting `{}` above `{}`",
-        node.borrow().versioned_name(),
-        child_name
+        node_idx.index(),
+        child_idx.index()
     );
-    let should_insert = match &mut child_ref.inner {
-        MirNodeInner::DependentJoin { on, .. } if child_name == dependent_join_name => {
+    let should_insert = match &mut query.get_node_mut(child_idx).unwrap().inner {
+        MirNodeInner::DependentJoin { on, .. } if child_idx == dependent_join_idx => {
             match dependency {
                 DependentCondition::JoinKey { lhs, rhs } => {
                     on.push((lhs.clone(), rhs.clone()));
-                    child_ref.add_column(lhs)?;
-                    child_ref.add_column(rhs)?;
+                    query.graph.add_column(child_idx, lhs)?;
+                    query.graph.add_column(child_idx, rhs)?;
                     false
                 }
                 DependentCondition::FullyDependent { .. } => true,
@@ -104,7 +103,7 @@ fn push_dependent_filter(
         | MirNodeInner::AliasTable { .. } => true,
         MirNodeInner::Aggregation { .. } | MirNodeInner::Extremum { .. } => {
             for col in dependency.non_dependent_columns() {
-                child_ref.add_column(col.clone())?;
+                query.graph.add_column(child_idx, col.clone())?;
             }
             true
         }
@@ -113,10 +112,11 @@ fn push_dependent_filter(
             inner.description()
         ),
     };
-    drop(child_ref);
 
     if should_insert {
-        MirNode::splice_child_below(child, node);
+        query.swap_with_child(node_idx)?;
+    } else {
+        query.remove_node(node_idx)?;
     }
 
     Ok(())
@@ -164,49 +164,43 @@ fn push_dependent_filter(
 /// coefficients here are usually quite small). There's a lot of stuff that would likely be a lot
 /// easier to memoize if it weren't for the way MIR is structured, with [`RefCell`]s throwing borrow
 /// errors at runtime basically all the time
-#[instrument(skip_all, fields(query = %query.name))]
-pub(super) fn eliminate_dependent_joins(query: &mut MirQuery) -> ReadySetResult<()> {
+#[instrument(skip_all, fields(query = %query.name()))]
+pub(crate) fn eliminate_dependent_joins(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
     // TODO(grfn): lots of opportunity for memoization here, but the MIR RefCell mess makes that a
     // lot harder
     loop {
-        let dependent_joins = query
+        let dependent_joins: Vec<NodeIndex> = query
             .topo_nodes()
             .into_iter()
-            .filter(|n| n.borrow().inner.is_dependent_join())
+            .filter(|&n| query.get_node(n).unwrap().inner.is_dependent_join())
             .collect::<Vec<_>>();
 
         // Try to rewrite one dependent join at a time, starting with the topmost
         let join = if let Some(join) = dependent_joins.last() {
-            join.clone()
+            *join
         } else {
             trace!("No more dependent joins left");
             break;
         };
 
         // Dependent joins allow nodes on the right to reference columns from the left side
-        let left_parent = join
-            .borrow()
-            .ancestors()
-            .first()
-            .expect("Joins must have at least two parents")
-            .upgrade()
-            .unwrap();
-        let right_parent = join
-            .borrow()
-            .ancestors()
-            .get(1)
-            .expect("Joins must have at least two parents")
-            .upgrade()
-            .unwrap();
-        let left_roots = left_parent.borrow().root_ancestors();
-        let left_columns = left_roots
-            .flat_map(|n| n.borrow().columns().to_vec())
+        let join_parents = query.ancestors(join)?;
+        invariant!(
+            join_parents.len() >= 2,
+            "Joins must have at least two parents"
+        );
+        let left_parent = join_parents[0];
+        let right_parent = join_parents[1];
+        let left_columns = query
+            .topo_ancestors(left_parent)?
+            .filter(|&n| query.is_root(n))
+            .flat_map(|n| query.graph.columns(n))
             .collect::<Vec<_>>();
 
         // If a node is a dependent filter, return a description of *how* it's a dependent
         // filter
-        let dependent_condition = |node: &MirNodeRef| {
-            if let MirNodeInner::Filter { conditions } = &node.borrow().inner {
+        let dependent_condition = |inner: &MirNodeInner| {
+            if let MirNodeInner::Filter { conditions } = inner {
                 match conditions {
                     Expr::BinaryOp {
                         lhs: box Expr::Column(left_col),
@@ -251,42 +245,37 @@ pub(super) fn eliminate_dependent_joins(query: &mut MirQuery) -> ReadySetResult<
                                     .map(|c| c.into())
                                     .collect(),
                             });
-                        } else {
-                            {}
                         }
                     }
                 }
             }
             None
         };
-        drop(left_parent);
 
-        let dependency = dependent_condition(&right_parent)
-            .map(|dep| (right_parent.clone(), dep))
-            .or_else(|| {
-                right_parent
-                    .borrow()
-                    .topo_ancestors()
-                    .find_map(|n| dependent_condition(&n).map(|dep| (n, dep)))
-            });
+        let dependency = match dependent_condition(&query.get_node(right_parent).unwrap().inner) {
+            Some(dep) => Some((right_parent, dep)),
+            None => query.topo_ancestors(right_parent)?.find_map(|n| {
+                dependent_condition(&query.get_node(n).unwrap().inner).map(|dep| (n, dep))
+            }),
+        };
 
         if let Some((node, dependency)) = dependency {
-            push_dependent_filter(node, join, dependency)?;
+            push_dependent_filter(query, node, join, dependency)?;
         } else {
             trace!(
-                dependent_join = %join.borrow().versioned_name(),
+                dependent_join = %query.get_node(join).unwrap().name(),
                 "Can't find any more dependent nodes, done rewriting!"
             );
             // Can't find any dependent nodes, which means the join isn't dependent anymore! So turn
             // it into a non-dependent join
-            let new_inner = match &join.borrow().inner {
+            let new_inner = match &query.get_node(join).unwrap().inner {
                 MirNodeInner::DependentJoin { on, project } => MirNodeInner::Join {
                     on: on.clone(),
                     project: project.clone(),
                 },
                 _ => unreachable!("Already checked is_dependent_join above"),
             };
-            join.borrow_mut().inner = new_inner;
+            query.get_node_mut(join).unwrap().inner = new_inner;
         };
     }
     Ok(())
@@ -294,6 +283,7 @@ pub(super) fn eliminate_dependent_joins(query: &mut MirQuery) -> ReadySetResult<
 
 /// For a dependent filter, a description of *how* that filter depends on columns from the left side
 /// of a dependent join
+#[derive(Debug)]
 enum DependentCondition {
     /// This filter can be turned into a equi-join key
     ///
@@ -324,13 +314,13 @@ impl DependentCondition {
 #[cfg(test)]
 #[allow(clippy::panic)] // it's a test
 mod tests {
-    use std::rc::Rc;
-
     use common::{DfValue, IndexType};
     use dataflow::ops::grouped::aggregate::Aggregation;
     use nom_sql::{BinaryOperator, ColumnSpecification, Expr, Literal, Relation, SqlType};
+    use petgraph::Direction;
 
     use super::*;
+    use crate::graph::MirGraph;
     use crate::node::{MirNode, MirNodeInner};
     use crate::rewrite::pull_columns::pull_all_required_columns;
     use crate::visualize::GraphViz;
@@ -341,10 +331,12 @@ mod tests {
         readyset_tracing::init_test_logging();
         // query looks something like:
         //     SELECT t1.a FROM t1 WHERE EXISTS (SELECT * FROM t2 WHERE t2.a = t1.a)
+        let mut graph = MirGraph::new();
 
-        let t2 = MirNode::new(
+        let query_name = Relation::from("q");
+
+        let t2 = graph.add_node(MirNode::new(
             "t2".into(),
-            0,
             MirNodeInner::Base {
                 column_specs: vec![(
                     ColumnSpecification {
@@ -359,15 +351,13 @@ mod tests {
                 unique_keys: Default::default(),
                 adapted_over: None,
             },
-            vec![],
-            vec![],
-        );
+        ));
+        graph[t2].add_owner(query_name.clone());
         // t2 -> ...
 
         // -> σ[t2.a = t1.a]
-        let t2_filter = MirNode::new(
+        let t2_filter = graph.add_node(MirNode::new(
             "t2_filter".into(),
-            0,
             MirNodeInner::Filter {
                 conditions: Expr::BinaryOp {
                     lhs: Box::new(Expr::Column("t2.a".into())),
@@ -375,25 +365,25 @@ mod tests {
                     rhs: Box::new(Expr::Column("t1.a".into())),
                 },
             },
-            vec![Rc::downgrade(&t2)],
-            vec![],
-        );
+        ));
+        graph[t2_filter].add_owner(query_name.clone());
+
+        graph.add_edge(t2, t2_filter, 0);
 
         // -> AliasTable
-        let t2_alias_table = MirNode::new(
+        let t2_alias_table = graph.add_node(MirNode::new(
             "alias_table".into(),
-            0,
             MirNodeInner::AliasTable {
                 table: "rhs".into(),
             },
-            vec![Rc::downgrade(&t2_filter)],
-            vec![],
-        );
+        ));
+        graph[t2_alias_table].add_owner(query_name.clone());
+
+        graph.add_edge(t2_filter, t2_alias_table, 0);
 
         // -> π[lit: 0, lit: 0]
-        let group_proj = MirNode::new(
+        let group_proj = graph.add_node(MirNode::new(
             "q_prj_hlpr".into(),
-            0,
             MirNodeInner::Project {
                 emit: vec![],
                 expressions: vec![],
@@ -402,30 +392,28 @@ mod tests {
                     ("__count_grp".into(), DfValue::from(0u32)),
                 ],
             },
-            vec![Rc::downgrade(&t2_alias_table)],
-            vec![],
-        );
+        ));
+        graph[group_proj].add_owner(query_name.clone());
+        graph.add_edge(t2_alias_table, group_proj, 0);
         // -> [0, 0] for each row
 
         // -> |0| γ[1]
-        let exists_count = MirNode::new(
+        let exists_count = graph.add_node(MirNode::new(
             "__exists_count".into(),
-            0,
             MirNodeInner::Aggregation {
                 on: Column::named("__count_val"),
                 group_by: vec![Column::named("__count_grp")],
                 output_column: Column::named("__exists_count"),
                 kind: Aggregation::Count,
             },
-            vec![Rc::downgrade(&group_proj)],
-            vec![],
-        );
+        ));
+        graph[exists_count].add_owner(query_name.clone());
+        graph.add_edge(group_proj, exists_count, 0);
         // -> [0, <count>] for each row
 
         // -> σ[c1 > 0]
-        let gt_0_filter = MirNode::new(
+        let gt_0_filter = graph.add_node(MirNode::new(
             "count_gt_0".into(),
-            0,
             MirNodeInner::Filter {
                 conditions: Expr::BinaryOp {
                     lhs: Box::new(Expr::Column("__exists_count".into())),
@@ -433,13 +421,12 @@ mod tests {
                     rhs: Box::new(Expr::Literal(Literal::Integer(0))),
                 },
             },
-            vec![Rc::downgrade(&exists_count)],
-            vec![],
-        );
+        ));
+        graph[gt_0_filter].add_owner(query_name.clone());
+        graph.add_edge(exists_count, gt_0_filter, 0);
 
-        let t1 = MirNode::new(
+        let t1 = graph.add_node(MirNode::new(
             "t1".into(),
-            0,
             MirNodeInner::Base {
                 column_specs: vec![(
                     ColumnSpecification {
@@ -454,28 +441,25 @@ mod tests {
                 unique_keys: Default::default(),
                 adapted_over: None,
             },
-            vec![],
-            vec![],
-        );
+        ));
+        graph[t1].add_owner(query_name.clone());
         // t1 -> ...
 
         // -> π[..., lit: 0]
-        let left_literal_join_key_proj = MirNode::new(
+        let left_literal_join_key_proj = graph.add_node(MirNode::new(
             "t1_join_key".into(),
-            0,
             MirNodeInner::Project {
                 emit: vec![Column::new(Some("t1"), "a")],
                 expressions: vec![],
                 literals: vec![("__exists_join_key".into(), DfValue::from(0u32))],
             },
-            vec![Rc::downgrade(&t1)],
-            vec![],
-        );
+        ));
+        graph[left_literal_join_key_proj].add_owner(query_name.clone());
+        graph.add_edge(t1, left_literal_join_key_proj, 0);
 
         // -> ⧑ on: l.__exists_join_key ≡ r.__count_grp
-        let exists_join = MirNode::new(
+        let exists_join = graph.add_node(MirNode::new(
             "exists_join".into(),
-            0,
             MirNodeInner::DependentJoin {
                 on: vec![(
                     Column::named("__exists_join_key"),
@@ -488,33 +472,25 @@ mod tests {
                     Column::named("__exists_count"),
                 ],
             },
-            vec![
-                Rc::downgrade(&left_literal_join_key_proj),
-                Rc::downgrade(&gt_0_filter),
-            ],
-            vec![],
-        );
+        ));
+        graph[exists_join].add_owner(query_name.clone());
+        graph.add_edge(left_literal_join_key_proj, exists_join, 0);
+        graph.add_edge(gt_0_filter, exists_join, 1);
 
-        let leaf = MirNode::new(
+        let leaf = graph.add_node(MirNode::new(
             "q".into(),
-            0,
             MirNodeInner::leaf(vec![], IndexType::HashMap),
-            vec![Rc::downgrade(&exists_join)],
-            vec![],
-        );
+        ));
+        graph[leaf].add_owner(query_name.clone());
+        graph.add_edge(exists_join, leaf, 0);
 
-        let mut query = MirQuery {
-            name: "q".into(),
-            roots: vec![t1, t2],
-            leaf,
-            fields: vec!["a".into()],
-        };
+        let mut query = MirQuery::new(query_name, leaf, &mut graph);
 
         eliminate_dependent_joins(&mut query).unwrap();
 
         eprintln!("{}", query.to_graphviz());
 
-        match &exists_join.borrow().inner {
+        match &query.graph[exists_join].inner {
             MirNodeInner::Join { on, .. } => {
                 assert_eq!(on.len(), 2);
 
@@ -532,20 +508,17 @@ mod tests {
             }
             _ => panic!(
                 "should have rewritten dependent to non-dependent join (got: {})",
-                exists_join.borrow().description()
+                graph[exists_join].name()
             ),
         };
 
         assert_eq!(
-            t2_alias_table
-                .borrow()
-                .ancestors()
-                .first()
-                .unwrap()
-                .upgrade()
-                .unwrap()
-                .borrow()
-                .name(),
+            query.graph[query
+                .graph
+                .neighbors_directed(t2_alias_table, Direction::Incoming)
+                .next()
+                .unwrap()]
+            .name(),
             &Relation::from("t2"),
             "t2_filter should be removed"
         );
@@ -563,10 +536,12 @@ mod tests {
         //         SELECT 1 FROM t2 WHERE t2.a = t1.a GROUP BY t2.b
         //         HAVING COUNT(t2.b) BETWEEN 4 AND 7
         //     )
+        let mut graph = MirGraph::new();
 
-        let t2 = MirNode::new(
+        let query_name = Relation::from("q");
+
+        let t2 = graph.add_node(MirNode::new(
             "t2".into(),
-            0,
             MirNodeInner::Base {
                 column_specs: vec![
                     (
@@ -592,15 +567,13 @@ mod tests {
                 unique_keys: Default::default(),
                 adapted_over: None,
             },
-            vec![],
-            vec![],
-        );
+        ));
+        graph[t2].add_owner(query_name.clone());
         // t2 -> ...
 
         // -> σ[t2.a = t1.a]
-        let t2_filter = MirNode::new(
+        let t2_filter = graph.add_node(MirNode::new(
             "t2_filter".into(),
-            0,
             MirNodeInner::Filter {
                 conditions: Expr::BinaryOp {
                     lhs: Box::new(Expr::Column("t2.a".into())),
@@ -608,28 +581,26 @@ mod tests {
                     rhs: Box::new(Expr::Column("t1.a".into())),
                 },
             },
-            vec![Rc::downgrade(&t2)],
-            vec![],
-        );
+        ));
+        graph[t2_filter].add_owner(query_name.clone());
+        graph.add_edge(t2, t2_filter, 0);
 
         // -> |*|(t2.b) γ[t2.b]
-        let t2_count = MirNode::new(
+        let t2_count = graph.add_node(MirNode::new(
             "q_t2_count".into(),
-            0,
             MirNodeInner::Aggregation {
                 on: Column::new(Some("t2"), "b"),
                 group_by: vec![Column::new(Some("t2"), "b")],
                 output_column: Column::named("COUNT(t2.b)"),
                 kind: Aggregation::Count,
             },
-            vec![Rc::downgrade(&t2_filter)],
-            vec![],
-        );
+        ));
+        graph[t2_count].add_owner(query_name.clone());
+        graph.add_edge(t2_filter, t2_count, 0);
 
         // -> σ[count(t2.b) >= 4]
-        let t2_count_f1 = MirNode::new(
+        let t2_count_f1 = graph.add_node(MirNode::new(
             "q_t2_count_f1".into(),
-            0,
             MirNodeInner::Filter {
                 conditions: Expr::BinaryOp {
                     lhs: Box::new(Expr::Column(nom_sql::Column {
@@ -640,14 +611,13 @@ mod tests {
                     rhs: Box::new(Expr::Literal(4.into())),
                 },
             },
-            vec![Rc::downgrade(&t2_count)],
-            vec![],
-        );
+        ));
+        graph[t2_count_f1].add_owner(query_name.clone());
+        graph.add_edge(t2_count, t2_count_f1, 0);
 
         // -> σ[count(t2.b) <= 7]
-        let t2_count_f2 = MirNode::new(
+        let t2_count_f2 = graph.add_node(MirNode::new(
             "q_t2_count_f2".into(),
-            0,
             MirNodeInner::Filter {
                 conditions: Expr::BinaryOp {
                     lhs: Box::new(Expr::Column(nom_sql::Column {
@@ -658,14 +628,13 @@ mod tests {
                     rhs: Box::new(Expr::Literal(7.into())),
                 },
             },
-            vec![Rc::downgrade(&t2_count_f1)],
-            vec![],
-        );
+        ));
+        graph[t2_count_f2].add_owner(query_name.clone());
+        graph.add_edge(t2_count_f1, t2_count_f2, 0);
 
         // -> π[lit: 0, lit: 0]
-        let group_proj = MirNode::new(
+        let group_proj = graph.add_node(MirNode::new(
             "q_prj_hlpr".into(),
-            0,
             MirNodeInner::Project {
                 emit: vec![],
                 expressions: vec![],
@@ -674,30 +643,28 @@ mod tests {
                     ("__count_grp".into(), DfValue::from(0u32)),
                 ],
             },
-            vec![Rc::downgrade(&t2_count_f2)],
-            vec![],
-        );
+        ));
+        graph[group_proj].add_owner(query_name.clone());
+        graph.add_edge(t2_count_f2, group_proj, 0);
         // -> [0, 0] for each row
 
         // -> |0| γ[1]
-        let exists_count = MirNode::new(
+        let exists_count = graph.add_node(MirNode::new(
             "__exists_count".into(),
-            0,
             MirNodeInner::Aggregation {
                 on: Column::named("__count_val"),
                 group_by: vec![Column::named("__count_grp")],
                 output_column: Column::named("__exists_count"),
                 kind: Aggregation::Count,
             },
-            vec![Rc::downgrade(&group_proj)],
-            vec![],
-        );
+        ));
+        graph[exists_count].add_owner(query_name.clone());
+        graph.add_edge(group_proj, exists_count, 0);
         // -> [0, <count>] for each row
 
         // -> σ[c1 > 0]
-        let gt_0_filter = MirNode::new(
+        let gt_0_filter = graph.add_node(MirNode::new(
             "count_gt_0".into(),
-            0,
             MirNodeInner::Filter {
                 conditions: Expr::BinaryOp {
                     lhs: Box::new(Expr::Column("__exists_count".into())),
@@ -705,13 +672,12 @@ mod tests {
                     rhs: Box::new(Expr::Literal(Literal::Integer(0))),
                 },
             },
-            vec![Rc::downgrade(&exists_count)],
-            vec![],
-        );
+        ));
+        graph[gt_0_filter].add_owner(query_name.clone());
+        graph.add_edge(exists_count, gt_0_filter, 0);
 
-        let t1 = MirNode::new(
+        let t1 = graph.add_node(MirNode::new(
             "t1".into(),
-            0,
             MirNodeInner::Base {
                 column_specs: vec![(
                     ColumnSpecification {
@@ -726,28 +692,25 @@ mod tests {
                 unique_keys: Default::default(),
                 adapted_over: None,
             },
-            vec![],
-            vec![],
-        );
+        ));
+        graph[t1].add_owner(query_name.clone());
         // t1 -> ...
 
         // -> π[..., lit: 0]
-        let left_literal_join_key_proj = MirNode::new(
+        let left_literal_join_key_proj = graph.add_node(MirNode::new(
             "t1_join_key".into(),
-            0,
             MirNodeInner::Project {
                 emit: vec![Column::new(Some("t1"), "a")],
                 expressions: vec![],
                 literals: vec![("__exists_join_key".into(), DfValue::from(0u32))],
             },
-            vec![Rc::downgrade(&t1)],
-            vec![],
-        );
+        ));
+        graph[left_literal_join_key_proj].add_owner(query_name.clone());
+        graph.add_edge(t1, left_literal_join_key_proj, 0);
 
         // -> ⧑ on: l.__exists_join_key ≡ r.__count_grp
-        let exists_join = MirNode::new(
+        let exists_join = graph.add_node(MirNode::new(
             "exists_join".into(),
-            0,
             MirNodeInner::DependentJoin {
                 on: vec![(
                     Column::named("__exists_join_key"),
@@ -760,34 +723,26 @@ mod tests {
                     Column::named("__exists_count"),
                 ],
             },
-            vec![
-                Rc::downgrade(&left_literal_join_key_proj),
-                Rc::downgrade(&gt_0_filter),
-            ],
-            vec![],
-        );
+        ));
+        graph[exists_join].add_owner(query_name.clone());
+        graph.add_edge(left_literal_join_key_proj, exists_join, 0);
+        graph.add_edge(gt_0_filter, exists_join, 1);
 
-        let leaf = MirNode::new(
+        let leaf = graph.add_node(MirNode::new(
             "q".into(),
-            0,
             MirNodeInner::leaf(vec![], IndexType::HashMap),
-            vec![Rc::downgrade(&exists_join)],
-            vec![],
-        );
+        ));
+        graph[leaf].add_owner(query_name.clone());
+        graph.add_edge(exists_join, leaf, 0);
 
-        let mut query = MirQuery {
-            name: "q".into(),
-            roots: vec![t1, t2],
-            leaf,
-            fields: vec!["a".into()],
-        };
+        let mut query = MirQuery::new(query_name, leaf, &mut graph);
 
         eliminate_dependent_joins(&mut query).unwrap();
 
         eprintln!("{}", query.to_graphviz());
 
         assert_eq!(
-            t2_count_f2.borrow().columns(),
+            query.graph.columns(t2_count_f2),
             &[
                 Column::new(Some("t2"), "b"),
                 Column::new(Some("t2"), "a"),
@@ -796,7 +751,7 @@ mod tests {
             "should update columns of filters recursively"
         );
 
-        match &exists_join.borrow().inner {
+        match &query.graph[exists_join].inner {
             MirNodeInner::Join { on, .. } => {
                 assert_eq!(on.len(), 2);
 
@@ -814,7 +769,7 @@ mod tests {
             }
             _ => panic!(
                 "should have rewritten dependent to non-dependent join (got: {})",
-                exists_join.borrow().description()
+                graph[exists_join].name()
             ),
         };
 

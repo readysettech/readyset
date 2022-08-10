@@ -37,7 +37,6 @@ pub struct MirGraph {
     graph: StableGraph<MirNode, usize>,
 }
 
-#[allow(dead_code)] // TODO(fran): Remove this.
 impl MirGraph {
     /// Creates a new, empty graph.
     pub fn new() -> Self {
@@ -260,7 +259,6 @@ impl MirGraph {
                 // nobody cares about that column, so just give it a throwaway name here
                 .chain(iter::once(MirColumn::named("__distinct_count")))
                 .collect(),
-            MirNodeInner::Reuse { .. } => unreachable!(), // TODO(fran): Remove
         }
     }
 

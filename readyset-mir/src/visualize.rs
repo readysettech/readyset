@@ -1,4 +1,3 @@
-use std::collections::{HashMap, VecDeque};
 use std::fmt::{self, Display};
 
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
@@ -7,10 +6,13 @@ use dataflow::ops::union;
 use dataflow::PostLookupAggregateFunction;
 use itertools::Itertools;
 use lazy_static::lazy_static;
+use petgraph::stable_graph::NodeIndex;
+use petgraph::visit::EdgeRef;
+use petgraph::Direction;
 use regex::Regex;
 
+use crate::graph::MirGraph;
 use crate::node::node_inner::MirNodeInner;
-use crate::node::MirNode;
 use crate::query::MirQuery;
 
 pub struct GraphVizzed<'a, T: ?Sized>(&'a T);
@@ -49,56 +51,71 @@ pub trait GraphViz {
     }
 }
 
-impl GraphViz for MirQuery {
+impl<'a> GraphViz for MirQuery<'a> {
     fn graphviz_fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // starting at the roots, print nodes in topological order
-        let mut node_queue = VecDeque::new();
-        node_queue.extend(self.roots.iter().cloned());
-        let mut in_edge_counts = HashMap::new();
-        for n in &node_queue {
-            in_edge_counts.insert(n.borrow().versioned_name(), 0);
-        }
+        // NOTE(fran): It's true that petgraph has a Graphviz implementation,
+        //  but it's not very configurable and the resulting graph is harder
+        //  to read than ours. So, for now, we'll stick to our current implementation.
 
         f.write_str("digraph {\n")?;
         f.write_str("node [shape=record, fontsize=10]\n")?;
 
-        while !node_queue.is_empty() {
-            let n = node_queue.pop_front().unwrap();
-            assert_eq!(in_edge_counts[&n.borrow().versioned_name()], 0);
+        for n in self.topo_nodes() {
+            if !self.graph[n].is_owned_by(self.name()) {
+                continue;
+            }
 
-            let vn = n.borrow().versioned_name();
+            let name = self.graph[n].name().clone();
             writeln!(
                 f,
-                "\"{}\" [label=\"{{ {} | {} }}\"]",
-                vn,
-                vn,
-                Sanitized(n.borrow().to_graphviz()),
+                "{} [label=\"{{ {}: {} | {} }}\"]",
+                n.index(),
+                n.index(),
+                name,
+                Sanitized(
+                    MirNodeRef {
+                        node: n,
+                        graph: self.graph
+                    }
+                    .to_graphviz()
+                ),
             )?;
 
-            for child in n.borrow().children.iter() {
-                let nd = child.borrow().versioned_name();
-                writeln!(f, "\"{}\" -> \"{}\"", n.borrow().versioned_name(), nd)?;
-                let in_edges = if in_edge_counts.contains_key(&nd) {
-                    in_edge_counts[&nd]
-                } else {
-                    child.borrow().ancestors.len()
-                };
-                assert!(in_edges >= 1);
-                if in_edges == 1 {
-                    // last edge removed
-                    node_queue.push_back(child.clone());
+            for edge in self
+                .graph
+                .edges_directed(n, Direction::Outgoing)
+                .sorted_by_key(|e| e.weight())
+            {
+                let child = edge.target();
+                if !self.graph[child].is_owned_by(self.name()) {
+                    continue;
                 }
-                in_edge_counts.insert(nd, in_edges - 1);
+                writeln!(f, "{} -> {}", n.index(), child.index(),)?;
             }
         }
         f.write_str("}\n")
     }
 }
 
-impl GraphViz for MirNode {
+struct MirNodeRef<'a> {
+    node: NodeIndex,
+    graph: &'a MirGraph,
+}
+
+impl<'a> GraphViz for MirNodeRef<'a> {
     fn graphviz_fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} | ", self.inner.to_graphviz(),)?;
-        for (i, col) in self.columns().iter().enumerate() {
+        let owners = &self.graph[self.node].owners();
+        for (i, owner) in owners.iter().enumerate() {
+            if i != 0 {
+                write!(f, ",\\n")?;
+            }
+            write!(f, "{}", owner)?;
+        }
+        if !owners.is_empty() {
+            write!(f, " | ")?;
+        }
+        write!(f, "{} | ", self.graph[self.node].inner.to_graphviz())?;
+        for (i, col) in self.graph.columns(self.node).iter().enumerate() {
             if i != 0 {
                 write!(f, ",\\n")?;
             }
@@ -264,13 +281,6 @@ impl GraphViz for MirNodeInner {
                         )
                         .join(", ")
                 )
-            }
-            MirNodeInner::Reuse { ref node } => {
-                write!(f, "Reuse | using: {}", node.borrow().versioned_name(),)?;
-                if let Some(flow_node) = &node.borrow().flow_node {
-                    write!(f, " | flow node: {}", flow_node.address().index())?;
-                }
-                Ok(())
             }
             MirNodeInner::Distinct { ref group_by } => {
                 let key_cols = group_by.iter().join(", ");

@@ -1,8 +1,7 @@
-use std::collections::{hash_map, HashMap, HashSet};
+use std::collections::{hash_map, HashMap};
 use std::str;
 use std::vec::Vec;
 
-use ::mir::query::{MirQuery, QueryFlowParts};
 use ::mir::visualize::GraphViz;
 use ::serde::{Deserialize, Serialize};
 use nom_sql::{
@@ -12,22 +11,20 @@ use nom_sql::{
 use petgraph::graph::NodeIndex;
 use readyset::recipe::changelist::AlterTypeChange;
 use readyset_data::{DfType, Dialect, PgEnumMetadata};
-use readyset_errors::{internal_err, invalid_err, ReadySetError, ReadySetResult};
+use readyset_errors::{invalid_err, ReadySetError, ReadySetResult};
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{AliasRemoval, Rewrite, RewriteContext};
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace};
 
 use self::mir::SqlToMirConverter;
 use self::query_graph::{to_query_graph, QueryGraph};
-use self::query_signature::Signature;
-use super::mir_to_flow::mir_query_to_flow_parts;
+use crate::controller::mir_to_flow::{mir_node_to_flow_parts, mir_query_to_flow_parts};
 use crate::controller::Migration;
 use crate::ReuseConfigType;
 
 pub(crate) mod mir;
 mod query_graph;
 mod query_signature;
-mod serde;
 
 /// Configuration for converting SQL to dataflow
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -54,7 +51,7 @@ impl Default for Config {
 /// * [`add_table`][Self::add_table], to add a new `TABLE`
 /// * [`add_view`][Self::add_view], to add a new `VIEW`
 /// * [`add_query`][Self::add_query], to add a new cached query
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 // crate viz for tests
 pub(crate) struct SqlIncorporator {
     mir_converter: SqlToMirConverter,
@@ -63,9 +60,6 @@ pub(crate) struct SqlIncorporator {
     /// Stores VIEWs and CACHE queries.
     named_queries: HashMap<Relation, u64>,
     query_graphs: HashMap<u64, QueryGraph>,
-    /// Stores CREATE TABLE statements.
-    base_mir_queries: HashMap<Relation, MirQuery>,
-    mir_queries: HashMap<u64, MirQuery>,
     num_queries: usize,
 
     base_schemas: HashMap<Relation, CreateTableStatement>,
@@ -156,8 +150,8 @@ impl SqlIncorporator {
         statement: CreateTableStatement,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<()> {
-        let qfp = self.add_base_via_mir(statement, mig)?;
-        self.leaf_addresses.insert(qfp.name, qfp.query_leaf);
+        let (name, dataflow_idx) = self.add_base_via_mir(statement, mig)?;
+        self.leaf_addresses.insert(name, dataflow_idx);
         Ok(())
     }
 
@@ -169,16 +163,15 @@ impl SqlIncorporator {
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<()> {
         let name = statement.name;
-        let qfp = match *statement.definition {
+        let mir_leaf = match *statement.definition {
             SelectSpecification::Compound(query) => {
                 self.add_compound_query(name.clone(), query, /* is_leaf = */ true, mig)?
             }
             SelectSpecification::Simple(query) => {
                 self.add_select_query(name.clone(), query, /* is_leaf = */ true, mig)?
-                    .0
             }
         };
-        self.leaf_addresses.insert(name, qfp.query_leaf);
+        self.mir_to_dataflow(name, mir_leaf, mig)?;
         Ok(())
     }
 
@@ -193,9 +186,11 @@ impl SqlIncorporator {
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<Relation> {
         let name = name.unwrap_or_else(|| format!("q_{}", self.num_queries).into());
-        let (qfp, _) = self.add_select_query(name.clone(), stmt, /* is_leaf = */ true, mig)?;
+        let mir_query =
+            self.add_select_query(name.clone(), stmt, /* is_leaf = */ true, mig)?;
 
-        self.leaf_addresses.insert(name.clone(), qfp.query_leaf);
+        let leaf = self.mir_to_dataflow(name.clone(), mir_query, mig)?;
+        self.leaf_addresses.insert(name.clone(), leaf);
 
         Ok(name)
     }
@@ -324,8 +319,8 @@ impl SqlIncorporator {
     }
 
     #[cfg(test)]
-    fn get_flow_node_address(&self, name: &Relation, v: usize) -> Option<NodeIndex> {
-        self.mir_converter.get_flow_node_address(name, v)
+    fn get_flow_node_address(&self, name: &Relation) -> Option<NodeIndex> {
+        self.mir_converter.get_flow_node_address(name)
     }
 
     /// Retrieves the flow node associated with a given query's leaf view.
@@ -352,27 +347,24 @@ impl SqlIncorporator {
         &mut self,
         stmt: CreateTableStatement,
         mig: &mut Migration<'_>,
-    ) -> ReadySetResult<QueryFlowParts> {
+    ) -> ReadySetResult<(Relation, NodeIndex)> {
         // first, compute the MIR representation of the SQL query
-        let mut mir = self.mir_converter.named_base_to_mir(&stmt)?;
+        let mir = self.mir_converter.named_base_to_mir(&stmt)?;
 
         trace!(base_node_mir = ?mir);
 
         // no optimization, because standalone base nodes can't be optimized
+        let dataflow_node =
+            mir_node_to_flow_parts(mir.graph, mir.mir_node, &self.custom_types, mig)?.address();
 
-        // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
-        let qfp = mir_query_to_flow_parts(&mut mir, &self.custom_types, mig)?;
-
-        // remember the schema in case we need it later
-        // on base table schema change, we will overwrite the existing schema here.
-        // TODO(malte): this means that requests for this will always return the *latest* schema
-        // for a base.
         let table = stmt.table.clone();
+        // TODO(fran): Do we need this?
         self.base_schemas.insert(table.clone(), stmt);
 
-        self.register_query(table, None, &mir);
+        let fields = mir.fields;
+        self.register_query(table.clone(), fields);
 
-        Ok(qfp)
+        Ok((table, dataflow_node))
     }
 
     fn add_compound_query(
@@ -381,19 +373,14 @@ impl SqlIncorporator {
         query: CompoundSelectStatement,
         is_leaf: bool,
         mig: &mut Migration<'_>,
-    ) -> Result<QueryFlowParts, ReadySetError> {
-        let subqueries = query
-            .selects
-            .into_iter()
-            .enumerate()
-            .map(|(i, (_op, stmt))| {
-                Ok(self
-                    .add_select_query(format!("{}_csq_{}", query_name, i).into(), stmt, false, mig)?
-                    .1)
-            })
-            .collect::<ReadySetResult<Vec<_>>>()?;
+    ) -> Result<NodeIndex, ReadySetError> {
+        let mut subqueries = Vec::new();
+        for (_, stmt) in query.selects.into_iter() {
+            let subquery_leaf = self.add_select_query(query_name.clone(), stmt, false, mig)?;
+            subqueries.push(subquery_leaf);
+        }
 
-        let mut combined_mir_query = self.mir_converter.compound_query_to_mir(
+        let mir_leaf = self.mir_converter.compound_query_to_mir(
             &query_name,
             subqueries,
             CompoundSelectOperator::Union,
@@ -403,11 +390,7 @@ impl SqlIncorporator {
             is_leaf,
         )?;
 
-        let qfp = mir_query_to_flow_parts(&mut combined_mir_query, &self.custom_types, mig)?;
-
-        self.register_query(query_name.clone(), None, &combined_mir_query);
-
-        Ok(qfp)
+        Ok(mir_leaf)
     }
 
     /// Add a new SelectStatement to the given migration, returning information about the dataflow
@@ -418,7 +401,7 @@ impl SqlIncorporator {
         mut stmt: SelectStatement,
         is_leaf: bool,
         mig: &mut Migration<'_>,
-    ) -> Result<(QueryFlowParts, MirQuery), ReadySetError> {
+    ) -> Result<NodeIndex, ReadySetError> {
         let on_err = |e| ReadySetError::SelectQueryCreationFailed {
             qname: query_name.to_string(),
             source: Box::new(e),
@@ -430,6 +413,7 @@ impl SqlIncorporator {
         // be replaced with a view rather than the table itself in order to prevent ambiguity. (This
         // may occur when a single table is referenced using more than one alias).
         let table_alias_rewrites = stmt.rewrite_table_aliases(&query_name.name);
+        let mut anon_queries = HashMap::new();
         for r in table_alias_rewrites {
             match r {
                 TableAliasRewrite::View {
@@ -440,25 +424,30 @@ impl SqlIncorporator {
                         fields: vec![FieldDefinitionExpr::All],
                         ..Default::default()
                     };
-                    self.add_select_query(
-                        to_view,
+                    let subquery_leaf = self.add_select_query(
+                        query_name.clone(),
                         self.rewrite(
                             query,
                             &[], /* Don't need a schema search path since we're only resolving
                                   * one (already qualified) table */
                             mig.dialect,
                             None,
-                        )?,
+                        )
+                        .map_err(on_err)?,
                         false,
                         mig,
                     )?;
+                    anon_queries.insert(to_view, subquery_leaf);
                 }
                 TableAliasRewrite::Cte {
                     to_view,
                     for_statement,
                     ..
                 } => {
-                    self.add_select_query(to_view, *for_statement, false, mig)?;
+                    let subquery_leaf = self
+                        .add_select_query(query_name.clone(), *for_statement, false, mig)
+                        .map_err(on_err)?;
+                    anon_queries.insert(to_view, subquery_leaf);
                 }
                 TableAliasRewrite::Table { .. } => {}
             }
@@ -467,111 +456,54 @@ impl SqlIncorporator {
         trace!(rewritten_query = %stmt);
 
         let qg = to_query_graph(&stmt).map_err(on_err)?;
-        let mir_query = self
+        let mir_leaf = self
             .mir_converter
-            .named_query_to_mir(&query_name, stmt, &qg, is_leaf)
+            .named_query_to_mir(&query_name, stmt, &qg, anon_queries, is_leaf)
             .map_err(on_err)?;
 
+        Ok(mir_leaf)
+    }
+
+    fn mir_to_dataflow(
+        &mut self,
+        query_name: Relation,
+        mir_leaf: NodeIndex,
+        mig: &mut Migration<'_>,
+    ) -> ReadySetResult<NodeIndex> {
+        let on_err = |e| ReadySetError::SelectQueryCreationFailed {
+            qname: query_name.to_string(),
+            source: Box::new(e),
+        };
+        let mir_query = self
+            .mir_converter
+            .make_mir_query(query_name.clone(), mir_leaf);
+
         trace!(pre_opt_mir = %mir_query.to_graphviz());
-        let mut opt_mir = mir_query.optimize().map_err(on_err)?;
+        let mut opt_mir = mir_query.rewrite().map_err(on_err)?;
         trace!(post_opt_mir = %opt_mir.to_graphviz());
 
-        let qfp = mir_query_to_flow_parts(&mut opt_mir, &self.custom_types, mig).map_err(on_err)?;
-        self.register_query(query_name.clone(), Some(qg), &opt_mir);
-        Ok((qfp, opt_mir))
+        let df_leaf =
+            mir_query_to_flow_parts(&mut opt_mir, &self.custom_types, mig).map_err(on_err)?;
+        let fields = opt_mir.fields();
+
+        self.register_query(query_name, fields);
+
+        Ok(df_leaf)
     }
 
-    pub(super) fn remove_query(
-        &mut self,
-        query_name: &Relation,
-    ) -> ReadySetResult<Option<NodeIndex>> {
-        let nodeid = self
-            .leaf_addresses
-            .remove(query_name)
-            .ok_or_else(|| internal_err!("tried to remove unknown query"))?;
-
-        let qg_hash = self.named_queries.remove(query_name).ok_or_else(|| {
-            internal_err!("missing query hash for named query \"{}\"", query_name)
-        })?;
-        let mir = match self.mir_queries.get(&qg_hash) {
-            None => return Ok(None),
-            Some(mir) => mir,
-        };
-
-        // TODO(malte): implement this
-        self.mir_converter.remove_query(query_name, mir)?;
-
-        // clean up local state
-        self.mir_queries.remove(&(qg_hash)).unwrap();
-        self.query_graphs.remove(&qg_hash).unwrap();
-        self.view_schemas.remove(query_name).unwrap();
-
-        // traverse self.leaf__addresses
-        if !self.leaf_addresses.values().any(|id| *id == nodeid) {
-            // ok to remove
-
-            // trigger reader node removal
-            Ok(Some(nodeid))
-        } else {
-            // more than one query uses this leaf
-            // don't remove node yet!
-            Ok(None)
-        }
+    pub(super) fn remove_query(&mut self, query_name: &Relation) -> ReadySetResult<NodeIndex> {
+        self.leaf_addresses.remove(query_name);
+        self.mir_converter.remove_query(query_name)
     }
 
-    /// Removes the base table with the given `name`, and all the MIR queries
-    /// that depend on it.
-    pub(super) fn remove_base(&mut self, name: &Relation) -> ReadySetResult<NodeIndex> {
-        debug!(%name, "Removing base from SqlIncorporator");
-        if self.base_schemas.remove(name).is_none() {
-            warn!(
-                %name,
-                "Attempted to remove non-existent base node from SqlIncorporator"
-            );
-        }
-
-        let mir = self
-            .base_mir_queries
-            .remove(name)
-            .ok_or_else(|| invalid_err!("tried to remove unknown base {}", name))?;
-        let roots = mir
-            .roots
-            .iter()
-            .map(|r| r.borrow().name.clone())
-            .collect::<HashSet<_>>();
-
-        self.mir_queries.retain(|_, v| {
-            !v.roots
-                .iter()
-                .any(|root| roots.contains(&root.borrow().name))
-        });
-
-        self.mir_converter.remove_base(name, &mir)?;
-
-        self.leaf_addresses
-            .remove(name)
-            .ok_or_else(|| invalid_err!("tried to remove unknown base {}", name))
+    pub(super) fn remove_base(&mut self, table_name: &Relation) -> ReadySetResult<NodeIndex> {
+        self.leaf_addresses.remove(table_name);
+        self.mir_converter.remove_base(table_name)
     }
 
-    fn register_query(&mut self, query_name: Relation, qg: Option<QueryGraph>, mir: &MirQuery) {
+    fn register_query(&mut self, query_name: Relation, fields: Vec<SqlIdentifier>) {
         debug!(%query_name, "registering query");
-        self.view_schemas
-            .insert(query_name.clone(), mir.fields.clone());
-
-        // We made a new query, so store the query graph and the corresponding leaf MIR node.
-        // TODO(malte): we currently store nothing if there is no QG (e.g., for compound queries).
-        // This means we cannot reuse these queries.
-        match qg {
-            Some(qg) => {
-                let qg_hash = qg.signature().hash;
-                self.query_graphs.insert(qg_hash, qg);
-                self.mir_queries.insert(qg_hash, mir.clone());
-                self.named_queries.insert(query_name, qg_hash);
-            }
-            None => {
-                self.base_mir_queries.insert(query_name, mir.clone());
-            }
-        }
+        self.view_schemas.insert(query_name, fields);
     }
 
     /// Upgrades the schema version for the
@@ -594,7 +526,7 @@ mod tests {
     /// Helper to grab a reference to a named view.
     fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration<'_>, name: &Relation) -> &'a Node {
         let na = inc
-            .get_flow_node_address(name, 0)
+            .get_flow_node_address(name)
             .unwrap_or_else(|| panic!("No node named {name} exists"));
         mig.graph().node_weight(na).unwrap()
     }
@@ -606,7 +538,7 @@ mod tests {
         name: &Relation,
     ) -> &'a Node {
         let na = inc
-            .get_flow_node_address(name, 0)
+            .get_flow_node_address(name)
             .unwrap_or_else(|| panic!("No node named {name} exists"));
         let ni = mig.graph().node_weight(na).unwrap().ancestors().unwrap()[0];
         &mig.graph()[ni]
@@ -614,7 +546,7 @@ mod tests {
 
     fn get_reader<'a>(inc: &SqlIncorporator, mig: &'a Migration<'_>, name: &Relation) -> &'a Node {
         let na = inc
-            .get_flow_node_address(name, 0)
+            .get_flow_node_address(name)
             .unwrap_or_else(|| panic!("No node named {name} exists"));
         let children: Vec<_> = mig
             .graph()

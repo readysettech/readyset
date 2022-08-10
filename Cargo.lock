@@ -4221,6 +4221,7 @@ dependencies = [
 name = "readyset-mir"
 version = "0.7.0"
 dependencies = [
+ "fixedbitset",
  "itertools",
  "lazy_static",
  "nom-sql",

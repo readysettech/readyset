@@ -12,7 +12,7 @@ use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 use crate::node::BaseNodeAdaptation;
-use crate::{Column, MirNodeRef};
+use crate::Column;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum MirNodeInner {
@@ -214,14 +214,6 @@ pub enum MirNodeInner {
     /// [`Aggregator`]: dataflow::ops::grouped::aggregate::Aggregator
     /// [`Aggregation::Count`]: dataflow::ops::grouped::aggregate::Aggregation::Count
     Distinct { group_by: Vec<Column> },
-    /// Reuse a node that's already in the graph.
-    ///
-    /// Note that this node is used even when query graph reuse is disabled, for the base nodes in
-    /// newly created query graphs (either querying from a base table or an explicit named `VIEW`)
-    Reuse {
-        /// Reference to the node to reuse
-        node: MirNodeRef,
-    },
     /// Alias all columns in the query to change their table
     ///
     /// This node will not be converted into a dataflow node when lowering MIR to dataflow.
@@ -322,219 +314,6 @@ impl MirNodeInner {
                 Ok(true)
             }
             _ => Ok(false),
-        }
-    }
-
-    pub(crate) fn can_reuse_as(&self, other: &MirNodeInner) -> bool {
-        match *self {
-            MirNodeInner::Reuse { .. } => (), // handled below
-            _ => {
-                // we're not a `Reuse` ourselves, but the other side might be
-                if let MirNodeInner::Reuse { ref node } = *other {
-                    // it is, so dig deeper
-                    // this does not check the projected columns of the inner node for two
-                    // reasons:
-                    // 1) our own projected columns aren't accessible on `MirNodeInner`, but
-                    //    only on the outer `MirNode`, which isn't accessible here; but more
-                    //    importantly
-                    // 2) since this is already a node reuse, the inner, reused node must have
-                    //    *at least* a superset of our own (inaccessible) projected columns.
-                    // Hence, it is sufficient to check the projected columns on the parent
-                    // `MirNode`, and if that check passes, it also holds for the nodes reused
-                    // here.
-                    return self.can_reuse_as(&node.borrow().inner);
-                } else {
-                    // handled below
-                }
-            }
-        }
-
-        match self {
-            MirNodeInner::Aggregation {
-                on: ref our_on,
-                group_by: ref our_group_by,
-                kind: ref our_kind,
-                ..
-            } => {
-                match *other {
-                    MirNodeInner::Aggregation {
-                        ref on,
-                        ref group_by,
-                        ref kind,
-                        ..
-                    } => {
-                        // TODO(malte): this is stricter than it needs to be, as it could cover
-                        // COUNT-as-SUM-style relationships.
-                        our_on == on && our_group_by == group_by && our_kind == kind
-                    }
-                    _ => false,
-                }
-            }
-            MirNodeInner::Base {
-                column_specs: our_column_specs,
-                primary_key: our_primary_key,
-                unique_keys: our_keys,
-                adapted_over: our_adapted_over,
-            } => {
-                match other {
-                    MirNodeInner::Base {
-                        column_specs,
-                        unique_keys,
-                        primary_key,
-                        ..
-                    } => {
-                        // if we are instructed to adapt an earlier base node, we cannot reuse
-                        // anything directly; we'll have to keep a new MIR node here.
-                        if our_adapted_over.is_some() {
-                            // TODO(malte): this is a bit more conservative than it needs to be,
-                            // since base node adaptation actually *changes* the underlying base
-                            // node, so we will actually reuse. However, returning false here
-                            // terminates the reuse search unnecessarily. We should handle this
-                            // special case.
-                            return false;
-                        }
-                        // note that as long as we are not adapting a previous base node,
-                        // we do *not* need `adapted_over` to *match*, since current reuse
-                        // does not depend on how base node was created from an earlier one
-                        our_column_specs == column_specs
-                            && our_keys == unique_keys
-                            && primary_key == our_primary_key
-                    }
-                    _ => false,
-                }
-            }
-            MirNodeInner::Extremum {
-                on: ref our_on,
-                group_by: ref our_group_by,
-                kind: ref our_kind,
-                ..
-            } => match *other {
-                MirNodeInner::Extremum {
-                    ref on,
-                    ref group_by,
-                    ref kind,
-                    ..
-                } => our_on == on && our_group_by == group_by && our_kind == kind,
-                _ => false,
-            },
-            MirNodeInner::Filter {
-                conditions: ref our_conditions,
-            } => match *other {
-                MirNodeInner::Filter { ref conditions } => our_conditions == conditions,
-                _ => false,
-            },
-            MirNodeInner::Join {
-                on: ref our_on,
-                project: ref our_project,
-                ..
-            } => {
-                match *other {
-                    MirNodeInner::Join {
-                        ref on,
-                        ref project,
-                        ..
-                    } => {
-                        // TODO(malte): column order does not actually need to match, but this only
-                        // succeeds if it does.
-                        our_on == on && our_project == project
-                    }
-                    _ => false,
-                }
-            }
-            MirNodeInner::JoinAggregates => matches!(*other, MirNodeInner::JoinAggregates),
-            MirNodeInner::LeftJoin {
-                on: ref our_on,
-                project: ref our_project,
-                ..
-            } => {
-                match *other {
-                    MirNodeInner::LeftJoin {
-                        ref on,
-                        ref project,
-                        ..
-                    } => {
-                        // TODO(malte): column order does not actually need to match, but this only
-                        // succeeds if it does.
-                        our_on == on && our_project == project
-                    }
-                    _ => false,
-                }
-            }
-            MirNodeInner::Project {
-                emit: ref our_emit,
-                literals: ref our_literals,
-                expressions: ref our_expressions,
-            } => match *other {
-                MirNodeInner::Project {
-                    ref emit,
-                    ref literals,
-                    ref expressions,
-                } => our_emit == emit && our_literals == literals && our_expressions == expressions,
-                _ => false,
-            },
-            MirNodeInner::Distinct {
-                group_by: ref our_group_by,
-            } => match *other {
-                MirNodeInner::Distinct { ref group_by } => group_by == our_group_by,
-                _ => false,
-            },
-            MirNodeInner::Reuse { node: ref us } => {
-                match *other {
-                    // both nodes are `Reuse` nodes, so we simply compare the both sides' reuse
-                    // target
-                    MirNodeInner::Reuse { ref node } => us.borrow().can_reuse_as(&node.borrow()),
-                    // we're a `Reuse`, the other side isn't, so see if our reuse target's `inner`
-                    // can be reused for the other side. It's sufficient to check the target's
-                    // `inner` because reuse implies that our target has at least a superset of our
-                    // projected columns (see earlier comment).
-                    _ => us.borrow().inner.can_reuse_as(other),
-                }
-            }
-            MirNodeInner::Paginate {
-                order: our_order,
-                group_by: our_group_by,
-                limit: our_limit,
-            } => match other {
-                MirNodeInner::Paginate {
-                    order,
-                    group_by,
-                    limit,
-                } => order == our_order && group_by == our_group_by && limit == our_limit,
-                _ => false,
-            },
-            MirNodeInner::TopK {
-                order: our_order,
-                group_by: our_group_by,
-                limit: our_limit,
-            } => match other {
-                MirNodeInner::TopK {
-                    order,
-                    group_by,
-                    limit,
-                } => order == our_order && group_by == our_group_by && limit == our_limit,
-                _ => false,
-            },
-            MirNodeInner::Leaf {
-                keys: ref our_keys, ..
-            } => match *other {
-                MirNodeInner::Leaf { ref keys, .. } => keys == our_keys,
-                _ => false,
-            },
-            MirNodeInner::Union {
-                emit: ref our_emit,
-                duplicate_mode: ref our_duplicate_mode,
-            } => match *other {
-                MirNodeInner::Union {
-                    ref emit,
-                    ref duplicate_mode,
-                } => emit == our_emit && our_duplicate_mode == duplicate_mode,
-                _ => false,
-            },
-            MirNodeInner::AliasTable { .. } => matches!(
-                other,
-                MirNodeInner::AliasTable { .. } | MirNodeInner::Identity
-            ),
-            _ => unimplemented!(),
         }
     }
 
@@ -708,12 +487,6 @@ impl Debug for MirNodeInner {
                     )
                     .collect::<Vec<_>>()
                     .join(", "),
-            ),
-            MirNodeInner::Reuse { ref node } => write!(
-                f,
-                "Reuse [{}: {}]",
-                node.borrow().versioned_name(),
-                node.borrow()
             ),
             MirNodeInner::Distinct { ref group_by } => {
                 let key_cols = group_by

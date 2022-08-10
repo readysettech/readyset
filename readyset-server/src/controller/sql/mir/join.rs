@@ -1,21 +1,21 @@
 use std::collections::{HashMap, HashSet};
 
-use mir::MirNodeRef;
 use nom_sql::Relation;
+use petgraph::graph::NodeIndex;
 use readyset_errors::{internal, internal_err, invariant};
 
 use super::JoinKind;
 use crate::controller::sql::mir::SqlToMirConverter;
-use crate::controller::sql::query_graph::{JoinPredicate, JoinRef, QueryGraph, QueryGraphEdge};
+use crate::controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
 use crate::ReadySetResult;
 
 struct JoinChain {
     tables: HashSet<Relation>,
-    last_node: MirNodeRef,
+    last_node: NodeIndex,
 }
 
 impl JoinChain {
-    pub(super) fn merge_chain(self, other: JoinChain, last_node: MirNodeRef) -> JoinChain {
+    pub(super) fn merge_chain(self, other: JoinChain, last_node: NodeIndex) -> JoinChain {
         let tables = self.tables.union(&other.tables).cloned().collect();
 
         JoinChain { tables, last_node }
@@ -35,24 +35,27 @@ impl JoinChain {
 // a new join chain is started for the current predicate. And we assume that
 // a future predicate will bring these chains together.
 pub(super) fn make_joins(
-    mir_converter: &SqlToMirConverter,
+    mir_converter: &mut SqlToMirConverter,
+    query_name: &Relation,
     name: Relation,
     qg: &QueryGraph,
-    node_for_rel: &HashMap<&Relation, MirNodeRef>,
-    correlated_nodes: &HashSet<&Relation>,
-    node_count: usize,
-) -> ReadySetResult<Vec<MirNodeRef>> {
-    let mut join_nodes: Vec<MirNodeRef> = Vec::new();
+    node_for_rel: &HashMap<&Relation, NodeIndex>,
+    correlated_nodes: &HashSet<NodeIndex>,
+) -> ReadySetResult<Vec<NodeIndex>> {
+    let mut join_nodes: Vec<NodeIndex> = Vec::new();
     let mut join_chains = Vec::new();
-    let mut node_count = node_count;
 
     for jref in qg.join_order.iter() {
-        let (mut join_kind, jps) = from_join_ref(jref, qg);
+        let (mut join_kind, jps) = match &qg.edges[&(jref.src.clone(), jref.dst.clone())] {
+            QueryGraphEdge::Join { on } => (JoinKind::Inner, on),
+            QueryGraphEdge::LeftJoin { on } => (JoinKind::Left, on),
+        };
 
         let (left_chain, right_chain) =
-            pick_join_chains(&jref.src, &jref.dst, &mut join_chains, node_for_rel);
+            pick_join_chains(&jref.src, &jref.dst, &mut join_chains, node_for_rel)?;
 
-        if correlated_nodes.contains(right_chain.last_node.borrow().name()) {
+        // TODO(fran): Use NodeIndex instead of name.
+        if correlated_nodes.contains(&right_chain.last_node) {
             match join_kind {
                 JoinKind::Left => internal!(
                     "Dependent left join not yet supported (when joining to {})",
@@ -66,18 +69,17 @@ pub(super) fn make_joins(
         }
 
         let jn = mir_converter.make_join_node(
-            format!("{}_n{}", name, node_count).into(),
+            query_name,
+            mir_converter.generate_label(&name),
             jps,
-            left_chain.last_node.clone(),
-            right_chain.last_node.clone(),
+            left_chain.last_node,
+            right_chain.last_node,
             join_kind,
         )?;
 
         // merge node chains
-        let new_chain = left_chain.merge_chain(right_chain, jn.clone());
+        let new_chain = left_chain.merge_chain(right_chain, jn);
         join_chains.push(new_chain);
-
-        node_count += 1;
 
         join_nodes.push(jn);
     }
@@ -92,33 +94,34 @@ pub(super) fn make_joins(
 ///
 /// Will never return an empty list.
 pub(super) fn make_cross_joins(
-    mir_converter: &SqlToMirConverter,
+    mir_converter: &mut SqlToMirConverter,
+    query_name: &Relation,
     name: &str,
-    node_count: &mut usize,
-    nodes: Vec<MirNodeRef>,
-    correlated_nodes: &HashSet<&Relation>,
-) -> ReadySetResult<Vec<MirNodeRef>> {
+    nodes: Vec<NodeIndex>,
+    correlated_nodes: &HashSet<NodeIndex>,
+) -> ReadySetResult<Vec<NodeIndex>> {
     let mut join_nodes = vec![];
     let mut nodes = nodes.into_iter();
     let first_node = nodes
         .next()
         .ok_or_else(|| internal_err!("make_cross_joins called with empty nodes"))?;
     nodes.try_fold(first_node, |n1, n2| -> ReadySetResult<_> {
-        *node_count += 1;
-        let join_kind = if correlated_nodes.contains(n2.borrow().name()) {
+        // TODO(fran): Use NodeIndex instead of name.
+        let join_kind = if correlated_nodes.contains(&n2) {
             JoinKind::Dependent
         } else {
             JoinKind::Inner
         };
 
         let node = mir_converter.make_join_node(
-            format!("{}_n{}", name, node_count).into(),
+            query_name,
+            mir_converter.generate_label(&name),
             &[],
             n1,
             n2,
             join_kind,
         )?;
-        join_nodes.push(node.clone());
+        join_nodes.push(node);
         Ok(node)
     })?;
 
@@ -129,19 +132,19 @@ pub(super) fn make_cross_joins(
 // `mir_converter.make_join_aggregates_node` only once if there are only two parents, and otherwise
 // create multiple nodes of type `MirNodeInner::JoinAggregates`.
 pub(super) fn make_joins_for_aggregates(
-    mir_converter: &SqlToMirConverter,
+    mir_converter: &mut SqlToMirConverter,
+    query_name: &Relation,
     name: &str,
-    ancestors: &[MirNodeRef],
-    node_count: usize,
-) -> ReadySetResult<Vec<MirNodeRef>> {
+    ancestors: &[NodeIndex],
+) -> ReadySetResult<Vec<NodeIndex>> {
     invariant!(ancestors.len() >= 2);
 
     let parent_join = mir_converter.make_join_aggregates_node(
-        format!("{}_n{}", name, node_count).into(),
-        &[ancestors[0].clone(), ancestors[1].clone()],
+        query_name,
+        mir_converter.generate_label(&name),
+        ancestors[0],
+        ancestors[1],
     )?;
-
-    let mut node_count = node_count + 1;
 
     let mut join_nodes = vec![parent_join];
 
@@ -149,11 +152,11 @@ pub(super) fn make_joins_for_aggregates(
     for ancestor in ancestors.iter().skip(2) {
         // We want top join our most recent join node to our next ancestor.
         let jn = mir_converter.make_join_aggregates_node(
-            format!("{}_n{}", name, node_count).into(),
-            &[join_nodes.last().unwrap().clone(), ancestor.clone()],
+            query_name,
+            mir_converter.generate_label(&name),
+            *join_nodes.last().unwrap(),
+            *ancestor,
         )?;
-
-        node_count += 1;
 
         join_nodes.push(jn);
     }
@@ -161,19 +164,12 @@ pub(super) fn make_joins_for_aggregates(
     Ok(join_nodes)
 }
 
-fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> (JoinKind, &'a [JoinPredicate]) {
-    match &qg.edges[&(jref.src.clone(), jref.dst.clone())] {
-        QueryGraphEdge::Join { on } => (JoinKind::Inner, on),
-        QueryGraphEdge::LeftJoin { on } => (JoinKind::Left, on),
-    }
-}
-
 fn pick_join_chains(
     src: &Relation,
     dst: &Relation,
     join_chains: &mut Vec<JoinChain>,
-    node_for_rel: &HashMap<&Relation, MirNodeRef>,
-) -> (JoinChain, JoinChain) {
+    node_for_rel: &HashMap<&Relation, NodeIndex>,
+) -> ReadySetResult<(JoinChain, JoinChain)> {
     let left_chain = match join_chains
         .iter()
         .position(|chain| chain.has_table(&src.clone()))
@@ -181,7 +177,7 @@ fn pick_join_chains(
         Some(idx) => join_chains.swap_remove(idx),
         None => JoinChain {
             tables: std::iter::once(src.clone()).collect(),
-            last_node: node_for_rel[src].clone(),
+            last_node: node_for_rel[src],
         },
     };
 
@@ -192,9 +188,9 @@ fn pick_join_chains(
         Some(idx) => join_chains.swap_remove(idx),
         None => JoinChain {
             tables: std::iter::once(dst.clone()).collect(),
-            last_node: node_for_rel[dst].clone(),
+            last_node: node_for_rel[dst],
         },
     };
 
-    (left_chain, right_chain)
+    Ok((left_chain, right_chain))
 }

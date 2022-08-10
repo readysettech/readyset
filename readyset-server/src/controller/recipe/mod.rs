@@ -503,8 +503,7 @@ impl Recipe {
                     }
                 }
             }
-            _ => self.inc.remove_query(name)?
-                .ok_or_else(|| internal_err!("Inconsistent state in recipe: query exists in recipe but not in SqlIncorporator. Query name: {}", name))?
+            _ => self.inc.remove_query(name)?,
         };
         let is_base = mig
             .dataflow_state

@@ -56,7 +56,7 @@ mod column;
 pub mod graph;
 pub mod node;
 pub mod query;
-mod rewrite;
+pub(crate) mod rewrite;
 pub mod visualize;
 
 pub type MirNodeRef = Rc<RefCell<node::MirNode>>;
