@@ -589,10 +589,6 @@ pub struct WorkerOptions {
     #[clap(long, default_value = "0", env = "NORIA_SHARDS")]
     pub shards: usize,
 
-    /// Metrics queue length (number of metrics updates before a flush is needed).
-    #[clap(long, default_value = "1024")]
-    pub metrics_queue_len: usize,
-
     /// Volume associated with the server.
     #[clap(long, env = "VOLUME_ID")]
     pub volume_id: Option<VolumeId>,
