@@ -14,7 +14,7 @@ pub(crate) type Edge = ();
 
 // dataflow types
 pub(crate) use dataflow_state::{LookupResult, MemoryState, PersistentState, RecordResult, State};
-pub(crate) use noria::PacketPayload;
+pub(crate) use readyset::PacketPayload;
 
 // domain local state
 pub use crate::node_map::NodeMap;
@@ -24,8 +24,8 @@ pub type DomainNodes = NodeMap<cell::RefCell<Node>>;
 
 // public exports
 pub use common::*;
-pub use noria::internal::*;
 pub use petgraph::graph::NodeIndex;
+pub use readyset::internal::*;
 
 pub use crate::node::Node;
 pub use crate::ops::NodeOperator;
@@ -41,7 +41,7 @@ pub use crate::processing::{ColumnRef, ColumnSource};
 pub use crate::EvictionKind;
 
 /// Channel coordinator type specialized for domains
-pub type ChannelCoordinator = noria::channel::ChannelCoordinator<ReplicaAddress, Box<Packet>>;
+pub type ChannelCoordinator = readyset::channel::ChannelCoordinator<ReplicaAddress, Box<Packet>>;
 pub trait Executor {
     fn send(&mut self, dest: ReplicaAddress, m: Box<Packet>);
 }

@@ -4,8 +4,8 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use clap::Parser;
-use noria::consensus::AuthorityType;
-use noria::ControllerHandle;
+use readyset::consensus::AuthorityType;
+use readyset::ControllerHandle;
 
 #[derive(Parser)]
 #[clap(name = "controller_request")]

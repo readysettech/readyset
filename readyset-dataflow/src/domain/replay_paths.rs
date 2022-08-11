@@ -5,8 +5,8 @@ use std::ops;
 
 use dataflow_state::Rows;
 use launchpad::Indices;
-use noria::internal::LocalNodeIndex;
-use noria::KeyComparison;
+use readyset::internal::LocalNodeIndex;
+use readyset::KeyComparison;
 use tracing::trace;
 use vec1::Vec1;
 

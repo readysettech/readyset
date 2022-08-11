@@ -2,8 +2,8 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use dataflow::prelude::*;
-use noria::consensus::Authority;
-use noria::prelude::*;
+use readyset::consensus::Authority;
+use readyset::prelude::*;
 use reqwest::Url;
 use stream_cancel::Trigger;
 use tokio::sync::mpsc::Sender;

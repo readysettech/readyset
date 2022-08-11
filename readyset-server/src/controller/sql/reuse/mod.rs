@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::vec::Vec;
 
 use nom_sql::Table;
-use noria::ReadySetError;
+use readyset::ReadySetError;
 
 use crate::controller::sql::query_graph::QueryGraph;
 use crate::controller::sql::reuse::join_order::reorder_joins;

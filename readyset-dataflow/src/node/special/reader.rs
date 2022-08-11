@@ -3,8 +3,8 @@ use std::time::SystemTime;
 use dataflow_expression::ReaderProcessing;
 use failpoint_macros::failpoint;
 use metrics::histogram;
-use noria::metrics::recorded;
-use noria::{KeyColumnIdx, ViewPlaceholder};
+use readyset::metrics::recorded;
+use readyset::{KeyColumnIdx, ViewPlaceholder};
 use serde::{Deserialize, Serialize};
 use tracing::{trace, warn};
 

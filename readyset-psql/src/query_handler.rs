@@ -6,7 +6,7 @@ use nom_sql::{
     Literal, PostgresParameterValue, PostgresParameterValueInner, SetNames, SetPostgresParameter,
     SetPostgresParameterValue, SetStatement, SqlQuery,
 };
-use noria::ReadySetResult;
+use readyset::ReadySetResult;
 use readyset_client::backend::noria_connector::QueryResult;
 use readyset_client::backend::{noria_connector, SelectSchema};
 use readyset_client::QueryHandler;

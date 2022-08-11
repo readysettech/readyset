@@ -1,5 +1,5 @@
 use nom_sql::SqlQuery;
-use noria::ReadySetResult;
+use readyset::ReadySetResult;
 
 use crate::backend::noria_connector;
 

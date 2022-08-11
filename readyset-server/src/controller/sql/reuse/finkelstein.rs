@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::vec::Vec;
 
-use noria::ReadySetError;
+use readyset::ReadySetError;
 
 use super::super::query_graph::{QueryGraph, QueryGraphEdge};
 use super::super::query_signature::Signature;

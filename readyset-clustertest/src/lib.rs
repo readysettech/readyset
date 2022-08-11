@@ -215,13 +215,13 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 
+use ::readyset::consensus::AuthorityType;
+use ::readyset::metrics::client::MetricsClient;
+use ::readyset::{ControllerHandle, ReadySetResult};
 use anyhow::{anyhow, Result};
 use futures::executor;
 use hyper::Client;
 use mysql_async::prelude::Queryable;
-use noria::consensus::AuthorityType;
-use noria::metrics::client::MetricsClient;
-use noria::{ControllerHandle, ReadySetResult};
 use rand::Rng;
 #[cfg(test)]
 use readyset_clustertest_macros::clustertest;

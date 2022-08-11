@@ -5,7 +5,7 @@ use std::hash::{BuildHasher, Hash};
 use std::iter::FromIterator;
 
 use left_right::ReadGuard;
-use noria::internal::IndexType;
+use readyset::internal::IndexType;
 
 use crate::inner::Inner;
 use crate::values::Values;

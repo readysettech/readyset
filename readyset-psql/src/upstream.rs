@@ -5,11 +5,11 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use futures::TryStreamExt;
-use noria::ColumnSchema;
 use pgsql::config::Host;
 use pgsql::types::Type;
 use pgsql::{GenericResult, Row};
 use psql_srv::Column;
+use readyset::ColumnSchema;
 use readyset_client::upstream_database::NoriaCompare;
 use readyset_client::{UpstreamDatabase, UpstreamPrepare};
 use readyset_data::DataType;

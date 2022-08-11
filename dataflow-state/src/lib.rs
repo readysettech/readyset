@@ -17,10 +17,10 @@ use ahash::RandomState;
 use common::{KeyType, RangeKey, Records, SizeOf, Tag};
 use derive_more::From;
 use hashbag::HashBag;
-use noria::internal::Index;
-use noria::replication::ReplicationOffset;
-use noria::{KeyComparison, KeyCount};
 pub use partial_map::PartialMap;
+use readyset::internal::Index;
+use readyset::replication::ReplicationOffset;
+use readyset::{KeyComparison, KeyCount};
 use readyset_data::DataType;
 use readyset_errors::ReadySetResult;
 

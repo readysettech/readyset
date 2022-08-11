@@ -3,9 +3,9 @@ use std::rc::Rc;
 
 use common::{IndexType, KeyType, RangeKey, SizeOf};
 use itertools::Either;
-use noria::internal::Index;
-use noria::KeyComparison;
 use rand::prelude::*;
+use readyset::internal::Index;
+use readyset::KeyComparison;
 use readyset_data::DataType;
 use vec1::Vec1;
 
@@ -22,7 +22,7 @@ use crate::{LookupResult, RangeLookupResult, RecordResult, Row, Rows};
 /// [`IndexMap`](indexmap::IndexMap) (which is similar to a [`HashMap`](std::collections::HashMap)).
 ///
 /// Any operations on a SingleState that are unsupported by the index type, such as inserting or
-/// looking up ranges in a [`HashMap`](noria::IndexType::HashMap) index, will panic, as mixing up
+/// looking up ranges in a [`HashMap`](readyset::IndexType::HashMap) index, will panic, as mixing up
 /// index types is an unrecoverable violation of a broad system invariant.
 pub(super) struct SingleState {
     /// The column indices and index type that this index is keyed on

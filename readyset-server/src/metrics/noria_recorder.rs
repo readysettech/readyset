@@ -4,8 +4,8 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
 use metrics::{Counter, Gauge, Histogram, KeyName, Recorder, Unit};
-use noria::metrics::{Key, MetricsDump};
 use parking_lot::Mutex;
+use readyset::metrics::{Key, MetricsDump};
 
 use crate::metrics::{Clear, Render};
 

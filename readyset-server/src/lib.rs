@@ -32,8 +32,8 @@
 //! # Interfacing with Noria
 //!
 //! In Noria, a user provides only the *base types* that can arrive into the system (i.e., the
-//! possible writes Noria will observe; see `noria::Input`), and the queries the application cares
-//! about over those writes. Each such query is called a *view*. Queries are expressed through
+//! possible writes Noria will observe; see `readyset::Input`), and the queries the application
+//! cares about over those writes. Each such query is called a *view*. Queries are expressed through
 //! relational SQL statements that operate over base tables and other views.
 //!
 //! Ultimately, the base tables, intermediate operators, and views are assembled into a single
@@ -75,7 +75,8 @@
 //! the same time. Specifically, each Noria worker runs a [`tokio`](https://docs.rs/tokio) thread
 //! pool, and each domain is placed in its own "task" (see `Replica` in `src/controller/mod.rs`).
 //! Noria sends updates across domain boundaries using TCP if the source and destination domains
-//! are hosted by different workers, and using in-memory channels otherwise (see `noria::channel`).
+//! are hosted by different workers, and using in-memory channels otherwise (see
+//! `readyset::channel`).
 //!
 //! When a domain receives an update, it processes that update to completion before it progresses
 //! to the next update. This approach has a number of advantages compared to the "one thread per
@@ -116,7 +117,7 @@
 //!  - `Packet` in `dataflow/src/payload.rs`, which holds all the possible messages that a domain
 //!    may receive. Of particular note are `Packet::Message`, the packet type for inter-domain
 //!    updates; `Packet::Input`, the packet type for client writes to base tables (see also
-//!    `noria::Input`); and `Packet::ReplayPiece`, the packet type for upquery responses.
+//!    `readyset::Input`); and `Packet::ReplayPiece`, the packet type for upquery responses.
 //!  - `Domain` in `dataflow/src/domain/mod.rs`, which contains all the logic used to execute
 //!    cliques of Noria operators that are contained in the same domain. Its primary entry point is
 //!    `Domain::on_event`, which gets called whenever there are new `Packets` for the domain. You
@@ -290,7 +291,7 @@
 //!
 //! Since we asked `Migration` to "maintain" the output of `awvc`, `awvc` has a single child node
 //! which is a `Reader`. `Reader` keeps materialized state that can be accessed by applications by
-//! issuing reads on a `noria::View`. This materialized state uses a
+//! issuing reads on a `readyset::View`. This materialized state uses a
 //! [`reader_map`](https://github.com/readysettech/readyset/tree/master/noria/server/dataflow/reader_map),
 //! which is optimized for concurrent reads and writes.
 //! Since `awvc` produced no updates this time around, no changes are made to the `Reader`. When
@@ -437,9 +438,9 @@ pub use controller::migrate::materialization::FrontierStrategy;
 pub use controller::replication::{ReplicationOptions, ReplicationStrategy};
 use controller::sql;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
-pub use noria::consensus::{Authority, LocalAuthority};
-pub use noria::*;
 pub use petgraph::graph::NodeIndex;
+pub use readyset::consensus::{Authority, LocalAuthority};
+pub use readyset::*;
 
 pub use crate::builder::Builder;
 pub use crate::handle::Handle;

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::fmt::{self, Display};
 
 use itertools::Itertools;
-use noria::{self, KeyComparison, PacketData, PacketTrace};
+use readyset::{self, KeyComparison, PacketData, PacketTrace};
 use serde::{Deserialize, Serialize};
 use strum_macros::{EnumCount, EnumDiscriminants, EnumIter, IntoStaticStr};
 use vec1::Vec1;

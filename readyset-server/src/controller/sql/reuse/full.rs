@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::vec::Vec;
 
-use noria::ReadySetError;
+use readyset::ReadySetError;
 
 use crate::controller::sql::query_graph::QueryGraph;
 use crate::controller::sql::reuse::{ReuseConfiguration, ReuseType};

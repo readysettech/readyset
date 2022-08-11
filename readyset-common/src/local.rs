@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::fmt;
 use std::ops::{Bound, RangeBounds};
 
-use noria::internal::LocalNodeIndex;
 use petgraph::graph::NodeIndex;
+use readyset::internal::LocalNodeIndex;
 use readyset_data::DataType;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use test_strategy::Arbitrary;

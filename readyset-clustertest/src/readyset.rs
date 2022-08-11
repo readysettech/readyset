@@ -1,6 +1,6 @@
+use ::readyset::get_metric;
+use ::readyset::metrics::{recorded, DumpedMetricValue};
 use launchpad::eventually;
-use noria::get_metric;
-use noria::metrics::{recorded, DumpedMetricValue};
 use readyset_data::DataType;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;

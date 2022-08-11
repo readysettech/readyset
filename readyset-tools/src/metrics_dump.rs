@@ -3,9 +3,9 @@
 //! deployment.
 
 use clap::Parser;
-use noria::consensus::AuthorityType;
-use noria::metrics::client::MetricsClient;
-use noria::ControllerHandle;
+use readyset::consensus::AuthorityType;
+use readyset::metrics::client::MetricsClient;
+use readyset::ControllerHandle;
 
 #[derive(Parser)]
 #[clap(name = "metrics_dump")]

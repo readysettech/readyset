@@ -1,6 +1,6 @@
 use dataflow::prelude::*;
 use nom_sql::{Column, ColumnSpecification, SqlType};
-use noria::{ColumnBase, ColumnSchema};
+use readyset::{ColumnBase, ColumnSchema};
 use tracing::trace;
 
 use super::keys::provenance_of;

@@ -25,8 +25,8 @@
 //! requires a nightly release of Rust to run for the time being.
 //!
 //! ```no_run
-//! # use noria::*;
-//! # use noria::consensus::Authority;
+//! # use readyset::*;
+//! # use readyset::consensus::Authority;
 //! # use readyset_data::DataType;
 //!
 //! #[tokio::main]

@@ -72,9 +72,9 @@ use std::{fmt, fs};
 
 use bincode::Options;
 use common::{IndexType, KeyType, RangeKey, Record, Records, SizeOf, Tag};
-use noria::internal::Index;
-use noria::replication::ReplicationOffset;
-use noria::{KeyComparison, KeyCount};
+use readyset::internal::Index;
+use readyset::replication::ReplicationOffset;
+use readyset::{KeyComparison, KeyCount};
 use readyset_data::DataType;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use rocksdb::{self, PlainTableFactoryOptions, SliceTransform, WriteBatch};

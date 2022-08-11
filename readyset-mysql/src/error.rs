@@ -1,7 +1,7 @@
 use std::io;
 
 use mysql_srv::MsqlSrvError;
-use noria::ReadySetError;
+use readyset::ReadySetError;
 use readyset_client::upstream_database::IsFatalError;
 use thiserror::Error;
 

@@ -7,8 +7,8 @@ use nom_sql::{
     Column, ColumnSpecification, Expr, FieldDefinitionExpr, Literal, SqlIdentifier, SqlQuery,
     SqlType, VariableScope,
 };
-use noria::results::Results;
-use noria::{ColumnSchema, ReadySetError};
+use readyset::results::Results;
+use readyset::{ColumnSchema, ReadySetError};
 use readyset_client::backend::noria_connector::QueryResult;
 use readyset_client::backend::SelectSchema;
 use readyset_client::QueryHandler;

@@ -507,7 +507,7 @@ pub enum ReadySetError {
 
     /// An attempt was made to compare replication offsets from different logs.
     ///
-    /// See the documentation for [`ReplicationOffset`](noria::ReplicationOffset) for why this
+    /// See the documentation for [`ReplicationOffset`](readyset::ReplicationOffset) for why this
     /// might happen
     #[error(
         "Cannot compare replication offsets from different logs: expected {0}, but got {1} \

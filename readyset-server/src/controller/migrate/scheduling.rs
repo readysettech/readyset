@@ -26,8 +26,8 @@ use std::collections::{HashMap, HashSet};
 
 use array2::Array2;
 use dataflow::prelude::*;
-use noria::consensus::NodeTypeSchedulingRestriction;
-use noria::internal::DomainIndex;
+use readyset::consensus::NodeTypeSchedulingRestriction;
+use readyset::internal::DomainIndex;
 use tracing::{instrument, trace};
 
 use crate::controller::state::DataflowState;

@@ -2,9 +2,9 @@ use std::str;
 use std::vec::Vec;
 
 use nom_sql::{CacheInner, CreateCacheStatement, CreateTableStatement, SqlIdentifier, SqlQuery};
-use noria::recipe::changelist::{Change, ChangeList};
 use petgraph::graph::NodeIndex;
 use petgraph::visit::Bfs;
+use readyset::recipe::changelist::{Change, ChangeList};
 use readyset_errors::{
     internal, internal_err, invariant, invariant_eq, ReadySetError, ReadySetResult,
 };

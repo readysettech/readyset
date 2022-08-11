@@ -2,8 +2,8 @@ use std::convert::TryFrom;
 use std::iter;
 use std::sync::Arc;
 
-use noria::results::{ResultIterator, Results};
 use psql_srv as ps;
+use readyset::results::{ResultIterator, Results};
 use readyset_data::DataType;
 use tokio_postgres::types::Type;
 
@@ -126,7 +126,7 @@ mod tests {
     use std::convert::TryFrom;
 
     use nom_sql::{ColumnSpecification, SqlType};
-    use noria::ColumnSchema;
+    use readyset::ColumnSchema;
     use readyset_client::backend as cl;
     use readyset_data::DataType;
 

@@ -15,9 +15,9 @@ use common::Index;
 use dataflow::node::special::Base;
 use dataflow::ops::union::{self, Union};
 use dataflow::utils::make_columns;
-use noria::consensus::StandaloneAuthority;
-use noria::get_metric;
-use noria::metrics::{recorded, DumpedMetricValue, MetricsDump};
+use readyset::consensus::StandaloneAuthority;
+use readyset::get_metric;
+use readyset::metrics::{recorded, DumpedMetricValue, MetricsDump};
 use readyset_data::DataType;
 use serial_test::serial;
 
@@ -205,7 +205,7 @@ async fn it_works_basic_standalone() {
             dir_path,
         ));
         builder.enable_packet_filters();
-        builder.start_local_custom(std::sync::Arc::new(noria::consensus::Authority::from(
+        builder.start_local_custom(std::sync::Arc::new(readyset::consensus::Authority::from(
             StandaloneAuthority::new(dir_path, "it_works_basic_standalone").unwrap(),
         )))
     };

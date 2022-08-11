@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use nom_sql::{SqlIdentifier, Table};
-use noria::consistency::Timestamp;
+use readyset::consistency::Timestamp;
 use readyset_data::noria_type::Type;
 use serde::{Deserialize, Serialize};
 

@@ -5,7 +5,7 @@ use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, CreateTableStatement, DeleteStatement, Expr,
     InsertStatement, Literal, SelectStatement, SqlQuery, TableKey, UpdateStatement,
 };
-use noria::{Modification, Operation};
+use readyset::{Modification, Operation};
 use readyset_data::DataType;
 use readyset_errors::{
     bad_request_err, invariant, invariant_eq, unsupported, unsupported_err, ReadySetResult,

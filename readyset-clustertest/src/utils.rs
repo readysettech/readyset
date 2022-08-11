@@ -2,9 +2,9 @@ use std::time::{Duration, Instant};
 
 use mysql_async::prelude::{FromRow, Queryable, StatementLike};
 use mysql_async::{Conn, Params};
-use noria::get_metric;
-use noria::metrics::client::MetricsClient;
-use noria::metrics::{recorded, DumpedMetricValue};
+use readyset::get_metric;
+use readyset::metrics::client::MetricsClient;
+use readyset::metrics::{recorded, DumpedMetricValue};
 use tokio::time::sleep;
 
 fn equal_rows<T>(a: &[T], b: &[T]) -> bool

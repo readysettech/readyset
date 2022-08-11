@@ -14,14 +14,14 @@ use dataflow::{Expr as DataflowExpr, LookupError, ReaderMap, Readers, SingleRead
 use failpoint_macros::set_failpoint;
 use futures_util::future::TryFutureExt;
 use futures_util::stream::{StreamExt, TryStreamExt};
-use noria::consistency::Timestamp;
-use noria::metrics::recorded;
-use noria::results::ResultIterator;
-use noria::{
+use pin_project::pin_project;
+use readyset::consistency::Timestamp;
+use readyset::metrics::recorded;
+use readyset::results::ResultIterator;
+use readyset::{
     KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyStats, ReaderAddress, Tagged,
     ViewQuery,
 };
-use pin_project::pin_project;
 use readyset_errors::internal_err;
 use serde::ser::Serializer;
 use serde::Serialize;
@@ -561,8 +561,8 @@ fn get_reader_from_cache<'a>(
 
 #[cfg(test)]
 mod readreply {
-    use noria::results::SharedResults;
-    use noria::{LookupResult, ReadReply, ReadReplyStats, ReadySetError, Tagged};
+    use readyset::results::SharedResults;
+    use readyset::{LookupResult, ReadReply, ReadReplyStats, ReadySetError, Tagged};
     use readyset_data::DataType;
 
     use super::*;

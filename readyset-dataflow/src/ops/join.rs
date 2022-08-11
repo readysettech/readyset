@@ -6,7 +6,7 @@ use itertools::Itertools;
 use launchpad::intervals::into_bound_endpoint;
 use launchpad::Indices;
 use maplit::hashmap;
-use noria::KeyComparison;
+use readyset::KeyComparison;
 use readyset_errors::{internal_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use vec1::{vec1, Vec1};

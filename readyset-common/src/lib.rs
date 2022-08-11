@@ -4,8 +4,8 @@
 mod local;
 mod records;
 
-pub use noria::internal::{Index, IndexType};
 use petgraph::prelude::*;
+pub use readyset::internal::{Index, IndexType};
 pub use readyset_data::DataType;
 use serde::{Deserialize, Serialize};
 

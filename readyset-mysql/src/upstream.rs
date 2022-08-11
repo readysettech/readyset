@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use mysql_async::consts::{CapabilityFlags, StatusFlags};
 use mysql_async::prelude::Queryable;
 use mysql_async::{Column, Conn, Opts, OptsBuilder, Row, TxOpts, UrlError};
-use noria::ColumnSchema;
+use readyset::ColumnSchema;
 use readyset_client::upstream_database::NoriaCompare;
 use readyset_client::{UpstreamDatabase, UpstreamPrepare};
 use readyset_data::DataType;
@@ -18,7 +18,7 @@ use crate::Error;
 
 type StatementID = u32;
 
-fn dt_to_value_params(dt: &[DataType]) -> Result<Vec<mysql_async::Value>, noria::ReadySetError> {
+fn dt_to_value_params(dt: &[DataType]) -> Result<Vec<mysql_async::Value>, readyset::ReadySetError> {
     dt.iter().map(|v| v.try_into()).collect()
 }
 

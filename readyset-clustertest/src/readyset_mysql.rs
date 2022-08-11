@@ -1,9 +1,9 @@
 use std::time::Duration;
 
+use ::readyset::get_metric;
+use ::readyset::metrics::{recorded, DumpedMetricValue};
 use launchpad::hash::hash;
 use mysql_async::prelude::Queryable;
-use noria::get_metric;
-use noria::metrics::{recorded, DumpedMetricValue};
 use readyset_client::backend::QueryInfo;
 use readyset_client::query_status_cache::hash_to_query_id;
 use readyset_client_metrics::QueryDestination;

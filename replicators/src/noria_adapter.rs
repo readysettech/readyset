@@ -11,12 +11,12 @@ use futures::FutureExt;
 use launchpad::redacted::RedactedString;
 use launchpad::select;
 use metrics::{counter, histogram};
-use noria::consensus::Authority;
-use noria::consistency::Timestamp;
-use noria::metrics::recorded::{self, SnapshotStatusTag};
-use noria::recipe::changelist::{Change, ChangeList};
-use noria::replication::{ReplicationOffset, ReplicationOffsets};
-use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table, TableOperation};
+use readyset::consensus::Authority;
+use readyset::consistency::Timestamp;
+use readyset::metrics::recorded::{self, SnapshotStatusTag};
+use readyset::recipe::changelist::{Change, ChangeList};
+use readyset::replication::{ReplicationOffset, ReplicationOffsets};
+use readyset::{ControllerHandle, ReadySetError, ReadySetResult, Table, TableOperation};
 use readyset_errors::{internal_err, invalid_err};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
@@ -154,7 +154,7 @@ pub struct NoriaAdapter {
 
 impl NoriaAdapter {
     pub async fn start_with_authority(authority: Authority, config: Config) -> ReadySetResult<!> {
-        let noria = noria::ControllerHandle::new(authority).await;
+        let noria = readyset::ControllerHandle::new(authority).await;
         NoriaAdapter::start(noria, config, None).await
     }
 

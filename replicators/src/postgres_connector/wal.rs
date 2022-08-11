@@ -40,7 +40,7 @@ pub enum WalError {
     BitVectorParseError(String),
     InvalidMapping(String),
     ToastNotSupported,
-    ReadySetError(noria::ReadySetError),
+    ReadySetError(readyset::ReadySetError),
 }
 
 impl From<std::array::TryFromSliceError> for WalError {
@@ -79,14 +79,14 @@ impl From<chrono::ParseError> for WalError {
     }
 }
 
-impl From<WalError> for noria::ReadySetError {
+impl From<WalError> for readyset::ReadySetError {
     fn from(err: WalError) -> Self {
-        noria::ReadySetError::ReplicationFailed(format!("WAL error: {:?}", err))
+        readyset::ReadySetError::ReplicationFailed(format!("WAL error: {:?}", err))
     }
 }
 
-impl From<noria::ReadySetError> for WalError {
-    fn from(err: noria::ReadySetError) -> Self {
+impl From<readyset::ReadySetError> for WalError {
+    fn from(err: readyset::ReadySetError) -> Self {
         WalError::ReadySetError(err)
     }
 }

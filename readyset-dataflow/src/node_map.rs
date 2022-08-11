@@ -3,7 +3,7 @@ use std::iter::{Enumerate, FromIterator};
 use std::ops::{Index, IndexMut};
 use std::{mem, slice};
 
-use noria::internal::LocalNodeIndex;
+use readyset::internal::LocalNodeIndex;
 use serde::{Deserialize, Serialize};
 
 /// A map from [`LocalNodeIndex`] to `T`, implemented as a sparse vector for super-efficient and
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 /// # Examples
 ///
 /// ```rust
-/// use noria::internal::LocalNodeIndex;
+/// use readyset::internal::LocalNodeIndex;
 /// use readyset_dataflow::NodeMap;
 ///
 /// let node_1 = LocalNodeIndex::make(1u32);

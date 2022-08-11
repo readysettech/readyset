@@ -1,4 +1,4 @@
-use noria::{ControllerHandle, ReadySetResult};
+use readyset::{ControllerHandle, ReadySetResult};
 use tokio::select;
 use tracing::{info, instrument, warn};
 

@@ -230,8 +230,8 @@ use std::fmt;
 use std::hash::{BuildHasher, Hash};
 
 pub use eviction::EvictionStrategy;
-use noria::internal::IndexType;
 use partial_map::InsertionOrder;
+use readyset::internal::IndexType;
 
 use crate::inner::Inner;
 use crate::read::ReadHandle;

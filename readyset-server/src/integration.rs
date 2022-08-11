@@ -26,10 +26,10 @@ use dataflow::{DurabilityMode, Expr as DataflowExpr, PersistenceParameters, Read
 use futures::StreamExt;
 use itertools::Itertools;
 use nom_sql::{parse_query, BinaryOperator, Dialect, OrderType, SqlQuery, SqlType};
-use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
-use noria::consistency::Timestamp;
-use noria::internal::LocalNodeIndex;
-use noria::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
+use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
+use readyset::consistency::Timestamp;
+use readyset::internal::LocalNodeIndex;
+use readyset::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
 use readyset_data::noria_type::Type;
 use readyset_data::DataType;
 use readyset_errors::ReadySetError::{MigrationPlanFailed, RpcFailed, SelectQueryCreationFailed};
@@ -421,7 +421,7 @@ async fn broad_recursing_upquery() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn base_mutation() {
-    use noria::{Modification, Operation};
+    use readyset::{Modification, Operation};
 
     let mut g = start_simple_unsharded("base_mutation").await;
     g.migrate(|mig| {

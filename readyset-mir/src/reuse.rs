@@ -188,8 +188,8 @@ pub fn merge_mir_for_queries(new_query: &MirQuery, old_query: &MirQuery) -> (Mir
 #[cfg(test)]
 mod tests {
     use nom_sql::{self, ColumnSpecification, SqlType};
-    use noria::internal::IndexType;
-    use noria::ViewPlaceholder;
+    use readyset::internal::IndexType;
+    use readyset::ViewPlaceholder;
 
     use crate::column::Column;
     use crate::node::node_inner::MirNodeInner;

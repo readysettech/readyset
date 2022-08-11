@@ -1,4 +1,4 @@
-use noria::KeyComparison;
+use readyset::KeyComparison;
 use serde::{Deserialize, Serialize};
 use vec_map::VecMap;
 

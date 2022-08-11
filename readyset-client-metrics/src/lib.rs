@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use metrics::SharedString;
 use nom_sql::SqlQuery;
-use noria::ReadySetError;
+use readyset::ReadySetError;
 use serde::Serialize;
 
 pub mod recorded;

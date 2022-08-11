@@ -5,10 +5,10 @@ use std::sync::Arc;
 use ahash::RandomState;
 use common::SizeOf;
 use dataflow_expression::{PostLookup, ReaderProcessing};
-use noria::consistency::Timestamp;
-use noria::results::SharedResults;
-use noria::KeyComparison;
 use reader_map::EvictionStrategy;
+use readyset::consistency::Timestamp;
+use readyset::results::SharedResults;
+use readyset::KeyComparison;
 use vec1::Vec1;
 
 pub use self::multir::LookupError;
@@ -450,7 +450,7 @@ impl SingleReadHandle {
 mod tests {
     use std::ops::Bound;
 
-    use noria::results::SharedRows;
+    use readyset::results::SharedRows;
 
     use super::*;
 

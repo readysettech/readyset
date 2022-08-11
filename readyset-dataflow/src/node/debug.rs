@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use itertools::Itertools;
-use noria::KeyCount;
+use readyset::KeyCount;
 
 use crate::node::{Node, NodeType};
 use crate::prelude::*;

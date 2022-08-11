@@ -758,7 +758,7 @@ mod tests {
         use dataflow::ops::grouped::extremum::Extremum;
         use dataflow::ops::union::DuplicateMode;
         use nom_sql::{BinaryOperator, Expr, OrderType, SqlType};
-        use noria::ViewPlaceholder;
+        use readyset::ViewPlaceholder;
 
         use super::*;
 

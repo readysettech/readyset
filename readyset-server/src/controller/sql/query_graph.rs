@@ -13,7 +13,7 @@ use nom_sql::{
     ItemPlaceholder, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderType,
     SelectStatement, SqlIdentifier, Table, TableExpr, UnaryOperator,
 };
-use noria::{PlaceholderIdx, ViewPlaceholder};
+use readyset::{PlaceholderIdx, ViewPlaceholder};
 use readyset_errors::{
     internal, invalid_err, invariant, invariant_eq, no_table_for_col, unsupported, unsupported_err,
     ReadySetResult,

@@ -40,8 +40,8 @@ use dataflow::prelude::*;
 use dataflow::{node, DomainRequest, ReaderProcessing};
 use metrics::{counter, histogram};
 use nom_sql::SqlIdentifier;
-use noria::metrics::recorded;
-use noria::{KeyColumnIdx, ReadySetError, ViewPlaceholder};
+use readyset::metrics::recorded;
+use readyset::{KeyColumnIdx, ReadySetError, ViewPlaceholder};
 use tracing::{debug, debug_span, error, info, info_span, instrument, trace};
 
 use crate::controller::migrate::materialization::InvalidEdge;

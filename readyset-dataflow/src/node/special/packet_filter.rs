@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Bound;
 
 use common::DataType;
-use noria::KeyComparison;
+use readyset::KeyComparison;
 use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;

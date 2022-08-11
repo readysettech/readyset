@@ -15,12 +15,12 @@ use hyper::http::{Method, StatusCode};
 use launchpad::select;
 use metrics::{counter, gauge, histogram};
 use nom_sql::SqlIdentifier;
-use noria::consensus::{
+use readyset::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult,
     WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
 };
-use noria::metrics::recorded;
-use noria::ControllerDescriptor;
+use readyset::metrics::recorded;
+use readyset::ControllerDescriptor;
 use readyset_errors::{internal, internal_err, ReadySetError};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -1067,8 +1067,8 @@ async fn handle_controller_request(
 
 #[cfg(test)]
 mod tests {
-    use noria::replication::ReplicationOffset;
-    use noria::KeyCount;
+    use readyset::replication::ReplicationOffset;
+    use readyset::KeyCount;
 
     use crate::integration_utils::start_simple;
 

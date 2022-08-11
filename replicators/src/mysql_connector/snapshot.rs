@@ -11,8 +11,8 @@ use mysql::prelude::*;
 use mysql::{Transaction, TxOpts};
 use mysql_async as mysql;
 use nom_sql::SqlIdentifier;
-use noria::replication::{ReplicationOffset, ReplicationOffsets};
-use noria::ReadySetResult;
+use readyset::replication::{ReplicationOffset, ReplicationOffsets};
+use readyset::ReadySetResult;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
@@ -93,7 +93,7 @@ impl MySqlReplicator {
     /// over any tables that fail to install
     async fn load_recipe_with_meta_lock(
         &mut self,
-        noria: &mut noria::ControllerHandle,
+        noria: &mut readyset::ControllerHandle,
     ) -> ReadySetResult<Transaction<'static>> {
         let mut tx = self.pool.start_transaction(tx_opts()).await?;
 
@@ -251,7 +251,7 @@ impl MySqlReplicator {
     /// converting every MySQL row into Noria row and calling `insert_many` in batches
     async fn replicate_table(
         mut dumper: TableDumper,
-        mut table_mutator: noria::Table,
+        mut table_mutator: readyset::Table,
     ) -> ReadySetResult<()> {
         let mut cnt = 0;
 
@@ -320,7 +320,7 @@ impl MySqlReplicator {
     ///   in addition to the rows
     pub(crate) async fn snapshot_to_noria(
         mut self,
-        noria: &mut noria::ControllerHandle,
+        noria: &mut readyset::ControllerHandle,
     ) -> ReadySetResult<()> {
         let result = self.replicate_to_noria_with_table_locks(noria).await;
 
@@ -336,7 +336,7 @@ impl MySqlReplicator {
     /// offset.
     async fn replicate_to_noria_with_table_locks(
         &mut self,
-        noria: &mut noria::ControllerHandle,
+        noria: &mut readyset::ControllerHandle,
     ) -> ReadySetResult<()> {
         // NOTE: There are two ways to prevent DDL changes in MySQL:
         // `FLUSH TABLES WITH READ LOCK` or `LOCK INSTANCE FOR BACKUP`. Both are not
@@ -378,7 +378,7 @@ impl MySqlReplicator {
     /// the join handle
     async fn dumper_task_for_table(
         &mut self,
-        noria: &mut noria::ControllerHandle,
+        noria: &mut readyset::ControllerHandle,
         db: SqlIdentifier,
         table_name: SqlIdentifier,
     ) -> ReadySetResult<
@@ -424,7 +424,7 @@ impl MySqlReplicator {
     /// Copy all base tables into noria
     async fn dump_tables(
         &mut self,
-        noria: &mut noria::ControllerHandle,
+        noria: &mut readyset::ControllerHandle,
         replication_offsets: &ReplicationOffsets,
     ) -> ReadySetResult<()> {
         let mut replication_tasks = FuturesUnordered::new();

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{self, Duration};
 
 use dataflow::PersistenceParameters;
-use noria::consensus::{
+use readyset::consensus::{
     Authority, LocalAuthority, LocalAuthorityStore, NodeTypeSchedulingRestriction,
     WorkerSchedulingConfig,
 };

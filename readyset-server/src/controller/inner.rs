@@ -13,12 +13,12 @@ use std::time::Duration;
 
 use failpoint_macros::failpoint;
 use hyper::Method;
-use noria::consensus::Authority;
-use noria::internal::ReplicaAddress;
-use noria::recipe::ExtendRecipeSpec;
-use noria::replication::ReplicationOffset;
-use noria::status::{ReadySetStatus, SnapshotStatus};
-use noria::WorkerDescriptor;
+use readyset::consensus::Authority;
+use readyset::internal::ReplicaAddress;
+use readyset::recipe::ExtendRecipeSpec;
+use readyset::replication::ReplicationOffset;
+use readyset::status::{ReadySetStatus, SnapshotStatus};
+use readyset::WorkerDescriptor;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use reqwest::Url;
 use tokio::sync::mpsc::UnboundedSender;
@@ -105,8 +105,8 @@ impl Leader {
         let config = self.replicator_config.clone();
         self.replicator_task = Some(tokio::spawn(async move {
             loop {
-                let noria: noria::ControllerHandle =
-                    noria::ControllerHandle::new(Arc::clone(&authority)).await;
+                let noria: readyset::ControllerHandle =
+                    readyset::ControllerHandle::new(Arc::clone(&authority)).await;
 
                 match replicators::NoriaAdapter::start(
                     noria,

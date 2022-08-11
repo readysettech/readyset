@@ -4,9 +4,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dataflow::{DurabilityMode, PersistenceParameters};
-use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
-use noria::metrics::client::MetricsClient;
-use noria::metrics::{DumpedMetric, DumpedMetricValue, MetricsDump};
+use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
+use readyset::metrics::client::MetricsClient;
+use readyset::metrics::{DumpedMetric, DumpedMetricValue, MetricsDump};
 use readyset_errors::{ReadySetError, ReadySetResult};
 
 use crate::metrics::{

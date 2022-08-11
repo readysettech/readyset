@@ -404,7 +404,7 @@ impl KeyComparison {
     /// # Examples
     ///
     /// ```
-    /// use noria::KeyComparison;
+    /// use readyset::KeyComparison;
     /// use readyset_data::DataType;
     /// use vec1::vec1;
     ///
@@ -486,7 +486,7 @@ impl KeyComparison {
     /// Equal keys contain themselves and only themselves:
     ///
     /// ```rust
-    /// use noria::KeyComparison;
+    /// use readyset::KeyComparison;
     /// use readyset_data::DataType;
     /// use vec1::vec1;
     ///
@@ -500,7 +500,7 @@ impl KeyComparison {
     /// ```rust
     /// use std::ops::Bound::*;
     ///
-    /// use noria::KeyComparison;
+    /// use readyset::KeyComparison;
     /// use readyset_data::DataType;
     /// use vec1::vec1;
     ///

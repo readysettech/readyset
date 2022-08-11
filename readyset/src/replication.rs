@@ -119,7 +119,7 @@ impl ReplicationOffsets {
     /// A completely missing table returns `false`:
     ///
     /// ```rust
-    /// use noria::replication::ReplicationOffsets;
+    /// use readyset::replication::ReplicationOffsets;
     ///
     /// let mut replication_offsets = ReplicationOffsets::default();
     /// assert!(!replication_offsets.has_table("table_1"));
@@ -128,7 +128,7 @@ impl ReplicationOffsets {
     /// A table that is present but set to [`None`] also returns `false`:
     ///
     /// ```rust
-    /// use noria::replication::ReplicationOffsets;
+    /// use readyset::replication::ReplicationOffsets;
     ///
     /// let mut replication_offsets = ReplicationOffsets::default();
     /// replication_offsets.tables.insert("table_1".into(), None);
@@ -138,7 +138,7 @@ impl ReplicationOffsets {
     /// A table that is present returns `true`:
     ///
     /// ```rust
-    /// use noria::replication::{ReplicationOffset, ReplicationOffsets};
+    /// use readyset::replication::{ReplicationOffset, ReplicationOffsets};
     ///
     /// let mut replication_offsets = ReplicationOffsets::default();
     /// replication_offsets.tables.insert(

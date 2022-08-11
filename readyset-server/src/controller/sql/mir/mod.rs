@@ -21,10 +21,10 @@ use nom_sql::{
     FieldDefinitionExpr, FieldReference, FunctionExpr, Literal, OrderClause, OrderType,
     SelectStatement, SqlIdentifier, Table, TableKey, UnaryOperator,
 };
-use noria::ViewPlaceholder;
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::{any, Arbitrary};
 use proptest::strategy::Strategy;
+use readyset::ViewPlaceholder;
 use readyset_data::DataType;
 use readyset_errors::{
     internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError,

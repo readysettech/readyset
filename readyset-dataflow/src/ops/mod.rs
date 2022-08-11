@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use derive_more::From;
-use noria::KeyComparison;
+use readyset::KeyComparison;
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
 

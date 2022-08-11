@@ -12,11 +12,11 @@ use nom_sql::{
     self, BinaryOperator, ColumnConstraint, DeleteStatement, InsertStatement, SelectStatement,
     SqlIdentifier, SqlQuery, SqlType, UpdateStatement,
 };
-use noria::consistency::Timestamp;
-use noria::internal::LocalNodeIndex;
-use noria::recipe::changelist::{Change, ChangeList};
-use noria::results::{ResultIterator, Results};
-use noria::{
+use readyset::consistency::Timestamp;
+use readyset::internal::LocalNodeIndex;
+use readyset::recipe::changelist::{Change, ChangeList};
+use readyset::results::{ResultIterator, Results};
+use readyset::{
     ColumnSchema, ControllerHandle, KeyColumnIdx, KeyComparison, ReadQuery, ReadySetError,
     ReadySetResult, SchemaType, Table, TableOperation, View, ViewPlaceholder, ViewQuery,
     ViewSchema,
@@ -1723,7 +1723,7 @@ async fn do_read<'a>(
     event.num_keys = Some(vq.key_comparisons.len() as _);
 
     let data = if let Some(rh) = read_request_handler {
-        let request = noria::Tagged::from(ReadQuery::Normal {
+        let request = readyset::Tagged::from(ReadQuery::Normal {
             target: (*getter.node(), getter.name(), 0).into(),
             query: vq.clone(),
         });
@@ -1826,7 +1826,7 @@ mod tests {
     mod build_view_query {
         use lazy_static::lazy_static;
         use nom_sql::{parse_query, Column, ColumnSpecification, Dialect, SqlType};
-        use noria::ColumnBase;
+        use readyset::ColumnBase;
 
         use super::*;
 

@@ -4,8 +4,8 @@
 //! * query for that table. It then performs a lookup of the
 //! view.
 use clap::Parser;
-use noria::consensus::AuthorityType;
-use noria::ControllerHandle;
+use readyset::consensus::AuthorityType;
+use readyset::ControllerHandle;
 
 #[derive(Parser)]
 #[clap(name = "query_installer")]

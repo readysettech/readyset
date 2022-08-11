@@ -6,7 +6,7 @@ use std::{iter, mem};
 
 use derive_more::From;
 use launchpad::Indices;
-use noria::KeyComparison;
+use readyset::KeyComparison;
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use launchpad::redacted::RedactedString;
 use nom_sql::{replicator_table_list, Dialect, SqlIdentifier};
-use noria::{ReadySetError, ReadySetResult};
+use readyset::{ReadySetError, ReadySetResult};
 
 /// A [`TableFilter`] keep a list of all the tables readyset-server is interested in as a mapping
 /// from namespace to a list of tables for that schema. When a replication event happens, the event

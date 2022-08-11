@@ -14,7 +14,7 @@ use std::convert::TryFrom;
 use dataflow::payload::{ReplayPathSegment, SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
-use noria::ReadySetError;
+use readyset::ReadySetError;
 use tracing::{debug, instrument, trace};
 use vec1::Vec1;
 

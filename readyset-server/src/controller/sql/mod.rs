@@ -14,8 +14,8 @@ use nom_sql::{
     CreateViewStatement, FieldDefinitionExpr, SelectSpecification, SelectStatement, SqlIdentifier,
     Table, TableExpr,
 };
-use noria::internal::IndexType;
 use petgraph::graph::NodeIndex;
+use readyset::internal::IndexType;
 use readyset_errors::{internal_err, invalid_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql_passes::alias_removal::TableAliasRewrite;
 use readyset_sql_passes::{contains_aggregate, AliasRemoval, Rewrite, RewriteContext};

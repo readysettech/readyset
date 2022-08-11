@@ -2,7 +2,7 @@ use std::convert::TryFrom;
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use mysql_async::prelude::*;
-use noria::status::ReadySetStatus;
+use readyset::status::ReadySetStatus;
 use readyset_client::backend::noria_connector::ReadBehavior;
 use readyset_client::backend::QueryInfo;
 use readyset_client_metrics::QueryDestination;

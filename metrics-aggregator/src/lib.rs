@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use clap::Parser;
-use noria::consensus::ConsulAuthority;
 use prometheus_http_query::{Client, Scheme};
+use readyset::consensus::ConsulAuthority;
 use stream_cancel::Valve;
 use tokio::sync::Mutex;
 use tracing::info;

@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use nom_sql::SelectStatement;
-use noria::consensus::{Authority, LocalAuthorityStore};
+use readyset::consensus::{Authority, LocalAuthorityStore};
 use readyset_client::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_client::backend::{BackendBuilder, MigrationMode, UnsupportedSetMode};
 use readyset_client::query_status_cache::QueryStatusCache;

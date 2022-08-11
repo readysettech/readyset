@@ -94,7 +94,3 @@ nom-sql = { path = "../nom-sql" }
 [dev-dependencies]
 serial_test = "0.5.1"
 tempfile = "3.2"
-
-[lib]
-path = "src/lib.rs"
-name = "noria"

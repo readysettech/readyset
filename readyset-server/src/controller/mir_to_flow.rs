@@ -28,9 +28,9 @@ use nom_sql::{
     BinaryOperator, ColumnConstraint, ColumnSpecification, Expr, FunctionExpr, InValue, OrderType,
     SqlIdentifier, SqlType, UnaryOperator,
 };
-use noria::internal::{Index, IndexType};
-use noria::ViewPlaceholder;
 use petgraph::graph::NodeIndex;
+use readyset::internal::{Index, IndexType};
+use readyset::ViewPlaceholder;
 use readyset_data::noria_type::Type;
 use readyset_errors::{
     internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,

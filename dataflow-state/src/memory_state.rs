@@ -2,10 +2,10 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use common::{IndexType, KeyType, RangeKey, Record, Records, SizeOf, Tag};
-use noria::internal::Index;
-use noria::replication::ReplicationOffset;
-use noria::{KeyComparison, KeyCount};
 use rand::{self, Rng};
+use readyset::internal::Index;
+use readyset::replication::ReplicationOffset;
+use readyset::{KeyComparison, KeyCount};
 use readyset_data::DataType;
 use readyset_errors::ReadySetResult;
 use tracing::trace;

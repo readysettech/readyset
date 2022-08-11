@@ -83,9 +83,9 @@ use nom_sql::{
     InsertStatement, SelectStatement, SetStatement, ShowStatement, SqlIdentifier, SqlQuery,
     UpdateStatement,
 };
-use noria::consistency::Timestamp;
-use noria::results::Results;
-use noria::ColumnSchema;
+use readyset::consistency::Timestamp;
+use readyset::results::Results;
+use readyset::ColumnSchema;
 use readyset_client_metrics::{
     recorded, EventType, QueryDestination, QueryExecutionEvent, SqlQueryType,
 };

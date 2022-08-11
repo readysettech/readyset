@@ -39,7 +39,7 @@ use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 
-use noria::ReaderAddress;
+use readyset::ReaderAddress;
 use serde::{Deserialize, Serialize};
 
 pub use crate::backlog::{LookupError, SingleReadHandle};
@@ -98,7 +98,7 @@ impl Default for EvictionKind {
     }
 }
 
-pub use noria::shard_by;
+pub use readyset::shard_by;
 
 impl Deref for ReaderMap {
     type Target = HashMap<ReaderAddress, SingleReadHandle>;

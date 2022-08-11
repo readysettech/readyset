@@ -6,8 +6,8 @@ use std::future;
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
 use nom_sql::{parse_key_specification_string, Dialect, TableKey};
-use noria::{ReadySetError, ReadySetResult};
 use postgres_types::{accepts, FromSql, Type};
+use readyset::{ReadySetError, ReadySetResult};
 use readyset_data::DataType;
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, info_span, trace, Instrument};
@@ -21,7 +21,7 @@ const BATCH_SIZE: usize = 1024; // How many queries to buffer before pushing to 
 pub struct PostgresReplicator<'a> {
     /// This is the underlying (regular) PostgreSQL transaction
     pub(crate) transaction: pgsql::Transaction<'a>,
-    pub(crate) noria: &'a mut noria::ControllerHandle,
+    pub(crate) noria: &'a mut readyset::ControllerHandle,
     /// Filters out tables we are not interested in
     pub(crate) table_filter: TableFilter,
 }
@@ -245,7 +245,7 @@ impl TableDescription {
     async fn dump<'a>(
         &self,
         transaction: &'a pgsql::Transaction<'a>,
-        mut noria_table: noria::Table,
+        mut noria_table: readyset::Table,
     ) -> ReadySetResult<()> {
         let mut cnt = 0;
 
@@ -314,7 +314,7 @@ impl TableDescription {
 impl<'a> PostgresReplicator<'a> {
     pub(crate) async fn new(
         client: &'a mut pgsql::Client,
-        noria: &'a mut noria::ControllerHandle,
+        noria: &'a mut readyset::ControllerHandle,
         table_filter: TableFilter,
     ) -> ReadySetResult<PostgresReplicator<'a>> {
         let transaction = client

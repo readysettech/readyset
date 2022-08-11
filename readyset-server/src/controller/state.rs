@@ -31,17 +31,17 @@ use futures::{FutureExt, TryStream};
 use lazy_static::lazy_static;
 use metrics::{gauge, histogram};
 use nom_sql::{CacheInner, CreateCacheStatement, SelectStatement, SqlIdentifier, SqlQuery};
-use noria::builders::{TableBuilder, ViewBuilder};
-use noria::consensus::{Authority, AuthorityControl};
-use noria::debug::info::GraphInfo;
-use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
-use noria::internal::{MaterializationStatus, ReplicaAddress};
-use noria::metrics::recorded;
-use noria::recipe::changelist::{Change, ChangeList};
-use noria::recipe::ExtendRecipeSpec;
-use noria::replication::{ReplicationOffset, ReplicationOffsets};
-use noria::{KeyCount, ReadySetError, ReadySetResult, ViewFilter, ViewRequest, ViewSchema};
 use petgraph::visit::Bfs;
+use readyset::builders::{TableBuilder, ViewBuilder};
+use readyset::consensus::{Authority, AuthorityControl};
+use readyset::debug::info::GraphInfo;
+use readyset::debug::stats::{DomainStats, GraphStats, NodeStats};
+use readyset::internal::{MaterializationStatus, ReplicaAddress};
+use readyset::metrics::recorded;
+use readyset::recipe::changelist::{Change, ChangeList};
+use readyset::recipe::ExtendRecipeSpec;
+use readyset::replication::{ReplicationOffset, ReplicationOffsets};
+use readyset::{KeyCount, ReadySetError, ReadySetResult, ViewFilter, ViewRequest, ViewSchema};
 use readyset_errors::{internal, internal_err, invariant_eq, NodeType};
 use regex::Regex;
 use serde::de::DeserializeOwned;
@@ -1380,7 +1380,7 @@ impl DataflowStateHandle {
         let state_copy = read_guard.state.clone();
         let elapsed = start.elapsed();
         histogram!(
-            noria::metrics::recorded::DATAFLOW_STATE_CLONE_TIME,
+            readyset::metrics::recorded::DATAFLOW_STATE_CLONE_TIME,
             elapsed.as_micros() as f64,
         );
         DataflowStateWriter {

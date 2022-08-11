@@ -2,10 +2,10 @@ use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
 
 use nom_sql::{ColumnSpecification, SqlType};
-use noria::results::{ResultIterator, Results};
-use noria::ColumnSchema;
 use psql_srv as ps;
 use psql_srv::Column;
+use readyset::results::{ResultIterator, Results};
+use readyset::ColumnSchema;
 use readyset_client::backend::{self as cl, noria_connector, SinglePrepareResult, UpstreamPrepare};
 use upstream::StatementMeta;
 

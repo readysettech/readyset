@@ -21,10 +21,10 @@ pub use internal::{DomainIndex, ReplicaAddress};
 use launchpad::redacted::Sensitive;
 use launchpad::Indices;
 use merging_interval_tree::IntervalTreeSet;
-use noria::internal::Index;
-use noria::replication::ReplicationOffset;
-use noria::{channel, internal, KeyComparison, KeyCount, ReaderAddress, ReadySetError};
 use petgraph::graph::NodeIndex;
+use readyset::internal::Index;
+use readyset::replication::ReplicationOffset;
+use readyset::{channel, internal, KeyComparison, KeyCount, ReaderAddress, ReadySetError};
 use readyset_errors::{internal, internal_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
@@ -1828,7 +1828,7 @@ impl Domain {
                 Ok(None)
             }
             DomainRequest::GetStatistics => {
-                let domain_stats = noria::debug::stats::DomainStats {
+                let domain_stats = readyset::debug::stats::DomainStats {
                     total_time: self.total_time.num_nanoseconds(),
                     total_ptime: self.total_ptime.num_nanoseconds(),
                     total_replay_time: self.total_replay_time.num_nanoseconds(),
@@ -1838,7 +1838,7 @@ impl Domain {
 
                 let node_stats: HashMap<
                     petgraph::graph::NodeIndex,
-                    noria::debug::stats::NodeStats,
+                    readyset::debug::stats::NodeStats,
                 > = self
                     .nodes
                     .values()
@@ -1894,7 +1894,7 @@ impl Domain {
                         if let (Some(time), Some(ptime)) = (time, ptime) {
                             Some((
                                 node_index,
-                                noria::debug::stats::NodeStats {
+                                readyset::debug::stats::NodeStats {
                                     desc: format!("{:?}", n),
                                     process_time: time,
                                     process_ptime: ptime,

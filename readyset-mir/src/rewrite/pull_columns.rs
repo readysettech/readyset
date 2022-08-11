@@ -52,7 +52,7 @@ mod tests {
     use common::IndexType;
     use dataflow::ops::grouped::aggregate::Aggregation;
     use nom_sql::{BinaryOperator, ColumnSpecification, Expr, FunctionExpr, Literal, SqlType};
-    use noria::ViewPlaceholder;
+    use readyset::ViewPlaceholder;
 
     use super::*;
     use crate::node::node_inner::MirNodeInner;

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use noria::metrics::recorded;
+use readyset::metrics::recorded;
 use readyset_errors::{internal_err, invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
