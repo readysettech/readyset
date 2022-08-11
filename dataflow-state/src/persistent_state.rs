@@ -1351,7 +1351,9 @@ impl PersistentState {
     // Filters out secondary indices to return an iterator for the actual key-value pairs.
     fn all_rows(&self) -> impl Iterator<Item = (Box<[u8]>, Box<[u8]>)> + '_ {
         let cf = self.db.cf_handle(&self.indices[0].column_family).unwrap();
-        self.db.full_iterator_cf(cf, rocksdb::IteratorMode::Start)
+        self.db
+            .full_iterator_cf(cf, rocksdb::IteratorMode::Start)
+            .map(|res| res.unwrap())
     }
 
     /// Inserts the row into the database by replicating it across all of the column

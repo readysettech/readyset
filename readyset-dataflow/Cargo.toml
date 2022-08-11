@@ -47,7 +47,6 @@ clap = { version = "3.0", features = ["derive"] }
 petgraph = { version = "0.5", features = ["serde-1"] }
 serde = { version = "1.0.8", features = ["rc"] }
 timekeeper = { version = "0.3.2", default-features = false }
-rocksdb = { version = "0.17", default-features = false, features = ["lz4"] }
 
 # local deps
 common = { path = "../readyset-common", package = "readyset-common" }
