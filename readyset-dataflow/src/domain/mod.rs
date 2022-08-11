@@ -2447,741 +2447,727 @@ impl Domain {
                 }
             }
 
-            // will look somewhat nicer with https://github.com/rust-lang/rust/issues/15287
-            match m {
+            let (tag, link, mut data, mut context) = match m {
                 Packet::ReplayPiece {
                     tag,
                     link,
-                    mut data,
-                    mut context,
-                } => {
-                    if let ReplayPieceContext::Partial { ref for_keys, .. } = context {
-                        trace!(
-                            num = data.len(),
-                            %tag,
-                            keys = ?for_keys,
-                            "replaying batch"
-                        );
-                    } else {
-                        debug!(num = data.len(), "replaying batch");
+
+                    data,
+                    context,
+                } => (tag, link, data, context),
+                _ => internal!(),
+            };
+
+            if let ReplayPieceContext::Partial { ref for_keys, .. } = context {
+                trace!(
+                    num = data.len(),
+                    %tag,
+                    keys = ?for_keys,
+                    "replaying batch"
+                );
+            } else {
+                debug!(num = data.len(), "replaying batch");
+            }
+
+            // let's collect some information about the destination of this replay
+            let dst = path.last().node;
+            let target = path
+                .iter()
+                .find(|s| s.is_target)
+                .map(|s| s.node)
+                .or(*source);
+            #[allow(clippy::indexing_slicing)] // dst came from a replay path
+            let dst_is_reader = self.nodes[dst]
+                .borrow()
+                .as_reader()
+                .map(|r| r.is_materialized())
+                .unwrap_or(false);
+            // Is the destination of this replay path within this domain just going to
+            // forward packets on to another node (is it an egress or sharder)?
+            let dst_is_sender = self
+                .nodes
+                .get(dst)
+                .ok_or_else(|| ReadySetError::NoSuchNode(dst.id()))?
+                .borrow()
+                .is_sender();
+            // Is the target of this replay path inside this domain?
+            let target_in_self = path.iter().any(|n| n.is_target);
+
+            if target_in_self {
+                // If this replay pathh is bound for us, prune keys and data for keys we're
+                // not waiting for
+                if let ReplayPieceContext::Partial {
+                    ref mut for_keys, ..
+                } = context
+                {
+                    let had = for_keys.len();
+                    let partial_index = path.last().partial_index.as_ref().unwrap();
+                    if let Some(w) = self.waiting.get(dst) {
+                        // discard all the keys that we aren't waiting for
+                        for_keys.retain(|k| {
+                            w.redos.contains_key(&Hole {
+                                node: target.expect("already checked target_in_self"),
+                                column_indices: partial_index.columns.to_owned(),
+                                key: k.clone(),
+                            })
+                        });
                     }
 
-                    // let's collect some information about the destination of this replay
-                    let dst = path.last().node;
-                    let target = path
-                        .iter()
-                        .find(|s| s.is_target)
-                        .map(|s| s.node)
-                        .or(*source);
-                    #[allow(clippy::indexing_slicing)] // dst came from a replay path
-                    let dst_is_reader = self.nodes[dst]
-                        .borrow()
-                        .as_reader()
-                        .map(|r| r.is_materialized())
-                        .unwrap_or(false);
-                    // Is the destination of this replay path within this domain just going to
-                    // forward packets on to another node (is it an egress or sharder)?
-                    let dst_is_sender = self
-                        .nodes
-                        .get(dst)
-                        .ok_or_else(|| ReadySetError::NoSuchNode(dst.id()))?
-                        .borrow()
-                        .is_sender();
-                    // Is the target of this replay path inside this domain?
-                    let target_in_self = path.iter().any(|n| n.is_target);
-
-                    if target_in_self {
-                        // If this replay pathh is bound for us, prune keys and data for keys we're
-                        // not waiting for
-                        if let ReplayPieceContext::Partial {
-                            ref mut for_keys, ..
-                        } = context
-                        {
-                            let had = for_keys.len();
-                            let partial_index = path.last().partial_index.as_ref().unwrap();
-                            if let Some(w) = self.waiting.get(dst) {
-                                // discard all the keys that we aren't waiting for
-                                for_keys.retain(|k| {
-                                    w.redos.contains_key(&Hole {
-                                        node: target.expect("already checked target_in_self"),
-                                        column_indices: partial_index.columns.to_owned(),
-                                        key: k.clone(),
-                                    })
-                                });
-                            } else if let Some(prev) = self.reader_triggered.get(dst) {
-                                // discard all the keys or subranges of keys that we aren't waiting
-                                // for
-                                if !prev.is_empty() {
-                                    prev.filter_keys(for_keys);
-                                }
-                            } else {
-                                // this packet contained no keys that we're waiting for, so it's
-                                // useless to us.
-                                debug!("Received packet with no keys that we were waiting for");
-                                return Ok(());
-                            }
-
-                            if for_keys.is_empty() {
-                                return Ok(());
-                            } else if for_keys.len() != had {
-                                // discard records in data associated with the keys we weren't
-                                // waiting for
-                                // note that we need to use the partial_keys column IDs from the
-                                // *start* of the path here, as the records haven't been processed
-                                // yet
-                                // We already know it's a partial replay path, so it must have a
-                                // partial key
-                                #[allow(clippy::unwrap_used)]
-                                let partial_keys = path.first().partial_index.as_ref().unwrap();
-                                data.retain(|r| {
-                                    for_keys.iter().any(|k| {
-                                        k.contains(
-                                            &partial_keys
-                                                .columns
-                                                .iter()
-                                                .map(|c| {
-                                                    #[allow(clippy::indexing_slicing)]
-                                                    // record came from processing, which means it
-                                                    // must have the right number of columns
-                                                    r[*c].clone()
-                                                })
-                                                .collect::<Vec<_>>(),
-                                        )
-                                    })
-                                });
-                            }
+                    if let Some(prev) = self.reader_triggered.get(dst) {
+                        // discard all the keys or subranges of keys that we aren't waiting
+                        // for
+                        if !prev.is_empty() {
+                            prev.filter_keys(for_keys);
                         }
                     }
 
-                    // forward the current message through all local nodes.
-                    let m = Box::new(Packet::ReplayPiece {
-                        link,
-                        tag,
-                        data,
-                        context,
-                    });
-                    let mut m = Some(m);
-
-                    macro_rules! replay_context {
-                        ($m:ident, $field:ident) => {
-                            if let Some(&mut Packet::ReplayPiece {
-                                ref mut context, ..
-                            }) = $m.as_deref_mut()
-                            {
-                                if let ReplayPieceContext::Partial { ref mut $field, .. } = *context
-                                {
-                                    Some($field)
-                                } else {
-                                    None
-                                }
-                            } else {
-                                internal!("asked to fetch replay field on non-replay packet")
-                            }
-                        };
+                    if for_keys.is_empty() {
+                        debug!("Received packet with no keys that we were waiting for");
+                        return Ok(());
+                    } else if for_keys.len() != had {
+                        // discard records in data associated with the keys we weren't
+                        // waiting for
+                        // note that we need to use the partial_keys column IDs from the
+                        // *start* of the path here, as the records haven't been processed
+                        // yet
+                        // We already know it's a partial replay path, so it must have a
+                        // partial key
+                        #[allow(clippy::unwrap_used)]
+                        let partial_keys = path.first().partial_index.as_ref().unwrap();
+                        data.retain(|r| {
+                            for_keys.iter().any(|k| {
+                                k.contains(
+                                    &partial_keys
+                                        .columns
+                                        .iter()
+                                        .map(|c| {
+                                            #[allow(clippy::indexing_slicing)]
+                                            // record came from processing, which means it
+                                            // must have the right number of columns
+                                            r[*c].clone()
+                                        })
+                                        .collect::<Vec<_>>(),
+                                )
+                            })
+                        });
                     }
+                }
+            }
 
-                    for (i, segment) in path.iter().enumerate() {
-                        if let Some(force_tag) = segment.force_tag_to {
-                            #[allow(clippy::unwrap_used)]
-                            // We would have bailed in a previous iteration (break 'outer, below) if
-                            // it wasn't Some
-                            if let Packet::ReplayPiece { ref mut tag, .. } =
-                                m.as_deref_mut().unwrap()
-                            {
-                                *tag = force_tag;
-                            }
-                        }
+            // forward the current message through all local nodes.
+            let m = Box::new(Packet::ReplayPiece {
+                link,
+                tag,
+                data,
+                context,
+            });
+            let mut m = Some(m);
 
-                        #[allow(clippy::indexing_slicing)]
-                        // we know replay paths only contain real nodes
-                        let mut n = self.nodes[segment.node].borrow_mut();
-
-                        // keep track of whether we're filling any partial holes
-                        let partial_key_cols = segment.partial_index.as_ref();
-                        // keep a copy of the partial keys from before we process
-                        // we need this because n.process may choose to reduce the set of keys
-                        // (e.g., because some of them missed), in which case we need to know what
-                        // keys to _undo_.
-                        let mut backfill_keys = if let Some(for_keys) = replay_context!(m, for_keys)
-                        {
-                            debug_assert!(partial_key_cols.is_some());
-                            Some(for_keys.clone())
+            macro_rules! replay_context {
+                ($m:ident, $field:ident) => {
+                    if let Some(&mut Packet::ReplayPiece {
+                        ref mut context, ..
+                    }) = $m.as_deref_mut()
+                    {
+                        if let ReplayPieceContext::Partial { ref mut $field, .. } = *context {
+                            Some($field)
                         } else {
                             None
-                        };
+                        }
+                    } else {
+                        internal!("asked to fetch replay field on non-replay packet")
+                    }
+                };
+            }
 
-                        // Is this segment the target of the replay path?
-                        let is_target = backfill_keys.is_some() && segment.is_target;
-                        let cols = segment.partial_index.as_ref().map(|idx| &idx.columns);
-                        // If this replay path is targeting a set of generated columns, figure out
-                        // what the tags are for those generated columns so we can mark them as
-                        // filled later
-                        let tags_for_generated = cols.and_then(|cols| {
-                            self.replay_paths
-                                .tags_for_generated_columns(segment.node, cols)
-                        });
+            for (i, segment) in path.iter().enumerate() {
+                if let Some(force_tag) = segment.force_tag_to {
+                    #[allow(clippy::unwrap_used)]
+                    // We would have bailed in a previous iteration (break 'outer, below) if
+                    // it wasn't Some
+                    if let Packet::ReplayPiece { ref mut tag, .. } = m.as_deref_mut().unwrap() {
+                        *tag = force_tag;
+                    }
+                }
 
-                        // are we about to fill a hole?
-                        if let Some(backfill_keys) = &backfill_keys {
-                            if is_target {
-                                // mark the state for the key being replayed as *not* a hole
-                                // otherwise we'll just end up with
-                                // the same "need replay" response that
-                                // triggered this replay initially.
-                                if let Some(state) = self.state.get_mut(segment.node) {
-                                    for key in backfill_keys.iter() {
-                                        trace!(?key, ?tag, local = %segment.node, "Marking filled");
-                                        state.mark_filled(key.clone(), tag);
-                                    }
-                                } else {
-                                    // we must be filling a hole in a Reader. we need to ensure
-                                    // that the hole for the key we're replaying ends up being
-                                    // filled, even if that hole is empty!
-                                    if let Some(wh) =
-                                        self.reader_write_handles.get_mut(segment.node)
-                                    {
-                                        for key in backfill_keys.iter() {
-                                            trace!(?key, local = %segment.node, "Marking filled in reader");
-                                            wh.mark_filled(key.clone())?;
-                                        }
-                                    }
+                #[allow(clippy::indexing_slicing)]
+                // we know replay paths only contain real nodes
+                let mut n = self.nodes[segment.node].borrow_mut();
+
+                // keep track of whether we're filling any partial holes
+                let partial_key_cols = segment.partial_index.as_ref();
+                // keep a copy of the partial keys from before we process
+                // we need this because n.process may choose to reduce the set of keys
+                // (e.g., because some of them missed), in which case we need to know what
+                // keys to _undo_.
+                let mut backfill_keys = if let Some(for_keys) = replay_context!(m, for_keys) {
+                    debug_assert!(partial_key_cols.is_some());
+                    Some(for_keys.clone())
+                } else {
+                    None
+                };
+
+                // Is this segment the target of the replay path?
+                let is_target = backfill_keys.is_some() && segment.is_target;
+                let cols = segment.partial_index.as_ref().map(|idx| &idx.columns);
+                // If this replay path is targeting a set of generated columns, figure out
+                // what the tags are for those generated columns so we can mark them as
+                // filled later
+                let tags_for_generated = cols.and_then(|cols| {
+                    self.replay_paths
+                        .tags_for_generated_columns(segment.node, cols)
+                });
+
+                // are we about to fill a hole?
+                if let Some(backfill_keys) = &backfill_keys {
+                    if is_target {
+                        // mark the state for the key being replayed as *not* a hole
+                        // otherwise we'll just end up with
+                        // the same "need replay" response that
+                        // triggered this replay initially.
+                        if let Some(state) = self.state.get_mut(segment.node) {
+                            for key in backfill_keys.iter() {
+                                trace!(?key, ?tag, local = %segment.node, "Marking filled");
+                                state.mark_filled(key.clone(), tag);
+                            }
+                        } else {
+                            // we must be filling a hole in a Reader. we need to ensure
+                            // that the hole for the key we're replaying ends up being
+                            // filled, even if that hole is empty!
+                            if let Some(wh) = self.reader_write_handles.get_mut(segment.node) {
+                                for key in backfill_keys.iter() {
+                                    trace!(?key, local = %segment.node, "Marking filled in reader");
+                                    wh.mark_filled(key.clone())?;
                                 }
-                            } else if tags_for_generated.is_some() {
-                                // If we're processing a replay that ends at a set of generated
-                                // columns, and there's some downstream replay that's waiting on us,
-                                // we need to mark that downstream replay's key as filled before
-                                // processing the records, so that when we materialize the result
-                                // we don't miss when processing the redo
-                                //
-                                // TODO(grfn): there's an opportunity for an optimization here -
-                                // since we're ostensibly querying for considerably more data than
-                                // we actually need (think eg paginate where we query for all the
-                                // rows in a group in order to satisfy a lookup of an individual
-                                // page) we could instead mark all keys taken from the column
-                                // indices of the redo in *all* rows returned from the node as
-                                // filled (since because of the semantics of
-                                // ColumnSource::GeneratedFromColumns we know we've just loaded all
-                                // the rows we'd need to mark those holes as filled!).
-                                // Unfortunately, we don't actually know what those rows are going
-                                // to be at this point (since we haven't processed through the node
-                                // yet), not to mention that optimization doesn't make sense for
-                                // range keys (since we can't just take the key out of the rows
-                                // themselves). So for now we just mark the original key as filled,
-                                // and any subsequent queries that remap to the same upstream key
-                                // have to replay the same set of rows over again (sad!)
-                                if let Some(state) = self.state.get_mut(segment.node) {
-                                    if let Some(waiting) = self.waiting.get(segment.node) {
-                                        for key in backfill_keys.clone() {
-                                            let hole = Hole {
-                                                node: target.unwrap(),
-                                                column_indices: self.replay_paths[tag]
-                                                    .target_index
-                                                    .as_ref()
-                                                    .unwrap()
-                                                    .columns
-                                                    .clone(),
-                                                key,
-                                            };
-                                            if let Some(redos) = waiting.redos.get(&hole) {
-                                                for redo in redos {
-                                                    // Are we about to satisfy the last hole this
-                                                    // redo was waiting for?
-                                                    if waiting.holes.get(redo) == Some(&1) {
-                                                        trace!(
-                                                            key = ?redo.replay_key,
-                                                            tag = ?redo.tag,
-                                                            local = %segment.node,
-                                                            "Marking remapped hole filled"
-                                                        );
-                                                        state.mark_filled(
-                                                            redo.replay_key.clone(),
-                                                            redo.tag,
-                                                        )
-                                                    }
-                                                }
+                            }
+                        }
+                    } else if tags_for_generated.is_some() {
+                        // If we're processing a replay that ends at a set of generated
+                        // columns, and there's some downstream replay that's waiting on us,
+                        // we need to mark that downstream replay's key as filled before
+                        // processing the records, so that when we materialize the result
+                        // we don't miss when processing the redo
+                        //
+                        // TODO(grfn): there's an opportunity for an optimization here -
+                        // since we're ostensibly querying for considerably more data than
+                        // we actually need (think eg paginate where we query for all the
+                        // rows in a group in order to satisfy a lookup of an individual
+                        // page) we could instead mark all keys taken from the column
+                        // indices of the redo in *all* rows returned from the node as
+                        // filled (since because of the semantics of
+                        // ColumnSource::GeneratedFromColumns we know we've just loaded all
+                        // the rows we'd need to mark those holes as filled!).
+                        // Unfortunately, we don't actually know what those rows are going
+                        // to be at this point (since we haven't processed through the node
+                        // yet), not to mention that optimization doesn't make sense for
+                        // range keys (since we can't just take the key out of the rows
+                        // themselves). So for now we just mark the original key as filled,
+                        // and any subsequent queries that remap to the same upstream key
+                        // have to replay the same set of rows over again (sad!)
+                        if let Some(state) = self.state.get_mut(segment.node) {
+                            if let Some(waiting) = self.waiting.get(segment.node) {
+                                for key in backfill_keys.clone() {
+                                    let hole = Hole {
+                                        node: target.unwrap(),
+                                        column_indices: self.replay_paths[tag]
+                                            .target_index
+                                            .as_ref()
+                                            .unwrap()
+                                            .columns
+                                            .clone(),
+                                        key,
+                                    };
+                                    if let Some(redos) = waiting.redos.get(&hole) {
+                                        for redo in redos {
+                                            // Are we about to satisfy the last hole this
+                                            // redo was waiting for?
+                                            if waiting.holes.get(redo) == Some(&1) {
+                                                trace!(
+                                                    key = ?redo.replay_key,
+                                                    tag = ?redo.tag,
+                                                    local = %segment.node,
+                                                    "Marking remapped hole filled"
+                                                );
+                                                state.mark_filled(redo.replay_key.clone(), redo.tag)
                                             }
                                         }
                                     }
                                 }
                             }
                         }
+                    }
+                }
 
-                        // process the current message in this node
-                        let process_result = n.process(
-                            &mut m,
-                            cols,
-                            Some(rp),
-                            false,
-                            ProcessEnv {
-                                state: &mut self.state,
-                                reader_write_handles: &mut self.reader_write_handles,
-                                nodes: &self.nodes,
-                                executor: ex,
-                                shard: self.shard,
-                                replica: self.replica,
-                            },
-                        )?;
+                // process the current message in this node
+                let process_result = n.process(
+                    &mut m,
+                    cols,
+                    Some(rp),
+                    false,
+                    ProcessEnv {
+                        state: &mut self.state,
+                        reader_write_handles: &mut self.reader_write_handles,
+                        nodes: &self.nodes,
+                        executor: ex,
+                        shard: self.shard,
+                        replica: self.replica,
+                    },
+                )?;
 
-                        let misses = process_result.unique_misses();
+                let misses = process_result.unique_misses();
 
-                        let missed_on = if backfill_keys.is_some() {
-                            let mut missed_on = HashSet::with_capacity(misses.len());
-                            for miss in &misses {
-                                #[allow(clippy::unwrap_used)]
-                                // this is a partial miss, so it must have a partial key
-                                missed_on.insert(miss.replay_key().unwrap());
-                            }
-                            missed_on
-                        } else {
-                            HashSet::new()
-                        };
-
-                        if is_target {
-                            if !misses.is_empty() {
-                                // we missed while processing
-                                // it's important that we clear out any partially-filled holes.
-                                if let Some(state) = self.state.get_mut(segment.node) {
-                                    for miss in &missed_on {
-                                        state.mark_hole(miss, tag);
-                                    }
-                                } else if let Some(wh) =
-                                    self.reader_write_handles.get_mut(segment.node)
-                                {
-                                    for miss in &missed_on {
-                                        wh.mark_hole(miss)?;
-                                    }
-                                }
-                            } else if n.is_reader() {
-                                // we filled a hole! swap the reader.
-                                if let Some(wh) = self.reader_write_handles.get_mut(segment.node) {
-                                    wh.swap();
-                                }
-
-                                // and also unmark the replay request
-                                if let Some(ref mut prev) =
-                                    self.reader_triggered.get_mut(segment.node)
-                                {
-                                    if let Some(backfill_keys) = &backfill_keys {
-                                        for key in backfill_keys {
-                                            prev.remove(key);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        if is_target && !process_result.captured.is_empty() {
-                            // materialized union ate some of our keys,
-                            // so we didn't *actually* fill those keys after all!
-                            if let Some(state) = self.state.get_mut(segment.node) {
-                                for key in &process_result.captured {
-                                    state.mark_hole(key, tag);
-                                }
-                            } else if n.is_reader() {
-                                if let Some(wh) = self.reader_write_handles.get_mut(segment.node) {
-                                    for key in &process_result.captured {
-                                        wh.mark_hole(key)?;
-                                    }
-                                }
-                            }
-                        }
-
-                        // we're done with the node
-                        drop(n);
-
-                        if m.is_none() {
-                            // eaten full replay
-                            assert_eq!(misses.len(), 0);
-
-                            // it's been captured, so we need to *not* consider the replay finished
-                            // (which the logic below matching on context would do)
-                            break 'outer;
-                        }
-
-                        // we need to track how many replays we completed, and we need to do so
-                        // *before* we prune keys that missed. these conditions are all important,
-                        // so let's walk through them
-                        //
-                        //  1. this applies only to partial backfills
-                        //  2. we should only set finished_partial if it hasn't already been set.
-                        //     this is important, as misses will cause backfill_keys to be pruned
-                        //     over time, which would cause finished_partial to hold the wrong
-                        //     value!
-                        if let Some(backfill_keys) = &backfill_keys {
-                            if finished_partial == 0 && (dst_is_reader || !dst_is_sender) {
-                                finished_partial = backfill_keys.len();
-                            }
-                        }
-
-                        // only continue with the keys that weren't captured
+                let missed_on = if backfill_keys.is_some() {
+                    let mut missed_on = HashSet::with_capacity(misses.len());
+                    for miss in &misses {
                         #[allow(clippy::unwrap_used)]
-                        // We would have bailed earlier (break 'outer, above) if m wasn't Some
+                        // this is a partial miss, so it must have a partial key
+                        missed_on.insert(miss.replay_key().unwrap());
+                    }
+                    missed_on
+                } else {
+                    HashSet::new()
+                };
+
+                if is_target {
+                    if !misses.is_empty() {
+                        // we missed while processing
+                        // it's important that we clear out any partially-filled holes.
+                        if let Some(state) = self.state.get_mut(segment.node) {
+                            for miss in &missed_on {
+                                state.mark_hole(miss, tag);
+                            }
+                        } else if let Some(wh) = self.reader_write_handles.get_mut(segment.node) {
+                            for miss in &missed_on {
+                                wh.mark_hole(miss)?;
+                            }
+                        }
+                    } else if n.is_reader() {
+                        // we filled a hole! swap the reader.
+                        if let Some(wh) = self.reader_write_handles.get_mut(segment.node) {
+                            wh.swap();
+                        }
+
+                        // and also unmark the replay request
+                        if let Some(ref mut prev) = self.reader_triggered.get_mut(segment.node) {
+                            if let Some(backfill_keys) = &backfill_keys {
+                                for key in backfill_keys {
+                                    prev.remove(key);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if is_target && !process_result.captured.is_empty() {
+                    // materialized union ate some of our keys,
+                    // so we didn't *actually* fill those keys after all!
+                    if let Some(state) = self.state.get_mut(segment.node) {
+                        for key in &process_result.captured {
+                            state.mark_hole(key, tag);
+                        }
+                    } else if n.is_reader() {
+                        if let Some(wh) = self.reader_write_handles.get_mut(segment.node) {
+                            for key in &process_result.captured {
+                                wh.mark_hole(key)?;
+                            }
+                        }
+                    }
+                }
+
+                // we're done with the node
+                drop(n);
+
+                if m.is_none() {
+                    // eaten full replay
+                    assert_eq!(misses.len(), 0);
+
+                    // it's been captured, so we need to *not* consider the replay finished
+                    // (which the logic below matching on context would do)
+                    break 'outer;
+                }
+
+                // we need to track how many replays we completed, and we need to do so
+                // *before* we prune keys that missed. these conditions are all important,
+                // so let's walk through them
+                //
+                //  1. this applies only to partial backfills
+                //  2. we should only set finished_partial if it hasn't already been set.
+                //     this is important, as misses will cause backfill_keys to be pruned
+                //     over time, which would cause finished_partial to hold the wrong
+                //     value!
+                if let Some(backfill_keys) = &backfill_keys {
+                    if finished_partial == 0 && (dst_is_reader || !dst_is_sender) {
+                        finished_partial = backfill_keys.len();
+                    }
+                }
+
+                // only continue with the keys that weren't captured
+                #[allow(clippy::unwrap_used)]
+                // We would have bailed earlier (break 'outer, above) if m wasn't Some
+                if let Packet::ReplayPiece {
+                    context:
+                        ReplayPieceContext::Partial {
+                            ref mut for_keys, ..
+                        },
+                    ..
+                } = **m.as_mut().unwrap()
+                {
+                    for backfill_keys in &mut backfill_keys {
+                        backfill_keys.retain(|k| for_keys.contains(k));
+                    }
+                }
+
+                // if we missed during replay, we need to do another replay
+                if backfill_keys.is_some() && !misses.is_empty() {
+                    // so, in theory, unishard can be changed by n.process. however, it
+                    // will only ever be changed by a union, which can't cause misses.
+                    // since we only enter this branch in the cases where we have a miss,
+                    // it is okay to assume that unishard _hasn't_ changed, and therefore
+                    // we can use the value that's in m.
+                    #[allow(clippy::unwrap_used)]
+                    // We would have bailed earlier (break 'outer, above) if m wasn't Some
+                    let (unishard, requesting_shard, requesting_replica) =
                         if let Packet::ReplayPiece {
                             context:
                                 ReplayPieceContext::Partial {
-                                    ref mut for_keys, ..
+                                    unishard,
+                                    requesting_shard,
+                                    requesting_replica,
+                                    ..
                                 },
                             ..
                         } = **m.as_mut().unwrap()
                         {
-                            for backfill_keys in &mut backfill_keys {
-                                backfill_keys.retain(|k| for_keys.contains(k));
-                            }
-                        }
+                            (unishard, requesting_shard, requesting_replica)
+                        } else {
+                            internal!("backfill_keys.is_some() implies Context::Partial");
+                        };
 
-                        // if we missed during replay, we need to do another replay
-                        if backfill_keys.is_some() && !misses.is_empty() {
-                            // so, in theory, unishard can be changed by n.process. however, it
-                            // will only ever be changed by a union, which can't cause misses.
-                            // since we only enter this branch in the cases where we have a miss,
-                            // it is okay to assume that unishard _hasn't_ changed, and therefore
-                            // we can use the value that's in m.
-                            #[allow(clippy::unwrap_used)]
-                            // We would have bailed earlier (break 'outer, above) if m wasn't Some
-                            let (unishard, requesting_shard, requesting_replica) =
-                                if let Packet::ReplayPiece {
-                                    context:
-                                        ReplayPieceContext::Partial {
-                                            unishard,
-                                            requesting_shard,
-                                            requesting_replica,
-                                            ..
-                                        },
-                                    ..
-                                } = **m.as_mut().unwrap()
-                                {
-                                    (unishard, requesting_shard, requesting_replica)
-                                } else {
-                                    internal!("backfill_keys.is_some() implies Context::Partial");
-                                };
+                    need_replay.extend(misses.iter().map(|m| {
+                        ReplayDescriptor::from_miss(
+                            m,
+                            tag,
+                            unishard,
+                            requesting_shard,
+                            requesting_replica,
+                        )
+                    }));
 
-                            need_replay.extend(misses.iter().map(|m| {
-                                ReplayDescriptor::from_miss(
-                                    m,
-                                    tag,
-                                    unishard,
-                                    requesting_shard,
-                                    requesting_replica,
+                    // we should only finish the replays for keys that *didn't* miss
+                    #[allow(clippy::unwrap_used)] // We already checked it's Some
+                    backfill_keys
+                        .as_mut()
+                        .unwrap()
+                        .retain(|k| !missed_on.contains(k));
+
+                    // prune all replayed records for keys where any replayed record for
+                    // that key missed.
+                    #[allow(clippy::unwrap_used)]
+                    // We know this is a partial replay
+                    let partial_index = partial_key_cols.as_ref().unwrap();
+                    #[allow(clippy::unwrap_used)]
+                    // We would have bailed earlier (break 'outer, above) if m wasn't Some
+                    m.as_mut().unwrap().map_data(|rs| {
+                        rs.retain(|r| {
+                            // XXX: don't we technically need to translate the columns a
+                            // bunch here? what if two key columns are reordered?
+                            // XXX: this clone and collect here is *really* sad
+                            let r = r.rec();
+                            !missed_on.iter().any(|miss| {
+                                miss.contains(
+                                    &partial_index
+                                        .columns
+                                        .iter()
+                                        .map(|&c| {
+                                            #[allow(clippy::indexing_slicing)]
+                                            // record came from processing, which means it
+                                            // must have the right number of columns
+                                            r[c].clone()
+                                        })
+                                        .collect::<Vec<_>>(),
                                 )
-                            }));
+                            })
+                        })
+                    });
+                }
 
-                            // we should only finish the replays for keys that *didn't* miss
-                            #[allow(clippy::unwrap_used)] // We already checked it's Some
-                            backfill_keys
-                                .as_mut()
-                                .unwrap()
-                                .retain(|k| !missed_on.contains(k));
+                // no more keys to replay, so we might as well terminate early
+                if backfill_keys
+                    .as_ref()
+                    .map(|b| b.is_empty())
+                    .unwrap_or(false)
+                {
+                    break 'outer;
+                }
 
-                            // prune all replayed records for keys where any replayed record for
-                            // that key missed.
-                            #[allow(clippy::unwrap_used)]
-                            // We know this is a partial replay
-                            let partial_index = partial_key_cols.as_ref().unwrap();
-                            #[allow(clippy::unwrap_used)]
-                            // We would have bailed earlier (break 'outer, above) if m wasn't Some
-                            m.as_mut().unwrap().map_data(|rs| {
-                                rs.retain(|r| {
-                                    // XXX: don't we technically need to translate the columns a
-                                    // bunch here? what if two key columns are reordered?
-                                    // XXX: this clone and collect here is *really* sad
-                                    let r = r.rec();
-                                    !missed_on.iter().any(|miss| {
-                                        miss.contains(
-                                            &partial_index
-                                                .columns
-                                                .iter()
-                                                .map(|&c| {
-                                                    #[allow(clippy::indexing_slicing)]
-                                                    // record came from processing, which means it
-                                                    // must have the right number of columns
-                                                    r[c].clone()
-                                                })
-                                                .collect::<Vec<_>>(),
-                                        )
-                                    })
-                                })
-                            });
-                        }
-
-                        // no more keys to replay, so we might as well terminate early
-                        if backfill_keys
-                            .as_ref()
-                            .map(|b| b.is_empty())
-                            .unwrap_or(false)
-                        {
-                            break 'outer;
-                        }
-
-                        // we successfully processed some upquery responses!
-                        //
-                        // at this point, we can discard the state that the replay used in n's
-                        // ancestors if they are beyond the materialization frontier (and thus
-                        // should not be allowed to amass significant state).
-                        //
-                        // we want to make sure we only remove state once it will no longer be
-                        // looked up into though. consider this dataflow graph:
-                        //
-                        //  (a)     (b)
-                        //   |       |
-                        //   |       |
-                        //  (q)      |
-                        //   |       |
-                        //   `--(j)--`
-                        //       |
-                        //
-                        // where j is a join, a and b are materialized, q is query-through. if we
-                        // removed state the moment a replay has passed through the next operator,
-                        // then the following could happen: a replay then comes from a, passes
-                        // through q, q then discards state from a and forwards to j. j misses in
-                        // b. replay happens to b, and re-triggers replay from a. however, state in
-                        // a is discarded, so replay to a needs to happen a second time. that's not
-                        // _wrong_, and we will eventually make progress, but it is pretty
-                        // inefficient.
-                        //
-                        // insted, we probably want the join to do the eviction. we achieve this by
-                        // only evicting from a after the replay has passed the join (or, more
-                        // generally, the operator that might perform lookups into a)
-                        if let Some(ref backfill_keys) = backfill_keys {
-                            // first and foremost -- evict the source of the replay (if we own it).
-                            // we only do this when the replay has reached its target, or if it's
-                            // about to leave the domain, otherwise we might evict state that a
-                            // later operator (like a join) will still do lookups into.
-                            if i == path.len() - 1 {
-                                // only evict if we own the state where the replay originated
-                                if let Some(src) = source {
-                                    #[allow(clippy::indexing_slicing)]
-                                    // src came from a replay path
-                                    let n = self.nodes[*src].borrow();
-                                    if n.beyond_mat_frontier() {
-                                        let state = self.state.get_mut(*src).ok_or_else(|| {
-                                            internal_err!("replay sourced at non-materialized node")
-                                        })?;
-                                        trace!(
-                                            node = n.global_addr().index(),
-                                            keys = ?backfill_keys,
-                                            "clearing keys from purgeable replay source after replay"
-                                        );
-                                        for key in backfill_keys {
-                                            state.mark_hole(key, tag);
-                                        }
-                                    }
+                // we successfully processed some upquery responses!
+                //
+                // at this point, we can discard the state that the replay used in n's
+                // ancestors if they are beyond the materialization frontier (and thus
+                // should not be allowed to amass significant state).
+                //
+                // we want to make sure we only remove state once it will no longer be
+                // looked up into though. consider this dataflow graph:
+                //
+                //  (a)     (b)
+                //   |       |
+                //   |       |
+                //  (q)      |
+                //   |       |
+                //   `--(j)--`
+                //       |
+                //
+                // where j is a join, a and b are materialized, q is query-through. if we
+                // removed state the moment a replay has passed through the next operator,
+                // then the following could happen: a replay then comes from a, passes
+                // through q, q then discards state from a and forwards to j. j misses in
+                // b. replay happens to b, and re-triggers replay from a. however, state in
+                // a is discarded, so replay to a needs to happen a second time. that's not
+                // _wrong_, and we will eventually make progress, but it is pretty
+                // inefficient.
+                //
+                // insted, we probably want the join to do the eviction. we achieve this by
+                // only evicting from a after the replay has passed the join (or, more
+                // generally, the operator that might perform lookups into a)
+                if let Some(ref backfill_keys) = backfill_keys {
+                    // first and foremost -- evict the source of the replay (if we own it).
+                    // we only do this when the replay has reached its target, or if it's
+                    // about to leave the domain, otherwise we might evict state that a
+                    // later operator (like a join) will still do lookups into.
+                    if i == path.len() - 1 {
+                        // only evict if we own the state where the replay originated
+                        if let Some(src) = source {
+                            #[allow(clippy::indexing_slicing)]
+                            // src came from a replay path
+                            let n = self.nodes[*src].borrow();
+                            if n.beyond_mat_frontier() {
+                                let state = self.state.get_mut(*src).ok_or_else(|| {
+                                    internal_err!("replay sourced at non-materialized node")
+                                })?;
+                                trace!(
+                                    node = n.global_addr().index(),
+                                    keys = ?backfill_keys,
+                                    "clearing keys from purgeable replay source after replay"
+                                );
+                                for key in backfill_keys {
+                                    state.mark_hole(key, tag);
                                 }
                             }
+                        }
+                    }
 
-                            // next, evict any state that we had to look up to process this replay.
-                            let mut evict_tags = Vec::new();
-                            let mut pns_for = None;
-                            let mut pns = Vec::new();
-                            let mut tmp = Vec::new();
-                            for lookup in process_result.lookups {
-                                // don't evict from our own state
-                                if lookup.on == segment.node {
+                    // next, evict any state that we had to look up to process this replay.
+                    let mut evict_tags = Vec::new();
+                    let mut pns_for = None;
+                    let mut pns = Vec::new();
+                    let mut tmp = Vec::new();
+                    for lookup in process_result.lookups {
+                        // don't evict from our own state
+                        if lookup.on == segment.node {
+                            continue;
+                        }
+
+                        // resolve any lookups through query-through nodes
+                        if pns_for != Some(lookup.on) {
+                            pns.clear();
+                            assert!(tmp.is_empty());
+                            tmp.push(lookup.on);
+
+                            while let Some(pn) = tmp.pop() {
+                                if self.state.contains_key(pn) {
+                                    #[allow(clippy::indexing_slicing)]
+                                    // we know the lookup was into a real node
+                                    if self.nodes[pn].borrow().beyond_mat_frontier() {
+                                        // we should evict from this!
+                                        pns.push(pn);
+                                    } else {
+                                        // we should _not_ evict from this
+                                    }
                                     continue;
                                 }
 
-                                // resolve any lookups through query-through nodes
-                                if pns_for != Some(lookup.on) {
-                                    pns.clear();
-                                    assert!(tmp.is_empty());
-                                    tmp.push(lookup.on);
-
-                                    while let Some(pn) = tmp.pop() {
-                                        if self.state.contains_key(pn) {
-                                            #[allow(clippy::indexing_slicing)]
-                                            // we know the lookup was into a real node
-                                            if self.nodes[pn].borrow().beyond_mat_frontier() {
-                                                // we should evict from this!
-                                                pns.push(pn);
-                                            } else {
-                                                // we should _not_ evict from this
-                                            }
-                                            continue;
-                                        }
-
-                                        // this parent needs to be resolved further
-                                        #[allow(clippy::indexing_slicing)]
-                                        // we know the lookup was into a real node
-                                        let pn = self.nodes[pn].borrow();
-                                        if !pn.can_query_through() {
-                                            internal!("lookup into non-materialized, non-query-through node.");
-                                        }
-
-                                        for &ppn in pn.parents() {
-                                            tmp.push(ppn);
-                                        }
-                                    }
-                                    pns_for = Some(lookup.on);
-                                }
-
-                                #[allow(clippy::unwrap_used)]
-                                // we know this is a partial replay path
-                                let tag_match = |rp: &ReplayPath, pn| {
-                                    let path_index = rp.target_index.as_ref().unwrap();
-                                    rp.target_node() == Some(pn)
-                                        && path_index.columns == lookup.cols
-                                        && path_index.index_type.supports_key(&lookup.key)
-                                };
-
-                                for &pn in &pns {
-                                    // this is a node that we were doing lookups into as part of
-                                    // the replay -- make sure we evict any state we may have added
-                                    // there.
-                                    evict_tags.retain(|tag| {
-                                        #[allow(clippy::indexing_slicing)]
-                                        // tag came from an internal data structure that guarantees
-                                        // it exists
-                                        tag_match(&self.replay_paths[*tag], pn)
-                                    });
-
-                                    let state = self.state.get_mut(pn).unwrap();
-                                    assert!(state.is_partial());
-
-                                    if evict_tags.is_empty() {
-                                        for index_type in IndexType::all_for_key(&lookup.key) {
-                                            if let Some(tags) = self.replay_paths.tags_for_index(
-                                                Destination(pn),
-                                                Target(pn),
-                                                &Index::new(*index_type, lookup.cols.clone()),
-                                            ) {
-                                                // this is the tag we would have used to fill a
-                                                // lookup hole in this ancestor, so this is the
-                                                // tag we need to evict from.
-
-                                                // TODO: could there have been multiple
-                                                invariant_eq!(tags.len(), 1);
-                                                #[allow(clippy::indexing_slicing)]
-                                                // we check len is 1 first
-                                                evict_tags.push(tags[0]);
-                                            }
-                                        }
-                                    }
-
-                                    if evict_tags.is_empty() {
-                                        internal!(
-                                            "no tag found for lookup target {:?}({:?}) (really {:?})",
-                                            self.nodes[lookup.on].borrow().global_addr(),
-                                            lookup.cols,
-                                            self.nodes[pn].borrow().global_addr());
-                                    }
-
-                                    #[allow(clippy::indexing_slicing)] // came from self.nodes
-                                    for tag in &evict_tags {
-                                        // NOTE: this assumes that the key order is the same
-                                        trace!(
-                                            node = self.nodes[pn].borrow().global_addr().index(),
-                                            key = ?&lookup.key,
-                                            "clearing keys from purgeable materialization after replay"
-                                        );
-                                        state.mark_hole(&lookup.key, *tag);
-                                    }
-                                }
-                            }
-                        }
-
-                        // we're all good -- continue propagating
-                        #[allow(clippy::unwrap_used)]
-                        // We would have bailed earlier (break 'outer, above) if m wasn't Some
-                        if m.as_ref().unwrap().is_empty() {
-                            if let Packet::ReplayPiece {
-                                context: ReplayPieceContext::Regular { last: false },
-                                ..
-                            } = m.as_deref().unwrap()
-                            {
-                                trace!("dropping empty non-terminal full replay packet");
-                                // don't continue processing empty updates, *except* if this is the
-                                // last replay batch. in that case we need to send it so that the
-                                // next domain knows that we're done
-                                // TODO: we *could* skip ahead to path.last() here
-                                break;
-                            }
-                        }
-
-                        #[allow(clippy::unwrap_used)]
-                        // We would have bailed earlier (break 'outer, above) if m wasn't Some
-                        if i + 1 < path.len() {
-                            // update link for next iteration
-                            #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
-                            if self.nodes[path[i + 1].node].borrow().is_shard_merger() {
-                                // we need to preserve the egress src for shard mergers
-                                // (which includes shard identifier)
-                            } else {
-                                m.as_mut().unwrap().link_mut().src = segment.node;
-                            }
-                            m.as_mut().unwrap().link_mut().dst = {
+                                // this parent needs to be resolved further
                                 #[allow(clippy::indexing_slicing)]
-                                // we already checked i + 1 isn't out-of-bounds
-                                path[i + 1].node
-                            };
-                        }
+                                // we know the lookup was into a real node
+                                let pn = self.nodes[pn].borrow();
+                                if !pn.can_query_through() {
+                                    internal!(
+                                        "lookup into non-materialized, non-query-through node."
+                                    );
+                                }
 
-                        // feed forward the updated backfill_keys
-                        #[allow(clippy::unwrap_used)]
-                        // We would have bailed earlier (break 'outer, above) if m wasn't Some
-                        if let Packet::ReplayPiece {
-                            context:
-                                ReplayPieceContext::Partial {
-                                    ref mut for_keys, ..
-                                },
-                            ..
-                        } = m.as_deref_mut().unwrap()
-                        {
-                            *for_keys = backfill_keys.unwrap();
-                        }
-                    }
-
-                    #[allow(clippy::unwrap_used)]
-                    // We would have bailed earlier (break 'outer, above) if m wasn't Some
-                    let context = if let Packet::ReplayPiece { context, .. } = *m.unwrap() {
-                        context
-                    } else {
-                        internal!("started as a replay, now not a replay?");
-                    };
-
-                    match context {
-                        ReplayPieceContext::Regular { last } if last => {
-                            debug!(terminal = notify_done, "last batch processed");
-                            if notify_done {
-                                debug!(local = dst.id(), "last batch received");
-                                finished = Some((tag, dst, target.unwrap(), None));
+                                for &ppn in pn.parents() {
+                                    tmp.push(ppn);
+                                }
                             }
+                            pns_for = Some(lookup.on);
                         }
-                        ReplayPieceContext::Regular { .. } => {
-                            debug!("batch processed");
-                        }
-                        ReplayPieceContext::Partial { for_keys, .. } => {
-                            if dst_is_reader {
-                                if self
-                                    .nodes
-                                    .get(dst)
-                                    .ok_or_else(|| ReadySetError::NoSuchNode(dst.id()))?
-                                    .borrow()
-                                    .beyond_mat_frontier()
-                                {
-                                    // make sure we eventually evict these from here
-                                    self.timed_purges.push_back(TimedPurge {
-                                        time: time::Instant::now()
-                                            + time::Duration::from_millis(50),
-                                        keys: for_keys,
-                                        view: dst,
-                                    });
+
+                        #[allow(clippy::unwrap_used)]
+                        // we know this is a partial replay path
+                        let tag_match = |rp: &ReplayPath, pn| {
+                            let path_index = rp.target_index.as_ref().unwrap();
+                            rp.target_node() == Some(pn)
+                                && path_index.columns == lookup.cols
+                                && path_index.index_type.supports_key(&lookup.key)
+                        };
+
+                        for &pn in &pns {
+                            // this is a node that we were doing lookups into as part of
+                            // the replay -- make sure we evict any state we may have added
+                            // there.
+                            evict_tags.retain(|tag| {
+                                #[allow(clippy::indexing_slicing)]
+                                // tag came from an internal data structure that guarantees
+                                // it exists
+                                tag_match(&self.replay_paths[*tag], pn)
+                            });
+
+                            let state = self.state.get_mut(pn).unwrap();
+                            assert!(state.is_partial());
+
+                            if evict_tags.is_empty() {
+                                for index_type in IndexType::all_for_key(&lookup.key) {
+                                    if let Some(tags) = self.replay_paths.tags_for_index(
+                                        Destination(pn),
+                                        Target(pn),
+                                        &Index::new(*index_type, lookup.cols.clone()),
+                                    ) {
+                                        // this is the tag we would have used to fill a
+                                        // lookup hole in this ancestor, so this is the
+                                        // tag we need to evict from.
+
+                                        // TODO: could there have been multiple
+                                        invariant_eq!(tags.len(), 1);
+                                        #[allow(clippy::indexing_slicing)]
+                                        // we check len is 1 first
+                                        evict_tags.push(tags[0]);
+                                    }
                                 }
-                                assert_ne!(finished_partial, 0);
-                            } else if !dst_is_sender {
-                                trace!(local = dst.id(), "partial replay completed");
-                                if finished_partial == 0 {
-                                    assert!(for_keys.is_empty());
-                                }
-                                finished = Some((tag, dst, target.unwrap(), Some(for_keys)));
-                            } else {
-                                // we're just on the replay path
+                            }
+
+                            if evict_tags.is_empty() {
+                                internal!(
+                                    "no tag found for lookup target {:?}({:?}) (really {:?})",
+                                    self.nodes[lookup.on].borrow().global_addr(),
+                                    lookup.cols,
+                                    self.nodes[pn].borrow().global_addr()
+                                );
+                            }
+
+                            #[allow(clippy::indexing_slicing)] // came from self.nodes
+                            for tag in &evict_tags {
+                                // NOTE: this assumes that the key order is the same
+                                trace!(
+                                    node = self.nodes[pn].borrow().global_addr().index(),
+                                    key = ?&lookup.key,
+                                    "clearing keys from purgeable materialization after replay"
+                                );
+                                state.mark_hole(&lookup.key, *tag);
                             }
                         }
                     }
                 }
-                _ => {
-                    internal!();
+
+                // we're all good -- continue propagating
+                #[allow(clippy::unwrap_used)]
+                // We would have bailed earlier (break 'outer, above) if m wasn't Some
+                if m.as_ref().unwrap().is_empty() {
+                    if let Packet::ReplayPiece {
+                        context: ReplayPieceContext::Regular { last: false },
+                        ..
+                    } = m.as_deref().unwrap()
+                    {
+                        trace!("dropping empty non-terminal full replay packet");
+                        // don't continue processing empty updates, *except* if this is the
+                        // last replay batch. in that case we need to send it so that the
+                        // next domain knows that we're done
+                        // TODO: we *could* skip ahead to path.last() here
+                        break;
+                    }
+                }
+
+                #[allow(clippy::unwrap_used)]
+                // We would have bailed earlier (break 'outer, above) if m wasn't Some
+                if i + 1 < path.len() {
+                    // update link for next iteration
+                    #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
+                    if self.nodes[path[i + 1].node].borrow().is_shard_merger() {
+                        // we need to preserve the egress src for shard mergers
+                        // (which includes shard identifier)
+                    } else {
+                        m.as_mut().unwrap().link_mut().src = segment.node;
+                    }
+                    m.as_mut().unwrap().link_mut().dst = {
+                        #[allow(clippy::indexing_slicing)]
+                        // we already checked i + 1 isn't out-of-bounds
+                        path[i + 1].node
+                    };
+                }
+
+                // feed forward the updated backfill_keys
+                #[allow(clippy::unwrap_used)]
+                // We would have bailed earlier (break 'outer, above) if m wasn't Some
+                if let Packet::ReplayPiece {
+                    context:
+                        ReplayPieceContext::Partial {
+                            ref mut for_keys, ..
+                        },
+                    ..
+                } = m.as_deref_mut().unwrap()
+                {
+                    *for_keys = backfill_keys.unwrap();
                 }
             }
+
+            #[allow(clippy::unwrap_used)]
+            // We would have bailed earlier (break 'outer, above) if m wasn't Some
+            let context = if let Packet::ReplayPiece { context, .. } = *m.unwrap() {
+                context
+            } else {
+                internal!("started as a replay, now not a replay?");
+            };
+
+            match context {
+                ReplayPieceContext::Regular { last } if last => {
+                    debug!(terminal = notify_done, "last batch processed");
+                    if notify_done {
+                        debug!(local = dst.id(), "last batch received");
+                        finished = Some((tag, dst, target.unwrap(), None));
+                    }
+                }
+                ReplayPieceContext::Regular { .. } => {
+                    debug!("batch processed");
+                }
+                ReplayPieceContext::Partial { for_keys, .. } => {
+                    if dst_is_reader {
+                        if self
+                            .nodes
+                            .get(dst)
+                            .ok_or_else(|| ReadySetError::NoSuchNode(dst.id()))?
+                            .borrow()
+                            .beyond_mat_frontier()
+                        {
+                            // make sure we eventually evict these from here
+                            self.timed_purges.push_back(TimedPurge {
+                                time: time::Instant::now() + time::Duration::from_millis(50),
+                                keys: for_keys,
+                                view: dst,
+                            });
+                        }
+                        assert_ne!(finished_partial, 0);
+                    } else if !dst_is_sender {
+                        trace!(local = dst.id(), "partial replay completed");
+                        if finished_partial == 0 {
+                            assert!(for_keys.is_empty());
+                        }
+                        finished = Some((tag, dst, target.unwrap(), Some(for_keys)));
+                    } else {
+                        // we're just on the replay path
+                    }
+                }
+            }
+
             break;
         }
 
