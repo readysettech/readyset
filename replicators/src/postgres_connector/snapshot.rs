@@ -5,8 +5,10 @@ use std::future;
 
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt, TryFutureExt};
+use metrics::register_gauge;
 use nom_sql::{parse_key_specification_string, Dialect, Relation, SqlIdentifier, TableKey};
 use postgres_types::{accepts, FromSql, Type};
+use readyset::metrics::recorded;
 use readyset::recipe::changelist::ChangeList;
 use readyset::{ReadySetError, ReadySetResult};
 use readyset_data::DfValue;
@@ -286,11 +288,21 @@ impl TableDescription {
 
         let mut noria_rows = Vec::with_capacity(BATCH_SIZE);
 
-        info!(rows = %nrows, "Replication started");
+        info!(rows = %nrows, "Snapshotting started");
+        let progress_percentage_metric: metrics::Gauge = register_gauge!(
+            recorded::REPLICATOR_SNAPSHOT_PERCENT,
+            "schema" => self.schema()?.to_string(),
+            "name" => self.name.name.to_string()
+        );
+
         while let Some(Ok(row)) = binary_rows.next().await {
             let noria_row = (0..type_map.len())
                 .map(|i| row.try_get::<DfValue>(i))
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|err| {
+                    progress_percentage_metric.set(0.0);
+                    err
+                })?;
 
             noria_rows.push(noria_row);
             cnt += 1;
@@ -303,20 +315,30 @@ impl TableDescription {
                         &mut noria_rows,
                         Vec::with_capacity(BATCH_SIZE),
                     ))
-                    .await?;
+                    .await
+                    .map_err(|err| {
+                        progress_percentage_metric.set(0.0);
+                        err
+                    })?;
             }
 
             if cnt % 1_000_000 == 0 {
-                let progress = format!("{:.2}%", (cnt as f64 / nrows as f64) * 100.);
-                info!(rows_replicated = %cnt, %progress, "Replication progress");
+                let progress_percent = (cnt as f64 / nrows as f64) * 100.;
+                let progress = format!("{:.2}%", progress_percent);
+                info!(rows_replicated = %cnt, %progress, "Snapshotting progress");
+                progress_percentage_metric.set(progress_percent);
             }
         }
 
         if !noria_rows.is_empty() {
-            noria_table.insert_many(noria_rows).await?;
+            noria_table.insert_many(noria_rows).await.map_err(|err| {
+                progress_percentage_metric.set(0.0);
+                err
+            })?;
         }
 
-        info!(rows_replicated = %cnt, "Replication finished");
+        info!(rows_replicated = %cnt, "Snapshotting finished");
+        progress_percentage_metric.set(100.0);
 
         Ok(())
     }

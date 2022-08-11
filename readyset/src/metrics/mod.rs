@@ -408,6 +408,13 @@ pub mod recorded {
     /// | status | SnapshotStatusTag |
     pub const REPLICATOR_SNAPSHOT_STATUS: &str = "replicator.snapshot_status";
 
+    /// Gauge: Progress (in percent, 0-100) in snapshotting the given table
+    ///
+    /// | Tag | Description |
+    /// | schema | Schema the relevant table exists in |
+    /// | name | Name of the table being snapshot |
+    pub const REPLICATOR_SNAPSHOT_PERCENT: &str = "replicator.snapshot.percent";
+
     /// Counter: Number of failures encountered when following the replication
     /// log.
     pub const REPLICATOR_FAILURE: &str = "replicator.update_failure";

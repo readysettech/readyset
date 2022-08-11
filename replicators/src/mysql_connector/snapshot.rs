@@ -7,10 +7,12 @@ use futures::future::TryFutureExt;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use itertools::Itertools;
+use metrics::register_gauge;
 use mysql::prelude::*;
 use mysql::{Transaction, TxOpts};
 use mysql_async as mysql;
 use nom_sql::Relation;
+use readyset::metrics::recorded;
 use readyset::recipe::changelist::ChangeList;
 use readyset::replication::{ReplicationOffset, ReplicationOffsets};
 use readyset::ReadySetResult;
@@ -269,6 +271,10 @@ impl MySqlReplicator {
         info!(rows = %nrows, "Replication started");
 
         table_mutator.set_snapshot_mode(true).await?;
+        let progress_percentage_metric: metrics::Gauge = register_gauge!(
+            recorded::REPLICATOR_SNAPSHOT_PERCENT,
+            "name" => table_mutator.table_name().to_string(),
+        );
 
         loop {
             let row = match row_stream.next().await {
@@ -278,7 +284,10 @@ impl MySqlReplicator {
                     info!(error = %err, "Error encountered during snapshot, but all rows replicated succesfully");
                     break;
                 }
-                Err(err) => return Err(err).map_err(log_err),
+                Err(err) => {
+                    progress_percentage_metric.set(0.0);
+                    return Err(err).map_err(log_err);
+                }
             };
 
             rows.push(row);
@@ -287,23 +296,29 @@ impl MySqlReplicator {
             if rows.len() == BATCH_SIZE {
                 // We aggregate rows into batches and then send them all to noria
                 let send_rows = std::mem::replace(&mut rows, Vec::with_capacity(BATCH_SIZE));
-                table_mutator
-                    .insert_many(send_rows)
-                    .await
-                    .map_err(log_err)?;
+                table_mutator.insert_many(send_rows).await.map_err(|err| {
+                    progress_percentage_metric.set(0.0);
+                    log_err(err)
+                })?;
             }
 
             if cnt % 1_000_000 == 0 && nrows > 0 {
-                let progress = format!("{:.2}%", (cnt as f64 / nrows as f64) * 100.);
+                let progress_percent = (cnt as f64 / nrows as f64) * 100.;
+                let progress = format!("{:.2}%", progress_percent);
                 info!(rows_replicated = %cnt, %progress, "Replication progress");
+                progress_percentage_metric.set(progress_percent);
             }
         }
 
         if !rows.is_empty() {
-            table_mutator.insert_many(rows).await.map_err(log_err)?;
+            table_mutator.insert_many(rows).await.map_err(|err| {
+                progress_percentage_metric.set(0.0);
+                log_err(err)
+            })?;
         }
 
         info!(rows_replicated = %cnt, "Replication finished");
+        progress_percentage_metric.set(100.0);
 
         Ok(())
     }
