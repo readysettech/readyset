@@ -504,7 +504,6 @@ impl Default for Config {
             sharding: None,
             materialization_config: Default::default(),
             domain_config: DomainConfig {
-                concurrent_replays: 512,
                 aggressively_update_state_sizes: false,
                 view_request_timeout: Duration::from_millis(5000),
                 // This RPC timeout must be long enough to handle compaction RPCs and extremely
@@ -603,10 +602,6 @@ pub struct WorkerOptions {
     /// parameters
     #[clap(long, env = "EXPERIMENTAL_MIXED_COMPARISONS_SUPPORT", hide = true)]
     pub enable_experimental_mixed_comparisons: bool,
-
-    /// Sets the number of concurrent replay requests in a noria-server.
-    #[clap(long, hide = true)]
-    pub max_concurrent_replays: Option<usize>,
 
     /// Directory in which to store replicated table data. If not specified, defaults to the
     /// current working directory.

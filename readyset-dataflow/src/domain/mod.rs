@@ -43,8 +43,6 @@ use crate::{backlog, DomainRequest, Readers};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Config {
-    pub concurrent_replays: usize,
-
     /// If set to `true`, the metric tracking the in-memory size of materialized state will be
     /// updated after every packet is handled, rather than only when requested by the eviction
     /// worker. This causes a (minor) runtime cost, with the upside being that the materialization
@@ -418,9 +416,6 @@ impl DomainBuilder {
 
             timed_purges: Default::default(),
 
-            concurrent_replays: 0,
-            max_concurrent_replays: self.config.concurrent_replays,
-            replay_request_queue: Default::default(),
             delayed_for_self: Default::default(),
 
             state_size,
@@ -500,10 +495,6 @@ pub struct Domain {
     /// * Each node referenced by a `view` of a TimedPurge must be in `self.nodes`
     /// * Each node referenced by a `view` of a TimedPurge must be a reader node
     timed_purges: VecDeque<TimedPurge>,
-
-    concurrent_replays: usize,
-    max_concurrent_replays: usize,
-    replay_request_queue: VecDeque<(Tag, Vec<KeyComparison>)>,
 
     readers: Readers,
     channel_coordinator: Arc<ChannelCoordinator>,
@@ -642,10 +633,7 @@ impl Domain {
                 continue;
             }
 
-            // NOTE: due to max_concurrent_replays, it may be that we only replay from *some* of
-            // these ancestors now, and some later. this will cause more of the replay to be
-            // buffered up at the union above us, but that's probably fine.
-            self.request_partial_replay(tag, miss_keys.clone())?;
+            self.send_partial_replay_request(tag, miss_keys.clone())?;
         }
 
         Ok(())
@@ -766,7 +754,6 @@ impl Domain {
         tag: Tag,
         keys: Vec<KeyComparison>,
     ) -> ReadySetResult<()> {
-        debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
         let requesting_shard = self.shard();
         let requesting_replica = self.replica();
 
@@ -790,14 +777,7 @@ impl Domain {
             if ask_shard_by_key_i.is_none() && options.len() != 1 {
                 // source is sharded by a different key than we are doing lookups for,
                 // so we need to trigger on all the shards.
-                self.concurrent_replays += 1;
-                trace!(
-                    ?tag,
-                    ?keys,
-                    buffered = self.replay_request_queue.len(),
-                    concurrent = self.concurrent_replays,
-                    "sending shuffled shard replay request"
-                );
+                trace!(?tag, ?keys, "sending shuffled shard replay request");
 
                 for trigger in options {
                     if trigger
@@ -816,12 +796,9 @@ impl Domain {
                 return Ok(());
             }
 
-            self.concurrent_replays += 1;
             trace!(
                 tag = ?tag,
                 keys = ?keys,
-                buffered = %self.replay_request_queue.len(),
-                concurrent = %self.concurrent_replays,
                 "sending replay request",
             );
 
@@ -874,27 +851,6 @@ impl Domain {
         Ok(())
     }
 
-    fn request_partial_replay(
-        &mut self,
-        tag: Tag,
-        keys: Vec<KeyComparison>,
-    ) -> Result<(), ReadySetError> {
-        if self.concurrent_replays < self.max_concurrent_replays {
-            assert_eq!(self.replay_request_queue.len(), 0);
-            self.send_partial_replay_request(tag, keys)?;
-            Ok(())
-        } else {
-            trace!(
-                tag = ?tag,
-                keys = ?keys,
-                buffered = %self.replay_request_queue.len(),
-                "buffering replay request"
-            );
-            self.replay_request_queue.push_back((tag, keys));
-            Ok(())
-        }
-    }
-
     /// Called when a partial replay has been completed
     ///
     /// # Invariants
@@ -905,12 +861,6 @@ impl Domain {
         match self.replay_paths[tag].trigger {
             TriggerEndpoint::End { .. } => {
                 // A backfill request we made to another domain was just satisfied!
-                // We can now issue another request from the concurrent replay queue.
-                // However, since unions require multiple backfill requests, but produce only one
-                // backfill reply, we need to check how many requests we're now free to issue. If
-                // we just naively release one slot here, a union with two parents would mean that
-                // `self.concurrent_replays` constantly grows by +1 (+2 for the backfill requests,
-                // -1 when satisfied), which would lead to a deadlock!
                 let mut requests_satisfied = 0;
                 #[allow(clippy::unwrap_used)] // Replay paths can't be empty
                 let last = self.replay_paths[tag].last_segment();
@@ -937,38 +887,7 @@ impl Domain {
 
                 // we also sent that many requests *per key*.
                 requests_satisfied *= num;
-
-                // TODO: figure out why this can underflow
-                self.concurrent_replays =
-                    self.concurrent_replays.saturating_sub(requests_satisfied);
-                trace!(
-                    num_done = requests_satisfied,
-                    ongoing = self.concurrent_replays,
-                    "notified of finished replay"
-                );
-                debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
-                let mut per_tag = HashMap::new();
-                while self.concurrent_replays < self.max_concurrent_replays {
-                    if let Some((tag, mut keys)) = self.replay_request_queue.pop_front() {
-                        per_tag
-                            .entry(tag)
-                            .or_insert_with(Vec::new)
-                            .append(&mut keys);
-                    } else {
-                        break;
-                    }
-                }
-
-                for (tag, keys) in per_tag {
-                    trace!(
-                        ?tag,
-                        ?keys,
-                        left = self.replay_request_queue.len(),
-                        ongoing = self.concurrent_replays,
-                        "releasing replay request"
-                    );
-                    self.send_partial_replay_request(tag, keys)?;
-                }
+                trace!(num_done = requests_satisfied, "notified of finished replay");
                 Ok(())
             }
             TriggerEndpoint::Local(..) => {
@@ -2888,11 +2807,6 @@ impl Domain {
                         //     this is important, as misses will cause backfill_keys to be pruned
                         //     over time, which would cause finished_partial to hold the wrong
                         //     value!
-                        //  3. if the last node on this path is a reader, or is a ::End (so we
-                        //     triggered the replay) then we need to decrement the concurrent
-                        //     replay count! note that it's *not* sufficient to check if the
-                        //     *current* node is a target/reader, because we could miss during a
-                        //     join along the path.
                         if let Some(backfill_keys) = &backfill_keys {
                             if finished_partial == 0 && (dst_is_reader || !dst_is_sender) {
                                 finished_partial = backfill_keys.len();

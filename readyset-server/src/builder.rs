@@ -78,10 +78,6 @@ impl Builder {
             builder.set_volume_id(volume_id);
         }
 
-        if let Some(r) = opts.max_concurrent_replays {
-            builder.set_max_concurrent_replay(r)
-        }
-
         let persistence_params = PersistenceParameters::new(
             opts.durability,
             Some(deployment.into()),
@@ -100,15 +96,6 @@ impl Builder {
         let mut builder = Self::default();
         builder.set_abort_on_task_failure(false);
         builder
-    }
-
-    /// Set the maximum number of concurrent partial replay requests a domain can have outstanding
-    /// at any given time.
-    ///
-    /// Note that this number *must* be greater than the width (in terms of number of ancestors) of
-    /// the widest union in the graph, otherwise a deadlock will occur.
-    pub fn set_max_concurrent_replay(&mut self, n: usize) {
-        self.config.domain_config.concurrent_replays = n;
     }
 
     /// Set the persistence parameters used by the system.
