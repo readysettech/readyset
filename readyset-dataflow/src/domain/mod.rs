@@ -2536,18 +2536,12 @@ impl Domain {
                         let partial_keys = path.first().partial_index.as_ref().unwrap();
                         data.retain(|r| {
                             for_keys.iter().any(|k| {
-                                k.contains(
-                                    &partial_keys
-                                        .columns
-                                        .iter()
-                                        .map(|c| {
-                                            #[allow(clippy::indexing_slicing)]
-                                            // record came from processing, which means it
-                                            // must have the right number of columns
-                                            r[*c].clone()
-                                        })
-                                        .collect::<Vec<_>>(),
-                                )
+                                k.contains(partial_keys.columns.iter().map(|c| {
+                                    #[allow(clippy::indexing_slicing)]
+                                    // record came from processing, which means it
+                                    // must have the right number of columns
+                                    &r[*c]
+                                }))
                             })
                         });
                     }
@@ -2874,18 +2868,12 @@ impl Domain {
                             // XXX: this clone and collect here is *really* sad
                             let r = r.rec();
                             !missed_on.iter().any(|miss| {
-                                miss.contains(
-                                    &partial_index
-                                        .columns
-                                        .iter()
-                                        .map(|&c| {
-                                            #[allow(clippy::indexing_slicing)]
-                                            // record came from processing, which means it
-                                            // must have the right number of columns
-                                            r[c].clone()
-                                        })
-                                        .collect::<Vec<_>>(),
-                                )
+                                miss.contains(partial_index.columns.iter().map(|&c| {
+                                    #[allow(clippy::indexing_slicing)]
+                                    // record came from processing, which means it
+                                    // must have the right number of columns
+                                    &r[c]
+                                }))
                             })
                         })
                     });

@@ -514,15 +514,21 @@ impl KeyComparison {
     /// ```
     pub fn contains<'a, I>(&'a self, key: I) -> bool
     where
-        I: IntoIterator<Item = &'a DataType>,
+        I: IntoIterator<Item = &'a DataType> + Clone,
     {
         match self {
             Self::Equal(equal) => key.into_iter().cmp(equal.iter()) == Ordering::Equal,
-            Self::Range((lower, upper)) => (
-                lower.as_ref().map(|x| x.iter().collect::<Vec<_>>()),
-                upper.as_ref().map(|x| x.iter().collect::<Vec<_>>()),
-            )
-                .contains(&key.into_iter().collect::<Vec<_>>()),
+            Self::Range((lower, upper)) => {
+                (match lower {
+                    Bound::Included(start) => key.clone().into_iter().cmp(start.iter()).is_ge(),
+                    Bound::Excluded(start) => key.clone().into_iter().cmp(start.iter()).is_gt(),
+                    Bound::Unbounded => true,
+                }) && (match upper {
+                    Bound::Included(end) => key.into_iter().cmp(end.iter()).is_le(),
+                    Bound::Excluded(end) => key.into_iter().cmp(end.iter()).is_lt(),
+                    Bound::Unbounded => true,
+                })
+            }
         }
     }
 
