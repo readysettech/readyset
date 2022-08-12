@@ -7,7 +7,7 @@ use mysql_time::MysqlTime;
 use nom_sql::SqlType;
 use postgres_types::Kind;
 use readyset::{ReadySetError, ReadySetResult};
-use readyset_data::{Array, DfValue};
+use readyset_data::{Array, DfType, DfValue};
 use readyset_errors::unsupported;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
@@ -347,7 +347,8 @@ impl wal::TupleData {
                                 _ => unsupported!("unsupported type {}", spec.data_type),
                             }));
 
-                            DfValue::from(str.parse::<Array>()?).coerce_to(&target_sql_type)?
+                            DfValue::from(str.parse::<Array>()?)
+                                .coerce_to(&target_sql_type, &DfType::Unknown)?
                         }
                         _ => match spec.data_type {
                             PGType::BOOL => DfValue::UnsignedInt(match str.as_ref() {

@@ -18,8 +18,8 @@ use crate::like::{CaseInsensitive, CaseSensitive, LikePattern};
 use crate::{utils, BuiltinFunction, Expr};
 
 macro_rules! try_cast_or_none {
-    ($df_value:expr, $sqltype:expr) => {{
-        match $df_value.coerce_to($sqltype) {
+    ($df_value:expr, $sqltype:expr, $from_sqltype:expr) => {{
+        match $df_value.coerce_to($sqltype, $from_sqltype) {
             Ok(v) => v,
             Err(_) => return Ok(DfValue::None),
         }
@@ -27,10 +27,10 @@ macro_rules! try_cast_or_none {
 }
 
 macro_rules! get_time_or_default {
-    ($df_value:expr) => {
+    ($df_value:expr, $from_sqltype:expr) => {
         $df_value
-            .coerce_to(&SqlType::Timestamp)
-            .or($df_value.coerce_to(&SqlType::Time))
+            .coerce_to(&SqlType::Timestamp, $from_sqltype)
+            .or($df_value.coerce_to(&SqlType::Time, $from_sqltype))
             .unwrap_or(DfValue::None)
     };
 }
@@ -127,14 +127,17 @@ impl Expr {
             } => {
                 use BinaryOperator::*;
 
+                let left_ty = left.ty();
+                let right_ty = right.ty();
+
                 let left = left.eval(record)?;
                 let right = right.eval(record)?;
 
                 macro_rules! like {
                     ($case_sensitivity: expr, $negated: expr) => {{
                         match (
-                            left.coerce_to(&SqlType::Text),
-                            right.coerce_to(&SqlType::Text),
+                            left.coerce_to(&SqlType::Text, left_ty),
+                            right.coerce_to(&SqlType::Text, right_ty),
                         ) {
                             (Ok(left), Ok(right)) => {
                                 // NOTE(grfn): At some point, we may want to optimize this to
@@ -180,16 +183,16 @@ impl Expr {
             }
             Cast { expr, to_type, .. } => {
                 let res = expr.eval(record)?;
-                Ok(res.coerce_to(to_type)?)
+                Ok(res.coerce_to(to_type, expr.ty())?)
             }
             Call { func, .. } => match &**func {
                 BuiltinFunction::ConvertTZ(arg1, arg2, arg3) => {
                     let param1 = arg1.eval(record)?;
                     let param2 = arg2.eval(record)?;
                     let param3 = arg3.eval(record)?;
-                    let param1_cast = try_cast_or_none!(param1, &SqlType::Timestamp);
-                    let param2_cast = try_cast_or_none!(param2, &SqlType::Text);
-                    let param3_cast = try_cast_or_none!(param3, &SqlType::Text);
+                    let param1_cast = try_cast_or_none!(param1, &SqlType::Timestamp, arg1.ty());
+                    let param2_cast = try_cast_or_none!(param2, &SqlType::Text, arg2.ty());
+                    let param3_cast = try_cast_or_none!(param3, &SqlType::Text, arg3.ty());
                     match convert_tz(
                         &(NaiveDateTime::try_from(&param1_cast))?,
                         <&str>::try_from(&param2_cast)?,
@@ -201,7 +204,7 @@ impl Expr {
                 }
                 BuiltinFunction::DayOfWeek(arg) => {
                     let param = arg.eval(record)?;
-                    let param_cast = try_cast_or_none!(param, &SqlType::Date);
+                    let param_cast = try_cast_or_none!(param, &SqlType::Date, arg.ty());
                     Ok(DfValue::Int(
                         day_of_week(&(NaiveDate::try_from(&param_cast)?)) as i64,
                     ))
@@ -217,7 +220,7 @@ impl Expr {
                 }
                 BuiltinFunction::Month(arg) => {
                     let param = arg.eval(record)?;
-                    let param_cast = try_cast_or_none!(param, &SqlType::Date);
+                    let param_cast = try_cast_or_none!(param, &SqlType::Date, arg.ty());
                     Ok(DfValue::UnsignedInt(
                         month(&(NaiveDate::try_from(non_null!(param_cast))?)) as u64,
                     ))
@@ -226,8 +229,8 @@ impl Expr {
                     let param1 = arg1.eval(record)?;
                     let param2 = arg2.eval(record)?;
                     let null_result = Ok(DfValue::None);
-                    let time_param1 = get_time_or_default!(param1);
-                    let time_param2 = get_time_or_default!(param2);
+                    let time_param1 = get_time_or_default!(param1, arg1.ty());
+                    let time_param2 = get_time_or_default!(param2, arg2.ty());
                     if time_param1.is_none()
                         || time_param1
                             .sql_type()
@@ -253,11 +256,11 @@ impl Expr {
                 BuiltinFunction::Addtime(arg1, arg2) => {
                     let param1 = arg1.eval(record)?;
                     let param2 = arg2.eval(record)?;
-                    let time_param2 = get_time_or_default!(param2);
+                    let time_param2 = get_time_or_default!(param2, arg2.ty());
                     if time_param2.is_datetime() {
                         return Ok(DfValue::None);
                     }
-                    let time_param1 = get_time_or_default!(param1);
+                    let time_param1 = get_time_or_default!(param1, arg1.ty());
                     if time_param1.is_datetime() {
                         Ok(DfValue::TimestampTz(
                             addtime_datetime(
@@ -377,7 +380,11 @@ impl Expr {
                 BuiltinFunction::JsonTypeof(expr) | BuiltinFunction::JsonbTypeof(expr) => {
                     // TODO: Change this to coerce to `SqlType::Jsonb` and have it return a
                     // `DfValue` actually representing JSON.
-                    let val = try_cast_or_none!(non_null!(&expr.eval(record)?), &SqlType::Text);
+                    let val = try_cast_or_none!(
+                        non_null!(&expr.eval(record)?),
+                        &SqlType::Text,
+                        expr.ty()
+                    );
                     let json_str = <&str>::try_from(&val)?;
 
                     let json = serde_json::Value::from_str(json_str).map_err(|e| {

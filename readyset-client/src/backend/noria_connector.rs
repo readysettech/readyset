@@ -1171,7 +1171,7 @@ impl NoriaConnector {
                                 "Row returned from noria-server had the wrong number of columns",
                             )
                         })?
-                        .coerce_to(&field.sql_type)?;
+                        .coerce_to(&field.sql_type, &DfType::Unknown)?; // No from_ty, we're inserting literals
                     buf[ri][idx] = value;
                 }
             }
@@ -1502,7 +1502,7 @@ fn build_view_query(
                 .position(|x| x.spec.column.name == col.name)
                 .ok_or_else(|| ReadySetError::NoSuchColumn(col.name.to_string()))?;
             let key_type = key_types.remove(idx);
-            let value = key[idx].coerce_to(key_type)?;
+            let value = key[idx].coerce_to(key_type, &DfType::Unknown)?; // No from_ty, key values are literals
             if !key.is_empty() {
                 // the LIKE/ILIKE isn't our only key, add the rest back to `keys`
                 raw_keys.push(key);
@@ -1567,7 +1567,8 @@ fn build_view_query(
                                 continue;
                             };
                             // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
-                            let value = key[*idx - 1].coerce_to(key_type)?;
+                            // also, no from_ty since the key value is a literal
+                            let value = key[*idx - 1].coerce_to(key_type, &DfType::Unknown)?;
 
                             let make_op = |op| DfExpr::Op {
                                 left: Box::new(DfExpr::Column {
@@ -1631,8 +1632,11 @@ fn build_view_query(
                         ViewPlaceholder::Between(lower_idx, upper_idx) => {
                             let key_type = key_types[key_column_idx];
                             // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
-                            let lower_value = key[*lower_idx - 1].coerce_to(key_type)?;
-                            let upper_value = key[*upper_idx - 1].coerce_to(key_type)?;
+                            // also, no from_ty since the key value is a literal
+                            let lower_value =
+                                key[*lower_idx - 1].coerce_to(key_type, &DfType::Unknown)?;
+                            let upper_value =
+                                key[*upper_idx - 1].coerce_to(key_type, &DfType::Unknown)?;
                             let (lower_key, upper_key) =
                                 bounds.get_or_insert_with(Default::default);
                             lower_key.push(lower_value);
@@ -1644,8 +1648,9 @@ fn build_view_query(
                         } => {
                             // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
                             // offset parameters should always be a BigInt
+                            // also, no from_ty since the key value is a literal
                             let offset: u64 = key[*offset_placeholder - 1]
-                                .coerce_to(&nom_sql::SqlType::BigInt(None))?
+                                .coerce_to(&nom_sql::SqlType::BigInt(None), &DfType::Unknown)?
                                 .try_into()?;
                             if offset % *limit != 0 {
                                 unsupported!(

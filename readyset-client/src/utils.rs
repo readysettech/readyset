@@ -6,7 +6,7 @@ use nom_sql::{
     InsertStatement, Literal, SelectStatement, SqlQuery, TableKey, UpdateStatement,
 };
 use readyset::{Modification, Operation};
-use readyset_data::DfValue;
+use readyset_data::{DfType, DfValue};
 use readyset_errors::{
     bad_request_err, invariant, invariant_eq, unsupported, unsupported_err, ReadySetResult,
 };
@@ -449,7 +449,10 @@ where
                 Expr::Literal(ref v) => {
                     updates.push((
                         i,
-                        Modification::Set(DfValue::try_from(v)?.coerce_to(&field.sql_type)?),
+                        // Coercing from a literal, so no "from" type to pass to coerce_to
+                        Modification::Set(
+                            DfValue::try_from(v)?.coerce_to(&field.sql_type, &DfType::Unknown)?,
+                        ),
                     ));
                 }
                 Expr::BinaryOp {
@@ -542,7 +545,12 @@ pub(crate) fn coerce_params(
         for (i, col) in get_parameter_columns(q).iter().enumerate() {
             for field in &schema.fields {
                 if col.name == field.column.name {
-                    coerced_params.push(DfValue::coerce_to(&prms[i], &field.sql_type)?);
+                    // coercing from the raw parameters, so no prior SqlType to use for from_ty
+                    coerced_params.push(DfValue::coerce_to(
+                        &prms[i],
+                        &field.sql_type,
+                        &DfType::Unknown,
+                    )?);
                 }
             }
         }

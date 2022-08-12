@@ -95,7 +95,7 @@ use proptest::strategy::{BoxedStrategy, Strategy};
 use rand::distributions::{Distribution, Standard};
 use rand::seq::SliceRandom;
 use rand::Rng;
-use readyset_data::DfValue;
+use readyset_data::{DfType, DfValue};
 use readyset_sql_passes::outermost_table_exprs;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -608,9 +608,9 @@ impl ColumnGenerationSpec {
             ColumnGenerationSpec::Zipfian { min, max, alpha } => {
                 ColumnGenerator::Zipfian(ZipfianGenerator::new(min.clone(), max.clone(), *alpha))
             }
-            ColumnGenerationSpec::Constant(val) => {
-                ColumnGenerator::Constant(val.coerce_to(&col_type).unwrap().into())
-            }
+            ColumnGenerationSpec::Constant(val) => ColumnGenerator::Constant(
+                val.coerce_to(&col_type, &DfType::Unknown).unwrap().into(),
+            ),
         }
     }
 }
@@ -962,7 +962,9 @@ impl From<CreateTableStatement> for TableSpec {
                         field.has_default().and_then(|l| DfValue::try_from(l).ok())
                     {
                         // Prefer the specified default value for a field
-                        ColumnGenerator::Constant(d.coerce_to(&sql_type).unwrap().into())
+                        ColumnGenerator::Constant(
+                            d.coerce_to(&sql_type, &DfType::Unknown).unwrap().into(),
+                        )
                     } else {
                         // Otherwise default to generating fields with a constant value.
                         ColumnGenerator::Constant(sql_type.clone().into())

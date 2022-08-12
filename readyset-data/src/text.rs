@@ -10,7 +10,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use nom_sql::SqlType;
 use readyset_errors::{ReadySetError, ReadySetResult};
 
-use crate::{Array, DfValue};
+use crate::{Array, DfType, DfValue};
 
 const TINYTEXT_WIDTH: usize = 14;
 
@@ -240,7 +240,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
     }
 
     /// Coerce this type to a different DfValue.
-    fn coerce_to(&self, sql_type: &SqlType) -> ReadySetResult<DfValue> {
+    fn coerce_to(&self, sql_type: &SqlType, from_ty: &DfType) -> ReadySetResult<DfValue> {
         let str = self.try_str()?;
 
         match sql_type {
@@ -416,7 +416,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 str.parse::<Array>()
                     .map_err(|e| Self::coerce_err(sql_type, e))?,
             )
-            .coerce_to(sql_type),
+            .coerce_to(sql_type, from_ty),
 
             SqlType::Enum(_) | SqlType::Bit(_) | SqlType::VarBit(_) => {
                 Err(Self::coerce_err(sql_type, "Not allowed"))
@@ -487,99 +487,111 @@ mod tests {
         // TEXT to TEXT coercions
         let text = DfValue::from("abcdefgh");
         assert_eq!(
-            text.coerce_to(&SqlType::Char(Some(10))).unwrap(),
+            text.coerce_to(&SqlType::Char(Some(10)), &DfType::Unknown)
+                .unwrap(),
             DfValue::from("abcdefgh  ")
         );
         assert_eq!(
-            text.coerce_to(&SqlType::Char(Some(4))).unwrap(),
+            text.coerce_to(&SqlType::Char(Some(4)), &DfType::Unknown)
+                .unwrap(),
             DfValue::from("abcd")
         );
         assert_eq!(
-            text.coerce_to(&SqlType::VarChar(Some(10))).unwrap(),
+            text.coerce_to(&SqlType::VarChar(Some(10)), &DfType::Unknown)
+                .unwrap(),
             DfValue::from("abcdefgh")
         );
         assert_eq!(
-            text.coerce_to(&SqlType::VarChar(Some(4))).unwrap(),
+            text.coerce_to(&SqlType::VarChar(Some(4)), &DfType::Unknown)
+                .unwrap(),
             DfValue::from("abcd")
         );
 
         // TEXT to BINARY
         assert_eq!(
-            text.coerce_to(&SqlType::Binary(Some(10))).unwrap(),
+            text.coerce_to(&SqlType::Binary(Some(10)), &DfType::Unknown)
+                .unwrap(),
             DfValue::ByteArray(b"abcdefgh\0\0".to_vec().into())
         );
         assert_eq!(
-            text.coerce_to(&SqlType::Binary(Some(4))).unwrap(),
+            text.coerce_to(&SqlType::Binary(Some(4)), &DfType::Unknown)
+                .unwrap(),
             DfValue::ByteArray(b"abcd".to_vec().into())
         );
         assert_eq!(
-            text.coerce_to(&SqlType::VarBinary(10)).unwrap(),
+            text.coerce_to(&SqlType::VarBinary(10), &DfType::Unknown)
+                .unwrap(),
             DfValue::ByteArray(b"abcdefgh".to_vec().into())
         );
         assert_eq!(
-            text.coerce_to(&SqlType::VarBinary(4)).unwrap(),
+            text.coerce_to(&SqlType::VarBinary(4), &DfType::Unknown)
+                .unwrap(),
             DfValue::ByteArray(b"abcd".to_vec().into())
         );
 
         // TEXT to INTEGER
         assert_eq!(
             DfValue::from("50")
-                .coerce_to(&SqlType::TinyInt(None))
+                .coerce_to(&SqlType::TinyInt(None), &DfType::Unknown)
                 .unwrap(),
             DfValue::Int(50),
         );
         assert!(DfValue::from("500")
-            .coerce_to(&SqlType::TinyInt(None))
+            .coerce_to(&SqlType::TinyInt(None), &DfType::Unknown)
             .is_err());
         assert_eq!(
             DfValue::from("-500")
-                .coerce_to(&SqlType::Int(None))
+                .coerce_to(&SqlType::Int(None), &DfType::Unknown)
                 .unwrap(),
             DfValue::Int(-500),
         );
         assert!(DfValue::from("-500")
-            .coerce_to(&SqlType::UnsignedInt(None))
+            .coerce_to(&SqlType::UnsignedInt(None), &DfType::Unknown)
             .is_err());
 
         // TEXT to FLOAT
         assert_eq!(
-            DfValue::from("50").coerce_to(&SqlType::Real).unwrap(),
+            DfValue::from("50")
+                .coerce_to(&SqlType::Real, &DfType::Unknown)
+                .unwrap(),
             DfValue::Float(50.0),
         );
         assert_eq!(
-            DfValue::from("-50.5").coerce_to(&SqlType::Double).unwrap(),
+            DfValue::from("-50.5")
+                .coerce_to(&SqlType::Double, &DfType::Unknown)
+                .unwrap(),
             DfValue::Double(-50.5),
         );
 
         // TEXT to UUID
         assert_eq!(
             DfValue::from("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
-                .coerce_to(&SqlType::Uuid)
+                .coerce_to(&SqlType::Uuid, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
         );
         assert_eq!(
             DfValue::from("A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11")
-                .coerce_to(&SqlType::Uuid)
+                .coerce_to(&SqlType::Uuid, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
         );
         assert_eq!(
             DfValue::from("a0eebc999c0b4ef8bb6d6bb9bd380a11")
-                .coerce_to(&SqlType::Uuid)
+                .coerce_to(&SqlType::Uuid, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
         );
         /* TODO: fix the following UUID conversions one day
         assert_eq!(
             DfValue::from("a0ee-bc99-9c0b-4ef8-bb6d-6bb9-bd38-0a11")
-                .coerce_to(&SqlType::Uuid)
+                .coerce_to(&SqlType::Uuid, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
         );
         assert_eq!(
             DfValue::from("{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}")
-                .coerce_to(&SqlType::Uuid)
+                .coerce_to(&SqlType::Uuid, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
         );*/
@@ -587,49 +599,49 @@ mod tests {
         // TEXT to MAC
         assert_eq!(
             DfValue::from("08:00:2b:01:02:03")
-                .coerce_to(&SqlType::MacAddr)
+                .coerce_to(&SqlType::MacAddr, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("08:00:2b:01:02:03"),
         );
         // TEXT to MAC
         assert_eq!(
             DfValue::from("08-00-2b-01-02-03")
-                .coerce_to(&SqlType::MacAddr)
+                .coerce_to(&SqlType::MacAddr, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("08:00:2b:01:02:03"),
         );
         // TEXT to MAC
         assert_eq!(
             DfValue::from("08002b:010203")
-                .coerce_to(&SqlType::MacAddr)
+                .coerce_to(&SqlType::MacAddr, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("08:00:2b:01:02:03"),
         );
         // TEXT to MAC
         assert_eq!(
             DfValue::from("08002b-010203")
-                .coerce_to(&SqlType::MacAddr)
+                .coerce_to(&SqlType::MacAddr, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("08:00:2b:01:02:03"),
         );
         // TEXT to MAC
         assert_eq!(
             DfValue::from("0800.2b01.0203")
-                .coerce_to(&SqlType::MacAddr)
+                .coerce_to(&SqlType::MacAddr, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("08:00:2b:01:02:03"),
         );
         // TEXT to MAC
         assert_eq!(
             DfValue::from("08002b010203")
-                .coerce_to(&SqlType::MacAddr)
+                .coerce_to(&SqlType::MacAddr, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("08:00:2b:01:02:03"),
         );
         // TEXT to INET
         assert_eq!(
             DfValue::from("feed:0:0::beef")
-                .coerce_to(&SqlType::Inet)
+                .coerce_to(&SqlType::Inet, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("feed::beef")
         );

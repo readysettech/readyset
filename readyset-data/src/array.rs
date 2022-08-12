@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
 use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql};
 
-use crate::{DfValue, DfValueKind};
+use crate::{DfType, DfValue, DfValueKind};
 
 /// Internal representation of PostgreSQL arrays
 ///
@@ -102,7 +102,11 @@ impl Array {
 
     /// Coerce the values within this array to the given new member type, which can either be an
     /// arbitrarily-nested array type or a scalar type
-    pub(crate) fn coerce_to(&self, new_member_type: &SqlType) -> ReadySetResult<Self> {
+    pub(crate) fn coerce_to(
+        &self,
+        new_member_type: &SqlType,
+        from_member_type: &DfType,
+    ) -> ReadySetResult<Self> {
         // Postgresql doesn't validate array nesting levels in type cast expressions:
         //
         // localhost/postgres=# select '[-1:0][3:4]={{1,2},{3,4}}'::int[][][];
@@ -120,8 +124,12 @@ impl Array {
 
         let mut arr = self.clone();
         let new_member_type = innermost_array_type(new_member_type);
+        let from_member_type = match from_member_type {
+            DfType::Sql(s) => DfType::Sql(innermost_array_type(s).clone()),
+            DfType::Unknown => DfType::Unknown,
+        };
         for v in arr.values_mut() {
-            *v = v.coerce_to(new_member_type)?;
+            *v = v.coerce_to(new_member_type, &from_member_type)?;
         }
         Ok(arr)
     }

@@ -1,3 +1,5 @@
+#![feature(box_patterns)]
+
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::hash::{Hash, Hasher};
@@ -368,10 +370,12 @@ impl DfValue {
     ///
     /// ```rust
     /// use nom_sql::SqlType;
-    /// use readyset_data::DfValue;
+    /// use readyset_data::{DfType, DfValue};
     ///
     /// let real = DfValue::Double(123.0);
-    /// let int = real.coerce_to(&SqlType::Int(None)).unwrap();
+    /// let int = real
+    ///     .coerce_to(&SqlType::Int(None), &DfType::Unknown)
+    ///     .unwrap();
     /// assert_eq!(int, DfValue::Int(123));
     /// ```
     ///
@@ -383,16 +387,18 @@ impl DfValue {
     ///
     /// use chrono::NaiveDate;
     /// use nom_sql::SqlType;
-    /// use readyset_data::DfValue;
+    /// use readyset_data::{DfType, DfValue};
     ///
     /// let text = DfValue::try_from("2021-01-26 10:20:37").unwrap();
-    /// let timestamp = text.coerce_to(&SqlType::Timestamp).unwrap();
+    /// let timestamp = text
+    ///     .coerce_to(&SqlType::Timestamp, &DfType::Unknown)
+    ///     .unwrap();
     /// assert_eq!(
     ///     timestamp,
     ///     DfValue::TimestampTz(NaiveDate::from_ymd(2021, 01, 26).and_hms(10, 20, 37).into())
     /// );
     /// ```
-    pub fn coerce_to(&self, ty: &SqlType) -> ReadySetResult<DfValue> {
+    pub fn coerce_to(&self, ty: &SqlType, from_ty: &DfType) -> ReadySetResult<DfValue> {
         use crate::text::TextCoerce;
 
         let mk_err = || ReadySetError::DfValueConversionError {
@@ -404,13 +410,13 @@ impl DfValue {
         match self {
             DfValue::None => Ok(DfValue::None),
             DfValue::Array(arr) => match ty {
-                SqlType::Array(t) => Ok(DfValue::from(arr.clone().coerce_to(t)?)),
+                SqlType::Array(t) => Ok(DfValue::from(arr.coerce_to(t, from_ty)?)),
                 SqlType::Text => Ok(DfValue::from(arr.to_string())),
                 _ => Err(mk_err()),
             },
             dt if dt.sql_type().as_ref() == Some(ty) => Ok(self.clone()),
-            DfValue::Text(t) => t.coerce_to(ty),
-            DfValue::TinyText(tt) => tt.coerce_to(ty),
+            DfValue::Text(t) => t.coerce_to(ty, from_ty),
+            DfValue::TinyText(tt) => tt.coerce_to(ty, from_ty),
             DfValue::TimestampTz(tz) => tz.coerce_to(ty),
             DfValue::Int(v) => integer::coerce_integer(*v, "Int", ty),
             DfValue::UnsignedInt(v) => integer::coerce_integer(*v, "UnsignedInt", ty),
@@ -1090,10 +1096,10 @@ impl TryFrom<DfValue> for Literal {
             DfValue::Text(_) => Ok(Literal::String(String::try_from(dt)?)),
             DfValue::TinyText(_) => Ok(Literal::String(String::try_from(dt)?)),
             DfValue::TimestampTz(_) => Ok(Literal::String(String::try_from(
-                dt.coerce_to(&SqlType::Text)?,
+                dt.coerce_to(&SqlType::Text, &DfType::Unknown)?,
             )?)),
             DfValue::Time(_) => Ok(Literal::String(String::try_from(
-                dt.coerce_to(&SqlType::Text)?,
+                dt.coerce_to(&SqlType::Text, &DfType::Unknown)?,
             )?)),
             DfValue::ByteArray(ref array) => Ok(Literal::ByteArray(array.as_ref().clone())),
             DfValue::Numeric(ref d) => Ok(Literal::Numeric(d.mantissa(), d.scale())),
@@ -3213,7 +3219,7 @@ mod tests {
         #[proptest]
         fn same_type_is_identity(dt: DfValue) {
             if let Some(ty) = dt.sql_type() {
-                assert_eq!(dt.coerce_to(&ty).unwrap(), dt);
+                assert_eq!(dt.coerce_to(&ty, &DfType::Unknown).unwrap(), dt);
             }
         }
 
@@ -3223,7 +3229,7 @@ mod tests {
             let input =
                 DfValue::try_from(ndt.format(crate::timestamp::TIMESTAMP_FORMAT).to_string())
                     .unwrap();
-            let result = input.coerce_to(&Timestamp).unwrap();
+            let result = input.coerce_to(&Timestamp, &DfType::Unknown).unwrap();
             assert_eq!(result, expected);
         }
 
@@ -3231,7 +3237,7 @@ mod tests {
         fn parse_times(#[strategy(arbitrary_naive_time())] nt: NaiveTime) {
             let expected = DfValue::from(nt);
             let input = DfValue::try_from(nt.format(TIME_FORMAT).to_string()).unwrap();
-            let result = input.coerce_to(&Time).unwrap();
+            let result = input.coerce_to(&Time, &DfType::Unknown).unwrap();
             assert_eq!(result, expected);
         }
 
@@ -3242,7 +3248,9 @@ mod tests {
             let input =
                 DfValue::try_from(dt.format(crate::timestamp::TIMESTAMP_FORMAT).to_string())
                     .unwrap();
-            let result = input.coerce_to(&SqlType::DateTime(None)).unwrap();
+            let result = input
+                .coerce_to(&SqlType::DateTime(None), &DfType::Unknown)
+                .unwrap();
             assert_eq!(result, expected);
         }
 
@@ -3251,7 +3259,7 @@ mod tests {
             let expected = DfValue::from(NaiveDateTime::new(nd, NaiveTime::from_hms(0, 0, 0)));
             let input =
                 DfValue::try_from(nd.format(crate::timestamp::DATE_FORMAT).to_string()).unwrap();
-            let result = input.coerce_to(&Date).unwrap();
+            let result = input.coerce_to(&Date, &DfType::Unknown).unwrap();
             assert_eq!(result, expected);
         }
 
@@ -3259,11 +3267,11 @@ mod tests {
         fn timestamp_surjections() {
             let input = DfValue::from(NaiveDate::from_ymd(2021, 3, 17).and_hms(11, 34, 56));
             assert_eq!(
-                input.coerce_to(&Date).unwrap(),
+                input.coerce_to(&Date, &DfType::Unknown).unwrap(),
                 NaiveDate::from_ymd(2021, 3, 17).into()
             );
             assert_eq!(
-                input.coerce_to(&Time).unwrap(),
+                input.coerce_to(&Time, &DfType::Unknown).unwrap(),
                 NaiveTime::from_hms(11, 34, 56).into()
             );
         }
@@ -3275,7 +3283,10 @@ mod tests {
         ) {
             let input = DfValue::from(ndt);
             assert_eq!(
-                input.clone().coerce_to(&SqlType::DateTime(prec)).unwrap(),
+                input
+                    .clone()
+                    .coerce_to(&SqlType::DateTime(prec), &DfType::Unknown)
+                    .unwrap(),
                 input
             );
         }
@@ -3287,7 +3298,9 @@ mod tests {
                     let input = <$from>::try_from(source);
                     prop_assume!(input.is_ok());
                     assert_eq!(
-                        DfValue::from(input.unwrap()).coerce_to(&$sql_type).unwrap(),
+                        DfValue::from(input.unwrap())
+                            .coerce_to(&$sql_type, &DfType::Unknown)
+                            .unwrap(),
                         DfValue::from(source)
                     );
                 }
@@ -3319,14 +3332,14 @@ mod tests {
                         assert_eq!(
                             DfValue::try_from(source)
                                 .unwrap()
-                                .coerce_to(&$sql_type)
+                                .coerce_to(&$sql_type, &DfType::Unknown)
                                 .unwrap(),
                             DfValue::try_from(source as $to).unwrap()
                         );
                     } else {
                         assert!(DfValue::try_from(source)
                             .unwrap()
-                            .coerce_to(&$sql_type)
+                            .coerce_to(&$sql_type, &DfType::Unknown)
                             .is_err());
                         assert!(DfValue::try_from(source as $to).is_err());
                     }
@@ -3343,31 +3356,33 @@ mod tests {
             use SqlType::*;
             let input = DfValue::try_from(text.as_str()).unwrap();
             let intermediate = Char(Some(u16::try_from(text.len()).unwrap()));
-            let result = input.coerce_to(&intermediate).unwrap();
+            let result = input.coerce_to(&intermediate, &DfType::Unknown).unwrap();
             assert_eq!(String::try_from(&result).unwrap().as_str(), text.as_str());
         }
 
         #[test]
         fn text_to_json() {
             let input = DfValue::from("{\"name\": \"John Doe\", \"age\": 43, \"phones\": [\"+44 1234567\", \"+44 2345678\"] }");
-            let result = input.coerce_to(&SqlType::Json).unwrap();
+            let result = input.coerce_to(&SqlType::Json, &DfType::Unknown).unwrap();
             assert_eq!(input, result);
 
-            let result = input.coerce_to(&SqlType::Jsonb).unwrap();
+            let result = input.coerce_to(&SqlType::Jsonb, &DfType::Unknown).unwrap();
             assert_eq!(input, result);
 
             let input = DfValue::from("not a json");
-            let result = input.coerce_to(&SqlType::Json);
+            let result = input.coerce_to(&SqlType::Json, &DfType::Unknown);
             assert!(result.is_err());
 
-            let result = input.coerce_to(&SqlType::Jsonb);
+            let result = input.coerce_to(&SqlType::Jsonb, &DfType::Unknown);
             assert!(result.is_err());
         }
 
         #[test]
         fn text_to_macaddr() {
             let input = DfValue::from("12:34:56:ab:cd:ef");
-            let result = input.coerce_to(&SqlType::MacAddr).unwrap();
+            let result = input
+                .coerce_to(&SqlType::MacAddr, &DfType::Unknown)
+                .unwrap();
             assert_eq!(input, result);
         }
 
@@ -3376,19 +3391,19 @@ mod tests {
         fn int_to_text() {
             assert_eq!(
                 DfValue::from(20070523i64)
-                    .coerce_to(&SqlType::Text)
+                    .coerce_to(&SqlType::Text, &DfType::Unknown)
                     .unwrap(),
                 DfValue::from("20070523"),
             );
             assert_eq!(
                 DfValue::from(20070523i64)
-                    .coerce_to(&SqlType::VarChar(Some(2)))
+                    .coerce_to(&SqlType::VarChar(Some(2)), &DfType::Unknown)
                     .unwrap(),
                 DfValue::from("20"),
             );
             assert_eq!(
                 DfValue::from(20070523i64)
-                    .coerce_to(&SqlType::Char(Some(10)))
+                    .coerce_to(&SqlType::Char(Some(10)), &DfType::Unknown)
                     .unwrap(),
                 DfValue::from("20070523  "),
             );
@@ -3398,32 +3413,36 @@ mod tests {
         fn int_to_date_time() {
             assert_eq!(
                 DfValue::from(20070523i64)
-                    .coerce_to(&SqlType::Date)
+                    .coerce_to(&SqlType::Date, &DfType::Unknown)
                     .unwrap(),
                 DfValue::from(NaiveDate::from_ymd(2007, 05, 23))
             );
 
             assert_eq!(
-                DfValue::from(70523u64).coerce_to(&SqlType::Date).unwrap(),
+                DfValue::from(70523u64)
+                    .coerce_to(&SqlType::Date, &DfType::Unknown)
+                    .unwrap(),
                 DfValue::from(NaiveDate::from_ymd(2007, 05, 23))
             );
 
             assert_eq!(
                 DfValue::from(19830905132800i64)
-                    .coerce_to(&SqlType::Timestamp)
+                    .coerce_to(&SqlType::Timestamp, &DfType::Unknown)
                     .unwrap(),
                 DfValue::from(NaiveDate::from_ymd(1983, 09, 05).and_hms(13, 28, 00))
             );
 
             assert_eq!(
                 DfValue::from(830905132800u64)
-                    .coerce_to(&SqlType::DateTime(None))
+                    .coerce_to(&SqlType::DateTime(None), &DfType::Unknown)
                     .unwrap(),
                 DfValue::from(NaiveDate::from_ymd(1983, 09, 05).and_hms(13, 28, 00))
             );
 
             assert_eq!(
-                DfValue::from(101112i64).coerce_to(&SqlType::Time).unwrap(),
+                DfValue::from(101112i64)
+                    .coerce_to(&SqlType::Time, &DfType::Unknown)
+                    .unwrap(),
                 DfValue::from(MysqlTime::from_hmsus(true, 10, 11, 12, 0))
             );
         }
@@ -3431,7 +3450,7 @@ mod tests {
         #[test]
         fn text_to_uuid() {
             let input = DfValue::from(uuid::Uuid::new_v4().to_string());
-            let result = input.coerce_to(&SqlType::Uuid).unwrap();
+            let result = input.coerce_to(&SqlType::Uuid, &DfType::Unknown).unwrap();
             assert_eq!(input, result);
         }
 
@@ -3440,7 +3459,9 @@ mod tests {
                 #[proptest]
                 fn $name(input: $ty) {
                     let input_dt = DfValue::from(input);
-                    let result = input_dt.coerce_to(&SqlType::Bool).unwrap();
+                    let result = input_dt
+                        .coerce_to(&SqlType::Bool, &DfType::Unknown)
+                        .unwrap();
                     let expected = DfValue::from(input != 0);
                     assert_eq!(result, expected);
                 }
@@ -3460,7 +3481,7 @@ mod tests {
         fn string_to_array() {
             let input = DfValue::from(r#"{"a", "b", "c"}"#);
             let res = input
-                .coerce_to(&SqlType::Array(Box::new(SqlType::Text)))
+                .coerce_to(&SqlType::Array(Box::new(SqlType::Text)), &DfType::Unknown)
                 .unwrap();
             assert_eq!(
                 res,
@@ -3476,7 +3497,7 @@ mod tests {
         fn array_coercing_values() {
             let input = DfValue::from(r#"{1, 2, 3}"#);
             let res = input
-                .coerce_to(&SqlType::Array(Box::new(SqlType::Text)))
+                .coerce_to(&SqlType::Array(Box::new(SqlType::Text)), &DfType::Unknown)
                 .unwrap();
             assert_eq!(
                 res,
@@ -3492,7 +3513,7 @@ mod tests {
         fn two_d_array_coercing_values() {
             let input = DfValue::from(r#"[0:1][0:1]={{1, 2}, {3, 4}}"#);
             let res = input
-                .coerce_to(&SqlType::Array(Box::new(SqlType::Text)))
+                .coerce_to(&SqlType::Array(Box::new(SqlType::Text)), &DfType::Unknown)
                 .unwrap();
             assert_eq!(
                 res,

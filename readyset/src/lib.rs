@@ -263,7 +263,7 @@ use std::pin::Pin;
 
 #[doc(hidden)]
 pub use nom_sql::{ColumnConstraint, SqlIdentifier};
-use readyset_data::DfValue;
+use readyset_data::{DfType, DfValue};
 pub use readyset_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use tokio::task_local;
@@ -464,7 +464,7 @@ pub fn shard_by(dt: &DfValue, shards: usize) -> usize {
             // this unwrap should be safe because there are no error paths with a Text, TinyText,
             // nor Timestamp converting to Text
             #[allow(clippy::unwrap_used)]
-            let str_dt = dt.coerce_to(&SqlType::Text).unwrap();
+            let str_dt = dt.coerce_to(&SqlType::Text, &DfType::Unknown).unwrap();
             // this unwrap should be safe because we just coerced dt to a text
             #[allow(clippy::unwrap_used)]
             let s: &str = <&str>::try_from(&str_dt).unwrap();

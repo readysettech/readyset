@@ -478,6 +478,7 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
+    use crate::DfType;
 
     #[test]
     fn timestamp_coercion() {
@@ -485,39 +486,47 @@ mod tests {
             DfValue::from(chrono::NaiveDate::from_ymd(2022, 2, 9).and_hms_milli(13, 14, 15, 169));
 
         assert_eq!(
-            ts.coerce_to(&SqlType::BigInt(None)).unwrap(),
+            ts.coerce_to(&SqlType::BigInt(None), &DfType::Unknown)
+                .unwrap(),
             DfValue::from(20220209131415i64)
         );
 
         assert_eq!(
-            ts.coerce_to(&SqlType::Date)
+            ts.coerce_to(&SqlType::Date, &DfType::Unknown)
                 .unwrap()
-                .coerce_to(&SqlType::BigInt(None))
+                .coerce_to(&SqlType::BigInt(None), &DfType::Unknown)
                 .unwrap(),
             DfValue::from(20220209i64)
         );
 
         assert_eq!(
-            ts.coerce_to(&SqlType::Double).unwrap(),
+            ts.coerce_to(&SqlType::Double, &DfType::Unknown).unwrap(),
             DfValue::Double(20220209131415.0f64)
         );
 
         assert_eq!(
-            &format!("{}", ts.coerce_to(&SqlType::Text).unwrap()),
+            &format!(
+                "{}",
+                ts.coerce_to(&SqlType::Text, &DfType::Unknown).unwrap()
+            ),
             "2022-02-09 13:14:15"
         );
 
         assert_eq!(
-            &format!("{}", ts.coerce_to(&SqlType::VarChar(Some(6))).unwrap()),
+            &format!(
+                "{}",
+                ts.coerce_to(&SqlType::VarChar(Some(6)), &DfType::Unknown)
+                    .unwrap()
+            ),
             "2022-0"
         );
 
         assert_eq!(
             &format!(
                 "{}",
-                ts.coerce_to(&SqlType::DateTime(Some(6)))
+                ts.coerce_to(&SqlType::DateTime(Some(6)), &DfType::Unknown)
                     .unwrap()
-                    .coerce_to(&SqlType::Text)
+                    .coerce_to(&SqlType::Text, &DfType::Unknown)
                     .unwrap()
             ),
             "2022-02-09 13:14:15.169000"
@@ -526,9 +535,9 @@ mod tests {
         assert_eq!(
             &format!(
                 "{}",
-                ts.coerce_to(&SqlType::DateTime(Some(2)))
+                ts.coerce_to(&SqlType::DateTime(Some(2)), &DfType::Unknown)
                     .unwrap()
-                    .coerce_to(&SqlType::Text)
+                    .coerce_to(&SqlType::Text, &DfType::Unknown)
                     .unwrap()
             ),
             "2022-02-09 13:14:15.17"
@@ -537,9 +546,9 @@ mod tests {
         assert_eq!(
             &format!(
                 "{}",
-                ts.coerce_to(&SqlType::DateTime(Some(1)))
+                ts.coerce_to(&SqlType::DateTime(Some(1)), &DfType::Unknown)
                     .unwrap()
-                    .coerce_to(&SqlType::Text)
+                    .coerce_to(&SqlType::Text, &DfType::Unknown)
                     .unwrap()
             ),
             "2022-02-09 13:14:15.2"
@@ -548,9 +557,9 @@ mod tests {
         assert_eq!(
             &format!(
                 "{}",
-                ts.coerce_to(&SqlType::Date)
+                ts.coerce_to(&SqlType::Date, &DfType::Unknown)
                     .unwrap()
-                    .coerce_to(&SqlType::Text)
+                    .coerce_to(&SqlType::Text, &DfType::Unknown)
                     .unwrap()
             ),
             "2022-02-09"
@@ -559,9 +568,9 @@ mod tests {
         assert_eq!(
             &format!(
                 "{}",
-                ts.coerce_to(&SqlType::DateTime(Some(1)))
+                ts.coerce_to(&SqlType::DateTime(Some(1)), &DfType::Unknown)
                     .unwrap()
-                    .coerce_to(&SqlType::Json)
+                    .coerce_to(&SqlType::Json, &DfType::Unknown)
                     .unwrap()
             ),
             "\"2022-02-09 13:14:15.169000\""
