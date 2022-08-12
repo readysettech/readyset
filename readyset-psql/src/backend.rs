@@ -107,13 +107,13 @@ impl TryFrom<ParamRef<'_>> for DataType {
         match v.0 {
             ps::Value::Null => Ok(DataType::None),
             ps::Value::Bool(b) => Ok(DataType::from(*b)),
-            ps::Value::Varchar(v) | ps::Value::Name(v) | ps::Value::Text(v) => {
+            ps::Value::VarChar(v) | ps::Value::Name(v) | ps::Value::Text(v) => {
                 Ok(v.as_str().into())
             }
             ps::Value::Char(v) => Ok((*v).into()),
             ps::Value::Int(v) => Ok((*v).into()),
-            ps::Value::Bigint(v) => Ok((*v).into()),
-            ps::Value::Smallint(v) => Ok((*v).into()),
+            ps::Value::BigInt(v) => Ok((*v).into()),
+            ps::Value::SmallInt(v) => Ok((*v).into()),
             ps::Value::Oid(v) => Ok((*v).into()),
             ps::Value::Double(v) => DataType::try_from(*v)
                 .map_err(|_| ps::Error::Unsupported(format!("f64 with value `{}`", v))),

@@ -4185,7 +4185,7 @@ async fn correct_nested_view_schema() {
     let expected_schema = vec![
         ColumnSpecification::new("swvc.id".try_into().unwrap(), SqlType::Int(None)),
         ColumnSpecification::new("swvc.content".try_into().unwrap(), SqlType::Text),
-        ColumnSpecification::new("swvc.vc".try_into().unwrap(), SqlType::Bigint(None)),
+        ColumnSpecification::new("swvc.vc".try_into().unwrap(), SqlType::BigInt(None)),
     ];
     assert_eq!(
         q.schema()

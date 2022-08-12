@@ -664,15 +664,15 @@ mod tests {
         let type3 = "bigint(20) signed";
 
         let res = type_identifier(Dialect::MySQL)(type0.as_bytes());
-        assert_eq!(res.unwrap().1, SqlType::Bigint(Some(20)));
+        assert_eq!(res.unwrap().1, SqlType::BigInt(Some(20)));
         let res = type_identifier(Dialect::MySQL)(type1.as_bytes());
-        assert_eq!(res.unwrap().1, SqlType::Varchar(Some(255)));
+        assert_eq!(res.unwrap().1, SqlType::VarChar(Some(255)));
         let res = type_identifier(Dialect::MySQL)(type2.as_bytes());
-        assert_eq!(res.unwrap().1, SqlType::UnsignedBigint(Some(20)));
+        assert_eq!(res.unwrap().1, SqlType::UnsignedBigInt(Some(20)));
         let res = type_identifier(Dialect::MySQL)(type3.as_bytes());
-        assert_eq!(res.unwrap().1, SqlType::Bigint(Some(20)));
+        assert_eq!(res.unwrap().1, SqlType::BigInt(Some(20)));
         let res = type_identifier(Dialect::MySQL)(type2.as_bytes());
-        assert_eq!(res.unwrap().1, SqlType::UnsignedBigint(Some(20)));
+        assert_eq!(res.unwrap().1, SqlType::UnsignedBigInt(Some(20)));
     }
 
     #[test]
@@ -685,8 +685,8 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             vec![
-                ColumnSpecification::new(Column::from("id"), SqlType::Bigint(Some(20))),
-                ColumnSpecification::new(Column::from("name"), SqlType::Varchar(Some(255))),
+                ColumnSpecification::new(Column::from("id"), SqlType::BigInt(Some(20))),
+                ColumnSpecification::new(Column::from("name"), SqlType::VarChar(Some(255))),
             ]
         );
     }
@@ -701,9 +701,9 @@ mod tests {
             CreateTableStatement {
                 table: Table::from("users"),
                 fields: vec![
-                    ColumnSpecification::new(Column::from("id"), SqlType::Bigint(Some(20))),
-                    ColumnSpecification::new(Column::from("name"), SqlType::Varchar(Some(255))),
-                    ColumnSpecification::new(Column::from("email"), SqlType::Varchar(Some(255))),
+                    ColumnSpecification::new(Column::from("id"), SqlType::BigInt(Some(20))),
+                    ColumnSpecification::new(Column::from("name"), SqlType::VarChar(Some(255))),
+                    ColumnSpecification::new(Column::from("email"), SqlType::VarChar(Some(255))),
                 ],
                 if_not_exists: true,
                 keys: None,
@@ -765,9 +765,9 @@ mod tests {
             CreateTableStatement {
                 table: Table::from("users"),
                 fields: vec![
-                    ColumnSpecification::new(Column::from("id"), SqlType::Bigint(Some(20))),
-                    ColumnSpecification::new(Column::from("name"), SqlType::Varchar(Some(255))),
-                    ColumnSpecification::new(Column::from("email"), SqlType::Varchar(Some(255))),
+                    ColumnSpecification::new(Column::from("id"), SqlType::BigInt(Some(20))),
+                    ColumnSpecification::new(Column::from("name"), SqlType::VarChar(Some(255))),
+                    ColumnSpecification::new(Column::from("email"), SqlType::VarChar(Some(255))),
                 ],
                 keys: Some(vec![TableKey::PrimaryKey {
                     name: None,
@@ -788,9 +788,9 @@ mod tests {
             CreateTableStatement {
                 table: Table::from("users"),
                 fields: vec![
-                    ColumnSpecification::new(Column::from("id"), SqlType::Bigint(Some(20))),
-                    ColumnSpecification::new(Column::from("name"), SqlType::Varchar(Some(255))),
-                    ColumnSpecification::new(Column::from("email"), SqlType::Varchar(Some(255))),
+                    ColumnSpecification::new(Column::from("id"), SqlType::BigInt(Some(20))),
+                    ColumnSpecification::new(Column::from("name"), SqlType::VarChar(Some(255))),
+                    ColumnSpecification::new(Column::from("email"), SqlType::VarChar(Some(255))),
                 ],
                 keys: Some(vec![TableKey::UniqueKey {
                     name: Some("id_k".into()),
@@ -919,10 +919,10 @@ mod tests {
                         ]
                     ),
                     non_null_col("customer_id", SqlType::Int(None)),
-                    non_null_col("street", SqlType::Varchar(Some(255))),
-                    non_null_col("city", SqlType::Varchar(Some(255))),
-                    non_null_col("state", SqlType::Varchar(Some(255))),
-                    non_null_col("zip", SqlType::Varchar(Some(255))),
+                    non_null_col("street", SqlType::VarChar(Some(255))),
+                    non_null_col("city", SqlType::VarChar(Some(255))),
+                    non_null_col("state", SqlType::VarChar(Some(255))),
+                    non_null_col("zip", SqlType::VarChar(Some(255))),
                     non_null_col(
                         "type",
                         SqlType::Enum(vec![
@@ -1039,12 +1039,12 @@ mod tests {
                     ),
                     ColumnSpecification::with_constraints(
                         "last_name".into(),
-                        SqlType::Varchar(Some(255)),
+                        SqlType::VarChar(Some(255)),
                         vec![ColumnConstraint::NotNull, ColumnConstraint::Unique,]
                     ),
                     ColumnSpecification::with_constraints(
                         "email".into(),
-                        SqlType::Varchar(Some(255)),
+                        SqlType::VarChar(Some(255)),
                         vec![ColumnConstraint::NotNull, ColumnConstraint::Unique,]
                     ),
                 ],
@@ -1206,20 +1206,20 @@ mod tests {
                             Column::from("content_type_id"),
                             SqlType::Int(None),
                         ),
-                        ColumnSpecification::new(Column::from("object_id"), SqlType::Longtext,),
+                        ColumnSpecification::new(Column::from("object_id"), SqlType::LongText,),
                         ColumnSpecification::with_constraints(
                             Column::from("object_repr"),
-                            SqlType::Varchar(Some(200)),
+                            SqlType::VarChar(Some(200)),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("action_flag"),
-                            SqlType::UnsignedSmallint(None),
+                            SqlType::UnsignedSmallInt(None),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("change_message"),
-                            SqlType::Longtext,
+                            SqlType::LongText,
                             vec![ColumnConstraint::NotNull],
                         ),
                     ],
@@ -1249,7 +1249,7 @@ mod tests {
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("name"),
-                            SqlType::Varchar(Some(80)),
+                            SqlType::VarChar(Some(80)),
                             vec![ColumnConstraint::NotNull, ColumnConstraint::Unique],
                         ),
                     ],
@@ -1492,7 +1492,7 @@ mod tests {
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("user_ip"),
-                            SqlType::Varchar(Some(40)),
+                            SqlType::VarChar(Some(40)),
                             vec![
                                 ColumnConstraint::NotNull,
                                 ColumnConstraint::DefaultValue(Literal::String(String::from(""))),
@@ -1660,20 +1660,20 @@ mod tests {
                             Column::from("content_type_id"),
                             SqlType::Int(None),
                         ),
-                        ColumnSpecification::new(Column::from("object_id"), SqlType::Longtext,),
+                        ColumnSpecification::new(Column::from("object_id"), SqlType::LongText,),
                         ColumnSpecification::with_constraints(
                             Column::from("object_repr"),
-                            SqlType::Varchar(Some(200)),
+                            SqlType::VarChar(Some(200)),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("action_flag"),
-                            SqlType::UnsignedSmallint(None),
+                            SqlType::UnsignedSmallInt(None),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("change_message"),
-                            SqlType::Longtext,
+                            SqlType::LongText,
                             vec![ColumnConstraint::NotNull],
                         ),
                     ],
@@ -1703,7 +1703,7 @@ mod tests {
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("name"),
-                            SqlType::Varchar(Some(80)),
+                            SqlType::VarChar(Some(80)),
                             vec![ColumnConstraint::NotNull, ColumnConstraint::Unique],
                         ),
                     ],
@@ -1852,7 +1852,7 @@ mod tests {
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("user_ip"),
-                            SqlType::Varchar(Some(40)),
+                            SqlType::VarChar(Some(40)),
                             vec![
                                 ColumnConstraint::NotNull,
                                 ColumnConstraint::DefaultValue(Literal::String(String::from(""))),
@@ -1953,7 +1953,7 @@ mod tests {
                     ),
                     ColumnSpecification::with_constraints(
                         "token".into(),
-                        SqlType::Varchar(Some(40)),
+                        SqlType::VarChar(Some(40)),
                         vec![
                             ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
                             ColumnConstraint::NotNull
@@ -1976,7 +1976,7 @@ mod tests {
                     ),
                     ColumnSpecification::with_constraints(
                         "type".into(),
-                        SqlType::Varchar(Some(100)),
+                        SqlType::VarChar(Some(100)),
                         vec![
                             ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
                             ColumnConstraint::NotNull,
@@ -1984,7 +1984,7 @@ mod tests {
                     ),
                     ColumnSpecification::with_constraints(
                         "title".into(),
-                        SqlType::Varchar(Some(150)),
+                        SqlType::VarChar(Some(150)),
                         vec![
                             ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
                             ColumnConstraint::DefaultValue(Literal::Null),
@@ -1992,7 +1992,7 @@ mod tests {
                     ),
                     ColumnSpecification::with_constraints(
                         "last_ip_address".into(),
-                        SqlType::Varchar(Some(45)),
+                        SqlType::VarChar(Some(45)),
                         vec![
                             ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
                             ColumnConstraint::DefaultValue(Literal::Null),
@@ -2000,7 +2000,7 @@ mod tests {
                     ),
                     ColumnSpecification::with_constraints(
                         "last_user_agent".into(),
-                        SqlType::Varchar(Some(255)),
+                        SqlType::VarChar(Some(255)),
                         vec![
                             ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
                             ColumnConstraint::DefaultValue(Literal::Null),

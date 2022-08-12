@@ -37,27 +37,27 @@ pub(crate) fn convert_column(
     use mysql_srv::ColumnType::*;
 
     let coltype = match col.sql_type {
-        SqlType::Mediumtext => MYSQL_TYPE_VAR_STRING,
-        SqlType::Longtext => MYSQL_TYPE_BLOB,
+        SqlType::MediumText => MYSQL_TYPE_VAR_STRING,
+        SqlType::LongText => MYSQL_TYPE_BLOB,
         SqlType::Text => MYSQL_TYPE_BLOB,
-        SqlType::Varchar(_) => MYSQL_TYPE_VAR_STRING,
+        SqlType::VarChar(_) => MYSQL_TYPE_VAR_STRING,
         SqlType::Int(_) => MYSQL_TYPE_LONG,
         SqlType::UnsignedInt(_) => {
             colflags |= mysql_srv::ColumnFlags::UNSIGNED_FLAG;
             MYSQL_TYPE_LONG
         }
-        SqlType::Bigint(_) => MYSQL_TYPE_LONGLONG,
-        SqlType::UnsignedBigint(_) => {
+        SqlType::BigInt(_) => MYSQL_TYPE_LONGLONG,
+        SqlType::UnsignedBigInt(_) => {
             colflags |= mysql_srv::ColumnFlags::UNSIGNED_FLAG;
             MYSQL_TYPE_LONGLONG
         }
-        SqlType::Tinyint(_) => MYSQL_TYPE_TINY,
-        SqlType::UnsignedTinyint(_) => {
+        SqlType::TinyInt(_) => MYSQL_TYPE_TINY,
+        SqlType::UnsignedTinyInt(_) => {
             colflags |= mysql_srv::ColumnFlags::UNSIGNED_FLAG;
             MYSQL_TYPE_TINY
         }
-        SqlType::Smallint(_) => MYSQL_TYPE_SHORT,
-        SqlType::UnsignedSmallint(_) => {
+        SqlType::SmallInt(_) => MYSQL_TYPE_SHORT,
+        SqlType::UnsignedSmallInt(_) => {
             colflags |= mysql_srv::ColumnFlags::UNSIGNED_FLAG;
             MYSQL_TYPE_SHORT
         }
@@ -70,9 +70,9 @@ pub(crate) fn convert_column(
             MYSQL_TYPE_STRING
         }
         SqlType::Blob => MYSQL_TYPE_BLOB,
-        SqlType::Longblob => MYSQL_TYPE_LONG_BLOB,
-        SqlType::Mediumblob => MYSQL_TYPE_MEDIUM_BLOB,
-        SqlType::Tinyblob => MYSQL_TYPE_TINY_BLOB,
+        SqlType::LongBlob => MYSQL_TYPE_LONG_BLOB,
+        SqlType::MediumBlob => MYSQL_TYPE_MEDIUM_BLOB,
+        SqlType::TinyBlob => MYSQL_TYPE_TINY_BLOB,
         SqlType::Double => MYSQL_TYPE_DOUBLE,
         SqlType::Real => {
             // a generous reading of
@@ -81,7 +81,7 @@ pub(crate) fn convert_column(
             // TODO(grfn): Make sure that's the case
             MYSQL_TYPE_FLOAT
         }
-        SqlType::Tinytext => MYSQL_TYPE_BLOB,
+        SqlType::TinyText => MYSQL_TYPE_BLOB,
         SqlType::Date => MYSQL_TYPE_DATE,
         SqlType::Timestamp => MYSQL_TYPE_TIMESTAMP,
         SqlType::TimestampTz => {
@@ -92,7 +92,7 @@ pub(crate) fn convert_column(
             colflags |= mysql_srv::ColumnFlags::BINARY_FLAG;
             MYSQL_TYPE_STRING
         }
-        SqlType::Varbinary(_) => {
+        SqlType::VarBinary(_) => {
             // TODO(grfn): I don't know if this is right
             colflags |= mysql_srv::ColumnFlags::BINARY_FLAG;
             MYSQL_TYPE_VAR_STRING
@@ -118,7 +118,7 @@ pub(crate) fn convert_column(
                 unsupported!("MySQL bit type cannot have a size bigger than 64")
             }
         }
-        SqlType::Varbit(_) => unsupported!("MySQL does not support the bit varying type"),
+        SqlType::VarBit(_) => unsupported!("MySQL does not support the bit varying type"),
         SqlType::Serial => MYSQL_TYPE_LONG,
         SqlType::BigSerial => MYSQL_TYPE_LONGLONG,
         SqlType::Array(_) => unsupported!("MySQL does not support arrays"),
@@ -145,15 +145,15 @@ pub(crate) fn convert_column(
     // TODO: All columns have a default display length, so `column_length` should not be an option.
     let column_length = match col.sql_type {
         SqlType::Char(l)
-        | SqlType::Varchar(l)
+        | SqlType::VarChar(l)
         | SqlType::Int(l)
         | SqlType::UnsignedInt(l)
-        | SqlType::Bigint(l)
-        | SqlType::UnsignedBigint(l)
-        | SqlType::Tinyint(l)
-        | SqlType::UnsignedTinyint(l)
-        | SqlType::Smallint(l)
-        | SqlType::UnsignedSmallint(l) => l.map(|l| l.into()),
+        | SqlType::BigInt(l)
+        | SqlType::UnsignedBigInt(l)
+        | SqlType::TinyInt(l)
+        | SqlType::UnsignedTinyInt(l)
+        | SqlType::SmallInt(l)
+        | SqlType::UnsignedSmallInt(l) => l.map(|l| l.into()),
         _ => None,
     };
 

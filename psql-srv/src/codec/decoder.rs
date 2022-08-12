@@ -319,12 +319,12 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
                 Err(Error::InvalidUtf8)
             }
             Type::BOOL => Ok(Value::Bool(bool::from_sql(t, buf)?)),
-            Type::VARCHAR => Ok(Value::Varchar(<&str>::from_sql(t, buf)?.into())),
+            Type::VARCHAR => Ok(Value::VarChar(<&str>::from_sql(t, buf)?.into())),
             Type::NAME => Ok(Value::Name(<&str>::from_sql(t, buf)?.into())),
             Type::CHAR => Ok(Value::Char(i8::from_sql(t, buf)?)),
             Type::INT4 => Ok(Value::Int(i32::from_sql(t, buf)?)),
-            Type::INT8 => Ok(Value::Bigint(i64::from_sql(t, buf)?)),
-            Type::INT2 => Ok(Value::Smallint(i16::from_sql(t, buf)?)),
+            Type::INT8 => Ok(Value::BigInt(i64::from_sql(t, buf)?)),
+            Type::INT2 => Ok(Value::SmallInt(i16::from_sql(t, buf)?)),
             Type::OID => Ok(Value::Oid(u32::from_sql(t, buf)?)),
             Type::FLOAT8 => Ok(Value::Double(f64::from_sql(t, buf)?)),
             Type::FLOAT4 => Ok(Value::Float(f32::from_sql(t, buf)?)),
@@ -374,12 +374,12 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
     let text_str: &str = text.borrow();
     match *t {
         Type::BOOL => Ok(Value::Bool(text_str == BOOL_TRUE_TEXT_REP)),
-        Type::VARCHAR => Ok(Value::Varchar(text_str.into())),
+        Type::VARCHAR => Ok(Value::VarChar(text_str.into())),
         Type::NAME => Ok(Value::Name(text_str.into())),
         Type::CHAR => Ok(Value::Char(text_str.parse::<i8>()?)),
         Type::INT4 => Ok(Value::Int(text_str.parse::<i32>()?)),
-        Type::INT8 => Ok(Value::Bigint(text_str.parse::<i64>()?)),
-        Type::INT2 => Ok(Value::Smallint(text_str.parse::<i16>()?)),
+        Type::INT8 => Ok(Value::BigInt(text_str.parse::<i64>()?)),
+        Type::INT2 => Ok(Value::SmallInt(text_str.parse::<i16>()?)),
         Type::OID => Ok(Value::Oid(text_str.parse::<u32>()?)),
         Type::FLOAT8 => {
             // TODO: Ensure all values are properly parsed, including +/-0 and +/-inf.
@@ -979,7 +979,7 @@ mod tests {
         buf.extend_from_slice(b"mighty"); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::VARCHAR).unwrap(),
-            DataValue::Varchar("mighty".into())
+            DataValue::VarChar("mighty".into())
         );
     }
 
@@ -1001,7 +1001,7 @@ mod tests {
         buf.put_i64(0x1234567890abcdef); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::INT8).unwrap(),
-            DataValue::Bigint(0x1234567890abcdef)
+            DataValue::BigInt(0x1234567890abcdef)
         );
     }
 
@@ -1012,7 +1012,7 @@ mod tests {
         buf.put_i16(0x1234); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::INT2).unwrap(),
-            DataValue::Smallint(0x1234)
+            DataValue::SmallInt(0x1234)
         );
     }
 
@@ -1244,7 +1244,7 @@ mod tests {
         buf.extend_from_slice(b"mighty"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::VARCHAR).unwrap(),
-            DataValue::Varchar("mighty".into())
+            DataValue::VarChar("mighty".into())
         );
     }
 
@@ -1266,7 +1266,7 @@ mod tests {
         buf.extend_from_slice(b"1311768467294899695"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::INT8).unwrap(),
-            DataValue::Bigint(0x1234567890abcdef)
+            DataValue::BigInt(0x1234567890abcdef)
         );
     }
 
@@ -1277,7 +1277,7 @@ mod tests {
         buf.extend_from_slice(b"4660"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::INT2).unwrap(),
-            DataValue::Smallint(0x1234)
+            DataValue::SmallInt(0x1234)
         );
     }
 

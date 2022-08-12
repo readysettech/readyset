@@ -320,13 +320,13 @@ mod tests {
                 "table1".into(),
             ),
             ColumnSchema::from_base(
-                ColumnSpecification::new(test_column(), SqlType::Bigint(Some(10))),
+                ColumnSpecification::new(test_column(), SqlType::BigInt(Some(10))),
                 "table1".into(),
             ),
         ];
 
         let schema_spec = vec![ColumnSchema::from_base(
-            ColumnSpecification::new(test_column(), SqlType::Varchar(Some(8))),
+            ColumnSpecification::new(test_column(), SqlType::VarChar(Some(8))),
             "table1".into(),
         )];
 
@@ -349,7 +349,7 @@ mod tests {
         )];
 
         let schema_spec = vec![ColumnSchema::from_base(
-            ColumnSpecification::new(test_column(), SqlType::Varchar(Some(8))),
+            ColumnSpecification::new(test_column(), SqlType::VarChar(Some(8))),
             "table1".into(),
         )];
 
@@ -373,13 +373,13 @@ mod tests {
                 "table1".into(),
             ),
             ColumnSchema::from_base(
-                ColumnSpecification::new(test_column(), SqlType::Varchar(Some(10))),
+                ColumnSpecification::new(test_column(), SqlType::VarChar(Some(10))),
                 "table1".into(),
             ),
         ];
 
         let schema_spec = vec![ColumnSchema::from_base(
-            ColumnSpecification::new(test_column(), SqlType::Varchar(Some(8))),
+            ColumnSpecification::new(test_column(), SqlType::VarChar(Some(8))),
             "table1".into(),
         )];
 

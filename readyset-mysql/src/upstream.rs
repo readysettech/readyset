@@ -332,7 +332,7 @@ mod tests {
 
         let param_specs = vec![
             ColumnSchema::from_base(
-                ColumnSpecification::new(test_column(), SqlType::Varchar(Some(10))),
+                ColumnSpecification::new(test_column(), SqlType::VarChar(Some(10))),
                 "table1".into(),
             ),
             ColumnSchema::from_base(
@@ -360,7 +360,7 @@ mod tests {
         };
 
         let param_specs = vec![ColumnSchema::from_base(
-            ColumnSpecification::new(test_column(), SqlType::Varchar(Some(10))),
+            ColumnSpecification::new(test_column(), SqlType::VarChar(Some(10))),
             "table1".into(),
         )];
 
@@ -395,7 +395,7 @@ mod tests {
         ];
 
         let schema_spec = vec![ColumnSchema::from_base(
-            ColumnSpecification::new(test_column(), SqlType::Varchar(Some(8))),
+            ColumnSpecification::new(test_column(), SqlType::VarChar(Some(8))),
             "table1".into(),
         )];
 

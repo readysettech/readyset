@@ -114,17 +114,17 @@ use zipf::ZipfDistribution;
 fn value_of_type(typ: &SqlType) -> DataType {
     match typ {
         SqlType::Char(_)
-        | SqlType::Varchar(_)
+        | SqlType::VarChar(_)
         | SqlType::Blob
-        | SqlType::Longblob
-        | SqlType::Mediumblob
-        | SqlType::Tinyblob
-        | SqlType::Tinytext
-        | SqlType::Mediumtext
-        | SqlType::Longtext
+        | SqlType::LongBlob
+        | SqlType::MediumBlob
+        | SqlType::TinyBlob
+        | SqlType::TinyText
+        | SqlType::MediumText
+        | SqlType::LongText
         | SqlType::Text
         | SqlType::Binary(_)
-        | SqlType::Varbinary(_) => {
+        | SqlType::VarBinary(_) => {
             // It is safe to transform an "a" String into a DataType.
             #[allow(clippy::unwrap_used)]
             DataType::try_from("a").unwrap()
@@ -136,13 +136,13 @@ fn value_of_type(typ: &SqlType) -> DataType {
             DataType::ByteArray(Arc::new(vec![0u8]))
         }
         SqlType::Int(_) => 1i32.into(),
-        SqlType::Bigint(_) => 1i64.into(),
+        SqlType::BigInt(_) => 1i64.into(),
         SqlType::UnsignedInt(_) | SqlType::Serial => 1u32.into(),
-        SqlType::UnsignedBigint(_) | SqlType::BigSerial => 1u64.into(),
-        SqlType::Tinyint(_) => 1i8.into(),
-        SqlType::UnsignedTinyint(_) => 1u8.into(),
-        SqlType::Smallint(_) => 1i16.into(),
-        SqlType::UnsignedSmallint(_) => 1u16.into(),
+        SqlType::UnsignedBigInt(_) | SqlType::BigSerial => 1u64.into(),
+        SqlType::TinyInt(_) => 1i8.into(),
+        SqlType::UnsignedTinyInt(_) => 1u8.into(),
+        SqlType::SmallInt(_) => 1i16.into(),
+        SqlType::UnsignedSmallInt(_) => 1u16.into(),
         SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
             1.5.try_into().unwrap()
         }
@@ -166,7 +166,7 @@ fn value_of_type(typ: &SqlType) -> DataType {
         SqlType::Bit(size_opt) => {
             DataType::from(BitVec::with_capacity(size_opt.unwrap_or(1) as usize))
         }
-        SqlType::Varbit(_) => DataType::from(BitVec::new()),
+        SqlType::VarBit(_) => DataType::from(BitVec::new()),
         SqlType::Array(_) => unimplemented!(),
     }
 }
@@ -182,13 +182,13 @@ fn value_of_type(typ: &SqlType) -> DataType {
 fn random_value_of_type(typ: &SqlType) -> DataType {
     let mut rng = rand::thread_rng();
     match typ {
-        SqlType::Char(Some(x)) | SqlType::Varchar(Some(x)) => {
+        SqlType::Char(Some(x)) | SqlType::VarChar(Some(x)) => {
             let length: usize = rng.gen_range(1..=*x).into();
             // It is safe to transform an String of consecutive a's into a DataType.
             #[allow(clippy::unwrap_used)]
             DataType::try_from("a".repeat(length)).unwrap()
         }
-        SqlType::Tinyblob | SqlType::Tinytext => {
+        SqlType::TinyBlob | SqlType::TinyText => {
             // 2^8 bytes
             let length: usize = rng.gen_range(1..256);
             // It is safe to transform an String of consecutive a's into a DataType.
@@ -198,7 +198,7 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
         SqlType::Blob
         | SqlType::Text
         | SqlType::Char(None)
-        | SqlType::Varchar(None)
+        | SqlType::VarChar(None)
         | SqlType::Binary(None) => {
             // 2^16 bytes
             let length: usize = rng.gen_range(1..65536);
@@ -206,7 +206,7 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
             #[allow(clippy::unwrap_used)]
             DataType::try_from("a".repeat(length)).unwrap()
         }
-        SqlType::Mediumblob | SqlType::Mediumtext => {
+        SqlType::MediumBlob | SqlType::MediumText => {
             // 2^24 bytes
             // Currently capped at 65536 as these are generated in memory.
             let length: usize = rng.gen_range(1..65536);
@@ -214,7 +214,7 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
             #[allow(clippy::unwrap_used)]
             DataType::try_from("a".repeat(length)).unwrap()
         }
-        SqlType::Longblob | SqlType::Longtext => {
+        SqlType::LongBlob | SqlType::LongText => {
             // 2^32 bytes
             // Currently capped at 65536 as these are generated in memory.
             let length: usize = rng.gen_range(1..65536);
@@ -222,7 +222,7 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
             #[allow(clippy::unwrap_used)]
             DataType::try_from("a".repeat(length)).unwrap()
         }
-        SqlType::Binary(Some(x)) | SqlType::Varbinary(x) => {
+        SqlType::Binary(Some(x)) | SqlType::VarBinary(x) => {
             // Convert to bytes and generate string data to match.
             let length: usize = rng.gen_range(1..*x / 8).into();
             // It is safe to transform an String of consecutive a's into a DataType.
@@ -238,13 +238,13 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
             DataType::ByteArray(Arc::new(array))
         }
         SqlType::Int(_) => rng.gen::<i32>().into(),
-        SqlType::Bigint(_) => rng.gen::<i64>().into(),
+        SqlType::BigInt(_) => rng.gen::<i64>().into(),
         SqlType::UnsignedInt(_) => rng.gen::<u32>().into(),
-        SqlType::UnsignedBigint(_) => rng.gen::<u32>().into(),
-        SqlType::Tinyint(_) => rng.gen::<i8>().into(),
-        SqlType::UnsignedTinyint(_) => rng.gen::<u8>().into(),
-        SqlType::Smallint(_) => rng.gen::<i16>().into(),
-        SqlType::UnsignedSmallint(_) => rng.gen::<u16>().into(),
+        SqlType::UnsignedBigInt(_) => rng.gen::<u32>().into(),
+        SqlType::TinyInt(_) => rng.gen::<i8>().into(),
+        SqlType::UnsignedTinyInt(_) => rng.gen::<u8>().into(),
+        SqlType::SmallInt(_) => rng.gen::<i16>().into(),
+        SqlType::UnsignedSmallInt(_) => rng.gen::<u16>().into(),
         SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
             1.5.try_into().unwrap()
         }
@@ -298,7 +298,7 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
                 .take(size_opt.unwrap_or(1) as usize)
                 .collect::<Vec<bool>>(),
         )),
-        SqlType::Varbit(max_size) => {
+        SqlType::VarBit(max_size) => {
             let size = rng.gen_range(0..max_size.unwrap_or(u16::MAX));
             DataType::from(BitVec::from_iter(
                 rng.sample_iter(Standard)
@@ -337,29 +337,29 @@ fn uniform_random_value(min: &DataType, max: &DataType) -> DataType {
 fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
     match typ {
         SqlType::Char(_)
-        | SqlType::Varchar(_)
+        | SqlType::VarChar(_)
         | SqlType::Blob
-        | SqlType::Longblob
-        | SqlType::Mediumblob
-        | SqlType::Tinyblob
-        | SqlType::Tinytext
-        | SqlType::Mediumtext
-        | SqlType::Longtext
+        | SqlType::LongBlob
+        | SqlType::MediumBlob
+        | SqlType::TinyBlob
+        | SqlType::TinyText
+        | SqlType::MediumText
+        | SqlType::LongText
         | SqlType::Text
         | SqlType::Binary(_)
-        | SqlType::Varbinary(_) => {
+        | SqlType::VarBinary(_) => {
             // It is safe to transform an u32 String representation into a DataType.
             #[allow(clippy::unwrap_used)]
             DataType::try_from(format!("{}", idx)).unwrap()
         }
         SqlType::Int(_) => (idx as i32).into(),
-        SqlType::Bigint(_) => (idx as i64).into(),
+        SqlType::BigInt(_) => (idx as i64).into(),
         SqlType::UnsignedInt(_) => (idx as u32).into(),
-        SqlType::UnsignedBigint(_) => (idx as u64).into(),
-        SqlType::Tinyint(_) => (idx as i8).into(),
-        SqlType::UnsignedTinyint(_) => (idx).into(),
-        SqlType::Smallint(_) => (idx as i16).into(),
-        SqlType::UnsignedSmallint(_) => (idx as u16).into(),
+        SqlType::UnsignedBigInt(_) => (idx as u64).into(),
+        SqlType::TinyInt(_) => (idx as i8).into(),
+        SqlType::UnsignedTinyInt(_) => (idx).into(),
+        SqlType::SmallInt(_) => (idx as i16).into(),
+        SqlType::UnsignedSmallInt(_) => (idx as u16).into(),
         SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
             (1.5 + idx as f64).try_into().unwrap()
         }
@@ -411,7 +411,7 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
             #[allow(clippy::unwrap_used)]
             DataType::from(uuid::Uuid::from_slice(&bytes[..]).unwrap().to_string())
         }
-        SqlType::Bit(_) | SqlType::Varbit(_) => {
+        SqlType::Bit(_) | SqlType::VarBit(_) => {
             let mut bytes = [u8::MAX; 4];
             bytes[0] = ((idx >> 24) & 0xff) as u8;
             bytes[1] = ((idx >> 16) & 0xff) as u8;

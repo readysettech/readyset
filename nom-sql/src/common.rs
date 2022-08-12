@@ -29,30 +29,30 @@ use crate::{literal, Expr, FunctionExpr, Literal, SqlIdentifier};
 pub enum SqlType {
     Bool,
     Char(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
-    Varchar(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
+    VarChar(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
     Int(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
     UnsignedInt(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
-    Bigint(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
-    UnsignedBigint(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
-    Tinyint(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
-    UnsignedTinyint(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
-    Smallint(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
-    UnsignedSmallint(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
+    BigInt(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
+    UnsignedBigInt(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
+    TinyInt(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
+    UnsignedTinyInt(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
+    SmallInt(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
+    UnsignedSmallInt(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
     #[weight(0)]
     Blob,
     #[weight(0)]
-    Longblob,
+    LongBlob,
     #[weight(0)]
-    Mediumblob,
+    MediumBlob,
     #[weight(0)]
-    Tinyblob,
+    TinyBlob,
     Double,
     Float,
     Real,
     Numeric(Option<(u16, Option<u8>)>),
-    Tinytext,
-    Mediumtext,
-    Longtext,
+    TinyText,
+    MediumText,
+    LongText,
     Text,
     Date,
     DateTime(#[strategy(proptest::option::of(1..=6u16))] Option<u16>),
@@ -62,7 +62,7 @@ pub enum SqlType {
     #[weight(0)]
     Binary(Option<u16>),
     #[weight(0)]
-    Varbinary(u16),
+    VarBinary(u16),
     #[weight(0)]
     Enum(Vec<Literal>),
     #[weight(0)]
@@ -74,7 +74,7 @@ pub enum SqlType {
     Inet,
     Uuid,
     Bit(Option<u16>),
-    Varbit(Option<u16>),
+    VarBit(Option<u16>),
     Serial,
     BigSerial,
     Array(Box<SqlType>),
@@ -89,12 +89,12 @@ impl SqlType {
         prop_oneof![
             prop::Just(Int(None)),
             prop::Just(UnsignedInt(None)),
-            prop::Just(Bigint(None)),
-            prop::Just(UnsignedBigint(None)),
-            prop::Just(Tinyint(None)),
-            prop::Just(UnsignedTinyint(None)),
-            prop::Just(Smallint(None)),
-            prop::Just(UnsignedSmallint(None)),
+            prop::Just(BigInt(None)),
+            prop::Just(UnsignedBigInt(None)),
+            prop::Just(TinyInt(None)),
+            prop::Just(UnsignedTinyInt(None)),
+            prop::Just(SmallInt(None)),
+            prop::Just(UnsignedSmallInt(None)),
             prop::Just(Double),
             prop::Just(Float),
             prop::Just(Real),
@@ -116,31 +116,31 @@ impl fmt::Display for SqlType {
         match *self {
             SqlType::Bool => write!(f, "BOOL"),
             SqlType::Char(len) => write_with_len(f, "CHAR", len),
-            SqlType::Varchar(len) => write_with_len(f, "VARCHAR", len),
+            SqlType::VarChar(len) => write_with_len(f, "VARCHAR", len),
             SqlType::Int(len) => write_with_len(f, "INT", len),
             SqlType::UnsignedInt(len) => {
                 write_with_len(f, "INT", len)?;
                 write!(f, " UNSIGNED")
             }
-            SqlType::Bigint(len) => write_with_len(f, "BIGINT", len),
-            SqlType::UnsignedBigint(len) => {
+            SqlType::BigInt(len) => write_with_len(f, "BIGINT", len),
+            SqlType::UnsignedBigInt(len) => {
                 write_with_len(f, "BIGINT", len)?;
                 write!(f, " UNSIGNED")
             }
-            SqlType::Tinyint(len) => write_with_len(f, "TINYINT", len),
-            SqlType::UnsignedTinyint(len) => {
+            SqlType::TinyInt(len) => write_with_len(f, "TINYINT", len),
+            SqlType::UnsignedTinyInt(len) => {
                 write_with_len(f, "TINYINT", len)?;
                 write!(f, " UNSIGNED")
             }
-            SqlType::Smallint(len) => write_with_len(f, "SMALLINT", len),
-            SqlType::UnsignedSmallint(len) => {
+            SqlType::SmallInt(len) => write_with_len(f, "SMALLINT", len),
+            SqlType::UnsignedSmallInt(len) => {
                 write_with_len(f, "SMALLINT", len)?;
                 write!(f, " UNSIGNED")
             }
             SqlType::Blob => write!(f, "BLOB"),
-            SqlType::Longblob => write!(f, "LONGBLOB"),
-            SqlType::Mediumblob => write!(f, "MEDIUMBLOB"),
-            SqlType::Tinyblob => write!(f, "TINYBLOB"),
+            SqlType::LongBlob => write!(f, "LONGBLOB"),
+            SqlType::MediumBlob => write!(f, "MEDIUMBLOB"),
+            SqlType::TinyBlob => write!(f, "TINYBLOB"),
             SqlType::Double => write!(f, "DOUBLE"),
             SqlType::Float => write!(f, "FLOAT"),
             SqlType::Real => write!(f, "REAL"),
@@ -149,9 +149,9 @@ impl fmt::Display for SqlType {
                 Some((prec, _)) => write!(f, "NUMERIC({})", prec),
                 _ => write!(f, "NUMERIC"),
             },
-            SqlType::Tinytext => write!(f, "TINYTEXT"),
-            SqlType::Mediumtext => write!(f, "MEDIUMTEXT"),
-            SqlType::Longtext => write!(f, "LONGTEXT"),
+            SqlType::TinyText => write!(f, "TINYTEXT"),
+            SqlType::MediumText => write!(f, "MEDIUMTEXT"),
+            SqlType::LongText => write!(f, "LONGTEXT"),
             SqlType::Text => write!(f, "TEXT"),
             SqlType::Date => write!(f, "DATE"),
             SqlType::DateTime(len) => write_with_len(f, "DATETIME", len),
@@ -159,7 +159,7 @@ impl fmt::Display for SqlType {
             SqlType::Timestamp => write!(f, "TIMESTAMP"),
             SqlType::TimestampTz => write!(f, "TIMESTAMP WITH TIME ZONE"),
             SqlType::Binary(len) => write_with_len(f, "BINARY", len),
-            SqlType::Varbinary(len) => write!(f, "VARBINARY({})", len),
+            SqlType::VarBinary(len) => write!(f, "VARBINARY({})", len),
             SqlType::Enum(ref variants) => write!(f, "ENUM({})", variants.iter().join(", ")),
             SqlType::Decimal(m, d) => write!(f, "DECIMAL({}, {})", m, d),
             SqlType::Json => write!(f, "JSON"),
@@ -175,7 +175,7 @@ impl fmt::Display for SqlType {
                 }
                 Ok(())
             }
-            SqlType::Varbit(n) => write_with_len(f, "VARBIT", n),
+            SqlType::VarBit(n) => write_with_len(f, "VARBIT", n),
             SqlType::Serial => write!(f, "SERIAL"),
             SqlType::BigSerial => write!(f, "BIGSERIAL"),
             SqlType::Array(ref t) => write!(f, "{}[]", t),
@@ -647,11 +647,11 @@ fn opt_without_time_zone(i: &[u8]) -> IResult<&[u8], ()> {
 fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
     move |i| {
         alt((
-            |i| int_type("tinyint", SqlType::UnsignedTinyint, SqlType::Tinyint, i),
-            |i| int_type("smallint", SqlType::UnsignedSmallint, SqlType::Smallint, i),
+            |i| int_type("tinyint", SqlType::UnsignedTinyInt, SqlType::TinyInt, i),
+            |i| int_type("smallint", SqlType::UnsignedSmallInt, SqlType::SmallInt, i),
             |i| int_type("integer", SqlType::UnsignedInt, SqlType::Int, i),
             |i| int_type("int", SqlType::UnsignedInt, SqlType::Int, i),
-            |i| int_type("bigint", SqlType::UnsignedBigint, SqlType::Bigint, i),
+            |i| int_type("bigint", SqlType::UnsignedBigInt, SqlType::BigInt, i),
             map(alt((tag_no_case("boolean"), tag_no_case("bool"))), |_| {
                 SqlType::Bool
             }),
@@ -744,7 +744,7 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
                     whitespace0,
                     opt(tag_no_case("binary")),
                 )),
-                |t| SqlType::Varchar(t.1),
+                |t| SqlType::VarChar(t.1),
             ),
             map(
                 tuple((
@@ -771,15 +771,15 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
             |t| SqlType::Binary(t.1),
         ),
         map(tag_no_case("blob"), |_| SqlType::Blob),
-        map(tag_no_case("longblob"), |_| SqlType::Longblob),
-        map(tag_no_case("mediumblob"), |_| SqlType::Mediumblob),
-        map(tag_no_case("mediumtext"), |_| SqlType::Mediumtext),
-        map(tag_no_case("longtext"), |_| SqlType::Longtext),
-        map(tag_no_case("tinyblob"), |_| SqlType::Tinyblob),
-        map(tag_no_case("tinytext"), |_| SqlType::Tinytext),
+        map(tag_no_case("longblob"), |_| SqlType::LongBlob),
+        map(tag_no_case("mediumblob"), |_| SqlType::MediumBlob),
+        map(tag_no_case("mediumtext"), |_| SqlType::MediumText),
+        map(tag_no_case("longtext"), |_| SqlType::LongText),
+        map(tag_no_case("tinyblob"), |_| SqlType::TinyBlob),
+        map(tag_no_case("tinytext"), |_| SqlType::TinyText),
         map(
             tuple((tag_no_case("varbinary"), delim_u16, whitespace0)),
-            |t| SqlType::Varbinary(t.1),
+            |t| SqlType::VarBinary(t.1),
         ),
         map(tag_no_case("bytea"), |_| SqlType::ByteArray),
         map(tag_no_case("macaddr"), |_| SqlType::MacAddr),
@@ -805,7 +805,7 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
                 )),
                 opt(delim_u16),
             )),
-            |t| SqlType::Varbit(t.1),
+            |t| SqlType::VarBit(t.1),
         ),
         map(tuple((tag_no_case("bit"), opt(delim_u16))), |t| {
             SqlType::Bit(t.1)
@@ -1537,13 +1537,13 @@ mod tests {
         #[test]
         fn bit_varying_type() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"bit varying");
-            assert_eq!(res, SqlType::Varbit(None));
+            assert_eq!(res, SqlType::VarBit(None));
         }
 
         #[test]
         fn bit_varying_with_size_type() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"bit varying(10)");
-            assert_eq!(res, SqlType::Varbit(Some(10)));
+            assert_eq!(res, SqlType::VarBit(Some(10)));
         }
 
         #[test]
@@ -1609,13 +1609,13 @@ mod tests {
         #[test]
         fn varchar_without_length() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"varchar");
-            assert_eq!(res, SqlType::Varchar(None));
+            assert_eq!(res, SqlType::VarChar(None));
         }
 
         #[test]
         fn character_varying() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"character varying");
-            assert_eq!(res, SqlType::Varchar(None));
+            assert_eq!(res, SqlType::VarChar(None));
         }
 
         #[test]
@@ -1624,7 +1624,7 @@ mod tests {
                 type_identifier(Dialect::PostgreSQL),
                 b"character varying(20)"
             );
-            assert_eq!(res, SqlType::Varchar(Some(20)));
+            assert_eq!(res, SqlType::VarChar(Some(20)));
         }
 
         #[test]

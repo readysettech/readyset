@@ -1311,7 +1311,7 @@ impl NoriaConnector {
             .map(|c| ColumnSchema {
                 spec: nom_sql::ColumnSpecification {
                     column: c,
-                    sql_type: nom_sql::SqlType::UnsignedBigint(None),
+                    sql_type: nom_sql::SqlType::UnsignedBigInt(None),
                     constraints: vec![],
                     comment: None,
                 },
@@ -1644,9 +1644,9 @@ fn build_view_query(
                             limit,
                         } => {
                             // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
-                            // offset parameters should always be a Bigint
+                            // offset parameters should always be a BigInt
                             let offset: u64 = key[*offset_placeholder - 1]
-                                .coerce_to(&nom_sql::SqlType::Bigint(None))?
+                                .coerce_to(&nom_sql::SqlType::BigInt(None))?
                                 .try_into()?;
                             if offset % *limit != 0 {
                                 unsupported!(

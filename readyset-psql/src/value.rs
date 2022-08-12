@@ -30,18 +30,18 @@ impl TryFrom<Value> for ps::Value {
             (Type::CHAR, DataType::Int(v)) => Ok(ps::Value::Char(v.try_into()?)),
             (Type::CHAR, DataType::UnsignedInt(v)) => Ok(ps::Value::Char(v.try_into()?)),
 
-            (Type::VARCHAR, DataType::Text(v)) => Ok(ps::Value::Varchar(v)),
-            (Type::VARCHAR, DataType::TinyText(t)) => Ok(ps::Value::Varchar(t.as_str().into())),
+            (Type::VARCHAR, DataType::Text(v)) => Ok(ps::Value::VarChar(v)),
+            (Type::VARCHAR, DataType::TinyText(t)) => Ok(ps::Value::VarChar(t.as_str().into())),
             (Type::NAME, DataType::Text(t)) => Ok(ps::Value::Name(t)),
             (Type::NAME, DataType::TinyText(t)) => Ok(ps::Value::Name(t.as_str().into())),
 
-            (Type::INT2, DataType::Int(v)) => Ok(ps::Value::Smallint(v as _)),
+            (Type::INT2, DataType::Int(v)) => Ok(ps::Value::SmallInt(v as _)),
             (Type::INT4, DataType::Int(v)) => Ok(ps::Value::Int(v as _)),
-            (Type::INT8, DataType::Int(v)) => Ok(ps::Value::Bigint(v as _)),
+            (Type::INT8, DataType::Int(v)) => Ok(ps::Value::BigInt(v as _)),
 
-            (Type::INT2, DataType::UnsignedInt(v)) => Ok(ps::Value::Smallint(v as _)),
+            (Type::INT2, DataType::UnsignedInt(v)) => Ok(ps::Value::SmallInt(v as _)),
             (Type::INT4, DataType::UnsignedInt(v)) => Ok(ps::Value::Int(v as _)),
-            (Type::INT8, DataType::UnsignedInt(v)) => Ok(ps::Value::Bigint(v as _)),
+            (Type::INT8, DataType::UnsignedInt(v)) => Ok(ps::Value::BigInt(v as _)),
 
             (ref ty, DataType::UnsignedInt(v)) if type_is_oid(ty) => {
                 Ok(ps::Value::Oid(v.try_into()?))
@@ -145,7 +145,7 @@ mod tests {
         };
         assert_eq!(
             ps::Value::try_from(val).unwrap(),
-            ps::Value::Varchar("aaaaaaaaaaaaaa".into())
+            ps::Value::VarChar("aaaaaaaaaaaaaa".into())
         );
     }
 

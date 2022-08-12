@@ -260,34 +260,34 @@ impl Literal {
         match sql_type {
             SqlType::Bool => prop_oneof![Just(Self::Integer(0)), Just(Self::Integer(1)),].boxed(),
             SqlType::Char(_)
-            | SqlType::Varchar(_)
-            | SqlType::Tinytext
-            | SqlType::Mediumtext
-            | SqlType::Longtext
+            | SqlType::VarChar(_)
+            | SqlType::TinyText
+            | SqlType::MediumText
+            | SqlType::LongText
             | SqlType::Text => any::<String>().prop_map(Self::String).boxed(),
             SqlType::Int(_) => any::<i32>().prop_map(|i| Self::Integer(i as _)).boxed(),
             SqlType::UnsignedInt(_) => any::<u32>()
                 .prop_map(|i| Self::UnsignedInteger(i as _))
                 .boxed(),
-            SqlType::Bigint(_) => any::<i64>().prop_map(|i| Self::Integer(i as _)).boxed(),
-            SqlType::UnsignedBigint(_) => any::<u64>()
+            SqlType::BigInt(_) => any::<i64>().prop_map(|i| Self::Integer(i as _)).boxed(),
+            SqlType::UnsignedBigInt(_) => any::<u64>()
                 .prop_map(|i| Self::UnsignedInteger(i as _))
                 .boxed(),
-            SqlType::Tinyint(_) => any::<i8>().prop_map(|i| Self::Integer(i as _)).boxed(),
-            SqlType::UnsignedTinyint(_) => any::<u8>()
+            SqlType::TinyInt(_) => any::<i8>().prop_map(|i| Self::Integer(i as _)).boxed(),
+            SqlType::UnsignedTinyInt(_) => any::<u8>()
                 .prop_map(|i| Self::UnsignedInteger(i as _))
                 .boxed(),
-            SqlType::Smallint(_) => any::<i16>().prop_map(|i| Self::Integer(i as _)).boxed(),
-            SqlType::UnsignedSmallint(_) => any::<u16>()
+            SqlType::SmallInt(_) => any::<i16>().prop_map(|i| Self::Integer(i as _)).boxed(),
+            SqlType::UnsignedSmallInt(_) => any::<u16>()
                 .prop_map(|i| Self::UnsignedInteger(i as _))
                 .boxed(),
             SqlType::Blob
             | SqlType::ByteArray
-            | SqlType::Longblob
-            | SqlType::Mediumblob
-            | SqlType::Tinyblob
+            | SqlType::LongBlob
+            | SqlType::MediumBlob
+            | SqlType::TinyBlob
             | SqlType::Binary(_)
-            | SqlType::Varbinary(_) => any::<Vec<u8>>().prop_map(Self::Blob).boxed(),
+            | SqlType::VarBinary(_) => any::<Vec<u8>>().prop_map(Self::Blob).boxed(),
             SqlType::Float => any::<Float>().prop_map(Self::Float).boxed(),
             SqlType::Double | SqlType::Real | SqlType::Decimal(_, _) => {
                 any::<Double>().prop_map(Self::Double).boxed()
@@ -335,7 +335,7 @@ impl Literal {
                     .prop_map(|bits| Self::BitVector(bits.to_bytes()))
                     .boxed()
             }
-            SqlType::Varbit(n) => {
+            SqlType::VarBit(n) => {
                 arbitrary_bitvec(0..n.map(|max_size| max_size as usize).unwrap_or(20_usize))
                     .prop_map(|bits| Self::BitVector(bits.to_bytes()))
                     .boxed()

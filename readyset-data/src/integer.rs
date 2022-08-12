@@ -63,27 +63,27 @@ where
                 Ok(DataType::from(val ^ val != val))
             }
         }
-        SqlType::Tinyint(_) => i8::try_from(val).map_err(|_| err()).map(DataType::from),
-        SqlType::Smallint(_) => i16::try_from(val).map_err(|_| err()).map(DataType::from),
+        SqlType::TinyInt(_) => i8::try_from(val).map_err(|_| err()).map(DataType::from),
+        SqlType::SmallInt(_) => i16::try_from(val).map_err(|_| err()).map(DataType::from),
         SqlType::Int(_) | SqlType::Serial => {
             i32::try_from(val).map_err(|_| err()).map(DataType::from)
         }
-        SqlType::Bigint(_) | SqlType::BigSerial => {
+        SqlType::BigInt(_) | SqlType::BigSerial => {
             i64::try_from(val).map_err(|_| err()).map(DataType::from)
         }
-        SqlType::UnsignedTinyint(_) => u8::try_from(val).map_err(|_| err()).map(DataType::from),
-        SqlType::UnsignedSmallint(_) => u16::try_from(val).map_err(|_| err()).map(DataType::from),
+        SqlType::UnsignedTinyInt(_) => u8::try_from(val).map_err(|_| err()).map(DataType::from),
+        SqlType::UnsignedSmallInt(_) => u16::try_from(val).map_err(|_| err()).map(DataType::from),
         SqlType::UnsignedInt(_) => u32::try_from(val).map_err(|_| err()).map(DataType::from),
-        SqlType::UnsignedBigint(_) => u64::try_from(val).map_err(|_| err()).map(DataType::from),
+        SqlType::UnsignedBigInt(_) => u64::try_from(val).map_err(|_| err()).map(DataType::from),
 
-        SqlType::Tinytext
-        | SqlType::Mediumtext
+        SqlType::TinyText
+        | SqlType::MediumText
         | SqlType::Text
-        | SqlType::Longtext
+        | SqlType::LongText
         | SqlType::Char(None)
-        | SqlType::Varchar(None) => Ok(val.to_string().into()),
+        | SqlType::VarChar(None) => Ok(val.to_string().into()),
 
-        SqlType::Varchar(Some(l)) => {
+        SqlType::VarChar(Some(l)) => {
             let mut val = val.to_string();
             val.truncate(*l as usize);
             Ok(val.to_string().into())
@@ -96,14 +96,14 @@ where
             Ok(val.into())
         }
 
-        SqlType::Tinyblob
-        | SqlType::Mediumblob
+        SqlType::TinyBlob
+        | SqlType::MediumBlob
         | SqlType::Blob
-        | SqlType::Longblob
+        | SqlType::LongBlob
         | SqlType::ByteArray
         | SqlType::Binary(None) => Ok(DataType::ByteArray(val.to_string().into_bytes().into())),
 
-        SqlType::Varbinary(l) => {
+        SqlType::VarBinary(l) => {
             let mut val = val.to_string();
             val.truncate(*l as usize);
             Ok(val.to_string().into_bytes().into())
@@ -183,7 +183,7 @@ where
         | SqlType::Inet
         | SqlType::Uuid
         | SqlType::Bit(_)
-        | SqlType::Varbit(_)
+        | SqlType::VarBit(_)
         | SqlType::Array(_) => Err(ReadySetError::DataTypeConversionError {
             src_type: src_type_name.to_string(),
             target_type: sql_type.to_string(),

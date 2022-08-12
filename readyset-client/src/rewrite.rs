@@ -113,7 +113,7 @@ impl ProcessedQueryParams {
                 Literal::Placeholder(_) => match params_iter
                     .next()
                     .ok_or_else(|| invalid_err!("Wrong number of parameters"))
-                    .and_then(|v| v.coerce_to(&SqlType::UnsignedBigint(None)))?
+                    .and_then(|v| v.coerce_to(&SqlType::UnsignedBigInt(None)))?
                 {
                     DataType::UnsignedInt(v) => Ok(v as usize),
                     _ => unreachable!("Succesfully coerced"),
@@ -128,7 +128,7 @@ impl ProcessedQueryParams {
                 | Literal::String(_)
                 | Literal::Numeric(_, _) => {
                     // All of those are invalid in MySQL, but Postgres coerces to integer
-                    match DataType::try_from(lit)?.coerce_to(&SqlType::UnsignedBigint(None))? {
+                    match DataType::try_from(lit)?.coerce_to(&SqlType::UnsignedBigInt(None))? {
                         DataType::UnsignedInt(v) => Ok(v as usize),
                         _ => unreachable!("Succesfully coerced"),
                     }

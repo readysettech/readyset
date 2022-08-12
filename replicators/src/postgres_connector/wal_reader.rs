@@ -324,10 +324,10 @@ impl wal::TupleData {
                             let target_sql_type = SqlType::Array(Box::new(match *member_type {
                                 PGType::BOOL => SqlType::Bool,
                                 PGType::CHAR => SqlType::Char(None),
-                                PGType::VARCHAR => SqlType::Varchar(None),
+                                PGType::VARCHAR => SqlType::VarChar(None),
                                 PGType::INT4 => SqlType::Int(None),
-                                PGType::INT8 => SqlType::Bigint(None),
-                                PGType::INT2 => SqlType::Smallint(None),
+                                PGType::INT8 => SqlType::BigInt(None),
+                                PGType::INT2 => SqlType::SmallInt(None),
                                 PGType::FLOAT4 => SqlType::Real,
                                 PGType::FLOAT8 => SqlType::Double,
                                 PGType::TEXT => SqlType::Text,
@@ -343,7 +343,7 @@ impl wal::TupleData {
                                 PGType::INET => SqlType::Inet,
                                 PGType::UUID => SqlType::Uuid,
                                 PGType::BIT => SqlType::Bit(None),
-                                PGType::VARBIT => SqlType::Varbit(None),
+                                PGType::VARBIT => SqlType::VarBit(None),
                                 _ => unsupported!("unsupported type {}", spec.data_type),
                             }));
 

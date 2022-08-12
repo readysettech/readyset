@@ -317,7 +317,7 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::Bool(v) => {
             v.to_sql(&Type::BOOL, dst)?;
         }
-        Value::Varchar(v) => {
+        Value::VarChar(v) => {
             v.as_bytes().to_sql(&Type::VARCHAR, dst)?;
         }
         Value::Name(v) => {
@@ -329,10 +329,10 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::Int(v) => {
             v.to_sql(&Type::INT4, dst)?;
         }
-        Value::Bigint(v) => {
+        Value::BigInt(v) => {
             v.to_sql(&Type::INT8, dst)?;
         }
-        Value::Smallint(v) => {
+        Value::SmallInt(v) => {
             v.to_sql(&Type::INT2, dst)?;
         }
         Value::Oid(v) => {
@@ -423,7 +423,7 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
             };
             write!(dst, "{}", text)?;
         }
-        Value::Varchar(v) | Value::Name(v) | Value::Text(v) => {
+        Value::VarChar(v) | Value::Name(v) | Value::Text(v) => {
             dst.extend_from_slice(v.as_bytes());
         }
         Value::Char(v) => {
@@ -432,10 +432,10 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::Int(v) => {
             write!(dst, "{}", v)?;
         }
-        Value::Bigint(v) => {
+        Value::BigInt(v) => {
             write!(dst, "{}", v)?;
         }
-        Value::Smallint(v) => {
+        Value::SmallInt(v) => {
             write!(dst, "{}", v)?;
         }
         Value::Oid(v) => {
@@ -1011,7 +1011,7 @@ mod tests {
     #[test]
     fn test_encode_binary_varchar() {
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::Varchar("some stuff".into()), &mut buf).unwrap();
+        put_binary_value(DataValue::VarChar("some stuff".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(10); // length
         exp.extend_from_slice(b"some stuff"); // value
@@ -1031,7 +1031,7 @@ mod tests {
     #[test]
     fn test_encode_binary_big_int() {
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::Bigint(0x1234567890abcdef), &mut buf).unwrap();
+        put_binary_value(DataValue::BigInt(0x1234567890abcdef), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(8); // length
         exp.put_i64(0x1234567890abcdef); // value
@@ -1041,7 +1041,7 @@ mod tests {
     #[test]
     fn test_encode_binary_small_int() {
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::Smallint(0x1234), &mut buf).unwrap();
+        put_binary_value(DataValue::SmallInt(0x1234), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(2); // length
         exp.put_i16(0x1234); // value
@@ -1258,7 +1258,7 @@ mod tests {
     #[test]
     fn test_encode_text_varchar() {
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::Varchar("some stuff".into()), &mut buf).unwrap();
+        put_text_value(DataValue::VarChar("some stuff".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(10); // length
         exp.extend_from_slice(b"some stuff"); // value
@@ -1278,7 +1278,7 @@ mod tests {
     #[test]
     fn test_encode_text_big_int() {
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::Bigint(0x1234567890abcdef), &mut buf).unwrap();
+        put_text_value(DataValue::BigInt(0x1234567890abcdef), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(19); // length
         exp.extend_from_slice(b"1311768467294899695"); // value
@@ -1288,7 +1288,7 @@ mod tests {
     #[test]
     fn test_encode_text_small_int() {
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::Smallint(0x1234), &mut buf).unwrap();
+        put_text_value(DataValue::SmallInt(0x1234), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(4); // length
         exp.extend_from_slice(b"4660"); // value

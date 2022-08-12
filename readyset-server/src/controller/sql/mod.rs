@@ -3308,7 +3308,7 @@ mod tests {
                         &Type::Sql(SqlType::Int(None)),    // a
                         &Type::Sql(SqlType::Float),        // b
                         &Type::Sql(SqlType::Text),         // c
-                        &Type::Sql(SqlType::Bigint(None)), // bogokey projection
+                        &Type::Sql(SqlType::BigInt(None)), // bogokey projection
                     ];
                     let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
                     assert_eq!(truth, types);
@@ -3400,21 +3400,21 @@ mod tests {
             g.node_indices().for_each(|idx| {
                 if matches!(g[idx].as_internal(), Some(NodeOperator::Aggregation(_))) {
                     let truth = vec![
-                        &Type::Sql(SqlType::Bigint(None)),    // bogokey
+                        &Type::Sql(SqlType::BigInt(None)),    // bogokey
                         &Type::Sql(SqlType::Decimal(64, 64)), // sum(t1.a)
                     ];
                     let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
                     assert_eq!(truth, types);
                 } else if matches!(g[idx].as_internal(), Some(NodeOperator::Extremum(_))) {
                     let truth = vec![
-                        &Type::Sql(SqlType::Bigint(None)), // bogokey
+                        &Type::Sql(SqlType::BigInt(None)), // bogokey
                         &Type::Sql(SqlType::Float),        // max(t1.b)
                     ];
                     let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
                     assert_eq!(truth, types);
                 } else if matches!(g[idx].as_internal(), Some(NodeOperator::Concat(_))) {
                     let truth = vec![
-                        &Type::Sql(SqlType::Bigint(None)), // bogokey
+                        &Type::Sql(SqlType::BigInt(None)), // bogokey
                         &Type::Sql(SqlType::Text),         // group_concat()
                     ];
                     let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
@@ -3587,7 +3587,7 @@ mod tests {
                 &Type::Sql(SqlType::Int(None)),    // t1.a
                 &Type::Sql(SqlType::Char(None)),   // cast(t1.b as char)
                 &Type::Sql(SqlType::Int(None)),    // t1.a + 1
-                &Type::Sql(SqlType::Bigint(None)), // bogokey
+                &Type::Sql(SqlType::BigInt(None)), // bogokey
             ];
             let types = g[project_leaf_node]
                 .columns()
@@ -3600,7 +3600,7 @@ mod tests {
                 &Type::Sql(SqlType::Char(None)),   // cast(t1.b as char)
                 &Type::Sql(SqlType::Int(None)),    // t1.a
                 &Type::Sql(SqlType::Int(None)),    // t1.a + 1
-                &Type::Sql(SqlType::Bigint(None)), // bogokey
+                &Type::Sql(SqlType::BigInt(None)), // bogokey
             ];
             let types = g[project_reorder_node]
                 .columns()

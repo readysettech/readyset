@@ -43,7 +43,7 @@ impl Aggregation {
         over_col_ty: &Type,
     ) -> ReadySetResult<GroupedOperator<Aggregator>> {
         let out_ty = match &self {
-            Aggregation::Count { .. } => Some(SqlType::Bigint(None)),
+            Aggregation::Count { .. } => Some(SqlType::BigInt(None)),
             // The SUM() and AVG() functions return a DECIMAL value for exact-value arguments
             // (integer or DECIMAL), and a DOUBLE value for approximate-value arguments (FLOAT or
             // DOUBLE).
@@ -162,7 +162,7 @@ impl Aggregator {
 
     fn new_data(&self) -> ReadySetResult<DataType> {
         match &self.out_ty {
-            Some(SqlType::Bigint(_)) => Ok(DataType::Int(0)),
+            Some(SqlType::BigInt(_)) => Ok(DataType::Int(0)),
             Some(SqlType::Double) => Ok(DataType::Double(0.)),
             Some(SqlType::Decimal(_, _)) => Ok(DataType::Numeric(Default::default())),
             Some(SqlType::Text) => Ok(DataType::from("")),

@@ -151,7 +151,7 @@ mod tests {
             schema: Cow::Owned(vec![ColumnSchema {
                 spec: ColumnSpecification {
                     column: "tab1.col1".into(),
-                    sql_type: SqlType::Bigint(None),
+                    sql_type: SqlType::BigInt(None),
                     comment: None,
                     constraints: vec![],
                 },
@@ -173,7 +173,7 @@ mod tests {
             schema: Cow::Owned(vec![ColumnSchema {
                 spec: ColumnSpecification {
                     column: "tab1.col1".into(),
-                    sql_type: SqlType::Bigint(None),
+                    sql_type: SqlType::BigInt(None),
                     comment: None,
                     constraints: vec![],
                 },
@@ -184,7 +184,7 @@ mod tests {
         let resultset = Resultset::try_new(ResultIterator::owned(results), &schema).unwrap();
         assert_eq!(
             collect_resultset_values(resultset),
-            vec![vec![ps::Value::Bigint(10)]]
+            vec![vec![ps::Value::BigInt(10)]]
         );
     }
 
@@ -200,7 +200,7 @@ mod tests {
             schema: Cow::Owned(vec![ColumnSchema {
                 spec: ColumnSpecification {
                     column: "tab1.col1".into(),
-                    sql_type: SqlType::Bigint(None),
+                    sql_type: SqlType::BigInt(None),
                     comment: None,
                     constraints: vec![],
                 },
@@ -212,9 +212,9 @@ mod tests {
         assert_eq!(
             collect_resultset_values(resultset),
             vec![
-                vec![ps::Value::Bigint(10)],
-                vec![ps::Value::Bigint(11)],
-                vec![ps::Value::Bigint(12)]
+                vec![ps::Value::BigInt(10)],
+                vec![ps::Value::BigInt(11)],
+                vec![ps::Value::BigInt(12)]
             ]
         );
     }
@@ -228,7 +228,7 @@ mod tests {
                 ColumnSchema {
                     spec: ColumnSpecification {
                         column: "tab1.col1".into(),
-                        sql_type: SqlType::Bigint(None),
+                        sql_type: SqlType::BigInt(None),
                         comment: None,
                         constraints: vec![],
                     },
@@ -284,7 +284,7 @@ mod tests {
                 ColumnSchema {
                     spec: ColumnSpecification {
                         column: "tab1.col1".into(),
-                        sql_type: SqlType::Bigint(None),
+                        sql_type: SqlType::BigInt(None),
                         comment: None,
                         constraints: vec![],
                     },
@@ -312,8 +312,8 @@ mod tests {
         assert_eq!(
             collect_resultset_values(resultset),
             vec![
-                vec![ps::Value::Bigint(10), ps::Value::Text("abcdef".into())],
-                vec![ps::Value::Bigint(11), ps::Value::Text("ghijkl".into())]
+                vec![ps::Value::BigInt(10), ps::Value::Text("abcdef".into())],
+                vec![ps::Value::BigInt(11), ps::Value::Text("ghijkl".into())]
             ]
         );
     }

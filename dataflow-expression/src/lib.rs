@@ -51,14 +51,14 @@ impl BuiltinFunction {
                 Type::Sql(ty) => match ty {
                     // When the first argument is of any integer type, the return type is always
                     // BIGINT.
-                    SqlType::Tinyint(_)
-                    | SqlType::UnsignedTinyint(_)
-                    | SqlType::Smallint(_)
-                    | SqlType::UnsignedSmallint(_)
+                    SqlType::TinyInt(_)
+                    | SqlType::UnsignedTinyInt(_)
+                    | SqlType::SmallInt(_)
+                    | SqlType::UnsignedSmallInt(_)
                     | SqlType::Int(_)
                     | SqlType::UnsignedInt(_)
-                    | SqlType::Bigint(_)
-                    | SqlType::UnsignedBigint(_) => Type::Sql(SqlType::Bigint(None)),
+                    | SqlType::BigInt(_)
+                    | SqlType::UnsignedBigInt(_) => Type::Sql(SqlType::BigInt(None)),
                     // When the first argument is a DECIMAL value, the return type is also DECIMAL.
                     SqlType::Decimal(_, _) => expr.ty().clone(),
                     // When the first argument is of any floating-point type or of any non-numeric

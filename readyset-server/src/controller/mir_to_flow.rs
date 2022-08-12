@@ -818,7 +818,7 @@ fn make_join_node(
         emit.push(JoinSource::B(left_col_idx, right_col_idx));
         cols.push(DataflowColumn::new(
             "cross_join_bogokey".into(),
-            SqlType::Bigint(None).into(),
+            SqlType::BigInt(None).into(),
             Some(name.into()),
         ));
     }
@@ -1241,7 +1241,7 @@ fn make_distinct_node(
         .clone();
     cols.push(DataflowColumn::new(
         distinct_count_name,
-        SqlType::Bigint(None).into(),
+        SqlType::BigInt(None).into(),
         Some(name.into()),
     ));
     set_names(&column_names(columns), &mut cols)?;
@@ -1302,7 +1302,7 @@ fn make_paginate_or_topk_node(
         #[allow(clippy::unwrap_used)] // column_names must be populated
         parent_cols.push(DataflowColumn::new(
             column_names.last().unwrap().into(),
-            SqlType::Bigint(None).into(),
+            SqlType::BigInt(None).into(),
             Some(name.into()),
         ));
     }

@@ -246,15 +246,15 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DataType> {
         match sql_type {
             SqlType::Bool => Ok(DataType::from(!str.is_empty())),
 
-            SqlType::Tinytext
-            | SqlType::Mediumtext
+            SqlType::TinyText
+            | SqlType::MediumText
             | SqlType::Text
-            | SqlType::Longtext
+            | SqlType::LongText
             | SqlType::Char(None)
-            | SqlType::Varchar(None) => Ok(self.clone().into()),
+            | SqlType::VarChar(None) => Ok(self.clone().into()),
 
-            SqlType::Varchar(Some(l)) if *l as usize >= str.len() => {
-                // Varchar, but length is sufficient to store current string
+            SqlType::VarChar(Some(l)) if *l as usize >= str.len() => {
+                // VarChar, but length is sufficient to store current string
                 Ok(self.clone().into())
             }
 
@@ -271,17 +271,17 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DataType> {
                 Ok(DataType::from(new_string))
             }
 
-            SqlType::Varchar(Some(l)) | SqlType::Char(Some(l)) => {
+            SqlType::VarChar(Some(l)) | SqlType::Char(Some(l)) => {
                 // String is too long, so have to truncate and allocate a new one
                 // TODO: can we do something smarter, like keep a len field, and clone the existing
                 // Arc?
                 Ok(DataType::from(&str[..*l as usize]))
             }
 
-            SqlType::Tinyblob
-            | SqlType::Mediumblob
+            SqlType::TinyBlob
+            | SqlType::MediumBlob
             | SqlType::Blob
-            | SqlType::Longblob
+            | SqlType::LongBlob
             | SqlType::ByteArray
             | SqlType::Binary(None) => Ok(DataType::ByteArray(str.as_bytes().to_vec().into())),
 
@@ -298,12 +298,12 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DataType> {
                 Ok(DataType::ByteArray(new_vec.into()))
             }
 
-            SqlType::Varbinary(l) if *l as usize >= str.len() => {
-                // Varbinary is sufficent to store whole string
+            SqlType::VarBinary(l) if *l as usize >= str.len() => {
+                // VarBinary is sufficent to store whole string
                 Ok(DataType::ByteArray(str.as_bytes().to_vec().into()))
             }
 
-            SqlType::Binary(Some(l)) | SqlType::Varbinary(l) => {
+            SqlType::Binary(Some(l)) | SqlType::VarBinary(l) => {
                 // Binary is shorter than string, truncate and convert
                 Ok(DataType::ByteArray(
                     str.as_bytes()[..*l as usize].to_vec().into(),
@@ -316,15 +316,15 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DataType> {
                 .map_err(|e| Self::coerce_err(sql_type, e))
                 .map(DataType::TimestampTz),
 
-            SqlType::Tinyint(_) => Self::parse_int::<i8>(str, sql_type),
-            SqlType::Smallint(_) => Self::parse_int::<i16>(str, sql_type),
+            SqlType::TinyInt(_) => Self::parse_int::<i8>(str, sql_type),
+            SqlType::SmallInt(_) => Self::parse_int::<i16>(str, sql_type),
             SqlType::Int(_) | SqlType::Serial => Self::parse_int::<i32>(str, sql_type),
-            SqlType::Bigint(_) | SqlType::BigSerial => Self::parse_int::<i64>(str, sql_type),
+            SqlType::BigInt(_) | SqlType::BigSerial => Self::parse_int::<i64>(str, sql_type),
 
-            SqlType::UnsignedTinyint(_) => Self::parse_int::<u8>(str, sql_type),
-            SqlType::UnsignedSmallint(_) => Self::parse_int::<u16>(str, sql_type),
+            SqlType::UnsignedTinyInt(_) => Self::parse_int::<u8>(str, sql_type),
+            SqlType::UnsignedSmallInt(_) => Self::parse_int::<u16>(str, sql_type),
             SqlType::UnsignedInt(_) => Self::parse_int::<u32>(str, sql_type),
-            SqlType::UnsignedBigint(_) => Self::parse_int::<u64>(str, sql_type),
+            SqlType::UnsignedBigInt(_) => Self::parse_int::<u64>(str, sql_type),
 
             SqlType::Json | SqlType::Jsonb => {
                 // Currently just validates the json
@@ -418,7 +418,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DataType> {
             )
             .coerce_to(sql_type),
 
-            SqlType::Enum(_) | SqlType::Bit(_) | SqlType::Varbit(_) => {
+            SqlType::Enum(_) | SqlType::Bit(_) | SqlType::VarBit(_) => {
                 Err(Self::coerce_err(sql_type, "Not allowed"))
             }
         }
@@ -495,11 +495,11 @@ mod tests {
             DataType::from("abcd")
         );
         assert_eq!(
-            text.coerce_to(&SqlType::Varchar(Some(10))).unwrap(),
+            text.coerce_to(&SqlType::VarChar(Some(10))).unwrap(),
             DataType::from("abcdefgh")
         );
         assert_eq!(
-            text.coerce_to(&SqlType::Varchar(Some(4))).unwrap(),
+            text.coerce_to(&SqlType::VarChar(Some(4))).unwrap(),
             DataType::from("abcd")
         );
 
@@ -513,23 +513,23 @@ mod tests {
             DataType::ByteArray(b"abcd".to_vec().into())
         );
         assert_eq!(
-            text.coerce_to(&SqlType::Varbinary(10)).unwrap(),
+            text.coerce_to(&SqlType::VarBinary(10)).unwrap(),
             DataType::ByteArray(b"abcdefgh".to_vec().into())
         );
         assert_eq!(
-            text.coerce_to(&SqlType::Varbinary(4)).unwrap(),
+            text.coerce_to(&SqlType::VarBinary(4)).unwrap(),
             DataType::ByteArray(b"abcd".to_vec().into())
         );
 
         // TEXT to INTEGER
         assert_eq!(
             DataType::from("50")
-                .coerce_to(&SqlType::Tinyint(None))
+                .coerce_to(&SqlType::TinyInt(None))
                 .unwrap(),
             DataType::Int(50),
         );
         assert!(DataType::from("500")
-            .coerce_to(&SqlType::Tinyint(None))
+            .coerce_to(&SqlType::TinyInt(None))
             .is_err());
         assert_eq!(
             DataType::from("-500")

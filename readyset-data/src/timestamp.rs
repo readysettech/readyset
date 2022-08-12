@@ -344,8 +344,8 @@ impl TimestampTz {
             SqlType::Date => Ok(DataType::TimestampTz(self.to_chrono().date().into())),
             SqlType::Time => Ok(self.to_chrono().naive_local().time().into()),
 
-            SqlType::Bigint(_) | SqlType::BigSerial => Ok(DataType::Int(self.datetime_as_int())),
-            SqlType::UnsignedBigint(_) => Ok(DataType::UnsignedInt(self.datetime_as_int() as _)),
+            SqlType::BigInt(_) | SqlType::BigSerial => Ok(DataType::Int(self.datetime_as_int())),
+            SqlType::UnsignedBigInt(_) => Ok(DataType::UnsignedInt(self.datetime_as_int() as _)),
             SqlType::Int(_) | SqlType::Serial if self.has_date_only() => {
                 Ok(DataType::Int(self.date_as_int()))
             }
@@ -362,22 +362,22 @@ impl TimestampTz {
                 self.to_chrono().naive_local() != NaiveDate::from_ymd(0, 0, 0).and_hms(0, 0, 0),
             )),
 
-            SqlType::Tinytext
-            | SqlType::Mediumtext
+            SqlType::TinyText
+            | SqlType::MediumText
             | SqlType::Text
-            | SqlType::Longtext
+            | SqlType::LongText
             | SqlType::Char(None)
-            | SqlType::Varchar(None) => Ok(DataType::from(format!("{}", self).as_str())),
-            SqlType::Char(Some(l)) | SqlType::Varchar(Some(l)) => {
+            | SqlType::VarChar(None) => Ok(DataType::from(format!("{}", self).as_str())),
+            SqlType::Char(Some(l)) | SqlType::VarChar(Some(l)) => {
                 let mut string = format!("{}", self);
                 string.truncate(*l as usize);
                 Ok(DataType::from(string.as_str()))
             }
 
-            SqlType::Tinyblob
-            | SqlType::Mediumblob
+            SqlType::TinyBlob
+            | SqlType::MediumBlob
             | SqlType::Blob
-            | SqlType::Longblob
+            | SqlType::LongBlob
             | SqlType::Binary(None)
             | SqlType::ByteArray => Ok(DataType::ByteArray(std::sync::Arc::new(
                 format!("{}", self).as_bytes().into(),
@@ -389,7 +389,7 @@ impl TimestampTz {
                 Ok(DataType::from(format!("\"{}\"", ts).as_str()))
             }
 
-            SqlType::Binary(Some(l)) | SqlType::Varbinary(l) => {
+            SqlType::Binary(Some(l)) | SqlType::VarBinary(l) => {
                 let mut string = format!("{}", self);
                 string.truncate(*l as usize);
                 Ok(DataType::ByteArray(std::sync::Arc::new(
@@ -397,11 +397,11 @@ impl TimestampTz {
                 )))
             }
 
-            SqlType::Tinyint(_)
-            | SqlType::Smallint(_)
+            SqlType::TinyInt(_)
+            | SqlType::SmallInt(_)
             | SqlType::Int(_)
-            | SqlType::UnsignedTinyint(_)
-            | SqlType::UnsignedSmallint(_)
+            | SqlType::UnsignedTinyInt(_)
+            | SqlType::UnsignedSmallInt(_)
             | SqlType::UnsignedInt(_)
             | SqlType::Serial => Err(ReadySetError::DataTypeConversionError {
                 src_type: "DataType::TimestampTz".to_string(),
@@ -415,7 +415,7 @@ impl TimestampTz {
             | SqlType::Inet
             | SqlType::Uuid
             | SqlType::Bit(_)
-            | SqlType::Varbit(_)
+            | SqlType::VarBit(_)
             | SqlType::Array(_) => Err(ReadySetError::DataTypeConversionError {
                 src_type: "DataType::TimestampTz".to_string(),
                 target_type: format!("{:?}", sql_type),
@@ -485,14 +485,14 @@ mod tests {
             DataType::from(chrono::NaiveDate::from_ymd(2022, 2, 9).and_hms_milli(13, 14, 15, 169));
 
         assert_eq!(
-            ts.coerce_to(&SqlType::Bigint(None)).unwrap(),
+            ts.coerce_to(&SqlType::BigInt(None)).unwrap(),
             DataType::from(20220209131415i64)
         );
 
         assert_eq!(
             ts.coerce_to(&SqlType::Date)
                 .unwrap()
-                .coerce_to(&SqlType::Bigint(None))
+                .coerce_to(&SqlType::BigInt(None))
                 .unwrap(),
             DataType::from(20220209i64)
         );
@@ -508,7 +508,7 @@ mod tests {
         );
 
         assert_eq!(
-            &format!("{}", ts.coerce_to(&SqlType::Varchar(Some(6))).unwrap()),
+            &format!("{}", ts.coerce_to(&SqlType::VarChar(Some(6))).unwrap()),
             "2022-0"
         );
 

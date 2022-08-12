@@ -332,7 +332,7 @@ mod tests {
                         name: "Email".into(),
                         table: None,
                     },
-                    sql_type: SqlType::Varchar(Some(255)),
+                    sql_type: SqlType::VarChar(Some(255)),
                     constraints: vec![],
                     comment: None,
                 }),
@@ -514,7 +514,7 @@ mod tests {
                         name: "f".into(),
                         spec: ColumnSpecification {
                             column: Column::from("f"),
-                            sql_type: SqlType::Varchar(Some(255)),
+                            sql_type: SqlType::VarChar(Some(255)),
                             constraints: vec![
                                 ColumnConstraint::NotNull,
                                 ColumnConstraint::PrimaryKey

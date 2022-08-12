@@ -70,40 +70,40 @@ pub(crate) fn coerce_f64(val: f64, sql_type: &SqlType) -> ReadySetResult<DataTyp
             .ok_or_else(bounds_err)
             .map(DataType::from),
 
-        SqlType::Tinyint(_) => coerce_f64_to_int::<i8>(val)
+        SqlType::TinyInt(_) => coerce_f64_to_int::<i8>(val)
             .ok_or_else(bounds_err)
             .map(DataType::from),
-        SqlType::Smallint(_) => coerce_f64_to_int::<i16>(val)
+        SqlType::SmallInt(_) => coerce_f64_to_int::<i16>(val)
             .ok_or_else(bounds_err)
             .map(DataType::from),
         SqlType::Int(_) | SqlType::Serial => coerce_f64_to_int::<i32>(val)
             .ok_or_else(bounds_err)
             .map(DataType::from),
-        SqlType::Bigint(_) | SqlType::BigSerial => coerce_f64_to_int::<i64>(val)
+        SqlType::BigInt(_) | SqlType::BigSerial => coerce_f64_to_int::<i64>(val)
             .ok_or_else(bounds_err)
             .map(DataType::from),
 
-        SqlType::UnsignedTinyint(_) => coerce_f64_to_uint::<u8>(val)
+        SqlType::UnsignedTinyInt(_) => coerce_f64_to_uint::<u8>(val)
             .ok_or_else(bounds_err)
             .map(DataType::from),
-        SqlType::UnsignedSmallint(_) => coerce_f64_to_uint::<u16>(val)
+        SqlType::UnsignedSmallInt(_) => coerce_f64_to_uint::<u16>(val)
             .ok_or_else(bounds_err)
             .map(DataType::from),
         SqlType::UnsignedInt(_) => coerce_f64_to_uint::<u32>(val)
             .ok_or_else(bounds_err)
             .map(DataType::from),
-        SqlType::UnsignedBigint(_) => coerce_f64_to_uint::<u64>(val)
+        SqlType::UnsignedBigInt(_) => coerce_f64_to_uint::<u64>(val)
             .ok_or_else(bounds_err)
             .map(DataType::from),
 
-        SqlType::Tinytext
-        | SqlType::Mediumtext
+        SqlType::TinyText
+        | SqlType::MediumText
         | SqlType::Text
-        | SqlType::Longtext
+        | SqlType::LongText
         | SqlType::Char(None)
-        | SqlType::Varchar(None) => Ok(val.to_string().into()),
+        | SqlType::VarChar(None) => Ok(val.to_string().into()),
 
-        SqlType::Varchar(Some(l)) => {
+        SqlType::VarChar(Some(l)) => {
             let mut val = val.to_string();
             val.truncate(*l as usize);
             Ok(val.to_string().into())
@@ -116,14 +116,14 @@ pub(crate) fn coerce_f64(val: f64, sql_type: &SqlType) -> ReadySetResult<DataTyp
             Ok(val.into())
         }
 
-        SqlType::Tinyblob
-        | SqlType::Mediumblob
+        SqlType::TinyBlob
+        | SqlType::MediumBlob
         | SqlType::Blob
-        | SqlType::Longblob
+        | SqlType::LongBlob
         | SqlType::ByteArray
         | SqlType::Binary(None) => Ok(DataType::ByteArray(val.to_string().into_bytes().into())),
 
-        SqlType::Varbinary(l) => {
+        SqlType::VarBinary(l) => {
             let mut val = val.to_string();
             val.truncate(*l as usize);
             Ok(val.to_string().into_bytes().into())
@@ -164,7 +164,7 @@ pub(crate) fn coerce_f64(val: f64, sql_type: &SqlType) -> ReadySetResult<DataTyp
         | SqlType::Inet
         | SqlType::Uuid
         | SqlType::Bit(_)
-        | SqlType::Varbit(_)
+        | SqlType::VarBit(_)
         | SqlType::Array(_) => Err(err("not allowed")),
     }
 }
@@ -192,24 +192,24 @@ pub(crate) fn coerce_decimal(val: &Decimal, sql_type: &SqlType) -> ReadySetResul
 
         SqlType::Decimal(_, _) | SqlType::Numeric(_) => Ok(DataType::from(*val)),
 
-        SqlType::Tinyint(_) => val.to_i8().ok_or_else(err).map(DataType::from),
-        SqlType::Smallint(_) => val.to_i16().ok_or_else(err).map(DataType::from),
+        SqlType::TinyInt(_) => val.to_i8().ok_or_else(err).map(DataType::from),
+        SqlType::SmallInt(_) => val.to_i16().ok_or_else(err).map(DataType::from),
         SqlType::Int(_) | SqlType::Serial => val.to_i32().ok_or_else(err).map(DataType::from),
-        SqlType::Bigint(_) | SqlType::BigSerial => val.to_i64().ok_or_else(err).map(DataType::from),
+        SqlType::BigInt(_) | SqlType::BigSerial => val.to_i64().ok_or_else(err).map(DataType::from),
 
-        SqlType::UnsignedTinyint(_) => val.to_u8().ok_or_else(err).map(DataType::from),
-        SqlType::UnsignedSmallint(_) => val.to_u16().ok_or_else(err).map(DataType::from),
+        SqlType::UnsignedTinyInt(_) => val.to_u8().ok_or_else(err).map(DataType::from),
+        SqlType::UnsignedSmallInt(_) => val.to_u16().ok_or_else(err).map(DataType::from),
         SqlType::UnsignedInt(_) => val.to_u32().ok_or_else(err).map(DataType::from),
-        SqlType::UnsignedBigint(_) => val.to_u64().ok_or_else(err).map(DataType::from),
+        SqlType::UnsignedBigInt(_) => val.to_u64().ok_or_else(err).map(DataType::from),
 
-        SqlType::Tinytext
-        | SqlType::Mediumtext
+        SqlType::TinyText
+        | SqlType::MediumText
         | SqlType::Text
-        | SqlType::Longtext
+        | SqlType::LongText
         | SqlType::Char(None)
-        | SqlType::Varchar(None) => Ok(val.to_string().into()),
+        | SqlType::VarChar(None) => Ok(val.to_string().into()),
 
-        SqlType::Varchar(Some(l)) => {
+        SqlType::VarChar(Some(l)) => {
             let mut val = val.to_string();
             val.truncate(*l as usize);
             Ok(val.to_string().into())
@@ -222,14 +222,14 @@ pub(crate) fn coerce_decimal(val: &Decimal, sql_type: &SqlType) -> ReadySetResul
             Ok(val.into())
         }
 
-        SqlType::Tinyblob
-        | SqlType::Mediumblob
+        SqlType::TinyBlob
+        | SqlType::MediumBlob
         | SqlType::Blob
-        | SqlType::Longblob
+        | SqlType::LongBlob
         | SqlType::ByteArray
         | SqlType::Binary(None) => Ok(DataType::ByteArray(val.to_string().into_bytes().into())),
 
-        SqlType::Varbinary(l) => {
+        SqlType::VarBinary(l) => {
             let mut val = val.to_string();
             val.truncate(*l as usize);
             Ok(val.to_string().into_bytes().into())
@@ -257,7 +257,7 @@ pub(crate) fn coerce_decimal(val: &Decimal, sql_type: &SqlType) -> ReadySetResul
         | SqlType::Inet
         | SqlType::Uuid
         | SqlType::Bit(_)
-        | SqlType::Varbit(_)
+        | SqlType::VarBit(_)
         | SqlType::Array(_) => Err(ReadySetError::DataTypeConversionError {
             src_type: "Decimal".to_string(),
             target_type: sql_type.to_string(),
@@ -277,22 +277,22 @@ mod tests {
     fn float_to_tinyint(val: f32) {
         if val < i8::MIN as f32 - 0.5 || val >= i8::MAX as f32 + 0.5 {
             DataType::Double(val as _)
-                .coerce_to(&SqlType::Tinyint(None))
+                .coerce_to(&SqlType::TinyInt(None))
                 .expect_err("OOB");
         } else {
             assert_eq!(
-                DataType::Double(val as f64).coerce_to(&SqlType::Tinyint(None)),
+                DataType::Double(val as f64).coerce_to(&SqlType::TinyInt(None)),
                 Ok(DataType::Int(val.round() as i64))
             );
         }
         // Yes, this is indeed the valid range for MySQL float to u8 conversion
         if val < -0.5f32 || val >= u8::MAX as f32 + 0.5 {
             DataType::Double(val as _)
-                .coerce_to(&SqlType::UnsignedTinyint(None))
+                .coerce_to(&SqlType::UnsignedTinyInt(None))
                 .expect_err("OOB");
         } else {
             assert_eq!(
-                DataType::Double(val as f64).coerce_to(&SqlType::UnsignedTinyint(None)),
+                DataType::Double(val as f64).coerce_to(&SqlType::UnsignedTinyInt(None)),
                 Ok(DataType::UnsignedInt(val.round() as u64))
             );
         }
@@ -302,21 +302,21 @@ mod tests {
     fn float_to_smallint(val: f32) {
         if val < i16::MIN as f32 - 0.5 || val >= i16::MAX as f32 + 0.5 {
             DataType::Double(val as _)
-                .coerce_to(&SqlType::Smallint(None))
+                .coerce_to(&SqlType::SmallInt(None))
                 .expect_err("OOB");
         } else {
             assert_eq!(
-                DataType::Double(val as f64).coerce_to(&SqlType::Smallint(None)),
+                DataType::Double(val as f64).coerce_to(&SqlType::SmallInt(None)),
                 Ok(DataType::Int(val.round() as i64))
             );
         }
         if val < -0.5f32 || val >= u16::MAX as f32 + 0.5 {
             DataType::Double(val as _)
-                .coerce_to(&SqlType::UnsignedSmallint(None))
+                .coerce_to(&SqlType::UnsignedSmallInt(None))
                 .expect_err("OOB");
         } else {
             assert_eq!(
-                DataType::Double(val as f64).coerce_to(&SqlType::UnsignedSmallint(None)),
+                DataType::Double(val as f64).coerce_to(&SqlType::UnsignedSmallInt(None)),
                 Ok(DataType::UnsignedInt(val.round() as u64))
             );
         }
@@ -350,21 +350,21 @@ mod tests {
     fn float_to_bigint(val: f64) {
         if val < i64::MIN as f64 - 0.5 || val >= i64::MAX as f64 + 0.5 {
             DataType::Double(val as _)
-                .coerce_to(&SqlType::Bigint(None))
+                .coerce_to(&SqlType::BigInt(None))
                 .expect_err("OOB");
         } else {
             assert_eq!(
-                DataType::Double(val as f64).coerce_to(&SqlType::Bigint(None)),
+                DataType::Double(val as f64).coerce_to(&SqlType::BigInt(None)),
                 Ok(DataType::Int(val.round() as i64))
             );
         }
         if val < -0.5f64 || val >= u64::MAX as f64 + 0.5 {
             DataType::Double(val as _)
-                .coerce_to(&SqlType::UnsignedBigint(None))
+                .coerce_to(&SqlType::UnsignedBigInt(None))
                 .expect_err("OOB");
         } else {
             assert_eq!(
-                DataType::Double(val as f64).coerce_to(&SqlType::UnsignedBigint(None)),
+                DataType::Double(val as f64).coerce_to(&SqlType::UnsignedBigInt(None)),
                 Ok(DataType::UnsignedInt(val.round() as u64))
             );
         }
@@ -391,7 +391,7 @@ mod tests {
 
         assert_eq!(
             DataType::Double(1e4)
-                .coerce_to(&SqlType::Varchar(Some(2)))
+                .coerce_to(&SqlType::VarChar(Some(2)))
                 .unwrap(),
             DataType::from("10")
         );
@@ -422,59 +422,59 @@ mod tests {
     #[test]
     fn float_to_int_manual() {
         assert_eq!(
-            DataType::Float(-0.6874218).coerce_to(&SqlType::Tinyint(None)),
+            DataType::Float(-0.6874218).coerce_to(&SqlType::TinyInt(None)),
             Ok(DataType::Int(-1))
         );
 
         assert_eq!(
-            DataType::Float(0.6874218).coerce_to(&SqlType::Tinyint(None)),
+            DataType::Float(0.6874218).coerce_to(&SqlType::TinyInt(None)),
             Ok(DataType::Int(1))
         );
 
         assert!(DataType::Float(-128.9039)
-            .coerce_to(&SqlType::Tinyint(None))
+            .coerce_to(&SqlType::TinyInt(None))
             .is_err());
 
         assert!(DataType::Float(127.9039)
-            .coerce_to(&SqlType::Tinyint(None))
+            .coerce_to(&SqlType::TinyInt(None))
             .is_err());
 
         assert_eq!(
-            DataType::Float(-128.4039).coerce_to(&SqlType::Tinyint(None)),
+            DataType::Float(-128.4039).coerce_to(&SqlType::TinyInt(None)),
             Ok(DataType::Int(-128))
         );
 
         assert_eq!(
-            DataType::Float(127.4039).coerce_to(&SqlType::Tinyint(None)),
+            DataType::Float(127.4039).coerce_to(&SqlType::TinyInt(None)),
             Ok(DataType::Int(127))
         );
 
         assert_eq!(
-            DataType::Float(0.5).coerce_to(&SqlType::UnsignedTinyint(None)),
+            DataType::Float(0.5).coerce_to(&SqlType::UnsignedTinyInt(None)),
             Ok(DataType::UnsignedInt(1))
         );
 
         assert_eq!(
-            DataType::Float(0.687_421_9).coerce_to(&SqlType::UnsignedTinyint(None)),
+            DataType::Float(0.687_421_9).coerce_to(&SqlType::UnsignedTinyInt(None)),
             Ok(DataType::UnsignedInt(1))
         );
 
         assert_eq!(
-            DataType::Float(255.49).coerce_to(&SqlType::UnsignedTinyint(None)),
+            DataType::Float(255.49).coerce_to(&SqlType::UnsignedTinyInt(None)),
             Ok(DataType::UnsignedInt(255))
         );
 
         assert!(DataType::Float(255.5)
-            .coerce_to(&SqlType::UnsignedTinyint(None))
+            .coerce_to(&SqlType::UnsignedTinyInt(None))
             .is_err());
 
         assert_eq!(
-            DataType::Float(65535.49).coerce_to(&SqlType::UnsignedSmallint(None)),
+            DataType::Float(65535.49).coerce_to(&SqlType::UnsignedSmallInt(None)),
             Ok(DataType::UnsignedInt(65535))
         );
 
         assert!(DataType::Float(65535.5)
-            .coerce_to(&SqlType::UnsignedSmallint(None))
+            .coerce_to(&SqlType::UnsignedSmallInt(None))
             .is_err());
 
         assert_eq!(
@@ -488,11 +488,11 @@ mod tests {
 
         // Since u64 max is not accurately representable as a doulbe, there are no exact conversions
         assert!(DataType::Double(18446744073709551613.49)
-            .coerce_to(&SqlType::UnsignedBigint(None))
+            .coerce_to(&SqlType::UnsignedBigInt(None))
             .is_err());
 
         assert_eq!(
-            DataType::Double(17946744073709551610.49).coerce_to(&SqlType::UnsignedBigint(None)),
+            DataType::Double(17946744073709551610.49).coerce_to(&SqlType::UnsignedBigInt(None)),
             Ok(DataType::UnsignedInt(17946744073709551616))
         );
     }

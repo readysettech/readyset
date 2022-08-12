@@ -330,17 +330,17 @@ impl DataType {
         use SqlType::*;
         match self {
             Self::None | Self::PassThrough(_) | Self::Max => None,
-            Self::Int(_) => Some(Bigint(None)),
-            Self::UnsignedInt(_) => Some(UnsignedBigint(None)),
+            Self::Int(_) => Some(BigInt(None)),
+            Self::UnsignedInt(_) => Some(UnsignedBigInt(None)),
             Self::Float(_) => Some(Float),
             Self::Double(_) => Some(Real),
             Self::Text(_) => Some(Text),
-            Self::TinyText(_) => Some(Tinytext),
+            Self::TinyText(_) => Some(TinyText),
             Self::TimestampTz(_) => Some(TimestampTz), // TODO: Timestamp if no tz
             Self::Time(_) => Some(Time),
             Self::ByteArray(_) => Some(ByteArray),
             Self::Numeric(_) => Some(Numeric(None)),
-            Self::BitVector(_) => Some(Varbit(None)),
+            Self::BitVector(_) => Some(VarBit(None)),
             // TODO: Once this returns NoriaType instead of SqlType, an empty array and an array of
             // null should be Array(Unknown) not Unknown
             Self::Array(vs) => Some(SqlType::Array(Box::new(
@@ -419,14 +419,14 @@ impl DataType {
             DataType::Time(ts)
                 if matches!(
                     ty,
-                    SqlType::Text | SqlType::Tinytext | SqlType::Mediumtext | SqlType::Varchar(_)
+                    SqlType::Text | SqlType::TinyText | SqlType::MediumText | SqlType::VarChar(_)
                 ) =>
             {
                 Ok(ts.to_string().into())
             }
             DataType::BitVector(vec) => match ty {
-                SqlType::Varbit(None) => Ok(self.clone()),
-                SqlType::Varbit(max_size_opt) => match max_size_opt {
+                SqlType::VarBit(None) => Ok(self.clone()),
+                SqlType::VarBit(max_size_opt) => match max_size_opt {
                     Some(max_size) if vec.len() > *max_size as usize => Err(mk_err()),
                     _ => Ok(self.clone()),
                 },
@@ -3177,7 +3177,7 @@ mod tests {
         let arr = DataType::from(vec![DataType::None, DataType::from(1)]);
         assert_eq!(
             arr.sql_type(),
-            Some(SqlType::Array(Box::new(SqlType::Bigint(None))))
+            Some(SqlType::Array(Box::new(SqlType::BigInt(None))))
         );
     }
 
@@ -3313,22 +3313,22 @@ mod tests {
             };
         }
 
-        int_conversion!(int_to_tinyint, i32, i8, Tinyint(None));
-        int_conversion!(int_to_unsigned_tinyint, i32, u8, UnsignedTinyint(None));
-        int_conversion!(int_to_smallint, i32, i16, Smallint(None));
-        int_conversion!(int_to_unsigned_smallint, i32, u16, UnsignedSmallint(None));
-        int_conversion!(bigint_to_tinyint, i64, i8, Tinyint(None));
-        int_conversion!(bigint_to_unsigned_tinyint, i64, u8, UnsignedTinyint(None));
-        int_conversion!(bigint_to_smallint, i64, i16, Smallint(None));
+        int_conversion!(int_to_tinyint, i32, i8, TinyInt(None));
+        int_conversion!(int_to_unsigned_tinyint, i32, u8, UnsignedTinyInt(None));
+        int_conversion!(int_to_smallint, i32, i16, SmallInt(None));
+        int_conversion!(int_to_unsigned_smallint, i32, u16, UnsignedSmallInt(None));
+        int_conversion!(bigint_to_tinyint, i64, i8, TinyInt(None));
+        int_conversion!(bigint_to_unsigned_tinyint, i64, u8, UnsignedTinyInt(None));
+        int_conversion!(bigint_to_smallint, i64, i16, SmallInt(None));
         int_conversion!(
             bigint_to_unsigned_smallint,
             i64,
             u16,
-            UnsignedSmallint(None)
+            UnsignedSmallInt(None)
         );
         int_conversion!(bigint_to_int, i64, i32, Int(None));
         int_conversion!(bigint_to_serial, i64, i32, Serial);
-        int_conversion!(bigint_to_unsigned_bigint, i64, u64, UnsignedBigint(None));
+        int_conversion!(bigint_to_unsigned_bigint, i64, u64, UnsignedBigInt(None));
 
         macro_rules! real_conversion {
             ($name: ident, $from: ty, $to: ty, $sql_type: expr) => {
@@ -3401,7 +3401,7 @@ mod tests {
             );
             assert_eq!(
                 DataType::from(20070523i64)
-                    .coerce_to(&SqlType::Varchar(Some(2)))
+                    .coerce_to(&SqlType::VarChar(Some(2)))
                     .unwrap(),
                 DataType::from("20"),
             );
