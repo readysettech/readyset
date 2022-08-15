@@ -2,7 +2,7 @@
   <img src="https://user-images.githubusercontent.com/38481289/172237414-023c0b04-c597-44b7-8b14-b5b0c382dc07.png" width='70%'>
 </p>
 <p align="center">
-<a href='https://join.slack.com/t/readysetcommunity/shared_invite/zt-1c7bxdxo7-Y6KuoLfc1YWagLk3xHSrsw'><img src='https://img.shields.io/badge/Slack-Join%20the%20community-4A154B?style=flat&logo=slack&logoColor=white'></a>
+<a href='https://discord.gg/readyset'><img src='https://img.shields.io/badge/Discord-Join%20the%20community-4A154B?style=flat&logo=discord&logoColor=white'></a>
 <a href='https://readysettech.typeform.com/to/BqovNk8A?typeform-source=github.com'><img src='https://img.shields.io/badge/ReadySet-Join%20the%20cloud%20waitlist-7648B5?logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAADrUlEQVRIS41V6UsVURQ/d2Z8vkVsoQ0iKsMgyd4rhGghogiqL0VQaUGLQQvtVPihsJ20KEgrxchK2vsg9CkikugPCNqQsiKwIqISKyzfmzmdu83ceU+rB8PcN3Pn/M75/X7nXAb/+HVsf78crMwNh3lg0+UwV909iDBYXVBb0vK3EKy/l483f/Zsy2W2xYMGgbNBbAJ0aE/iWLLPWDkPby1Fe9TQroyZMQ8gAhGQJcDClVAi4ln8SzrCmsrSZtIhgLZNvxdbmG7lWQaZyo9lJZIe+S4A1Wu+J2phuXM0dVOD+ABts9FJF/em+Sadbfa9tG44fHv0A761flVACtxMiL5vp0rKVCU+wJ11HvIMdbZBcJl52ZnBfuUvd7ynigKxw5WFNREAFzd7GCfm4i4qgDAVOoAGebH9IwnrQvGJkcAcBp27XyvKQtRhoiZpCYCzOwggA5AgkFhGgsw/74iMH276meUiWWXJ8aFgRy2/qs7dbwwLyz2FtaWMHazOVMR7rGsyOIH00t0FmLAEYdxCCx5s/JWjSeFYC8bvGugHRw/h3Z53ucLb7ipWtV/RQwAmSJRA+tNk6ukBRI2M7/UidFSRJkD0CIOETcK2HkHiH0FooC+qRKzp7outvF5WHQMnziAvweBtczf8fNbTp4W1bqyyFpFn7oNoLYyKNMjkLQ7kxVEEf3Lku19hqn6IqObLvW7outtlCO4CqziFGFPBOEjNAenchp0oNImTJtxdE8sBIgl+ITxv+BXiO2ThnZ0+AKeLLao3AYxKDMqSMxnEYwj5BQivbmb67AEO8nTbJ6VD0IBsXiPXQHJuVqKfjR4GMJwYKIgCfLhvatJXx3OhdQPKO5vVhCsjHlyROoRBEkRR0QiAKD3//ka6LKr6RHZ80M2BGQgEZDcz210vCJ9+QVYhbKqAEqRH3V4Gh/eRFlwH5SptZR5wQVYzZs+uSfUjmABItaBHAZgGCVUihJY21sElGAm/AmDMnOxm1FPXhSlnhkkAAXKZqlD+593M14EmUvzqowwadxFNHFC5S4xu3mBEiz6ceCXTzg0SsYPz4AA6qSJIa3HDmsgKuIVPVinKjNkVgEiR2732yIbscc3RJlzF8vwMXDf5DnW40fHh2YXBIWR7a+c2xi5pZnLP0Vtop3og49P1Fwsn0kxMXzkgEXq6rfxltxn9C379HvrJFj1CAncJ2gzR5Vq8xzVnrWB2/w+A3jOjGVeTTS/5mqiRLmYXepX7DzkXzYyz138Ac/pGks+x6G0AAAAASUVORK5CYII='></a>
 </p>
 
@@ -82,7 +82,7 @@ For more information, check out our full docs site [here](http://docs.readyset.i
 
 ## Join the Community
 
-For questions or support, join us on the [ReadySet Community Slack](https://join.slack.com/t/readysetcommunity/shared_invite/zt-18z5bxv02-C5R08CYFL00jXmIqjd7Ziw). You can also post questions on our [Github forum](https://github.com/readysettech/readyset/discussions). Everyone is welcome!
+For questions or support, join us on the [ReadySet Community Discord](https://discord.gg/readyset). You can also post questions on our [Github forum](https://github.com/readysettech/readyset/discussions). Everyone is welcome!
 
 ## Development
 
