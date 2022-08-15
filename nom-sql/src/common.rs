@@ -615,16 +615,16 @@ where
 // former has "at least" M precision, the latter "exactly".
 // See https://dev.mysql.com/doc/refman/5.7/en/precision-math-decimal-characteristics.html
 fn decimal_or_numeric(i: &[u8]) -> IResult<&[u8], SqlType> {
-    let (remaining_input, precision) = delimited(
-        alt((tag_no_case("decimal"), tag_no_case("numeric"))),
-        opt(precision),
-        whitespace0,
-    )(i)?;
+    let (i, _) = alt((tag_no_case("decimal"), tag_no_case("numeric")))(i)?;
+    let (i, precision) = opt(precision)(i)?;
+    let (i, _) = whitespace0(i)?;
+    // Parse and drop sign
+    let (i, _) = opt_signed(i)?;
 
     match precision {
-        None => Ok((remaining_input, SqlType::Decimal(32, 0))),
-        Some((m, None)) => Ok((remaining_input, SqlType::Decimal(m, 0))),
-        Some((m, Some(d))) => Ok((remaining_input, SqlType::Decimal(m, d))),
+        None => Ok((i, SqlType::Decimal(32, 0))),
+        Some((m, None)) => Ok((i, SqlType::Decimal(m, 0))),
+        Some((m, Some(d))) => Ok((i, SqlType::Decimal(m, d))),
     }
 }
 
@@ -690,6 +690,7 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
                     whitespace0,
                     opt(precision),
                     whitespace0,
+                    opt_signed,
                 )),
                 |_| SqlType::Float,
             ),
@@ -1225,7 +1226,14 @@ mod tests {
 
     #[test]
     fn sql_types() {
-        let ok = ["bool", "integer(16)", "datetime(16)"];
+        let ok = [
+            "bool",
+            "integer(16)",
+            "datetime(16)",
+            "decimal(6,2) unsigned",
+            "numeric(2) unsigned",
+            "float unsigned",
+        ];
 
         let res_ok: Vec<_> = ok
             .iter()
@@ -1237,7 +1245,10 @@ mod tests {
             vec![
                 SqlType::Bool,
                 SqlType::Int(Some(16)),
-                SqlType::DateTime(Some(16))
+                SqlType::DateTime(Some(16)),
+                SqlType::Decimal(6, 2),
+                SqlType::Numeric(Some((2, None))),
+                SqlType::Float,
             ]
         );
     }
