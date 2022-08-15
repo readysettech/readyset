@@ -7,7 +7,6 @@ use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex, RwLock};
-use std::task::Poll;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail};
@@ -33,7 +32,7 @@ use readyset_client::rewrite::anonymize_literals;
 use readyset_client::{Backend, BackendBuilder, QueryHandler, UpstreamDatabase};
 use readyset_client_metrics::QueryExecutionEvent;
 use readyset_dataflow::Readers;
-use readyset_server::worker::readers::{Ack, BlockingRead, ReadRequestHandler};
+use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
 use stream_cancel::Valve;
 use tokio::net::UdpSocket;
 use tokio::sync::broadcast;
@@ -43,8 +42,6 @@ use tokio::{net, select};
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, debug_span, error, info, info_span, span, warn, Level};
 use tracing_futures::Instrument;
-
-const RETRY_TIMEOUT: Duration = Duration::from_micros(100);
 
 const REGISTER_HTTP_INTERVAL: Duration = Duration::from_secs(20);
 const AWS_PRIVATE_IP_ENDPOINT: &str = "http://169.254.169.254/latest/meta-data/local-ipv4";
@@ -660,23 +657,8 @@ where
             let r = (options.standalone || options.embedded_readers).then(|| {
                 // Create a thread that repeatedly polls BlockingRead's every `RETRY_TIMEOUT`.
                 // When the `BlockingRead` completes, tell the future to resolve with ack.
-                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
-                let retries = async move {
-                    let mut reader_cache = Default::default();
-                    while let Some((mut pending, ack)) = rx.recv().await {
-                        // A blocking read always comes immediately after a miss, so no reason to
-                        // retry it right away better to wait a bit
-                        tokio::time::sleep(RETRY_TIMEOUT / 4).await;
-                        loop {
-                            if let Poll::Ready(res) = pending.check(&mut reader_cache) {
-                                let _ = ack.send(res);
-                                break;
-                            }
-                            tokio::time::sleep(RETRY_TIMEOUT).await;
-                        }
-                    }
-                };
-                rt.handle().spawn(retries);
+                let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
+                rt.handle().spawn(retry_misses(rx));
                 ReadRequestHandler::new(readers.clone(), tx, Duration::from_secs(5))
             });
 

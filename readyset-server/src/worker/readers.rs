@@ -27,6 +27,7 @@ use serde::ser::Serializer;
 use serde::Serialize;
 use stream_cancel::Valve;
 use streaming_iterator::StreamingIterator;
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_tower::multiplex::server;
@@ -337,6 +338,27 @@ impl Service<Tagged<ReadQuery>> for ReadRequestHandler {
     }
 }
 
+/// A spawned task responsible for repeating reads that could not be immediately served from cache,
+/// until they succeed.
+pub async fn retry_misses(mut rx: UnboundedReceiver<(BlockingRead, Ack)>) {
+    let upquery_hist = metrics::register_histogram!(recorded::SERVER_VIEW_UPQUERY_DURATION);
+    let mut reader_cache: ReaderMap = Default::default();
+
+    while let Some((mut pending, ack)) = rx.recv().await {
+        // A blocking read always comes immediately after a miss, so no reason to retry it
+        // right away, better to wait a bit
+        tokio::time::sleep(RETRY_TIMEOUT / 4).await;
+        loop {
+            if let Poll::Ready(res) = pending.check(&mut reader_cache) {
+                upquery_hist.record(pending.first.elapsed().as_micros() as f64);
+                let _ = ack.send(res);
+                break;
+            }
+            tokio::time::sleep(RETRY_TIMEOUT).await;
+        }
+    }
+}
+
 pub(crate) async fn listen(
     valve: Valve,
     on: tokio::net::TcpListener,
@@ -357,26 +379,8 @@ pub(crate) async fn listen(
 
         // future that ensures all blocking reads are handled in FIFO order
         // and avoid hogging the executors with read retries
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
-
-        let retries = async move {
-            let upquery_hist = metrics::register_histogram!(recorded::SERVER_VIEW_UPQUERY_DURATION);
-            let mut reader_cache: ReaderMap = Default::default();
-            while let Some((mut pending, ack)) = rx.recv().await {
-                // A blocking read always comes immediately after a miss, so no reason to retry it
-                // right away better to wait a bit
-                tokio::time::sleep(RETRY_TIMEOUT / 4).await;
-                loop {
-                    if let Poll::Ready(res) = pending.check(&mut reader_cache) {
-                        upquery_hist.record(pending.first.elapsed().as_micros() as f64);
-                        let _ = ack.send(res);
-                        break;
-                    }
-                    tokio::time::sleep(RETRY_TIMEOUT).await;
-                }
-            }
-        };
-        tokio::spawn(retries);
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
+        tokio::spawn(retry_misses(rx));
 
         let r = ReadRequestHandler::new(readers, tx, upquery_timeout);
 
