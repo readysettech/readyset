@@ -7,7 +7,7 @@ edition = "2021"
 build = "src/build.rs"
 
 readme = "README.md"
-description = "The Noria data-flow database server"
+description = "The ReadySet data-flow database server"
 
 keywords = ["database", "dataflow", "backend", "storage", "sql"]
 categories = ["database", "database-implementations"]
