@@ -5993,6 +5993,34 @@ async fn col_beginning_with_literal() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn simple_enum() {
+    let mut g = start_simple_unsharded("simple_enum").await;
+
+    let sql = "
+        CREATE TABLE t1 (id INT, color ENUM('red', 'yellow', 'green'));
+        CREATE CACHE c1 FROM SELECT color FROM t1 WHERE id = ?;
+    ";
+
+    g.extend_recipe(sql.parse().unwrap()).await.unwrap();
+
+    let mut mutator = g.table("t1").await.unwrap();
+    let mut getter = g.view("c1").await.unwrap();
+
+    let rows = vec!["green", "red", "purple"];
+    for (i, &color) in rows.iter().enumerate() {
+        mutator.insert(vec![i.into(), color.into()]).await.unwrap();
+    }
+
+    let result = getter.lookup(&[1.into()], true).await.unwrap().into_vec();
+
+    let schema = mutator.schema();
+    schema.unwrap().fields[1].sql_type.to_string();
+
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0][0], "red".into());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn round_int_to_int() {
     let mut g = start_simple_unsharded("round_int_to_int").await;
 
