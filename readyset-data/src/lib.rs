@@ -86,6 +86,10 @@ pub enum DfValue {
     BitVector(Arc<BitVec>),
     /// An array of [`DfValue`]s.
     Array(Arc<Array>),
+    /// An enum value, represented as an integer index into the list of possible enum values.
+    ///
+    /// Note that MySQL enums use 1-based indexing, with a value of 0 reserved for invalid values.
+    Enum(u32),
     /// Container type for arbitrary unserialized, unsupported types
     PassThrough(Arc<PassThrough>),
     /// A sentinel maximal value.
@@ -132,6 +136,7 @@ impl fmt::Display for DfValue {
                 )
             }
             DfValue::Array(ref arr) => write!(f, "{}", arr),
+            DfValue::Enum(i) => write!(f, "{}", i),
             DfValue::PassThrough(ref p) => {
                 write!(f, "[{}:{:x?}]", p.ty.name(), p.data)
             }
@@ -169,6 +174,7 @@ impl DfValue {
             DfValue::Numeric(_) => DfValue::from(Decimal::MIN),
             DfValue::BitVector(_) => DfValue::from(BitVec::new()),
             DfValue::Array(_) => DfValue::empty_array(),
+            DfValue::Enum(_) => DfValue::Enum(0),
             DfValue::PassThrough(p) => DfValue::PassThrough(Arc::new(PassThrough {
                 ty: p.ty.clone(),
                 data: [].into(),
@@ -197,6 +203,7 @@ impl DfValue {
             | DfValue::ByteArray(_)
             | DfValue::BitVector(_)
             | DfValue::Array(_)
+            | DfValue::Enum(_)
             | DfValue::PassThrough(_)
             | DfValue::Max => DfValue::Max,
         }
@@ -280,6 +287,7 @@ impl DfValue {
             DfValue::ByteArray(ref array) => !array.is_empty(),
             DfValue::Numeric(ref d) => !d.is_zero(),
             DfValue::BitVector(ref bits) => !bits.is_empty(),
+            DfValue::Enum(i) => i != 0,
             // Truthiness only matters for mysql, and mysql doesn't have arrays, so we can kind of
             // pick whatever we want here - but it makes the most sense to try to limit falsiness to
             // only the things that mysql considers falsey
@@ -351,6 +359,7 @@ impl DfValue {
             Self::Array(vs) => Some(SqlType::Array(Box::new(
                 vs.values().find_map(|v| v.sql_type())?,
             ))),
+            Self::Enum(_) => None, // TODO this is wrong, but this function is going away anyway?
         }
     }
 
@@ -409,6 +418,20 @@ impl DfValue {
 
         match self {
             DfValue::None => Ok(DfValue::None),
+            DfValue::Enum(i) if ty.is_any_text() => {
+                let enum_values = match from_ty {
+                    DfType::Sql(SqlType::Enum(v)) => Ok(v),
+                    _ => Err(mk_err()),
+                }?;
+                if *i == 0 {
+                    Ok(DfValue::from(""))
+                } else if let Some(enum_label) = enum_values.get(*i as usize - 1) {
+                    Ok(DfValue::from(enum_label.to_string()))
+                } else {
+                    Err(mk_err())
+                }
+            }
+            DfValue::Enum(i) => integer::coerce_integer(*i, "Enum", ty),
             DfValue::Array(arr) => match ty {
                 SqlType::Array(t) => Ok(DfValue::from(arr.coerce_to(t, from_ty)?)),
                 SqlType::Text => Ok(DfValue::from(arr.to_string())),
@@ -786,6 +809,7 @@ impl Hash for DfValue {
             DfValue::Numeric(ref d) => d.hash(state),
             DfValue::BitVector(ref bits) => bits.hash(state),
             DfValue::Array(ref vs) => vs.hash(state),
+            DfValue::Enum(ref i) => i.hash(state),
             DfValue::PassThrough(ref p) => p.hash(state),
         }
     }
@@ -1105,6 +1129,7 @@ impl TryFrom<DfValue> for Literal {
             DfValue::Numeric(ref d) => Ok(Literal::Numeric(d.mantissa(), d.scale())),
             DfValue::BitVector(ref bits) => Ok(Literal::BitVector(bits.as_ref().to_bytes())),
             DfValue::Array(_) => unsupported!("Arrays not implemented yet"),
+            DfValue::Enum(_) => unsupported!("Enums not implemented yet"),
             DfValue::PassThrough(_) => internal!("PassThrough has no representation as a literal"),
             DfValue::Max => internal!("MAX has no representation as a literal"),
         }
@@ -1699,6 +1724,7 @@ impl ToSql for DfValue {
             (Self::ByteArray(ref array), _) => array.as_ref().to_sql(ty, out),
             (Self::BitVector(ref bits), _) => bits.as_ref().to_sql(ty, out),
             (Self::Array(ref array), _) => array.as_ref().to_sql(ty, out),
+            (Self::Enum(i), _) => i.to_sql(ty, out), // No cast, PG uses 4-byte OIDs for enum vals
             (Self::PassThrough(p), _) => p.data.as_ref().to_sql(&p.ty, out),
         }
     }
@@ -1816,6 +1842,7 @@ impl TryFrom<&DfValue> for mysql_common::value::Value {
             }
             DfValue::BitVector(_) => internal!("MySQL does not support bit vector types"),
             DfValue::Array(_) => internal!("MySQL does not support array types"),
+            DfValue::Enum(i) => Ok(Value::UInt(*i as u64)),
         }
     }
 }
@@ -1981,6 +2008,7 @@ impl Arbitrary for DfValue {
                 .prop_map(|bs| DfValue::BitVector(Arc::new(BitVec::from_bytes(&bs))))
                 .boxed(),
             Some(DfValueKind::Array) => any::<Array>().prop_map(DfValue::from).boxed(),
+            Some(DfValueKind::Enum) => any::<u32>().prop_map(DfValue::Enum).boxed(),
             Some(DfValueKind::PassThrough) => any::<(u32, Vec<u8>)>()
                 .prop_map(|(oid, data)| {
                     DfValue::PassThrough(Arc::new(PassThrough {

@@ -501,6 +501,7 @@ pub fn shard_by(dt: &DfValue, shards: usize) -> usize {
     match *dt {
         DfValue::Int(n) => n as usize % shards,
         DfValue::UnsignedInt(n) => n as usize % shards,
+        DfValue::Enum(i) => i as usize % shards,
         DfValue::Text(..) | DfValue::TinyText(..) | DfValue::TimestampTz(_) => {
             use std::hash::Hasher;
             let mut hasher = ahash::AHasher::new_with_keys(0x3306, 0x6033);

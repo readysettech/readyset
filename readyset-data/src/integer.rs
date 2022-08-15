@@ -31,6 +31,15 @@ impl IntAsFloat for u64 {
     }
 }
 
+impl IntAsFloat for u32 {
+    fn to_f64(self) -> f64 {
+        self as f64
+    }
+    fn to_f32(self) -> f32 {
+        self as f32
+    }
+}
+
 /// Coerce an integer value according to MySQL rules to the best of our abilities
 pub(crate) fn coerce_integer<I, S>(
     val: I,
@@ -178,7 +187,7 @@ where
         SqlType::Real | SqlType::Float => Ok(DfValue::Float(val.to_f32())),
         SqlType::Numeric(_) | SqlType::Decimal(_, _) => Ok(DfValue::Numeric(Arc::new(val.into()))),
 
-        SqlType::Enum(_)
+        SqlType::Enum(_) // TODO integer to enum coercion should actually be allowed
         | SqlType::MacAddr
         | SqlType::Inet
         | SqlType::Uuid
