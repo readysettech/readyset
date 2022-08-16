@@ -20,12 +20,13 @@ use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
 mod array;
 mod float;
 mod integer;
-pub mod noria_type;
 mod serde;
 mod text;
 mod timestamp;
+mod r#type;
 
 pub use crate::array::Array;
+pub use crate::r#type::DataflowType;
 pub use crate::text::{Text, TinyText};
 pub use crate::timestamp::{TimestampTz, TIMESTAMP_FORMAT};
 
@@ -341,8 +342,8 @@ impl DataType {
             Self::ByteArray(_) => Some(ByteArray),
             Self::Numeric(_) => Some(Numeric(None)),
             Self::BitVector(_) => Some(VarBit(None)),
-            // TODO: Once this returns NoriaType instead of SqlType, an empty array and an array of
-            // null should be Array(Unknown) not Unknown
+            // TODO: Once this returns DataflowType instead of SqlType, an empty array and an array
+            // of null should be Array(Unknown) not Unknown.
             Self::Array(vs) => Some(SqlType::Array(Box::new(
                 vs.values().find_map(|v| v.sql_type())?,
             ))),

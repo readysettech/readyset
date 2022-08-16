@@ -31,7 +31,7 @@ use nom_sql::{
 use petgraph::graph::NodeIndex;
 use readyset::internal::{Index, IndexType};
 use readyset::ViewPlaceholder;
-use readyset_data::noria_type::Type;
+use readyset_data::DataflowType;
 use readyset_errors::{
     internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,
 };
@@ -1020,7 +1020,7 @@ fn lower_expression(
                 left,
                 right: Box::new(DataflowExpr::Literal {
                     val: DataType::Int(-1),
-                    ty: Type::Sql(SqlType::Int(None)),
+                    ty: DataflowType::Sql(SqlType::Int(None)),
                 }),
                 ty,
             })
@@ -1033,9 +1033,9 @@ fn lower_expression(
             left: Box::new(lower_expression(parent, *rhs, parent_cols)?),
             right: Box::new(DataflowExpr::Literal {
                 val: DataType::Int(1),
-                ty: Type::Sql(SqlType::Int(None)),
+                ty: DataflowType::Sql(SqlType::Int(None)),
             }),
-            ty: Type::Sql(SqlType::Bool), // type of NE is always bool
+            ty: DataflowType::Sql(SqlType::Bool), // type of NE is always bool
         }),
         Expr::Cast { expr, ty, .. } => Ok(DataflowExpr::Cast {
             expr: Box::new(lower_expression(parent, *expr, parent_cols)?),
@@ -1057,7 +1057,7 @@ fn lower_expression(
                     Some(else_expr) => Box::new(lower_expression(parent, *else_expr, parent_cols)?),
                     None => Box::new(DataflowExpr::Literal {
                         val: DataType::None,
-                        ty: Type::Unknown,
+                        ty: DataflowType::Unknown,
                     }),
                 },
                 ty,
@@ -1082,7 +1082,7 @@ fn lower_expression(
                         left: Box::new(lhs.clone()),
                         op: comparison_op,
                         right: Box::new(lower_expression(parent, rhs, parent_cols)?),
-                        ty: Type::Sql(SqlType::Bool), // type of =/!= is always bool
+                        ty: DataflowType::Sql(SqlType::Bool), // type of =/!= is always bool
                     })
                 };
 
@@ -1091,20 +1091,20 @@ fn lower_expression(
                         left: Box::new(acc),
                         op: logical_op,
                         right: Box::new(make_comparison(rhs)?),
-                        ty: Type::Sql(SqlType::Bool), // type of =/!= is always bool
+                        ty: DataflowType::Sql(SqlType::Bool), // type of =/!= is always bool
                     })
                 })
             } else if negated {
                 // x IN () is always false
                 Ok(DataflowExpr::Literal {
                     val: DataType::None,
-                    ty: Type::Sql(SqlType::Bool),
+                    ty: DataflowType::Sql(SqlType::Bool),
                 })
             } else {
                 // x NOT IN () is always false
                 Ok(DataflowExpr::Literal {
                     val: DataType::from(1),
-                    ty: Type::Sql(SqlType::Bool),
+                    ty: DataflowType::Sql(SqlType::Bool),
                 })
             }
         }
@@ -1275,7 +1275,7 @@ fn make_distinct_node(
             parent_na,
             0,
             &group_by_indx,
-            &Type::Unknown,
+            &DataflowType::Unknown,
         )?,
     );
     Ok(FlowNode::New(na))

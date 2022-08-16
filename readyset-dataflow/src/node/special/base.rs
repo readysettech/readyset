@@ -566,7 +566,7 @@ mod tests {
         use std::convert::TryInto;
 
         use dataflow_state::MaterializedNodeState;
-        use readyset_data::noria_type::Type as NoriaType;
+        use readyset_data::DataflowType;
 
         use super::*;
         use crate::node::Column as DataflowColumn;
@@ -579,7 +579,7 @@ mod tests {
             let mut graph = Graph::new();
             let source = graph.add_node(Node::new(
                 "source",
-                vec![DataflowColumn::new("".into(), NoriaType::Unknown, None)],
+                vec![DataflowColumn::new("".into(), DataflowType::Unknown, None)],
                 node::NodeType::Source,
             ));
 
@@ -587,9 +587,9 @@ mod tests {
             let global = graph.add_node(Node::new(
                 "b",
                 vec![
-                    DataflowColumn::new("x".into(), NoriaType::Unknown, None),
-                    DataflowColumn::new("y".into(), NoriaType::Unknown, None),
-                    DataflowColumn::new("z".into(), NoriaType::Unknown, None),
+                    DataflowColumn::new("x".into(), DataflowType::Unknown, None),
+                    DataflowColumn::new("y".into(), DataflowType::Unknown, None),
+                    DataflowColumn::new("z".into(), DataflowType::Unknown, None),
                 ],
                 b,
             ));

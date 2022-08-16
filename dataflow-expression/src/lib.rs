@@ -9,8 +9,7 @@ use std::fmt;
 use std::fmt::Formatter;
 
 use nom_sql::{BinaryOperator, SqlType};
-use readyset_data::noria_type::Type;
-use readyset_data::DataType;
+use readyset_data::{DataType, DataflowType};
 use readyset_errors::ReadySetError;
 use serde::{Deserialize, Serialize};
 
@@ -42,13 +41,13 @@ pub enum BuiltinFunction {
 }
 
 impl BuiltinFunction {
-    pub fn from_name_and_args<A>(name: &str, args: A) -> Result<(Self, Type), ReadySetError>
+    pub fn from_name_and_args<A>(name: &str, args: A) -> Result<(Self, DataflowType), ReadySetError>
     where
         A: IntoIterator<Item = Expr>,
     {
-        fn type_for_round(expr: &Expr, _precision: &Expr) -> Type {
+        fn type_for_round(expr: &Expr, _precision: &Expr) -> DataflowType {
             match expr.ty() {
-                Type::Sql(ty) => match ty {
+                DataflowType::Sql(ty) => match ty {
                     // When the first argument is of any integer type, the return type is always
                     // BIGINT.
                     SqlType::TinyInt(_)
@@ -58,14 +57,14 @@ impl BuiltinFunction {
                     | SqlType::Int(_)
                     | SqlType::UnsignedInt(_)
                     | SqlType::BigInt(_)
-                    | SqlType::UnsignedBigInt(_) => Type::Sql(SqlType::BigInt(None)),
+                    | SqlType::UnsignedBigInt(_) => DataflowType::Sql(SqlType::BigInt(None)),
                     // When the first argument is a DECIMAL value, the return type is also DECIMAL.
                     SqlType::Decimal(_, _) => expr.ty().clone(),
                     // When the first argument is of any floating-point type or of any non-numeric
                     // type, the return type is always DOUBLE.
-                    _ => Type::Sql(SqlType::Double),
+                    _ => DataflowType::Sql(SqlType::Double),
                 },
-                Type::Unknown => Type::Unknown,
+                DataflowType::Unknown => DataflowType::Unknown,
             }
         }
 
@@ -84,7 +83,7 @@ impl BuiltinFunction {
             "dayofweek" => {
                 Ok((
                     Self::DayOfWeek(next_arg()?),
-                    Type::Sql(SqlType::Int(None)), // Day of week is always an int
+                    DataflowType::Sql(SqlType::Int(None)), // Day of week is always an int
                 ))
             }
             "ifnull" => {
@@ -97,13 +96,13 @@ impl BuiltinFunction {
             "month" => {
                 Ok((
                     Self::Month(next_arg()?),
-                    Type::Sql(SqlType::Int(None)), // Month is always an int
+                    DataflowType::Sql(SqlType::Int(None)), // Month is always an int
                 ))
             }
             "timediff" => {
                 Ok((
                     Self::Timediff(next_arg()?, next_arg()?),
-                    Type::Sql(SqlType::Time), // type is always time
+                    DataflowType::Sql(SqlType::Time), // type is always time
                 ))
             }
             "addtime" => {
@@ -115,7 +114,7 @@ impl BuiltinFunction {
                 let expr = next_arg()?;
                 let prec = args.next().unwrap_or(Expr::Literal {
                     val: DataType::Int(0),
-                    ty: Type::Sql(SqlType::Int(None)),
+                    ty: DataflowType::Sql(SqlType::Int(None)),
                 });
                 let ty = type_for_round(&expr, &prec);
                 Ok((Self::Round(expr, prec), ty))
@@ -123,13 +122,15 @@ impl BuiltinFunction {
             "json_typeof" => {
                 Ok((
                     Self::JsonTypeof(next_arg()?),
-                    Type::Sql(SqlType::Text), // Always returns text containing the JSON type
+                    // Always returns text containing the JSON type.
+                    DataflowType::Sql(SqlType::Text),
                 ))
             }
             "jsonb_typeof" => {
                 Ok((
                     Self::JsonbTypeof(next_arg()?),
-                    Type::Sql(SqlType::Text), // Always returns text containing the JSON type
+                    // Always returns text containing the JSON type.
+                    DataflowType::Sql(SqlType::Text),
                 ))
             }
             _ => Err(ReadySetError::NoSuchFunction(name.to_owned())),
@@ -213,17 +214,17 @@ impl fmt::Display for BuiltinFunction {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Expr {
     /// A reference to a column, by index, in the parent node
-    Column { index: usize, ty: Type },
+    Column { index: usize, ty: DataflowType },
 
     /// A literal DataType value
-    Literal { val: DataType, ty: Type },
+    Literal { val: DataType, ty: DataflowType },
 
     /// A binary operation
     Op {
         op: BinaryOperator,
         left: Box<Expr>,
         right: Box<Expr>,
-        ty: Type,
+        ty: DataflowType,
     },
 
     /// CAST(expr AS type)
@@ -233,21 +234,22 @@ pub enum Expr {
         /// The `SqlType` that we're attempting to cast to. This is provided
         /// when `Expr::Cast` is created.
         to_type: SqlType,
-        /// The `Type` of the resulting cast. For now, this should be `Type::Sql(to_type)`
+        /// The `DataflowType` of the resulting cast. For now, this should be
+        /// `Sql(to_type)`.
         /// TODO: This field may not be necessary
-        ty: Type,
+        ty: DataflowType,
     },
 
     Call {
         func: Box<BuiltinFunction>,
-        ty: Type,
+        ty: DataflowType,
     },
 
     CaseWhen {
         condition: Box<Expr>,
         then_expr: Box<Expr>,
         else_expr: Box<Expr>,
-        ty: Type,
+        ty: DataflowType,
     },
 }
 
@@ -278,7 +280,7 @@ impl fmt::Display for Expr {
 }
 
 impl Expr {
-    pub fn ty(&self) -> &Type {
+    pub fn ty(&self) -> &DataflowType {
         match self {
             Expr::Column { ty, .. }
             | Expr::Literal { ty, .. }

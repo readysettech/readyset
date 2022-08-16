@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use nom_sql::{SqlIdentifier, Table};
 use readyset::consistency::Timestamp;
-use readyset_data::noria_type::Type;
+use readyset_data::DataflowType;
 use serde::{Deserialize, Serialize};
 
 use crate::ops;
@@ -34,7 +34,7 @@ pub struct Column {
     /// Column name
     name: SqlIdentifier,
     /// Column type
-    ty: Type,
+    ty: DataflowType,
     /// The node or table where this column originates.
     ///
     /// TODO: Use this information to lookup the column specification required for returning a
@@ -43,7 +43,7 @@ pub struct Column {
 }
 
 impl Column {
-    pub fn new(name: SqlIdentifier, ty: Type, source: Option<Table>) -> Self {
+    pub fn new(name: SqlIdentifier, ty: DataflowType, source: Option<Table>) -> Self {
         Self { name, ty, source }
     }
 
@@ -53,7 +53,7 @@ impl Column {
     }
 
     /// Type of the column
-    pub fn ty(&self) -> &Type {
+    pub fn ty(&self) -> &DataflowType {
         &self.ty
     }
 

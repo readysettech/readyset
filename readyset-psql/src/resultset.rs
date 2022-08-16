@@ -51,7 +51,7 @@ impl Resultset {
                 })
                 .collect::<Result<Vec<usize>, ps::Error>>()?,
         );
-        // Extract the appropriate `Type` for each column in the schema.
+        // Extract the appropriate `tokio_postgres` `Type` for each column in the schema.
         let project_field_types = Arc::new(
             schema
                 .0

@@ -21,8 +21,7 @@ use readyset::{
     ReadySetResult, SchemaType, Table, TableOperation, View, ViewPlaceholder, ViewQuery,
     ViewSchema,
 };
-use readyset_data::noria_type::Type;
-use readyset_data::DataType;
+use readyset_data::{DataType, DataflowType};
 use readyset_errors::ReadySetError::PreparedStatementMissing;
 use readyset_errors::{
     internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err,
@@ -1522,7 +1521,7 @@ fn build_view_query(
                     val: value,
                     ty: key_type.clone().into(),
                 }),
-                ty: Type::Sql(SqlType::Bool),
+                ty: DataflowType::Sql(SqlType::Bool),
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -1580,7 +1579,7 @@ fn build_view_query(
                                     val: value.clone(),
                                     ty: (*key_type).clone().into(),
                                 }),
-                                ty: Type::Sql(SqlType::Bool), // TODO: infer type
+                                ty: DataflowType::Sql(SqlType::Bool), // TODO: infer type
                             };
 
                             if let Some((lower_bound, upper_bound)) = &mut bounds {
@@ -1681,7 +1680,7 @@ fn build_view_query(
             left: Box::new(expr1),
             op: BinaryOperator::And,
             right: Box::new(expr2),
-            ty: Type::Sql(SqlType::Bool), // AND is a boolean operator
+            ty: DataflowType::Sql(SqlType::Bool), // AND is a boolean operator
         }),
         limit,
         offset,
@@ -1973,14 +1972,14 @@ mod tests {
                 Some(DataflowExpr::Op {
                     left: Box::new(DataflowExpr::Column {
                         index: 1,
-                        ty: Type::Sql(SqlType::Text)
+                        ty: DataflowType::Sql(SqlType::Text)
                     }),
                     op: BinaryOperator::ILike,
                     right: Box::new(DataflowExpr::Literal {
                         val: DataType::from("%a%"),
-                        ty: Type::Sql(SqlType::Text)
+                        ty: DataflowType::Sql(SqlType::Text)
                     }),
-                    ty: Type::Sql(SqlType::Bool),
+                    ty: DataflowType::Sql(SqlType::Bool),
                 })
             );
         }
@@ -2042,14 +2041,14 @@ mod tests {
                 Some(DataflowExpr::Op {
                     left: Box::new(DataflowExpr::Column {
                         index: 0,
-                        ty: Type::Sql(SqlType::Int(None))
+                        ty: DataflowType::Sql(SqlType::Int(None))
                     }),
                     op: BinaryOperator::Greater,
                     right: Box::new(DataflowExpr::Literal {
                         val: 1.into(),
-                        ty: Type::Sql(SqlType::Int(None))
+                        ty: DataflowType::Sql(SqlType::Int(None))
                     }),
-                    ty: Type::Sql(SqlType::Bool),
+                    ty: DataflowType::Sql(SqlType::Bool),
                 })
             );
             assert_eq!(
@@ -2077,14 +2076,14 @@ mod tests {
                 Some(DataflowExpr::Op {
                     left: Box::new(DataflowExpr::Column {
                         index: 1,
-                        ty: Type::Sql(SqlType::Text)
+                        ty: DataflowType::Sql(SqlType::Text)
                     }),
                     op: BinaryOperator::Greater,
                     right: Box::new(DataflowExpr::Literal {
                         val: "a".into(),
-                        ty: Type::Sql(SqlType::Text)
+                        ty: DataflowType::Sql(SqlType::Text)
                     }),
-                    ty: Type::Sql(SqlType::Bool)
+                    ty: DataflowType::Sql(SqlType::Bool)
                 })
             );
 
