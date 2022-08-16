@@ -13,8 +13,8 @@ use tracing::trace;
 use crate::keyed_state::KeyedState;
 use crate::single_state::SingleState;
 use crate::{
-    EvictBytesResult, EvictKeysResult, LookupResult, PersistentState, RangeLookupResult,
-    RecordResult, Row, Rows, State,
+    EvictBytesResult, EvictKeysResult, LookupResult, RangeLookupResult, RecordResult, Row, Rows,
+    State,
 };
 
 #[derive(Default)]
@@ -394,14 +394,6 @@ impl State for MemoryState {
 
     fn tear_down(self) -> ReadySetResult<()> {
         Ok(())
-    }
-
-    fn as_persistent(&self) -> Option<&PersistentState> {
-        None
-    }
-
-    fn as_persistent_mut(&mut self) -> Option<&mut PersistentState> {
-        None
     }
 }
 

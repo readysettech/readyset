@@ -26,7 +26,7 @@ use readyset_errors::ReadySetResult;
 
 pub use self::memory_state::MemoryState;
 pub use self::persistent_state::{
-    DurabilityMode, PersistenceParameters, PersistentState, SnapshotMode,
+    DurabilityMode, PersistenceParameters, PersistentState, PersistentStateHandle, SnapshotMode,
 };
 
 /// Information about state evicted via a call to [`State::evict_bytes`]
@@ -58,6 +58,8 @@ pub enum MaterializedNodeState {
     /// The state that stores all the materialized rows in a persistent
     /// storage.
     Persistent(PersistentState),
+    /// A read handle to a [`PersistentState`] owned by another node.
+    PersistentReadHandle(PersistentStateHandle),
 }
 
 /// The [`State`] trait is the interface to the state of a non-reader node in the graph, containing
@@ -184,10 +186,14 @@ pub trait State: SizeOf + Send {
     fn lookup_weak<'a>(&'a self, columns: &[usize], key: &KeyType) -> Option<RecordResult<'a>>;
 
     /// If the internal type is a `PersistentState` return a reference to itself
-    fn as_persistent(&self) -> Option<&PersistentState>;
+    fn as_persistent(&self) -> Option<&PersistentState> {
+        None
+    }
 
     /// If the internal type is a `PersistentState` return a mutable reference to itself
-    fn as_persistent_mut(&mut self) -> Option<&mut PersistentState>;
+    fn as_persistent_mut(&mut self) -> Option<&mut PersistentState> {
+        None
+    }
 
     /// Return (a potentially inaccurate estimate of) the number of keys stored in this state
     fn key_count(&self) -> KeyCount;
@@ -221,6 +227,7 @@ impl SizeOf for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.deep_size_of(),
             MaterializedNodeState::Persistent(ps) => ps.deep_size_of(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.deep_size_of(),
         }
     }
 
@@ -228,6 +235,7 @@ impl SizeOf for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.size_of(),
             MaterializedNodeState::Persistent(ps) => ps.size_of(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.size_of(),
         }
     }
 
@@ -235,6 +243,7 @@ impl SizeOf for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.is_empty(),
             MaterializedNodeState::Persistent(ps) => ps.is_empty(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.is_empty(),
         }
     }
 }
@@ -244,6 +253,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.add_key(index, tags),
             MaterializedNodeState::Persistent(ps) => ps.add_key(index, tags),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.add_key(index, tags),
         }
     }
 
@@ -251,6 +261,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.add_weak_key(index),
             MaterializedNodeState::Persistent(ps) => ps.add_weak_key(index),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.add_weak_key(index),
         }
     }
 
@@ -258,6 +269,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.is_useful(),
             MaterializedNodeState::Persistent(ps) => ps.is_useful(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.is_useful(),
         }
     }
 
@@ -265,6 +277,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.is_partial(),
             MaterializedNodeState::Persistent(ps) => ps.is_partial(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.is_partial(),
         }
     }
 
@@ -281,6 +294,9 @@ impl State for MaterializedNodeState {
             MaterializedNodeState::Persistent(ps) => {
                 ps.process_records(records, partial_tag, replication_offset)
             }
+            MaterializedNodeState::PersistentReadHandle(rh) => {
+                rh.process_records(records, partial_tag, replication_offset)
+            }
         }
     }
 
@@ -288,6 +304,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.replication_offset(),
             MaterializedNodeState::Persistent(ps) => ps.replication_offset(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.replication_offset(),
         }
     }
 
@@ -295,6 +312,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.mark_filled(key, tag),
             MaterializedNodeState::Persistent(ps) => ps.mark_filled(key, tag),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.mark_filled(key, tag),
         }
     }
 
@@ -302,6 +320,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.mark_hole(key, tag),
             MaterializedNodeState::Persistent(ps) => ps.mark_hole(key, tag),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.mark_hole(key, tag),
         }
     }
 
@@ -309,6 +328,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.lookup(columns, key),
             MaterializedNodeState::Persistent(ps) => ps.lookup(columns, key),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.lookup(columns, key),
         }
     }
 
@@ -316,6 +336,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.lookup_range(columns, key),
             MaterializedNodeState::Persistent(ps) => ps.lookup_range(columns, key),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.lookup_range(columns, key),
         }
     }
 
@@ -323,6 +344,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.lookup_weak(columns, key),
             MaterializedNodeState::Persistent(ps) => ps.lookup_weak(columns, key),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.lookup_weak(columns, key),
         }
     }
 
@@ -330,6 +352,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.as_persistent(),
             MaterializedNodeState::Persistent(ps) => ps.as_persistent(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.as_persistent(),
         }
     }
 
@@ -337,6 +360,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.as_persistent_mut(),
             MaterializedNodeState::Persistent(ps) => ps.as_persistent_mut(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.as_persistent_mut(),
         }
     }
 
@@ -344,6 +368,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.key_count(),
             MaterializedNodeState::Persistent(ps) => ps.key_count(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.key_count(),
         }
     }
 
@@ -351,6 +376,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.row_count(),
             MaterializedNodeState::Persistent(ps) => ps.row_count(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.row_count(),
         }
     }
 
@@ -358,6 +384,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.cloned_records(),
             MaterializedNodeState::Persistent(ps) => ps.cloned_records(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.cloned_records(),
         }
     }
 
@@ -365,6 +392,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.evict_bytes(bytes),
             MaterializedNodeState::Persistent(ps) => ps.evict_bytes(bytes),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.evict_bytes(bytes),
         }
     }
 
@@ -372,6 +400,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.evict_keys(tag, keys),
             MaterializedNodeState::Persistent(ps) => ps.evict_keys(tag, keys),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.evict_keys(tag, keys),
         }
     }
 
@@ -379,6 +408,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.clear(),
             MaterializedNodeState::Persistent(ps) => ps.clear(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.clear(),
         }
     }
 
@@ -386,6 +416,7 @@ impl State for MaterializedNodeState {
         match self {
             MaterializedNodeState::Memory(ms) => ms.tear_down(),
             MaterializedNodeState::Persistent(ps) => ps.tear_down(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.tear_down(),
         }
     }
 }

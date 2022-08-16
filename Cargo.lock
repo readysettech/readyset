@@ -979,6 +979,7 @@ dependencies = [
  "launchpad",
  "lazy_static",
  "notify",
+ "parking_lot 0.12.0",
  "partial-map",
  "pretty_assertions",
  "proptest",

@@ -67,23 +67,27 @@ use std::io::Read;
 use std::ops::Bound;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{fmt, fs};
 
 use bincode::Options;
 use common::{IndexType, KeyType, RangeKey, Record, Records, SizeOf, Tag};
+use parking_lot::{
+    MappedRwLockReadGuard, MappedRwLockWriteGuard, RwLock, RwLockReadGuard, RwLockWriteGuard,
+};
 use readyset::internal::Index;
 use readyset::replication::ReplicationOffset;
-use readyset::{KeyComparison, KeyCount};
+use readyset::{KeyComparison, KeyCount, SqlIdentifier};
 use readyset_data::DfValue;
 use readyset_errors::{ReadySetError, ReadySetResult};
-use rocksdb::{self, PlainTableFactoryOptions, SliceTransform, WriteBatch};
+use rocksdb::{self, PlainTableFactoryOptions, SliceTransform, WriteBatch, DB};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tempfile::{tempdir, TempDir};
 use test_strategy::Arbitrary;
 use thiserror::Error;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{EvictKeysResult, LookupResult, RangeLookupResult, RecordResult, State};
 
@@ -110,7 +114,7 @@ const INDEX_BATCH_SIZE: usize = 10_000;
 
 /// Load the metadata from the database, stored in the `DEFAULT_CF` column family under the
 /// `META_KEY`
-fn get_meta(db: &rocksdb::DB) -> PersistentMeta<'static> {
+fn get_meta(db: &DB) -> PersistentMeta<'static> {
     db.get_pinned(META_KEY)
         .unwrap()
         .and_then(|data| {
@@ -134,7 +138,7 @@ trait Put: Sized {
     /// Write a key/value pair
     ///
     /// This method is prefixed with "do" so that it doesn't conflict with the `put` method on both
-    /// [`rocksdb::DB`] and [`rocksdb::WriteBatch`]
+    /// [`DB`] and [`rocksdb::WriteBatch`]
     fn do_put<K, V>(self, key: K, value: V)
     where
         K: AsRef<[u8]>,
@@ -145,7 +149,7 @@ trait Put: Sized {
     }
 }
 
-impl Put for &rocksdb::DB {
+impl Put for &DB {
     fn do_put<K, V>(self, key: K, value: V)
     where
         K: AsRef<[u8]>,
@@ -167,7 +171,7 @@ impl Put for &mut rocksdb::WriteBatch {
 
 /// Load the saved [`PersistentMeta`] from the database, increment its
 /// [epoch](PersistentMeta::epoch) by one, and return it
-fn increment_epoch(db: &rocksdb::DB) -> PersistentMeta<'static> {
+fn increment_epoch(db: &DB) -> PersistentMeta<'static> {
     let mut meta = get_meta(db);
     meta.epoch += 1;
     db.save_meta(&meta);
@@ -293,19 +297,13 @@ struct PersistentIndex {
 
 /// PersistentState stores data in RocksDB.
 pub struct PersistentState {
-    name: String,
+    name: SqlIdentifier,
     default_options: rocksdb::Options,
-    db: rocksdb::DB,
-    // The lookup indices stored for this table. The first element is always considered the primary
-    // index
-    indices: Vec<PersistentIndex>,
+    db: PersistentStateHandle,
     // The list of all the indices that are defined as unique in the schema for this table
     unique_keys: Vec<Box<[usize]>>,
     seq: IndexSeq,
     epoch: IndexEpoch,
-    /// The latest replication offset that has been written to the base table backed by this
-    /// [`PersistentState`]
-    replication_offset: Option<ReplicationOffset>,
     // With DurabilityMode::DeleteOnExit,
     // RocksDB files are stored in a temporary directory.
     _tmpdir: Option<TempDir>,
@@ -314,11 +312,201 @@ pub struct PersistentState {
     snapshot_mode: SnapshotMode,
 }
 
+/// Things that are shared between read handles and the state itself, that can be locked under a
+/// single lock
+struct SharedState {
+    /// The handle to the RocksDB database we are reading from
+    db: DB,
+    /// The latest replication offset that has been written to the base table backed by this
+    /// [`PersistentState`]
+    replication_offset: Option<ReplicationOffset>,
+    /// The lookup indices stored for this table. The first element is always considered the
+    /// primary index
+    indices: Vec<PersistentIndex>,
+}
+
+impl SharedState {
+    /// Returns the PersistentIndex for the given index, panicking if it doesn't exist
+    // TODO(grfn): This should actually be an error, since it can be triggered by bad requests
+    fn index(&self, index_type: IndexType, columns: &[usize]) -> &PersistentIndex {
+        self.indices
+            .iter()
+            .find(|index| index.index.index_type == index_type && index.index.columns == columns)
+            .unwrap_or_else(|| {
+                panic!(
+                    "lookup on non-indexed column set {:?}({:?})",
+                    index_type, columns
+                )
+            })
+    }
+}
+
+/// A handle that can cloned and shared between threas to safely read from the [`PersistentState`]
+/// concurently.
+#[derive(Clone)]
+pub struct PersistentStateHandle {
+    /// The replication offset used to make sure the read handle recieved all forward processing
+    /// messages for state, if the replication offset of the read handle is behind that of
+    /// the base table (`inner.replication_offset`), lookups will result in a miss.
+    replication_offset: Option<ReplicationOffset>,
+    inner: Arc<RwLock<SharedState>>,
+}
+
+impl PersistentStateHandle {
+    fn inner(&self) -> RwLockReadGuard<'_, SharedState> {
+        self.inner.read()
+    }
+
+    fn inner_mut(&self) -> RwLockWriteGuard<'_, SharedState> {
+        self.inner.write()
+    }
+
+    fn handle(&self) -> MappedRwLockReadGuard<'_, DB> {
+        RwLockReadGuard::map(self.inner.read(), |i| &i.db)
+    }
+
+    fn handle_mut(&self) -> MappedRwLockWriteGuard<'_, DB> {
+        RwLockWriteGuard::map(self.inner.write(), |i| &mut i.db)
+    }
+
+    /// Perform a lookup for multiple equal keys at once. The results are returned in the order of
+    /// the original keys.
+    pub fn lookup_multi<'a>(
+        &'a self,
+        columns: &[usize],
+        keys: &[KeyType],
+    ) -> Vec<RecordResult<'a>> {
+        if keys.is_empty() {
+            return vec![];
+        }
+        let inner = self.inner();
+        let db = &inner.db;
+
+        let index = inner.index(IndexType::HashMap, columns);
+        let is_primary = index.is_primary;
+
+        let cf = db.cf_handle(&index.column_family).unwrap();
+        // Create an iterator once, reuse it for each key
+        let mut iter = db.raw_iterator_cf(cf);
+        let mut iter_primary = if !is_primary {
+            Some(
+                db.raw_iterator_cf(
+                    db.cf_handle(PK_CF)
+                        .expect("Primary key column family not found"),
+                ),
+            )
+        } else {
+            None
+        };
+
+        keys.iter()
+            .map(|k| {
+                let prefix = PersistentState::serialize_prefix(k);
+                let mut rows = Vec::new();
+
+                let is_unique = index.is_unique && !k.has_null();
+
+                iter.seek(&prefix); // Find the next key
+
+                while iter.key().map(|k| k.starts_with(&prefix)).unwrap_or(false) {
+                    let val = match &mut iter_primary {
+                        Some(iter_primary) => {
+                            // If we have a primary iterator, it means this is a secondary index and
+                            // we need to lookup by the primary key next
+                            iter_primary.seek(iter.value().unwrap());
+                            deserialize_row(iter_primary.value().unwrap())
+                        }
+                        None => deserialize_row(iter.value().unwrap()),
+                    };
+
+                    rows.push(val);
+
+                    if is_unique {
+                        // We know that there is only one row for this index
+                        break;
+                    }
+
+                    iter.next();
+                }
+
+                RecordResult::Owned(rows)
+            })
+            .collect()
+    }
+
+    /// Looks up rows in an index
+    /// If the index is the primary index, the lookup gets the rows from the primary index directly.
+    /// If the index is a secondary index, we will first lookup the primary index keys from that
+    /// secondary index, then perform a lookup into the primary index
+    fn do_lookup(&self, columns: &[usize], key: &KeyType) -> Option<Vec<Vec<DfValue>>> {
+        let inner = self.inner();
+        if self.replication_offset < inner.replication_offset {
+            // We are checking the replication offset under a read lock, and the lock remains in
+            // place until after the read completed, guaranteeing that no write takes place. An
+            // alternative would be to use a transaction that reads the log offset from the meta
+            // with the value.
+            debug!("Consistency miss in PersistentStateHandle");
+            return None;
+        }
+        let index = inner.index(IndexType::HashMap, columns);
+
+        let db = &inner.db;
+        let cf = db.cf_handle(&index.column_family).unwrap();
+        let primary_cf = if !index.is_primary {
+            Some(db.cf_handle(PK_CF).unwrap())
+        } else {
+            None
+        };
+
+        let prefix = PersistentState::serialize_prefix(key);
+
+        if index.is_unique && !key.has_null() {
+            // This is a unique key, so we know there's only one row to retrieve
+            let value = db.get_pinned_cf(cf, &prefix).unwrap();
+            Some(match (value, primary_cf) {
+                (None, _) => vec![],
+                (Some(value), None) => vec![deserialize_row(value)],
+                (Some(pk), Some(primary_cf)) => vec![deserialize_row(
+                    db.get_pinned_cf(primary_cf, pk)
+                        .unwrap()
+                        .expect("Existing primary key"),
+                )],
+            })
+        } else {
+            // This could correspond to more than one value, so we'll use a prefix_iterator,
+            // for each row
+            let mut rows = Vec::new();
+            let mut opts = rocksdb::ReadOptions::default();
+            opts.set_prefix_same_as_start(true);
+
+            let mut iter = db.raw_iterator_cf_opt(cf, opts);
+            let mut iter_primary = primary_cf.map(|pcf| db.raw_iterator_cf(pcf));
+
+            iter.seek(&prefix);
+
+            while let Some(value) = iter.value() {
+                let raw_row = match &mut iter_primary {
+                    Some(iter_primary) => {
+                        iter_primary.seek(value);
+                        iter_primary.value().expect("Existing primary key")
+                    }
+                    None => value,
+                };
+
+                rows.push(deserialize_row(raw_row));
+                iter.next();
+            }
+
+            Some(rows)
+        }
+    }
+}
+
 impl fmt::Debug for PersistentState {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("PersistentState")
             .field("name", &self.name)
-            .field("indices", &self.indices)
+            .field("indices", &self.db.inner().indices)
             .field("unique_keys", &self.unique_keys)
             .field("seq", &self.seq)
             .field("epoch", &self.epoch)
@@ -354,7 +542,7 @@ impl State for PersistentState {
         }
 
         // Don't process records if the replication offset is less than our current.
-        if let (Some(new), Some(current)) = (&replication_offset, &self.replication_offset) {
+        if let (Some(new), Some(current)) = (&replication_offset, &self.db.replication_offset) {
             if new <= current {
                 warn!("Dropping writes we have already processed");
                 return;
@@ -382,6 +570,7 @@ impl State for PersistentState {
         {
             opts.disable_wal(true);
         } else {
+            let db = &self.db.handle();
             if self.snapshot_mode.is_enabled() && replication_offset.is_some() {
                 // We are setting the replication offset, which is great, but all of our previous
                 // writes are not guranteed to flush to disk even if the next write is synced. We
@@ -391,14 +580,13 @@ impl State for PersistentState {
                 // Q: After a write following option.disableWAL=true, I write another record with
                 // options.sync=true,    will it persist the previous write too?
                 // A: No. After the program crashes, writes with option.disableWAL=true will be
-                // lost, if they are not flushed    to SST files.
-                for index in &self.indices {
-                    self.db
-                        .flush_cf(self.db.cf_handle(&index.column_family).unwrap())
+                // lost, if they are not flushed to SST files.
+                for index in self.db.inner().indices.iter() {
+                    db.flush_cf(db.cf_handle(&index.column_family).unwrap())
                         .expect("Flush to disk failed");
                 }
 
-                self.db.flush().expect("Flush to disk failed");
+                db.flush().expect("Flush to disk failed");
             }
             opts.set_sync(true);
         }
@@ -407,30 +595,212 @@ impl State for PersistentState {
             self.set_replication_offset(&mut batch, offset);
         }
 
-        self.db.write_opt(batch, &opts).unwrap();
+        self.db.handle().write_opt(batch, &opts).unwrap();
     }
 
     fn replication_offset(&self) -> Option<&ReplicationOffset> {
-        self.replication_offset.as_ref()
+        self.db.replication_offset.as_ref()
     }
 
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
-        let index = self.index(IndexType::HashMap, columns);
-        LookupResult::Some(self.do_lookup(index, key).into())
+        self.db.lookup(columns, key)
     }
 
     fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a> {
-        let db = &self.db;
-        let index = self.index(IndexType::BTreeMap, columns);
+        self.db.lookup_range(columns, key)
+    }
+
+    fn as_persistent(&self) -> Option<&PersistentState> {
+        Some(self)
+    }
+
+    fn as_persistent_mut(&mut self) -> Option<&mut PersistentState> {
+        Some(self)
+    }
+
+    /// Add a new index to the table, the first index we add will contain the data
+    /// each additional index we add, will contain pointers to the primary index
+    /// Panics if partial is Some
+    fn add_key(&mut self, index: Index, partial: Option<Vec<Tag>>) {
+        #[allow(clippy::panic)] // This should definitely never happen!
+        {
+            assert!(partial.is_none(), "Bases can't be partial");
+        }
+        let columns = &index.columns;
+        let existing = self.db.inner().indices.iter().any(|pi| pi.index == index);
+
+        if existing {
+            self.db.add_key(index, partial);
+            return;
+        }
+
+        let is_unique = check_if_index_is_unique(&self.unique_keys, columns);
+        if self.db.inner().indices.is_empty() {
+            self.add_primary_index(&index.columns, is_unique);
+            if index.index_type != IndexType::HashMap {
+                // Primary indices can only be HashMaps, so if this is our first index and it's
+                // *not* a HashMap index, add another secondary index of the correct index type
+                self.add_secondary_index(&index, is_unique);
+            }
+        } else {
+            self.add_secondary_index(&index, is_unique)
+        }
+    }
+
+    fn cloned_records(&self) -> Vec<Vec<DfValue>> {
+        self.db.cloned_records()
+    }
+
+    /// Returns a *row* count estimate from RocksDB (not a key count as the function name would
+    /// suggest), since getting a key count could be quite expensive, and we care less about the
+    /// key count of persistent nodes anyway.
+    fn key_count(&self) -> KeyCount {
+        KeyCount::EstimatedRowCount(self.row_count())
+    }
+
+    /// Returns a row count estimate from RocksDB.
+    fn row_count(&self) -> usize {
+        self.db.row_count()
+    }
+
+    fn is_useful(&self) -> bool {
+        self.db.is_useful()
+    }
+
+    fn is_partial(&self) -> bool {
+        false
+    }
+
+    /// Panics if called
+    #[allow(clippy::unreachable)] // this should never happen!
+    fn mark_filled(&mut self, _: KeyComparison, _: Tag) {
+        unreachable!("PersistentState can't be partial")
+    }
+
+    /// Panics if called
+    #[allow(clippy::unreachable)] // this should never happen!
+    fn mark_hole(&mut self, _: &KeyComparison, _: Tag) {
+        unreachable!("PersistentState can't be partial")
+    }
+
+    /// Panics if called
+    #[allow(clippy::unreachable)] // this should never happen!
+    fn evict_bytes(&mut self, _: usize) -> Option<super::EvictBytesResult> {
+        unreachable!("can't evict keys from PersistentState")
+    }
+
+    /// Panics if called
+    #[allow(clippy::unreachable)] // this should never happen!
+    fn evict_keys(&mut self, _: Tag, _: &[KeyComparison]) -> Option<EvictKeysResult> {
+        unreachable!("can't evict keys from PersistentState")
+    }
+
+    /// Panics if called
+    #[allow(clippy::unreachable)] // this should never happen!
+    fn clear(&mut self) {
+        unreachable!("can't clear PersistentState")
+    }
+
+    fn add_weak_key(&mut self, index: Index) {
+        self.add_key(index, None);
+    }
+
+    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &KeyType) -> Option<RecordResult<'a>> {
+        self.db.lookup_weak(columns, key)
+    }
+
+    fn tear_down(mut self) -> ReadySetResult<()> {
+        let temp_dir = self._tmpdir.take();
+        let full_path = self.db.handle().path().to_path_buf();
+        // We have to make the drop here so that rocksdb gets closed and frees
+        // the file descriptors, so that we can remove the directory.
+        // We can't implement this logic by implementing the `Drop` trait, because
+        // otherwise we would be dropping rocksdb twice, which will make the whole thing
+        // panic.
+        drop(self);
+        if let Some(temp) = temp_dir {
+            fs::remove_dir_all(temp.path()).map_err(|e| {
+                ReadySetError::IOError(format!(
+                    "Failed to remove temporary rocksdb directory: {}",
+                    e
+                ))
+            })
+        } else {
+            fs::remove_dir_all(full_path).map_err(|e| {
+                ReadySetError::IOError(format!("Failed to remove rocksdb directory: {}", e))
+            })
+        }
+    }
+}
+
+impl State for PersistentStateHandle {
+    fn add_key(&mut self, _: Index, _: Option<Vec<Tag>>) {
+        // Do nothing, as all keys are propagated via the [`PeristentState::add_key`]
+    }
+
+    fn add_weak_key(&mut self, _: Index) {
+        // Add key does nothing, as all keys are propagated via the [`PeristentState::add_key`]
+    }
+
+    fn process_records(
+        &mut self,
+        _: &mut Records,
+        _: Option<Tag>,
+        replication_offset: Option<ReplicationOffset>,
+    ) {
+        // We ignore all the records, as record processing is handled by the [`PersistentState`], we
+        // only read records. However we must know that we are up to date when reading from the base
+        // table, and have to compare our replication offset to that of the table.
+        if let Some(replication_offset) = replication_offset {
+            self.replication_offset = Some(replication_offset);
+        }
+    }
+
+    fn is_useful(&self) -> bool {
+        !self.inner().indices.is_empty()
+    }
+
+    fn is_partial(&self) -> bool {
+        false
+    }
+
+    fn replication_offset(&self) -> Option<&ReplicationOffset> {
+        None
+    }
+
+    fn mark_filled(&mut self, _: KeyComparison, _: Tag) {}
+
+    fn mark_hole(&mut self, _: &KeyComparison, _: Tag) {}
+
+    fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
+        match self.do_lookup(columns, key) {
+            Some(result) => LookupResult::Some(result.into()),
+            None => LookupResult::Missing,
+        }
+    }
+
+    fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a> {
+        let inner = self.inner();
+        if self.replication_offset < inner.replication_offset {
+            debug!("Consistency miss in PersistentStateHandle");
+            // TODO(vlad): The read handle missed on binlog position, but that doesn't mean we want
+            // to replay the entire range, all we want is for something to trigger a
+            // replay and a repeat lookup
+            return RangeLookupResult::Missing(vec![key.as_bound_pair()]);
+        }
+
+        let db = &inner.db;
+
+        let index = inner.index(IndexType::BTreeMap, columns);
 
         let cf = db.cf_handle(&index.column_family).unwrap();
         let primary_cf = if !index.is_primary {
-            Some(self.db.cf_handle(PK_CF).unwrap())
+            Some(db.cf_handle(PK_CF).unwrap())
         } else {
             None
         };
 
-        let (lower, upper) = Self::serialize_range(key, ((), ()));
+        let (lower, upper) = PersistentState::serialize_range(key, ((), ()));
 
         let mut opts = rocksdb::ReadOptions::default();
         let mut inclusive_end = None;
@@ -497,131 +867,44 @@ impl State for PersistentState {
         RangeLookupResult::Some(RecordResult::Owned(rows))
     }
 
-    fn as_persistent(&self) -> Option<&PersistentState> {
-        Some(self)
+    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &KeyType) -> Option<RecordResult<'a>> {
+        self.lookup(columns, key).records()
     }
 
-    fn as_persistent_mut(&mut self) -> Option<&mut PersistentState> {
-        Some(self)
-    }
-
-    /// Add a new index to the table, the first index we add will contain the data
-    /// each additional index we add, will contain pointers to the primary index
-    /// Panics if partial is Some
-    fn add_key(&mut self, index: Index, partial: Option<Vec<Tag>>) {
-        #[allow(clippy::panic)] // This should definitely never happen!
-        {
-            assert!(partial.is_none(), "Bases can't be partial");
-        }
-        let columns = &index.columns;
-        let existing = self.indices.iter().any(|pi| pi.index == index);
-
-        if existing {
-            return;
-        }
-
-        let is_unique = check_if_index_is_unique(&self.unique_keys, columns);
-        if self.indices.is_empty() {
-            self.add_primary_index(&index.columns, is_unique);
-            if index.index_type != IndexType::HashMap {
-                // Primary indices can only be HashMaps, so if this is our first index and it's
-                // *not* a HashMap index, add another secondary index of the correct index type
-                self.add_secondary_index(&index, is_unique);
-            }
-        } else {
-            self.add_secondary_index(&index, is_unique)
-        }
-    }
-
-    fn cloned_records(&self) -> Vec<Vec<DfValue>> {
-        self.all_rows()
-            .map(|(_, ref value)| deserialize_row(value))
-            .collect()
-    }
-
-    /// Returns a *row* count estimate from RocksDB (not a key count as the function name would
-    /// suggest), since getting a key count could be quite expensive, and we care less about the
-    /// key count of persistent nodes anyway.
     fn key_count(&self) -> KeyCount {
-        KeyCount::EstimatedRowCount(self.row_count())
+        KeyCount::ExternalMaterialization
     }
 
     /// Returns a row count estimate from RocksDB.
     fn row_count(&self) -> usize {
-        let db = &self.db;
+        let db = &self.handle();
         let cf = db.cf_handle(PK_CF).unwrap();
         db.property_int_value_cf(cf, "rocksdb.estimate-num-keys")
             .unwrap()
             .unwrap() as usize
     }
 
-    fn is_useful(&self) -> bool {
-        !self.indices.is_empty()
+    fn cloned_records(&self) -> Vec<Vec<DfValue>> {
+        let inner = self.inner();
+        let db = &inner.db;
+        let cf = db.cf_handle(&inner.indices[0].column_family).unwrap();
+        db.full_iterator_cf(cf, rocksdb::IteratorMode::Start)
+            .map(|res| deserialize_row(res.unwrap().1))
+            .collect()
     }
 
-    fn is_partial(&self) -> bool {
-        false
+    fn evict_bytes(&mut self, _: usize) -> Option<crate::EvictBytesResult> {
+        None
     }
 
-    /// Panics if called
-    #[allow(clippy::unreachable)] // this should never happen!
-    fn mark_filled(&mut self, _: KeyComparison, _: Tag) {
-        unreachable!("PersistentState can't be partial")
-    }
-
-    /// Panics if called
-    #[allow(clippy::unreachable)] // this should never happen!
-    fn mark_hole(&mut self, _: &KeyComparison, _: Tag) {
-        unreachable!("PersistentState can't be partial")
-    }
-
-    /// Panics if called
-    #[allow(clippy::unreachable)] // this should never happen!
-    fn evict_bytes(&mut self, _: usize) -> Option<super::EvictBytesResult> {
-        unreachable!("can't evict keys from PersistentState")
-    }
-
-    /// Panics if called
-    #[allow(clippy::unreachable)] // this should never happen!
     fn evict_keys(&mut self, _: Tag, _: &[KeyComparison]) -> Option<EvictKeysResult> {
-        unreachable!("can't evict keys from PersistentState")
+        None
     }
 
-    /// Panics if called
-    #[allow(clippy::unreachable)] // this should never happen!
-    fn clear(&mut self) {
-        unreachable!("can't clear PersistentState")
-    }
+    fn clear(&mut self) {}
 
-    fn add_weak_key(&mut self, index: Index) {
-        self.add_key(index, None);
-    }
-
-    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &KeyType) -> Option<RecordResult<'a>> {
-        self.lookup(columns, key).records()
-    }
-
-    fn tear_down(mut self) -> ReadySetResult<()> {
-        let temp_dir = self._tmpdir.take();
-        let full_path = self.db.path().to_path_buf();
-        // We have to make the drop here so that rocksdb gets closed and frees
-        // the file descriptors, so that we can remove the directory.
-        // We can't implement this logic by implementing the `Drop` trait, because
-        // otherwise we would be dropping rocksdb twice, which will make the whole thing
-        // panic.
-        drop(self);
-        if let Some(temp) = temp_dir {
-            fs::remove_dir_all(temp.path()).map_err(|e| {
-                ReadySetError::IOError(format!(
-                    "Failed to remove temporary rocksdb directory: {}",
-                    e
-                ))
-            })
-        } else {
-            fs::remove_dir_all(full_path).map_err(|e| {
-                ReadySetError::IOError(format!("Failed to remove rocksdb directory: {}", e))
-            })
-        }
+    fn tear_down(self) -> ReadySetResult<()> {
+        Ok(())
     }
 }
 
@@ -766,7 +1049,7 @@ impl PersistentState {
         let unique_keys: Vec<Box<[usize]>> =
             unique_keys.into_iter().map(|c| c.as_ref().into()).collect();
 
-        use rocksdb::{ColumnFamilyDescriptor, DB};
+        use rocksdb::ColumnFamilyDescriptor;
         let (tmpdir, full_path) = match params.mode {
             DurabilityMode::Permanent => {
                 let mut path = params.db_dir.clone().unwrap_or_else(|| ".".into());
@@ -870,15 +1153,24 @@ impl PersistentState {
             }
         }
 
+        let name: SqlIdentifier = name.into();
+        let replication_offset = meta.replication_offset.map(|ro| ro.into_owned());
+        let read_handle = PersistentStateHandle {
+            inner: Arc::new(RwLock::new(SharedState {
+                db,
+                replication_offset: replication_offset.clone(),
+                indices,
+            })),
+            replication_offset,
+        };
+
         let mut state = Self {
             name,
             default_options,
             seq: 0,
-            indices,
             unique_keys,
             epoch: meta.epoch,
-            replication_offset: meta.replication_offset.map(|ro| ro.into_owned()),
-            db,
+            db: read_handle,
             _tmpdir: tmpdir,
             snapshot_mode: SnapshotMode::SnapshotModeDisabled,
         };
@@ -892,9 +1184,16 @@ impl PersistentState {
         state
     }
 
+    /// Returns a new [`PersistentStateHandle`] that can be used to read directly from this
+    /// [`PersistentState`] from other threads.
+    pub fn read_handle(&self) -> PersistentStateHandle {
+        // The cloning here clones an inner Arc reference not the database
+        self.db.clone()
+    }
+
     /// Adds a new primary index, assuming there are none present
     fn add_primary_index(&mut self, columns: &[usize], is_unique: bool) {
-        if self.indices.is_empty() {
+        if self.db.inner().indices.is_empty() {
             info!(base = %self.name, index = ?columns, is_unique, "Base creating primary index");
 
             let index_params = IndexParams::new(IndexType::HashMap, columns.len());
@@ -908,10 +1207,11 @@ impl PersistentState {
                 is_primary: true,
             };
 
-            self.indices.push(persistent_index);
-            self.persist_meta();
-
+            self.db.inner_mut().indices.push(persistent_index);
+            let meta = self.meta();
+            self.db.handle().save_meta(&meta);
             self.db
+                .handle_mut()
                 .create_cf(
                     PK_CF,
                     &index_params.make_rocksdb_options(&self.default_options),
@@ -927,31 +1227,38 @@ impl PersistentState {
 
         // We'll store all the values for this index in its own column family:
         let index_params = IndexParams::from(index);
-        let cf_name = self.indices.len().to_string();
+        let cf_name = self.db.inner().indices.len().to_string();
 
         // add the index to the meta first so even if we fail before we fully reindex we still have
         // the information about the column family
-        self.indices.push(PersistentIndex {
+        let persistent_index = PersistentIndex {
             column_family: cf_name.clone(),
             is_unique,
             is_primary: false,
             index: index.clone(),
-        });
+        };
 
-        self.persist_meta();
-
+        self.db.inner_mut().indices.push(persistent_index.clone());
+        let meta = self.meta();
+        self.db.handle().save_meta(&meta);
         self.db
+            .inner_mut()
+            .db
             .create_cf(
                 &cf_name,
                 &index_params.make_rocksdb_options(&self.default_options),
             )
             .unwrap();
 
-        let db = &self.db;
+        let db = self.db.handle();
         let cf = db.cf_handle(&cf_name).unwrap();
 
         // Prevent autocompactions while we reindex the table
-        if let Err(err) = db.set_options_cf(cf, &[("disable_auto_compactions", "true")]) {
+        if let Err(err) = self
+            .db
+            .handle()
+            .set_options_cf(cf, &[("disable_auto_compactions", "true")])
+        {
             error!(%err, "Error setting cf options");
         }
 
@@ -999,64 +1306,8 @@ impl PersistentState {
         // Flush just in case
         db.flush_cf(cf).unwrap();
         // Manually compact the newly created column family
-        self.compact_cf(self.indices.last().unwrap());
+        self.compact_cf(&db, &persistent_index);
         info!("Base finished compacting secondary index");
-    }
-
-    /// Looks up rows in an index
-    /// If the index is the primary index, the lookup get the rows from the primary index directly.
-    /// If the index is a secondary index, we will first lookup the primary index keys from that
-    /// secondary index, then perform a lookup into the primary index
-    fn do_lookup(&self, index: &PersistentIndex, key: &KeyType) -> Vec<Vec<DfValue>> {
-        let db = &self.db;
-        let cf = db.cf_handle(&index.column_family).unwrap();
-        let primary_cf = if !index.is_primary {
-            Some(self.db.cf_handle(PK_CF).unwrap())
-        } else {
-            None
-        };
-
-        let prefix = Self::serialize_prefix(key);
-
-        if index.is_unique && !key.has_null() {
-            // This is a unique key, so we know there's only one row to retrieve
-            let value = db.get_pinned_cf(cf, &prefix).unwrap();
-            match (value, primary_cf) {
-                (None, _) => vec![],
-                (Some(value), None) => vec![deserialize_row(value)],
-                (Some(pk), Some(primary_cf)) => vec![deserialize_row(
-                    db.get_pinned_cf(primary_cf, pk)
-                        .unwrap()
-                        .expect("Existing primary key"),
-                )],
-            }
-        } else {
-            // This could correspond to more than one value, so we'll use a prefix_iterator,
-            // for each row
-            let mut rows = Vec::new();
-            let mut opts = rocksdb::ReadOptions::default();
-            opts.set_prefix_same_as_start(true);
-
-            let mut iter = db.raw_iterator_cf_opt(cf, opts);
-            let mut iter_primary = primary_cf.map(|pcf| db.raw_iterator_cf(pcf));
-
-            iter.seek(&prefix);
-
-            while let Some(value) = iter.value() {
-                let raw_row = match &mut iter_primary {
-                    Some(iter_primary) => {
-                        iter_primary.seek(value);
-                        iter_primary.value().expect("Existing primary key")
-                    }
-                    None => value,
-                };
-
-                rows.push(deserialize_row(raw_row));
-                iter.next();
-            }
-
-            rows
-        }
     }
 
     fn build_key<'a>(row: &'a [DfValue], columns: &[usize]) -> KeyType<'a> {
@@ -1071,17 +1322,16 @@ impl PersistentState {
     /// * The replication offset
     fn meta(&self) -> PersistentMeta<'_> {
         PersistentMeta {
-            indices: self.indices.iter().map(|pi| pi.index.clone()).collect(),
+            indices: self
+                .db
+                .inner()
+                .indices
+                .iter()
+                .map(|pi| pi.index.clone())
+                .collect(),
             epoch: self.epoch,
             replication_offset: self.replication_offset().map(Cow::Borrowed),
         }
-    }
-
-    /// Save metadata about this [`PersistentState`] to the db.
-    ///
-    /// See [Self::meta] for more information about what is saved to the db
-    fn persist_meta(&self) {
-        self.db.save_meta(&self.meta());
     }
 
     /// Add an operation to the given [`WriteBatch`] to set the [replication
@@ -1089,7 +1339,8 @@ impl PersistentState {
     fn set_replication_offset(&mut self, batch: &mut WriteBatch, offset: ReplicationOffset) {
         // It's ok to read and update meta in two steps here since each State can (currently) only
         // be modified by a single thread.
-        self.replication_offset = Some(offset);
+        self.db.replication_offset = Some(offset.clone());
+        self.db.inner_mut().replication_offset = Some(offset);
         batch.save_meta(&self.meta());
     }
 
@@ -1108,35 +1359,34 @@ impl PersistentState {
     }
 
     fn enable_snapshot_mode(&mut self) {
-        self.replication_offset = None; // Remove any replication offset first (although it should be None already)
-        self.persist_meta();
+        self.db.replication_offset = None; // Remove any replication offset first (although it should be None already)
+        let meta = self.meta();
+        let mut inner = self.db.inner_mut();
+        let SharedState { db, indices, .. } = &mut *inner;
+        db.save_meta(&meta);
 
         // Clear the data by dropping each column family and creating it anew
-        for index in &self.indices {
+        for index in indices.iter() {
             let cf_name = index.column_family.as_str();
-            self.db.drop_cf(cf_name).unwrap();
-            self.db
-                .create_cf(
-                    cf_name,
-                    &IndexParams::from(&index.index).make_rocksdb_options(&self.default_options),
-                )
-                .unwrap();
+            db.drop_cf(cf_name).unwrap();
+            db.create_cf(
+                cf_name,
+                &IndexParams::from(&index.index).make_rocksdb_options(&self.default_options),
+            )
+            .unwrap();
 
-            let cf = self.db.cf_handle(cf_name).expect("just created this cf");
+            let cf = db.cf_handle(cf_name).expect("just created this cf");
 
-            if let Err(err) = self
-                .db
-                .set_options_cf(cf, &[("disable_auto_compactions", "true")])
-            {
+            if let Err(err) = db.set_options_cf(cf, &[("disable_auto_compactions", "true")]) {
                 error!(%err, "Error setting cf options");
             }
         }
     }
 
     fn disable_snapshot_mode(&mut self) {
-        for index in &self.indices {
+        for index in self.db.inner().indices.iter() {
             // Perform a manual compaction for each column family
-            self.compact_cf(index);
+            self.compact_cf(&self.db.handle(), index);
         }
     }
 
@@ -1146,7 +1396,7 @@ impl PersistentState {
     // to get accurate progress stats is from reading the DB LOG directly. This is very
     // fragile, as it depends on the LOG format not changing, and if it does the report
     // will be less accurate or not work at all. This is however not critical.
-    fn compaction_progress_watcher(&self) -> anyhow::Result<impl notify::Watcher> {
+    fn compaction_progress_watcher(&self, db: &DB) -> anyhow::Result<impl notify::Watcher> {
         use std::fs::File;
         use std::io::{Seek, SeekFrom};
 
@@ -1154,11 +1404,16 @@ impl PersistentState {
 
         // We open the LOG file, skip to the end, and begin watching for change events
         // on it in order to get the latest log entries as they come
-        let log_path = self.db.path().join("LOG");
+        let log_path = db.path().join("LOG");
         let (tx, rx) = std::sync::mpsc::channel();
         let mut log_watcher = raw_watcher(tx)?;
         let table = self.name.clone();
-        let row_count = self.row_count();
+        // Row count, but without a lock
+        let pk_cf = db.cf_handle(PK_CF).unwrap();
+        let row_count = db
+            .property_int_value_cf(pk_cf, "rocksdb.estimate-num-keys")
+            .unwrap()
+            .unwrap() as usize;
         let mut log_file = File::options().read(true).open(&log_path)?;
         log_file.seek(SeekFrom::End(0))?;
 
@@ -1250,8 +1505,7 @@ impl PersistentState {
         Ok(log_watcher)
     }
 
-    fn compact_cf(&self, index: &PersistentIndex) {
-        let db = &self.db;
+    fn compact_cf(&self, db: &DB, index: &PersistentIndex) {
         let cf = match db.cf_handle(&index.column_family) {
             Some(cf) => cf,
             None => {
@@ -1260,7 +1514,7 @@ impl PersistentState {
             }
         };
 
-        let _log_watcher = self.compaction_progress_watcher();
+        let _log_watcher = self.compaction_progress_watcher(db);
         if let Err(err) = &_log_watcher {
             warn!(%err, table = %self.name, "Could not start compaction monitor");
         }
@@ -1348,21 +1602,15 @@ impl PersistentState {
         }
     }
 
-    // Filters out secondary indices to return an iterator for the actual key-value pairs.
-    fn all_rows(&self) -> impl Iterator<Item = (Box<[u8]>, Box<[u8]>)> + '_ {
-        let cf = self.db.cf_handle(&self.indices[0].column_family).unwrap();
-        self.db
-            .full_iterator_cf(cf, rocksdb::IteratorMode::Start)
-            .map(|res| res.unwrap())
-    }
-
     /// Inserts the row into the database by replicating it across all of the column
     /// families. The insert is performed in a context of a [`rocksdb::WriteBatch`]
     /// operation and is therefore guaranteed to be atomic.
     fn insert(&mut self, batch: &mut WriteBatch, r: &[DfValue]) {
-        let primary_index = self.indices.first().expect("Insert on un-indexed state");
+        let inner = self.db.inner();
+        let db = &inner.db;
+        let primary_index = inner.indices.first().expect("Insert on un-indexed state");
         let primary_key = Self::build_key(r, &primary_index.index.columns);
-        let primary_cf = self.db.cf_handle(&primary_index.column_family).unwrap();
+        let primary_cf = db.cf_handle(&primary_index.column_family).unwrap();
 
         // Generate a new primary key by extracting the key columns from the provided row
         // using the primary index and serialize it as RocksDB prefix.
@@ -1381,9 +1629,9 @@ impl PersistentState {
         batch.put_cf(primary_cf, &serialized_pk, &serialized_row);
 
         // Then insert the value for all the secondary indices:
-        for index in self.indices[1..].iter() {
+        for index in inner.indices[1..].iter() {
             // Construct a key with the index values, and serialize it with bincode:
-            let cf = self.db.cf_handle(&index.column_family).unwrap();
+            let cf = db.cf_handle(&index.column_family).unwrap();
 
             let key = Self::build_key(r, &index.index.columns);
             if index.is_unique && !key.has_null() {
@@ -1399,9 +1647,12 @@ impl PersistentState {
     }
 
     fn remove(&self, batch: &mut WriteBatch, r: &[DfValue]) {
-        let primary_index = self.indices.first().expect("Delete on un-indexed state");
+        let inner = self.db.inner();
+        let db = &inner.db;
+
+        let primary_index = inner.indices.first().expect("Delete on un-indexed state");
         let primary_key = Self::build_key(r, &primary_index.index.columns);
-        let primary_cf = self.db.cf_handle(&primary_index.column_family).unwrap();
+        let primary_cf = db.cf_handle(&primary_index.column_family).unwrap();
 
         let prefix = Self::serialize_prefix(&primary_key);
 
@@ -1412,7 +1663,7 @@ impl PersistentState {
             // This is key is not unique, therefore we have to iterate over the
             // the values, looking for the first one that matches the full row
             // and then return the (full length) unique primary key associated with it
-            let mut iter = self.db.raw_iterator_cf(primary_cf);
+            let mut iter = db.raw_iterator_cf(primary_cf);
             iter.seek(&prefix); // Find the first key
 
             loop {
@@ -1432,7 +1683,7 @@ impl PersistentState {
         batch.delete_cf(primary_cf, &serialized_pk);
 
         // Then delete the value for all the secondary indices
-        for index in self.indices[1..].iter() {
+        for index in inner.indices[1..].iter() {
             // Construct a key with the index values, and serialize it with bincode:
             let key = Self::build_key(r, &index.index.columns);
             let serialized_key = if index.is_unique && !key.has_null() {
@@ -1442,88 +1693,9 @@ impl PersistentState {
                 // the *exact* same row from each family
                 Self::serialize_secondary(&key, &serialized_pk)
             };
-            let cf = self.db.cf_handle(&index.column_family).unwrap();
+            let cf = db.cf_handle(&index.column_family).unwrap();
             batch.delete_cf(cf, &serialized_key);
         }
-    }
-
-    /// Returns the PersistentIndex for the given index, panicking if it doesn't exist
-    // TODO(grfn): This should actually be an error, since it can be triggered by bad requests
-    #[allow(clippy::panic)]
-    fn index(&self, index_type: IndexType, columns: &[usize]) -> &PersistentIndex {
-        self.indices
-            .iter()
-            .find(|index| index.index.index_type == index_type && index.index.columns == columns)
-            .unwrap_or_else(|| {
-                panic!(
-                    "lookup on non-indexed column set {:?}({:?})",
-                    index_type, columns
-                )
-            })
-    }
-
-    /// Perform a lookup for multiple equal keys at once, the results are returned in order of the
-    /// original keys
-    pub fn lookup_multi<'a>(
-        &'a self,
-        columns: &[usize],
-        keys: &[KeyType],
-    ) -> Vec<RecordResult<'a>> {
-        if keys.is_empty() {
-            return vec![];
-        }
-
-        let index = self.index(IndexType::HashMap, columns);
-        let is_primary = index.is_primary;
-
-        let cf = self.db.cf_handle(&index.column_family).unwrap();
-        // Create an iterator once, reuse it for each key
-        let mut iter = self.db.raw_iterator_cf(cf);
-        let mut iter_primary = if !is_primary {
-            Some(
-                self.db.raw_iterator_cf(
-                    self.db
-                        .cf_handle(PK_CF)
-                        .expect("Primary key column family not found"),
-                ),
-            )
-        } else {
-            None
-        };
-
-        keys.iter()
-            .map(|k| {
-                let prefix = Self::serialize_prefix(k);
-                let mut rows = Vec::new();
-
-                let is_unique = index.is_unique && !k.has_null();
-
-                iter.seek(&prefix); // Find the next key
-
-                while iter.key().map(|k| k.starts_with(&prefix)).unwrap_or(false) {
-                    let val = match &mut iter_primary {
-                        Some(iter_primary) => {
-                            // If we have a primary iterator, it means this is a secondary index and
-                            // we need to lookup by the primary key next
-                            iter_primary.seek(iter.value().unwrap());
-                            deserialize_row(iter_primary.value().unwrap())
-                        }
-                        None => deserialize_row(iter.value().unwrap()),
-                    };
-
-                    rows.push(val);
-
-                    if is_unique {
-                        // We know that there is only one row for this index
-                        break;
-                    }
-
-                    iter.next();
-                }
-
-                RecordResult::Owned(rows)
-            })
-            .collect()
     }
 
     pub fn is_snapshotting(&self) -> bool {
@@ -1533,6 +1705,16 @@ impl PersistentState {
     /// Get the persistent state's snapshot mode.
     pub fn snapshot_mode(&self) -> SnapshotMode {
         self.snapshot_mode
+    }
+
+    /// Perform a lookup for multiple equal keys at once, the results are returned in order of the
+    /// original keys
+    pub fn lookup_multi<'a>(
+        &'a self,
+        columns: &[usize],
+        keys: &[KeyType],
+    ) -> Vec<RecordResult<'a>> {
+        self.db.lookup_multi(columns, keys)
     }
 }
 
@@ -1640,24 +1822,43 @@ fn in_domain(key: &[u8]) -> bool {
     key != META_KEY
 }
 
+impl SizeOf for PersistentStateHandle {
+    fn deep_size_of(&self) -> u64 {
+        0
+    }
+
+    fn size_of(&self) -> u64 {
+        std::mem::size_of::<Self>() as u64
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner()
+            .db
+            .property_int_value("rocksdb.estimate-num-keys")
+            .unwrap()
+            .unwrap()
+            == 0
+    }
+}
+
 impl SizeOf for PersistentState {
     fn size_of(&self) -> u64 {
-        use std::mem::size_of;
-
-        size_of::<Self>() as u64
+        std::mem::size_of::<Self>() as u64
     }
 
     #[allow(clippy::panic)] // Can't return a result, panicking is the best we can do
     fn deep_size_of(&self) -> u64 {
-        self.indices
+        let inner = self.db.inner();
+        inner
+            .indices
             .iter()
             .map(|idx| {
-                let cf = self
+                let cf = inner
                     .db
                     .cf_handle(&idx.column_family)
                     .unwrap_or_else(|| panic!("Column family not found: {}", idx.column_family));
-
-                self.db
+                inner
+                    .db
                     .property_int_value_cf(cf, "rocksdb.estimate-live-data-size")
                     .unwrap()
                     .unwrap()
@@ -1666,11 +1867,7 @@ impl SizeOf for PersistentState {
     }
 
     fn is_empty(&self) -> bool {
-        self.db
-            .property_int_value("rocksdb.estimate-num-keys")
-            .unwrap()
-            .unwrap()
-            == 0
+        self.db.is_empty()
     }
 }
 
@@ -2207,10 +2404,7 @@ mod tests {
             insert(&mut state, row);
         }
 
-        let actual_rows: Vec<Vec<DfValue>> = state
-            .all_rows()
-            .map(|(_key, value)| deserialize_row(&value))
-            .collect();
+        let actual_rows: Vec<Vec<DfValue>> = state.cloned_records();
 
         assert_eq!(actual_rows, rows);
     }
@@ -2341,6 +2535,57 @@ mod tests {
         insert(&mut state, vec![1.into()]);
         insert(&mut state, vec![DfValue::None]);
         state.add_key(Index::btree_map(vec![0]), None);
+    }
+
+    #[test]
+    /// Test that a read handle will miss on lookups unless it was informed of the same binlog
+    /// position as the parent handle, this is important to avoid accidental reorder of upqueries
+    /// and forward processing in nodes that would use the read handle for upqueries.
+    fn read_handle_misses_on_binlog() {
+        let mut state = setup_persistent("read_handle_misses_on_binlog", None);
+        state.add_key(Index::hash_map(vec![0]), None);
+
+        state.process_records(
+            &mut (0..10)
+                .map(|n| Record::from(vec![n.into()]))
+                .collect::<Records>(),
+            None,
+            Some(ReplicationOffset {
+                offset: 1,
+                replication_log_name: String::new(),
+            }),
+        );
+
+        let mut rh = state.read_handle();
+        // When we first create the rh, it is up to date
+        assert!(rh.do_lookup(&[0], &KeyType::Single(&0.into())).is_some());
+
+        // Process more records ...
+        state.process_records(
+            &mut (0..10)
+                .map(|n| Record::from(vec![n.into()]))
+                .collect::<Records>(),
+            None,
+            Some(ReplicationOffset {
+                offset: 2,
+                replication_log_name: String::new(),
+            }),
+        );
+
+        // Now read handle is behind, since it didn't get the forward processing yet
+        assert!(rh.do_lookup(&[0], &KeyType::Single(&0.into())).is_none());
+
+        rh.process_records(
+            &mut Records::from(Vec::<Record>::new()),
+            None,
+            Some(ReplicationOffset {
+                offset: 2,
+                replication_log_name: String::new(),
+            }),
+        );
+
+        // Read handle is up to date now
+        assert!(rh.do_lookup(&[0], &KeyType::Single(&0.into())).is_some());
     }
 
     mod lookup_range {

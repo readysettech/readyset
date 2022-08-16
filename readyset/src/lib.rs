@@ -421,6 +421,8 @@ pub enum KeyCount {
     ExactKeyCount(usize),
     /// An estimate of the row count, pulled from a persistent storage node
     EstimatedRowCount(usize),
+    /// This node does not keep rows, it uses materialization from another node
+    ExternalMaterialization,
 }
 
 /// Used to wrap the materialized size of a node's state
@@ -432,6 +434,7 @@ impl Display for KeyCount {
         match self {
             KeyCount::ExactKeyCount(count) => write!(f, "{}", count),
             KeyCount::EstimatedRowCount(count) => write!(f, "~{}", count),
+            KeyCount::ExternalMaterialization => write!(f, ""),
         }
     }
 }

@@ -2,11 +2,13 @@ use std::collections::HashMap;
 use std::fmt;
 use std::ops::{Bound, RangeBounds};
 
+use launchpad::intervals::BoundPair;
 use petgraph::graph::NodeIndex;
 use readyset::internal::LocalNodeIndex;
 use readyset_data::DfValue;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use test_strategy::Arbitrary;
+use tuple::TupleElements;
 use vec1::Vec1;
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -155,8 +157,6 @@ pub enum KeyType<'a> {
 #[allow(clippy::len_without_is_empty)]
 impl<'a> KeyType<'a> {
     pub fn get(&self, idx: usize) -> Option<&DfValue> {
-        use tuple::TupleElements;
-
         match self {
             KeyType::Single(x) if idx == 0 => Some(x),
             KeyType::Single(_) => None,
@@ -386,8 +386,6 @@ impl<'a> RangeKey<'a> {
 
     /// Returns the upper bound of the range key
     pub fn upper_bound(&self) -> Bound<Vec<&'a DfValue>> {
-        use tuple::TupleElements;
-
         match self {
             RangeKey::Unbounded => Bound::Unbounded,
             RangeKey::Single((_, upper)) => upper.map(|dt| vec![dt]),
@@ -416,6 +414,41 @@ impl<'a> RangeKey<'a> {
                 | (_, Bound::Included(k))
                 | (_, Bound::Excluded(k)),
             ) => Some(k.len()),
+        }
+    }
+}
+
+impl<'a> RangeKey<'a> {
+    pub fn as_bound_pair(&self) -> BoundPair<Vec<DfValue>> {
+        match self {
+            RangeKey::Unbounded => (Bound::Unbounded, Bound::Unbounded),
+            RangeKey::Single((lower, upper)) => (
+                lower.map(|dt| vec![dt.clone()]),
+                upper.map(|dt| vec![dt.clone()]),
+            ),
+            RangeKey::Double((lower, upper)) => (
+                lower.map(|dts| dts.into_elements().cloned().collect()),
+                upper.map(|dts| dts.into_elements().cloned().collect()),
+            ),
+            RangeKey::Tri((lower, upper)) => (
+                lower.map(|dts| dts.into_elements().cloned().collect()),
+                upper.map(|dts| dts.into_elements().cloned().collect()),
+            ),
+            RangeKey::Quad((lower, upper)) => (
+                lower.map(|dts| dts.into_elements().cloned().collect()),
+                upper.map(|dts| dts.into_elements().cloned().collect()),
+            ),
+            RangeKey::Quin((lower, upper)) => (
+                lower.map(|dts| dts.into_elements().cloned().collect()),
+                upper.map(|dts| dts.into_elements().cloned().collect()),
+            ),
+            RangeKey::Sex((lower, upper)) => (
+                lower.map(|dts| dts.into_elements().cloned().collect()),
+                upper.map(|dts| dts.into_elements().cloned().collect()),
+            ),
+            RangeKey::Multi((lower, upper)) => {
+                (lower.map(|dts| dts.to_vec()), upper.map(|dts| dts.to_vec()))
+            }
         }
     }
 }

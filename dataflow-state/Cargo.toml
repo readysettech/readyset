@@ -25,6 +25,7 @@ thiserror = "1.0.26"
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
 tuple = "0.5.1"
 vec1 = "1.6.0"
+parking_lot = "0.12"
 
 # local deps
 common = { path = "../readyset-common", package = "readyset-common" }
