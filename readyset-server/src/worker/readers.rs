@@ -10,7 +10,7 @@ use std::time::Duration;
 use async_bincode::AsyncBincodeStream;
 use bincode::Options;
 use dataflow::prelude::*;
-use dataflow::{Expr as DataflowExpr, LookupError, ReaderMap, Readers, SingleReadHandle};
+use dataflow::{Expr as DfExpr, LookupError, ReaderMap, Readers, SingleReadHandle};
 use failpoint_macros::set_failpoint;
 use futures_util::future::TryFutureExt;
 use futures_util::stream::{StreamExt, TryStreamExt};
@@ -432,7 +432,7 @@ pub struct BlockingRead {
     truth: Readers,
     limit: Option<usize>,
     offset: Option<usize>,
-    filter: Option<DataflowExpr>,
+    filter: Option<DfExpr>,
     trigger_timeout: Duration,
     next_trigger: time::Instant,
     first: time::Instant,

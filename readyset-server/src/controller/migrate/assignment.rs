@@ -3,7 +3,7 @@
 use dataflow::prelude::*;
 use tracing::debug;
 
-use crate::controller::state::DataflowState;
+use crate::controller::state::DfState;
 use crate::controller::NodeRestrictionKey;
 
 /// Assigns domains to all the new nodes.
@@ -41,7 +41,7 @@ use crate::controller::NodeRestrictionKey;
 /// without traversing any sharders or shard mergers.
 ///
 /// The set of those base node will be grouped together in the same domain, as long as their shards
-/// are compatible with each other (based on the [`DataflowState::node_restrictions`]).
+/// are compatible with each other (based on the [`DfState::node_restrictions`]).
 ///
 /// ## Node name starts with 'BOUNDARY_'
 /// It is assigned a new domain.
@@ -56,7 +56,7 @@ use crate::controller::NodeRestrictionKey;
 /// ancestors.
 /// The reason behind this is that it is not possible to change the shard key of the dataflow
 /// except at a domain boundary.
-pub fn assign(dataflow_state: &mut DataflowState, new_nodes: &[NodeIndex]) -> ReadySetResult<()> {
+pub fn assign(dataflow_state: &mut DfState, new_nodes: &[NodeIndex]) -> ReadySetResult<()> {
     // we need to walk the data flow graph and assign domains to all new nodes.
     // we generally want as few domains as possible, but in *some* cases we must make new ones.
     // specifically:

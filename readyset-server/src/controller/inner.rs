@@ -25,7 +25,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::Notify;
 use tracing::{error, info, warn};
 
-use crate::controller::state::{DataflowState, DataflowStateHandle};
+use crate::controller::state::{DfState, DfStateHandle};
 use crate::controller::{ControllerRequest, ControllerState, Worker, WorkerIdentifier};
 use crate::coordination::DomainDescriptor;
 use crate::worker::WorkerRequestKind;
@@ -40,7 +40,7 @@ use crate::worker::WorkerRequestKind;
 /// `Migration`, which can be performed using `Leader::migrate`. Only one `Migration` can
 /// occur at any given point in time.
 pub struct Leader {
-    pub(super) dataflow_state_handle: DataflowStateHandle,
+    pub(super) dataflow_state_handle: DfStateHandle,
 
     pending_recovery: bool,
 
@@ -377,7 +377,7 @@ impl Leader {
                         require_leader_ready()?;
                     }
                     let ret = futures::executor::block_on(async move {
-                        let mut state_copy: DataflowState = {
+                        let mut state_copy: DfState = {
                             let reader = self.dataflow_state_handle.read().await;
                             check_quorum!(reader);
                             reader.clone()
@@ -613,7 +613,7 @@ impl Leader {
         // [`ControllerState`]   itself.
         let pending_recovery = state.dataflow_state.ingredients.node_indices().count() > 1;
 
-        let dataflow_state_handle = DataflowStateHandle::new(state.dataflow_state);
+        let dataflow_state_handle = DfStateHandle::new(state.dataflow_state);
 
         Leader {
             dataflow_state_handle,

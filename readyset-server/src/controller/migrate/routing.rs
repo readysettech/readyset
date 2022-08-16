@@ -18,12 +18,12 @@ use readyset_errors::{
 use tracing::trace;
 
 use crate::controller::migrate::DomainMigrationPlan;
-use crate::controller::state::DataflowState;
+use crate::controller::state::DfState;
 
 /// Add in ingress and egress nodes as appropriate in the graph to facilitate cross-domain
 /// communication.
 pub fn add(
-    dataflow_state: &mut DataflowState,
+    dataflow_state: &mut DfState,
     new: &mut HashSet<NodeIndex>,
     topo_list: &[NodeIndex],
 ) -> Result<HashMap<(NodeIndex, NodeIndex), NodeIndex>, ReadySetError> {

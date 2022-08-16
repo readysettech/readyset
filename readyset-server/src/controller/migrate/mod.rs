@@ -47,7 +47,7 @@ use tracing::{debug, debug_span, error, info, info_span, instrument, trace};
 use crate::controller::migrate::materialization::InvalidEdge;
 use crate::controller::migrate::node_changes::{MigrationNodeChanges, NodeChanges};
 use crate::controller::migrate::scheduling::Scheduler;
-use crate::controller::state::DataflowState;
+use crate::controller::state::DfState;
 use crate::controller::WorkerIdentifier;
 
 pub(crate) mod assignment;
@@ -72,7 +72,7 @@ pub struct StoredDomainRequest {
 }
 
 impl StoredDomainRequest {
-    pub async fn apply(self, mainline: &mut DataflowState) -> ReadySetResult<()> {
+    pub async fn apply(self, mainline: &mut DfState) -> ReadySetResult<()> {
         trace!(req=?self, "Applying domain request");
         let dom =
             mainline
@@ -167,12 +167,12 @@ pub struct DomainMigrationPlan {
 }
 
 /// A set of stored data sufficient to apply a migration.
-pub struct MigrationPlan<'dataflow> {
-    dataflow_state: &'dataflow mut DataflowState,
+pub struct MigrationPlan<'df> {
+    dataflow_state: &'df mut DfState,
     dmp: DomainMigrationPlan,
 }
 
-impl<'dataflow> MigrationPlan<'dataflow> {
+impl<'df> MigrationPlan<'df> {
     /// Apply the migration plan to the provided `Leader`.
     ///
     /// If the plan fails, the `Leader`'s state is left unchanged; however, no attempt
@@ -211,7 +211,7 @@ impl<'dataflow> MigrationPlan<'dataflow> {
 impl DomainMigrationPlan {
     /// Make a new `DomainMigrationPlan`, noting which domains are valid based off the provided
     /// controller.
-    pub fn new(mainline: &DataflowState) -> Self {
+    pub fn new(mainline: &DfState) -> Self {
         Self {
             stored: vec![],
             place: vec![],
@@ -278,7 +278,7 @@ impl DomainMigrationPlan {
 
     /// Apply all stored changes using the given controller object, placing new domains and sending
     /// messages added since the last time this method was called.
-    pub async fn apply(&mut self, mainline: &mut DataflowState) -> ReadySetResult<()> {
+    pub async fn apply(&mut self, mainline: &mut DfState) -> ReadySetResult<()> {
         for place in self.place.drain(..) {
             let d = mainline
                 .place_domain(place.idx, place.shard_replica_workers, place.nodes)
@@ -353,7 +353,7 @@ impl DomainMigrationPlan {
     }
 }
 
-fn topo_order(dataflow_state: &DataflowState, nodes: &HashSet<NodeIndex>) -> Vec<NodeIndex> {
+fn topo_order(dataflow_state: &DfState, nodes: &HashSet<NodeIndex>) -> Vec<NodeIndex> {
     let mut topo_list = Vec::with_capacity(nodes.len());
     let mut topo = petgraph::visit::Topo::new(&dataflow_state.ingredients);
     while let Some(node) = topo.next(&dataflow_state.ingredients) {
@@ -428,8 +428,8 @@ fn inform_col_changes(
 ///
 /// Only one `Migration` can be in effect at any point in time. No changes are made to the running
 /// graph until the `Migration` is committed (using `Migration::commit`).
-pub struct Migration<'dataflow> {
-    pub(super) dataflow_state: &'dataflow mut DataflowState,
+pub struct Migration<'df> {
+    pub(super) dataflow_state: &'df mut DfState,
     pub(in crate::controller) changes: MigrationNodeChanges,
     pub(super) columns: Vec<(NodeIndex, ColumnChange)>,
     pub(super) readers: HashMap<NodeIndex, NodeIndex>,
@@ -438,7 +438,7 @@ pub struct Migration<'dataflow> {
     pub(super) start: Instant,
 }
 
-impl<'dataflow> Migration<'dataflow> {
+impl<'df> Migration<'df> {
     /// Add the given `Ingredient` to the dataflow graph.
     ///
     /// The returned identifier can later be used to refer to the added ingredient.
@@ -722,7 +722,7 @@ impl<'dataflow> Migration<'dataflow> {
     ///
     /// See the module-level docs for more information on what a migration entails.
     #[allow(clippy::cognitive_complexity)]
-    pub(super) fn plan(self) -> ReadySetResult<MigrationPlan<'dataflow>> {
+    pub(super) fn plan(self) -> ReadySetResult<MigrationPlan<'df>> {
         let span = info_span!("plan");
         let _g = span.enter();
 
@@ -770,7 +770,7 @@ impl<'dataflow> Migration<'dataflow> {
 }
 
 fn plan_add_nodes(
-    dataflow_state: &mut DataflowState,
+    dataflow_state: &mut DfState,
     mut new_nodes: HashSet<NodeIndex>,
     worker: &Option<WorkerIdentifier>,
 ) -> ReadySetResult<DomainMigrationPlan> {
@@ -1116,7 +1116,7 @@ fn plan_add_nodes(
 }
 
 fn plan_drop_nodes(
-    dataflow_state: &mut DataflowState,
+    dataflow_state: &mut DfState,
     removals: HashSet<NodeIndex>,
 ) -> ReadySetResult<DomainMigrationPlan> {
     let mut dmp = DomainMigrationPlan::new(dataflow_state);
@@ -1125,7 +1125,7 @@ fn plan_drop_nodes(
 }
 
 fn remove_nodes(
-    dataflow_state: &mut DataflowState,
+    dataflow_state: &mut DfState,
     dmp: &mut DomainMigrationPlan,
     removals: &HashSet<NodeIndex>,
 ) -> ReadySetResult<()> {

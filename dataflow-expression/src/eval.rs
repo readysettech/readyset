@@ -411,7 +411,7 @@ mod tests {
     use std::convert::TryInto;
 
     use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
-    use readyset_data::DataflowType;
+    use readyset_data::DfType;
     use rust_decimal::prelude::FromPrimitive;
     use rust_decimal::Decimal;
     use test_strategy::proptest;
@@ -448,10 +448,10 @@ mod tests {
                 left: Box::new(make_column(1)),
                 right: Box::new(make_literal(3.into())),
                 op: BinaryOperator::Add,
-                ty: DataflowType::Unknown,
+                ty: DfType::Unknown,
             }),
             op: BinaryOperator::Add,
-            ty: DataflowType::Unknown,
+            ty: DfType::Unknown,
         };
         assert_eq!(
             expr.eval(&[DataType::from(1), DataType::from(2)]).unwrap(),
@@ -474,7 +474,7 @@ mod tests {
                     left: Box::new(make_column(0)),
                     right: Box::new(make_literal($value)),
                     op: $binary_op,
-                    ty: DataflowType::Unknown,
+                    ty: DfType::Unknown,
                 };
                 assert_eq!(
                     expr.eval::<DataType>(&[dt.into()]).unwrap(),
@@ -499,7 +499,7 @@ mod tests {
         let expr = Cast {
             expr: Box::new(make_column(0)),
             to_type: SqlType::Int(None),
-            ty: DataflowType::Sql(SqlType::Int(None)),
+            ty: DfType::Sql(SqlType::Int(None)),
         };
         assert_eq!(
             expr.eval::<DataType>(&["1".try_into().unwrap(), "2".try_into().unwrap()])
@@ -1103,7 +1103,7 @@ mod tests {
                 left: Box::new(make_literal(1.into())),
                 op: BinaryOperator::And,
                 right: Box::new(make_literal(3.into())),
-                ty: DataflowType::Unknown,
+                ty: DfType::Unknown,
             }
             .eval::<DataType>(&[])
             .unwrap(),
@@ -1115,7 +1115,7 @@ mod tests {
                 left: Box::new(make_literal(1.into())),
                 op: BinaryOperator::And,
                 right: Box::new(make_literal(0.into())),
-                ty: DataflowType::Unknown,
+                ty: DfType::Unknown,
             }
             .eval::<DataType>(&[])
             .unwrap(),
@@ -1130,11 +1130,11 @@ mod tests {
                 left: Box::new(make_column(0)),
                 op: BinaryOperator::Equal,
                 right: Box::new(make_literal(1.into())),
-                ty: DataflowType::Unknown,
+                ty: DfType::Unknown,
             }),
             then_expr: Box::new(make_literal("yes".try_into().unwrap())),
             else_expr: Box::new(make_literal("no".try_into().unwrap())),
-            ty: DataflowType::Unknown,
+            ty: DfType::Unknown,
         };
 
         assert_eq!(
@@ -1154,7 +1154,7 @@ mod tests {
             left: Box::new(make_literal("foo".into())),
             op: BinaryOperator::Like,
             right: Box::new(make_literal("f%".into())),
-            ty: DataflowType::Unknown,
+            ty: DfType::Unknown,
         };
         let res = expr.eval::<DataType>(&[]).unwrap();
         assert!(res.is_truthy());

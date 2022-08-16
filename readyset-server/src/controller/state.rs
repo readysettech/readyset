@@ -69,10 +69,10 @@ use crate::worker::WorkerRequestKind;
 const CONCURRENT_REQUESTS: usize = 16;
 
 /// This structure holds all the dataflow state.
-/// It's meant to be handled exclusively by the [`DataflowStateHandle`], which is the structure
+/// It's meant to be handled exclusively by the [`DfStateHandle`], which is the structure
 /// that guarantees thread-safe access to it.
 #[derive(Clone, Serialize, Deserialize)]
-pub struct DataflowState {
+pub struct DfState {
     pub(super) ingredients: Graph,
 
     /// ID for the root node in the graph. This is used to retrieve a list of base tables.
@@ -128,8 +128,8 @@ pub struct DataflowState {
     keep_prior_recipes: bool,
 }
 
-impl DataflowState {
-    /// Creates a new instance of [`DataflowState`].
+impl DfState {
+    /// Creates a new instance of [`DfState`].
     pub(super) fn new(
         ingredients: Graph,
         source: NodeIndex,
@@ -1199,7 +1199,7 @@ impl DataflowState {
         self.apply_recipe(ChangeList { changes }, false).await
     }
 
-    /// Runs all the necessary steps to recover the full [`DataflowState`], when said state only
+    /// Runs all the necessary steps to recover the full [`DfState`], when said state only
     /// has the bare minimum information.
     ///
     /// # Invariants
@@ -1279,14 +1279,14 @@ impl DataflowState {
     }
 }
 
-/// This structure acts as a wrapper for a [`DataflowStateReader`] in order to guarantee
+/// This structure acts as a wrapper for a [`DfStateReader`] in order to guarantee
 /// thread-safe access (read and writes) to Noria's dataflow state.
 ///
 /// # Overview
 /// Two operations can be performed by this structure.
 ///
 /// ## Reads
-/// Reads are performed by taking a read lock on the underlying [`DataflowStateReader`].
+/// Reads are performed by taking a read lock on the underlying [`DfStateReader`].
 /// This allows any thread to freely get a read-only view of the dataflow state without having
 /// to worry about other threads attemting to modify it.
 ///
@@ -1300,21 +1300,21 @@ impl DataflowState {
 /// ## Writes
 /// Writes are performed by following a couple of steps:
 /// 1. A mutex is acquired to ensure that only one write is in progress at any time.
-/// 2. A copy of the current [`DataflowState`] (being held by the [`DataflowStateReader`] is made.
-/// 3. A [`DataflowStateWriter`] is created from the copy and the mutex guard, having the lifetime
+/// 2. A copy of the current [`DfState`] (being held by the [`DfStateReader`] is made.
+/// 3. A [`DfStateWriter`] is created from the copy and the mutex guard, having the lifetime
 /// of the latter.
-/// 4. All the computations/modifications are performed on the [`DataflowStateWriter`] (aka, on the
-/// underlying [`DataflowState`] copy).
-/// 5. The [`DataflowStateWriter`] is then committed to the [`DataflowState`] by calling
-/// [`DataflowStateWriter::commit`], which replaces the old state by the new one in the
-/// [`DataflowStateReader`].
+/// 4. All the computations/modifications are performed on the [`DfStateWriter`] (aka, on the
+/// underlying [`DfState`] copy).
+/// 5. The [`DfStateWriter`] is then committed to the [`DfState`] by calling
+/// [`DfStateWriter::commit`], which replaces the old state by the new one in the
+/// [`DfStateReader`].
 ///
 /// As previously mentioned for reads, the choice of using [`tokio::sync::RwLock`] ensures writers
 /// fairness and the ability to use the lock by multiple threads.
 ///
 /// Following the three steps to perform a write guarantees that:
 /// 1. Writes don't starve readers: when we start a write operation, we take a read lock
-/// for the [`DataflowStateReader`] in order to make a copy of a state. In doing so, we ensure that
+/// for the [`DfStateReader`] in order to make a copy of a state. In doing so, we ensure that
 /// readers can continue to read the state: no modification has been made yet.
 /// Writers can also perform all their computing/modifications (which can be pretty expensive
 /// time-wise), and only then the changes can be committed by swapping the old state for the new
@@ -1323,38 +1323,38 @@ impl DataflowState {
 /// TODO(fran): Even though the state is not modified here, we might have sent messages to other
 /// workers/domains.   It is worth looking into a better way of handling that (if it's even
 /// necessary).   Such a mechanism was never in place to begin with.
-/// 3. Writes are transactional: if there is an instance of [`DataflowStateWriter`] in
+/// 3. Writes are transactional: if there is an instance of [`DfStateWriter`] in
 /// existence, then all the other writes must wait. This guarantees that the operations performed
 /// to the dataflow state are executed transactionally.
 ///
 /// # How to use
 /// ## Reading the state
-/// To get read-only access to the dataflow state, the [`DataflowState::read`] method must be used.
-/// This method returns a read guard to another wrapper structure, [`DataflowStateReader`],
+/// To get read-only access to the dataflow state, the [`DfState::read`] method must be used.
+/// This method returns a read guard to another wrapper structure, [`DfStateReader`],
 /// which only allows reference access to the dataflow state.
 ///
 /// ## Modifying the state
-/// To get write and read access to the dataflow state, the [`DataflowState::write`] method must be
-/// used. This method returns a write guard to another wrapper structure, [`DataflowStateWriter`]
-/// which will allow to get a reference or mutable reference to a [`DataflowState`], which starts
+/// To get write and read access to the dataflow state, the [`DfState::write`] method must be
+/// used. This method returns a write guard to another wrapper structure, [`DfStateWriter`]
+/// which will allow to get a reference or mutable reference to a [`DfState`], which starts
 /// off as a copy of the actual dataflow state.
 ///
-/// Once all the computations/modifications are done, the [`DataflowStateWriter`] must be passed on
-/// to the [`DataflowStateWriter::commit`] to be committed and destroyed.
-pub(super) struct DataflowStateHandle {
-    /// A read/write lock protecting the [`DataflowStateWriter`] from
+/// Once all the computations/modifications are done, the [`DfStateWriter`] must be passed on
+/// to the [`DfStateWriter::commit`] to be committed and destroyed.
+pub(super) struct DfStateHandle {
+    /// A read/write lock protecting the [`DfStateWriter`] from
     /// being accessed directly and in a non-thread-safe way.
-    reader: RwLock<DataflowStateReader>,
+    reader: RwLock<DfStateReader>,
     /// A mutex used to ensure that writes are transactional (there's
-    /// only one writer at a time holding an instance of [`DataflowStateWriter`]).
+    /// only one writer at a time holding an instance of [`DfStateWriter`]).
     write_guard: Mutex<()>,
 }
 
-impl DataflowStateHandle {
-    /// Creates a new instance of [`DataflowStateHandle`].
-    pub(super) fn new(dataflow_state: DataflowState) -> Self {
+impl DfStateHandle {
+    /// Creates a new instance of [`DfStateHandle`].
+    pub(super) fn new(dataflow_state: DfState) -> Self {
         Self {
-            reader: RwLock::new(DataflowStateReader {
+            reader: RwLock::new(DfStateReader {
                 state: dataflow_state,
             }),
             write_guard: Mutex::new(()),
@@ -1363,17 +1363,17 @@ impl DataflowStateHandle {
 
     /// Acquires a read lock over the dataflow state, and returns the
     /// read guard.
-    /// This method will block if there's a [`DataflowStateHandle::commit`] operation
+    /// This method will block if there's a [`DfStateHandle::commit`] operation
     /// taking place.
-    pub(super) async fn read(&self) -> RwLockReadGuard<'_, DataflowStateReader> {
+    pub(super) async fn read(&self) -> RwLockReadGuard<'_, DfStateReader> {
         self.reader.read().await
     }
 
-    /// Creates a new instance of a [`DataflowStateWriter`].
-    /// This method will block if there's a [`DataflowStateHandle::commit`] operation
+    /// Creates a new instance of a [`DfStateWriter`].
+    /// This method will block if there's a [`DfStateHandle::commit`] operation
     /// taking place, or if there exists a thread that owns
-    /// an instance of [`DataflowStateWriter`].
-    pub(super) async fn write(&self) -> DataflowStateWriter<'_> {
+    /// an instance of [`DfStateWriter`].
+    pub(super) async fn write(&self) -> DfStateWriter<'_> {
         let write_guard = self.write_guard.lock().await;
         let read_guard = self.reader.read().await;
         let start = Instant::now();
@@ -1383,7 +1383,7 @@ impl DataflowStateHandle {
             readyset::metrics::recorded::DATAFLOW_STATE_CLONE_TIME,
             elapsed.as_micros() as f64,
         );
-        DataflowStateWriter {
+        DfStateWriter {
             state: state_copy,
             _guard: write_guard,
         }
@@ -1393,10 +1393,10 @@ impl DataflowStateHandle {
     /// This method will block if there are threads reading the dataflow state.
     pub(super) async fn commit(
         &self,
-        writer: DataflowStateWriter<'_>,
+        writer: DfStateWriter<'_>,
         authority: &Arc<Authority>,
     ) -> ReadySetResult<()> {
-        let persistable_ds = PersistableDataflowState {
+        let persistable_ds = PersistableDfState {
             state: writer.state,
         };
 
@@ -1447,25 +1447,25 @@ impl DataflowStateHandle {
 
 /// A read-only wrapper around the dataflow state.
 /// This struct implements [`Deref`] in order to provide read-only access to the inner
-/// [`DataflowState`]. No implementation of [`DerefMut`] is provided, nor any other way of accessing
-/// the inner [`DataflowState`] in a mutable way.
-pub(super) struct DataflowStateReader {
-    state: DataflowState,
+/// [`DfState`]. No implementation of [`DerefMut`] is provided, nor any other way of accessing
+/// the inner [`DfState`] in a mutable way.
+pub(super) struct DfStateReader {
+    state: DfState,
 }
 
-impl DataflowStateReader {
+impl DfStateReader {
     /// Replaces the dataflow state with a new one.
-    /// This method is meant to be used by the [`DataflowStateHandle`] only, in order
+    /// This method is meant to be used by the [`DfStateHandle`] only, in order
     /// to atomically swap the dataflow state view exposed to the users.
     // This method MUST NEVER become public, as this guarantees
-    // that only the [`DataflowStateHandle`] can modify it.
-    fn replace(&mut self, state: DataflowState) {
+    // that only the [`DfStateHandle`] can modify it.
+    fn replace(&mut self, state: DfState) {
         self.state = state;
     }
 }
 
-impl Deref for DataflowStateReader {
-    type Target = DataflowState;
+impl Deref for DfStateReader {
+    type Target = DfState;
 
     fn deref(&self) -> &Self::Target {
         &self.state
@@ -1473,59 +1473,59 @@ impl Deref for DataflowStateReader {
 }
 
 /// A read and write wrapper around the dataflow state.
-/// This struct implements [`Deref`] to provide read-only access to the inner [`DataflowState`],
+/// This struct implements [`Deref`] to provide read-only access to the inner [`DfState`],
 /// as well as [`DerefMut`] to allow mutability.
-/// To commit the modifications made to the [`DataflowState`], use the
-/// [`DataflowStateHandle::commit`] method. Dropping this struct without calling
-/// [`DataflowStateHandle::commit`] will cause the modifications to be discarded, and the lock
+/// To commit the modifications made to the [`DfState`], use the
+/// [`DfStateHandle::commit`] method. Dropping this struct without calling
+/// [`DfStateHandle::commit`] will cause the modifications to be discarded, and the lock
 /// preventing other writer threads to acquiring an instance to be released.
-pub(super) struct DataflowStateWriter<'handle> {
-    state: DataflowState,
+pub(super) struct DfStateWriter<'handle> {
+    state: DfState,
     _guard: MutexGuard<'handle, ()>,
 }
 
-impl<'handle> AsRef<DataflowState> for DataflowStateWriter<'handle> {
-    fn as_ref(&self) -> &DataflowState {
+impl<'handle> AsRef<DfState> for DfStateWriter<'handle> {
+    fn as_ref(&self) -> &DfState {
         &self.state
     }
 }
 
-impl<'handle> AsMut<DataflowState> for DataflowStateWriter<'handle> {
-    fn as_mut(&mut self) -> &mut DataflowState {
+impl<'handle> AsMut<DfState> for DfStateWriter<'handle> {
+    fn as_mut(&mut self) -> &mut DfState {
         &mut self.state
     }
 }
 
-/// A wrapper around the dataflow state, to be used only in [`DataflowStateWriter::commit`]
+/// A wrapper around the dataflow state, to be used only in [`DfStateWriter::commit`]
 /// to send a copy of the state across thread boundaries.
-struct PersistableDataflowState {
-    state: DataflowState,
+struct PersistableDfState {
+    state: DfState,
 }
 
 // There is a chain of not thread-safe (not [`Send`] structures at play here:
 // [`Graph`] is not [`Send`] (as it might contain a [`reader_map::WriteHandle`]), which
-// makes [`DataflowState`] not [`Send`].
-// Because [`DataflowStateReader`] holds a [`DataflowState`] instance, the compiler does not
+// makes [`DfState`] not [`Send`].
+// Because [`DfStateReader`] holds a [`DfState`] instance, the compiler does not
 // automatically implement [`Send`] for it. But here is what the compiler does not know:
-// 1. Only the [`DataflowStateHandle`] can instantiate and hold an instance of
-// [`DataflowStateReader`].
+// 1. Only the [`DfStateHandle`] can instantiate and hold an instance of
+// [`DfStateReader`].
 //
-// 2. Only the [`DataflowStateHandle`] is able to get a mutable reference to the
-// [`DataflowStateReader`].
+// 2. Only the [`DfStateHandle`] is able to get a mutable reference to the
+// [`DfStateReader`].
 //
-// 3. The [`DataflowStateReader`] held by the [`DataflowStateHandle`] is behind a
-// [`tokio::sync::RwLock`], which is only acquired as write in the [`DataflowStateHandle::commit`]
+// 3. The [`DfStateReader`] held by the [`DfStateHandle`] is behind a
+// [`tokio::sync::RwLock`], which is only acquired as write in the [`DfStateHandle::commit`]
 // method.
 //
 // Those three conditions guarantee that there are no concurrent modifications to the underlying
 // dataflow state.
-// So, we explicitly tell the compiler that the [`DataflowStateReader`] is safe to be moved
+// So, we explicitly tell the compiler that the [`DfStateReader`] is safe to be moved
 // between threads.
-unsafe impl Sync for DataflowStateReader {}
+unsafe impl Sync for DfStateReader {}
 
-// Needed to send a copy of the [`DataflowState`] across thread boundaries, when
+// Needed to send a copy of the [`DfState`] across thread boundaries, when
 // we are persisting the state to the [`Authority`].
-unsafe impl Sync for PersistableDataflowState {}
+unsafe impl Sync for PersistableDfState {}
 
 /// Build a graphviz [dot][] representation of the graph, given information about its
 /// materializations and (optionally) the set of nodes within each domain.

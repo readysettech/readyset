@@ -22,7 +22,7 @@ use dataflow::ops::join::{Join, JoinSource, JoinType};
 use dataflow::ops::project::Project;
 use dataflow::ops::union::{self, Union};
 use dataflow::utils::{dataflow_column, make_columns};
-use dataflow::{DurabilityMode, Expr as DataflowExpr, PersistenceParameters, ReaderProcessing};
+use dataflow::{DurabilityMode, Expr as DfExpr, PersistenceParameters, ReaderProcessing};
 use futures::StreamExt;
 use itertools::Itertools;
 use nom_sql::{parse_query, BinaryOperator, Dialect, OrderType, SqlQuery, SqlType};
@@ -30,7 +30,7 @@ use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset::consistency::Timestamp;
 use readyset::internal::LocalNodeIndex;
 use readyset::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
-use readyset_data::{DataType, DataflowType};
+use readyset_data::{DataType, DfType};
 use readyset_errors::ReadySetError::{MigrationPlanFailed, RpcFailed, SelectQueryCreationFailed};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
@@ -1391,7 +1391,7 @@ async fn mutator_churn() {
                 "votecount",
                 make_columns(&["id", "votes"]),
                 Aggregation::Count { count_nulls: false }
-                    .over(vote, 0, &[1], &DataflowType::Unknown)
+                    .over(vote, 0, &[1], &DfType::Unknown)
                     .unwrap(),
             );
 
@@ -1838,7 +1838,7 @@ async fn votes() {
                 "vc",
                 make_columns(&["id", "votes"]),
                 Aggregation::Count { count_nulls: false }
-                    .over(vote, 0, &[1], &DataflowType::Unknown)
+                    .over(vote, 0, &[1], &DfType::Unknown)
                     .unwrap(),
             );
             mig.maintain_anonymous(vc, &Index::hash_map(vec![0]));
@@ -2479,7 +2479,7 @@ async fn cascading_replays_with_sharding() {
             // aggregate over the join. this will force a shard merger to be inserted because the
             // group-by column ("f2") isn't the same as the join's output sharding column ("f1"/"u")
             let a = Aggregation::Count { count_nulls: false }
-                .over(j, 0, &[2], &DataflowType::Unknown)
+                .over(j, 0, &[2], &DfType::Unknown)
                 .unwrap();
             let end = mig.add_ingredient("end", make_columns(&["u", "c"]), a);
             mig.maintain_anonymous_with_reader_processing(
@@ -2611,7 +2611,7 @@ async fn full_aggregation_with_bogokey() {
                 "agg",
                 make_columns(&["bogo", "count"]),
                 Aggregation::Count { count_nulls: false }
-                    .over(bogo, 0, &[1], &DataflowType::Unknown)
+                    .over(bogo, 0, &[1], &DfType::Unknown)
                     .unwrap(),
             );
             mig.maintain_anonymous_with_reader_processing(
@@ -2730,7 +2730,7 @@ async fn materialization_frontier() {
             "votecount",
             make_columns(&["id", "votes"]),
             Aggregation::Count { count_nulls: false }
-                .over(vote, 0, &[1], &DataflowType::Unknown)
+                .over(vote, 0, &[1], &DfType::Unknown)
                 .unwrap(),
         );
         mig.mark_shallow(vc);
@@ -3040,7 +3040,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
                 "votecount",
                 make_columns(&["id", "votes"]),
                 Aggregation::Count { count_nulls: false }
-                    .over(vote, 0, &[1], &DataflowType::Unknown)
+                    .over(vote, 0, &[1], &DfType::Unknown)
                     .unwrap(),
             );
 
@@ -3097,7 +3097,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
                 "rsum",
                 make_columns(&["id", "total"]),
                 Aggregation::Sum
-                    .over(rating, 2, &[1], &DataflowType::Unknown)
+                    .over(rating, 2, &[1], &DfType::Unknown)
                     .unwrap(),
             );
 
@@ -3188,7 +3188,7 @@ async fn live_writes() {
                 "votecount",
                 make_columns(&["id", "votes"]),
                 Aggregation::Count { count_nulls: false }
-                    .over(vote, 0, &[1], &DataflowType::Unknown)
+                    .over(vote, 0, &[1], &DfType::Unknown)
                     .unwrap(),
             );
 
@@ -3227,7 +3227,7 @@ async fn live_writes() {
                 "votecount2",
                 make_columns(&["id", "votes"]),
                 Aggregation::Sum
-                    .over(vc, 1, &[0], &DataflowType::Unknown)
+                    .over(vc, 1, &[0], &DfType::Unknown)
                     .unwrap(),
             );
             mig.maintain_anonymous_with_reader_processing(
@@ -4971,17 +4971,17 @@ async fn post_read_ilike() {
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::from_range(&(..))],
             block: true,
-            filter: Some(DataflowExpr::Op {
-                left: Box::new(DataflowExpr::Column {
+            filter: Some(DfExpr::Op {
+                left: Box::new(DfExpr::Column {
                     index: 0,
-                    ty: DataflowType::Sql(SqlType::Text),
+                    ty: DfType::Sql(SqlType::Text),
                 }),
                 op: BinaryOperator::ILike,
-                right: Box::new(DataflowExpr::Literal {
+                right: Box::new(DfExpr::Literal {
                     val: "%a%".into(),
-                    ty: DataflowType::Sql(SqlType::Text),
+                    ty: DfType::Sql(SqlType::Text),
                 }),
-                ty: DataflowType::Sql(SqlType::Bool),
+                ty: DfType::Sql(SqlType::Bool),
             }),
             timestamp: None,
             limit: None,

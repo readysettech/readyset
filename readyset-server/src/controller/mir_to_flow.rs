@@ -11,13 +11,13 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 
 use common::DataType;
-use dataflow::node::Column as DataflowColumn;
+use dataflow::node::Column as DfColumn;
 use dataflow::ops::grouped::concat::GroupConcat;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::project::Project;
 use dataflow::{
-    node, ops, BuiltinFunction, Expr as DataflowExpr, PostLookupAggregates, ReaderProcessing,
+    node, ops, BuiltinFunction, Expr as DfExpr, PostLookupAggregates, ReaderProcessing,
 };
 use launchpad::redacted::Sensitive;
 use mir::node::node_inner::MirNodeInner;
@@ -31,7 +31,7 @@ use nom_sql::{
 use petgraph::graph::NodeIndex;
 use readyset::internal::{Index, IndexType};
 use readyset::ViewPlaceholder;
-use readyset_data::DataflowType;
+use readyset_data::DfType;
 use readyset_errors::{
     internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,
 };
@@ -40,7 +40,7 @@ use crate::controller::Migration;
 use crate::manual::ops::grouped::aggregate::Aggregation;
 
 /// Sets the names of dataflow columns using the names determined in MIR to ensure aliases are used
-fn set_names(names: &[&str], columns: &mut [DataflowColumn]) -> ReadySetResult<()> {
+fn set_names(names: &[&str], columns: &mut [DfColumn]) -> ReadySetResult<()> {
     invariant_eq!(columns.len(), names.len());
     for (c, n) in columns.iter_mut().zip(names.iter()) {
         c.set_name((*n).into());
@@ -412,7 +412,7 @@ fn adapt_base_node(
                 break;
             }
         }
-        let column_id = mig.add_column(na, DataflowColumn::from(a.clone()), default_value)?;
+        let column_id = mig.add_column(na, DfColumn::from(a.clone()), default_value)?;
 
         // store the new column ID in the column specs for this node
         for &mut (ref cs, ref mut cid) in column_specs.iter_mut() {
@@ -462,7 +462,7 @@ fn make_base_node(
         cs.1 = Some(i);
     }
 
-    let columns: Vec<DataflowColumn> = column_specs
+    let columns: Vec<DfColumn> = column_specs
         .iter()
         .map(|&(ref cs, _)| cs.clone().into())
         .collect();
@@ -643,7 +643,7 @@ fn make_grouped_node(
         // aggregation before we pattern match for a generic aggregation.
         GroupedNodeType::Aggregation(Aggregation::GroupConcat { separator: sep }) => {
             let gc = GroupConcat::new(parent_na, over_col_indx, group_col_indx, sep)?;
-            let agg_col = DataflowColumn::new(
+            let agg_col = DfColumn::new(
                 over_col_name.clone(),
                 SqlType::Text.into(),
                 Some(name.into()),
@@ -661,9 +661,9 @@ fn make_grouped_node(
             )?;
             let agg_col = grouped
                 .output_col_type()
-                .map(|ty| DataflowColumn::new(over_col_name.clone(), ty.into(), Some(name.into())))
+                .map(|ty| DfColumn::new(over_col_name.clone(), ty.into(), Some(name.into())))
                 .unwrap_or_else(|| {
-                    DataflowColumn::new(
+                    DfColumn::new(
                         over_col_name.clone(),
                         over_col_ty.clone(),
                         Some(name.into()),
@@ -677,9 +677,9 @@ fn make_grouped_node(
             let grouped = extr.over(parent_na, over_col_indx, group_col_indx.as_slice());
             let agg_col = grouped
                 .output_col_type()
-                .map(|ty| DataflowColumn::new(over_col_name.clone(), ty.into(), Some(name.into())))
+                .map(|ty| DfColumn::new(over_col_name.clone(), ty.into(), Some(name.into())))
                 .unwrap_or_else(|| {
-                    DataflowColumn::new(
+                    DfColumn::new(
                         over_col_name.clone(),
                         over_col_ty.clone(),
                         Some(name.into()),
@@ -816,7 +816,7 @@ fn make_join_node(
         right_na = make_cross_join_bogokey(right)?.address();
 
         emit.push(JoinSource::B(left_col_idx, right_col_idx));
-        cols.push(DataflowColumn::new(
+        cols.push(DfColumn::new(
             "cross_join_bogokey".into(),
             SqlType::BigInt(None).into(),
             Some(name.into()),
@@ -943,7 +943,7 @@ fn make_latest_node(
     Ok(FlowNode::New(na))
 }
 
-/// Lower the given nom_sql AST expression to a DataflowExpr.
+/// Lower the given `nom_sql` AST expression to a `DfExpr`.
 ///
 /// Currently, this involves:
 ///
@@ -958,8 +958,8 @@ fn make_latest_node(
 fn lower_expression(
     parent: &MirNodeRef,
     expr: Expr,
-    parent_cols: &[DataflowColumn],
-) -> ReadySetResult<DataflowExpr> {
+    parent_cols: &[DfColumn],
+) -> ReadySetResult<DfExpr> {
     match expr {
         Expr::Call(FunctionExpr::Call {
             name: fname,
@@ -970,7 +970,7 @@ fn lower_expression(
                 .map(|arg| lower_expression(parent, arg, parent_cols))
                 .collect::<Result<Vec<_>, _>>()?;
             let (func, ty) = BuiltinFunction::from_name_and_args(&fname, args)?;
-            Ok(DataflowExpr::Call {
+            Ok(DfExpr::Call {
                 func: Box::new(func),
                 ty,
             })
@@ -984,7 +984,7 @@ fn lower_expression(
             // TODO: Infer type from SQL
             let ty = val.sql_type().into();
 
-            Ok(DataflowExpr::Literal { val, ty })
+            Ok(DfExpr::Literal { val, ty })
         }
         Expr::Column(nom_sql::Column { name, table, .. }) => {
             let index = parent
@@ -995,13 +995,13 @@ fn lower_expression(
                 .ok_or_else(|| internal_err!("Index exceeds length of parent cols, idx={}", index))?
                 .ty()
                 .clone();
-            Ok(DataflowExpr::Column { index, ty })
+            Ok(DfExpr::Column { index, ty })
         }
         Expr::BinaryOp { lhs, op, rhs } => {
             // TODO: Consider rhs and op when inferring type
             let left = Box::new(lower_expression(parent, *lhs, parent_cols)?);
             let ty = left.ty().clone();
-            Ok(DataflowExpr::Op {
+            Ok(DfExpr::Op {
                 op,
                 left,
                 right: Box::new(lower_expression(parent, *rhs, parent_cols)?),
@@ -1015,12 +1015,12 @@ fn lower_expression(
             let left = Box::new(lower_expression(parent, *rhs, parent_cols)?);
             // TODO: Negation may change type to signed
             let ty = left.ty().clone();
-            Ok(DataflowExpr::Op {
+            Ok(DfExpr::Op {
                 op: BinaryOperator::Multiply,
                 left,
-                right: Box::new(DataflowExpr::Literal {
+                right: Box::new(DfExpr::Literal {
                     val: DataType::Int(-1),
-                    ty: DataflowType::Sql(SqlType::Int(None)),
+                    ty: DfType::Sql(SqlType::Int(None)),
                 }),
                 ty,
             })
@@ -1028,16 +1028,16 @@ fn lower_expression(
         Expr::UnaryOp {
             op: UnaryOperator::Not,
             rhs,
-        } => Ok(DataflowExpr::Op {
+        } => Ok(DfExpr::Op {
             op: BinaryOperator::NotEqual,
             left: Box::new(lower_expression(parent, *rhs, parent_cols)?),
-            right: Box::new(DataflowExpr::Literal {
+            right: Box::new(DfExpr::Literal {
                 val: DataType::Int(1),
-                ty: DataflowType::Sql(SqlType::Int(None)),
+                ty: DfType::Sql(SqlType::Int(None)),
             }),
-            ty: DataflowType::Sql(SqlType::Bool), // type of NE is always bool
+            ty: DfType::Sql(SqlType::Bool), // type of NE is always bool
         }),
-        Expr::Cast { expr, ty, .. } => Ok(DataflowExpr::Cast {
+        Expr::Cast { expr, ty, .. } => Ok(DfExpr::Cast {
             expr: Box::new(lower_expression(parent, *expr, parent_cols)?),
             to_type: ty.clone(),
             ty: ty.into(),
@@ -1049,15 +1049,15 @@ fn lower_expression(
         } => {
             let then_expr = Box::new(lower_expression(parent, *then_expr, parent_cols)?);
             let ty = then_expr.ty().clone();
-            Ok(DataflowExpr::CaseWhen {
+            Ok(DfExpr::CaseWhen {
                 // TODO: Do case arm types have to match? See if type is inferred at runtime
                 condition: Box::new(lower_expression(parent, *condition, parent_cols)?),
                 then_expr,
                 else_expr: match else_expr {
                     Some(else_expr) => Box::new(lower_expression(parent, *else_expr, parent_cols)?),
-                    None => Box::new(DataflowExpr::Literal {
+                    None => Box::new(DfExpr::Literal {
                         val: DataType::None,
-                        ty: DataflowType::Unknown,
+                        ty: DfType::Unknown,
                     }),
                 },
                 ty,
@@ -1078,33 +1078,33 @@ fn lower_expression(
 
                 let lhs = lower_expression(parent, *lhs, parent_cols)?;
                 let make_comparison = |rhs| -> ReadySetResult<_> {
-                    Ok(DataflowExpr::Op {
+                    Ok(DfExpr::Op {
                         left: Box::new(lhs.clone()),
                         op: comparison_op,
                         right: Box::new(lower_expression(parent, rhs, parent_cols)?),
-                        ty: DataflowType::Sql(SqlType::Bool), // type of =/!= is always bool
+                        ty: DfType::Sql(SqlType::Bool), // type of =/!= is always bool
                     })
                 };
 
                 exprs.try_fold(make_comparison(fst)?, |acc, rhs| {
-                    Ok(DataflowExpr::Op {
+                    Ok(DfExpr::Op {
                         left: Box::new(acc),
                         op: logical_op,
                         right: Box::new(make_comparison(rhs)?),
-                        ty: DataflowType::Sql(SqlType::Bool), // type of =/!= is always bool
+                        ty: DfType::Sql(SqlType::Bool), // type of =/!= is always bool
                     })
                 })
             } else if negated {
                 // x IN () is always false
-                Ok(DataflowExpr::Literal {
+                Ok(DfExpr::Literal {
                     val: DataType::None,
-                    ty: DataflowType::Sql(SqlType::Bool),
+                    ty: DfType::Sql(SqlType::Bool),
                 })
             } else {
                 // x NOT IN () is always false
-                Ok(DataflowExpr::Literal {
+                Ok(DfExpr::Literal {
                     val: DataType::from(1),
-                    ty: DataflowType::Sql(SqlType::Bool),
+                    ty: DfType::Sql(SqlType::Bool),
                 })
             }
         }
@@ -1158,7 +1158,7 @@ fn make_project_node(
 
     let (_, literal_values): (Vec<_>, Vec<_>) = literals.iter().cloned().unzip();
 
-    let projected_expressions: Vec<DataflowExpr> = expressions
+    let projected_expressions: Vec<DfExpr> = expressions
         .iter()
         .map(|(_, e)| lower_expression(&parent, e.clone(), parent_cols))
         .collect::<Result<Vec<_>, _>>()?;
@@ -1183,7 +1183,7 @@ fn make_project_node(
             .iter()
             .chain(literal_types.iter())
             .zip(col_names)
-            .map(|(ty, n)| DataflowColumn::new(n, ty.clone(), Some(name.into()))),
+            .map(|(ty, n)| DfColumn::new(n, ty.clone(), Some(name.into()))),
     );
 
     // Check here since we did not check in `set_names()`
@@ -1239,7 +1239,7 @@ fn make_distinct_node(
         .ok_or_else(|| internal_err!("No projected columns for distinct"))?
         .name
         .clone();
-    cols.push(DataflowColumn::new(
+    cols.push(DfColumn::new(
         distinct_count_name,
         SqlType::BigInt(None).into(),
         Some(name.into()),
@@ -1275,7 +1275,7 @@ fn make_distinct_node(
             parent_na,
             0,
             &group_by_indx,
-            &DataflowType::Unknown,
+            &DfType::Unknown,
         )?,
     );
     Ok(FlowNode::New(na))
@@ -1300,7 +1300,7 @@ fn make_paginate_or_topk_node(
     // create page_number column if this is a paginate node
     if !is_topk {
         #[allow(clippy::unwrap_used)] // column_names must be populated
-        parent_cols.push(DataflowColumn::new(
+        parent_cols.push(DfColumn::new(
             column_names.last().unwrap().into(),
             SqlType::BigInt(None).into(),
             Some(name.into()),

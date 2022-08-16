@@ -566,10 +566,10 @@ mod tests {
         use std::convert::TryInto;
 
         use dataflow_state::MaterializedNodeState;
-        use readyset_data::DataflowType;
+        use readyset_data::DfType;
 
         use super::*;
-        use crate::node::Column as DataflowColumn;
+        use crate::node::Column as DfColumn;
 
         fn test_lots_of_changes_in_same_batch(mut state: MaterializedNodeState) {
             use crate::node;
@@ -579,7 +579,7 @@ mod tests {
             let mut graph = Graph::new();
             let source = graph.add_node(Node::new(
                 "source",
-                vec![DataflowColumn::new("".into(), DataflowType::Unknown, None)],
+                vec![DfColumn::new("".into(), DfType::Unknown, None)],
                 node::NodeType::Source,
             ));
 
@@ -587,9 +587,9 @@ mod tests {
             let global = graph.add_node(Node::new(
                 "b",
                 vec![
-                    DataflowColumn::new("x".into(), DataflowType::Unknown, None),
-                    DataflowColumn::new("y".into(), DataflowType::Unknown, None),
-                    DataflowColumn::new("z".into(), DataflowType::Unknown, None),
+                    DfColumn::new("x".into(), DfType::Unknown, None),
+                    DfColumn::new("y".into(), DfType::Unknown, None),
+                    DfColumn::new("z".into(), DfType::Unknown, None),
                 ],
                 b,
             ));

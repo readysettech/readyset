@@ -30,7 +30,7 @@ use readyset::consensus::NodeTypeSchedulingRestriction;
 use readyset::internal::DomainIndex;
 use tracing::{instrument, trace};
 
-use crate::controller::state::DataflowState;
+use crate::controller::state::DfState;
 use crate::controller::{DomainPlacementRestriction, NodeRestrictionKey, Worker, WorkerIdentifier};
 
 /// Verifies that the worker `worker` meets the domain placement restrictions of all dataflow nodes
@@ -64,13 +64,13 @@ pub(crate) struct Scheduler<'state> {
     valid_workers: Vec<(&'state WorkerIdentifier, &'state Worker)>,
     worker_stats: HashMap<&'state WorkerIdentifier, WorkerStats>,
     scheduled_shards: HashMap<&'state WorkerIdentifier, HashSet<(DomainIndex, usize)>>,
-    dataflow_state: &'state DataflowState,
+    dataflow_state: &'state DfState,
 }
 
 impl<'state> Scheduler<'state> {
     /// Create a new [`Scheduler`], optionally restricted to the given `worker`.
     pub(crate) fn new(
-        dataflow_state: &'state DataflowState,
+        dataflow_state: &'state DfState,
         worker: &Option<WorkerIdentifier>,
     ) -> ReadySetResult<Self> {
         let valid_workers = dataflow_state

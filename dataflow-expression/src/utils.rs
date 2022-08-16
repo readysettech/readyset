@@ -1,5 +1,5 @@
 use nom_sql::SqlType;
-use readyset_data::{DataType, DataflowType};
+use readyset_data::{DataType, DfType};
 
 use crate::{BuiltinFunction, Expr};
 
@@ -14,18 +14,18 @@ use crate::{BuiltinFunction, Expr};
 ///
 /// Not intended for use outside of tests
 pub fn make_column(index: usize) -> Expr {
-    column_with_type(index, DataflowType::Unknown)
+    column_with_type(index, DfType::Unknown)
 }
 
 /// Create `Expr::Column` with type set to Int
 ///
 /// Not intended for use outside of tests
 pub fn make_int_column(index: usize) -> Expr {
-    column_with_type(index, DataflowType::Sql(SqlType::Int(None)))
+    column_with_type(index, DfType::Sql(SqlType::Int(None)))
 }
 
-/// Create `Expr::Column` with `DataflowType` ty.
-pub fn column_with_type(index: usize, ty: DataflowType) -> Expr {
+/// Create `Expr::Column` with `DfType` ty.
+pub fn column_with_type(index: usize, ty: DfType) -> Expr {
     Expr::Column { index, ty }
 }
 
@@ -45,7 +45,7 @@ pub fn make_literal(val: DataType) -> Expr {
 pub fn make_call(func: BuiltinFunction) -> Expr {
     Expr::Call {
         func: Box::new(func),
-        ty: DataflowType::Unknown,
+        ty: DfType::Unknown,
     }
 }
 

@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use array2::Array2;
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
-use dataflow_expression::Expr as DataflowExpr;
+use dataflow_expression::Expr as DfExpr;
 use futures_util::future::TryFutureExt;
 use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::{StreamExt, TryStreamExt};
@@ -967,7 +967,7 @@ pub struct ViewQuery {
     /// rows for which it evaluates to a non-[truthy][] value will be omitted from the result set.
     ///
     /// [truthy]: DataType::is_truthy
-    pub filter: Option<DataflowExpr>,
+    pub filter: Option<DfExpr>,
     /// An optional limit to the number of values to return
     pub limit: Option<usize>,
     /// An optional offset to skip the given number of rows from the beginning of the result set

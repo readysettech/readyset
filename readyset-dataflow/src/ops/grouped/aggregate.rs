@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 pub use nom_sql::{BinaryOperator, Literal, SqlType};
-use readyset_data::DataflowType;
+use readyset_data::DfType;
 use readyset_errors::{invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
@@ -40,7 +40,7 @@ impl Aggregation {
         src: NodeIndex,
         over: usize,
         group_by: &[usize],
-        over_col_ty: &DataflowType,
+        over_col_ty: &DfType,
     ) -> ReadySetResult<GroupedOperator<Aggregator>> {
         let out_ty = match &self {
             Aggregation::Count { .. } => Some(SqlType::BigInt(None)),
@@ -50,7 +50,7 @@ impl Aggregation {
             Aggregation::Sum | Aggregation::Avg => {
                 if matches!(
                     over_col_ty,
-                    DataflowType::Sql(SqlType::Float) | DataflowType::Sql(SqlType::Double)
+                    DfType::Sql(SqlType::Float) | DfType::Sql(SqlType::Double)
                 ) {
                     Some(SqlType::Double)
                 } else {
@@ -321,7 +321,7 @@ mod tests {
             "identity",
             &["x", "ys"],
             aggregation
-                .over(s.as_global(), 1, &[0], &DataflowType::Sql(SqlType::Double))
+                .over(s.as_global(), 1, &[0], &DfType::Sql(SqlType::Double))
                 .unwrap(),
             mat,
         );
@@ -335,12 +335,7 @@ mod tests {
             "identity",
             &["x", "z", "ys"],
             aggregation
-                .over(
-                    s.as_global(),
-                    1,
-                    &[0, 2],
-                    &DataflowType::Sql(SqlType::Double),
-                )
+                .over(s.as_global(), 1, &[0, 2], &DfType::Sql(SqlType::Double))
                 .unwrap(),
             mat,
         );
@@ -352,17 +347,17 @@ mod tests {
         let src = 0.into();
 
         let c = Aggregation::Count { count_nulls: false }
-            .over(src, 1, &[0, 2], &DataflowType::Unknown)
+            .over(src, 1, &[0, 2], &DfType::Unknown)
             .unwrap();
         assert_eq!(c.description(true), "|*| γ[0, 2]");
 
         let s = Aggregation::Sum
-            .over(src, 1, &[2, 0], &DataflowType::Unknown)
+            .over(src, 1, &[2, 0], &DfType::Unknown)
             .unwrap();
         assert_eq!(s.description(true), "𝛴(1) γ[2, 0]");
 
         let a = Aggregation::Avg
-            .over(src, 1, &[2, 0], &DataflowType::Unknown)
+            .over(src, 1, &[2, 0], &DfType::Unknown)
             .unwrap();
         assert_eq!(a.description(true), "Avg(1) γ[2, 0]");
     }

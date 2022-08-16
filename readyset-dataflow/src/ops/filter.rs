@@ -133,7 +133,7 @@ impl Ingredient for Filter {
 mod tests {
     use dataflow_expression::utils::{column_with_type, make_literal};
     use nom_sql::SqlType;
-    use readyset_data::DataflowType;
+    use readyset_data::DfType;
     use Expr::Op;
 
     use super::*;
@@ -148,10 +148,10 @@ mod tests {
             Filter::new(
                 s.as_global(),
                 filters.unwrap_or_else(|| Op {
-                    left: Box::new(column_with_type(1, DataflowType::Sql(SqlType::Text))),
+                    left: Box::new(column_with_type(1, DfType::Sql(SqlType::Text))),
                     op: BinaryOperator::Equal,
                     right: Box::new(make_literal(DataType::from("a"))),
-                    ty: DataflowType::Sql(SqlType::Bool),
+                    ty: DfType::Sql(SqlType::Bool),
                 }),
             ),
             materialized,
@@ -193,19 +193,19 @@ mod tests {
             false,
             Some(Op {
                 left: Box::new(Op {
-                    left: Box::new(column_with_type(0, DataflowType::Sql(SqlType::Int(None)))),
+                    left: Box::new(column_with_type(0, DfType::Sql(SqlType::Int(None)))),
                     op: BinaryOperator::Equal,
                     right: Box::new(make_literal(DataType::from(1))),
-                    ty: DataflowType::Sql(SqlType::Bool),
+                    ty: DfType::Sql(SqlType::Bool),
                 }),
                 op: BinaryOperator::And,
                 right: Box::new(Op {
-                    left: Box::new(column_with_type(1, DataflowType::Sql(SqlType::Text))),
+                    left: Box::new(column_with_type(1, DfType::Sql(SqlType::Text))),
                     op: BinaryOperator::Equal,
                     right: Box::new(make_literal(DataType::from("a"))),
-                    ty: DataflowType::Sql(SqlType::Bool),
+                    ty: DfType::Sql(SqlType::Bool),
                 }),
-                ty: DataflowType::Sql(SqlType::Bool),
+                ty: DfType::Sql(SqlType::Bool),
             }),
         );
 
@@ -262,19 +262,19 @@ mod tests {
             false,
             Some(Op {
                 left: Box::new(Op {
-                    left: Box::new(column_with_type(0, DataflowType::Sql(SqlType::Int(None)))),
+                    left: Box::new(column_with_type(0, DfType::Sql(SqlType::Int(None)))),
                     op: BinaryOperator::LessOrEqual,
                     right: Box::new(make_literal(DataType::from(2))),
-                    ty: DataflowType::Sql(SqlType::Bool),
+                    ty: DfType::Sql(SqlType::Bool),
                 }),
                 op: BinaryOperator::And,
                 right: Box::new(Op {
-                    left: Box::new(column_with_type(1, DataflowType::Sql(SqlType::Text))),
+                    left: Box::new(column_with_type(1, DfType::Sql(SqlType::Text))),
                     op: BinaryOperator::NotEqual,
                     right: Box::new(make_literal(DataType::from("a"))),
-                    ty: DataflowType::Sql(SqlType::Bool),
+                    ty: DfType::Sql(SqlType::Bool),
                 }),
-                ty: DataflowType::Sql(SqlType::Bool),
+                ty: DfType::Sql(SqlType::Bool),
             }),
         );
 
@@ -300,10 +300,10 @@ mod tests {
         let mut g = setup(
             false,
             Some(Op {
-                left: Box::new(column_with_type(0, DataflowType::Sql(SqlType::Text))),
+                left: Box::new(column_with_type(0, DfType::Sql(SqlType::Text))),
                 op: BinaryOperator::Equal,
-                right: Box::new(column_with_type(1, DataflowType::Sql(SqlType::Text))),
-                ty: DataflowType::Sql(SqlType::Bool),
+                right: Box::new(column_with_type(1, DfType::Sql(SqlType::Text))),
+                ty: DfType::Sql(SqlType::Bool),
             }),
         );
 

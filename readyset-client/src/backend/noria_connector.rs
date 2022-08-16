@@ -5,7 +5,7 @@ use std::fmt;
 use std::ops::Bound;
 use std::sync::{atomic, Arc, RwLock};
 
-use dataflow_expression::Expr as DataflowExpr;
+use dataflow_expression::Expr as DfExpr;
 use itertools::Itertools;
 use launchpad::redacted::Sensitive;
 use nom_sql::{
@@ -21,7 +21,7 @@ use readyset::{
     ReadySetResult, SchemaType, Table, TableOperation, View, ViewPlaceholder, ViewQuery,
     ViewSchema,
 };
-use readyset_data::{DataType, DataflowType};
+use readyset_data::{DataType, DfType};
 use readyset_errors::ReadySetError::PreparedStatementMissing;
 use readyset_errors::{
     internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err,
@@ -1511,17 +1511,17 @@ fn build_view_query(
             filter_op_idx = Some(idx);
 
             // LIKE/ILIKE resolve to bool
-            Ok(DataflowExpr::Op {
-                left: Box::new(DataflowExpr::Column {
+            Ok(DfExpr::Op {
+                left: Box::new(DfExpr::Column {
                     index: column,
                     ty: key_type.clone().into(),
                 }),
                 op: *op,
-                right: Box::new(DataflowExpr::Literal {
+                right: Box::new(DfExpr::Literal {
                     val: value,
                     ty: key_type.clone().into(),
                 }),
-                ty: DataflowType::Sql(SqlType::Bool),
+                ty: DfType::Sql(SqlType::Bool),
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -1569,17 +1569,17 @@ fn build_view_query(
                             // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
                             let value = key[*idx - 1].coerce_to(key_type)?;
 
-                            let make_op = |op| DataflowExpr::Op {
-                                left: Box::new(DataflowExpr::Column {
+                            let make_op = |op| DfExpr::Op {
+                                left: Box::new(DfExpr::Column {
                                     index: *key_column_idx,
                                     ty: (*key_type).clone().into(),
                                 }),
                                 op,
-                                right: Box::new(DataflowExpr::Literal {
+                                right: Box::new(DfExpr::Literal {
                                     val: value.clone(),
                                     ty: (*key_type).clone().into(),
                                 }),
-                                ty: DataflowType::Sql(SqlType::Bool), // TODO: infer type
+                                ty: DfType::Sql(SqlType::Bool), // TODO: infer type
                             };
 
                             if let Some((lower_bound, upper_bound)) = &mut bounds {
@@ -1676,11 +1676,11 @@ fn build_view_query(
     Ok(ViewQuery {
         key_comparisons: keys,
         block: read_behavior.is_blocking(),
-        filter: filters.into_iter().reduce(|expr1, expr2| DataflowExpr::Op {
+        filter: filters.into_iter().reduce(|expr1, expr2| DfExpr::Op {
             left: Box::new(expr1),
             op: BinaryOperator::And,
             right: Box::new(expr2),
-            ty: DataflowType::Sql(SqlType::Bool), // AND is a boolean operator
+            ty: DfType::Sql(SqlType::Bool), // AND is a boolean operator
         }),
         limit,
         offset,
@@ -1969,17 +1969,17 @@ mod tests {
 
             assert_eq!(
                 query.filter,
-                Some(DataflowExpr::Op {
-                    left: Box::new(DataflowExpr::Column {
+                Some(DfExpr::Op {
+                    left: Box::new(DfExpr::Column {
                         index: 1,
-                        ty: DataflowType::Sql(SqlType::Text)
+                        ty: DfType::Sql(SqlType::Text)
                     }),
                     op: BinaryOperator::ILike,
-                    right: Box::new(DataflowExpr::Literal {
+                    right: Box::new(DfExpr::Literal {
                         val: DataType::from("%a%"),
-                        ty: DataflowType::Sql(SqlType::Text)
+                        ty: DfType::Sql(SqlType::Text)
                     }),
-                    ty: DataflowType::Sql(SqlType::Bool),
+                    ty: DfType::Sql(SqlType::Bool),
                 })
             );
         }
@@ -2038,17 +2038,17 @@ mod tests {
 
             assert_eq!(
                 query.filter,
-                Some(DataflowExpr::Op {
-                    left: Box::new(DataflowExpr::Column {
+                Some(DfExpr::Op {
+                    left: Box::new(DfExpr::Column {
                         index: 0,
-                        ty: DataflowType::Sql(SqlType::Int(None))
+                        ty: DfType::Sql(SqlType::Int(None))
                     }),
                     op: BinaryOperator::Greater,
-                    right: Box::new(DataflowExpr::Literal {
+                    right: Box::new(DfExpr::Literal {
                         val: 1.into(),
-                        ty: DataflowType::Sql(SqlType::Int(None))
+                        ty: DfType::Sql(SqlType::Int(None))
                     }),
-                    ty: DataflowType::Sql(SqlType::Bool),
+                    ty: DfType::Sql(SqlType::Bool),
                 })
             );
             assert_eq!(
@@ -2073,17 +2073,17 @@ mod tests {
 
             assert_eq!(
                 query.filter,
-                Some(DataflowExpr::Op {
-                    left: Box::new(DataflowExpr::Column {
+                Some(DfExpr::Op {
+                    left: Box::new(DfExpr::Column {
                         index: 1,
-                        ty: DataflowType::Sql(SqlType::Text)
+                        ty: DfType::Sql(SqlType::Text)
                     }),
                     op: BinaryOperator::Greater,
-                    right: Box::new(DataflowExpr::Literal {
+                    right: Box::new(DfExpr::Literal {
                         val: "a".into(),
-                        ty: DataflowType::Sql(SqlType::Text)
+                        ty: DfType::Sql(SqlType::Text)
                     }),
-                    ty: DataflowType::Sql(SqlType::Bool)
+                    ty: DfType::Sql(SqlType::Bool)
                 })
             );
 

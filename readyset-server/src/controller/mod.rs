@@ -34,7 +34,7 @@ use url::Url;
 use crate::controller::inner::{ControllerRequestType, Leader};
 use crate::controller::migrate::Migration;
 use crate::controller::recipe::Recipe;
-use crate::controller::state::DataflowState;
+use crate::controller::state::DfState;
 use crate::materialization::Materializations;
 use crate::worker::{WorkerRequest, WorkerRequestKind};
 use crate::{Config, ReadySetResult, VolumeId};
@@ -76,11 +76,11 @@ pub struct NodeRestrictionKey {
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct ControllerState {
     pub(crate) config: Config,
-    pub(crate) dataflow_state: DataflowState,
+    pub(crate) dataflow_state: DfState,
 }
 
-// We implement [`Debug`] manually so that we can skip the [`DataflowState`] field.
-// In the future, we might want to implement [`Debug`] for [`DataflowState`] as well and just derive
+// We implement [`Debug`] manually so that we can skip the [`DfState`] field.
+// In the future, we might want to implement [`Debug`] for [`DfState`] as well and just derive
 // it from [`Debug`] for [`ControllerState`].
 impl Debug for ControllerState {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -695,7 +695,7 @@ impl AuthorityLeaderElectionState {
                                     self.config.mir_config.clone(),
                                 );
 
-                                let dataflow_state = DataflowState::new(
+                                let dataflow_state = DfState::new(
                                     g,
                                     source,
                                     0,

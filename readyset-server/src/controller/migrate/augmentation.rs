@@ -14,13 +14,13 @@ use petgraph::graph::NodeIndex;
 use tracing::{debug_span, trace};
 
 use crate::controller::migrate::DomainMigrationPlan;
-use crate::controller::state::DataflowState;
+use crate::controller::state::DfState;
 
 /// Adds all the necessary messages to [`DomainMigrationPlan`] to inform
 /// the domains (present in the `nodes` map) about all the new nodes that were
 /// added.
 pub(super) fn inform(
-    dataflow_state: &mut DataflowState,
+    dataflow_state: &mut DfState,
     dmp: &mut DomainMigrationPlan,
     nodes: HashMap<DomainIndex, Vec<NodeIndex>>,
     new_nodes: &HashSet<NodeIndex>,
