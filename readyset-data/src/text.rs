@@ -7,7 +7,7 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 
-use nom_sql::SqlType;
+use nom_sql::{Literal, SqlType};
 use readyset_errors::{ReadySetError, ReadySetResult};
 
 use crate::{Array, DfType, DfValue};
@@ -418,9 +418,20 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
             )
             .coerce_to(sql_type, from_ty),
 
-            SqlType::Enum(_) | SqlType::Bit(_) | SqlType::VarBit(_) => {
-                Err(Self::coerce_err(sql_type, "Not allowed"))
+            SqlType::Enum(elements) => {
+                if let Some(i) = elements
+                    .iter()
+                    .position(|e| matches!(e, Literal::String(s) if s == str))
+                {
+                    // MySQL enums use 1-based indexing since a value of 0 is reserved for string
+                    // values that do not correspond to valid enum elements:
+                    Ok(DfValue::Enum(i as u32 + 1))
+                } else {
+                    Ok(DfValue::Enum(0))
+                }
             }
+
+            SqlType::Bit(_) | SqlType::VarBit(_) => Err(Self::coerce_err(sql_type, "Not allowed")),
         }
     }
 }
@@ -644,6 +655,24 @@ mod tests {
                 .coerce_to(&SqlType::Inet, &DfType::Unknown)
                 .unwrap(),
             DfValue::from("feed::beef")
+        );
+        // TEXT to ENUM
+        let enum_type = SqlType::Enum(
+            ["red", "yellow", "green"]
+                .map(|s| Literal::String(s.to_string()))
+                .to_vec(),
+        );
+        assert_eq!(
+            DfValue::from("green")
+                .coerce_to(&enum_type, &DfType::Unknown)
+                .unwrap(),
+            DfValue::Enum(3)
+        );
+        assert_eq!(
+            DfValue::from("ultraviolet")
+                .coerce_to(&enum_type, &DfType::Unknown)
+                .unwrap(),
+            DfValue::Enum(0)
         );
     }
 }
