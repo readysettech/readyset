@@ -608,6 +608,7 @@ impl PartialEq for DfValue {
                 bits_a.as_ref() == bits_b.as_ref()
             }
             (&DfValue::Array(ref vs_a), &DfValue::Array(ref vs_b)) => vs_a == vs_b,
+            (&DfValue::Enum(i_a), &DfValue::Enum(i_b)) => i_a == i_b,
             (&DfValue::None, &DfValue::None) => true,
             (&DfValue::Max, &DfValue::Max) => true,
             _ => false,
