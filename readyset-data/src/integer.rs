@@ -56,6 +56,7 @@ where
     u32: TryFrom<I>,
     u64: TryFrom<I>,
     Decimal: From<I>,
+    usize: TryFrom<I>,
     I: std::ops::BitXor<I, Output = I> + std::cmp::Eq + Copy + fmt::Display + IntAsFloat,
     S: ToString,
 {
@@ -187,8 +188,20 @@ where
         SqlType::Real | SqlType::Float => Ok(DfValue::Float(val.to_f32())),
         SqlType::Numeric(_) | SqlType::Decimal(_, _) => Ok(DfValue::Numeric(Arc::new(val.into()))),
 
-        SqlType::Enum(_) // TODO integer to enum coercion should actually be allowed
-        | SqlType::MacAddr
+        SqlType::Enum(v) => {
+            // If it can't be converted to u32 it's definitely out of bounds, and MySQL coerces
+            // out-of-bounds enum indices to 0
+            let idx = u32::try_from(val).unwrap_or(0);
+            // Note that indexes into the vector of enum values start at 1, so it is actually
+            // correct to check if idx is greater than v.len() here:
+            if idx as usize > v.len() {
+                Ok(DfValue::Enum(0))
+            } else {
+                Ok(DfValue::Enum(idx))
+            }
+        }
+
+        SqlType::MacAddr
         | SqlType::Inet
         | SqlType::Uuid
         | SqlType::Bit(_)
