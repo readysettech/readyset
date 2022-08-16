@@ -6006,18 +6006,59 @@ async fn simple_enum() {
     let mut mutator = g.table("t1").await.unwrap();
     let mut getter = g.view("c1").await.unwrap();
 
+    let color_idxs = HashMap::from([("red", 1), ("yellow", 2), ("green", 3)]);
     let rows = vec!["green", "red", "purple"];
     for (i, &color) in rows.iter().enumerate() {
-        mutator.insert(vec![i.into(), color.into()]).await.unwrap();
+        mutator
+            .insert(vec![
+                i.into(),
+                DfValue::Enum(*color_idxs.get(color).unwrap_or(&0)),
+            ])
+            .await
+            .unwrap();
     }
 
-    let result = getter.lookup(&[1.into()], true).await.unwrap().into_vec();
+    let lookup_keys = (0..3)
+        .map(|k| KeyComparison::Equal(vec1![k.into()]))
+        .collect();
+    let result = getter
+        .multi_lookup(lookup_keys, true)
+        .await
+        .unwrap()
+        .into_vec();
 
-    let schema = mutator.schema();
-    schema.unwrap().fields[1].sql_type.to_string();
+    let result_type = getter
+        .schema()
+        .unwrap()
+        .col_types([0], SchemaType::ReturnedSchema)
+        .unwrap()[0];
 
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0][0], "red".into());
+    assert_eq!(result.len(), 3);
+
+    assert_eq!(
+        result[0][0]
+            .coerce_to(result_type, &DfType::Unknown)
+            .unwrap(),
+        DfValue::from("green")
+            .coerce_to(result_type, &DfType::Unknown)
+            .unwrap()
+    );
+    assert_eq!(
+        result[1][0]
+            .coerce_to(result_type, &DfType::Unknown)
+            .unwrap(),
+        DfValue::from("red")
+            .coerce_to(result_type, &DfType::Unknown)
+            .unwrap()
+    );
+    assert_eq!(
+        result[2][0]
+            .coerce_to(result_type, &DfType::Unknown)
+            .unwrap(),
+        DfValue::from("purple")
+            .coerce_to(result_type, &DfType::Unknown)
+            .unwrap()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
