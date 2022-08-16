@@ -333,8 +333,10 @@ impl DataType {
             Self::None | Self::PassThrough(_) | Self::Max => None,
             Self::Int(_) => Some(BigInt(None)),
             Self::UnsignedInt(_) => Some(UnsignedBigInt(None)),
+            // FIXME: `SqlType::Float` precision can be either single (MySQL) or
+            // double (PostgreSQL).
             Self::Float(_) => Some(Float),
-            Self::Double(_) => Some(Real),
+            Self::Double(_) => Some(Double),
             Self::Text(_) => Some(Text),
             Self::TinyText(_) => Some(TinyText),
             Self::TimestampTz(_) => Some(TimestampTz), // TODO: Timestamp if no tz
