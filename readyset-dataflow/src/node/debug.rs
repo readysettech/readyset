@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use itertools::Itertools;
-use readyset::KeyCount;
+use readyset::NodeSize;
 
 use crate::node::{Node, NodeType};
 use crate::prelude::*;
@@ -27,7 +27,7 @@ impl Node {
         &self,
         idx: NodeIndex,
         detailed: bool,
-        node_key_counts: &HashMap<NodeIndex, KeyCount>,
+        node_sizes: &HashMap<NodeIndex, NodeSize>,
         materialization_status: MaterializationStatus,
     ) -> String {
         let mut s = String::new();
@@ -118,9 +118,13 @@ impl Node {
                     .map(|d| format!("\"/set312/{}\"", (d % 12) + 1))
                     .unwrap_or_else(|| "white".into())
             ));
-            let key_count_str = node_key_counts
-                .get(&idx)
-                .map_or("".to_owned(), |c| format!("&nbsp;({})", c));
+
+            let (key_count_str, node_size_str) = match node_sizes.get(&idx) {
+                Some(NodeSize { key_count, bytes }) => {
+                    (format!("&nbsp;({})", key_count), format!("| {}", bytes))
+                }
+                _ => ("".to_string(), "".to_string()),
+            };
 
             let materialized = match materialization_status {
                 MaterializationStatus::Not => "",
@@ -176,8 +180,8 @@ impl Node {
                     ));
                 }
                 NodeType::Ingress => s.push_str(&format!(
-                    "{{ {{ {} {} {} }} | (ingress) | {} }}",
-                    addr, materialized, key_count_str, sharding
+                    "{{ {{ {} {} {} {} }} | (ingress) | {} }}",
+                    addr, materialized, key_count_str, node_size_str, sharding
                 )),
                 NodeType::Egress { .. } => {
                     s.push_str(&format!("{{ {} | (egress) | {} }}", addr, sharding))
@@ -194,11 +198,12 @@ impl Node {
                         Some(index) => format!("{:?}({:?})", index.index_type, index.columns),
                     };
                     s.push_str(&format!(
-                        "{{ {{ {} / {} {} {} }} | (reader / ⚷: {}) | {} }}",
+                        "{{ {{ {} / {} {} {} {} }} | (reader / ⚷: {}) | {} }}",
                         addr,
                         Self::escape(self.name()),
                         materialized,
                         key_count_str,
+                        node_size_str,
                         key,
                         sharding,
                     ))
@@ -208,12 +213,13 @@ impl Node {
 
                     // Output node name and description. First row.
                     s.push_str(&format!(
-                        "{{ {} / {} | {} {} {} }}",
+                        "{{ {} / {} | {} {} {} {} }}",
                         addr,
                         Self::escape(self.name()),
                         Self::escape(&i.description(detailed)),
                         materialized,
                         key_count_str,
+                        node_size_str,
                     ));
 
                     // Output node outputs. Second row.

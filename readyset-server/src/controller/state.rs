@@ -41,7 +41,7 @@ use readyset::metrics::recorded;
 use readyset::recipe::changelist::{Change, ChangeList};
 use readyset::recipe::ExtendRecipeSpec;
 use readyset::replication::{ReplicationOffset, ReplicationOffsets};
-use readyset::{KeyCount, ReadySetError, ReadySetResult, ViewFilter, ViewRequest, ViewSchema};
+use readyset::{NodeSize, ReadySetError, ReadySetResult, ViewFilter, ViewRequest, ViewSchema};
 use readyset_errors::{internal, internal_err, invariant_eq, NodeType};
 use regex::Regex;
 use serde::de::DeserializeOwned;
@@ -608,12 +608,12 @@ impl DfState {
     pub(super) fn graphviz(
         &self,
         detailed: bool,
-        node_key_counts: Option<HashMap<NodeIndex, KeyCount>>,
+        node_sizes: Option<HashMap<NodeIndex, NodeSize>>,
     ) -> String {
         graphviz(
             &self.ingredients,
             detailed,
-            node_key_counts,
+            node_sizes,
             &self.materializations,
             Some(&self.domain_nodes),
         )
@@ -775,12 +775,12 @@ impl DfState {
 
     /// Return a map of node indices to key counts.
     #[allow(dead_code)]
-    pub(super) async fn node_key_counts(&self) -> ReadySetResult<HashMap<NodeIndex, KeyCount>> {
-        let counts_per_domain: Vec<(DomainIndex, Vec<Vec<Vec<(NodeIndex, KeyCount)>>>)> = self
-            .query_domains::<_, Vec<(NodeIndex, KeyCount)>>(
+    pub(super) async fn node_sizes(&self) -> ReadySetResult<HashMap<NodeIndex, NodeSize>> {
+        let counts_per_domain: Vec<(DomainIndex, Vec<Vec<Vec<(NodeIndex, NodeSize)>>>)> = self
+            .query_domains::<_, Vec<(NodeIndex, NodeSize)>>(
                 self.domains
                     .keys()
-                    .map(|di| (*di, DomainRequest::RequestNodeKeyCounts)),
+                    .map(|di| (*di, DomainRequest::RequestNodeSizes)),
             )
             .try_collect()
             .await?;
@@ -794,7 +794,7 @@ impl DfState {
             // We may have multiple entries for the same node in the case of sharding, so this code
             // adds together the key counts for any duplicate nodes we come across:
             res.entry(node_index)
-                .and_modify(|e| *e += count)
+                .and_modify(|s| *s += count)
                 .or_insert(count);
         }
         Ok(res)
@@ -1536,13 +1536,13 @@ unsafe impl Sync for PersistableDfState {}
 pub(super) fn graphviz(
     graph: &Graph,
     detailed: bool,
-    node_key_counts: Option<HashMap<NodeIndex, KeyCount>>,
+    node_sizes: Option<HashMap<NodeIndex, NodeSize>>,
     materializations: &Materializations,
     domain_nodes: Option<&HashMap<DomainIndex, NodeMap<NodeIndex>>>,
 ) -> String {
     let mut s = String::new();
     let indentln = |s: &mut String| s.push_str("    ");
-    let node_key_counts = node_key_counts.unwrap_or_default();
+    let node_sizes = node_sizes.unwrap_or_default();
 
     #[allow(clippy::unwrap_used)] // regex is hardcoded and valid
     fn sanitize(s: &str) -> Cow<str> {
@@ -1599,7 +1599,7 @@ pub(super) fn graphviz(
             indentln(&mut s);
             s.push_str(&format!("n{}", index.index()));
             s.push_str(
-                sanitize(&node.describe(index, detailed, &node_key_counts, materialization_status))
+                sanitize(&node.describe(index, detailed, &node_sizes, materialization_status))
                     .as_ref(),
             );
         }

@@ -179,20 +179,20 @@ impl Leader {
                     return_serialized!(ds.graphviz(false, None));
                 }
                 (&Method::GET, "/graph") => {
-                    let (ds, node_key_counts) = futures::executor::block_on(async move {
+                    let (ds, node_sizes) = futures::executor::block_on(async move {
                         let ds = self.dataflow_state_handle.read().await;
-                        let node_key_counts = ds.node_key_counts().await?;
-                        ReadySetResult::Ok((ds, node_key_counts))
+                        let node_sizes = ds.node_sizes().await?;
+                        ReadySetResult::Ok((ds, node_sizes))
                     })?;
-                    return Ok(ds.graphviz(true, Some(node_key_counts)).into_bytes());
+                    return Ok(ds.graphviz(true, Some(node_sizes)).into_bytes());
                 }
                 (&Method::POST, "/graphviz") => {
-                    let (ds, node_key_counts) = futures::executor::block_on(async move {
+                    let (ds, node_sizes) = futures::executor::block_on(async move {
                         let ds = self.dataflow_state_handle.read().await;
-                        let node_key_counts = ds.node_key_counts().await?;
-                        ReadySetResult::Ok((ds, node_key_counts))
+                        let node_sizes = ds.node_sizes().await?;
+                        ReadySetResult::Ok((ds, node_sizes))
                     })?;
-                    return_serialized!(ds.graphviz(true, Some(node_key_counts)));
+                    return_serialized!(ds.graphviz(true, Some(node_sizes)));
                 }
                 (&Method::GET | &Method::POST, "/get_statistics") => {
                     let ret = futures::executor::block_on(async move {
@@ -349,10 +349,10 @@ impl Leader {
                     })?;
                     return_serialized!(res);
                 }
-                (&Method::POST, "/node_key_counts") => {
+                (&Method::POST, "/node_sizes") => {
                     let res = futures::executor::block_on(async move {
                         let ds = self.dataflow_state_handle.read().await;
-                        ds.node_key_counts().await
+                        ds.node_sizes().await
                     })?;
                     return_serialized!(res);
                 }

@@ -308,8 +308,9 @@ pub enum DomainRequest {
     /// Request a list of base table nodes that are currently involved in snapshotting.
     RequestSnapshottingTables,
 
-    /// Request a map of node indexes to key counts
-    RequestNodeKeyCounts,
+    /// Request a map of node indexes to approximate key counts and materialized state size in
+    /// bytes
+    RequestNodeSizes,
 
     /// Process the packet, as per usual
     Packet(Packet),

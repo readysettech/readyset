@@ -1181,21 +1181,27 @@ mod tests {
             .await
             .unwrap();
 
-        let key_counts = noria.node_key_counts().await.unwrap();
+        let key_counts = noria.node_sizes().await.unwrap();
 
         let mut table = noria.table("key_count_test").await.unwrap();
         // The table only contains the local index, so we use `inputs()` to get the global index
         let table_idx = noria.inputs().await.unwrap()["key_count_test"];
         let view_idx = noria.view("q1").await.unwrap().node().clone();
 
-        assert_eq!(key_counts[&table_idx], KeyCount::EstimatedRowCount(0));
-        assert_eq!(key_counts[&view_idx], KeyCount::ExactKeyCount(0));
+        assert_eq!(
+            key_counts[&table_idx].key_count,
+            KeyCount::EstimatedRowCount(0)
+        );
+        assert_eq!(key_counts[&view_idx].key_count, KeyCount::ExactKeyCount(0));
 
         table.insert(vec![1.into(), "abc".into()]).await.unwrap();
 
-        let key_counts = noria.node_key_counts().await.unwrap();
+        let key_counts = noria.node_sizes().await.unwrap();
 
-        assert_eq!(key_counts[&table_idx], KeyCount::EstimatedRowCount(1));
-        assert_eq!(key_counts[&view_idx], KeyCount::ExactKeyCount(1));
+        assert_eq!(
+            key_counts[&table_idx].key_count,
+            KeyCount::EstimatedRowCount(1)
+        );
+        assert_eq!(key_counts[&view_idx].key_count, KeyCount::ExactKeyCount(1));
     }
 }

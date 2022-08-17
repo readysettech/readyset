@@ -258,6 +258,10 @@ impl WriteHandle {
         self.handle.refresh();
     }
 
+    pub(crate) fn len(&self) -> usize {
+        self.handle.read().len()
+    }
+
     /// Add a new set of records to the backlog.
     ///
     /// These will be made visible to readers after the next call to `swap()`.

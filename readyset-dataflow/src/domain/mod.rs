@@ -1919,24 +1919,21 @@ impl Domain {
             DomainRequest::RequestSnapshottingTables => {
                 Ok(Some(bincode::serialize(&self.snapshotting_base_nodes())?))
             }
-            DomainRequest::RequestNodeKeyCounts => {
+            DomainRequest::RequestNodeSizes => {
                 let mut res = Vec::new();
                 for (local_index, node_ref) in self.nodes.iter() {
                     let node = node_ref.borrow();
                     if node.is_reader() {
-                        let reader_addr =
-                            (node.global_addr(), node.name().clone(), self.shard()).into();
-                        #[allow(clippy::unwrap_used)] // lock poisoning is unrecoverable
-                        let key_count = self
-                            .readers
-                            .lock()
-                            .unwrap()
-                            .get(&reader_addr)
-                            .map_or(0, |handle| handle.len());
-                        res.push((node.global_addr(), KeyCount::ExactKeyCount(key_count)))
+                        if let Some(wh) = self.reader_write_handles.get(local_index) {
+                            res.push((
+                                node.global_addr(),
+                                KeyCount::ExactKeyCount(wh.len()),
+                                wh.deep_size_of(),
+                            ));
+                        }
                     } else if let Some(state) = self.state.get(local_index) {
                         // non-reader node with state
-                        res.push((node.global_addr(), state.key_count()))
+                        res.push((node.global_addr(), state.key_count(), state.deep_size_of()))
                     }
                 }
                 Ok(Some(bincode::serialize(&res)?))

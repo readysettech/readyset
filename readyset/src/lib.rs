@@ -408,6 +408,15 @@ impl From<(petgraph::graph::NodeIndex, SqlIdentifier, usize)> for ReaderAddress 
     }
 }
 
+/// Use to aggregate various node stats that describe its size
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeSize {
+    /// The number of keys materialized for a node
+    pub key_count: KeyCount,
+    /// The approximate size of the materialized state in bytes
+    pub bytes: NodeMaterializedSize,
+}
+
 /// Used to wrap key counts since we use row count estimates as a rough correlate of the key count
 /// in the case of RocksDB nodes, and we want to keep track of when we do that so as to avoid any
 /// confusion in other parts of the code.
@@ -419,12 +428,39 @@ pub enum KeyCount {
     EstimatedRowCount(usize),
 }
 
+/// Used to wrap the materialized size of a node's state
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeMaterializedSize(usize);
+
 impl Display for KeyCount {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             KeyCount::ExactKeyCount(count) => write!(f, "{}", count),
             KeyCount::EstimatedRowCount(count) => write!(f, "~{}", count),
         }
+    }
+}
+
+impl Display for NodeMaterializedSize {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let size_b = self.0 as f64;
+        let size_kb = size_b / 1024.;
+        let size_mb = size_kb / 1024.;
+        if size_kb < 1. {
+            write!(f, "{size_b:.0} B")
+        } else if size_mb < 1. {
+            write!(f, "{size_kb:.2} KiB")
+        } else {
+            write!(f, "{size_mb:.2} MiB")
+        }
+    }
+}
+
+impl AddAssign for NodeSize {
+    /// Adds the node size for the rhs node size to ourselves.
+    fn add_assign(&mut self, rhs: Self) {
+        self.key_count += rhs.key_count;
+        self.bytes += rhs.bytes;
     }
 }
 
@@ -449,6 +485,13 @@ impl AddAssign for KeyCount {
                 self, rhs
             ),
         };
+    }
+}
+
+impl AddAssign for NodeMaterializedSize {
+    /// Adds the node size for the rhs node size to ourselves.
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 += rhs.0;
     }
 }
 

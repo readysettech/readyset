@@ -31,7 +31,7 @@ use crate::replication::ReplicationOffsets;
 use crate::status::ReadySetStatus;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
-use crate::{KeyCount, ReplicationOffset, ViewFilter, ViewRequest};
+use crate::{NodeSize, ReplicationOffset, ViewFilter, ViewRequest};
 
 mod rpc;
 
@@ -664,10 +664,10 @@ impl ControllerHandle {
     }
 
     /// Return a map of node indices to key counts.
-    pub fn node_key_counts(
+    pub fn node_sizes(
         &mut self,
-    ) -> impl Future<Output = ReadySetResult<HashMap<NodeIndex, KeyCount>>> + '_ {
-        self.rpc("node_key_counts", (), self.request_timeout)
+    ) -> impl Future<Output = ReadySetResult<HashMap<NodeIndex, NodeSize>>> + '_ {
+        self.rpc("node_sizes", (), self.request_timeout)
     }
 
     /// Return whether the leader is ready or not.
