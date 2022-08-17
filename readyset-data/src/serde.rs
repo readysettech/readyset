@@ -12,7 +12,7 @@ use serde_bytes::{ByteBuf, Bytes};
 use strum::VariantNames;
 use strum_macros::{EnumString, EnumVariantNames, FromRepr};
 
-use crate::{DataType, Text, TimestampTz, TinyText};
+use crate::{DfValue, Text, TimestampTz, TinyText};
 
 #[derive(EnumVariantNames, EnumString, FromRepr, Clone, Copy)]
 enum Variant {
@@ -44,51 +44,49 @@ where
     // The compiler should be able to inline the constant name here, so no lookups are done
     // at runtime
     let variant_name = Variant::VARIANTS[variant as usize];
-    serializer.serialize_newtype_variant("DataType", variant as _, variant_name, value)
+    serializer.serialize_newtype_variant("DfValue", variant as _, variant_name, value)
 }
 
-impl serde::ser::Serialize for DataType {
+impl serde::ser::Serialize for DfValue {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::ser::Serializer,
     {
         match &self {
-            DataType::None => serializer.serialize_unit_variant(
-                "DataType",
+            DfValue::None => serializer.serialize_unit_variant(
+                "DfValue",
                 Variant::None as _,
                 Variant::VARIANTS[Variant::None as usize],
             ),
-            DataType::Int(v) => serialize_variant(serializer, Variant::Int, &i128::from(*v)),
-            DataType::UnsignedInt(v) => {
-                serialize_variant(serializer, Variant::Int, &i128::from(*v))
-            }
-            DataType::Float(f) => serialize_variant(serializer, Variant::Float, &f.to_bits()),
-            DataType::Double(f) => serialize_variant(serializer, Variant::Double, &f.to_bits()),
-            DataType::Text(v) => {
+            DfValue::Int(v) => serialize_variant(serializer, Variant::Int, &i128::from(*v)),
+            DfValue::UnsignedInt(v) => serialize_variant(serializer, Variant::Int, &i128::from(*v)),
+            DfValue::Float(f) => serialize_variant(serializer, Variant::Float, &f.to_bits()),
+            DfValue::Double(f) => serialize_variant(serializer, Variant::Double, &f.to_bits()),
+            DfValue::Text(v) => {
                 serialize_variant(serializer, Variant::Text, Bytes::new(v.as_bytes()))
             }
-            DataType::TinyText(v) => {
+            DfValue::TinyText(v) => {
                 serialize_variant(serializer, Variant::Text, Bytes::new(v.as_bytes()))
             }
-            DataType::Time(v) => serialize_variant(serializer, Variant::Time, &v),
-            DataType::ByteArray(a) => {
+            DfValue::Time(v) => serialize_variant(serializer, Variant::Time, &v),
+            DfValue::ByteArray(a) => {
                 serialize_variant(serializer, Variant::ByteArray, Bytes::new(a.as_ref()))
             }
-            DataType::Numeric(d) => serialize_variant(serializer, Variant::Numeric, &d),
-            DataType::BitVector(bits) => serialize_variant(serializer, Variant::BitVector, &bits),
-            DataType::TimestampTz(ts) => {
+            DfValue::Numeric(d) => serialize_variant(serializer, Variant::Numeric, &d),
+            DfValue::BitVector(bits) => serialize_variant(serializer, Variant::BitVector, &bits),
+            DfValue::TimestampTz(ts) => {
                 let extra = ts.extra;
                 let nt = ts.to_chrono();
                 let ts = nt.naive_utc().timestamp() as u64 as u128
                     + ((nt.naive_utc().timestamp_subsec_nanos() as u128) << 64);
                 serialize_variant(serializer, Variant::TimestampTz, &(ts, extra))
             }
-            DataType::Array(vs) => serialize_variant(serializer, Variant::Array, &vs),
-            DataType::PassThrough(_) => Err(serde::ser::Error::custom(
+            DfValue::Array(vs) => serialize_variant(serializer, Variant::Array, &vs),
+            DfValue::PassThrough(_) => Err(serde::ser::Error::custom(
                 "PassThrough not supported in dataflow graph",
             )),
-            DataType::Max => serializer.serialize_unit_variant(
-                "DataType",
+            DfValue::Max => serializer.serialize_unit_variant(
+                "DfValue",
                 Variant::Max as _,
                 Variant::VARIANTS[Variant::Max as usize],
             ),
@@ -96,8 +94,8 @@ impl serde::ser::Serialize for DataType {
     }
 }
 
-impl<'de> Deserialize<'de> for DataType {
-    fn deserialize<D>(deserializer: D) -> Result<DataType, D::Error>
+impl<'de> Deserialize<'de> for DfValue {
+    fn deserialize<D>(deserializer: D) -> Result<DfValue, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
@@ -156,9 +154,9 @@ impl<'de> Deserialize<'de> for DataType {
 
         struct Visitor;
         impl<'de> serde::de::Visitor<'de> for Visitor {
-            type Value = DataType;
+            type Value = DfValue;
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("enum DataType")
+                f.write_str("enum DfValue")
             }
 
             fn visit_enum<A>(self, data: A) -> Result<Self::Value, A::Error>
@@ -167,11 +165,11 @@ impl<'de> Deserialize<'de> for DataType {
             {
                 match EnumAccess::variant(data)? {
                     (Variant::None, variant) => {
-                        VariantAccess::unit_variant(variant).map(|_| DataType::None)
+                        VariantAccess::unit_variant(variant).map(|_| DfValue::None)
                     }
                     (Variant::Int, variant) => VariantAccess::newtype_variant::<i128>(variant)
                         .and_then(|x| {
-                            DataType::try_from(x).map_err(|_| {
+                            DfValue::try_from(x).map_err(|_| {
                                 serde::de::Error::invalid_value(
                                     serde::de::Unexpected::Other(format!("{}", x).as_str()),
                                     &"integer (i128)",
@@ -179,30 +177,30 @@ impl<'de> Deserialize<'de> for DataType {
                             })
                         }),
                     (Variant::Float, variant) => VariantAccess::newtype_variant::<u32>(variant)
-                        .map(|b| DataType::Float(f32::from_bits(b))),
+                        .map(|b| DfValue::Float(f32::from_bits(b))),
                     (Variant::Double, variant) => VariantAccess::newtype_variant::<u64>(variant)
-                        .map(|b| DataType::Double(f64::from_bits(b))),
+                        .map(|b| DfValue::Double(f64::from_bits(b))),
                     (Variant::Numeric, variant) => {
                         VariantAccess::newtype_variant::<Decimal>(variant)
-                            .map(|d| DataType::Numeric(Arc::new(d)))
+                            .map(|d| DfValue::Numeric(Arc::new(d)))
                     }
                     (Variant::Text, variant) => {
                         VariantAccess::newtype_variant::<TextOrTinyText>(variant).map(|tt| match tt
                         {
-                            TextOrTinyText::TinyText(tt) => DataType::TinyText(tt),
-                            TextOrTinyText::Text(t) => DataType::Text(t),
+                            TextOrTinyText::TinyText(tt) => DfValue::TinyText(tt),
+                            TextOrTinyText::Text(t) => DfValue::Text(t),
                         })
                     }
                     (Variant::Time, variant) => {
-                        VariantAccess::newtype_variant::<MysqlTime>(variant).map(DataType::Time)
+                        VariantAccess::newtype_variant::<MysqlTime>(variant).map(DfValue::Time)
                     }
                     (Variant::ByteArray, variant) => {
                         VariantAccess::newtype_variant::<ByteBuf>(variant)
-                            .map(|v| DataType::ByteArray(Arc::new(v.into_vec())))
+                            .map(|v| DfValue::ByteArray(Arc::new(v.into_vec())))
                     }
                     (Variant::BitVector, variant) => {
                         VariantAccess::newtype_variant::<BitVec>(variant)
-                            .map(|bits| DataType::BitVector(Arc::new(bits)))
+                            .map(|bits| DfValue::BitVector(Arc::new(bits)))
                     }
                     (Variant::TimestampTz, variant) => VariantAccess::newtype_variant::<(
                         u128,
@@ -212,19 +210,19 @@ impl<'de> Deserialize<'de> for DataType {
                         // We deserialize the NaiveDateTime by extracting nsecs from the top 64 bits
                         // of the encoded i128, and secs from the low 64 bits
                         let datetime = NaiveDateTime::from_timestamp(ts as _, (ts >> 64) as _);
-                        DataType::TimestampTz(TimestampTz { datetime, extra })
+                        DfValue::TimestampTz(TimestampTz { datetime, extra })
                     }),
                     (Variant::Array, variant) => {
-                        VariantAccess::newtype_variant(variant).map(DataType::Array)
+                        VariantAccess::newtype_variant(variant).map(DfValue::Array)
                     }
                     (Variant::Max, variant) => {
-                        VariantAccess::unit_variant(variant).map(|_| DataType::Max)
+                        VariantAccess::unit_variant(variant).map(|_| DfValue::Max)
                     }
                 }
             }
         }
 
-        deserializer.deserialize_enum("DataType", Variant::VARIANTS, Visitor)
+        deserializer.deserialize_enum("DfValue", Variant::VARIANTS, Visitor)
     }
 }
 

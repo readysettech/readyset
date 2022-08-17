@@ -232,8 +232,8 @@ struct Waiting {
 /// [`HashMap`]: IndexType::HashMap
 /// [`BTreeMap`]: IndexType::BTreeMap
 enum RequestedKeys {
-    Points(HashSet<Vec1<DataType>, RandomState>),
-    Ranges(IntervalTreeSet<Vec1<DataType>>),
+    Points(HashSet<Vec1<DfValue>, RandomState>),
+    Ranges(IntervalTreeSet<Vec1<DfValue>>),
 }
 
 impl RequestedKeys {
@@ -279,10 +279,7 @@ impl RequestedKeys {
                             .get_interval_difference(key)
                             .into_iter()
                             .map(
-                                |(lower, upper): (
-                                    Bound<&Vec1<DataType>>,
-                                    Bound<&Vec1<DataType>>,
-                                )| {
+                                |(lower, upper): (Bound<&Vec1<DfValue>>, Bound<&Vec1<DfValue>>)| {
                                     (lower.cloned(), upper.cloned())
                                 },
                             )
@@ -473,7 +470,7 @@ pub struct Domain {
 
     not_ready: HashSet<LocalNodeIndex>,
 
-    ingress_inject: NodeMap<(usize, Vec<DataType>)>,
+    ingress_inject: NodeMap<(usize, Vec<DfValue>)>,
 
     persistence_parameters: PersistenceParameters,
 
@@ -1683,7 +1680,7 @@ impl Domain {
                         }
                         default
                     };
-                    let fix = move |mut r: Vec<DataType>| -> Vec<DataType> {
+                    let fix = move |mut r: Vec<DfValue>| -> Vec<DfValue> {
                         if let Some((start, ref added)) = added_cols {
                             let rlen = r.len();
                             r.extend(added.iter().skip(rlen - start).cloned());
@@ -2164,7 +2161,7 @@ impl Domain {
         Ok(())
     }
 
-    fn seed_row(&self, source: LocalNodeIndex, row: Cow<[DataType]>) -> ReadySetResult<Record> {
+    fn seed_row(&self, source: LocalNodeIndex, row: Cow<[DfValue]>) -> ReadySetResult<Record> {
         if let Some(&(start, ref defaults)) = self.ingress_inject.get(source) {
             let mut v = Vec::with_capacity(start + defaults.len());
             v.extend(row.iter().cloned());

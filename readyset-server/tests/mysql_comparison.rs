@@ -10,7 +10,7 @@ use std::{io, panic, thread, time};
 
 use mysql::prelude::Queryable;
 use mysql::{OptsBuilder, Params};
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use readyset_server::Builder;
 use serde::Deserialize;
 
@@ -26,7 +26,7 @@ enum Type {
 }
 
 impl Type {
-    pub fn make_datatype(&self, value: &str) -> DataType {
+    pub fn make_dataflow_value(&self, value: &str) -> DfValue {
         match *self {
             Type::Int => i64::from_str(value).unwrap().into(),
             Type::Text => value.try_into().unwrap(),
@@ -279,10 +279,10 @@ async fn check_query(
         let mut mutator = g.table(table_name).await.unwrap();
         for row in table.data.as_ref().unwrap().iter() {
             assert_eq!(row.len(), table.types.len());
-            let row: Vec<DataType> = row
+            let row: Vec<DfValue> = row
                 .iter()
                 .enumerate()
-                .map(|(i, v)| table.types[i].make_datatype(v))
+                .map(|(i, v)| table.types[i].make_dataflow_value(v))
                 .collect();
             mutator.insert(row).await.unwrap();
         }
@@ -293,7 +293,7 @@ async fn check_query(
     let mut getter = g.view(query_name).await.unwrap();
 
     for (i, query_parameter) in query.values.iter().enumerate() {
-        let query_param = query.types[0].make_datatype(&query_parameter[0]);
+        let query_param = query.types[0].make_dataflow_value(&query_parameter[0]);
         let query_results = getter.lookup(&[query_param], true).await.unwrap();
 
         let target_results = &target[&i.to_string()];
@@ -302,23 +302,23 @@ async fn check_query(
             .map(|row| {
                 row.into_iter()
                     .map(|v| match v {
-                        DataType::None | DataType::Max => "NULL".to_owned(),
-                        DataType::Int(i) => i.to_string(),
-                        DataType::UnsignedInt(i) => i.to_string(),
-                        DataType::Float(f) => format!("{}", f),
-                        DataType::Double(f) => format!("{}", f),
-                        DataType::Numeric(ref d) => d.to_string(),
-                        DataType::Text(_) | DataType::TinyText(_) => {
+                        DfValue::None | DfValue::Max => "NULL".to_owned(),
+                        DfValue::Int(i) => i.to_string(),
+                        DfValue::UnsignedInt(i) => i.to_string(),
+                        DfValue::Float(f) => format!("{}", f),
+                        DfValue::Double(f) => format!("{}", f),
+                        DfValue::Numeric(ref d) => d.to_string(),
+                        DfValue::Text(_) | DfValue::TinyText(_) => {
                             let s: &str = (&v).try_into().unwrap();
                             s.to_string()
                         }
-                        d @ DataType::ByteArray(_) => format!("{}", d),
-                        DataType::TimestampTz(_)
-                        | DataType::Time(_)
+                        d @ DfValue::ByteArray(_) => format!("{}", d),
+                        DfValue::TimestampTz(_)
+                        | DfValue::Time(_)
                         // These types are PostgreSQL specific
-                        | DataType::BitVector(_)
-                        | DataType::PassThrough(_)
-                        | DataType::Array(_) => {
+                        | DfValue::BitVector(_)
+                        | DfValue::PassThrough(_)
+                        | DfValue::Array(_) => {
                             unimplemented!()
                         }
                     })

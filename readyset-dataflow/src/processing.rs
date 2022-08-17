@@ -14,7 +14,7 @@ use vec1::Vec1;
 use crate::ops;
 use crate::prelude::*;
 
-// TODO: make a Key type that is an ArrayVec<DataType>
+// TODO: make a Key type that is an ArrayVec<DfValue>
 
 /// Indication, for a [`Miss`], for how to derive the replay key that was being processed during
 /// that miss
@@ -35,7 +35,7 @@ pub(crate) enum MissReplayKey {
     ///
     /// * The endpoints of the range must be the same length
     /// * The endpoints of the range may not be empty
-    Range((Bound<Vec1<DataType>>, Bound<Vec1<DataType>>)),
+    Range((Bound<Vec1<DfValue>>, Bound<Vec1<DfValue>>)),
 }
 
 /// Indication, for a [`Miss`], for how to derive the key that was used for the lookup that resulted
@@ -95,7 +95,7 @@ pub(crate) struct Miss {
     /// The replay key that was being processed during the lookup (if any)
     pub(crate) replay_key: Option<MissReplayKey>,
     /// The record we were processing when we missed.
-    pub(crate) record: Vec<DataType>,
+    pub(crate) record: Vec<DfValue>,
 }
 
 /// A builder for [`Miss`]es.
@@ -108,7 +108,7 @@ pub(crate) struct MissBuilder<'a> {
     lookup_key: Option<MissLookupKey>,
     replay: Option<&'a ReplayContext<'a>>,
     replay_key_cols: Option<&'a [usize]>,
-    record: Option<Vec<DataType>>,
+    record: Option<Vec<DfValue>>,
 }
 
 impl<'a> MissBuilder<'a> {
@@ -150,7 +150,7 @@ impl<'a> MissBuilder<'a> {
     }
 
     /// Set the value for [`Miss::record`].
-    pub(crate) fn record(&mut self, record: Vec<DataType>) -> &mut Self {
+    pub(crate) fn record(&mut self, record: Vec<DfValue>) -> &mut Self {
         self.record = Some(record);
         self
     }
@@ -185,7 +185,7 @@ impl<'a> MissBuilder<'a> {
                         )
                             .contains(record_key_memo.get_or_insert_with(
                                 // TODO(grfn): This clone shouldn't be necessary, but comparing
-                                // Vec<&DataType> with &Vec<DataType> is surprisingly difficult
+                                // Vec<&DfValue> with &Vec<DfValue> is surprisingly difficult
                                 || {
                                     record
                                         .cloned_indices(replay_key_cols.iter().copied())
@@ -477,7 +477,7 @@ impl std::ops::Index<usize> for LookupIndex {
 /// expression)
 pub(crate) enum IngredientLookupResult<'a> {
     /// Records returned from a successful lookup
-    Records(Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>),
+    Records(Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DfValue]>>> + 'a>),
     /// The lookup got a miss
     Miss,
 }
@@ -493,7 +493,7 @@ impl<'a> From<LookupResult<'a>> for IngredientLookupResult<'a> {
 
 impl<'a, I> From<Box<I>> for IngredientLookupResult<'a>
 where
-    I: Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a,
+    I: Iterator<Item = ReadySetResult<Cow<'a, [DfValue]>>> + 'a,
 {
     fn from(rs: Box<I>) -> Self {
         Self::Records(rs as Box<_>)
@@ -505,7 +505,7 @@ impl<'a> IngredientLookupResult<'a> {
     pub(crate) fn records<I, R>(rs: I) -> Self
     where
         I: IntoIterator<Item = R> + 'a,
-        Cow<'a, [DataType]>: From<R>,
+        Cow<'a, [DfValue]>: From<R>,
         R: 'a,
     {
         Box::new(rs.into_iter().map(|r| Ok(r.into()))).into()
@@ -528,7 +528,7 @@ impl<'a> IngredientLookupResult<'a> {
     /// records in [`Self::Records`], or by returning [`Self::Miss`]
     pub(crate) fn map<F>(self, f: F) -> Self
     where
-        F: 'a + FnMut(ReadySetResult<Cow<'a, [DataType]>>) -> ReadySetResult<Cow<'a, [DataType]>>,
+        F: 'a + FnMut(ReadySetResult<Cow<'a, [DfValue]>>) -> ReadySetResult<Cow<'a, [DfValue]>>,
     {
         match self {
             Self::Records(rs) => Self::Records(Box::new(rs.map(f)) as _),
@@ -551,7 +551,7 @@ impl<'a> IngredientLookupResult<'a> {
     #[cfg(test)]
     pub(crate) fn unwrap(
         self,
-    ) -> Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a> {
+    ) -> Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DfValue]>>> + 'a> {
         match self {
             IngredientLookupResult::Records(rs) => rs,
             IngredientLookupResult::Miss => {

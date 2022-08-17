@@ -150,7 +150,7 @@ fn new_inner(
 mod multir;
 mod multiw;
 
-fn key_to_single(k: Key) -> Cow<DataType> {
+fn key_to_single(k: Key) -> Cow<DfValue> {
     assert_eq!(k.len(), 1);
     match k {
         Cow::Owned(mut k) => Cow::Owned(k.swap_remove(0)),
@@ -167,7 +167,7 @@ pub(crate) struct WriteHandle {
     mem_size: usize,
 }
 
-type Key<'a> = Cow<'a, [DataType]>;
+type Key<'a> = Cow<'a, [DfValue]>;
 
 pub(crate) struct MutWriteHandleEntry<'a> {
     handle: &'a mut WriteHandle,
@@ -241,7 +241,7 @@ impl WriteHandle {
         }
     }
 
-    pub(crate) fn contains_record(&self, rec: &[DataType]) -> reader_map::Result<bool> {
+    pub(crate) fn contains_record(&self, rec: &[DfValue]) -> reader_map::Result<bool> {
         let key_cols = self.index.columns.as_slice();
         if self.contiguous {
             self.contains_key(&rec[key_cols[0]..(key_cols[0] + key_cols.len())])
@@ -250,7 +250,7 @@ impl WriteHandle {
         }
     }
 
-    pub(super) fn contains_key(&self, key: &[DataType]) -> reader_map::Result<bool> {
+    pub(super) fn contains_key(&self, key: &[DfValue]) -> reader_map::Result<bool> {
         self.handle.read().contains_key(key)
     }
 
@@ -432,7 +432,7 @@ impl SingleReadHandle {
         self.handle.len() == 0
     }
 
-    pub fn keys(&self) -> Vec<Vec<DataType>> {
+    pub fn keys(&self) -> Vec<Vec<DfValue>> {
         self.handle.keys()
     }
 
@@ -455,7 +455,7 @@ mod tests {
     use super::*;
 
     impl SingleReadHandle {
-        fn get<'a>(&self, key: &'a [DataType]) -> Result<SharedRows, LookupError<'a>> {
+        fn get<'a>(&self, key: &'a [DfValue]) -> Result<SharedRows, LookupError<'a>> {
             match self.handle.get(key) {
                 Err(e) if e.is_miss() && self.trigger.is_none() => Ok(SharedRows::default()),
                 r => r,
@@ -641,7 +641,7 @@ mod tests {
             );
             w.swap();
 
-            let key = vec1![DataType::from(0)];
+            let key = vec1![DfValue::from(0)];
             assert!(r.get(&key).err().unwrap().is_miss());
 
             w.mark_filled(key.clone().into()).unwrap();
@@ -661,14 +661,14 @@ mod tests {
             w.swap();
 
             let range_key = &[KeyComparison::Range((
-                Bound::Included(vec1![DataType::from(0)]),
-                Bound::Excluded(vec1![DataType::from(10)]),
+                Bound::Included(vec1![DfValue::from(0)]),
+                Bound::Excluded(vec1![DfValue::from(10)]),
             ))];
 
             assert!(r.get_multi(range_key).err().unwrap().is_miss());
 
             w.mark_filled(KeyComparison::from_range(
-                &(vec1![DataType::from(0)]..vec1![DataType::from(10)]),
+                &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)]),
             ))
             .unwrap();
             w.swap();
@@ -690,7 +690,7 @@ mod tests {
             );
             w.swap();
 
-            let key = vec1![DataType::from(0)];
+            let key = vec1![DfValue::from(0)];
             w.mark_filled(key.clone().into()).unwrap();
             w.swap();
             r.get(&key).unwrap();
@@ -712,19 +712,19 @@ mod tests {
             w.swap();
 
             let range_key = &[KeyComparison::Range((
-                Bound::Included(vec1![DataType::from(0)]),
-                Bound::Excluded(vec1![DataType::from(10)]),
+                Bound::Included(vec1![DfValue::from(0)]),
+                Bound::Excluded(vec1![DfValue::from(10)]),
             ))];
 
             w.mark_filled(KeyComparison::from_range(
-                &(vec1![DataType::from(0)]..vec1![DataType::from(10)]),
+                &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)]),
             ))
             .unwrap();
             w.swap();
             r.get_multi(range_key).unwrap();
 
             w.mark_hole(&KeyComparison::from_range(
-                &(vec1![DataType::from(0)]..vec1![DataType::from(10)]),
+                &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)]),
             ))
             .unwrap();
             w.swap();

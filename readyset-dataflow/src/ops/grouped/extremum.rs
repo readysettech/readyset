@@ -60,8 +60,8 @@ pub struct ExtremumOperator {
 }
 
 pub enum DiffType {
-    Insert(DataType),
-    Remove(DataType),
+    Insert(DfValue),
+    Remove(DfValue),
     None,
 }
 
@@ -80,10 +80,10 @@ impl GroupedOperation for ExtremumOperator {
         &self.group[..]
     }
 
-    fn to_diff(&self, r: &[DataType], pos: bool) -> ReadySetResult<Self::Diff> {
+    fn to_diff(&self, r: &[DfValue], pos: bool) -> ReadySetResult<Self::Diff> {
         #[allow(clippy::indexing_slicing)] // Invariant documented.
         let v = &r[self.over];
-        if let DataType::None = *v {
+        if let DfValue::None = *v {
             Ok(DiffType::None)
         } else if pos {
             Ok(DiffType::Insert(v.clone()))
@@ -94,17 +94,17 @@ impl GroupedOperation for ExtremumOperator {
 
     fn apply(
         &self,
-        current: Option<&DataType>,
+        current: Option<&DfValue>,
         diffs: &mut dyn Iterator<Item = Self::Diff>,
-    ) -> ReadySetResult<Option<DataType>> {
+    ) -> ReadySetResult<Option<DfValue>> {
         // Extreme values are those that are at least as extreme as the current min/max (if any).
         // let mut is_extreme_value : Box<dyn Fn(i64) -> bool> = Box::new(|_|true);
-        let mut extreme_values: Vec<DataType> = vec![];
+        let mut extreme_values: Vec<DfValue> = vec![];
         if let Some(d) = current {
             extreme_values.push(d.clone());
         }
 
-        let is_extreme_value = |x: &DataType| {
+        let is_extreme_value = |x: &DfValue| {
             if let Some(n) = current {
                 match self.op {
                     Extremum::Max => x >= n,
@@ -190,7 +190,7 @@ mod tests {
         }
     }
 
-    fn assert_record_change(group: i32, old: DataType, new: DataType, rs: Records) {
+    fn assert_record_change(group: i32, old: DfValue, new: DfValue, rs: Records) {
         assert_eq!(rs.len(), 2);
         let mut rs = rs.into_iter();
 

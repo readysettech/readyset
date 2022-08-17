@@ -7,7 +7,7 @@ use std::{iter, mem};
 use itertools::{Either, Itertools};
 use nom_sql::analysis::visit::{self, Visitor};
 use nom_sql::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement, SqlType};
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use readyset_errors::{invalid_err, unsupported, ReadySetError, ReadySetResult};
 use tracing::trace;
 
@@ -99,7 +99,7 @@ impl ProcessedQueryParams {
     /// offset`
     pub(crate) fn limit_offset_params(
         &self,
-        params: &[DataType],
+        params: &[DfValue],
     ) -> ReadySetResult<(Option<usize>, Option<usize>)> {
         let mut params_iter = self
             .reordered_placeholders
@@ -115,7 +115,7 @@ impl ProcessedQueryParams {
                     .ok_or_else(|| invalid_err!("Wrong number of parameters"))
                     .and_then(|v| v.coerce_to(&SqlType::UnsignedBigInt(None)))?
                 {
-                    DataType::UnsignedInt(v) => Ok(v as usize),
+                    DfValue::UnsignedInt(v) => Ok(v as usize),
                     _ => unreachable!("Succesfully coerced"),
                 },
                 Literal::Integer(v) => {
@@ -128,8 +128,8 @@ impl ProcessedQueryParams {
                 | Literal::String(_)
                 | Literal::Numeric(_, _) => {
                     // All of those are invalid in MySQL, but Postgres coerces to integer
-                    match DataType::try_from(lit)?.coerce_to(&SqlType::UnsignedBigInt(None))? {
-                        DataType::UnsignedInt(v) => Ok(v as usize),
+                    match DfValue::try_from(lit)?.coerce_to(&SqlType::UnsignedBigInt(None))? {
+                        DfValue::UnsignedInt(v) => Ok(v as usize),
                         _ => unreachable!("Succesfully coerced"),
                     }
                 }
@@ -1305,14 +1305,14 @@ mod tests {
     }
 
     mod process_query {
-        use readyset_data::DataType;
+        use readyset_data::DfValue;
 
         use super::*;
 
         fn process_and_make_keys(
             query: &str,
-            params: Vec<DataType>,
-        ) -> (Vec<Vec<DataType>>, SelectStatement) {
+            params: Vec<DfValue>,
+        ) -> (Vec<Vec<DfValue>>, SelectStatement) {
             let mut query = parse_select_statement(query);
             let processed = process_query(&mut query, false).unwrap();
             (
@@ -1494,7 +1494,7 @@ mod tests {
 
         #[test]
         fn correct_offset_limit() {
-            let get_lim_off = |q: &str, p: &[DataType]| -> (Option<usize>, Option<usize>) {
+            let get_lim_off = |q: &str, p: &[DfValue]| -> (Option<usize>, Option<usize>) {
                 let proc = process_query(&mut parse_select_statement(q), false).unwrap();
                 proc.limit_offset_params(p).unwrap()
             };

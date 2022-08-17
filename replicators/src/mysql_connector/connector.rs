@@ -11,7 +11,7 @@ use mysql_common::binlog::row::BinlogRow;
 use mysql_common::binlog::value::BinlogValue;
 use readyset::replication::ReplicationOffset;
 use readyset::{ReadySetError, ReadySetResult};
-use readyset_data::DataType;
+use readyset_data::DfValue;
 
 use super::BinlogPosition;
 use crate::noria_adapter::{Connector, ReplicationAction};
@@ -505,7 +505,7 @@ fn binlog_val_to_noria_val(
     val: &mysql_common::value::Value,
     col_kind: mysql_common::constants::ColumnType,
     meta: &[u8],
-) -> mysql::Result<DataType> {
+) -> mysql::Result<DfValue> {
     // Not all values are coereced to the value expected by Noria directly
 
     use mysql_common::constants::ColumnType;
@@ -528,7 +528,7 @@ fn binlog_val_to_noria_val(
             if epoch == 0 {
                 // The 0 epoch is reserved for the '0000-00-00 00:00:00' timestamp, which we
                 // currently set to None
-                return Ok(DataType::None);
+                return Ok(DfValue::None);
             }
             let time = chrono::naive::NaiveDateTime::from_timestamp(epoch, 0);
             Ok(time.try_into().unwrap()) // Can unwarp because we know maps derectly to noria type
@@ -552,7 +552,7 @@ fn binlog_val_to_noria_val(
 fn binlog_row_to_noria_row(
     binlog_row: &BinlogRow,
     tme: &binlog::events::TableMapEvent<'static>,
-) -> mysql::Result<Vec<DataType>> {
+) -> mysql::Result<Vec<DfValue>> {
     (0..binlog_row.len())
         .map(|idx| {
             match binlog_row.as_ref(idx).unwrap() {
@@ -568,13 +568,13 @@ fn binlog_row_to_noria_row(
                 BinlogValue::Jsonb(val) => {
                     let json: Result<serde_json::Value, _> = val.clone().try_into(); // urgh no TryFrom impl
                     match json {
-                        Ok(val) => Ok(DataType::from(val.to_string())),
+                        Ok(val) => Ok(DfValue::from(val.to_string())),
                         Err(JsonbToJsonError::Opaque) => match val {
                             jsonb::Value::Opaque(opaque_val) => {
                                 // As far as I can *tell* Opaque is just a raw JSON string, which we
-                                // can just translate into a DataType as JSON directly without going
+                                // can just translate into a DfValue as JSON directly without going
                                 // through serde_json::Value first.
-                                Ok(DataType::from(opaque_val.data().as_ref()))
+                                Ok(DfValue::from(opaque_val.data().as_ref()))
                             }
                             _ => {
                                 #[allow(clippy::unreachable)] // actually unreachable

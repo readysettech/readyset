@@ -179,8 +179,8 @@ pub enum ReadySetError {
     #[error("wrong packet data type")]
     WrongPacketDataType,
 
-    /// A NOT NULL column was set to [`DataType::None`].
-    #[error("Attempted to set NOT NULL column '{col}' to DataType::None")]
+    /// A NOT NULL column was set to [`DfValue::None`].
+    #[error("Attempted to set NOT NULL column '{col}' to DfValue::None")]
     NonNullable {
         /// The column in question.
         col: String,
@@ -332,9 +332,9 @@ pub enum ReadySetError {
     #[error("Column {0} not found in table or view")]
     NoSuchColumn(String),
 
-    /// Conversion to or from a [`DataType`](crate::DataType) failed.
-    #[error("DataType conversion error: Failed to convert value of type {src_type} to the type {target_type}: {details}")]
-    DataTypeConversionError {
+    /// Conversion to or from a [`DfValue`](crate::DfValue) failed.
+    #[error("DfValue conversion error: Failed to convert value of type {src_type} to the type {target_type}: {details}")]
+    DfValueConversionError {
         /// Source type.
         src_type: String,
         /// Target type.
@@ -644,10 +644,10 @@ impl ReadySetError {
         })
     }
 
-    /// Returns true if the error either *is* [`DataTypeConversionError`], or was *caused by*
-    /// [`DataTypeConversionError`]
+    /// Returns true if the error either *is* [`DfValueConversionError`], or was *caused by*
+    /// [`DfValueConversionError`]
     pub fn caused_by_data_type_conversion(&self) -> bool {
-        self.any_cause(|e| matches!(e, Self::DataTypeConversionError { .. }))
+        self.any_cause(|e| matches!(e, Self::DfValueConversionError { .. }))
     }
 
     /// Returns true if the error either *is* [`ViewDestroyed`], or was *caused by*

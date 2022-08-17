@@ -9,7 +9,7 @@ use launchpad::Indices;
 use maplit::hashmap;
 use readyset::replication::ReplicationOffset;
 use readyset::{Modification, Operation, TableOperation};
-use readyset_data::DataTypeKind;
+use readyset_data::DfValueKind;
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -64,7 +64,7 @@ pub struct Base {
     primary_key: Option<Box<[usize]>>,
     unique_keys: Vec<Box<[usize]>>,
 
-    defaults: Vec<DataType>,
+    defaults: Vec<DfValue>,
     dropped: Vec<usize>,
     unmodified: bool,
 }
@@ -75,7 +75,7 @@ impl Base {
         Default::default()
     }
 
-    pub fn with_default_values(mut self, defaults: Vec<DataType>) -> Self {
+    pub fn with_default_values(mut self, defaults: Vec<DfValue>) -> Self {
         self.defaults = defaults;
         self
     }
@@ -110,7 +110,7 @@ impl Base {
     }
 
     /// Add a new column to this base node.
-    pub fn add_column(&mut self, default: DataType) -> ReadySetResult<usize> {
+    pub fn add_column(&mut self, default: DfValue) -> ReadySetResult<usize> {
         invariant!(
             !self.defaults.is_empty(),
             "cannot add columns to base nodes without\
@@ -138,7 +138,7 @@ impl Base {
         Ok(())
     }
 
-    pub fn get_dropped(&self) -> VecMap<DataType> {
+    pub fn get_dropped(&self) -> VecMap<DfValue> {
         self.dropped
             .iter()
             .map(|&col| (col, self.defaults[col].clone()))
@@ -146,7 +146,7 @@ impl Base {
     }
 
     /// Extend a row with default values if it does not match the current schema length
-    pub(crate) fn fix(&self, row: &mut Vec<DataType>) {
+    pub(crate) fn fix(&self, row: &mut Vec<DfValue>) {
         if self.unmodified {
             return;
         }
@@ -185,7 +185,7 @@ impl Default for Base {
     }
 }
 
-fn key_val(i: usize, col: usize, r: &TableOperation) -> Option<&DataType> {
+fn key_val(i: usize, col: usize, r: &TableOperation) -> Option<&DfValue> {
     match *r {
         TableOperation::Insert(ref row) => Some(&row[col]),
         TableOperation::DeleteByKey { ref key } => Some(&key[i]),
@@ -197,7 +197,7 @@ fn key_val(i: usize, col: usize, r: &TableOperation) -> Option<&DataType> {
     }
 }
 
-fn key_of<'a>(key_cols: &'a [usize], r: &'a TableOperation) -> impl Iterator<Item = &'a DataType> {
+fn key_of<'a>(key_cols: &'a [usize], r: &'a TableOperation) -> impl Iterator<Item = &'a DfValue> {
     key_cols
         .iter()
         .enumerate()
@@ -313,9 +313,9 @@ impl Base {
         /// the current batch that was not yet persisted to the base node.
         enum TouchedKey<'a> {
             Deleted,
-            Inserted(Cow<'a, [DataType]>),
+            Inserted(Cow<'a, [DfValue]>),
         }
-        let mut touched_keys: HashMap<Vec<DataType>, TouchedKey> = HashMap::new();
+        let mut touched_keys: HashMap<Vec<DfValue>, TouchedKey> = HashMap::new();
 
         for (key, ops) in &ops {
             // It is not enough to check the persisted value for the key, as it may have been
@@ -380,8 +380,8 @@ impl Base {
                                         let old: i128 = <i128>::try_from(updated[col].clone())?;
                                         let delta: i128 = <i128>::try_from(v)?;
                                         updated[col] = match op {
-                                            Operation::Add => DataType::try_from(old + delta)?,
-                                            Operation::Sub => DataType::try_from(old - delta)?,
+                                            Operation::Add => DfValue::try_from(old + delta)?,
+                                            Operation::Sub => DfValue::try_from(old - delta)?,
                                         };
                                     }
                                     Modification::None => {}
@@ -453,13 +453,13 @@ struct FailedOpLogger {
     delete_non_existing: usize,
     // Maps from (column index, deleted data type, actual data type) to count for columns with
     // different types
-    delete_type_mismatch: HashMap<(usize, Option<DataTypeKind>, Option<DataTypeKind>), usize>,
+    delete_type_mismatch: HashMap<(usize, Option<DfValueKind>, Option<DfValueKind>), usize>,
     // Maps from (column inxed, deleted data type) to count for columns with different values
-    delete_row_data_mismatch: HashMap<(usize, DataTypeKind), usize>,
+    delete_row_data_mismatch: HashMap<(usize, DfValueKind), usize>,
 }
 
 impl FailedOpLogger {
-    fn failed_delete(&mut self, deleted_row: Vec<DataType>, current_row: Option<&[DataType]>) {
+    fn failed_delete(&mut self, deleted_row: Vec<DfValue>, current_row: Option<&[DfValue]>) {
         use itertools::EitherOrBoth;
 
         match current_row {
@@ -472,14 +472,10 @@ impl FailedOpLogger {
                         EitherOrBoth::Right(c) => (None, Some(c)),
                     };
 
-                    if del.map(DataTypeKind::from) != cur.map(DataTypeKind::from) {
+                    if del.map(DfValueKind::from) != cur.map(DfValueKind::from) {
                         *self
                             .delete_type_mismatch
-                            .entry((
-                                col,
-                                del.map(DataTypeKind::from),
-                                cur.map(DataTypeKind::from),
-                            ))
+                            .entry((col, del.map(DfValueKind::from), cur.map(DfValueKind::from)))
                             .or_default() += 1;
                         // Only report the first inconsistency in the row
                         break;
@@ -487,7 +483,7 @@ impl FailedOpLogger {
                         *self
                             .delete_row_data_mismatch
                             // Unwrap ok because del has to be Some in else statement
-                            .entry((col, DataTypeKind::from(del.unwrap())))
+                            .entry((col, DfValueKind::from(del.unwrap())))
                             .or_default() += 1;
                         // Only report the first inconsistency in the row
                         break;

@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use eui48::MacAddressFormat;
 use psql_srv as ps;
 use readyset_client::backend as cl;
-use readyset_data::DataType;
+use readyset_data::DfValue;
 
 use crate::error::Error;
 use crate::query_handler::PostgreSqlQueryHandler;
@@ -39,7 +39,7 @@ impl Backend {
         Ok(PrepareResponse(self.0.prepare(query).await?))
     }
 
-    async fn execute(&mut self, id: u32, params: &[DataType]) -> Result<QueryResponse<'_>, Error> {
+    async fn execute(&mut self, id: u32, params: &[DfValue]) -> Result<QueryResponse<'_>, Error> {
         Ok(QueryResponse(self.0.execute(id, params).await?))
     }
 }
@@ -76,7 +76,7 @@ impl ps::Backend for Backend {
         let params = params
             .iter()
             .map(|p| ParamRef(p).try_into())
-            .collect::<Result<Vec<DataType>, ps::Error>>()?;
+            .collect::<Result<Vec<DfValue>, ps::Error>>()?;
         self.execute(statement_id, &params).await?.try_into()
     }
 
@@ -97,16 +97,16 @@ impl ps::Backend for Backend {
 }
 
 /// A simple wrapper around a request parameter `psql_srv::Value` reference, facilitiating
-/// conversion to `DataType`.
+/// conversion to `DfValue`.
 struct ParamRef<'a>(&'a ps::Value);
 
-impl TryFrom<ParamRef<'_>> for DataType {
+impl TryFrom<ParamRef<'_>> for DfValue {
     type Error = ps::Error;
 
     fn try_from(v: ParamRef) -> Result<Self, Self::Error> {
         match v.0 {
-            ps::Value::Null => Ok(DataType::None),
-            ps::Value::Bool(b) => Ok(DataType::from(*b)),
+            ps::Value::Null => Ok(DfValue::None),
+            ps::Value::Bool(b) => Ok(DfValue::from(*b)),
             ps::Value::VarChar(v) | ps::Value::Name(v) | ps::Value::Text(v) => {
                 Ok(v.as_str().into())
             }
@@ -115,25 +115,23 @@ impl TryFrom<ParamRef<'_>> for DataType {
             ps::Value::BigInt(v) => Ok((*v).into()),
             ps::Value::SmallInt(v) => Ok((*v).into()),
             ps::Value::Oid(v) => Ok((*v).into()),
-            ps::Value::Double(v) => DataType::try_from(*v)
+            ps::Value::Double(v) => DfValue::try_from(*v)
                 .map_err(|_| ps::Error::Unsupported(format!("f64 with value `{}`", v))),
-            ps::Value::Float(v) => DataType::try_from(*v)
+            ps::Value::Float(v) => DfValue::try_from(*v)
                 .map_err(|_| ps::Error::Unsupported(format!("f32 with value `{}`", v))),
-            ps::Value::Numeric(d) => Ok(DataType::from(*d)),
+            ps::Value::Numeric(d) => Ok(DfValue::from(*d)),
             ps::Value::Timestamp(v) => Ok((*v).into()),
-            ps::Value::TimestampTz(v) => Ok(DataType::from(*v)),
+            ps::Value::TimestampTz(v) => Ok(DfValue::from(*v)),
             ps::Value::Date(v) => Ok((*v).into()),
             ps::Value::Time(v) => Ok((*v).into()),
-            ps::Value::ByteArray(b) => Ok(DataType::ByteArray(Arc::new(b.clone()))),
-            ps::Value::MacAddress(m) => {
-                Ok(DataType::from(m.to_string(MacAddressFormat::HexString)))
-            }
-            ps::Value::Inet(ip) => Ok(DataType::from(ip.to_string())),
-            ps::Value::Uuid(uuid) => Ok(DataType::from(uuid.to_string())),
-            ps::Value::Json(v) | ps::Value::Jsonb(v) => Ok(DataType::from(v.to_string())),
-            ps::Value::Bit(bits) | ps::Value::VarBit(bits) => Ok(DataType::from(bits.clone())),
-            ps::Value::Array(arr, _) => Ok(DataType::from(arr.clone())),
-            ps::Value::PassThrough(p) => Ok(DataType::PassThrough(Arc::new(p.clone()))),
+            ps::Value::ByteArray(b) => Ok(DfValue::ByteArray(Arc::new(b.clone()))),
+            ps::Value::MacAddress(m) => Ok(DfValue::from(m.to_string(MacAddressFormat::HexString))),
+            ps::Value::Inet(ip) => Ok(DfValue::from(ip.to_string())),
+            ps::Value::Uuid(uuid) => Ok(DfValue::from(uuid.to_string())),
+            ps::Value::Json(v) | ps::Value::Jsonb(v) => Ok(DfValue::from(v.to_string())),
+            ps::Value::Bit(bits) | ps::Value::VarBit(bits) => Ok(DfValue::from(bits.clone())),
+            ps::Value::Array(arr, _) => Ok(DfValue::from(arr.clone())),
+            ps::Value::PassThrough(p) => Ok(DfValue::PassThrough(Arc::new(p.clone()))),
         }
     }
 }

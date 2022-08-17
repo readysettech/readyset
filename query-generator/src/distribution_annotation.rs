@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use anyhow::bail;
-use readyset_data::DataType;
+use readyset_data::DfValue;
 
 use crate::ColumnGenerationSpec;
 
@@ -28,15 +28,15 @@ impl FromStr for DistributionAnnotation {
             "uniform" => {
                 let from: i64 = chunks.next().unwrap().parse().unwrap();
                 let to: i64 = chunks.next().unwrap().parse().unwrap();
-                ColumnGenerationSpec::Uniform(DataType::Int(from), DataType::Int(to))
+                ColumnGenerationSpec::Uniform(DfValue::Int(from), DfValue::Int(to))
             }
             "zipf" => {
                 let from: i64 = chunks.next().unwrap().parse().unwrap();
                 let to: i64 = chunks.next().unwrap().parse().unwrap();
                 let alpha: f64 = chunks.next().unwrap().parse().unwrap();
                 ColumnGenerationSpec::Zipfian {
-                    min: DataType::Int(from),
-                    max: DataType::Int(to),
+                    min: DfValue::Int(from),
+                    max: DfValue::Int(to),
                     alpha,
                 }
             }
@@ -50,7 +50,7 @@ impl FromStr for DistributionAnnotation {
                 ColumnGenerationSpec::UniqueRepeated(num)
             }
             "constant" => {
-                let val: DataType = chunks.next().unwrap().into();
+                let val: DfValue = chunks.next().unwrap().into();
                 ColumnGenerationSpec::Constant(val)
             }
             _ => bail!("Unrecognized annotation"),
@@ -72,7 +72,7 @@ mod tests {
         let s = q.parse::<DistributionAnnotation>().unwrap();
         assert!(matches!(
             s.spec,
-            ColumnGenerationSpec::Uniform(DataType::Int(4), DataType::Int(100))
+            ColumnGenerationSpec::Uniform(DfValue::Int(4), DfValue::Int(100))
         ));
     }
 
@@ -83,7 +83,7 @@ mod tests {
         assert!(matches!(
             (s.spec, s.unique),
             (
-                ColumnGenerationSpec::Uniform(DataType::Int(4), DataType::Int(100)),
+                ColumnGenerationSpec::Uniform(DfValue::Int(4), DfValue::Int(100)),
                 true
             )
         ));
@@ -93,6 +93,6 @@ mod tests {
     fn parse_constant_spec() {
         let q = "constant 5";
         let s = q.parse::<DistributionAnnotation>().unwrap();
-        assert!(matches!(s.spec, ColumnGenerationSpec::Constant(dt) if dt == DataType::from("5")));
+        assert!(matches!(s.spec, ColumnGenerationSpec::Constant(dt) if dt == DfValue::from("5")));
     }
 }

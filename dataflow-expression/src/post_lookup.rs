@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use nom_sql::OrderType;
 use partial_map::InsertionOrder;
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
@@ -32,7 +32,7 @@ impl PostLookupAggregateFunction {
     /// Apply this aggregate function to the two input values
     ///
     /// This forms a semigroup.
-    pub fn apply(&self, val1: &DataType, val2: &DataType) -> ReadySetResult<DataType> {
+    pub fn apply(&self, val1: &DfValue, val2: &DfValue) -> ReadySetResult<DfValue> {
         match self {
             PostLookupAggregateFunction::Sum => (val1 + val2),
             PostLookupAggregateFunction::Product => (val1 * val2),
@@ -118,7 +118,7 @@ impl ReaderProcessing {
         order_by: Option<Vec<(usize, OrderType)>>,
         limit: Option<usize>,
         returned_cols: Option<Vec<usize>>,
-        default_row: Option<Vec<DataType>>,
+        default_row: Option<Vec<DfValue>>,
         aggregates: Option<PostLookupAggregates>,
     ) -> ReadySetResult<Self> {
         if let Some(cols) = &returned_cols {
@@ -173,7 +173,7 @@ pub struct PostLookup {
     /// columns
     pub returned_cols: Option<Vec<usize>>,
     /// Default values to send back, for example if we're aggregating and no rows are found
-    pub default_row: Option<Arc<Box<[DataType]>>>,
+    pub default_row: Option<Arc<Box<[DfValue]>>>,
     /// Aggregates to perform on the result set *after* it's retrieved from the reader.
     ///
     /// Note that currently these are only performed on each key individually, not the overall
@@ -193,11 +193,11 @@ pub struct PreInsertion {
     group_by: Option<Vec<usize>>,
 }
 
-impl InsertionOrder<Box<[DataType]>> for PreInsertion {
+impl InsertionOrder<Box<[DfValue]>> for PreInsertion {
     fn get_insertion_order(
         &self,
-        values: &[Box<[DataType]>],
-        elem: &Box<[DataType]>,
+        values: &[Box<[DfValue]>],
+        elem: &Box<[DfValue]>,
     ) -> Result<usize, usize> {
         if let Some(cols) = &self.group_by {
             values.binary_search_by(|cur_row| {

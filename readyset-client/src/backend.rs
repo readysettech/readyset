@@ -89,7 +89,7 @@ use readyset::ColumnSchema;
 use readyset_client_metrics::{
     recorded, EventType, QueryDestination, QueryExecutionEvent, SqlQueryType,
 };
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetResult};
 use readyset_tracing::instrument_root;
@@ -1042,7 +1042,7 @@ where
     async fn execute_noria<'a>(
         noria: &'a mut NoriaConnector,
         prep: &noria_connector::PrepareResult,
-        params: &[DataType],
+        params: &[DfValue],
         ticket: Option<Timestamp>,
         event: &mut QueryExecutionEvent,
     ) -> ReadySetResult<QueryResult<'a, DB>> {
@@ -1083,7 +1083,7 @@ where
     async fn execute_upstream<'a>(
         upstream: &'a mut Option<DB>,
         prep: &UpstreamPrepare<DB>,
-        params: &[DataType],
+        params: &[DfValue],
         event: &mut QueryExecutionEvent,
         is_fallback: bool,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
@@ -1112,7 +1112,7 @@ where
         upstream: &'a mut Option<DB>,
         noria_prep: &noria_connector::PrepareResult,
         upstream_prep: &UpstreamPrepare<DB>,
-        params: &[DataType],
+        params: &[DfValue],
         ex_info: Option<&mut ExecutionInfo>,
         ticket: Option<Timestamp>,
         event: &mut QueryExecutionEvent,
@@ -1222,7 +1222,7 @@ where
     pub async fn execute(
         &mut self,
         id: u32,
-        params: &[DataType],
+        params: &[DfValue],
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
         self.last_query = None;
         let cached_statement = self
@@ -1493,7 +1493,7 @@ where
                     Query::ParseFailed(ref s) => s.to_string(),
                 };
 
-                vec![DataType::from(id), DataType::from(query), DataType::from(s)]
+                vec![DfValue::from(id), DfValue::from(query), DfValue::from(s)]
             })
             .collect::<Vec<_>>();
         Ok(noria_connector::QueryResult::from_owned(

@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
 
-use common::DataType;
+use common::DfValue;
 use dataflow::node::Column as DfColumn;
 use dataflow::ops::grouped::concat::GroupConcat;
 use dataflow::ops::join::{Join, JoinType};
@@ -405,7 +405,7 @@ fn adapt_base_node(
     };
 
     for a in add.iter() {
-        let mut default_value = DataType::None;
+        let mut default_value = DfValue::None;
         for c in &a.constraints {
             if let ColumnConstraint::DefaultValue(dv) = c {
                 default_value = dv.try_into()?;
@@ -477,9 +477,9 @@ fn make_base_node(
                     return dv.try_into();
                 }
             }
-            Ok(DataType::None)
+            Ok(DfValue::None)
         })
-        .collect::<Result<Vec<DataType>, _>>()?;
+        .collect::<Result<Vec<DfValue>, _>>()?;
 
     let cols_from_spec = |cols: &[Column]| -> ReadySetResult<Vec<usize>> {
         cols.iter()
@@ -804,7 +804,7 @@ fn make_join_node(
                 &node_columns,
                 &node.borrow().columns(),
                 &[],
-                &[("cross_join_bogokey".into(), DataType::from(0))],
+                &[("cross_join_bogokey".into(), DfValue::from(0))],
                 mig,
             )
         };
@@ -947,7 +947,7 @@ fn make_latest_node(
 ///
 /// Currently, this involves:
 ///
-/// - Literals being replaced with their corresponding [`DataType`]
+/// - Literals being replaced with their corresponding [`DfValue`]
 /// - [Column references](nom_sql::Column) being resolved into column indices in the parent node.
 /// - Function calls being resolved to built-in functions, and arities checked
 /// - Desugaring x IN (y, z, ...) to `x = y OR x = z OR ...` and x NOT IN (y, z, ...) to `x != y AND
@@ -980,7 +980,7 @@ fn lower_expression(
             Sensitive(&call)
         ),
         Expr::Literal(lit) => {
-            let val: DataType = lit.try_into()?;
+            let val: DfValue = lit.try_into()?;
             // TODO: Infer type from SQL
             let ty = val.sql_type().into();
 
@@ -1019,7 +1019,7 @@ fn lower_expression(
                 op: BinaryOperator::Multiply,
                 left,
                 right: Box::new(DfExpr::Literal {
-                    val: DataType::Int(-1),
+                    val: DfValue::Int(-1),
                     ty: DfType::Sql(SqlType::Int(None)),
                 }),
                 ty,
@@ -1032,7 +1032,7 @@ fn lower_expression(
             op: BinaryOperator::NotEqual,
             left: Box::new(lower_expression(parent, *rhs, parent_cols)?),
             right: Box::new(DfExpr::Literal {
-                val: DataType::Int(1),
+                val: DfValue::Int(1),
                 ty: DfType::Sql(SqlType::Int(None)),
             }),
             ty: DfType::Sql(SqlType::Bool), // type of NE is always bool
@@ -1056,7 +1056,7 @@ fn lower_expression(
                 else_expr: match else_expr {
                     Some(else_expr) => Box::new(lower_expression(parent, *else_expr, parent_cols)?),
                     None => Box::new(DfExpr::Literal {
-                        val: DataType::None,
+                        val: DfValue::None,
                         ty: DfType::Unknown,
                     }),
                 },
@@ -1097,13 +1097,13 @@ fn lower_expression(
             } else if negated {
                 // x IN () is always false
                 Ok(DfExpr::Literal {
-                    val: DataType::None,
+                    val: DfValue::None,
                     ty: DfType::Sql(SqlType::Bool),
                 })
             } else {
                 // x NOT IN () is always false
                 Ok(DfExpr::Literal {
-                    val: DataType::from(1),
+                    val: DfValue::from(1),
                     ty: DfType::Sql(SqlType::Bool),
                 })
             }
@@ -1122,7 +1122,7 @@ fn make_project_node(
     source_columns: &[Column],
     emit: &[Column],
     expressions: &[(SqlIdentifier, Expr)],
-    literals: &[(SqlIdentifier, DataType)],
+    literals: &[(SqlIdentifier, DfValue)],
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
@@ -1360,7 +1360,7 @@ fn make_reader_processing(
     order_by: &Option<Vec<(Column, OrderType)>>,
     limit: Option<usize>,
     returned_cols: &Option<Vec<Column>>,
-    default_row: Option<Vec<DataType>>,
+    default_row: Option<Vec<DfValue>>,
     aggregates: &Option<PostLookupAggregates<Column>>,
 ) -> ReadySetResult<ReaderProcessing> {
     let order_by = if let Some(order) = order_by.as_ref() {

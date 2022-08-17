@@ -84,7 +84,7 @@ mod tests {
     fn it_forwards() {
         let mut g = setup(false);
 
-        let left: Vec<DataType> = vec![1.into(), "a".try_into().unwrap()];
+        let left: Vec<DfValue> = vec![1.into(), "a".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
     }
 

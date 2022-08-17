@@ -6,7 +6,7 @@ use itertools::Either;
 use rand::prelude::*;
 use readyset::internal::Index;
 use readyset::KeyComparison;
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use vec1::Vec1;
 
 use crate::keyed_state::KeyedState;
@@ -70,7 +70,7 @@ impl SingleState {
     }
 
     /// Attempt to remove row `r`.
-    pub(super) fn remove_row(&mut self, r: &[DataType], hit: &mut bool) -> Option<Row> {
+    pub(super) fn remove_row(&mut self, r: &[DfValue], hit: &mut bool) -> Option<Row> {
         let row = self.state.remove(&self.index.columns, r, Some(hit));
         if row.is_some() {
             self.row_count = self.row_count.saturating_sub(1);
@@ -78,7 +78,7 @@ impl SingleState {
         row
     }
 
-    fn mark_point_filled(&mut self, key: Vec1<DataType>) {
+    fn mark_point_filled(&mut self, key: Vec1<DfValue>) {
         let mut key = key.into_iter();
         let replaced = match self.state {
             KeyedState::SingleBTree(ref mut map) => {
@@ -210,7 +210,7 @@ impl SingleState {
         assert!(replaced.is_none());
     }
 
-    fn mark_range_filled(&mut self, range: (Bound<Vec1<DataType>>, Bound<Vec1<DataType>>)) {
+    fn mark_range_filled(&mut self, range: (Bound<Vec1<DfValue>>, Bound<Vec1<DfValue>>)) {
         self.state.insert_range(range);
     }
 
@@ -261,27 +261,27 @@ impl SingleState {
                     Box::new(m.remove(&(key[0])).into_iter().flatten())
                 }
                 KeyedState::DoubleHash(ref mut m) => Box::new(
-                    m.remove::<(DataType, _)>(&MakeKey::from_key(key))
+                    m.remove::<(DfValue, _)>(&MakeKey::from_key(key))
                         .into_iter()
                         .flatten(),
                 ),
                 KeyedState::TriHash(ref mut m) => Box::new(
-                    m.remove::<(DataType, _, _)>(&MakeKey::from_key(key))
+                    m.remove::<(DfValue, _, _)>(&MakeKey::from_key(key))
                         .into_iter()
                         .flatten(),
                 ),
                 KeyedState::QuadHash(ref mut m) => Box::new(
-                    m.remove::<(DataType, _, _, _)>(&MakeKey::from_key(key))
+                    m.remove::<(DfValue, _, _, _)>(&MakeKey::from_key(key))
                         .into_iter()
                         .flatten(),
                 ),
                 KeyedState::QuinHash(ref mut m) => Box::new(
-                    m.remove::<(DataType, _, _, _, _)>(&MakeKey::from_key(key))
+                    m.remove::<(DfValue, _, _, _, _)>(&MakeKey::from_key(key))
                         .into_iter()
                         .flatten(),
                 ),
                 KeyedState::SexHash(ref mut m) => Box::new(
-                    m.remove::<(DataType, _, _, _, _, _)>(&MakeKey::from_key(key))
+                    m.remove::<(DfValue, _, _, _, _, _)>(&MakeKey::from_key(key))
                         .into_iter()
                         .flatten(),
                 ),
@@ -290,27 +290,27 @@ impl SingleState {
                 macro_rules! remove_range {
                     ($m: expr, $range: expr, $hint: ty) => {
                         Box::new(
-                            $m.remove_range(<$hint as MakeKey<DataType>>::from_range(range))
+                            $m.remove_range(<$hint as MakeKey<DfValue>>::from_range(range))
                                 .flat_map(|(_, rows)| rows),
                         )
                     };
                 }
 
                 match self.state {
-                    KeyedState::SingleBTree(ref mut m) => remove_range!(m, range, DataType),
-                    KeyedState::DoubleBTree(ref mut m) => remove_range!(m, range, (DataType, _)),
-                    KeyedState::TriBTree(ref mut m) => remove_range!(m, range, (DataType, _, _)),
+                    KeyedState::SingleBTree(ref mut m) => remove_range!(m, range, DfValue),
+                    KeyedState::DoubleBTree(ref mut m) => remove_range!(m, range, (DfValue, _)),
+                    KeyedState::TriBTree(ref mut m) => remove_range!(m, range, (DfValue, _, _)),
                     KeyedState::QuadBTree(ref mut m) => {
-                        remove_range!(m, range, (DataType, _, _, _))
+                        remove_range!(m, range, (DfValue, _, _, _))
                     }
                     KeyedState::QuinBTree(ref mut m) => {
-                        remove_range!(m, range, (DataType, _, _, _, _))
+                        remove_range!(m, range, (DfValue, _, _, _, _))
                     }
                     KeyedState::SexBTree(ref mut m) => {
-                        remove_range!(m, range, (DataType, _, _, _, _, _))
+                        remove_range!(m, range, (DfValue, _, _, _, _, _))
                     }
                     KeyedState::MultiBTree(ref mut m, _) => Box::new(
-                        m.remove_range::<[DataType], _>((
+                        m.remove_range::<[DfValue], _>((
                             range.start_bound().map(Vec1::as_slice),
                             range.end_bound().map(Vec1::as_slice),
                         ))
@@ -354,7 +354,7 @@ impl SingleState {
 
     /// Evict up to `bytes` by randomly selected keys from state and return them along with the
     /// removed rows
-    pub(super) fn evict_random(&mut self, rng: &mut ThreadRng) -> Option<(Vec<DataType>, Rows)> {
+    pub(super) fn evict_random(&mut self, rng: &mut ThreadRng) -> Option<(Vec<DfValue>, Rows)> {
         self.state.evict_with_seed(rng.gen()).map(|(rows, key)| {
             self.row_count = self.row_count.saturating_sub(1);
             (key, rows)
@@ -496,11 +496,11 @@ mod tests {
         fn range() {
             let mut state = SingleState::new(Index::new(IndexType::BTreeMap, vec![0]), true);
             let key =
-                KeyComparison::from_range(&(vec1![DataType::from(0)]..vec1![DataType::from(10)]));
+                KeyComparison::from_range(&(vec1![DfValue::from(0)]..vec1![DfValue::from(10)]));
             state.mark_filled(key.clone());
             assert!(state
                 .lookup_range(&RangeKey::from(
-                    &(vec1![DataType::from(0)]..vec1![DataType::from(10)])
+                    &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)])
                 ))
                 .is_some());
 
@@ -509,7 +509,7 @@ mod tests {
             assert!(state.lookup(&KeyType::from(&[0.into()])).is_missing());
             assert!(state
                 .lookup_range(&RangeKey::from(
-                    &(vec1![DataType::from(0)]..vec1![DataType::from(10)])
+                    &(vec1![DfValue::from(0)]..vec1![DfValue::from(10)])
                 ))
                 .is_missing())
         }

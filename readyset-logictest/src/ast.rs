@@ -21,7 +21,7 @@ use mysql_common::chrono::NaiveDateTime;
 use mysql_time::MysqlTime;
 use nom_sql::{Literal, SqlQuery};
 use pgsql::types::{accepts, to_sql_checked};
-use readyset_data::{DataType, TIMESTAMP_FORMAT};
+use readyset_data::{DfValue, TIMESTAMP_FORMAT};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use thiserror::Error;
@@ -386,24 +386,24 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
     accepts!(BOOL, CHAR, INT2, INT4, INT8, FLOAT4, FLOAT8, NUMERIC, TEXT, DATE, TIME);
 }
 
-impl TryFrom<DataType> for Value {
+impl TryFrom<DfValue> for Value {
     type Error = anyhow::Error;
 
-    fn try_from(value: DataType) -> Result<Self, Self::Error> {
+    fn try_from(value: DfValue) -> Result<Self, Self::Error> {
         match value {
-            DataType::None | DataType::Max => Ok(Value::Null),
-            DataType::Int(i) => Ok(Value::Integer(i)),
-            DataType::UnsignedInt(u) => Ok(Value::Integer(u.try_into()?)),
-            DataType::Float(f) => Ok(f.into()),
-            DataType::Double(f) => Ok(f.into()),
-            DataType::Text(_) | DataType::TinyText(_) => Ok(Value::Text(value.try_into()?)),
-            DataType::TimestampTz(ref ts) => Ok(Value::Date(ts.to_chrono().naive_utc())),
-            DataType::Time(t) => Ok(Value::Time(t)),
-            DataType::ByteArray(t) => Ok(Value::ByteArray(t.as_ref().clone())),
-            DataType::Numeric(ref d) => Ok(Value::Numeric(*d.as_ref())),
-            DataType::BitVector(ref b) => Ok(Value::BitVector(b.as_ref().clone())),
-            DataType::Array(_) => bail!("Arrays not supported"),
-            DataType::PassThrough(_) => unimplemented!(),
+            DfValue::None | DfValue::Max => Ok(Value::Null),
+            DfValue::Int(i) => Ok(Value::Integer(i)),
+            DfValue::UnsignedInt(u) => Ok(Value::Integer(u.try_into()?)),
+            DfValue::Float(f) => Ok(f.into()),
+            DfValue::Double(f) => Ok(f.into()),
+            DfValue::Text(_) | DfValue::TinyText(_) => Ok(Value::Text(value.try_into()?)),
+            DfValue::TimestampTz(ref ts) => Ok(Value::Date(ts.to_chrono().naive_utc())),
+            DfValue::Time(t) => Ok(Value::Time(t)),
+            DfValue::ByteArray(t) => Ok(Value::ByteArray(t.as_ref().clone())),
+            DfValue::Numeric(ref d) => Ok(Value::Numeric(*d.as_ref())),
+            DfValue::BitVector(ref b) => Ok(Value::BitVector(b.as_ref().clone())),
+            DfValue::Array(_) => bail!("Arrays not supported"),
+            DfValue::PassThrough(_) => unimplemented!(),
         }
     }
 }

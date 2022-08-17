@@ -12,12 +12,12 @@ use readyset::{ColumnSchema, ReadySetError};
 use readyset_client::backend::noria_connector::QueryResult;
 use readyset_client::backend::SelectSchema;
 use readyset_client::QueryHandler;
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use readyset_errors::ReadySetResult;
 use tracing::warn;
 
 const MAX_ALLOWED_PACKET_VARIABLE_NAME: &str = "max_allowed_packet";
-const MAX_ALLOWED_PACKET_DEFAULT: DataType = DataType::UnsignedInt(67108864);
+const MAX_ALLOWED_PACKET_DEFAULT: DfValue = DfValue::UnsignedInt(67108864);
 
 /// The list of mysql `SQL_MODE`s that *must* be set by a client
 const REQUIRED_SQL_MODES: [SqlMode; 3] = [

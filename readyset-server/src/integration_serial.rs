@@ -18,7 +18,7 @@ use dataflow::utils::make_columns;
 use readyset::consensus::StandaloneAuthority;
 use readyset::get_metric;
 use readyset::metrics::{recorded, DumpedMetricValue, MetricsDump};
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use serial_test::serial;
 
 use crate::integration_utils::*;
@@ -66,21 +66,21 @@ async fn it_works_basic() {
     let mut cq = g.view("c").await.unwrap();
     let mut muta = g.table("a").await.unwrap();
     let mut mutb = g.table("b").await.unwrap();
-    let id: DataType = 1.into();
+    let id: DfValue = 1.into();
 
     assert_eq!(muta.table_name(), "a");
     assert_eq!(muta.columns(), &["a", "b"]);
 
     // send a value on a
-    muta.insert(vec![id.clone(), DataType::try_from(2i32).unwrap()])
+    muta.insert(vec![id.clone(), DfValue::try_from(2i32).unwrap()])
         .await
         .unwrap();
 
     // send a value on a that won't be used.
     // We expect the egress node to drop it.
     muta.insert(vec![
-        DataType::try_from(2i32).unwrap(),
-        DataType::try_from(2i32).unwrap(),
+        DfValue::try_from(2i32).unwrap(),
+        DfValue::try_from(2i32).unwrap(),
     ])
     .await
     .unwrap();
@@ -121,7 +121,7 @@ async fn it_works_basic() {
     );
 
     // update value again
-    mutb.insert(vec![id.clone(), DataType::try_from(4i32).unwrap()])
+    mutb.insert(vec![id.clone(), DfValue::try_from(4i32).unwrap()])
         .await
         .unwrap();
 
@@ -138,13 +138,13 @@ async fn it_works_basic() {
     assert!(res.iter().any(|r| get_col!(cq, r, "b", i32) == 2));
     assert!(res.iter().any(|r| get_col!(cq, r, "b", i32) == 4));
     // same with index
-    assert!(res.iter().all(|r| get_col!(cq, r, "a", DataType) == id));
+    assert!(res.iter().all(|r| get_col!(cq, r, "a", DfValue) == id));
     assert!(res
         .iter()
-        .any(|r| get_col!(cq, r, "b", DataType) == 2.into()));
+        .any(|r| get_col!(cq, r, "b", DfValue) == 2.into()));
     assert!(res
         .iter()
-        .any(|r| get_col!(cq, r, "b", DataType) == 4.into()));
+        .any(|r| get_col!(cq, r, "b", DfValue) == 4.into()));
 
     // This request does not hit the base table.
     let metrics = metrics_client.get_metrics().await.unwrap();
@@ -231,13 +231,13 @@ async fn it_works_basic_standalone() {
     let mut cq = g.view("c").await.unwrap();
     let mut muta = g.table("a").await.unwrap();
     let mut mutb = g.table("b").await.unwrap();
-    let id: DataType = 1.into();
+    let id: DfValue = 1.into();
 
     assert_eq!(muta.table_name(), "a");
     assert_eq!(muta.columns(), &["a", "b"]);
 
     // send a value on a
-    muta.insert(vec![id.clone(), DataType::try_from(2i32).unwrap()])
+    muta.insert(vec![id.clone(), DfValue::try_from(2i32).unwrap()])
         .await
         .unwrap();
 
@@ -254,7 +254,7 @@ async fn it_works_basic_standalone() {
     );
 
     // update value again
-    mutb.insert(vec![id.clone(), DataType::try_from(4i32).unwrap()])
+    mutb.insert(vec![id.clone(), DfValue::try_from(4i32).unwrap()])
         .await
         .unwrap();
 

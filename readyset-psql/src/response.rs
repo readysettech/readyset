@@ -105,7 +105,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                 let resultset = Resultset::try_new(
                     ResultIterator::owned(vec![Results::new(vec![vars
                         .into_iter()
-                        .map(|v| readyset_data::DataType::from(v.value))
+                        .map(|v| readyset_data::DfValue::from(v.value))
                         .collect()])]),
                     &select_schema,
                 )?;
@@ -141,7 +141,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     ]),
                     columns: Cow::Owned(vec!["name".into(), "value".into()]),
                 });
-                let mut rows: Vec<Vec<readyset_data::DataType>> = Vec::new();
+                let mut rows: Vec<Vec<readyset_data::DfValue>> = Vec::new();
                 for v in vars {
                     rows.push(vec![v.name.as_str().into(), v.value.into()]);
                 }

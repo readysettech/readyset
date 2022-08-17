@@ -31,7 +31,7 @@ mod types {
     use proptest::string::string_regex;
     use readyset_client_test_helpers::psql_helpers::upstream_config;
     use readyset_client_test_helpers::sleep;
-    use readyset_data::DataType;
+    use readyset_data::DfValue;
     use rust_decimal::Decimal;
     use tokio_postgres::types::{FromSql, ToSql};
     use tokio_postgres::NoTls;
@@ -166,7 +166,7 @@ mod types {
             .query_one("SELECT 't'::regclass", &[])
             .await
             .unwrap()
-            .get::<_, DataType>(0);
+            .get::<_, DfValue>(0);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -179,7 +179,7 @@ mod types {
             .unwrap();
         tokio::spawn(upstream_conn);
 
-        let upstream_res: DataType = upstream
+        let upstream_res: DfValue = upstream
             .query_one("SELECT typinput FROM pg_type WHERE typname = 'bool'", &[])
             .await
             .unwrap()
@@ -188,7 +188,7 @@ mod types {
         let (config, _handle) = setup().await;
         let client = connect(config).await;
 
-        let typinput: DataType = client
+        let typinput: DfValue = client
             .query_one("SELECT typinput FROM pg_type WHERE typname = 'bool'", &[])
             .await
             .unwrap()

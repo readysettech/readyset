@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use psql_srv as ps;
 use readyset::results::{ResultIterator, Results};
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use tokio_postgres::types::Type;
 
 use crate::row::Row;
@@ -100,7 +100,7 @@ impl TryFrom<Vec<tokio_postgres::Row>> for Resultset {
         for row in rows.iter() {
             let mut result_row = Vec::new();
             for i in 0..columns.len() {
-                let val: DataType = row.try_get(i).map_err(|e| {
+                let val: DfValue = row.try_get(i).map_err(|e| {
                     psql_srv::Error::InternalError(format!(
                         "could not retrieve expected column index {} from row while parsing psql result: {}",
                         i,
@@ -128,7 +128,7 @@ mod tests {
     use nom_sql::{ColumnSpecification, SqlType};
     use readyset::ColumnSchema;
     use readyset_client::backend as cl;
-    use readyset_data::DataType;
+    use readyset_data::DfValue;
 
     use super::*;
 
@@ -160,14 +160,14 @@ mod tests {
             columns: Cow::Owned(vec!["col1".into()]),
         });
         let resultset = Resultset::try_new(ResultIterator::owned(results), &schema).unwrap();
-        assert_eq!(resultset.results.into_vec(), Vec::<Vec<DataType>>::new());
+        assert_eq!(resultset.results.into_vec(), Vec::<Vec<DfValue>>::new());
         assert_eq!(resultset.project_fields, Arc::new(vec![0]));
         assert_eq!(resultset.project_field_types, Arc::new(vec![Type::INT8]));
     }
 
     #[test]
     fn iterate_resultset() {
-        let results = vec![Results::new(vec![vec![DataType::Int(10)]])];
+        let results = vec![Results::new(vec![vec![DfValue::Int(10)]])];
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: false,
             schema: Cow::Owned(vec![ColumnSchema {
@@ -191,9 +191,9 @@ mod tests {
     #[test]
     fn iterate_resultset_with_multiple_results() {
         let results = vec![
-            Results::new(vec![vec![DataType::Int(10)]]),
-            Results::new(Vec::<Vec<DataType>>::new()),
-            Results::new(vec![vec![DataType::Int(11)], vec![DataType::Int(12)]]),
+            Results::new(vec![vec![DfValue::Int(10)]]),
+            Results::new(Vec::<Vec<DfValue>>::new()),
+            Results::new(vec![vec![DfValue::Int(11)], vec![DfValue::Int(12)]]),
         ];
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: false,
@@ -252,7 +252,7 @@ mod tests {
             ]),
         });
         let resultset = Resultset::try_new(ResultIterator::owned(results), &schema).unwrap();
-        assert_eq!(resultset.results.into_vec(), Vec::<Vec<DataType>>::new());
+        assert_eq!(resultset.results.into_vec(), Vec::<Vec<DfValue>>::new());
         // The projected field indices of "col1" and "col2" within `columns` are 0 and 2. The
         // unprojected "col3" and "bogokey" fields are excluded.
         assert_eq!(resultset.project_fields, Arc::new(vec![0, 2]));
@@ -266,16 +266,16 @@ mod tests {
     fn iterate_resultset_with_unprojected_fields() {
         let results = vec![Results::new(vec![
             vec![
-                DataType::Int(10),
-                DataType::Int(99),
-                DataType::Text("abcdef".into()),
-                DataType::Int(0),
+                DfValue::Int(10),
+                DfValue::Int(99),
+                DfValue::Text("abcdef".into()),
+                DfValue::Int(0),
             ],
             vec![
-                DataType::Int(11),
-                DataType::Int(99),
-                DataType::Text("ghijkl".into()),
-                DataType::Int(0),
+                DfValue::Int(11),
+                DfValue::Int(99),
+                DfValue::Text("ghijkl".into()),
+                DfValue::Int(0),
             ],
         ])];
         let schema = SelectSchema(cl::SelectSchema {

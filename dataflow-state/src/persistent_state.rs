@@ -26,14 +26,14 @@
 //! * For [`HashMap`] indices, we optimize for point lookups (for unique indices) and in-prefix
 //!   scans (for non-unique indices), at the cost of not allowing cross-prefix range scans.
 //! * For [`BTreeMap`] indices, we configure a custom key comparator to compare the keys via
-//!   deserializing to DataTypes rather than RocksDB's default lexicographic bytewise ordering,
+//!   deserializing to `DfValue` rather than RocksDB's default lexicographic bytewise ordering,
 //!   which allows us to do queries across ranges covering multiple keys. To avoid having to encode
 //!   the length of the index (really the enum variant tag for [`KeyType`]) in the key itself, this
 //!   custom key comparator is built dynamically based on the number of columns in the index, up to
 //!   a maximum of 6 (since past that point we use [`KeyType::Multi`]). Note that since we currently
-//!   don't have the ability to do zero-copy deserialization of [`DataType`], deserializing for the
+//!   don't have the ability to do zero-copy deserialization of [`DfValue`], deserializing for the
 //!   custom comparator currently requires copying any string values just to compare them. If we are
-//!   able to make [`DataType`] enable zero-copy deserialization (by adding a lifetime parameter)
+//!   able to make [`DfValue`] enable zero-copy deserialization (by adding a lifetime parameter)
 //!   this would likely speed up rather significantly.
 //!
 //! Since RocksDB requires that we always provide the same set of options (including the name of the
@@ -75,7 +75,7 @@ use common::{IndexType, KeyType, RangeKey, Record, Records, SizeOf, Tag};
 use readyset::internal::Index;
 use readyset::replication::ReplicationOffset;
 use readyset::{KeyComparison, KeyCount};
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use rocksdb::{self, PlainTableFactoryOptions, SliceTransform, WriteBatch};
 use serde::de::DeserializeOwned;
@@ -533,7 +533,7 @@ impl State for PersistentState {
         }
     }
 
-    fn cloned_records(&self) -> Vec<Vec<DataType>> {
+    fn cloned_records(&self) -> Vec<Vec<DfValue>> {
         self.all_rows()
             .map(|(_, ref value)| deserialize_row(value))
             .collect()
@@ -630,7 +630,7 @@ fn serialize_key<K: serde::Serialize, E: serde::Serialize>(k: K, extra: E) -> Ve
     bincode::options().serialize(&(size, k, extra)).unwrap()
 }
 
-fn deserialize_row<T: AsRef<[u8]>>(bytes: T) -> Vec<DataType> {
+fn deserialize_row<T: AsRef<[u8]>>(bytes: T) -> Vec<DfValue> {
     bincode::options()
         .deserialize(bytes.as_ref())
         .expect("Deserializing from rocksdb")
@@ -739,7 +739,7 @@ impl IndexParams {
                 });
             }
             // For "btree" indices, allow full total-order range iteration using the native ordering
-            // semantics of DataType, by configuring a custom comparator based on the number of
+            // semantics of DfValue, by configuring a custom comparator based on the number of
             // columns in the index
             IndexType::BTreeMap => match self.num_columns {
                 Some(0) => unreachable!("Can't create a column family with 0 columns"),
@@ -1007,7 +1007,7 @@ impl PersistentState {
     /// If the index is the primary index, the lookup get the rows from the primary index directly.
     /// If the index is a secondary index, we will first lookup the primary index keys from that
     /// secondary index, then perform a lookup into the primary index
-    fn do_lookup(&self, index: &PersistentIndex, key: &KeyType) -> Vec<Vec<DataType>> {
+    fn do_lookup(&self, index: &PersistentIndex, key: &KeyType) -> Vec<Vec<DfValue>> {
         let db = &self.db;
         let cf = db.cf_handle(&index.column_family).unwrap();
         let primary_cf = if !index.is_primary {
@@ -1059,7 +1059,7 @@ impl PersistentState {
         }
     }
 
-    fn build_key<'a>(row: &'a [DataType], columns: &[usize]) -> KeyType<'a> {
+    fn build_key<'a>(row: &'a [DfValue], columns: &[usize]) -> KeyType<'a> {
         KeyType::from(columns.iter().map(|i| &row[*i]))
     }
 
@@ -1359,7 +1359,7 @@ impl PersistentState {
     /// Inserts the row into the database by replicating it across all of the column
     /// families. The insert is performed in a context of a [`rocksdb::WriteBatch`]
     /// operation and is therefore guaranteed to be atomic.
-    fn insert(&mut self, batch: &mut WriteBatch, r: &[DataType]) {
+    fn insert(&mut self, batch: &mut WriteBatch, r: &[DfValue]) {
         let primary_index = self.indices.first().expect("Insert on un-indexed state");
         let primary_key = Self::build_key(r, &primary_index.index.columns);
         let primary_cf = self.db.cf_handle(&primary_index.column_family).unwrap();
@@ -1398,7 +1398,7 @@ impl PersistentState {
         }
     }
 
-    fn remove(&self, batch: &mut WriteBatch, r: &[DataType]) {
+    fn remove(&self, batch: &mut WriteBatch, r: &[DfValue]) {
         let primary_index = self.indices.first().expect("Delete on un-indexed state");
         let primary_key = Self::build_key(r, &primary_index.index.columns);
         let primary_cf = self.db.cf_handle(&primary_index.column_family).unwrap();
@@ -1589,13 +1589,13 @@ fn prefix_transform(key: &[u8]) -> &[u8] {
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum OwnedKey {
-    Single(DataType),
-    Double((DataType, DataType)),
-    Tri((DataType, DataType, DataType)),
-    Quad((DataType, DataType, DataType, DataType)),
-    Quin((DataType, DataType, DataType, DataType, DataType)),
-    Sex((DataType, DataType, DataType, DataType, DataType, DataType)),
-    Multi(Vec<DataType>),
+    Single(DfValue),
+    Double((DfValue, DfValue)),
+    Tri((DfValue, DfValue, DfValue)),
+    Quad((DfValue, DfValue, DfValue, DfValue)),
+    Quin((DfValue, DfValue, DfValue, DfValue, DfValue)),
+    Sex((DfValue, DfValue, DfValue, DfValue, DfValue, DfValue)),
+    Multi(Vec<DfValue>),
 }
 
 fn deserialize_key<D: DeserializeOwned>(inp: &[u8]) -> (u64, D) {
@@ -1683,7 +1683,7 @@ mod tests {
 
     use super::*;
 
-    fn insert<S: State>(state: &mut S, row: Vec<DataType>) {
+    fn insert<S: State>(state: &mut S, row: Vec<DfValue>) {
         let record: Record = row.into();
         state.process_records(&mut record.into(), None, None);
     }
@@ -1720,7 +1720,7 @@ mod tests {
     #[test]
     fn persistent_state_single_key() {
         let mut state = setup_single_key("persistent_state_single_key");
-        let row: Vec<DataType> = vec![10.into(), "Cat".into()];
+        let row: Vec<DfValue> = vec![10.into(), "Cat".into()];
         insert(&mut state, row);
 
         match state.lookup(&[0], &KeyType::Single(&5.into())) {
@@ -1742,7 +1742,7 @@ mod tests {
         let mut state = setup_persistent("persistent_state_multi_key", None);
         let cols = vec![0, 2];
         let index = Index::new(IndexType::HashMap, cols.clone());
-        let row: Vec<DataType> = vec![10.into(), "Cat".into(), 20.into()];
+        let row: Vec<DfValue> = vec![10.into(), "Cat".into(), 20.into()];
         state.add_key(index, None);
         insert(&mut state, row.clone());
 
@@ -1762,8 +1762,8 @@ mod tests {
     #[test]
     fn persistent_state_multiple_indices() {
         let mut state = setup_persistent("persistent_state_multiple_indices", None);
-        let first: Vec<DataType> = vec![10.into(), "Cat".into(), 1.into()];
-        let second: Vec<DataType> = vec![20.into(), "Cat".into(), 1.into()];
+        let first: Vec<DfValue> = vec![10.into(), "Cat".into(), 1.into()];
+        let second: Vec<DfValue> = vec![20.into(), "Cat".into(), 1.into()];
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![1, 2]), None);
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
@@ -1790,10 +1790,10 @@ mod tests {
     fn persistent_state_lookup_multi() {
         for primary in [None, Some(&[0usize][..])] {
             let mut state = setup_persistent("persistent_state_lookup_multi", primary);
-            let first: Vec<DataType> = vec![10.into(), "Cat".into(), 1.into()];
-            let second: Vec<DataType> = vec![20.into(), "Cat".into(), 1.into()];
-            let third: Vec<DataType> = vec![30.into(), "Dog".into(), 1.into()];
-            let fourth: Vec<DataType> = vec![40.into(), "Dog".into(), 1.into()];
+            let first: Vec<DfValue> = vec![10.into(), "Cat".into(), 1.into()];
+            let second: Vec<DfValue> = vec![20.into(), "Cat".into(), 1.into()];
+            let third: Vec<DfValue> = vec![30.into(), "Dog".into(), 1.into()];
+            let fourth: Vec<DfValue> = vec![40.into(), "Dog".into(), 1.into()];
             state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
             state.add_key(Index::new(IndexType::HashMap, vec![1, 2]), None);
             state.process_records(
@@ -1872,8 +1872,8 @@ mod tests {
             Some(&pk_cols),
             &PersistenceParameters::default(),
         );
-        let first: Vec<DataType> = vec![1.into(), 2.into(), "Cat".into()];
-        let second: Vec<DataType> = vec![10.into(), 20.into(), "Cat".into()];
+        let first: Vec<DfValue> = vec![1.into(), 2.into(), "Cat".into()];
+        let second: Vec<DfValue> = vec![10.into(), 20.into(), "Cat".into()];
         state.add_key(pk, None);
         state.add_key(Index::new(IndexType::HashMap, vec![2]), None);
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
@@ -1919,8 +1919,8 @@ mod tests {
             Some(&pk.columns),
             &PersistenceParameters::default(),
         );
-        let first: Vec<DataType> = vec![1.into(), 2.into()];
-        let second: Vec<DataType> = vec![10.into(), 20.into()];
+        let first: Vec<DfValue> = vec![1.into(), 2.into()];
+        let second: Vec<DfValue> = vec![10.into(), 20.into()];
         state.add_key(pk, None);
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
         match state.lookup(&[0], &KeyType::Single(&1.into())) {
@@ -1951,8 +1951,8 @@ mod tests {
     #[test]
     fn persistent_state_not_unique_primary() {
         let mut state = setup_persistent("persistent_state_multiple_indices", None);
-        let first: Vec<DataType> = vec![0.into(), 0.into()];
-        let second: Vec<DataType> = vec![0.into(), 1.into()];
+        let first: Vec<DfValue> = vec![0.into(), 0.into()];
+        let second: Vec<DfValue> = vec![0.into(), 1.into()];
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
@@ -1978,8 +1978,8 @@ mod tests {
     #[test]
     fn persistent_state_different_indices() {
         let mut state = setup_persistent("persistent_state_different_indices", None);
-        let first: Vec<DataType> = vec![10.into(), "Cat".into()];
-        let second: Vec<DataType> = vec![20.into(), "Bob".into()];
+        let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
+        let second: Vec<DfValue> = vec![20.into(), "Bob".into()];
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
@@ -2006,8 +2006,8 @@ mod tests {
         let (_dir, name) = get_tmp_path();
         let mut params = PersistenceParameters::default();
         params.mode = DurabilityMode::Permanent;
-        let first: Vec<DataType> = vec![10.into(), "Cat".into()];
-        let second: Vec<DataType> = vec![20.into(), "Bob".into()];
+        let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
+        let second: Vec<DfValue> = vec![20.into(), "Bob".into()];
         {
             let mut state = PersistentState::new(name.clone(), Vec::<Box<[usize]>>::new(), &params);
             state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
@@ -2038,8 +2038,8 @@ mod tests {
         let (_dir, name) = get_tmp_path();
         let mut params = PersistenceParameters::default();
         params.mode = DurabilityMode::Permanent;
-        let first: Vec<DataType> = vec![10.into(), "Cat".into()];
-        let second: Vec<DataType> = vec![20.into(), "Bob".into()];
+        let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
+        let second: Vec<DfValue> = vec![20.into(), "Bob".into()];
         {
             let mut state = PersistentState::new(name.clone(), Some(&[0]), &params);
             state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
@@ -2068,9 +2068,9 @@ mod tests {
     #[test]
     fn persistent_state_remove() {
         let mut state = setup_persistent("persistent_state_remove", None);
-        let first: Vec<DataType> = vec![10.into(), "Cat".into()];
-        let duplicate: Vec<DataType> = vec![10.into(), "Other Cat".into()];
-        let second: Vec<DataType> = vec![20.into(), "Cat".into()];
+        let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
+        let duplicate: Vec<DfValue> = vec![10.into(), "Other Cat".into()];
+        let second: Vec<DfValue> = vec![20.into(), "Cat".into()];
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
         state.process_records(
@@ -2124,9 +2124,9 @@ mod tests {
     #[test]
     fn persistent_state_remove_with_unique_secondary() {
         let mut state = setup_persistent("persistent_state_remove_unique", Some(&[2usize][..]));
-        let first: Vec<DataType> = vec![10.into(), "Cat".into(), DataType::None];
-        let duplicate: Vec<DataType> = vec![10.into(), "Other Cat".into(), DataType::None];
-        let second: Vec<DataType> = vec![20.into(), "Cat".into(), DataType::None];
+        let first: Vec<DfValue> = vec![10.into(), "Cat".into(), DfValue::None];
+        let duplicate: Vec<DfValue> = vec![10.into(), "Other Cat".into(), DfValue::None];
+        let second: Vec<DfValue> = vec![20.into(), "Cat".into(), DfValue::None];
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![2]), None);
@@ -2153,7 +2153,7 @@ mod tests {
         }
 
         // Make sure we have all of our unique nulls intact
-        match state.lookup(&[2], &KeyType::Single(&DataType::None)) {
+        match state.lookup(&[2], &KeyType::Single(&DfValue::None)) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 2);
                 assert_eq!(&rows[0], &duplicate);
@@ -2176,7 +2176,7 @@ mod tests {
         let mut state = setup_persistent("persistent_state_rows", None);
         let mut rows = vec![];
         for i in 0..30 {
-            let row = vec![DataType::from(i); 30];
+            let row = vec![DfValue::from(i); 30];
             rows.push(row);
             state.add_key(Index::new(IndexType::HashMap, vec![i]), None);
         }
@@ -2196,7 +2196,7 @@ mod tests {
         let mut state = setup_persistent("persistent_state_all_rows", None);
         let mut rows = vec![];
         for i in 0..10 {
-            let row = vec![DataType::from(i); 10];
+            let row = vec![DfValue::from(i); 10];
             rows.push(row);
             // Add a bunch of indices to make sure the sorting in all_rows()
             // correctly filters out non-primary indices:
@@ -2207,7 +2207,7 @@ mod tests {
             insert(&mut state, row);
         }
 
-        let actual_rows: Vec<Vec<DataType>> = state
+        let actual_rows: Vec<Vec<DfValue>> = state
             .all_rows()
             .map(|(_key, value)| deserialize_row(&value))
             .collect();
@@ -2218,8 +2218,8 @@ mod tests {
     #[test]
     fn persistent_state_cloned_records() {
         let mut state = setup_persistent("persistent_state_cloned_records", None);
-        let first: Vec<DataType> = vec![10.into(), "Cat".into()];
-        let second: Vec<DataType> = vec![20.into(), "Cat".into()];
+        let first: Vec<DfValue> = vec![10.into(), "Cat".into()];
+        let second: Vec<DfValue> = vec![20.into(), "Cat".into()];
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
@@ -2247,7 +2247,7 @@ mod tests {
     #[test]
     fn persistent_state_old_records_new_index() {
         let mut state = setup_persistent("persistent_state_old_records_new_index", None);
-        let row: Vec<DataType> = vec![10.into(), "Cat".into()];
+        let row: Vec<DfValue> = vec![10.into(), "Cat".into()];
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         insert(&mut state, row.clone());
         state.add_key(Index::new(IndexType::HashMap, vec![1]), None);
@@ -2307,7 +2307,7 @@ mod tests {
     fn persistent_state_prefix_transform() {
         let mut state = setup_persistent("persistent_state_prefix_transform", None);
         state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
-        let data = (DataType::from(1), DataType::from(10));
+        let data = (DfValue::from(1), DfValue::from(10));
         let r = KeyType::Double(data.clone());
         let k = PersistentState::serialize_prefix(&r);
         let prefix = prefix_transform(&k);
@@ -2339,7 +2339,7 @@ mod tests {
         let mut state = setup_persistent("reindex_with_nulls", None);
         state.add_key(Index::hash_map(vec![0]), None);
         insert(&mut state, vec![1.into()]);
-        insert(&mut state, vec![DataType::None]);
+        insert(&mut state, vec![DfValue::None]);
         state.add_key(Index::btree_map(vec![0]), None);
     }
 
@@ -2371,7 +2371,7 @@ mod tests {
             assert_eq!(
                 state.lookup_range(
                     &[0],
-                    &RangeKey::from(&(vec1![DataType::from(11)]..vec1![DataType::from(20)]))
+                    &RangeKey::from(&(vec1![DfValue::from(11)]..vec1![DfValue::from(20)]))
                 ),
                 RangeLookupResult::Some(vec![].into())
             );
@@ -2383,7 +2383,7 @@ mod tests {
             assert_eq!(
                 state.lookup_range(
                     &[0],
-                    &RangeKey::from(&(vec1![DataType::from(3)]..vec1![DataType::from(7)]))
+                    &RangeKey::from(&(vec1![DfValue::from(3)]..vec1![DfValue::from(7)]))
                 ),
                 RangeLookupResult::Some((3..7).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
             );
@@ -2395,7 +2395,7 @@ mod tests {
             assert_eq!(
                 state.lookup_range(
                     &[0],
-                    &RangeKey::from(&(vec1![DataType::from(3)]..=vec1![DataType::from(7)]))
+                    &RangeKey::from(&(vec1![DfValue::from(3)]..=vec1![DfValue::from(7)]))
                 ),
                 RangeLookupResult::Some((3..=7).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
             );
@@ -2408,8 +2408,8 @@ mod tests {
                 state.lookup_range(
                     &[0],
                     &RangeKey::from(&(
-                        Bound::Excluded(vec1![DataType::from(3)]),
-                        Bound::Excluded(vec1![DataType::from(7)])
+                        Bound::Excluded(vec1![DfValue::from(3)]),
+                        Bound::Excluded(vec1![DfValue::from(7)])
                     ))
                 ),
                 RangeLookupResult::Some(
@@ -2432,8 +2432,8 @@ mod tests {
                 state.lookup_range(
                     &[0],
                     &RangeKey::from(&(
-                        Bound::Excluded(vec1![DataType::from(3)]),
-                        Bound::Excluded(vec1![DataType::from(7)])
+                        Bound::Excluded(vec1![DfValue::from(3)]),
+                        Bound::Excluded(vec1![DfValue::from(7)])
                     ))
                 ),
                 RangeLookupResult::Some(
@@ -2453,8 +2453,8 @@ mod tests {
                 state.lookup_range(
                     &[0],
                     &RangeKey::from(&(
-                        Bound::Excluded(vec1![DataType::from(3)]),
-                        Bound::Included(vec1![DataType::from(7)])
+                        Bound::Excluded(vec1![DfValue::from(3)]),
+                        Bound::Included(vec1![DfValue::from(7)])
                     ))
                 ),
                 RangeLookupResult::Some(
@@ -2482,8 +2482,8 @@ mod tests {
                 state.lookup_range(
                     &[0],
                     &RangeKey::from(&(
-                        Bound::Excluded(vec1![DataType::from(3)]),
-                        Bound::Included(vec1![DataType::from(7)])
+                        Bound::Excluded(vec1![DfValue::from(3)]),
+                        Bound::Included(vec1![DfValue::from(7)])
                     ))
                 ),
                 RangeLookupResult::Some(
@@ -2500,7 +2500,7 @@ mod tests {
         fn inclusive_unbounded() {
             let state = setup();
             assert_eq!(
-                state.lookup_range(&[0], &RangeKey::from(&(vec1![DataType::from(3)]..))),
+                state.lookup_range(&[0], &RangeKey::from(&(vec1![DfValue::from(3)]..))),
                 RangeLookupResult::Some((3..10).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
             );
         }
@@ -2508,17 +2508,17 @@ mod tests {
         #[test]
         fn unbounded_inclusive_multiple_rows_in_upper_bound() {
             let mut state = setup();
-            state.process_records(&mut vec![vec![DataType::from(3)]].into(), None, None);
+            state.process_records(&mut vec![vec![DfValue::from(3)]].into(), None, None);
 
             assert_eq!(
-                state.lookup_range(&[0], &RangeKey::from(&(..=vec1![DataType::from(3)]))),
+                state.lookup_range(&[0], &RangeKey::from(&(..=vec1![DfValue::from(3)]))),
                 RangeLookupResult::Some(
                     vec![
-                        vec![DataType::from(0)],
-                        vec![DataType::from(1)],
-                        vec![DataType::from(2)],
-                        vec![DataType::from(3)],
-                        vec![DataType::from(3)],
+                        vec![DfValue::from(0)],
+                        vec![DfValue::from(1)],
+                        vec![DfValue::from(2)],
+                        vec![DfValue::from(3)],
+                        vec![DfValue::from(3)],
                     ]
                     .into()
                 )
@@ -2540,7 +2540,7 @@ mod tests {
             state.add_key(Index::btree_map(vec![0]), None);
 
             assert_eq!(
-                state.lookup_range(&[0], &RangeKey::from(&(vec1![DataType::from(2)]..))),
+                state.lookup_range(&[0], &RangeKey::from(&(vec1![DfValue::from(2)]..))),
                 RangeLookupResult::Some(
                     [(2, 4), (2, 5), (3, 6), (3, 7)]
                         .iter()
@@ -2555,7 +2555,7 @@ mod tests {
         fn unbounded_inclusive() {
             let state = setup();
             assert_eq!(
-                state.lookup_range(&[0], &RangeKey::from(&(..=vec1![DataType::from(3)]))),
+                state.lookup_range(&[0], &RangeKey::from(&(..=vec1![DfValue::from(3)]))),
                 RangeLookupResult::Some((0..=3).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
             );
         }
@@ -2564,7 +2564,7 @@ mod tests {
         fn unbounded_exclusive() {
             let state = setup();
             assert_eq!(
-                state.lookup_range(&[0], &RangeKey::from(&(..vec1![DataType::from(3)]))),
+                state.lookup_range(&[0], &RangeKey::from(&(..vec1![DfValue::from(3)]))),
                 RangeLookupResult::Some((0..3).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
             );
         }
@@ -2588,7 +2588,7 @@ mod tests {
             assert_eq!(
                 state.lookup_range(
                     &[1],
-                    &RangeKey::from(&(Included(vec1![DataType::from(3)]), Unbounded))
+                    &RangeKey::from(&(Included(vec1![DfValue::from(3)]), Unbounded))
                 ),
                 RangeLookupResult::Some(
                     (3..10)
@@ -2627,7 +2627,7 @@ mod tests {
             assert_eq!(
                 state.lookup_range(
                     &[1],
-                    &RangeKey::from(&(Excluded(vec1![DataType::from(10)]), Unbounded))
+                    &RangeKey::from(&(Excluded(vec1![DfValue::from(10)]), Unbounded))
                 ),
                 RangeLookupResult::Some(
                     [(8, 555671065), (9, 925768521), (0, 1221662829)]
@@ -2647,8 +2647,8 @@ mod tests {
                 state.lookup_range(
                     &[1],
                     &RangeKey::from(&(
-                        Excluded(vec1![DataType::from(3)]),
-                        Included(vec1![DataType::from(7)])
+                        Excluded(vec1![DfValue::from(3)]),
+                        Included(vec1![DfValue::from(7)])
                     ))
                 ),
                 RangeLookupResult::Some(
@@ -2667,8 +2667,8 @@ mod tests {
                 state.lookup_range(
                     &[1],
                     &RangeKey::from(&(
-                        Excluded(vec1![DataType::from(3)]),
-                        Excluded(vec1![DataType::from(7)])
+                        Excluded(vec1![DfValue::from(3)]),
+                        Excluded(vec1![DfValue::from(7)])
                     ))
                 ),
                 RangeLookupResult::Some(
@@ -2687,8 +2687,8 @@ mod tests {
                 state.lookup_range(
                     &[1],
                     &RangeKey::from(&(
-                        Included(vec1![DataType::from(3)]),
-                        Excluded(vec1![DataType::from(7)])
+                        Included(vec1![DfValue::from(3)]),
+                        Excluded(vec1![DfValue::from(7)])
                     ))
                 ),
                 RangeLookupResult::Some(
@@ -2707,8 +2707,8 @@ mod tests {
                 state.lookup_range(
                     &[1],
                     &RangeKey::from(&(
-                        Excluded(vec1![DataType::from(3)]),
-                        Included(vec1![DataType::from(7)])
+                        Excluded(vec1![DfValue::from(3)]),
+                        Included(vec1![DfValue::from(7)])
                     ))
                 ),
                 RangeLookupResult::Some(
@@ -2726,7 +2726,7 @@ mod tests {
             assert_eq!(
                 state.lookup_range(
                     &[1],
-                    &RangeKey::from(&(Unbounded, Included(vec1![DataType::from(7)])))
+                    &RangeKey::from(&(Unbounded, Included(vec1![DfValue::from(7)])))
                 ),
                 RangeLookupResult::Some(
                     (-10..=7)
@@ -2743,7 +2743,7 @@ mod tests {
             assert_eq!(
                 state.lookup_range(
                     &[1],
-                    &RangeKey::from(&(Unbounded, Excluded(vec1![DataType::from(7)])))
+                    &RangeKey::from(&(Unbounded, Excluded(vec1![DfValue::from(7)])))
                 ),
                 RangeLookupResult::Some(
                     (-10..7)
@@ -2762,7 +2762,7 @@ mod tests {
                 state.lookup_range(
                     &[0, 1],
                     &RangeKey::from(&(
-                        Included(vec1![DataType::from(3), DataType::from(3)]),
+                        Included(vec1![DfValue::from(3), DfValue::from(3)]),
                         Unbounded
                     ))
                 ),
@@ -2778,9 +2778,8 @@ mod tests {
         #[test]
         fn inclusive_unbounded_secondary_non_unique() {
             let mut state = setup_secondary();
-            let extra_row_beginning =
-                vec![DataType::from(11), DataType::from(3), DataType::from(3)];
-            let extra_row_end = vec![DataType::from(12), DataType::from(9), DataType::from(9)];
+            let extra_row_beginning = vec![DfValue::from(11), DfValue::from(3), DfValue::from(3)];
+            let extra_row_end = vec![DfValue::from(12), DfValue::from(9), DfValue::from(9)];
 
             state.process_records(
                 &mut vec![extra_row_beginning.clone(), extra_row_end.clone()].into(),
@@ -2791,7 +2790,7 @@ mod tests {
             assert_eq!(
                 state.lookup_range(
                     &[1],
-                    &RangeKey::from(&(Included(vec1![DataType::from(3)]), Unbounded))
+                    &RangeKey::from(&(Included(vec1![DfValue::from(3)]), Unbounded))
                 ),
                 RangeLookupResult::Some(
                     vec![vec![3.into(), 3.into(), 3.into()], extra_row_beginning]

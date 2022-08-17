@@ -12,7 +12,7 @@ use psql_srv::Column;
 use readyset::ColumnSchema;
 use readyset_client::upstream_database::NoriaCompare;
 use readyset_client::{UpstreamDatabase, UpstreamPrepare};
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use readyset_errors::{unsupported, ReadySetError};
 use tokio::process::Command;
 use tokio_postgres as pgsql;
@@ -210,7 +210,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     async fn execute(
         &mut self,
         statement_id: u32,
-        params: &[DataType],
+        params: &[DfValue],
     ) -> Result<Self::QueryResult, Error> {
         let statement = self
             .prepared_statements

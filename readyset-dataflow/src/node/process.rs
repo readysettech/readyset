@@ -38,7 +38,7 @@ struct MissSet<'a> {
     lookup_key: MissLookupKey,
     /// The replay key that was being processed during the lookup (if any)
     replay_key: Option<MissReplayKey>,
-    set: HashMap<&'a [DataType], &'a Miss>,
+    set: HashMap<&'a [DfValue], &'a Miss>,
 }
 
 impl<'a> MissSet<'a> {
@@ -684,7 +684,7 @@ pub(crate) fn materialize(
 
 #[cfg(feature = "bench")]
 pub mod bench {
-    use readyset_data::DataType::Int;
+    use readyset_data::DfValue::Int;
 
     use super::*;
 

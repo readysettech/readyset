@@ -3,7 +3,7 @@ use std::convert::TryInto;
 use std::ops::RangeBounds;
 
 use ahash::RandomState;
-use common::DataType;
+use common::DfValue;
 use dataflow_expression::PreInsertion;
 use reader_map::refs::Miss;
 use readyset::consistency::Timestamp;
@@ -14,21 +14,21 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 use vec1::{vec1, Vec1};
 
-/// A [`ReadHandle`] to a map whose key is a single [`DataType`], for faster lookup (compared to a
+/// A [`ReadHandle`] to a map whose key is a single [`DfValue`], for faster lookup (compared to a
 /// Vec with len == 1)
 type HandleSingle = reader_map::handles::ReadHandle<
-    DataType,
-    Box<[DataType]>,
+    DfValue,
+    Box<[DfValue]>,
     PreInsertion,
     i64,
     Timestamp,
     RandomState,
 >;
 
-/// A [`ReadHandle`] to a map whose key is a [`Vec<DataType>`]
+/// A [`ReadHandle`] to a map whose key is a [`Vec<DfValue>`]
 type HandleMany = reader_map::handles::ReadHandle<
-    Vec<DataType>,
-    Box<[DataType]>,
+    Vec<DfValue>,
+    Box<[DfValue]>,
     PreInsertion,
     i64,
     Timestamp,
@@ -92,7 +92,7 @@ impl Handle {
         }
     }
 
-    pub(super) fn keys(&self) -> Vec<Vec<DataType>> {
+    pub(super) fn keys(&self) -> Vec<Vec<DfValue>> {
         match *self {
             Handle::Single(ref h) => h.map_into(|k, _| vec![k.clone()]),
             Handle::Many(ref h) => h.map_into(|ks, _| ks.clone()),
@@ -161,7 +161,7 @@ impl Handle {
                         continue;
                     }
 
-                    match map.range::<_, [DataType]>(&(
+                    match map.range::<_, [DfValue]>(&(
                         start.as_ref().map(|v| v.as_slice()),
                         end.as_ref().map(|v| v.as_slice()),
                     )) {
@@ -196,7 +196,7 @@ impl Handle {
         }
     }
 
-    pub(super) fn get<'a>(&self, key: &'a [DataType]) -> Result<SharedRows, LookupError<'a>> {
+    pub(super) fn get<'a>(&self, key: &'a [DfValue]) -> Result<SharedRows, LookupError<'a>> {
         match self {
             Handle::Single(h) => {
                 let map = h.enter()?;
@@ -223,7 +223,7 @@ impl Handle {
     /// if the underlying reader map is not able to accept reads
     ///
     /// This is equivalent to testing if `get` returns an Err other than `NotReady`
-    pub(super) fn contains_key(&self, key: &[DataType]) -> reader_map::Result<bool> {
+    pub(super) fn contains_key(&self, key: &[DfValue]) -> reader_map::Result<bool> {
         match *self {
             Handle::Single(ref h) => {
                 assert_eq!(key.len(), 1);
@@ -243,7 +243,7 @@ impl Handle {
     /// This is equivalent to testing if `get` returns an Err other than `NotReady`
     pub(super) fn contains_range<R>(&self, range: &R) -> reader_map::Result<bool>
     where
-        R: RangeBounds<Vec<DataType>>,
+        R: RangeBounds<Vec<DfValue>>,
     {
         match *self {
             Handle::Single(ref h) => {
@@ -284,7 +284,7 @@ mod tests {
     use super::*;
 
     fn make_single() -> (
-        WriteHandle<DataType, Box<[DataType]>, PreInsertion, i64, Timestamp, RandomState>,
+        WriteHandle<DfValue, Box<[DfValue]>, PreInsertion, i64, Timestamp, RandomState>,
         Handle,
     ) {
         let (w, r) = reader_map::Options::default()
@@ -297,7 +297,7 @@ mod tests {
     }
 
     fn make_many() -> (
-        WriteHandle<Vec<DataType>, Box<[DataType]>, PreInsertion, i64, Timestamp, RandomState>,
+        WriteHandle<Vec<DfValue>, Box<[DfValue]>, PreInsertion, i64, Timestamp, RandomState>,
         Handle,
     ) {
         let (w, r) = reader_map::Options::default()
@@ -311,7 +311,7 @@ mod tests {
 
     proptest! {
         #[test]
-        fn get_double(key: [DataType; 2], val: Box<[DataType]>) {
+        fn get_double(key: [DfValue; 2], val: Box<[DfValue]>) {
             let (mut w, handle) = make_many();
             w.insert(key.to_vec(), val.clone());
             w.publish();
@@ -329,7 +329,7 @@ mod tests {
                 w.insert(k, v);
             });
 
-        w.insert_range((DataType::from(0i32))..(DataType::from(10i32)));
+        w.insert_range((DfValue::from(0i32))..(DfValue::from(10i32)));
         w.publish();
 
         let key = KeyComparison::Range((
@@ -344,7 +344,7 @@ mod tests {
                 .cloned()
                 .collect::<Vec<_>>(),
             (2i32..=3)
-                .map(|n| vec![DataType::from(n), DataType::from(n)].into_boxed_slice())
+                .map(|n| vec![DfValue::from(n), DfValue::from(n)].into_boxed_slice())
                 .collect::<Vec<_>>()
         );
     }
@@ -393,7 +393,7 @@ mod tests {
                 .cloned()
                 .collect::<Vec<_>>(),
             (2i32..=3)
-                .map(|n: i32| vec![DataType::from(n), DataType::from(n)].into_boxed_slice())
+                .map(|n: i32| vec![DfValue::from(n), DfValue::from(n)].into_boxed_slice())
                 .collect::<Vec<_>>()
         );
     }

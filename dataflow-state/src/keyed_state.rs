@@ -5,7 +5,7 @@ use common::{Index, IndexType, KeyType, RangeKey};
 use indexmap::IndexMap;
 use launchpad::intervals::into_bound_endpoint;
 use partial_map::PartialMap;
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use tuple::{Map, TupleElements};
 use vec1::Vec1;
 
@@ -14,7 +14,7 @@ use crate::{Misses, Row, Rows};
 
 /// A map containing a single index into the state of a node.
 ///
-/// KeyedStates are associative (key-value) maps from lists of [`DataType`]s of length of at least 1
+/// KeyedStates are associative (key-value) maps from lists of [`DfValue`]s of length of at least 1
 /// to [lists of reference-counted pointers to rows](Rows), and can be backed by either a
 /// [`BTreeMap`](std::collections::BTreeMap) or an [`IndexMap`], according to an
 /// [`IndexType`](readyset::IndexType).
@@ -23,32 +23,26 @@ use crate::{Misses, Row, Rows};
 /// looking up ranges in a HashMap, will panic.
 #[allow(clippy::type_complexity)]
 pub(super) enum KeyedState {
-    SingleBTree(PartialMap<DataType, Rows>),
-    DoubleBTree(PartialMap<(DataType, DataType), Rows>),
-    TriBTree(PartialMap<(DataType, DataType, DataType), Rows>),
-    QuadBTree(PartialMap<(DataType, DataType, DataType, DataType), Rows>),
-    QuinBTree(PartialMap<(DataType, DataType, DataType, DataType, DataType), Rows>),
-    SexBTree(PartialMap<(DataType, DataType, DataType, DataType, DataType, DataType), Rows>),
+    SingleBTree(PartialMap<DfValue, Rows>),
+    DoubleBTree(PartialMap<(DfValue, DfValue), Rows>),
+    TriBTree(PartialMap<(DfValue, DfValue, DfValue), Rows>),
+    QuadBTree(PartialMap<(DfValue, DfValue, DfValue, DfValue), Rows>),
+    QuinBTree(PartialMap<(DfValue, DfValue, DfValue, DfValue, DfValue), Rows>),
+    SexBTree(PartialMap<(DfValue, DfValue, DfValue, DfValue, DfValue, DfValue), Rows>),
     // the `usize` parameter is the length of the Vec.
-    MultiBTree(PartialMap<Vec<DataType>, Rows>, usize),
+    MultiBTree(PartialMap<Vec<DfValue>, Rows>, usize),
 
-    SingleHash(IndexMap<DataType, Rows, ahash::RandomState>),
-    DoubleHash(IndexMap<(DataType, DataType), Rows, ahash::RandomState>),
-    TriHash(IndexMap<(DataType, DataType, DataType), Rows, ahash::RandomState>),
-    QuadHash(IndexMap<(DataType, DataType, DataType, DataType), Rows, ahash::RandomState>),
-    QuinHash(
-        IndexMap<(DataType, DataType, DataType, DataType, DataType), Rows, ahash::RandomState>,
-    ),
+    SingleHash(IndexMap<DfValue, Rows, ahash::RandomState>),
+    DoubleHash(IndexMap<(DfValue, DfValue), Rows, ahash::RandomState>),
+    TriHash(IndexMap<(DfValue, DfValue, DfValue), Rows, ahash::RandomState>),
+    QuadHash(IndexMap<(DfValue, DfValue, DfValue, DfValue), Rows, ahash::RandomState>),
+    QuinHash(IndexMap<(DfValue, DfValue, DfValue, DfValue, DfValue), Rows, ahash::RandomState>),
     SexHash(
-        IndexMap<
-            (DataType, DataType, DataType, DataType, DataType, DataType),
-            Rows,
-            ahash::RandomState,
-        >,
+        IndexMap<(DfValue, DfValue, DfValue, DfValue, DfValue, DfValue), Rows, ahash::RandomState>,
     ),
     // ♪ multi-hash ♪ https://www.youtube.com/watch?v=bEtDVy55shI
     // (`usize` parameter as in `MultiBTree`)
-    MultiHash(IndexMap<Vec<DataType>, Rows>, usize),
+    MultiHash(IndexMap<Vec<DfValue>, Rows>, usize),
 }
 
 impl KeyedState {
@@ -230,7 +224,7 @@ impl KeyedState {
     pub(super) fn remove(
         &mut self,
         key_cols: &[usize],
-        row: &[DataType],
+        row: &[DfValue],
         hit: Option<&mut bool>,
     ) -> Option<Row> {
         let do_remove = |rs: &mut Rows| -> Option<Row> {
@@ -309,27 +303,27 @@ impl KeyedState {
     /// # Panics
     ///
     /// Panics if this `KeyedState` is backed by a HashMap index
-    pub(super) fn insert_range(&mut self, range: (Bound<Vec1<DataType>>, Bound<Vec1<DataType>>)) {
+    pub(super) fn insert_range(&mut self, range: (Bound<Vec1<DfValue>>, Bound<Vec1<DfValue>>)) {
         match self {
             KeyedState::SingleBTree(ref mut map) => map.insert_range((
                 range.0.map(|k| k.split_off_first().0),
                 range.1.map(|k| k.split_off_first().0),
             )),
             KeyedState::DoubleBTree(ref mut map) => {
-                map.insert_range(<(DataType, _) as MakeKey<_>>::from_range(&range))
+                map.insert_range(<(DfValue, _) as MakeKey<_>>::from_range(&range))
             }
             KeyedState::TriBTree(ref mut map) => {
-                map.insert_range(<(DataType, _, _) as MakeKey<_>>::from_range(&range))
+                map.insert_range(<(DfValue, _, _) as MakeKey<_>>::from_range(&range))
             }
             KeyedState::QuadBTree(ref mut map) => {
-                map.insert_range(<(DataType, _, _, _) as MakeKey<_>>::from_range(&range))
+                map.insert_range(<(DfValue, _, _, _) as MakeKey<_>>::from_range(&range))
             }
             KeyedState::QuinBTree(ref mut map) => {
-                map.insert_range(<(DataType, _, _, _, _) as MakeKey<_>>::from_range(&range))
+                map.insert_range(<(DfValue, _, _, _, _) as MakeKey<_>>::from_range(&range))
             }
-            KeyedState::SexBTree(ref mut map) => map.insert_range(
-                <(DataType, _, _, _, _, _) as MakeKey<_>>::from_range(&range),
-            ),
+            KeyedState::SexBTree(ref mut map) => {
+                map.insert_range(<(DfValue, _, _, _, _, _) as MakeKey<_>>::from_range(&range))
+            }
             // This is unwieldy, but allowing callers to insert the wrong length of Vec into us
             // would be very bad!
             KeyedState::MultiBTree(ref mut map, len)
@@ -357,7 +351,7 @@ impl KeyedState {
         &'a self,
         key: &RangeKey,
     ) -> Result<Box<dyn Iterator<Item = &'a Row> + 'a>, Misses> {
-        fn to_misses<K: TupleElements<Element = DataType>>(
+        fn to_misses<K: TupleElements<Element = DfValue>>(
             misses: Vec<(Bound<K>, Bound<K>)>,
         ) -> Misses {
             misses
@@ -451,7 +445,7 @@ impl KeyedState {
     /// with the key. Returns `None` if map is empty.
     // For correct eviction we care about the number of elements present in the map, not intervals,
     // therefore have to compare len to 0
-    pub(super) fn evict_with_seed(&mut self, seed: usize) -> Option<(Rows, Vec<DataType>)> {
+    pub(super) fn evict_with_seed(&mut self, seed: usize) -> Option<(Rows, Vec<DfValue>)> {
         let (rs, key) = match *self {
             KeyedState::SingleHash(ref mut m) if !m.is_empty() => {
                 let index = seed % m.len();
@@ -534,7 +528,7 @@ impl KeyedState {
     }
 
     /// Remove all rows for the given key, returning the evicted rows.
-    pub(super) fn evict(&mut self, key: &[DataType]) -> Option<Rows> {
+    pub(super) fn evict(&mut self, key: &[DfValue]) -> Option<Rows> {
         match *self {
             KeyedState::SingleBTree(ref mut m) => m.remove(&(key[0])),
             KeyedState::DoubleBTree(ref mut m) => m.remove(&MakeKey::from_key(key)),
@@ -549,16 +543,16 @@ impl KeyedState {
             KeyedState::MultiBTree(ref mut m, _) => m.remove(&key.to_owned()),
 
             KeyedState::SingleHash(ref mut m) => m.remove(&(key[0])),
-            KeyedState::DoubleHash(ref mut m) => m.remove::<(DataType, _)>(&MakeKey::from_key(key)),
-            KeyedState::TriHash(ref mut m) => m.remove::<(DataType, _, _)>(&MakeKey::from_key(key)),
+            KeyedState::DoubleHash(ref mut m) => m.remove::<(DfValue, _)>(&MakeKey::from_key(key)),
+            KeyedState::TriHash(ref mut m) => m.remove::<(DfValue, _, _)>(&MakeKey::from_key(key)),
             KeyedState::QuadHash(ref mut m) => {
-                m.remove::<(DataType, _, _, _)>(&MakeKey::from_key(key))
+                m.remove::<(DfValue, _, _, _)>(&MakeKey::from_key(key))
             }
             KeyedState::QuinHash(ref mut m) => {
-                m.remove::<(DataType, _, _, _, _)>(&MakeKey::from_key(key))
+                m.remove::<(DfValue, _, _, _, _)>(&MakeKey::from_key(key))
             }
             KeyedState::SexHash(ref mut m) => {
-                m.remove::<(DataType, _, _, _, _, _)>(&MakeKey::from_key(key))
+                m.remove::<(DfValue, _, _, _, _, _)>(&MakeKey::from_key(key))
             }
             KeyedState::MultiHash(ref mut m, _) => m.remove(&key.to_owned()),
         }
@@ -571,25 +565,25 @@ impl KeyedState {
     /// Panics if this `KeyedState` is backed by a HashMap index
     pub(super) fn evict_range<R>(&mut self, range: &R) -> Rows
     where
-        R: RangeBounds<Vec1<DataType>>,
+        R: RangeBounds<Vec1<DfValue>>,
     {
         macro_rules! do_evict_range {
             ($m: expr, $range: expr, $hint: ty) => {
-                $m.remove_range(<$hint as MakeKey<DataType>>::from_range($range))
+                $m.remove_range(<$hint as MakeKey<DfValue>>::from_range($range))
                     .flat_map(|(_, rows)| rows.into_iter().map(|(r, _)| r))
                     .collect()
             };
         }
 
         match self {
-            KeyedState::SingleBTree(m) => do_evict_range!(m, range, DataType),
-            KeyedState::DoubleBTree(m) => do_evict_range!(m, range, (DataType, _)),
-            KeyedState::TriBTree(m) => do_evict_range!(m, range, (DataType, _, _)),
-            KeyedState::QuadBTree(m) => do_evict_range!(m, range, (DataType, _, _, _)),
-            KeyedState::QuinBTree(m) => do_evict_range!(m, range, (DataType, _, _, _, _)),
-            KeyedState::SexBTree(m) => do_evict_range!(m, range, (DataType, _, _, _, _, _)),
+            KeyedState::SingleBTree(m) => do_evict_range!(m, range, DfValue),
+            KeyedState::DoubleBTree(m) => do_evict_range!(m, range, (DfValue, _)),
+            KeyedState::TriBTree(m) => do_evict_range!(m, range, (DfValue, _, _)),
+            KeyedState::QuadBTree(m) => do_evict_range!(m, range, (DfValue, _, _, _)),
+            KeyedState::QuinBTree(m) => do_evict_range!(m, range, (DfValue, _, _, _, _)),
+            KeyedState::SexBTree(m) => do_evict_range!(m, range, (DfValue, _, _, _, _, _)),
             KeyedState::MultiBTree(m, _) => m
-                .remove_range::<[DataType], _>((
+                .remove_range::<[DfValue], _>((
                     range.start_bound().map(Vec1::as_slice),
                     range.end_bound().map(Vec1::as_slice),
                 ))

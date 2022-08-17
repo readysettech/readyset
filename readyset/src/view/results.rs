@@ -4,7 +4,7 @@ use std::sync::Arc;
 use dataflow_expression::{Expr, PostLookup, PostLookupAggregates};
 use launchpad::nonmaxusize::NonMaxUsize;
 use nom_sql::OrderType;
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use smallvec::SmallVec;
 use streaming_iterator::StreamingIterator;
 use tournament_kway::{Comparator, StreamingTournament};
@@ -12,10 +12,10 @@ use tournament_kway::{Comparator, StreamingTournament};
 use crate::ReadReplyStats;
 
 /// A lookup key into a reader
-pub type Key = Box<[DataType]>;
+pub type Key = Box<[DfValue]>;
 
 /// A single row in a result set
-pub type Row = Box<[DataType]>;
+pub type Row = Box<[DfValue]>;
 
 /// A shared set of rows, returned for a given single key in a reader, under a [`triomphe::Arc`]
 pub type SharedRows = triomphe::Arc<SmallVec<[Row; 1]>>;
@@ -26,14 +26,14 @@ pub type SharedResults = SmallVec<[SharedRows; 1]>;
 /// A set of uniquely owned results
 #[derive(Debug)]
 pub struct Results {
-    results: Vec<Vec<DataType>>,
+    results: Vec<Vec<DfValue>>,
     /// When present, contains stats related to the operation
     pub stats: Option<ReadReplyStats>,
 }
 
 impl Results {
     #[doc(hidden)]
-    pub fn new(results: Vec<Vec<DataType>>) -> Self {
+    pub fn new(results: Vec<Vec<DfValue>>) -> Self {
         Self {
             results,
             stats: None,
@@ -41,7 +41,7 @@ impl Results {
     }
 
     #[doc(hidden)]
-    pub fn with_stats(results: Vec<Vec<DataType>>, stats: ReadReplyStats) -> Self {
+    pub fn with_stats(results: Vec<Vec<DfValue>>, stats: ReadReplyStats) -> Self {
         Self {
             results,
             stats: Some(stats),
@@ -49,7 +49,7 @@ impl Results {
     }
 
     #[doc(hidden)]
-    pub fn into_data(self) -> Vec<Vec<DataType>> {
+    pub fn into_data(self) -> Vec<Vec<DfValue>> {
         self.results
     }
 }
@@ -145,7 +145,7 @@ where
 struct AggregateIterator {
     inner: Box<ResultIteratorInner>,
     aggregate: PostLookupAggregates,
-    out_row: Option<Vec<DataType>>,
+    out_row: Option<Vec<DfValue>>,
     filter: Option<Expr>,
 }
 
@@ -343,7 +343,7 @@ impl ResultIterator {
 }
 
 impl StreamingIterator for OwnedResultIterator {
-    type Item = [DataType];
+    type Item = [DfValue];
 
     #[inline(always)]
     fn advance(&mut self) {
@@ -378,7 +378,7 @@ impl SingleKeyIterator {
 }
 
 impl StreamingIterator for SingleKeyIterator {
-    type Item = [DataType];
+    type Item = [DfValue];
 
     #[inline(always)]
     fn advance(&mut self) {
@@ -405,7 +405,7 @@ impl MultiKeyIterator {
 }
 
 impl StreamingIterator for MultiKeyIterator {
-    type Item = [DataType];
+    type Item = [DfValue];
 
     #[inline(always)]
     fn advance(&mut self) {
@@ -448,7 +448,7 @@ impl MergeIterator {
 }
 
 impl StreamingIterator for MergeIterator {
-    type Item = [DataType];
+    type Item = [DfValue];
 
     #[inline(always)]
     fn advance(&mut self) {
@@ -480,7 +480,7 @@ impl AggregateIterator {
 }
 
 impl StreamingIterator for AggregateIterator {
-    type Item = [DataType];
+    type Item = [DfValue];
 
     #[inline(always)]
     fn advance(&mut self) {
@@ -530,7 +530,7 @@ impl StreamingIterator for AggregateIterator {
 }
 
 impl StreamingIterator for ResultIteratorInner {
-    type Item = [DataType];
+    type Item = [DfValue];
 
     #[inline(always)]
     fn advance(&mut self) {
@@ -554,7 +554,7 @@ impl StreamingIterator for ResultIteratorInner {
 }
 
 impl StreamingIterator for ResultIterator {
-    type Item = [DataType];
+    type Item = [DfValue];
 
     #[inline(always)]
     fn advance(&mut self) {
@@ -603,8 +603,8 @@ impl StreamingIterator for ResultIterator {
 }
 
 impl IntoIterator for ResultIterator {
-    type Item = Vec<DataType>;
-    type IntoIter = impl Iterator<Item = Vec<DataType>>;
+    type Item = Vec<DfValue>;
+    type IntoIter = impl Iterator<Item = Vec<DfValue>>;
 
     /// Convert to an iterator over owned rows (rows are cloned)
     fn into_iter(self) -> Self::IntoIter {
@@ -614,12 +614,12 @@ impl IntoIterator for ResultIterator {
 
 impl ResultIterator {
     /// Collect the results into a vector (rows are cloned)
-    pub fn into_vec(self) -> Vec<Vec<DataType>> {
+    pub fn into_vec(self) -> Vec<Vec<DfValue>> {
         self.into_iter().collect()
     }
 }
 
-impl From<ResultIterator> for Vec<Vec<DataType>> {
+impl From<ResultIterator> for Vec<Vec<DfValue>> {
     fn from(iter: ResultIterator) -> Self {
         iter.into_vec()
     }

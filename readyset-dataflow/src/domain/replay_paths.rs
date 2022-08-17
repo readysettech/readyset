@@ -492,13 +492,13 @@ mod tests {
 
             // We just evicted [Equal([1])] from columns [0], resulting in {[1, "a"]}
             let index = Index::hash_map(vec![0]);
-            let evicted_keys = [KeyComparison::Equal(vec1![DataType::from(1)])];
+            let evicted_keys = [KeyComparison::Equal(vec1![DfValue::from(1)])];
             let res = paths
                 .downstream_dependent_paths(
                     LocalNodeIndex::make(0),
                     &index,
                     &evicted_keys,
-                    vec![Row::from(vec![DataType::from(1), DataType::from("a")])]
+                    vec![Row::from(vec![DfValue::from(1), DfValue::from("a")])]
                         .into_iter()
                         .collect(),
                 )
@@ -511,8 +511,8 @@ mod tests {
             assert_eq!(
                 *keys,
                 vec![KeyComparison::Equal(vec1![
-                    DataType::from(1),
-                    DataType::from("a")
+                    DfValue::from(1),
+                    DfValue::from("a")
                 ])]
             )
         }

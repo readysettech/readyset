@@ -95,7 +95,7 @@ impl Ingredient for Filter {
         match self.lookup(*self.src, columns, key, nodes, states, mode)? {
             IngredientLookupResult::Records(rs) => {
                 let f = self.expression.clone();
-                let filter = move |r: &[DataType]| Ok(f.eval(r)?.is_truthy());
+                let filter = move |r: &[DfValue]| Ok(f.eval(r)?.is_truthy());
                 Ok(IngredientLookupResult::Records(
                     Box::new(rs.filter_map(move |r| {
                         match r {
@@ -150,7 +150,7 @@ mod tests {
                 filters.unwrap_or_else(|| Op {
                     left: Box::new(column_with_type(1, DfType::Sql(SqlType::Text))),
                     op: BinaryOperator::Equal,
-                    right: Box::new(make_literal(DataType::from("a"))),
+                    right: Box::new(make_literal(DfValue::from("a"))),
                     ty: DfType::Sql(SqlType::Bool),
                 }),
             ),
@@ -161,9 +161,9 @@ mod tests {
 
     #[test]
     fn it_forwards_constant_expr() {
-        let mut g = setup(false, Some(make_literal(DataType::from(1))));
+        let mut g = setup(false, Some(make_literal(DfValue::from(1))));
 
-        let mut left: Vec<DataType> = vec![1.into(), "a".try_into().unwrap()];
+        let mut left: Vec<DfValue> = vec![1.into(), "a".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
         left = vec![1.into(), "b".try_into().unwrap()];
@@ -177,7 +177,7 @@ mod tests {
     fn it_forwards() {
         let mut g = setup(false, None);
 
-        let mut left: Vec<DataType> = vec![1.into(), "a".try_into().unwrap()];
+        let mut left: Vec<DfValue> = vec![1.into(), "a".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
         left = vec![1.into(), "b".try_into().unwrap()];
@@ -195,21 +195,21 @@ mod tests {
                 left: Box::new(Op {
                     left: Box::new(column_with_type(0, DfType::Sql(SqlType::Int(None)))),
                     op: BinaryOperator::Equal,
-                    right: Box::new(make_literal(DataType::from(1))),
+                    right: Box::new(make_literal(DfValue::from(1))),
                     ty: DfType::Sql(SqlType::Bool),
                 }),
                 op: BinaryOperator::And,
                 right: Box::new(Op {
                     left: Box::new(column_with_type(1, DfType::Sql(SqlType::Text))),
                     op: BinaryOperator::Equal,
-                    right: Box::new(make_literal(DataType::from("a"))),
+                    right: Box::new(make_literal(DfValue::from("a"))),
                     ty: DfType::Sql(SqlType::Bool),
                 }),
                 ty: DfType::Sql(SqlType::Bool),
             }),
         );
 
-        let mut left: Vec<DataType> = vec![1.into(), "a".try_into().unwrap()];
+        let mut left: Vec<DfValue> = vec![1.into(), "a".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
         left = vec![1.into(), "b".try_into().unwrap()];
@@ -264,14 +264,14 @@ mod tests {
                 left: Box::new(Op {
                     left: Box::new(column_with_type(0, DfType::Sql(SqlType::Int(None)))),
                     op: BinaryOperator::LessOrEqual,
-                    right: Box::new(make_literal(DataType::from(2))),
+                    right: Box::new(make_literal(DfValue::from(2))),
                     ty: DfType::Sql(SqlType::Bool),
                 }),
                 op: BinaryOperator::And,
                 right: Box::new(Op {
                     left: Box::new(column_with_type(1, DfType::Sql(SqlType::Text))),
                     op: BinaryOperator::NotEqual,
-                    right: Box::new(make_literal(DataType::from("a"))),
+                    right: Box::new(make_literal(DfValue::from("a"))),
                     ty: DfType::Sql(SqlType::Bool),
                 }),
                 ty: DfType::Sql(SqlType::Bool),
@@ -279,7 +279,7 @@ mod tests {
         );
 
         // both conditions match (2 <= 2, "b" != "a")
-        let mut left: Vec<DataType> = vec![2.into(), "b".try_into().unwrap()];
+        let mut left: Vec<DfValue> = vec![2.into(), "b".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
         // second condition fails ("a" != "a")
@@ -307,7 +307,7 @@ mod tests {
             }),
         );
 
-        let mut left: Vec<DataType> = vec![2.into(), 2.into()];
+        let mut left: Vec<DfValue> = vec![2.into(), 2.into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
         left = vec![2.into(), "b".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left, false), Records::default());

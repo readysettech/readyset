@@ -101,7 +101,7 @@ pub enum Literal {
     UnsignedInteger(u64),
     /// Represents an `f32` floating-point number.
     /// This distinction was introduced to avoid numeric error when transforming
-    /// a `[Literal]` into another type (`[DataType]` or `[mysql::Value]`), an back.
+    /// a `[Literal]` into another type (`[DfValue]` or `[mysql::Value]`), an back.
     /// As an example, if we read an `f32` from a binlog, we would be transforming that
     /// `f32` into an `f64` (thus, potentially introducing numeric error) if this type
     /// didn't exist.
@@ -116,9 +116,9 @@ pub enum Literal {
     CurrentTimestamp,
     // Even though `ByteArray` has the same inner representation as `Blob`,
     // we want to distinguish them, so then we can avoid doing a trial-and-error
-    // to try to determine to which DataType it corresponds to.
+    // to try to determine to which DfValue it corresponds to.
     // Having this here makes it easy to parse PostgreSQL byte array literals, and
-    // then just store the `Vec<u8>` into a DataType without testing if it's a valid
+    // then just store the `Vec<u8>` into a DfValue without testing if it's a valid
     // String or not.
     ByteArray(Vec<u8>),
     Placeholder(ItemPlaceholder),

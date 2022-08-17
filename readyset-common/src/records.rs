@@ -1,19 +1,19 @@
 use std::borrow::Borrow;
 use std::ops::{Deref, DerefMut};
 
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use serde::{Deserialize, Serialize};
 
 /// A record is a single positive or negative data record with an associated time stamp.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 #[warn(variant_size_differences)]
 pub enum Record {
-    Positive(Vec<DataType>),
-    Negative(Vec<DataType>),
+    Positive(Vec<DfValue>),
+    Negative(Vec<DfValue>),
 }
 
 impl Record {
-    pub fn rec(&self) -> &[DataType] {
+    pub fn rec(&self) -> &[DfValue] {
         match *self {
             Record::Positive(ref v) | Record::Negative(ref v) => &v[..],
         }
@@ -23,7 +23,7 @@ impl Record {
         matches!(self, Record::Positive(..))
     }
 
-    pub fn extract(self) -> (Vec<DataType>, bool) {
+    pub fn extract(self) -> (Vec<DfValue>, bool) {
         match self {
             Record::Positive(v) => (v, true),
             Record::Negative(v) => (v, false),
@@ -31,14 +31,14 @@ impl Record {
     }
 
     /// Return a reference to the underlying row for this Record, whether negative or positive
-    pub fn row(&self) -> &Vec<DataType> {
+    pub fn row(&self) -> &Vec<DfValue> {
         match self {
             Record::Positive(v) | Record::Negative(v) => v,
         }
     }
 
     /// Convert this Record into its underlying row
-    pub fn into_row(self) -> Vec<DataType> {
+    pub fn into_row(self) -> Vec<DfValue> {
         match self {
             Record::Positive(v) | Record::Negative(v) => v,
         }
@@ -46,7 +46,7 @@ impl Record {
 }
 
 impl Deref for Record {
-    type Target = Vec<DataType>;
+    type Target = Vec<DfValue>;
     fn deref(&self) -> &Self::Target {
         match *self {
             Record::Positive(ref r) | Record::Negative(ref r) => r,
@@ -62,14 +62,14 @@ impl DerefMut for Record {
     }
 }
 
-impl From<Vec<DataType>> for Record {
-    fn from(other: Vec<DataType>) -> Self {
+impl From<Vec<DfValue>> for Record {
+    fn from(other: Vec<DfValue>) -> Self {
         Record::Positive(other)
     }
 }
 
-impl From<(Vec<DataType>, bool)> for Record {
-    fn from(other: (Vec<DataType>, bool)) -> Self {
+impl From<(Vec<DfValue>, bool)> for Record {
+    fn from(other: (Vec<DfValue>, bool)) -> Self {
         if other.1 {
             Record::Positive(other.0)
         } else {
@@ -93,10 +93,10 @@ impl FromIterator<Record> for Records {
         Records(iter.into_iter().collect())
     }
 }
-impl FromIterator<Vec<DataType>> for Records {
+impl FromIterator<Vec<DfValue>> for Records {
     fn from_iter<I>(iter: I) -> Self
     where
-        I: IntoIterator<Item = Vec<DataType>>,
+        I: IntoIterator<Item = Vec<DfValue>>,
     {
         Records(iter.into_iter().map(Record::Positive).collect())
     }
@@ -123,7 +123,7 @@ pub struct Records(Vec<Record>);
 impl Records {
     pub fn has<Q: ?Sized>(&self, q: &Q, positive: bool) -> bool
     where
-        Vec<DataType>: Borrow<Q>,
+        Vec<DfValue>: Borrow<Q>,
         Q: Eq,
     {
         self.iter().any(|r| match r {
@@ -135,7 +135,7 @@ impl Records {
 
     pub fn has_positive<Q: ?Sized>(&self, q: &Q) -> bool
     where
-        Vec<DataType>: Borrow<Q>,
+        Vec<DfValue>: Borrow<Q>,
         Q: Eq,
     {
         self.has(q, true)
@@ -143,7 +143,7 @@ impl Records {
 
     pub fn has_negative<Q: ?Sized>(&self, q: &Q) -> bool
     where
-        Vec<DataType>: Borrow<Q>,
+        Vec<DfValue>: Borrow<Q>,
         Q: Eq,
     {
         self.has(q, false)
@@ -175,14 +175,14 @@ impl From<Vec<Record>> for Records {
     }
 }
 
-impl From<Vec<Vec<DataType>>> for Records {
-    fn from(val: Vec<Vec<DataType>>) -> Records {
+impl From<Vec<Vec<DfValue>>> for Records {
+    fn from(val: Vec<Vec<DfValue>>) -> Records {
         Records(val.into_iter().map(Into::into).collect())
     }
 }
 
-impl From<Vec<(Vec<DataType>, bool)>> for Records {
-    fn from(val: Vec<(Vec<DataType>, bool)>) -> Records {
+impl From<Vec<(Vec<DfValue>, bool)>> for Records {
+    fn from(val: Vec<(Vec<DfValue>, bool)>) -> Records {
         Records(val.into_iter().map(Into::into).collect())
     }
 }

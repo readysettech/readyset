@@ -24,7 +24,7 @@ use crate::processing::{ColumnSource, IngredientLookupResult, LookupIndex, Looku
 /// insertion into a [`BinaryHeap`]
 #[derive(Debug)]
 struct CurrentRecord<'topk, 'state> {
-    row: Cow<'state, [DataType]>,
+    row: Cow<'state, [DfValue]>,
     order: &'topk Order,
     is_new: bool,
 }
@@ -44,8 +44,8 @@ impl<'topk, 'state> PartialOrd for CurrentRecord<'topk, 'state> {
     }
 }
 
-impl<'topk, 'state> PartialOrd<[DataType]> for CurrentRecord<'topk, 'state> {
-    fn partial_cmp(&self, other: &[DataType]) -> Option<Ordering> {
+impl<'topk, 'state> PartialOrd<[DfValue]> for CurrentRecord<'topk, 'state> {
+    fn partial_cmp(&self, other: &[DfValue]) -> Option<Ordering> {
         Some(self.order.cmp(self.row.as_ref(), other))
     }
 }
@@ -56,8 +56,8 @@ impl<'topk, 'state> PartialEq for CurrentRecord<'topk, 'state> {
     }
 }
 
-impl<'topk, 'state> PartialEq<[DataType]> for CurrentRecord<'topk, 'state> {
-    fn eq(&self, other: &[DataType]) -> bool {
+impl<'topk, 'state> PartialEq<[DfValue]> for CurrentRecord<'topk, 'state> {
+    fn eq(&self, other: &[DfValue]) -> bool {
         self.partial_cmp(other).contains(&Ordering::Equal)
     }
 }
@@ -108,9 +108,9 @@ impl TopK {
     }
 
     /// Project the columns we are grouping by out of the given record
-    fn project_group<'rec, R>(&self, rec: &'rec R) -> ReadySetResult<Vec<&'rec DataType>>
+    fn project_group<'rec, R>(&self, rec: &'rec R) -> ReadySetResult<Vec<&'rec DfValue>>
     where
-        R: Indices<'static, usize, Output = DataType> + ?Sized,
+        R: Indices<'static, usize, Output = DfValue> + ?Sized,
     {
         rec.indices(self.group_by.clone())
             .map_err(|_| ReadySetError::InvalidRecordLength)
@@ -131,7 +131,7 @@ impl TopK {
         &'topk self,
         out: &mut Vec<Record>,
         current: &mut BinaryHeap<CurrentRecord<'topk, 'state>>,
-        current_group_key: &[DataType],
+        current_group_key: &[DfValue],
         original_group_len: usize,
         state: &'state StateMap,
         nodes: &DomainNodes,
@@ -485,13 +485,13 @@ mod tests {
         let (mut g, _) = setup(false);
         let ni = g.node().local_addr();
 
-        let r12: Vec<DataType> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
-        let r10: Vec<DataType> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
-        let r11: Vec<DataType> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
-        let r5: Vec<DataType> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
-        let r15: Vec<DataType> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
-        let r10b: Vec<DataType> = vec![6.into(), "z".try_into().unwrap(), 10.into()];
-        let r10c: Vec<DataType> = vec![7.into(), "z".try_into().unwrap(), 10.into()];
+        let r12: Vec<DfValue> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
+        let r10: Vec<DfValue> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
+        let r11: Vec<DfValue> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
+        let r5: Vec<DfValue> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
+        let r15: Vec<DfValue> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
+        let r10b: Vec<DfValue> = vec![6.into(), "z".try_into().unwrap(), 10.into()];
+        let r10c: Vec<DfValue> = vec![7.into(), "z".try_into().unwrap(), 10.into()];
 
         g.narrow_one_row(r12, true);
         g.narrow_one_row(r11, true);
@@ -509,11 +509,11 @@ mod tests {
     fn it_forwards() {
         let (mut g, _) = setup(false);
 
-        let r12: Vec<DataType> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
-        let r10: Vec<DataType> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
-        let r11: Vec<DataType> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
-        let r5: Vec<DataType> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
-        let r15: Vec<DataType> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
+        let r12: Vec<DfValue> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
+        let r10: Vec<DfValue> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
+        let r11: Vec<DfValue> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
+        let r5: Vec<DfValue> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
+        let r15: Vec<DfValue> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
 
         let a = g.narrow_one_row(r12.clone(), true);
         assert_eq!(a, vec![r12].into());
@@ -537,11 +537,11 @@ mod tests {
     fn it_queries_parent_on_deletes() {
         let (mut g, s) = setup(false);
 
-        let r12: Vec<DataType> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
-        let r10: Vec<DataType> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
-        let r11: Vec<DataType> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
-        let r5: Vec<DataType> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
-        let r15: Vec<DataType> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
+        let r12: Vec<DfValue> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
+        let r10: Vec<DfValue> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
+        let r11: Vec<DfValue> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
+        let r5: Vec<DfValue> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
+        let r15: Vec<DfValue> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
 
         // fill the parent (but not with 15 since we'll delete it)
         g.seed(s, r12.clone());
@@ -576,11 +576,11 @@ mod tests {
     fn it_queries_parent_on_deletes_reversed() {
         let (mut g, s) = setup(true);
 
-        let r12: Vec<DataType> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
-        let r10: Vec<DataType> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
-        let r11: Vec<DataType> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
-        let r5: Vec<DataType> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
-        let r15: Vec<DataType> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
+        let r12: Vec<DfValue> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
+        let r10: Vec<DfValue> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
+        let r11: Vec<DfValue> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
+        let r5: Vec<DfValue> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
+        let r15: Vec<DfValue> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
 
         // fill the parent (but not with 5 since we'll delete it)
         g.seed(s, r12.clone());
@@ -617,30 +617,30 @@ mod tests {
 
         let (mut g, _) = setup(true);
 
-        let r12: Vec<DataType> = vec![
+        let r12: Vec<DfValue> = vec![
             1.into(),
             "z".try_into().unwrap(),
-            DataType::try_from(-12.123).unwrap(),
+            DfValue::try_from(-12.123).unwrap(),
         ];
-        let r10: Vec<DataType> = vec![
+        let r10: Vec<DfValue> = vec![
             2.into(),
             "z".try_into().unwrap(),
-            DataType::try_from(0.0431).unwrap(),
+            DfValue::try_from(0.0431).unwrap(),
         ];
-        let r11: Vec<DataType> = vec![
+        let r11: Vec<DfValue> = vec![
             3.into(),
             "z".try_into().unwrap(),
-            DataType::try_from(-0.082).unwrap(),
+            DfValue::try_from(-0.082).unwrap(),
         ];
-        let r5: Vec<DataType> = vec![
+        let r5: Vec<DfValue> = vec![
             4.into(),
             "z".try_into().unwrap(),
-            DataType::try_from(5.601).unwrap(),
+            DfValue::try_from(5.601).unwrap(),
         ];
-        let r15: Vec<DataType> = vec![
+        let r15: Vec<DfValue> = vec![
             5.into(),
             "z".try_into().unwrap(),
-            DataType::try_from(-15.9).unwrap(),
+            DfValue::try_from(-15.9).unwrap(),
         ];
 
         let a = g.narrow_one_row(r12.clone(), true);
@@ -717,12 +717,12 @@ mod tests {
         let (mut g, _) = setup(false);
         let ni = g.node().local_addr();
 
-        let r1: Vec<DataType> = vec![1.into(), "z".try_into().unwrap(), 10.into()];
-        let r2: Vec<DataType> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
-        let r3: Vec<DataType> = vec![3.into(), "z".try_into().unwrap(), 10.into()];
-        let r4: Vec<DataType> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
-        let r4a: Vec<DataType> = vec![4.into(), "z".try_into().unwrap(), 10.into()];
-        let r4b: Vec<DataType> = vec![4.into(), "z".try_into().unwrap(), 11.into()];
+        let r1: Vec<DfValue> = vec![1.into(), "z".try_into().unwrap(), 10.into()];
+        let r2: Vec<DfValue> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
+        let r3: Vec<DfValue> = vec![3.into(), "z".try_into().unwrap(), 10.into()];
+        let r4: Vec<DfValue> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
+        let r4a: Vec<DfValue> = vec![4.into(), "z".try_into().unwrap(), 10.into()];
+        let r4b: Vec<DfValue> = vec![4.into(), "z".try_into().unwrap(), 11.into()];
 
         g.narrow_one_row(r1, true);
         g.narrow_one_row(r2, true);
@@ -761,17 +761,17 @@ mod tests {
         let (mut g, _) = setup(true);
         let ni = g.node().local_addr();
 
-        let ra1: Vec<DataType> = vec![1.into(), "a".try_into().unwrap(), 1.into()];
-        let ra2: Vec<DataType> = vec![2.into(), "a".try_into().unwrap(), 2.into()];
-        let ra3: Vec<DataType> = vec![3.into(), "a".try_into().unwrap(), 3.into()];
-        let ra4: Vec<DataType> = vec![4.into(), "a".try_into().unwrap(), 4.into()];
-        let ra5: Vec<DataType> = vec![5.into(), "a".try_into().unwrap(), 5.into()];
+        let ra1: Vec<DfValue> = vec![1.into(), "a".try_into().unwrap(), 1.into()];
+        let ra2: Vec<DfValue> = vec![2.into(), "a".try_into().unwrap(), 2.into()];
+        let ra3: Vec<DfValue> = vec![3.into(), "a".try_into().unwrap(), 3.into()];
+        let ra4: Vec<DfValue> = vec![4.into(), "a".try_into().unwrap(), 4.into()];
+        let ra5: Vec<DfValue> = vec![5.into(), "a".try_into().unwrap(), 5.into()];
 
-        let rb1: Vec<DataType> = vec![1.into(), "b".try_into().unwrap(), 1.into()];
-        let rb2: Vec<DataType> = vec![2.into(), "b".try_into().unwrap(), 2.into()];
-        let rb3: Vec<DataType> = vec![3.into(), "b".try_into().unwrap(), 3.into()];
-        let rb4: Vec<DataType> = vec![4.into(), "b".try_into().unwrap(), 4.into()];
-        let rb5: Vec<DataType> = vec![5.into(), "b".try_into().unwrap(), 5.into()];
+        let rb1: Vec<DfValue> = vec![1.into(), "b".try_into().unwrap(), 1.into()];
+        let rb2: Vec<DfValue> = vec![2.into(), "b".try_into().unwrap(), 2.into()];
+        let rb3: Vec<DfValue> = vec![3.into(), "b".try_into().unwrap(), 3.into()];
+        let rb4: Vec<DfValue> = vec![4.into(), "b".try_into().unwrap(), 4.into()];
+        let rb5: Vec<DfValue> = vec![5.into(), "b".try_into().unwrap(), 5.into()];
 
         g.narrow_one_row(ra3, true);
         g.narrow_one_row(ra4.clone(), true);
@@ -813,10 +813,10 @@ mod tests {
     #[test]
     fn update_shifting_out() {
         let (mut g, s) = setup(false);
-        let ra1: Vec<DataType> = vec![1.into(), "a".try_into().unwrap(), 1.into()];
-        let ra2: Vec<DataType> = vec![2.into(), "a".try_into().unwrap(), 2.into()];
-        let ra3: Vec<DataType> = vec![3.into(), "a".try_into().unwrap(), 3.into()];
-        let ra4: Vec<DataType> = vec![4.into(), "a".try_into().unwrap(), 4.into()];
+        let ra1: Vec<DfValue> = vec![1.into(), "a".try_into().unwrap(), 1.into()];
+        let ra2: Vec<DfValue> = vec![2.into(), "a".try_into().unwrap(), 2.into()];
+        let ra3: Vec<DfValue> = vec![3.into(), "a".try_into().unwrap(), 3.into()];
+        let ra4: Vec<DfValue> = vec![4.into(), "a".try_into().unwrap(), 4.into()];
 
         g.seed(s, ra1.clone());
         g.seed(s, ra2.clone());
@@ -827,7 +827,7 @@ mod tests {
         g.narrow_one_row(ra3.clone(), true);
         g.narrow_one_row(ra4, true);
 
-        let ra0: Vec<DataType> = vec![3.into(), "a".try_into().unwrap(), 0.into()];
+        let ra0: Vec<DfValue> = vec![3.into(), "a".try_into().unwrap(), 0.into()];
 
         let emit = g.narrow_one(vec![(ra3.clone(), false), (ra0, true)], true);
         assert_eq!(emit, vec![(ra3, false), (ra1, true)].into());

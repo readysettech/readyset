@@ -11,7 +11,7 @@
 use std::env;
 
 use ndarray::{ArrayD, IxDyn};
-use readyset_data::{Array, DataType};
+use readyset_data::{Array, DfValue};
 use serial_test::serial;
 use tokio_postgres::NoTls;
 
@@ -75,7 +75,7 @@ mod arrays {
     async fn one_d_array_to_from_sql() {
         round_trip(
             "int[]",
-            Array::from(vec![DataType::from(1), DataType::from(2)]),
+            Array::from(vec![DfValue::from(1), DfValue::from(2)]),
         )
         .await;
     }
@@ -89,10 +89,10 @@ mod arrays {
                 ArrayD::from_shape_vec(
                     IxDyn(&[2, 2]),
                     vec![
-                        DataType::from(1),
-                        DataType::from(2),
-                        DataType::from(3),
-                        DataType::from(4),
+                        DfValue::from(1),
+                        DfValue::from(2),
+                        DfValue::from(3),
+                        DfValue::from(4),
                     ],
                 )
                 .unwrap(),
@@ -111,10 +111,10 @@ mod arrays {
                 ArrayD::from_shape_vec(
                     IxDyn(&[2, 2]),
                     vec![
-                        DataType::from(1),
-                        DataType::from(2),
-                        DataType::from(3),
-                        DataType::from(4),
+                        DfValue::from(1),
+                        DfValue::from(2),
+                        DfValue::from(3),
+                        DfValue::from(4),
                     ],
                 )
                 .unwrap(),
@@ -133,10 +133,10 @@ mod arrays {
                 ArrayD::from_shape_vec(
                     IxDyn(&[2, 2]),
                     vec![
-                        DataType::from("a"),
-                        DataType::from("b"),
-                        DataType::from("c"),
-                        DataType::from("d"),
+                        DfValue::from("a"),
+                        DfValue::from("b"),
+                        DfValue::from("c"),
+                        DfValue::from("d"),
                     ],
                 )
                 .unwrap(),

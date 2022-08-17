@@ -248,7 +248,7 @@
 //! let mut article = db.table("article").await.unwrap();
 //! article
 //!     .insert(vec![
-//!         readyset_data::DataType::from(1),
+//!         readyset_data::DfValue::from(1),
 //!         "Hello world".try_into().unwrap(),
 //!     ])
 //!     .await
@@ -256,8 +256,8 @@
 //! # }
 //! ```
 //!
-//! The `.into()` calls here turn the given values into Noria's internal `DataType`. Noria records
-//! are always represented as vectors of `DataType` things, where the `n`th element corresponds to
+//! The `.into()` calls here turn the given values into Noria's internal `DfValue`. Noria records
+//! are always represented as vectors of `DfValue` things, where the `n`th element corresponds to
 //! the value of the `n`th column of that record's view. Internally in the data flow graph, they
 //! are also wrapped in the `Record` type to indicate if they are "positive" or "negative" (we'll
 //! get to that later), and again in the `Packet` type to allow meta-data updates to propagate
@@ -314,7 +314,7 @@
 //! );
 //! let mut db = readyset_server::ControllerHandle::new(zk_auth).await;
 //! let mut vote = db.table("vote").await.unwrap();
-//! vote.insert(vec![readyset_data::DataType::from(1000), 1.into()])
+//! vote.insert(vec![readyset_data::DfValue::from(1000), 1.into()])
 //!     .await
 //!     .unwrap();
 //! # }

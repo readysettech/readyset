@@ -1,6 +1,6 @@
 use std::fmt::{self, Debug, Formatter};
 
-use common::{DataType, IndexType};
+use common::{DfValue, IndexType};
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::grouped::extremum::Extremum;
 use dataflow::ops::union;
@@ -190,7 +190,7 @@ pub enum MirNodeInner {
         /// use only name and table (and don't support aliases).
         expressions: Vec<(SqlIdentifier, Expr)>,
         /// List of pairs of `(alias, value)`, giving literal values to emit in the output
-        literals: Vec<(SqlIdentifier, DataType)>,
+        literals: Vec<(SqlIdentifier, DfValue)>,
     },
     /// Node which computes a union of all of its (two or more) parents.
     ///
@@ -277,7 +277,7 @@ pub enum MirNodeInner {
         returned_cols: Option<Vec<Column>>,
         /// Row of default values to send back, for example if we're aggregating and no rows are
         /// found
-        default_row: Option<Vec<DataType>>,
+        default_row: Option<Vec<DfValue>>,
         /// Aggregates to perform in the reader on result sets for keys after performing the lookup
         aggregates: Option<PostLookupAggregates<Column>>,
     },

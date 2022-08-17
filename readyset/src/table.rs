@@ -16,7 +16,7 @@ use futures_util::{future, ready};
 use itertools::Either;
 use nom_sql::{CreateTableStatement, SqlIdentifier};
 use petgraph::graph::NodeIndex;
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use readyset_errors::{
     internal, internal_err, rpc_err, table_err, unsupported, ReadySetError, ReadySetResult,
 };
@@ -51,16 +51,16 @@ pub enum Operation {
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Modification {
     /// Set the cell to this value.
-    Set(DataType),
+    Set(DfValue),
     /// Use the given [`Operation`] to combine the existing value and this one.
-    Apply(Operation, DataType),
+    Apply(Operation, DfValue),
     /// Leave the existing value as-is.
     None,
 }
 
 impl<T> From<T> for Modification
 where
-    T: Into<DataType>,
+    T: Into<DfValue>,
 {
     fn from(t: T) -> Modification {
         Modification::Set(t.into())
@@ -71,22 +71,22 @@ where
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum TableOperation {
     /// Insert the contained row.
-    Insert(Vec<DataType>),
+    Insert(Vec<DfValue>),
     /// Delete a row with the contained key.
     DeleteByKey {
         /// The key.
-        key: Vec<DataType>,
+        key: Vec<DfValue>,
     },
     /// Delete *one* row matching the entirety of the given row
     DeleteRow {
         /// The row to delete
-        row: Vec<DataType>,
+        row: Vec<DfValue>,
     },
     /// If a row exists with the same key as the contained row, update it using `update`, otherwise
     /// insert `row`.
     InsertOrUpdate {
         /// This row will be inserted if no existing row is found.
-        row: Vec<DataType>,
+        row: Vec<DfValue>,
         /// These modifications will be applied to the columns of an existing row.
         update: Vec<Modification>,
     },
@@ -95,7 +95,7 @@ pub enum TableOperation {
         /// The modifications to make to each column of the existing row.
         update: Vec<Modification>,
         /// The key used to identify the row to update.
-        key: Vec<DataType>,
+        key: Vec<DfValue>,
     },
     /// Set the replication offset for data written to this base table.
     ///
@@ -112,7 +112,7 @@ pub enum TableOperation {
 
 impl TableOperation {
     #[doc(hidden)]
-    pub fn row(&self) -> Option<&[DataType]> {
+    pub fn row(&self) -> Option<&[DfValue]> {
         match *self {
             TableOperation::Insert(ref r) => Some(r),
             TableOperation::InsertOrUpdate { ref row, .. } => Some(row),
@@ -147,8 +147,8 @@ impl TableOperation {
     }
 }
 
-impl From<Vec<DataType>> for TableOperation {
-    fn from(other: Vec<DataType>) -> Self {
+impl From<Vec<DfValue>> for TableOperation {
+    fn from(other: Vec<DfValue>) -> Self {
         TableOperation::Insert(other)
     }
 }
@@ -273,7 +273,7 @@ pub struct TableBuilder {
     pub addr: LocalNodeIndex,
     pub key_is_primary: bool,
     pub key: Vec<usize>,
-    pub dropped: VecMap<DataType>,
+    pub dropped: VecMap<DfValue>,
 
     pub table_name: SqlIdentifier,
     pub columns: Vec<SqlIdentifier>,
@@ -354,7 +354,7 @@ pub struct Table {
     key_is_primary: bool,
     key: Vec<usize>,
     columns: Vec<SqlIdentifier>,
-    dropped: VecMap<DataType>,
+    dropped: VecMap<DfValue>,
     table_name: SqlIdentifier,
     schema: Option<CreateTableStatement>,
     shards: Vec<TableRpc>,
@@ -726,7 +726,7 @@ impl Table {
             let n = r.len() + ndropped;
             let mut hole = n;
             let mut last_unmoved = r.len() - 1;
-            r.resize(n, DataType::None);
+            r.resize(n, DfValue::None);
 
             // keep trying to insert the next dropped column
             for (next_insert, default) in dropped {
@@ -755,7 +755,7 @@ impl Table {
                     None => internal!("index out of bounds"),
                 };
                 let old = mem::replace(current, default.clone());
-                debug_assert_eq!(old, DataType::None);
+                debug_assert_eq!(old, DfValue::None);
             }
         }
         Ok(())
@@ -812,7 +812,7 @@ impl Table {
     /// Insert a single row of data into this base table.
     pub async fn insert<V>(&mut self, u: V) -> ReadySetResult<()>
     where
-        V: Into<Vec<DataType>>,
+        V: Into<Vec<DfValue>>,
     {
         self.quick_n_dirty(TableRequest::TableOperations(vec![TableOperation::Insert(
             u.into(),
@@ -824,7 +824,7 @@ impl Table {
     pub async fn insert_many<I, V>(&mut self, rows: I) -> ReadySetResult<()>
     where
         I: IntoIterator<Item = V>,
-        V: Into<Vec<DataType>>,
+        V: Into<Vec<DfValue>>,
     {
         self.quick_n_dirty_with_timeout(TableRequest::TableOperations(
             rows.into_iter()
@@ -849,7 +849,7 @@ impl Table {
     /// Delete the row with the given key from this base table.
     pub async fn delete<I>(&mut self, key: I) -> ReadySetResult<()>
     where
-        I: Into<Vec<DataType>>,
+        I: Into<Vec<DfValue>>,
     {
         self.quick_n_dirty_with_timeout(TableRequest::TableOperations(vec![
             TableOperation::DeleteByKey { key: key.into() },
@@ -861,7 +861,7 @@ impl Table {
     /// table.
     pub async fn delete_row<I>(&mut self, row: I) -> ReadySetResult<()>
     where
-        I: Into<Vec<DataType>>,
+        I: Into<Vec<DfValue>>,
     {
         self.quick_n_dirty_with_timeout(TableRequest::TableOperations(vec![
             TableOperation::DeleteRow { row: row.into() },
@@ -873,7 +873,7 @@ impl Table {
     ///
     /// `u` is a set of column-modification pairs, where for each pair `(i, m)`, the modification
     /// `m` will be applied to column `i` of the record with key `key`.
-    pub async fn update<V>(&mut self, key: Vec<DataType>, u: V) -> ReadySetResult<()>
+    pub async fn update<V>(&mut self, key: Vec<DfValue>, u: V) -> ReadySetResult<()>
     where
         V: IntoIterator<Item = (usize, Modification)>,
     {
@@ -906,7 +906,7 @@ impl Table {
     /// with the modifications in `u` (as documented in `Table::update`).
     pub async fn insert_or_update<V>(
         &mut self,
-        insert: Vec<DataType>,
+        insert: Vec<DfValue>,
         update: V,
     ) -> ReadySetResult<()>
     where

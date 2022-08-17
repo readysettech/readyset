@@ -5,12 +5,12 @@ use itertools::Itertools;
 use nom_sql::OrderType;
 use serde::{Deserialize, Serialize};
 
-use crate::prelude::DataType;
+use crate::prelude::DfValue;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct Order(Vec<(usize, OrderType)>);
 impl Order {
-    pub(crate) fn cmp(&self, a: &[DataType], b: &[DataType]) -> Ordering {
+    pub(crate) fn cmp(&self, a: &[DfValue], b: &[DfValue]) -> Ordering {
         for &(c, ref order_type) in &self.0 {
             let result = match *order_type {
                 OrderType::OrderAscending => a[c].cmp(&b[c]),

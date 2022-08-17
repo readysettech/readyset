@@ -1,7 +1,7 @@
 use ::readyset::get_metric;
 use ::readyset::metrics::{recorded, DumpedMetricValue};
 use launchpad::eventually;
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use serial_test::serial;
@@ -36,9 +36,9 @@ async fn query_failure_recovery_with_volume_id() {
     // Insert row (1, 2, 2) into t1.
     let mut t1 = deployment.leader_handle().table("t1").await.unwrap();
     t1.insert(vec![
-        DataType::from(1i32),
-        DataType::from(2i32),
-        DataType::from(2i32),
+        DfValue::from(1i32),
+        DfValue::from(2i32),
+        DfValue::from(2i32),
     ])
     .await
     .unwrap();
@@ -246,10 +246,10 @@ async fn replicated_readers() {
 
     let mut t = lh.table("t").await.unwrap();
     t.insert_many(vec![
-        vec![DataType::from(1), DataType::from(1)],
-        vec![DataType::from(1), DataType::from(2)],
-        vec![DataType::from(2), DataType::from(3)],
-        vec![DataType::from(2), DataType::from(4)],
+        vec![DfValue::from(1), DfValue::from(1)],
+        vec![DfValue::from(1), DfValue::from(2)],
+        vec![DfValue::from(2), DfValue::from(3)],
+        vec![DfValue::from(2), DfValue::from(4)],
     ])
     .await
     .unwrap();
@@ -265,43 +265,43 @@ async fn replicated_readers() {
     let view_0_key_1 = view_0.lookup(&[1.into()], true).await.unwrap();
     assert_eq!(
         view_0_key_1.into_vec()[0],
-        vec![DataType::from(1), DataType::from(Decimal::from_i32(3))]
+        vec![DfValue::from(1), DfValue::from(Decimal::from_i32(3))]
     );
 
     let view_1_key_2 = view_1.lookup(&[2.into()], true).await.unwrap();
     assert_eq!(
         view_1_key_2.into_vec()[0],
-        vec![DataType::from(2), DataType::from(Decimal::from_i32(7))]
+        vec![DfValue::from(2), DfValue::from(Decimal::from_i32(7))]
     );
 
     t.insert_many(vec![
-        vec![DataType::from(1), DataType::from(3)],
-        vec![DataType::from(2), DataType::from(2)],
+        vec![DfValue::from(1), DfValue::from(3)],
+        vec![DfValue::from(2), DfValue::from(2)],
     ])
     .await
     .unwrap();
 
     eventually! {
         let view_0_key_1 = view_0.lookup(&[1.into()], true).await.unwrap();
-        view_0_key_1.into_vec()[0] == vec![DataType::from(1), DataType::from(Decimal::from_i32(6))]
+        view_0_key_1.into_vec()[0] == vec![DfValue::from(1), DfValue::from(Decimal::from_i32(6))]
     }
 
     let view_1_key_2 = view_1.lookup(&[2.into()], true).await.unwrap();
     assert_eq!(
         view_1_key_2.into_vec()[0],
-        vec![DataType::from(2), DataType::from(Decimal::from_i32(9))]
+        vec![DfValue::from(2), DfValue::from(Decimal::from_i32(9))]
     );
 
     let view_0_key_2 = view_0.lookup(&[2.into()], true).await.unwrap();
     assert_eq!(
         view_0_key_2.into_vec()[0],
-        vec![DataType::from(2), DataType::from(Decimal::from_i32(9))]
+        vec![DfValue::from(2), DfValue::from(Decimal::from_i32(9))]
     );
 
     let view_1_key_1 = view_1.lookup(&[1.into()], true).await.unwrap();
     assert_eq!(
         view_1_key_1.into_vec()[0],
-        vec![DataType::from(1), DataType::from(Decimal::from_i32(6))]
+        vec![DfValue::from(1), DfValue::from(Decimal::from_i32(6))]
     );
 }
 
@@ -332,14 +332,14 @@ async fn replicated_readers_with_unions() {
 
     let mut t = lh.table("t").await.unwrap();
     t.insert_many(vec![
-        vec![DataType::from(1), DataType::from(1), DataType::from(1)],
-        vec![DataType::from(1), DataType::from(1), DataType::from(2)],
-        vec![DataType::from(1), DataType::from(2), DataType::from(1)],
-        vec![DataType::from(1), DataType::from(2), DataType::from(2)],
-        vec![DataType::from(1), DataType::from(2), DataType::from(3)],
-        vec![DataType::from(2), DataType::from(1), DataType::from(1)],
-        vec![DataType::from(2), DataType::from(1), DataType::from(2)],
-        vec![DataType::from(2), DataType::from(3), DataType::from(2)],
+        vec![DfValue::from(1), DfValue::from(1), DfValue::from(1)],
+        vec![DfValue::from(1), DfValue::from(1), DfValue::from(2)],
+        vec![DfValue::from(1), DfValue::from(2), DfValue::from(1)],
+        vec![DfValue::from(1), DfValue::from(2), DfValue::from(2)],
+        vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)],
+        vec![DfValue::from(2), DfValue::from(1), DfValue::from(1)],
+        vec![DfValue::from(2), DfValue::from(1), DfValue::from(2)],
+        vec![DfValue::from(2), DfValue::from(3), DfValue::from(2)],
     ])
     .await
     .unwrap();
@@ -352,16 +352,16 @@ async fn replicated_readers_with_unions() {
     assert_ne!(view_0.shard_addrs(), view_1.shard_addrs());
 
     let view_0_key_1 = view_0.lookup(&[1.into()], true).await.unwrap();
-    assert_eq!(view_0_key_1.into_vec()[0], vec![DataType::from(4)]);
+    assert_eq!(view_0_key_1.into_vec()[0], vec![DfValue::from(4)]);
 
     let view_1_key_2 = view_1.lookup(&[2.into()], true).await.unwrap();
-    assert_eq!(view_1_key_2.into_vec()[0], vec![DataType::from(2)]);
+    assert_eq!(view_1_key_2.into_vec()[0], vec![DfValue::from(2)]);
 
     let view_1_key_1 = view_1.lookup(&[1.into()], true).await.unwrap();
-    assert_eq!(view_1_key_1.into_vec()[0], vec![DataType::from(4)]);
+    assert_eq!(view_1_key_1.into_vec()[0], vec![DfValue::from(4)]);
 
     let view_0_key_2 = view_0.lookup(&[2.into()], true).await.unwrap();
-    assert_eq!(view_0_key_2.into_vec()[0], vec![DataType::from(2)]);
+    assert_eq!(view_0_key_2.into_vec()[0], vec![DfValue::from(2)]);
 }
 
 #[clustertest]

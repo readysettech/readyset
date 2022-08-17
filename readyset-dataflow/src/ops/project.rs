@@ -22,7 +22,7 @@ use crate::processing::{ColumnSource, IngredientLookupResult, LookupIndex, Looku
 pub struct Project {
     us: Option<IndexPair>,
     emit: Option<Vec<usize>>,
-    additional: Option<Vec<DataType>>,
+    additional: Option<Vec<DfValue>>,
     expressions: Option<Vec<Expr>>,
     src: IndexPair,
     cols: usize,
@@ -33,7 +33,7 @@ impl Project {
     pub fn new(
         src: NodeIndex,
         emit: &[usize],
-        additional: Option<Vec<DataType>>,
+        additional: Option<Vec<DfValue>>,
         expressions: Option<Vec<Expr>>,
     ) -> Project {
         Project {
@@ -101,10 +101,10 @@ impl Ingredient for Project {
             Some(emit) => res.map(move |r| {
                 let r = r?;
                 let mut new_r = Vec::with_capacity(r.len());
-                let mut expr: Vec<DataType> = if let Some(ref e) = expressions {
+                let mut expr: Vec<DfValue> = if let Some(ref e) = expressions {
                     e.iter()
                         .map(|expr| expr.eval(&r))
-                        .collect::<ReadySetResult<Vec<DataType>>>()?
+                        .collect::<ReadySetResult<Vec<DfValue>>>()?
                 } else {
                     vec![]
                 };
@@ -173,7 +173,7 @@ impl Ingredient for Project {
                         Ok(val) => val,
                         Err(e) => {
                             error!(error = %e, "Error evaluating project expression");
-                            DataType::None
+                            DfValue::None
                         }
                     }));
                 }
@@ -271,10 +271,7 @@ mod tests {
 
         let permutation = if all { vec![0, 1, 2] } else { vec![2, 0] };
         let additional = if add {
-            Some(vec![
-                DataType::try_from("hello").unwrap(),
-                DataType::Int(42),
-            ])
+            Some(vec![DfValue::try_from("hello").unwrap(), DfValue::Int(42)])
         } else {
             None
         };
@@ -449,7 +446,7 @@ mod tests {
 
     #[test]
     fn it_forwards_arithmetic_w_literals() {
-        let number: DataType = 40.into();
+        let number: DfValue = 40.into();
         let expression = Expr::Op {
             left: Box::new(make_int_column(0)),
             right: Box::new(make_literal(number)),
@@ -467,8 +464,8 @@ mod tests {
 
     #[test]
     fn it_forwards_arithmetic_w_only_literals() {
-        let a: DataType = 80.into();
-        let b: DataType = 40.into();
+        let a: DfValue = 80.into();
+        let b: DfValue = 40.into();
         let expression = Expr::Op {
             left: Box::new(make_literal(a)),
             right: Box::new(make_literal(b)),
@@ -487,7 +484,7 @@ mod tests {
     fn setup_query_through(
         mut state: MaterializedNodeState,
         permutation: &[usize],
-        additional: Option<Vec<DataType>>,
+        additional: Option<Vec<DfValue>>,
         expressions: Option<Vec<Expr>>,
     ) -> (Project, StateMap) {
         let global = NodeIndex::new(0);
@@ -512,9 +509,9 @@ mod tests {
     fn assert_query_through(
         project: Project,
         by_column: usize,
-        key: DataType,
+        key: DfValue,
         states: StateMap,
-        expected: Vec<DataType>,
+        expected: Vec<DfValue>,
     ) {
         let mut iter = project
             .query_through(
@@ -533,7 +530,7 @@ mod tests {
     fn it_queries_through_all() {
         let state = MaterializedNodeState::Memory(MemoryState::default());
         let (p, states) = setup_query_through(state, &[0, 1, 2], None, None);
-        let expected: Vec<DataType> = vec![1.into(), 2.into(), 3.into()];
+        let expected: Vec<DfValue> = vec![1.into(), 2.into(), 3.into()];
         assert_query_through(p, 0, 1.into(), states, expected);
     }
 
@@ -546,7 +543,7 @@ mod tests {
         ));
 
         let (p, states) = setup_query_through(state, &[0, 1, 2], None, None);
-        let expected: Vec<DataType> = vec![1.into(), 2.into(), 3.into()];
+        let expected: Vec<DfValue> = vec![1.into(), 2.into(), 3.into()];
         assert_query_through(p, 0, 1.into(), states, expected);
     }
 
@@ -554,7 +551,7 @@ mod tests {
     fn it_queries_through_some() {
         let state = MaterializedNodeState::Memory(MemoryState::default());
         let (p, states) = setup_query_through(state, &[1], None, None);
-        let expected: Vec<DataType> = vec![2.into()];
+        let expected: Vec<DfValue> = vec![2.into()];
         assert_query_through(p, 0, 2.into(), states, expected);
     }
 
@@ -567,22 +564,22 @@ mod tests {
         ));
 
         let (p, states) = setup_query_through(state, &[1], None, None);
-        let expected: Vec<DataType> = vec![2.into()];
+        let expected: Vec<DfValue> = vec![2.into()];
         assert_query_through(p, 0, 2.into(), states, expected);
     }
 
     #[test]
     fn it_queries_through_w_literals() {
-        let additional = Some(vec![DataType::Int(42)]);
+        let additional = Some(vec![DfValue::Int(42)]);
         let state = MaterializedNodeState::Memory(MemoryState::default());
         let (p, states) = setup_query_through(state, &[1], additional, None);
-        let expected: Vec<DataType> = vec![2.into(), 42.into()];
+        let expected: Vec<DfValue> = vec![2.into(), 42.into()];
         assert_query_through(p, 0, 2.into(), states, expected);
     }
 
     #[test]
     fn it_queries_through_w_literals_persistent() {
-        let additional = Some(vec![DataType::Int(42)]);
+        let additional = Some(vec![DfValue::Int(42)]);
         let state = MaterializedNodeState::Persistent(PersistentState::new(
             String::from("it_queries_through_w_literals"),
             Vec::<Box<[usize]>>::new(),
@@ -590,13 +587,13 @@ mod tests {
         ));
 
         let (p, states) = setup_query_through(state, &[1], additional, None);
-        let expected: Vec<DataType> = vec![2.into(), 42.into()];
+        let expected: Vec<DfValue> = vec![2.into(), 42.into()];
         assert_query_through(p, 0, 2.into(), states, expected);
     }
 
     #[test]
     fn it_queries_through_w_arithmetic_and_literals() {
-        let additional = Some(vec![DataType::Int(42)]);
+        let additional = Some(vec![DfValue::Int(42)]);
         let expressions = Some(vec![Expr::Op {
             left: Box::new(make_int_column(0)),
             right: Box::new(make_int_column(1)),
@@ -606,13 +603,13 @@ mod tests {
 
         let state = MaterializedNodeState::Memory(MemoryState::default());
         let (p, states) = setup_query_through(state, &[1], additional, expressions);
-        let expected: Vec<DataType> = vec![2.into(), (1 + 2).into(), 42.into()];
+        let expected: Vec<DfValue> = vec![2.into(), (1 + 2).into(), 42.into()];
         assert_query_through(p, 0, 2.into(), states, expected);
     }
 
     #[test]
     fn it_queries_through_w_arithmetic_and_literals_persistent() {
-        let additional = Some(vec![DataType::Int(42)]);
+        let additional = Some(vec![DfValue::Int(42)]);
         let expressions = Some(vec![Expr::Op {
             left: Box::new(make_int_column(0)),
             right: Box::new(make_int_column(1)),
@@ -627,7 +624,7 @@ mod tests {
         ));
 
         let (p, states) = setup_query_through(state, &[1], additional, expressions);
-        let expected: Vec<DataType> = vec![2.into(), (1 + 2).into(), 42.into()];
+        let expected: Vec<DfValue> = vec![2.into(), (1 + 2).into(), 42.into()];
         assert_query_through(p, 0, 2.into(), states, expected);
     }
 
@@ -641,7 +638,7 @@ mod tests {
                 op: BinaryOperator::Add,
                 ty: DfType::Sql(SqlType::Int(None)),
             }),
-            right: Box::new(make_literal(DataType::Int(2))),
+            right: Box::new(make_literal(DfValue::Int(2))),
             ty: DfType::Sql(SqlType::Int(None)),
         };
 
@@ -652,7 +649,7 @@ mod tests {
         ));
 
         let (p, states) = setup_query_through(state, &[1], None, Some(vec![expression]));
-        let expected: Vec<DataType> = vec![2.into(), ((1 + 2) * 2).into()];
+        let expected: Vec<DfValue> = vec![2.into(), ((1 + 2) * 2).into()];
         assert_query_through(p, 0, 2.into(), states, expected);
     }
 

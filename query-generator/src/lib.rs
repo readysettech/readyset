@@ -95,7 +95,7 @@ use proptest::strategy::{BoxedStrategy, Strategy};
 use rand::distributions::{Distribution, Standard};
 use rand::seq::SliceRandom;
 use rand::Rng;
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use readyset_sql_passes::outermost_table_exprs;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -106,12 +106,12 @@ use zipf::ZipfDistribution;
 
 /// Generate a constant value with the given [`SqlType`]
 ///
-/// The following SqlTypes do not have a representation as a [`DataType`] and will panic if passed:
+/// The following SqlTypes do not have a representation as a [`DfValue`] and will panic if passed:
 ///
 /// - [`SqlType::Date`]
 /// - [`SqlType::Enum`]
 /// - [`SqlType::Bool`]
-fn value_of_type(typ: &SqlType) -> DataType {
+fn value_of_type(typ: &SqlType) -> DfValue {
     match typ {
         SqlType::Char(_)
         | SqlType::VarChar(_)
@@ -125,15 +125,15 @@ fn value_of_type(typ: &SqlType) -> DataType {
         | SqlType::Text
         | SqlType::Binary(_)
         | SqlType::VarBinary(_) => {
-            // It is safe to transform an "a" String into a DataType.
+            // It is safe to transform an "a" String into a DfValue.
             #[allow(clippy::unwrap_used)]
-            DataType::try_from("a").unwrap()
+            DfValue::try_from("a").unwrap()
         }
         SqlType::ByteArray => {
             // Zero is an interesting value, because it can only occur for
             // byte arrays, since character strings don't allow zero
             // octets.
-            DataType::ByteArray(Arc::new(vec![0u8]))
+            DfValue::ByteArray(Arc::new(vec![0u8]))
         }
         SqlType::Int(_) => 1i32.into(),
         SqlType::BigInt(_) => 1i64.into(),
@@ -146,11 +146,11 @@ fn value_of_type(typ: &SqlType) -> DataType {
         SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
             1.5.try_into().unwrap()
         }
-        SqlType::Numeric(_) => DataType::from(Decimal::new(15, 1)),
+        SqlType::Numeric(_) => DfValue::from(Decimal::new(15, 1)),
         SqlType::DateTime(_) | SqlType::Timestamp => {
             NaiveDate::from_ymd(2020, 1, 1).and_hms(12, 30, 45).into()
         }
-        SqlType::TimestampTz => DataType::from(
+        SqlType::TimestampTz => DfValue::from(
             FixedOffset::west(18_000)
                 .ymd(2020, 1, 1)
                 .and_hms(12, 30, 45),
@@ -164,9 +164,9 @@ fn value_of_type(typ: &SqlType) -> DataType {
         SqlType::Inet => "::beef".into(),
         SqlType::Uuid => "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11".into(),
         SqlType::Bit(size_opt) => {
-            DataType::from(BitVec::with_capacity(size_opt.unwrap_or(1) as usize))
+            DfValue::from(BitVec::with_capacity(size_opt.unwrap_or(1) as usize))
         }
-        SqlType::VarBit(_) => DataType::from(BitVec::new()),
+        SqlType::VarBit(_) => DfValue::from(BitVec::new()),
         SqlType::Array(_) => unimplemented!(),
     }
 }
@@ -174,26 +174,26 @@ fn value_of_type(typ: &SqlType) -> DataType {
 /// Generate a random value with the given [`SqlType`]. The length of the value
 /// is pulled from a uniform distribution over the set of possible ranges.
 ///
-/// The following SqlTypes do not have a representation as a [`DataType`] and will panic if passed:
+/// The following SqlTypes do not have a representation as a [`DfValue`] and will panic if passed:
 ///
 /// - [`SqlType::Date`]
 /// - [`SqlType::Enum`]
 /// - [`SqlType::Bool`]
-fn random_value_of_type(typ: &SqlType) -> DataType {
+fn random_value_of_type(typ: &SqlType) -> DfValue {
     let mut rng = rand::thread_rng();
     match typ {
         SqlType::Char(Some(x)) | SqlType::VarChar(Some(x)) => {
             let length: usize = rng.gen_range(1..=*x).into();
-            // It is safe to transform an String of consecutive a's into a DataType.
+            // It is safe to transform an String of consecutive a's into a DfValue.
             #[allow(clippy::unwrap_used)]
-            DataType::try_from("a".repeat(length)).unwrap()
+            DfValue::try_from("a".repeat(length)).unwrap()
         }
         SqlType::TinyBlob | SqlType::TinyText => {
             // 2^8 bytes
             let length: usize = rng.gen_range(1..256);
-            // It is safe to transform an String of consecutive a's into a DataType.
+            // It is safe to transform an String of consecutive a's into a DfValue.
             #[allow(clippy::unwrap_used)]
-            DataType::try_from("a".repeat(length)).unwrap()
+            DfValue::try_from("a".repeat(length)).unwrap()
         }
         SqlType::Blob
         | SqlType::Text
@@ -202,32 +202,32 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
         | SqlType::Binary(None) => {
             // 2^16 bytes
             let length: usize = rng.gen_range(1..65536);
-            // It is safe to transform an String of consecutive a's into a DataType.
+            // It is safe to transform an String of consecutive a's into a DfValue.
             #[allow(clippy::unwrap_used)]
-            DataType::try_from("a".repeat(length)).unwrap()
+            DfValue::try_from("a".repeat(length)).unwrap()
         }
         SqlType::MediumBlob | SqlType::MediumText => {
             // 2^24 bytes
             // Currently capped at 65536 as these are generated in memory.
             let length: usize = rng.gen_range(1..65536);
-            // It is safe to transform an String of consecutive a's into a DataType.
+            // It is safe to transform an String of consecutive a's into a DfValue.
             #[allow(clippy::unwrap_used)]
-            DataType::try_from("a".repeat(length)).unwrap()
+            DfValue::try_from("a".repeat(length)).unwrap()
         }
         SqlType::LongBlob | SqlType::LongText => {
             // 2^32 bytes
             // Currently capped at 65536 as these are generated in memory.
             let length: usize = rng.gen_range(1..65536);
-            // It is safe to transform an String of consecutive a's into a DataType.
+            // It is safe to transform an String of consecutive a's into a DfValue.
             #[allow(clippy::unwrap_used)]
-            DataType::try_from("a".repeat(length)).unwrap()
+            DfValue::try_from("a".repeat(length)).unwrap()
         }
         SqlType::Binary(Some(x)) | SqlType::VarBinary(x) => {
             // Convert to bytes and generate string data to match.
             let length: usize = rng.gen_range(1..*x / 8).into();
-            // It is safe to transform an String of consecutive a's into a DataType.
+            // It is safe to transform an String of consecutive a's into a DfValue.
             #[allow(clippy::unwrap_used)]
-            DataType::try_from("a".repeat(length)).unwrap()
+            DfValue::try_from("a".repeat(length)).unwrap()
         }
         SqlType::ByteArray => {
             let length = rng.gen_range(1..10);
@@ -235,7 +235,7 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
             for _ in 0..length {
                 array.push(rng.gen::<u8>());
             }
-            DataType::ByteArray(Arc::new(array))
+            DfValue::ByteArray(Arc::new(array))
         }
         SqlType::Int(_) => rng.gen::<i32>().into(),
         SqlType::BigInt(_) => rng.gen::<i64>().into(),
@@ -248,14 +248,14 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
         SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
             1.5.try_into().unwrap()
         }
-        SqlType::Numeric(_) => DataType::from(Decimal::new(15, 1)),
+        SqlType::Numeric(_) => DfValue::from(Decimal::new(15, 1)),
         SqlType::DateTime(_) | SqlType::Timestamp => {
             // Generate a random month and day within the same year.
             NaiveDate::from_ymd(2020, rng.gen_range(1..12), rng.gen_range(1..28))
                 .and_hms(12, 30, 45)
                 .into()
         }
-        SqlType::TimestampTz => DataType::from(
+        SqlType::TimestampTz => DfValue::from(
             FixedOffset::west(18_000)
                 .ymd(2020, rng.gen_range(1..12), rng.gen_range(1..28))
                 .and_hms(12, 30, 45),
@@ -264,9 +264,9 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
         SqlType::Date => {
             NaiveDate::from_ymd(2020, rng.gen_range(1..12), rng.gen_range(1..28)).into()
         }
-        SqlType::Bool => DataType::from(rng.gen_bool(0.5)),
+        SqlType::Bool => DfValue::from(rng.gen_bool(0.5)),
         SqlType::Enum(_) => unimplemented!(),
-        SqlType::Json | SqlType::Jsonb => DataType::from(format!(
+        SqlType::Json | SqlType::Jsonb => DfValue::from(format!(
             "{{\"k\":\"{}\"}}",
             "a".repeat(rng.gen_range(1..255))
         )),
@@ -276,13 +276,13 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
             // We know the length and format of the bytes, so this should always be parsable as a
             // `MacAddress`.
             #[allow(clippy::unwrap_used)]
-            DataType::from(
+            DfValue::from(
                 MacAddress::from_bytes(&bytes[..])
                     .unwrap()
                     .to_string(MacAddressFormat::HexString),
             )
         }
-        SqlType::Inet => DataType::from(
+        SqlType::Inet => DfValue::from(
             IpAddr::V4(Ipv4Addr::new(rng.gen(), rng.gen(), rng.gen(), rng.gen())).to_string(),
         ),
         SqlType::Uuid => {
@@ -291,16 +291,16 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
             // We know the length and format of the bytes, so this should always be parsable as a
             // `UUID`.
             #[allow(clippy::unwrap_used)]
-            DataType::from(uuid::Uuid::from_slice(&bytes[..]).unwrap().to_string())
+            DfValue::from(uuid::Uuid::from_slice(&bytes[..]).unwrap().to_string())
         }
-        SqlType::Bit(size_opt) => DataType::from(BitVec::from_iter(
+        SqlType::Bit(size_opt) => DfValue::from(BitVec::from_iter(
             rng.sample_iter(Standard)
                 .take(size_opt.unwrap_or(1) as usize)
                 .collect::<Vec<bool>>(),
         )),
         SqlType::VarBit(max_size) => {
             let size = rng.gen_range(0..max_size.unwrap_or(u16::MAX));
-            DataType::from(BitVec::from_iter(
+            DfValue::from(BitVec::from_iter(
                 rng.sample_iter(Standard)
                     .take(size as usize)
                     .collect::<Vec<bool>>(),
@@ -315,26 +315,26 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
 /// Generate a random value from a uniform distribution with the given integer
 /// [`SqlType`] for a given range of values.If the range of `min` and `max`
 /// exceeds the storage of the type, this truncates to fit.
-fn uniform_random_value(min: &DataType, max: &DataType) -> DataType {
+fn uniform_random_value(min: &DfValue, max: &DfValue) -> DfValue {
     let mut rng = rand::thread_rng();
     match (min, max) {
-        (DataType::Int(i), DataType::Int(j)) => rng.gen_range(*i..*j).into(),
-        (DataType::UnsignedInt(i), DataType::UnsignedInt(j)) => rng.gen_range(*i..*j).into(),
-        (_, _) => unimplemented!("DataTypes unsupported for random uniform value generation"),
+        (DfValue::Int(i), DfValue::Int(j)) => rng.gen_range(*i..*j).into(),
+        (DfValue::UnsignedInt(i), DfValue::UnsignedInt(j)) => rng.gen_range(*i..*j).into(),
+        (_, _) => unimplemented!("DfValues unsupported for random uniform value generation"),
     }
 }
 
 /// Generate a unique value with the given [`SqlType`] from a monotonically increasing counter,
 /// `idx`.
 ///
-/// This is an injective function (from `(idx, typ)` to the resultant [`DataType`]).
+/// This is an injective function (from `(idx, typ)` to the resultant [`DfValue`]).
 ///
-/// The following SqlTypes do not have a representation as a [`DataType`] and will panic if passed:
+/// The following SqlTypes do not have a representation as a [`DfValue`] and will panic if passed:
 ///
 /// - [`SqlType::Date`]
 /// - [`SqlType::Enum`]
 /// - [`SqlType::Bool`]
-fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
+fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
     match typ {
         SqlType::Char(_)
         | SqlType::VarChar(_)
@@ -348,9 +348,9 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
         | SqlType::Text
         | SqlType::Binary(_)
         | SqlType::VarBinary(_) => {
-            // It is safe to transform an u32 String representation into a DataType.
+            // It is safe to transform an u32 String representation into a DfValue.
             #[allow(clippy::unwrap_used)]
-            DataType::try_from(format!("{}", idx)).unwrap()
+            DfValue::try_from(format!("{}", idx)).unwrap()
         }
         SqlType::Int(_) => (idx as i32).into(),
         SqlType::BigInt(_) => (idx as i64).into(),
@@ -363,11 +363,11 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
         SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
             (1.5 + idx as f64).try_into().unwrap()
         }
-        SqlType::Numeric(_) => DataType::from(Decimal::new((15 + idx) as i64, 2)),
+        SqlType::Numeric(_) => DfValue::from(Decimal::new((15 + idx) as i64, 2)),
         SqlType::DateTime(_) | SqlType::Timestamp => NaiveDate::from_ymd(2020, 1, 1)
             .and_hms(12, idx as _, 30)
             .into(),
-        SqlType::TimestampTz => DataType::from(
+        SqlType::TimestampTz => DfValue::from(
             FixedOffset::west(18_000)
                 .ymd(2020, 1, 1)
                 .and_hms(12, idx as _, 30),
@@ -377,7 +377,7 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
         SqlType::Bool => unimplemented!(),
         SqlType::ByteArray => unimplemented!(),
         SqlType::Time => NaiveTime::from_hms(12, idx as _, 30).into(),
-        SqlType::Json | SqlType::Jsonb => DataType::from(format!("{{\"k\": {}}}", idx)),
+        SqlType::Json | SqlType::Jsonb => DfValue::from(format!("{{\"k\": {}}}", idx)),
         SqlType::MacAddr => {
             let b1: u8 = ((idx >> 24) & 0xff) as u8;
             let b2: u8 = ((idx >> 16) & 0xff) as u8;
@@ -387,7 +387,7 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
             // We know the length and format of the bytes, so this should always be parsable as a
             // `MacAddress`.
             #[allow(clippy::unwrap_used)]
-            DataType::from(
+            DfValue::from(
                 MacAddress::from_bytes(&bytes[..])
                     .unwrap()
                     .to_string(MacAddressFormat::HexString),
@@ -398,7 +398,7 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
             let b2: u8 = ((idx >> 16) & 0xff) as u8;
             let b3: u8 = ((idx >> 8) & 0xff) as u8;
             let b4: u8 = (idx & 0xff) as u8;
-            DataType::from(IpAddr::V4(Ipv4Addr::new(b1, b2, b3, b4)).to_string())
+            DfValue::from(IpAddr::V4(Ipv4Addr::new(b1, b2, b3, b4)).to_string())
         }
         SqlType::Uuid => {
             let mut bytes = [u8::MAX; 16];
@@ -409,7 +409,7 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
             // We know the length and format of the bytes, so this should always be parsable as a
             // `UUID`.
             #[allow(clippy::unwrap_used)]
-            DataType::from(uuid::Uuid::from_slice(&bytes[..]).unwrap().to_string())
+            DfValue::from(uuid::Uuid::from_slice(&bytes[..]).unwrap().to_string())
         }
         SqlType::Bit(_) | SqlType::VarBit(_) => {
             let mut bytes = [u8::MAX; 4];
@@ -417,7 +417,7 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
             bytes[1] = ((idx >> 16) & 0xff) as u8;
             bytes[2] = ((idx >> 8) & 0xff) as u8;
             bytes[3] = (idx & 0xff) as u8;
-            DataType::from(BitVec::from_bytes(&bytes[..]))
+            DfValue::from(BitVec::from_bytes(&bytes[..]))
         }
         SqlType::Serial => (idx + 1).into(),
         SqlType::BigSerial => ((idx + 1) as u64).into(),
@@ -548,7 +548,7 @@ pub enum ColumnGenerationSpec {
     /// Generates a new unique value every n rows.
     UniqueRepeated(u32),
     /// Generates an integer in the specified range.
-    Uniform(DataType, DataType),
+    Uniform(DfValue, DfValue),
     /// Non-repeating Uniform, an optional batch size can be specified to
     /// reset the distribution after n rows are generated.
     ///
@@ -556,8 +556,8 @@ pub enum ColumnGenerationSpec {
     /// receive a value we have not yet seen in a batch, the batch
     /// size should be much smaller than the size of the distribution.
     UniformWithoutReplacement {
-        min: DataType,
-        max: DataType,
+        min: DfValue,
+        max: DfValue,
         batch_size: Option<u32>,
     },
     /// Generates a random value for the row.
@@ -565,14 +565,14 @@ pub enum ColumnGenerationSpec {
     /// Generate a random string from a regex
     RandomString(String),
     /// Generates an integer in the specified range. Cannot be used for
-    /// non discrete integer DataTypes.
+    /// non discrete integer DfValues.
     Zipfian {
-        min: DataType,
-        max: DataType,
+        min: DfValue,
+        max: DfValue,
         alpha: f64,
     },
     /// Always generate the same value
-    Constant(DataType),
+    Constant(DfValue),
 }
 
 impl ColumnGenerationSpec {
@@ -637,7 +637,7 @@ pub enum ColumnGenerator {
 }
 
 impl ColumnGenerator {
-    pub fn gen(&mut self) -> DataType {
+    pub fn gen(&mut self) -> DfValue {
         match self {
             ColumnGenerator::Constant(g) => g.gen(),
             ColumnGenerator::Unique(g) => g.gen(),
@@ -670,7 +670,7 @@ impl ColumnGenerator {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct ConstantGenerator {
-    value: DataType,
+    value: DfValue,
 }
 
 #[derive(Debug, Clone)]
@@ -698,7 +698,7 @@ impl<S: AsRef<str>> From<S> for RandomStringGenerator {
 }
 
 impl RandomStringGenerator {
-    fn gen(&self) -> DataType {
+    fn gen(&self) -> DfValue {
         let val: String = rand::thread_rng().sample(&self.inner);
         val.into()
     }
@@ -712,14 +712,14 @@ impl From<SqlType> for ConstantGenerator {
     }
 }
 
-impl From<DataType> for ConstantGenerator {
-    fn from(value: DataType) -> Self {
+impl From<DfValue> for ConstantGenerator {
+    fn from(value: DfValue) -> Self {
         Self { value }
     }
 }
 
 impl ConstantGenerator {
-    fn gen(&self) -> DataType {
+    fn gen(&self) -> DfValue {
         self.value.clone()
     }
 }
@@ -754,7 +754,7 @@ impl From<SqlType> for UniqueGenerator {
 }
 
 impl UniqueGenerator {
-    fn gen(&mut self) -> DataType {
+    fn gen(&mut self) -> DfValue {
         let val = unique_value_of_type(&self.sql_type, self.index);
         self.generated += 1;
         if self.generated % self.batch_size == 0 {
@@ -766,8 +766,8 @@ impl UniqueGenerator {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct UniformGenerator {
-    min: DataType,
-    max: DataType,
+    min: DfValue,
+    max: DfValue,
     /// Whether we should replace values within the uniform distribution.
     with_replacement: bool,
     /// The number of values to generate before resetting the
@@ -776,11 +776,11 @@ pub struct UniformGenerator {
 
     /// Values we have already pulled from the uniform distribution
     /// if we are not replacing values.
-    pulled: HashSet<DataType>,
+    pulled: HashSet<DfValue>,
 }
 
 impl UniformGenerator {
-    fn gen(&mut self) -> DataType {
+    fn gen(&mut self) -> DfValue {
         if self.with_replacement {
             uniform_random_value(&self.min, &self.max)
         } else {
@@ -812,27 +812,27 @@ impl UniformGenerator {
 
 #[derive(Debug, Clone)]
 pub struct ZipfianGenerator {
-    min: DataType,
-    max: DataType,
+    min: DfValue,
+    max: DfValue,
     alpha: f64,
     dist: ZipfDistribution,
-    mapping: Vec<DataType>,
+    mapping: Vec<DfValue>,
 }
 
 impl ZipfianGenerator {
-    fn new(min: DataType, max: DataType, alpha: f64) -> Self {
-        let (num_elements, mapping): (u64, Vec<DataType>) = match (&min, &max) {
-            (DataType::Int(i), DataType::Int(j)) => {
-                let mut mapping: Vec<_> = (*i..*j).map(DataType::Int).collect();
+    fn new(min: DfValue, max: DfValue, alpha: f64) -> Self {
+        let (num_elements, mapping): (u64, Vec<DfValue>) = match (&min, &max) {
+            (DfValue::Int(i), DfValue::Int(j)) => {
+                let mut mapping: Vec<_> = (*i..*j).map(DfValue::Int).collect();
                 mapping.shuffle(&mut rand::thread_rng());
                 ((j - i) as u64, mapping)
             }
-            (DataType::UnsignedInt(i), DataType::UnsignedInt(j)) => {
-                let mut mapping: Vec<_> = (*i..*j).map(DataType::UnsignedInt).collect();
+            (DfValue::UnsignedInt(i), DfValue::UnsignedInt(j)) => {
+                let mut mapping: Vec<_> = (*i..*j).map(DfValue::UnsignedInt).collect();
                 mapping.shuffle(&mut rand::thread_rng());
                 ((j - i) as u64, mapping)
             }
-            (_, _) => unimplemented!("DataTypes unsupported for discrete zipfian value generation"),
+            (_, _) => unimplemented!("DfValues unsupported for discrete zipfian value generation"),
         };
 
         Self {
@@ -844,7 +844,7 @@ impl ZipfianGenerator {
         }
     }
 
-    fn gen(&mut self) -> DataType {
+    fn gen(&mut self) -> DfValue {
         let mut rng = rand::thread_rng();
         let offset = self.dist.sample(&mut rng);
         self.mapping.get(offset).unwrap().clone()
@@ -871,7 +871,7 @@ impl From<SqlType> for RandomGenerator {
 }
 
 impl RandomGenerator {
-    pub fn gen(&self) -> DataType {
+    pub fn gen(&self) -> DfValue {
         random_value_of_type(&self.sql_type)
     }
 }
@@ -891,7 +891,7 @@ impl PartialEq for NonRepeatingGenerator {
 }
 
 impl NonRepeatingGenerator {
-    fn gen(&mut self) -> DataType {
+    fn gen(&mut self) -> DfValue {
         let mut reps = 0;
         loop {
             let d = match &mut *self.generator {
@@ -926,7 +926,7 @@ pub struct ColumnDataGeneration {
     ///
     /// This is used to ensure that queries that filter on constant values get at least some
     /// results
-    expected_values: HashSet<DataType>,
+    expected_values: HashSet<DfValue>,
 }
 
 /// Column data type and data generation information.
@@ -959,7 +959,7 @@ impl From<CreateTableStatement> for TableSpec {
                 .map(|field| {
                     let sql_type = field.sql_type.clone();
                     let generator = if let Some(d) =
-                        field.has_default().and_then(|l| DataType::try_from(l).ok())
+                        field.has_default().and_then(|l| DfValue::try_from(l).ok())
                     {
                         // Prefer the specified default value for a field
                         ColumnGenerator::Constant(d.coerce_to(&sql_type).unwrap().into())
@@ -1151,7 +1151,7 @@ impl TableSpec {
     ///
     /// This can be used, for example, to ensure that queries that filter comparing against a
     /// constant value return at least some results
-    pub fn expect_value(&mut self, column_name: ColumnName, value: DataType) {
+    pub fn expect_value(&mut self, column_name: ColumnName, value: DfValue) {
         assert!(self.columns.contains_key(&column_name));
         self.columns
             .get_mut(&column_name)
@@ -1185,7 +1185,7 @@ impl TableSpec {
         }
     }
 
-    fn generate_row(&mut self, index: usize, random: bool) -> HashMap<ColumnName, DataType> {
+    fn generate_row(&mut self, index: usize, random: bool) -> HashMap<ColumnName, DfValue> {
         self.columns
             .iter_mut()
             .map(
@@ -1232,7 +1232,7 @@ impl TableSpec {
         &mut self,
         num_rows: usize,
         random: bool,
-    ) -> Vec<HashMap<ColumnName, DataType>> {
+    ) -> Vec<HashMap<ColumnName, DfValue>> {
         self.generate_data_from_index(num_rows, 0, random)
     }
 
@@ -1245,7 +1245,7 @@ impl TableSpec {
         num_rows: usize,
         index: usize,
         random: bool,
-    ) -> Vec<HashMap<ColumnName, DataType>> {
+    ) -> Vec<HashMap<ColumnName, DfValue>> {
         (index..index + num_rows)
             .map(|n| self.generate_row(n, random))
             .collect()
@@ -1347,7 +1347,7 @@ impl GeneratorState {
         table_name: &TableName,
         num_rows: usize,
         random: bool,
-    ) -> Vec<HashMap<ColumnName, DataType>> {
+    ) -> Vec<HashMap<ColumnName, DfValue>> {
         self.tables
             .get_mut(table_name)
             .unwrap()
@@ -1391,9 +1391,9 @@ pub struct QueryState<'a> {
     gen: &'a mut GeneratorState,
     tables: HashSet<TableName>,
     parameters: Vec<QueryParameter>,
-    unique_parameters: HashMap<TableName, Vec<(ColumnName, DataType)>>,
+    unique_parameters: HashMap<TableName, Vec<(ColumnName, DfValue)>>,
     alias_counter: u32,
-    datatype_counter: u8,
+    value_counter: u8,
 }
 
 impl<'a> QueryState<'a> {
@@ -1404,7 +1404,7 @@ impl<'a> QueryState<'a> {
             unique_parameters: HashMap::new(),
             parameters: Vec::new(),
             alias_counter: 0,
-            datatype_counter: 0,
+            value_counter: 0,
         }
     }
 
@@ -1478,7 +1478,7 @@ impl<'a> QueryState<'a> {
         rows_per_table: usize,
         make_unique: bool,
         random: bool,
-    ) -> HashMap<TableName, Vec<HashMap<ColumnName, DataType>>> {
+    ) -> HashMap<TableName, Vec<HashMap<ColumnName, DfValue>>> {
         let table_names = self.tables.clone();
         table_names
             .iter()
@@ -1526,14 +1526,14 @@ impl<'a> QueryState<'a> {
         column_name: ColumnName,
         value: V,
     ) where
-        DataType: From<V>,
+        DfValue: From<V>,
     {
         self.parameters.push(QueryParameter {
             table_name,
             column_name,
             index: None,
             generator: Arc::new(Mutex::new(ColumnGenerator::Constant(
-                DataType::from(value).into(),
+                DfValue::from(value).into(),
             ))),
         })
     }
@@ -1563,7 +1563,7 @@ impl<'a> QueryState<'a> {
     /// Make a new, unique key for all the parameters in the query.
     ///
     /// To get data that matches this key, call `generate_data()` after calling this function.
-    pub fn make_unique_key(&mut self) -> Vec<DataType> {
+    pub fn make_unique_key(&mut self) -> Vec<DfValue> {
         let mut ret = Vec::with_capacity(self.parameters.len());
         for QueryParameter {
             table_name,
@@ -1573,20 +1573,20 @@ impl<'a> QueryState<'a> {
         {
             let val = unique_value_of_type(
                 &self.gen.tables[table_name].columns[column_name].sql_type,
-                self.datatype_counter as u32,
+                self.value_counter as u32,
             );
             self.unique_parameters
                 .entry(table_name.clone())
                 .or_insert_with(Vec::new)
                 .push((column_name.clone(), val.clone()));
-            self.datatype_counter += 1;
+            self.value_counter += 1;
             ret.push(val);
         }
         ret
     }
 
     /// Returns a lookup key for the parameters in the query that will return results
-    pub fn key(&self) -> Vec<DataType> {
+    pub fn key(&self) -> Vec<DfValue> {
         self.parameters
             .iter()
             .map(
@@ -2213,7 +2213,7 @@ impl QueryOperation {
                         negated: *negated,
                     },
                     FilterOp::IsNull { negated } => {
-                        tbl.expect_value(col, DataType::None);
+                        tbl.expect_value(col, DfValue::None);
                         Expr::BinaryOp {
                             lhs: Box::new(col_expr),
                             op: if *negated {

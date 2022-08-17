@@ -30,7 +30,7 @@ use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset::consistency::Timestamp;
 use readyset::internal::LocalNodeIndex;
 use readyset::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
-use readyset_data::{DataType, DfType};
+use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{MigrationPlanFailed, RpcFailed, SelectQueryCreationFailed};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
@@ -83,7 +83,7 @@ async fn it_completes() {
     let mut cq = g.view("c").await.unwrap();
     let mut muta = g.table("a").await.unwrap();
     let mut mutb = g.table("b").await.unwrap();
-    let id: DataType = 1.into();
+    let id: DfValue = 1.into();
 
     assert_eq!(muta.table_name(), "a");
     assert_eq!(muta.columns(), &["a", "b"]);
@@ -154,8 +154,8 @@ async fn test_timestamp_propagation_simple() {
     let mut muta = g.table("a").await.unwrap();
 
     // Insert <1, 2> into table "a".
-    let id: DataType = 1.into();
-    let value: DataType = 2.into();
+    let id: DfValue = 1.into();
+    let value: DfValue = 2.into();
     muta.insert(vec![id.clone(), value.clone()]).await.unwrap();
 
     // Create and pass the timestamp to the base table node.
@@ -225,7 +225,7 @@ async fn test_timestamp_propagation_multitable() {
     let mut mutb = g.table("b").await.unwrap();
 
     // Insert some data into table a.
-    muta.insert(vec![DataType::Int(1), DataType::Int(2)])
+    muta.insert(vec![DfValue::Int(1), DfValue::Int(2)])
         .await
         .unwrap();
 
@@ -256,7 +256,7 @@ async fn test_timestamp_propagation_multitable() {
     // each table.
     let res = cq
         .raw_lookup(ViewQuery::from((
-            vec![KeyComparison::Equal(vec1![DataType::Int(1)])],
+            vec![KeyComparison::Equal(vec1![DfValue::Int(1)])],
             true,
             Some(timestamp(vec![(0, 6), (1, 6)])),
         )))
@@ -264,14 +264,14 @@ async fn test_timestamp_propagation_multitable() {
         .unwrap()
         .into_vec();
 
-    assert_eq!(res, vec![vec![DataType::Int(1), DataType::Int(2)]]);
+    assert_eq!(res, vec![vec![DfValue::Int(1), DfValue::Int(2)]]);
 
     // Perform a non-blocking read with a timestamp that the reader should not
     // be able to satisfy. A non-blocking read of a satisfiable timestamp would
     // suceed here due to the previous read materializing the data.
     assert!(matches!(
         cq.raw_lookup(ViewQuery::from((
-            vec![KeyComparison::Equal(vec1![DataType::Int(1)])],
+            vec![KeyComparison::Equal(vec1![DfValue::Int(1)])],
             false,
             Some(timestamp(vec![(0, 6), (1, 7)])),
         )))
@@ -306,7 +306,7 @@ async fn sharded_shuffle() {
 
     // make sure there is data on >1 shard, and that we'd get multiple rows by querying the reader
     // for a single key.
-    base.perform_all((0..100).map(|i| vec![i.into(), DataType::Int(1)]))
+    base.perform_all((0..100).map(|i| vec![i.into(), DfValue::Int(1)]))
         .await
         .unwrap();
 
@@ -314,7 +314,7 @@ async fn sharded_shuffle() {
 
     // moment of truth
     let rows = view
-        .lookup(&[DataType::Int(1)], true)
+        .lookup(&[DfValue::Int(1)], true)
         .await
         .unwrap()
         .into_vec();
@@ -394,9 +394,9 @@ async fn broad_recursing_upquery() {
     base_x
         .perform_all((0..n).map(|i| {
             vec![
-                DataType::Int(i),
-                DataType::Int(i % nshards as i64),
-                DataType::Int(1),
+                DfValue::Int(i),
+                DfValue::Int(i % nshards as i64),
+                DfValue::Int(1),
             ]
         }))
         .await
@@ -406,7 +406,7 @@ async fn broad_recursing_upquery() {
 
     // moment of truth
     let rows = reader
-        .lookup(&[DataType::Int(1)], true)
+        .lookup(&[DfValue::Int(1)], true)
         .await
         .unwrap()
         .into_vec();
@@ -533,7 +533,7 @@ async fn shared_interdomain_ancestor() {
     let mut bq = g.view("b").await.unwrap();
     let mut cq = g.view("c").await.unwrap();
     let mut muta = g.table("a").await.unwrap();
-    let id: DataType = 1.into();
+    let id: DfValue = 1.into();
 
     // send a value on a
     muta.insert(vec![id.clone(), 2.into()]).await.unwrap();
@@ -548,7 +548,7 @@ async fn shared_interdomain_ancestor() {
     );
 
     // update value again
-    let id: DataType = 2.into();
+    let id: DfValue = 2.into();
     muta.insert(vec![id.clone(), 4.into()]).await.unwrap();
     sleep().await;
     assert_eq!(
@@ -583,7 +583,7 @@ async fn it_works_w_mat() {
     let mut cq = g.view("c").await.unwrap();
     let mut muta = g.table("a").await.unwrap();
     let mut mutb = g.table("b").await.unwrap();
-    let id: DataType = 1.into();
+    let id: DfValue = 1.into();
 
     // send a few values on a
     muta.insert(vec![id.clone(), 1.into()]).await.unwrap();
@@ -633,7 +633,7 @@ async fn it_works_w_partial_mat() {
         .await;
 
     let mut muta = g.table("a").await.unwrap();
-    let id: DataType = 1.into();
+    let id: DfValue = 1.into();
 
     // send a few values on a
     muta.insert(vec![id.clone(), 1.into()]).await.unwrap();
@@ -694,7 +694,7 @@ async fn it_works_w_partial_mat_below_empty() {
         .await;
 
     let mut muta = g.table("a").await.unwrap();
-    let id: DataType = 1.into();
+    let id: DfValue = 1.into();
 
     // send a few values on a
     muta.insert(vec![id.clone(), 1.into()]).await.unwrap();
@@ -797,26 +797,22 @@ async fn delete_row() {
     let mut all_rows = g.view("all_rows").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1), DataType::from(2), DataType::from(3)],
-        vec![DataType::from(1), DataType::from(2), DataType::from(3)],
-        vec![DataType::from(4), DataType::from(5), DataType::from(6)],
+        vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)],
+        vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)],
+        vec![DfValue::from(4), DfValue::from(5), DfValue::from(6)],
     ])
     .await
     .unwrap();
 
-    t.delete_row(vec![
-        DataType::from(1),
-        DataType::from(2),
-        DataType::from(3),
-    ])
-    .await
-    .unwrap();
+    t.delete_row(vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)])
+        .await
+        .unwrap();
 
     assert_eq!(
         all_rows.lookup(&[0.into()], true).await.unwrap().into_vec(),
         vec![
-            vec![DataType::from(1), DataType::from(2), DataType::from(3)],
-            vec![DataType::from(4), DataType::from(5), DataType::from(6)],
+            vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)],
+            vec![DfValue::from(4), DfValue::from(5), DfValue::from(6)],
         ]
     );
 }
@@ -901,7 +897,7 @@ async fn it_works_with_vote() {
     assert_eq!(empty.len(), 1);
     assert_eq!(
         empty[0],
-        vec![1i64.into(), "Article".try_into().unwrap(), DataType::None]
+        vec![1i64.into(), "Article".try_into().unwrap(), DfValue::None]
     );
 }
 
@@ -1410,7 +1406,7 @@ async fn mutator_churn() {
     let votes = 7;
 
     // continuously write to vote with new mutators
-    let user: DataType = 0.into();
+    let user: DfValue = 0.into();
     for _ in 0..votes {
         for i in 0..ids {
             g.table("vote")
@@ -1473,7 +1469,7 @@ async fn view_connection_churn() {
                 g.view("AID")
                     .await
                     .unwrap()
-                    .lookup(&[DataType::from(i)], true)
+                    .lookup(&[DfValue::from(i)], true)
                     .await
                     .unwrap();
 
@@ -1521,7 +1517,7 @@ async fn table_connection_churn() {
                 g.table("A")
                     .await
                     .unwrap()
-                    .insert(vec![DataType::from(i)])
+                    .insert(vec![DfValue::from(i)])
                     .await
                     .unwrap();
 
@@ -1696,8 +1692,8 @@ async fn it_works_with_simple_arithmetic() {
 
     let mut mutator = g.table("Car").await.unwrap();
     let mut getter = g.view("CarPrice").await.unwrap();
-    let id: DataType = 1.into();
-    let price: DataType = 123.into();
+    let id: DfValue = 1.into();
+    let price: DfValue = 123.into();
     mutator.insert(vec![id.clone(), price]).await.unwrap();
 
     // Let writes propagate:
@@ -1719,8 +1715,8 @@ async fn it_works_with_multiple_arithmetic_expressions() {
 
     let mut mutator = g.table("Car").await.unwrap();
     let mut getter = g.view("CarPrice").await.unwrap();
-    let id: DataType = 1.into();
-    let price: DataType = 123.into();
+    let id: DfValue = 1.into();
+    let price: DfValue = 123.into();
     mutator.insert(vec![id.clone(), price]).await.unwrap();
 
     // Let writes propagate:
@@ -1767,7 +1763,7 @@ async fn it_works_with_join_arithmetic() {
         .insert(vec![
             id.into(),
             id.into(),
-            DataType::try_from(fraction).unwrap(),
+            DfValue::try_from(fraction).unwrap(),
         ])
         .await
         .unwrap();
@@ -1780,7 +1776,7 @@ async fn it_works_with_join_arithmetic() {
     assert_eq!(result.len(), 1);
     assert_eq!(
         result[0][0],
-        DataType::try_from(f64::from(price) * fraction).unwrap()
+        DfValue::try_from(f64::from(price) * fraction).unwrap()
     );
 }
 
@@ -1807,7 +1803,7 @@ async fn it_works_with_function_arithmetic() {
 
     let result = getter.lookup(&[0.into()], true).await.unwrap().into_vec();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0][0], DataType::from(max_price * 2));
+    assert_eq!(result[0][0], DfValue::from(max_price * 2));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1860,8 +1856,8 @@ async fn votes() {
     let mut mut2 = g.table("article2").await.unwrap();
     let mut mutv = g.table("vote").await.unwrap();
 
-    let a1: DataType = 1.into();
-    let a2: DataType = 2.into();
+    let a1: DfValue = 1.into();
+    let a2: DfValue = 2.into();
 
     // make one article
     mut1.insert(vec![a1.clone(), 2.into()]).await.unwrap();
@@ -1954,7 +1950,7 @@ async fn empty_migration() {
     let mut cq = g.view("c").await.unwrap();
     let mut muta = g.table("a").await.unwrap();
     let mut mutb = g.table("b").await.unwrap();
-    let id: DataType = 1.into();
+    let id: DfValue = 1.into();
 
     // send a value on a
     muta.insert(vec![id.clone(), 2.into()]).await.unwrap();
@@ -1982,7 +1978,7 @@ async fn empty_migration() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_migration() {
-    let id: DataType = 1.into();
+    let id: DfValue = 1.into();
 
     // set up graph
     let mut g = start_simple_unsharded("simple_migration").await;
@@ -2036,7 +2032,7 @@ async fn simple_migration() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn add_columns() {
-    let id: DataType = "x".try_into().unwrap();
+    let id: DfValue = "x".try_into().unwrap();
 
     // set up graph
     let mut g = start_simple_unsharded("add_columns").await;
@@ -2102,7 +2098,7 @@ async fn add_columns() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn migrate_added_columns() {
-    let id: DataType = "x".try_into().unwrap();
+    let id: DfValue = "x".try_into().unwrap();
 
     // set up graph
     let mut g = start_simple_unsharded("migrate_added_columns").await;
@@ -2168,7 +2164,7 @@ async fn migrate_added_columns() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn migrate_drop_columns() {
-    let id: DataType = "x".try_into().unwrap();
+    let id: DfValue = "x".try_into().unwrap();
 
     // set up graph
     let mut g = start_simple_unsharded("migrate_drop_columns").await;
@@ -2532,7 +2528,7 @@ async fn cascading_replays_with_sharding() {
             .await
             .unwrap()
             .into_vec(),
-        Vec::<Vec<DataType>>::new()
+        Vec::<Vec<DfValue>>::new()
     );
     assert_eq!(
         e.lookup(&["u3".try_into().unwrap()], true)
@@ -2561,8 +2557,8 @@ async fn replay_multiple_keys_then_write() {
     let mut q = g.view("q").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1), DataType::from(1)],
-        vec![DataType::from(2), DataType::from(2)],
+        vec![DfValue::from(1), DfValue::from(1)],
+        vec![DfValue::from(2), DfValue::from(2)],
     ])
     .await
     .unwrap();
@@ -2571,7 +2567,7 @@ async fn replay_multiple_keys_then_write() {
     q.lookup(&[2.into()], true).await.unwrap();
 
     t.update(
-        vec![DataType::from(1)],
+        vec![DfValue::from(1)],
         vec![(1, Modification::Set(2.into()))],
     )
     .await
@@ -2581,7 +2577,7 @@ async fn replay_multiple_keys_then_write() {
 
     let res = &q.lookup(&[1.into()], true).await.unwrap().into_vec()[0];
 
-    assert_eq!(*res, vec![DataType::from(1), DataType::from(2)]);
+    assert_eq!(*res, vec![DfValue::from(1), DfValue::from(2)]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2678,7 +2674,7 @@ async fn pkey_then_full_table_with_bogokey() {
     let mut by_id = g.view("by_id").await.unwrap();
     let mut all_posts = g.view("all_posts").await.unwrap();
 
-    let rows: Vec<Vec<DataType>> = (0..10)
+    let rows: Vec<Vec<DfValue>> = (0..10)
         .map(|n| vec![n.into(), format!("post {}", n).try_into().unwrap()])
         .collect();
     posts.insert_many(rows.clone()).await.unwrap();
@@ -2688,14 +2684,11 @@ async fn pkey_then_full_table_with_bogokey() {
     // Looking up post with id 1 should return the correct post.
     assert_eq!(
         by_id.lookup(&[1.into()], true).await.unwrap().into_vec(),
-        vec![vec![
-            DataType::from(1),
-            DataType::try_from("post 1").unwrap()
-        ]]
+        vec![vec![DfValue::from(1), DfValue::try_from("post 1").unwrap()]]
     );
 
     // Looking up all posts using a 0 bogokey should return all posts.
-    let rows_with_bogokey: Vec<Vec<DataType>> = (0..10)
+    let rows_with_bogokey: Vec<Vec<DfValue>> = (0..10)
         .map(|n| vec![n.into(), format!("post {}", n).try_into().unwrap()])
         .collect();
     assert_eq!(
@@ -2854,7 +2847,7 @@ async fn crossing_migration() {
 
     let mut cq = g.view("c").await.unwrap();
 
-    let id: DataType = 1.into();
+    let id: DfValue = 1.into();
 
     // send a value on a
     muta.insert(vec![id.clone(), 2.into()]).await.unwrap();
@@ -2877,7 +2870,7 @@ async fn crossing_migration() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn independent_domain_migration() {
-    let id: DataType = 1.into();
+    let id: DfValue = 1.into();
 
     // set up graph
     let mut g = start_simple_unsharded("independent_domain_migration").await;
@@ -2956,7 +2949,7 @@ async fn domain_amend_migration() {
         .await;
     let mut cq = g.view("c").await.unwrap();
 
-    let id: DataType = 1.into();
+    let id: DfValue = 1.into();
 
     // send a value on a
     muta.insert(vec![id.clone(), 2.into()]).await.unwrap();
@@ -3056,8 +3049,8 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
     let mut mutv = g.table("vote").await.unwrap();
 
     let n = 250i64;
-    let title: DataType = "foo".try_into().unwrap();
-    let raten: DataType = 5.into();
+    let title: DfValue = "foo".try_into().unwrap();
+    let raten: DfValue = 5.into();
 
     for i in 0..n {
         muta.insert(vec![i.into(), title.clone()]).await.unwrap();
@@ -3574,7 +3567,7 @@ async fn node_removal() {
     let mut cq = g.view("c").await.unwrap();
     let mut muta = g.table("a").await.unwrap();
     let mut mutb = g.table("b").await.unwrap();
-    let id: DataType = 1.into();
+    let id: DfValue = 1.into();
 
     assert_eq!(muta.table_name(), "a");
     assert_eq!(muta.columns(), &["a", "b"]);
@@ -3933,9 +3926,9 @@ async fn between() {
 
     sleep().await;
 
-    let expected: Vec<Vec<DataType>> = (3..6).map(|i| vec![DataType::from(i)]).collect();
+    let expected: Vec<Vec<DfValue>> = (3..6).map(|i| vec![DfValue::from(i)]).collect();
     let res = between_query.lookup(&[0.into()], true).await.unwrap();
-    let rows: Vec<Vec<DataType>> = res.into();
+    let rows: Vec<Vec<DfValue>> = res.into();
     assert_eq!(rows, expected);
 }
 
@@ -3966,11 +3959,11 @@ async fn between_parametrized() {
     let mut q = g.view("q").await.unwrap();
     assert_eq!(q.key_map(), &[(ViewPlaceholder::Between(1, 2), 0)]);
 
-    let expected: Vec<Vec<DataType>> = (3..6).map(|i| vec![DataType::from(i)]).collect();
+    let expected: Vec<Vec<DfValue>> = (3..6).map(|i| vec![DfValue::from(i)]).collect();
     let rows = q
         .multi_lookup(
             vec![KeyComparison::from_range(
-                &(vec1![DataType::from(3)]..=vec1![DataType::from(5)]),
+                &(vec1![DfValue::from(3)]..=vec1![DfValue::from(5)]),
             )],
             true,
         )
@@ -4012,13 +4005,13 @@ async fn not_between() {
         .lookup(&[3.into(), 5.into()], true)
         .await
         .unwrap();
-    let rows: Vec<Vec<DataType>> = res.into();
+    let rows: Vec<Vec<DfValue>> = res.into();
     assert_eq!(
         rows,
         (1..2)
             .chain(6..10)
-            .map(|i| vec![DataType::from(i)])
-            .collect::<Vec<Vec<DataType>>>()
+            .map(|i| vec![DfValue::from(i)])
+            .collect::<Vec<Vec<DfValue>>>()
     );
 }
 
@@ -4047,7 +4040,7 @@ async fn topk_updates() {
     sleep().await;
 
     let res = top_posts.lookup(&[0.into()], true).await.unwrap();
-    let mut rows: Vec<Vec<DataType>> = res.into();
+    let mut rows: Vec<Vec<DfValue>> = res.into();
     rows.sort();
     assert_eq!(
         rows,
@@ -4061,7 +4054,7 @@ async fn topk_updates() {
     sleep().await;
 
     let res = top_posts.lookup(&[0.into()], true).await.unwrap();
-    let mut rows: Vec<Vec<DataType>> = res.into();
+    let mut rows: Vec<Vec<DfValue>> = res.into();
     rows.sort();
     assert_eq!(
         rows,
@@ -4088,15 +4081,15 @@ async fn simple_pagination() {
     let mut t = g.table("t").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1), DataType::from("a")],
-        vec![DataType::from(2), DataType::from("a")],
-        vec![DataType::from(3), DataType::from("a")],
-        vec![DataType::from(4), DataType::from("a")],
-        vec![DataType::from(5), DataType::from("a")],
-        vec![DataType::from(6), DataType::from("a")],
-        vec![DataType::from(1), DataType::from("b")],
-        vec![DataType::from(2), DataType::from("b")],
-        vec![DataType::from(3), DataType::from("b")],
+        vec![DfValue::from(1), DfValue::from("a")],
+        vec![DfValue::from(2), DfValue::from("a")],
+        vec![DfValue::from(3), DfValue::from("a")],
+        vec![DfValue::from(4), DfValue::from("a")],
+        vec![DfValue::from(5), DfValue::from("a")],
+        vec![DfValue::from(6), DfValue::from("a")],
+        vec![DfValue::from(1), DfValue::from("b")],
+        vec![DfValue::from(2), DfValue::from("b")],
+        vec![DfValue::from(3), DfValue::from("b")],
     ])
     .await
     .unwrap();
@@ -4116,7 +4109,7 @@ async fn simple_pagination() {
         ]
     );
 
-    let mut a_page1: Vec<Vec<DataType>> = q
+    let mut a_page1: Vec<Vec<DfValue>> = q
         .lookup(&["a".into(), 0.into()], true)
         .await
         .unwrap()
@@ -4125,13 +4118,13 @@ async fn simple_pagination() {
     assert_eq!(
         a_page1,
         vec![
-            vec![DataType::from(1), DataType::from("a")],
-            vec![DataType::from(2), DataType::from("a")],
-            vec![DataType::from(3), DataType::from("a")],
+            vec![DfValue::from(1), DfValue::from("a")],
+            vec![DfValue::from(2), DfValue::from("a")],
+            vec![DfValue::from(3), DfValue::from("a")],
         ]
     );
 
-    let mut a_page2: Vec<Vec<DataType>> = q
+    let mut a_page2: Vec<Vec<DfValue>> = q
         .lookup(&["a".into(), 1.into()], true)
         .await
         .unwrap()
@@ -4140,13 +4133,13 @@ async fn simple_pagination() {
     assert_eq!(
         a_page2,
         vec![
-            vec![DataType::from(4), DataType::from("a")],
-            vec![DataType::from(5), DataType::from("a")],
-            vec![DataType::from(6), DataType::from("a")],
+            vec![DfValue::from(4), DfValue::from("a")],
+            vec![DfValue::from(5), DfValue::from("a")],
+            vec![DfValue::from(6), DfValue::from("a")],
         ]
     );
 
-    let mut b_page1: Vec<Vec<DataType>> = q
+    let mut b_page1: Vec<Vec<DfValue>> = q
         .lookup(&["b".into(), 0.into()], true)
         .await
         .unwrap()
@@ -4155,9 +4148,9 @@ async fn simple_pagination() {
     assert_eq!(
         b_page1,
         vec![
-            vec![DataType::from(1), DataType::from("b")],
-            vec![DataType::from(2), DataType::from("b")],
-            vec![DataType::from(3), DataType::from("b")],
+            vec![DfValue::from(1), DfValue::from("b")],
+            vec![DfValue::from(2), DfValue::from("b")],
+            vec![DfValue::from(3), DfValue::from("b")],
         ]
     );
 }
@@ -4635,7 +4628,7 @@ async fn non_sql_materialized_range_query() {
 
     let mut a = g.table("a").await.unwrap();
     let mut reader = g.view("a").await.unwrap();
-    a.insert_many((0i32..10).map(|n| vec![DataType::from(n), DataType::from(n)]))
+    a.insert_many((0i32..10).map(|n| vec![DfValue::from(n), DfValue::from(n)]))
         .await
         .unwrap();
 
@@ -4643,7 +4636,7 @@ async fn non_sql_materialized_range_query() {
 
     let res = reader
         .multi_lookup(
-            vec![(vec1![DataType::from(2)]..vec1![DataType::from(5)]).into()],
+            vec![(vec1![DfValue::from(2)]..vec1![DfValue::from(5)]).into()],
             false,
         )
         .await
@@ -4679,7 +4672,7 @@ async fn non_sql_range_upquery() {
 
     let mut a = g.table("a").await.unwrap();
     let mut reader = g.view("a").await.unwrap();
-    a.insert_many((0i32..10).map(|n| vec![DataType::from(n), DataType::from(n)]))
+    a.insert_many((0i32..10).map(|n| vec![DfValue::from(n), DfValue::from(n)]))
         .await
         .unwrap();
 
@@ -4687,7 +4680,7 @@ async fn non_sql_range_upquery() {
 
     let res = reader
         .multi_lookup(
-            vec![(vec1![DataType::from(2)]..vec1![DataType::from(5)]).into()],
+            vec![(vec1![DfValue::from(2)]..vec1![DfValue::from(5)]).into()],
             true,
         )
         .await
@@ -4759,10 +4752,10 @@ async fn range_upquery_after_point_queries() {
     let mut b = g.table("b").await.unwrap();
     let mut btree_reader = g.view("btree_reader").await.unwrap();
     let mut hash_reader = g.view("hash_reader").await.unwrap();
-    a.insert_many((0i32..10).map(|n| vec![DataType::from(n), DataType::from(n)]))
+    a.insert_many((0i32..10).map(|n| vec![DfValue::from(n), DfValue::from(n)]))
         .await
         .unwrap();
-    b.insert_many((0i32..10).map(|n| vec![DataType::from(n), DataType::from(n * 10)]))
+    b.insert_many((0i32..10).map(|n| vec![DfValue::from(n), DfValue::from(n * 10)]))
         .await
         .unwrap();
 
@@ -4775,11 +4768,7 @@ async fn range_upquery_after_point_queries() {
             .await
             .unwrap()
             .into_vec(),
-        &[vec![
-            DataType::from(3),
-            DataType::from(3),
-            DataType::from(30)
-        ]]
+        &[vec![DfValue::from(3), DfValue::from(3), DfValue::from(30)]]
     );
     assert_eq!(
         &*hash_reader
@@ -4787,16 +4776,12 @@ async fn range_upquery_after_point_queries() {
             .await
             .unwrap()
             .into_vec(),
-        &[vec![
-            DataType::from(3),
-            DataType::from(3),
-            DataType::from(30)
-        ]]
+        &[vec![DfValue::from(3), DfValue::from(3), DfValue::from(30)]]
     );
 
     let res = btree_reader
         .multi_lookup(
-            vec![(vec1![DataType::from(2)]..vec1![DataType::from(5)]).into()],
+            vec![(vec1![DfValue::from(2)]..vec1![DfValue::from(5)]).into()],
             true,
         )
         .await
@@ -4869,10 +4854,10 @@ async fn same_table_columns_inequal() {
 
     let mut t1 = g.table("t1").await.unwrap();
     t1.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(1i32)],
-        vec![DataType::from(2i32), DataType::from(2i32)],
-        vec![DataType::from(1i32), DataType::from(2i32)],
-        vec![DataType::from(2i32), DataType::from(3i32)],
+        vec![DfValue::from(1i32), DfValue::from(1i32)],
+        vec![DfValue::from(2i32), DfValue::from(2i32)],
+        vec![DfValue::from(1i32), DfValue::from(2i32)],
+        vec![DfValue::from(2i32), DfValue::from(3i32)],
     ])
     .await
     .unwrap();
@@ -4884,8 +4869,8 @@ async fn same_table_columns_inequal() {
     assert_eq!(
         res,
         vec![
-            vec![DataType::from(1i32), DataType::from(2i32)],
-            vec![DataType::from(2i32), DataType::from(3i32)],
+            vec![DfValue::from(1i32), DfValue::from(2i32)],
+            vec![DfValue::from(2i32), DfValue::from(3i32)],
         ]
     );
 }
@@ -4953,13 +4938,13 @@ async fn post_read_ilike() {
     let mut a = g.table("a").await.unwrap();
     let mut reader = g.view("a").await.unwrap();
     a.insert_many(vec![
-        vec![DataType::try_from("foo").unwrap(), DataType::from(1i32)],
-        vec![DataType::try_from("bar").unwrap(), DataType::from(2i32)],
-        vec![DataType::try_from("baz").unwrap(), DataType::from(3i32)],
-        vec![DataType::try_from("BAZ").unwrap(), DataType::from(4i32)],
+        vec![DfValue::try_from("foo").unwrap(), DfValue::from(1i32)],
+        vec![DfValue::try_from("bar").unwrap(), DfValue::from(2i32)],
+        vec![DfValue::try_from("baz").unwrap(), DfValue::from(3i32)],
+        vec![DfValue::try_from("BAZ").unwrap(), DfValue::from(4i32)],
         vec![
-            DataType::try_from("something else entirely").unwrap(),
-            DataType::from(5i32),
+            DfValue::try_from("something else entirely").unwrap(),
+            DfValue::from(5i32),
         ],
     ])
     .await
@@ -4994,9 +4979,9 @@ async fn post_read_ilike() {
     assert_eq!(
         res,
         vec![
-            vec![DataType::try_from("bar").unwrap(), DataType::from(2)],
-            vec![DataType::try_from("baz").unwrap(), DataType::from(3)],
-            vec![DataType::try_from("BAZ").unwrap(), DataType::from(4)],
+            vec![DfValue::try_from("bar").unwrap(), DfValue::from(2)],
+            vec![DfValue::try_from("baz").unwrap(), DfValue::from(3)],
+            vec![DfValue::try_from("BAZ").unwrap(), DfValue::from(4)],
         ]
     )
 }
@@ -5035,7 +5020,7 @@ async fn cast_projection() {
 
     assert_eq!(
         result,
-        vec![DataType::from(1), NaiveDate::from_ymd(2020, 3, 16).into()]
+        vec![DfValue::from(1), NaiveDate::from_ymd(2020, 3, 16).into()]
     );
 }
 
@@ -5056,8 +5041,8 @@ async fn aggregate_expression() {
     let mut q = g.view("q").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::try_from("100").unwrap()],
-        vec![DataType::try_from("5").unwrap()],
+        vec![DfValue::try_from("100").unwrap()],
+        vec![DfValue::try_from("5").unwrap()],
     ])
     .await
     .unwrap();
@@ -5071,7 +5056,7 @@ async fn aggregate_expression() {
         .into_vec()
         .remove(0);
 
-    assert_eq!(get_col!(q, res, "max_num"), &DataType::from(100));
+    assert_eq!(get_col!(q, res, "max_num"), &DfValue::from(100));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -5116,19 +5101,19 @@ async fn post_join_filter() {
     let mut q = g.view("q").await.unwrap();
 
     t1.insert_many(vec![
-        vec![DataType::from(1), DataType::from(1)],
-        vec![DataType::from(2), DataType::from(2)],
-        vec![DataType::from(3), DataType::from(3)],
-        vec![DataType::from(4), DataType::from(4)],
+        vec![DfValue::from(1), DfValue::from(1)],
+        vec![DfValue::from(2), DfValue::from(2)],
+        vec![DfValue::from(3), DfValue::from(3)],
+        vec![DfValue::from(4), DfValue::from(4)],
     ])
     .await
     .unwrap();
 
     t2.insert_many(vec![
-        vec![DataType::from(1), DataType::from(1)],
-        vec![DataType::from(2), DataType::from(1)],
-        vec![DataType::from(2), DataType::from(5)],
-        vec![DataType::from(3), DataType::from(5)],
+        vec![DfValue::from(1), DfValue::from(1)],
+        vec![DfValue::from(2), DfValue::from(1)],
+        vec![DfValue::from(2), DfValue::from(5)],
+        vec![DfValue::from(3), DfValue::from(5)],
     ])
     .await
     .unwrap();
@@ -5172,19 +5157,19 @@ async fn duplicate_column_names() {
     let mut q = g.view("q").await.unwrap();
 
     t1.insert_many(vec![
-        vec![DataType::from(1), DataType::from(1)],
-        vec![DataType::from(2), DataType::from(2)],
-        vec![DataType::from(3), DataType::from(3)],
-        vec![DataType::from(4), DataType::from(4)],
+        vec![DfValue::from(1), DfValue::from(1)],
+        vec![DfValue::from(2), DfValue::from(2)],
+        vec![DfValue::from(3), DfValue::from(3)],
+        vec![DfValue::from(4), DfValue::from(4)],
     ])
     .await
     .unwrap();
 
     t2.insert_many(vec![
-        vec![DataType::from(1), DataType::from(1)],
-        vec![DataType::from(2), DataType::from(1)],
-        vec![DataType::from(2), DataType::from(5)],
-        vec![DataType::from(3), DataType::from(5)],
+        vec![DfValue::from(1), DfValue::from(1)],
+        vec![DfValue::from(2), DfValue::from(1)],
+        vec![DfValue::from(2), DfValue::from(5)],
+        vec![DfValue::from(3), DfValue::from(5)],
     ])
     .await
     .unwrap();
@@ -5220,12 +5205,12 @@ async fn filter_on_expression() {
 
     t.insert_many(vec![
         vec![
-            DataType::from(1),
-            DataType::from(NaiveDate::from_ymd(1995, 6, 2)),
+            DfValue::from(1),
+            DfValue::from(NaiveDate::from_ymd(1995, 6, 2)),
         ],
         vec![
-            DataType::from(2),
-            DataType::from(NaiveDate::from_ymd(2015, 5, 15)),
+            DfValue::from(2),
+            DfValue::from(NaiveDate::from_ymd(2015, 5, 15)),
         ],
     ])
     .await
@@ -5235,7 +5220,7 @@ async fn filter_on_expression() {
 
     let res = &q.lookup(&[0i32.into()], true).await.unwrap().into_vec();
 
-    assert_eq!(get_col!(q, res[0], "id"), &DataType::from(1));
+    assert_eq!(get_col!(q, res[0], "id"), &DfValue::from(1));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -5262,24 +5247,24 @@ async fn compound_join_key() {
 
     t1.insert_many(vec![
         vec![
-            DataType::from(1i32),
-            DataType::from(2i32),
-            DataType::from(3i32),
+            DfValue::from(1i32),
+            DfValue::from(2i32),
+            DfValue::from(3i32),
         ],
         vec![
-            DataType::from(1i32),
-            DataType::from(3i32),
-            DataType::from(4i32),
+            DfValue::from(1i32),
+            DfValue::from(3i32),
+            DfValue::from(4i32),
         ],
         vec![
-            DataType::from(2i32),
-            DataType::from(3i32),
-            DataType::from(4i32),
+            DfValue::from(2i32),
+            DfValue::from(3i32),
+            DfValue::from(4i32),
         ],
         vec![
-            DataType::from(2i32),
-            DataType::from(4i32),
-            DataType::from(5i32),
+            DfValue::from(2i32),
+            DfValue::from(4i32),
+            DfValue::from(5i32),
         ],
     ])
     .await
@@ -5287,29 +5272,29 @@ async fn compound_join_key() {
 
     t2.insert_many(vec![
         vec![
-            DataType::from(1i32),
-            DataType::from(2i32),
-            DataType::from(33i32),
+            DfValue::from(1i32),
+            DfValue::from(2i32),
+            DfValue::from(33i32),
         ],
         vec![
-            DataType::from(1i32),
-            DataType::from(3i32),
-            DataType::from(44i32),
+            DfValue::from(1i32),
+            DfValue::from(3i32),
+            DfValue::from(44i32),
         ],
         vec![
-            DataType::from(1i32),
-            DataType::from(4i32),
-            DataType::from(123i32),
+            DfValue::from(1i32),
+            DfValue::from(4i32),
+            DfValue::from(123i32),
         ],
         vec![
-            DataType::from(2i32),
-            DataType::from(3i32),
-            DataType::from(44i32),
+            DfValue::from(2i32),
+            DfValue::from(3i32),
+            DfValue::from(44i32),
         ],
         vec![
-            DataType::from(2i32),
-            DataType::from(5i32),
-            DataType::from(123i32),
+            DfValue::from(2i32),
+            DfValue::from(5i32),
+            DfValue::from(123i32),
         ],
     ])
     .await
@@ -5347,13 +5332,13 @@ async fn left_join_null() {
     let mut q = g.view("funky").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1), DataType::from(2)],
-        vec![DataType::from(3), DataType::from(6)],
-        vec![DataType::from(4), DataType::from(6)],
+        vec![DfValue::from(1), DfValue::from(2)],
+        vec![DfValue::from(3), DfValue::from(6)],
+        vec![DfValue::from(4), DfValue::from(6)],
     ])
     .await
     .unwrap();
-    t2.insert_many(vec![vec![DataType::from(3)]]).await.unwrap();
+    t2.insert_many(vec![vec![DfValue::from(3)]]).await.unwrap();
 
     sleep().await;
 
@@ -5380,15 +5365,15 @@ async fn overlapping_indices() {
     let mut q = g.view("overlapping").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1), DataType::from(1), DataType::from(1)],
-        vec![DataType::from(2), DataType::from(2), DataType::from(1)],
-        vec![DataType::from(3), DataType::from(3), DataType::from(1)],
-        vec![DataType::from(4), DataType::from(4), DataType::from(2)],
-        vec![DataType::from(5), DataType::from(5), DataType::from(2)],
-        vec![DataType::from(6), DataType::from(6), DataType::from(3)],
-        vec![DataType::from(6), DataType::from(14), DataType::from(3)],
-        vec![DataType::from(7), DataType::from(7), DataType::from(3)],
-        vec![DataType::from(8), DataType::from(8), DataType::from(3)],
+        vec![DfValue::from(1), DfValue::from(1), DfValue::from(1)],
+        vec![DfValue::from(2), DfValue::from(2), DfValue::from(1)],
+        vec![DfValue::from(3), DfValue::from(3), DfValue::from(1)],
+        vec![DfValue::from(4), DfValue::from(4), DfValue::from(2)],
+        vec![DfValue::from(5), DfValue::from(5), DfValue::from(2)],
+        vec![DfValue::from(6), DfValue::from(6), DfValue::from(3)],
+        vec![DfValue::from(6), DfValue::from(14), DfValue::from(3)],
+        vec![DfValue::from(7), DfValue::from(7), DfValue::from(3)],
+        vec![DfValue::from(8), DfValue::from(8), DfValue::from(3)],
     ])
     .await
     .unwrap();
@@ -5428,11 +5413,11 @@ async fn aggregate_after_filter_non_equality() {
     let mut q = g.view("filteragg").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(1i32)],
-        vec![DataType::from(2i32), DataType::from(4i32)],
-        vec![DataType::from(3i32), DataType::from(5i32)],
-        vec![DataType::from(4i32), DataType::from(7i32)],
-        vec![DataType::from(5i32), DataType::from(1i32)],
+        vec![DfValue::from(1i32), DfValue::from(1i32)],
+        vec![DfValue::from(2i32), DfValue::from(4i32)],
+        vec![DfValue::from(3i32), DfValue::from(5i32)],
+        vec![DfValue::from(4i32), DfValue::from(7i32)],
+        vec![DfValue::from(5i32), DfValue::from(1i32)],
     ])
     .await
     .unwrap();
@@ -5472,15 +5457,15 @@ async fn join_simple_cte() {
     let mut view = g.view("join_simple_cte").await.unwrap();
 
     t1.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(2i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
+        vec![DfValue::from(1i32), DfValue::from(2i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
     ])
     .await
     .unwrap();
 
     t2.insert_many(vec![
-        vec![DataType::from(2i32), DataType::try_from("two").unwrap()],
-        vec![DataType::from(4i32), DataType::try_from("four").unwrap()],
+        vec![DfValue::from(2i32), DfValue::try_from("two").unwrap()],
+        vec![DfValue::from(4i32), DfValue::try_from("four").unwrap()],
     ])
     .await
     .unwrap();
@@ -5490,7 +5475,7 @@ async fn join_simple_cte() {
     let res = view.lookup(&[0i32.into()], true).await.unwrap().into_vec();
     assert_eq!(
         get_col!(view, res[0], "name"),
-        &DataType::try_from("four").unwrap()
+        &DfValue::try_from("four").unwrap()
     );
 }
 
@@ -5514,29 +5499,29 @@ async fn multiple_aggregate_sum() {
 
     t.insert_many(vec![
         vec![
-            DataType::from(1i32),
-            DataType::from(1i32),
-            DataType::from(5i32),
+            DfValue::from(1i32),
+            DfValue::from(1i32),
+            DfValue::from(5i32),
         ],
         vec![
-            DataType::from(1i32),
-            DataType::from(4i32),
-            DataType::from(2i32),
+            DfValue::from(1i32),
+            DfValue::from(4i32),
+            DfValue::from(2i32),
         ],
         vec![
-            DataType::from(2i32),
-            DataType::from(5i32),
-            DataType::from(7i32),
+            DfValue::from(2i32),
+            DfValue::from(5i32),
+            DfValue::from(7i32),
         ],
         vec![
-            DataType::from(2i32),
-            DataType::from(7i32),
-            DataType::from(1i32),
+            DfValue::from(2i32),
+            DfValue::from(7i32),
+            DfValue::from(1i32),
         ],
         vec![
-            DataType::from(3i32),
-            DataType::from(1i32),
-            DataType::from(3i32),
+            DfValue::from(3i32),
+            DfValue::from(1i32),
+            DfValue::from(3i32),
         ],
     ])
     .await
@@ -5579,11 +5564,11 @@ async fn multiple_aggregate_same_col() {
     let mut q = g.view("multiaggsamecol").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(1i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(2i32), DataType::from(5i32)],
-        vec![DataType::from(2i32), DataType::from(7i32)],
-        vec![DataType::from(3i32), DataType::from(1i32)],
+        vec![DfValue::from(1i32), DfValue::from(1i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(2i32), DfValue::from(5i32)],
+        vec![DfValue::from(2i32), DfValue::from(7i32)],
+        vec![DfValue::from(3i32), DfValue::from(1i32)],
     ])
     .await
     .unwrap();
@@ -5623,29 +5608,29 @@ async fn multiple_aggregate_sum_sharded() {
 
     t.insert_many(vec![
         vec![
-            DataType::from(1i32),
-            DataType::from(1i32),
-            DataType::from(5i32),
+            DfValue::from(1i32),
+            DfValue::from(1i32),
+            DfValue::from(5i32),
         ],
         vec![
-            DataType::from(1i32),
-            DataType::from(4i32),
-            DataType::from(2i32),
+            DfValue::from(1i32),
+            DfValue::from(4i32),
+            DfValue::from(2i32),
         ],
         vec![
-            DataType::from(2i32),
-            DataType::from(5i32),
-            DataType::from(7i32),
+            DfValue::from(2i32),
+            DfValue::from(5i32),
+            DfValue::from(7i32),
         ],
         vec![
-            DataType::from(2i32),
-            DataType::from(7i32),
-            DataType::from(1i32),
+            DfValue::from(2i32),
+            DfValue::from(7i32),
+            DfValue::from(1i32),
         ],
         vec![
-            DataType::from(3i32),
-            DataType::from(1i32),
-            DataType::from(3i32),
+            DfValue::from(3i32),
+            DfValue::from(1i32),
+            DfValue::from(3i32),
         ],
     ])
     .await
@@ -5685,11 +5670,11 @@ async fn multiple_aggregate_same_col_sharded() {
     let mut q = g.view("multiaggsamecolsharded").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(1i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(2i32), DataType::from(5i32)],
-        vec![DataType::from(2i32), DataType::from(7i32)],
-        vec![DataType::from(3i32), DataType::from(1i32)],
+        vec![DfValue::from(1i32), DfValue::from(1i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(2i32), DfValue::from(5i32)],
+        vec![DfValue::from(2i32), DfValue::from(7i32)],
+        vec![DfValue::from(3i32), DfValue::from(1i32)],
     ])
     .await
     .unwrap();
@@ -5728,11 +5713,11 @@ async fn multiple_aggregate_over_two() {
     let mut q = g.view("multiaggovertwo").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(1i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(2i32), DataType::from(5i32)],
-        vec![DataType::from(2i32), DataType::from(7i32)],
-        vec![DataType::from(3i32), DataType::from(1i32)],
+        vec![DfValue::from(1i32), DfValue::from(1i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(2i32), DfValue::from(5i32)],
+        vec![DfValue::from(2i32), DfValue::from(7i32)],
+        vec![DfValue::from(3i32), DfValue::from(1i32)],
     ])
     .await
     .unwrap();
@@ -5775,11 +5760,11 @@ async fn multiple_aggregate_over_two_sharded() {
     let mut q = g.view("multiaggovertwosharded").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(1i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(2i32), DataType::from(5i32)],
-        vec![DataType::from(2i32), DataType::from(7i32)],
-        vec![DataType::from(3i32), DataType::from(1i32)],
+        vec![DfValue::from(1i32), DfValue::from(1i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(2i32), DfValue::from(5i32)],
+        vec![DfValue::from(2i32), DfValue::from(7i32)],
+        vec![DfValue::from(3i32), DfValue::from(1i32)],
     ])
     .await
     .unwrap();
@@ -5820,11 +5805,11 @@ async fn multiple_aggregate_with_expressions() {
     let mut q = g.view("multiaggwexpressions").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(1i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(2i32), DataType::from(5i32)],
-        vec![DataType::from(2i32), DataType::from(7i32)],
-        vec![DataType::from(3i32), DataType::from(1i32)],
+        vec![DfValue::from(1i32), DfValue::from(1i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(2i32), DfValue::from(5i32)],
+        vec![DfValue::from(2i32), DfValue::from(7i32)],
+        vec![DfValue::from(3i32), DfValue::from(1i32)],
     ])
     .await
     .unwrap();
@@ -5864,11 +5849,11 @@ async fn multiple_aggregate_with_expressions_sharded() {
     let mut q = g.view("multiaggwexpressionssharded").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(1i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(2i32), DataType::from(5i32)],
-        vec![DataType::from(2i32), DataType::from(7i32)],
-        vec![DataType::from(3i32), DataType::from(1i32)],
+        vec![DfValue::from(1i32), DfValue::from(1i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(2i32), DfValue::from(5i32)],
+        vec![DfValue::from(2i32), DfValue::from(7i32)],
+        vec![DfValue::from(3i32), DfValue::from(1i32)],
     ])
     .await
     .unwrap();
@@ -5907,11 +5892,11 @@ async fn multiple_aggregate_reuse() {
     let mut q = g.view("multiaggfirstquery").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(1i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(2i32), DataType::from(5i32)],
-        vec![DataType::from(2i32), DataType::from(7i32)],
-        vec![DataType::from(3i32), DataType::from(1i32)],
+        vec![DfValue::from(1i32), DfValue::from(1i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(2i32), DfValue::from(5i32)],
+        vec![DfValue::from(2i32), DfValue::from(7i32)],
+        vec![DfValue::from(3i32), DfValue::from(1i32)],
     ])
     .await
     .unwrap();
@@ -6023,7 +6008,7 @@ async fn round_int_to_int() {
     let mut t = g.table("test").await.unwrap();
     let mut q = g.view("roundinttoint").await.unwrap();
 
-    t.insert(vec![DataType::try_from(888i32).unwrap()])
+    t.insert(vec![DfValue::try_from(888i32).unwrap()])
         .await
         .unwrap();
 
@@ -6055,7 +6040,7 @@ async fn round_float_to_float() {
     let mut t = g.table("test").await.unwrap();
     let mut q = g.view("roundfloattofloat").await.unwrap();
 
-    t.insert(vec![DataType::try_from(2.2222_f64).unwrap()])
+    t.insert(vec![DfValue::try_from(2.2222_f64).unwrap()])
         .await
         .unwrap();
 
@@ -6087,7 +6072,7 @@ async fn round_float() {
     let mut t = g.table("test").await.unwrap();
     let mut q = g.view("roundfloat").await.unwrap();
 
-    t.insert(vec![DataType::try_from(2.2222_f64).unwrap()])
+    t.insert(vec![DfValue::try_from(2.2222_f64).unwrap()])
         .await
         .unwrap();
 
@@ -6122,7 +6107,7 @@ async fn round_with_precision_float() {
     let mut t = g.table("test").await.unwrap();
     let mut q = g.view("roundwithprecisionfloat").await.unwrap();
 
-    t.insert(vec![DataType::try_from(123.0_f64).unwrap()])
+    t.insert(vec![DfValue::try_from(123.0_f64).unwrap()])
         .await
         .unwrap();
 
@@ -6154,7 +6139,7 @@ async fn round_bigint_to_bigint() {
     let mut t = g.table("test").await.unwrap();
     let mut q = g.view("roundbiginttobigint").await.unwrap();
 
-    t.insert(vec![DataType::try_from(888i32).unwrap()])
+    t.insert(vec![DfValue::try_from(888i32).unwrap()])
         .await
         .unwrap();
 
@@ -6186,7 +6171,7 @@ async fn round_unsignedint_to_unsignedint() {
     let mut t = g.table("test").await.unwrap();
     let mut q = g.view("roundunsignedtounsigned").await.unwrap();
 
-    t.insert(vec![DataType::try_from(888i32).unwrap()])
+    t.insert(vec![DfValue::try_from(888i32).unwrap()])
         .await
         .unwrap();
 
@@ -6217,7 +6202,7 @@ async fn round_unsignedbigint_to_unsignedbitint() {
     let mut t = g.table("test").await.unwrap();
     let mut q = g.view("roundunsignedbiginttounsignedbigint").await.unwrap();
 
-    t.insert(vec![DataType::try_from(888i32).unwrap()])
+    t.insert(vec![DfValue::try_from(888i32).unwrap()])
         .await
         .unwrap();
 
@@ -6249,7 +6234,7 @@ async fn round_with_no_precision() {
     let mut t = g.table("test").await.unwrap();
     let mut q = g.view("roundwithnoprecision").await.unwrap();
 
-    t.insert(vec![DataType::try_from(56.2578_f64).unwrap()])
+    t.insert(vec![DfValue::try_from(56.2578_f64).unwrap()])
         .await
         .unwrap();
 
@@ -6282,11 +6267,11 @@ async fn distinct_select_works() {
     let mut q = g.view("distinctselect").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32)],
-        vec![DataType::from(1i32)],
-        vec![DataType::from(2i32)],
-        vec![DataType::from(2i32)],
-        vec![DataType::from(3i32)],
+        vec![DfValue::from(1i32)],
+        vec![DfValue::from(1i32)],
+        vec![DfValue::from(2i32)],
+        vec![DfValue::from(2i32)],
+        vec![DfValue::from(3i32)],
     ])
     .await
     .unwrap();
@@ -6331,11 +6316,11 @@ async fn partial_distinct() {
     }
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(0)],
-        vec![DataType::from(1i32), DataType::from(0)],
-        vec![DataType::from(2i32), DataType::from(0)],
-        vec![DataType::from(2i32), DataType::from(1)],
-        vec![DataType::from(3i32), DataType::from(1)],
+        vec![DfValue::from(1i32), DfValue::from(0)],
+        vec![DfValue::from(1i32), DfValue::from(0)],
+        vec![DfValue::from(2i32), DfValue::from(0)],
+        vec![DfValue::from(2i32), DfValue::from(1)],
+        vec![DfValue::from(3i32), DfValue::from(1)],
     ])
     .await
     .unwrap();
@@ -6344,7 +6329,7 @@ async fn partial_distinct() {
 
     assert_eq!(do_lookup!(q, 0), vec![1, 2]);
 
-    t.delete_row(vec![DataType::from(1), DataType::from(0)])
+    t.delete_row(vec![DfValue::from(1), DfValue::from(0)])
         .await
         .unwrap();
     sleep().await;
@@ -6368,31 +6353,11 @@ async fn partial_distinct_multi() {
     let mut q = g.view("distinctselectmulti").await.unwrap();
 
     t.insert_many(vec![
-        vec![
-            DataType::from(1i32),
-            DataType::from(2i32),
-            DataType::from(0),
-        ],
-        vec![
-            DataType::from(1i32),
-            DataType::from(4i32),
-            DataType::from(0),
-        ],
-        vec![
-            DataType::from(2i32),
-            DataType::from(2i32),
-            DataType::from(0),
-        ],
-        vec![
-            DataType::from(2i32),
-            DataType::from(6i32),
-            DataType::from(1),
-        ],
-        vec![
-            DataType::from(3i32),
-            DataType::from(2i32),
-            DataType::from(1),
-        ],
+        vec![DfValue::from(1i32), DfValue::from(2i32), DfValue::from(0)],
+        vec![DfValue::from(1i32), DfValue::from(4i32), DfValue::from(0)],
+        vec![DfValue::from(2i32), DfValue::from(2i32), DfValue::from(0)],
+        vec![DfValue::from(2i32), DfValue::from(6i32), DfValue::from(1)],
+        vec![DfValue::from(3i32), DfValue::from(2i32), DfValue::from(1)],
     ])
     .await
     .unwrap();
@@ -6432,11 +6397,11 @@ async fn distinct_select_works_sharded() {
     let mut q = g.view("distinctselectsharded").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32)],
-        vec![DataType::from(1i32)],
-        vec![DataType::from(2i32)],
-        vec![DataType::from(2i32)],
-        vec![DataType::from(3i32)],
+        vec![DfValue::from(1i32)],
+        vec![DfValue::from(1i32)],
+        vec![DfValue::from(2i32)],
+        vec![DfValue::from(2i32)],
+        vec![DfValue::from(3i32)],
     ])
     .await
     .unwrap();
@@ -6471,12 +6436,12 @@ async fn distinct_select_multi_col() {
     let mut q = g.view("distinctselectmulticol").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(2i32), DataType::from(5i32)],
-        vec![DataType::from(2i32), DataType::from(5i32)],
-        vec![DataType::from(3i32), DataType::from(6i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(2i32), DfValue::from(5i32)],
+        vec![DfValue::from(2i32), DfValue::from(5i32)],
+        vec![DfValue::from(3i32), DfValue::from(6i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
     ])
     .await
     .unwrap();
@@ -6512,12 +6477,12 @@ async fn distinct_select_multi_col_sharded() {
     let mut q = g.view("distinctselectmulticolsharded").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(2i32), DataType::from(5i32)],
-        vec![DataType::from(2i32), DataType::from(5i32)],
-        vec![DataType::from(3i32), DataType::from(6i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(2i32), DfValue::from(5i32)],
+        vec![DfValue::from(2i32), DfValue::from(5i32)],
+        vec![DfValue::from(3i32), DfValue::from(6i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
     ])
     .await
     .unwrap();
@@ -6553,12 +6518,12 @@ async fn distinct_select_with_builtin() {
     let mut q = g.view("distinctselectwithbuiltin").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(2i32), DataType::from(5i32)],
-        vec![DataType::from(2i32), DataType::from(5i32)],
-        vec![DataType::from(3i32), DataType::from(6i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(2i32), DfValue::from(5i32)],
+        vec![DfValue::from(2i32), DfValue::from(5i32)],
+        vec![DfValue::from(3i32), DfValue::from(6i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
     ])
     .await
     .unwrap();
@@ -6601,12 +6566,12 @@ async fn distinct_select_with_builtin_sharded() {
     let mut q = g.view("distinctselectwithbuiltinsharded").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(2i32), DataType::from(5i32)],
-        vec![DataType::from(2i32), DataType::from(5i32)],
-        vec![DataType::from(3i32), DataType::from(6i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(2i32), DfValue::from(5i32)],
+        vec![DfValue::from(2i32), DfValue::from(5i32)],
+        vec![DfValue::from(3i32), DfValue::from(6i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
     ])
     .await
     .unwrap();
@@ -6745,12 +6710,12 @@ async fn distinct_select_with_agg() {
     let mut q = g.view("distinctselectwithagg").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(1i32), DataType::from(5i32)],
-        vec![DataType::from(2i32), DataType::from(6i32)],
-        vec![DataType::from(2i32), DataType::from(3i32)],
-        vec![DataType::from(3i32), DataType::from(2i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(1i32), DfValue::from(5i32)],
+        vec![DfValue::from(2i32), DfValue::from(6i32)],
+        vec![DfValue::from(2i32), DfValue::from(3i32)],
+        vec![DfValue::from(3i32), DfValue::from(2i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
     ])
     .await
     .unwrap();
@@ -6786,12 +6751,12 @@ async fn distinct_select_with_agg_sharded() {
     let mut q = g.view("distinctselectwithaggsharded").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(1i32), DataType::from(5i32)],
-        vec![DataType::from(2i32), DataType::from(6i32)],
-        vec![DataType::from(2i32), DataType::from(3i32)],
-        vec![DataType::from(3i32), DataType::from(2i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(1i32), DfValue::from(5i32)],
+        vec![DfValue::from(2i32), DfValue::from(6i32)],
+        vec![DfValue::from(2i32), DfValue::from(3i32)],
+        vec![DfValue::from(3i32), DfValue::from(2i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
     ])
     .await
     .unwrap();
@@ -6826,12 +6791,12 @@ async fn distinct_select_with_multi_agg() {
     let mut q = g.view("distinctselectwithmultiagg").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(1i32), DataType::from(5i32)],
-        vec![DataType::from(2i32), DataType::from(6i32)],
-        vec![DataType::from(2i32), DataType::from(3i32)],
-        vec![DataType::from(3i32), DataType::from(2i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(1i32), DfValue::from(5i32)],
+        vec![DfValue::from(2i32), DfValue::from(6i32)],
+        vec![DfValue::from(2i32), DfValue::from(3i32)],
+        vec![DfValue::from(3i32), DfValue::from(2i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
     ])
     .await
     .unwrap();
@@ -6862,12 +6827,12 @@ async fn distinct_select_with_multi_agg_sharded() {
     let mut q = g.view("distinctselectwithmultiaggsharded").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(1i32), DataType::from(5i32)],
-        vec![DataType::from(2i32), DataType::from(6i32)],
-        vec![DataType::from(2i32), DataType::from(3i32)],
-        vec![DataType::from(3i32), DataType::from(2i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(1i32), DfValue::from(5i32)],
+        vec![DfValue::from(2i32), DfValue::from(6i32)],
+        vec![DfValue::from(2i32), DfValue::from(3i32)],
+        vec![DfValue::from(3i32), DfValue::from(2i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
     ])
     .await
     .unwrap();
@@ -6899,12 +6864,12 @@ async fn distinct_select_with_distinct_agg() {
     let mut q = g.view("distinctselectwithdistinctagg").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(2i32), DataType::from(6i32)],
-        vec![DataType::from(2i32), DataType::from(3i32)],
-        vec![DataType::from(3i32), DataType::from(2i32)],
-        vec![DataType::from(3i32), DataType::from(2i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(2i32), DfValue::from(6i32)],
+        vec![DfValue::from(2i32), DfValue::from(3i32)],
+        vec![DfValue::from(3i32), DfValue::from(2i32)],
+        vec![DfValue::from(3i32), DfValue::from(2i32)],
     ])
     .await
     .unwrap();
@@ -6940,12 +6905,12 @@ async fn distinct_select_with_distinct_agg_sharded() {
         .unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(2i32), DataType::from(6i32)],
-        vec![DataType::from(2i32), DataType::from(3i32)],
-        vec![DataType::from(3i32), DataType::from(2i32)],
-        vec![DataType::from(3i32), DataType::from(2i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(2i32), DfValue::from(6i32)],
+        vec![DfValue::from(2i32), DfValue::from(3i32)],
+        vec![DfValue::from(3i32), DfValue::from(2i32)],
+        vec![DfValue::from(3i32), DfValue::from(2i32)],
     ])
     .await
     .unwrap();
@@ -7035,15 +7000,15 @@ async fn join_straddled_columns() {
     eprintln!("{}", g.graphviz().await.unwrap());
 
     a.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(2i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
+        vec![DfValue::from(1i32), DfValue::from(2i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
     ])
     .await
     .unwrap();
 
     b.insert_many(vec![
-        vec![DataType::from(2i32), DataType::from(1i32)],
-        vec![DataType::from(2i32), DataType::from(2i32)],
+        vec![DfValue::from(2i32), DfValue::from(1i32)],
+        vec![DfValue::from(2i32), DfValue::from(2i32)],
     ])
     .await
     .unwrap();
@@ -7081,17 +7046,17 @@ async fn straddled_join_range_query() {
     let mut q = g.view("straddle").await.unwrap();
 
     a.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(2i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(2i32), DataType::from(2i32)],
-        vec![DataType::from(2i32), DataType::from(4i32)],
+        vec![DfValue::from(1i32), DfValue::from(2i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(2i32), DfValue::from(2i32)],
+        vec![DfValue::from(2i32), DfValue::from(4i32)],
     ])
     .await
     .unwrap();
 
     b.insert_many(vec![
-        vec![DataType::from(2i32), DataType::from(1i32)],
-        vec![DataType::from(2i32), DataType::from(2i32)],
+        vec![DfValue::from(2i32), DfValue::from(1i32)],
+        vec![DfValue::from(2i32), DfValue::from(2i32)],
     ])
     .await
     .unwrap();
@@ -7139,7 +7104,7 @@ async fn overlapping_range_queries() {
     let mut t = g.table("t").await.unwrap();
 
     let n = 1000i32;
-    t.insert_many((0..n).map(|n| vec![DataType::from(n)]))
+    t.insert_many((0..n).map(|n| vec![DfValue::from(n)]))
         .await
         .unwrap();
 
@@ -7153,7 +7118,7 @@ async fn overlapping_range_queries() {
             let results = q
                 .multi_lookup(
                     vec![KeyComparison::Range((
-                        Bound::Included(vec1![DataType::from(m * 10)]),
+                        Bound::Included(vec1![DfValue::from(m * 10)]),
                         Bound::Unbounded,
                     ))],
                     true,
@@ -7208,10 +7173,10 @@ async fn overlapping_remapped_range_queries() {
     let mut b = g.table("b").await.unwrap();
 
     let n = 1000i32;
-    a.insert_many((0..n).map(|n| vec![DataType::from(n), DataType::from(n)]))
+    a.insert_many((0..n).map(|n| vec![DfValue::from(n), DfValue::from(n)]))
         .await
         .unwrap();
-    b.insert_many((0..n).map(|n| vec![DataType::from(n), DataType::from(n)]))
+    b.insert_many((0..n).map(|n| vec![DfValue::from(n), DfValue::from(n)]))
         .await
         .unwrap();
 
@@ -7225,7 +7190,7 @@ async fn overlapping_remapped_range_queries() {
             let results = q
                 .multi_lookup(
                     vec![KeyComparison::Range((
-                        Bound::Included(vec1![DataType::from(m * 10), DataType::from(m * 10)]),
+                        Bound::Included(vec1![DfValue::from(m * 10), DfValue::from(m * 10)]),
                         Bound::Unbounded,
                     ))],
                     true,
@@ -7283,11 +7248,11 @@ async fn range_query_through_union() {
     let mut q = g.view("q").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1), DataType::from(1)],
-        vec![DataType::from(2), DataType::from(1)],
-        vec![DataType::from(1), DataType::from(2)],
-        vec![DataType::from(2), DataType::from(2)],
-        vec![DataType::from(3), DataType::from(2)],
+        vec![DfValue::from(1), DfValue::from(1)],
+        vec![DfValue::from(2), DfValue::from(1)],
+        vec![DfValue::from(1), DfValue::from(2)],
+        vec![DfValue::from(2), DfValue::from(2)],
+        vec![DfValue::from(3), DfValue::from(2)],
     ])
     .await
     .unwrap();
@@ -7342,7 +7307,7 @@ async fn mixed_inclusive_range_and_equality() {
 
     let mut t = g.table("t").await.unwrap();
 
-    t.insert_many::<_, Vec<DataType>>(vec![
+    t.insert_many::<_, Vec<DfValue>>(vec![
         // matches
         vec![1.into(), 2.into(), 3.into(), 4.into()],
         vec![2.into(), 2.into(), 3.into(), 4.into()],
@@ -7382,16 +7347,16 @@ async fn mixed_inclusive_range_and_equality() {
         .multi_lookup(
             vec![KeyComparison::from_range(
                 &(vec1![
-                    DataType::from(4i32),
-                    DataType::from(2i32),
-                    DataType::from(1i32),
-                    DataType::from(3i32)
+                    DfValue::from(4i32),
+                    DfValue::from(2i32),
+                    DfValue::from(1i32),
+                    DfValue::from(3i32)
                 ]
                     ..=vec1![
-                        DataType::from(4i32),
-                        DataType::from(2i32),
-                        DataType::from(i32::MAX),
-                        DataType::from(i32::MAX)
+                        DfValue::from(4i32),
+                        DfValue::from(2i32),
+                        DfValue::from(i32::MAX),
+                        DfValue::from(i32::MAX)
                     ]),
             )],
             true,
@@ -7435,15 +7400,15 @@ async fn group_by_agg_col_count() {
     let mut q = g.view("groupbyaggcolcount").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(2i32), DataType::from(6i32)],
-        vec![DataType::from(2i32), DataType::from(3i32)],
-        vec![DataType::from(2i32), DataType::from(3i32)],
-        vec![DataType::from(3i32), DataType::from(2i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(2i32), DfValue::from(6i32)],
+        vec![DfValue::from(2i32), DfValue::from(3i32)],
+        vec![DfValue::from(2i32), DfValue::from(3i32)],
+        vec![DfValue::from(3i32), DfValue::from(2i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
     ])
     .await
     .unwrap();
@@ -7478,15 +7443,15 @@ async fn group_by_agg_col_avg() {
     let mut q = g.view("groupbyaggcolavg").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(2i32), DataType::from(6i32)],
-        vec![DataType::from(2i32), DataType::from(3i32)],
-        vec![DataType::from(2i32), DataType::from(3i32)],
-        vec![DataType::from(3i32), DataType::from(2i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(2i32), DfValue::from(6i32)],
+        vec![DfValue::from(2i32), DfValue::from(3i32)],
+        vec![DfValue::from(2i32), DfValue::from(3i32)],
+        vec![DfValue::from(3i32), DfValue::from(2i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
     ])
     .await
     .unwrap();
@@ -7521,15 +7486,15 @@ async fn group_by_agg_col_sum() {
     let mut q = g.view("groupbyaggcolsum").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(2i32), DataType::from(6i32)],
-        vec![DataType::from(2i32), DataType::from(3i32)],
-        vec![DataType::from(2i32), DataType::from(3i32)],
-        vec![DataType::from(3i32), DataType::from(2i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(2i32), DfValue::from(6i32)],
+        vec![DfValue::from(2i32), DfValue::from(3i32)],
+        vec![DfValue::from(2i32), DfValue::from(3i32)],
+        vec![DfValue::from(3i32), DfValue::from(2i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
     ])
     .await
     .unwrap();
@@ -7560,15 +7525,15 @@ async fn group_by_agg_col_multi() {
     let mut q = g.view("groupbyaggcolmulti").await.unwrap();
 
     t.insert_many(vec![
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(1i32), DataType::from(4i32)],
-        vec![DataType::from(2i32), DataType::from(6i32)],
-        vec![DataType::from(2i32), DataType::from(3i32)],
-        vec![DataType::from(2i32), DataType::from(3i32)],
-        vec![DataType::from(3i32), DataType::from(2i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
-        vec![DataType::from(3i32), DataType::from(7i32)],
-        vec![DataType::from(3i32), DataType::from(8i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(1i32), DfValue::from(4i32)],
+        vec![DfValue::from(2i32), DfValue::from(6i32)],
+        vec![DfValue::from(2i32), DfValue::from(3i32)],
+        vec![DfValue::from(2i32), DfValue::from(3i32)],
+        vec![DfValue::from(3i32), DfValue::from(2i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
+        vec![DfValue::from(3i32), DfValue::from(7i32)],
+        vec![DfValue::from(3i32), DfValue::from(8i32)],
     ])
     .await
     .unwrap();
@@ -7687,20 +7652,20 @@ async fn count_emit_zero() {
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
     let res = rows
         .into_iter()
-        .map(|r| Vec::<DataType>::from(r))
-        .collect::<Vec<Vec<DataType>>>();
-    assert_eq!(res, vec![vec![DataType::None, DataType::Int(0)]]);
+        .map(|r| Vec::<DfValue>::from(r))
+        .collect::<Vec<Vec<DfValue>>>();
+    assert_eq!(res, vec![vec![DfValue::None, DfValue::Int(0)]]);
 
     // With no data in the table, we should get a 0 for COUNT(), and a NULL for other aggregations
     let mut q = g.view("countemitzerowithotheraggregations").await.unwrap();
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
     let res = rows
         .into_iter()
-        .map(|r| Vec::<DataType>::from(r))
-        .collect::<Vec<Vec<DataType>>>();
+        .map(|r| Vec::<DfValue>::from(r))
+        .collect::<Vec<Vec<DfValue>>>();
     assert_eq!(
         res,
-        vec![vec![DataType::Int(0), DataType::None, DataType::None]]
+        vec![vec![DfValue::Int(0), DfValue::None, DfValue::None]]
     );
 
     // Now let's add some data to ensure count is still correct.
@@ -7745,22 +7710,22 @@ async fn count_emit_zero() {
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
     let res = rows
         .into_iter()
-        .map(|r| Vec::<DataType>::from(r))
-        .collect::<Vec<Vec<DataType>>>();
-    assert_eq!(res, vec![vec![DataType::Int(0), DataType::Int(3)]]);
+        .map(|r| Vec::<DfValue>::from(r))
+        .collect::<Vec<Vec<DfValue>>>();
+    assert_eq!(res, vec![vec![DfValue::Int(0), DfValue::Int(3)]]);
 
     let mut q = g.view("countemitzerowithotheraggregations").await.unwrap();
     let rows = q.lookup(&[0i32.into()], true).await.unwrap();
     let res = rows
         .into_iter()
-        .map(|r| Vec::<DataType>::from(r))
-        .collect::<Vec<Vec<DataType>>>();
+        .map(|r| Vec::<DfValue>::from(r))
+        .collect::<Vec<Vec<DfValue>>>();
     assert_eq!(
         res,
         vec![vec![
-            DataType::Int(3),
+            DfValue::Int(3),
             Decimal::from(0).into(),
-            DataType::Int(0)
+            DfValue::Int(0)
         ]]
     );
 }
@@ -7783,14 +7748,14 @@ async fn partial_join_on_one_parent() {
     let mut t2 = g.table("t2").await.unwrap();
 
     t1.insert_many(
-        iter::once(vec![DataType::from(1i32), DataType::from(1i32)])
+        iter::once(vec![DfValue::from(1i32), DfValue::from(1i32)])
             .cycle()
             .take(5),
     )
     .await
     .unwrap();
 
-    t2.insert_many((1i32..=5).map(|pk| vec![DataType::from(1i32), DataType::from(pk)]))
+    t2.insert_many((1i32..=5).map(|pk| vec![DfValue::from(1i32), DfValue::from(pk)]))
         .await
         .unwrap();
 
@@ -7805,18 +7770,18 @@ async fn partial_join_on_one_parent() {
     let mut q = g.view("q").await.unwrap();
 
     let res1 = q
-        .lookup(&[DataType::from(1i32)], true)
+        .lookup(&[DfValue::from(1i32)], true)
         .await
         .unwrap()
         .into_vec();
     assert_eq!(res1.len(), 25);
 
-    t2.delete(vec![DataType::from(1i32)]).await.unwrap();
+    t2.delete(vec![DfValue::from(1i32)]).await.unwrap();
 
     sleep().await;
 
     let res2 = q
-        .lookup(&[DataType::from(1i32)], true)
+        .lookup(&[DfValue::from(1i32)], true)
         .await
         .unwrap()
         .into_vec();
@@ -7865,19 +7830,19 @@ async fn aggressive_eviction_setup() -> crate::Handle {
     let mut recommendations = g.table("recommendations").await.unwrap();
 
     users
-        .insert_many((0i32..30).map(|id| vec![DataType::from(id)]))
+        .insert_many((0i32..30).map(|id| vec![DfValue::from(id)]))
         .await
         .unwrap();
 
     articles
         .insert_many((0i32..20).map(|id| {
             vec![
-                DataType::from(id),
-                DataType::from("2020-01-01 12:30:45"),
-                DataType::from("asdasdasd"),
-                DataType::from("asdasdsadsadas"),
-                DataType::from("asdasdasdasd"),
-                DataType::from("asdjashdkjsahd"),
+                DfValue::from(id),
+                DfValue::from("2020-01-01 12:30:45"),
+                DfValue::from("asdasdasd"),
+                DfValue::from("asdasdsadsadas"),
+                DfValue::from("asdasdasdasd"),
+                DfValue::from("asdjashdkjsahd"),
             ]
         }))
         .await
@@ -7885,7 +7850,7 @@ async fn aggressive_eviction_setup() -> crate::Handle {
 
     recommendations
         .insert_many((0i32..30).flat_map(|id| {
-            (0i32..20).map(move |article| vec![DataType::from(id), DataType::from(article)])
+            (0i32..20).map(move |article| vec![DfValue::from(id), DfValue::from(article)])
         }))
         .await
         .unwrap();
@@ -7900,7 +7865,7 @@ async fn aggressive_eviction_impl() {
     for i in 0..500 {
         let offset = i % 10;
         let keys: Vec<_> = (offset..offset + 20)
-            .map(|k| KeyComparison::Equal(vec1::Vec1::new(DataType::Int(k))))
+            .map(|k| KeyComparison::Equal(vec1::Vec1::new(DfValue::Int(k))))
             .collect();
 
         let vq = ViewQuery::from((keys.clone(), true));
@@ -7919,8 +7884,8 @@ async fn aggressive_eviction_range_impl() {
         let offset = i % 10;
         let vq = ViewQuery::from((
             vec![KeyComparison::Range((
-                Bound::Included(vec1![DataType::Int(offset)]),
-                Bound::Excluded(vec1![DataType::Int(offset + 20)]),
+                Bound::Included(vec1![DfValue::Int(offset)]),
+                Bound::Excluded(vec1![DfValue::Int(offset + 20)]),
             ))],
             true,
         ));
@@ -7997,19 +7962,19 @@ async fn partial_ingress_above_full_reader() {
     assert_eq!(
         r1,
         vec![vec![
-            DataType::Int(1),
-            DataType::Int(2),
-            DataType::Int(1),
-            DataType::Int(1)
+            DfValue::Int(1),
+            DfValue::Int(2),
+            DfValue::Int(1),
+            DfValue::Int(1)
         ]]
     );
     assert_eq!(
         r2,
         vec![vec![
-            DataType::Int(1),
-            DataType::Int(2),
-            DataType::Int(1),
-            DataType::Int(1)
+            DfValue::Int(1),
+            DfValue::Int(2),
+            DfValue::Int(1),
+            DfValue::Int(1)
         ]]
     );
 }
@@ -8098,24 +8063,24 @@ async fn reroutes_two_children_at_once() {
     assert_eq!(
         r1,
         vec![vec![
-            DataType::Int(1),
-            DataType::Int(2),
-            DataType::Int(1),
-            DataType::Int(1)
+            DfValue::Int(1),
+            DfValue::Int(2),
+            DfValue::Int(1),
+            DfValue::Int(1)
         ]]
     );
     assert_eq!(
         r2,
         vec![vec![
-            DataType::Int(1),
-            DataType::Int(2),
-            DataType::Int(1),
-            DataType::Int(1)
+            DfValue::Int(1),
+            DfValue::Int(2),
+            DfValue::Int(1),
+            DfValue::Int(1)
         ]]
     );
     assert_eq!(
         r3,
-        vec![vec![DataType::Int(1), DataType::Int(2), DataType::Int(1)]]
+        vec![vec![DfValue::Int(1), DfValue::Int(2), DfValue::Int(1)]]
     );
 }
 
@@ -8152,25 +8117,22 @@ async fn reroutes_same_migration() {
     assert_eq!(
         r1.into_vec(),
         vec![vec![
-            DataType::Int(1),
-            DataType::Int(2),
-            DataType::Int(1),
-            DataType::Int(1)
+            DfValue::Int(1),
+            DfValue::Int(2),
+            DfValue::Int(1),
+            DfValue::Int(1)
         ]]
     );
     assert_eq!(
         r2.into_vec(),
         vec![vec![
-            DataType::Int(1),
-            DataType::Int(2),
-            DataType::Int(1),
-            DataType::Int(1)
+            DfValue::Int(1),
+            DfValue::Int(2),
+            DfValue::Int(1),
+            DfValue::Int(1)
         ]]
     );
-    assert_eq!(
-        r3.into_vec(),
-        vec![vec![DataType::Int(2), DataType::Int(1)]]
-    );
+    assert_eq!(r3.into_vec(), vec![vec![DfValue::Int(2), DfValue::Int(1)]]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -8212,22 +8174,22 @@ async fn reroutes_dependent_children() {
     assert_eq!(
         r1,
         vec![vec![
-            DataType::Int(1),
-            DataType::Int(2),
-            DataType::Int(1),
-            DataType::Int(1)
+            DfValue::Int(1),
+            DfValue::Int(2),
+            DfValue::Int(1),
+            DfValue::Int(1)
         ]]
     );
     assert_eq!(
         r2,
         vec![vec![
-            DataType::Int(1),
-            DataType::Int(2),
-            DataType::Int(1),
-            DataType::Int(1)
+            DfValue::Int(1),
+            DfValue::Int(2),
+            DfValue::Int(1),
+            DfValue::Int(1)
         ]]
     );
-    assert_eq!(r3, vec![vec![DataType::Int(1), DataType::Int(1)]]);
+    assert_eq!(r3, vec![vec![DfValue::Int(1), DfValue::Int(1)]]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -8254,13 +8216,13 @@ async fn reroutes_count() {
 
     let r1 = g1.lookup(&[1i64.into()], true).await.unwrap();
     let r2 = g2.lookup(&[0i64.into()], true).await.unwrap();
-    assert_eq!(r1.into_vec(), vec![vec![DataType::Int(2)]]);
+    assert_eq!(r1.into_vec(), vec![vec![DfValue::Int(2)]]);
     assert_eq!(
         r2.into_vec(),
         vec![
-            vec![DataType::Int(1)],
-            vec![DataType::Int(1)],
-            vec![DataType::Int(2)]
+            vec![DfValue::Int(1)],
+            vec![DfValue::Int(1)],
+            vec![DfValue::Int(2)]
         ]
     );
 }
@@ -8281,7 +8243,7 @@ async fn multi_diamond_union() {
     let mut table_1 = g.table("table_1").await.unwrap();
 
     table_1
-        .insert_many(([0, 6]).map(|column_1_value| vec![DataType::from(column_1_value)]))
+        .insert_many(([0, 6]).map(|column_1_value| vec![DfValue::from(column_1_value)]))
         .await
         .unwrap();
 

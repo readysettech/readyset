@@ -192,7 +192,7 @@ pub enum DomainRequest {
     AddBaseColumn {
         node: LocalNodeIndex,
         column: Column,
-        default: DataType,
+        default: DfValue,
     },
 
     /// Drops an existing column from a `Base` node.

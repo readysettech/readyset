@@ -6,7 +6,7 @@ use nom_sql::{
     InsertStatement, Literal, SelectStatement, SqlQuery, TableKey, UpdateStatement,
 };
 use readyset::{Modification, Operation};
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use readyset_errors::{
     bad_request_err, invariant, invariant_eq, unsupported, unsupported_err, ReadySetResult,
 };
@@ -39,7 +39,7 @@ pub(crate) fn hash_select_query(q: &SelectStatement) -> u64 {
 fn do_flatten_conditional(
     cond: &Expr,
     pkey: &[&Column],
-    flattened: &mut HashSet<Vec<(String, DataType)>>,
+    flattened: &mut HashSet<Vec<(String, DfValue)>>,
 ) -> ReadySetResult<bool> {
     Ok(match *cond {
         Expr::BinaryOp {
@@ -59,7 +59,7 @@ fn do_flatten_conditional(
                 unsupported!("UPDATE/DELETE contains references to another table")
             }
 
-            let value = DataType::try_from(l)?;
+            let value = DfValue::try_from(l)?;
             // We want to look through our existing keys and see if any of them
             // are missing any columns. In that case we'll add the one we're looking
             // at now there.
@@ -125,7 +125,7 @@ fn do_flatten_conditional(
 pub(crate) fn flatten_conditional(
     cond: &Expr,
     pkey: &[&Column],
-) -> ReadySetResult<Option<Vec<Vec<DataType>>>> {
+) -> ReadySetResult<Option<Vec<Vec<DfValue>>>> {
     let mut flattened = HashSet::new();
     Ok(if do_flatten_conditional(cond, pkey, &mut flattened)? {
         let keys = flattened
@@ -380,12 +380,12 @@ pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
 }
 
 fn walk_pkey_where<I>(
-    col2v: &mut HashMap<String, DataType>,
+    col2v: &mut HashMap<String, DfValue>,
     params: &mut Option<I>,
     expr: Expr,
 ) -> ReadySetResult<()>
 where
-    I: Iterator<Item = DataType>,
+    I: Iterator<Item = DfValue>,
 {
     match expr {
         Expr::BinaryOp {
@@ -401,7 +401,7 @@ where
                     .ok_or_else(|| {
                         bad_request_err("Not enough parameter values given in EXECUTE")
                     })?,
-                v => DataType::try_from(v)?,
+                v => DfValue::try_from(v)?,
             };
             let oldv = col2v.insert(c.name.to_string(), v);
             invariant!(oldv.is_none());
@@ -426,7 +426,7 @@ pub(crate) fn extract_update_params_and_fields<I>(
     schema: &CreateTableStatement,
 ) -> ReadySetResult<Vec<(usize, Modification)>>
 where
-    I: Iterator<Item = DataType>,
+    I: Iterator<Item = DfValue>,
 {
     let mut updates = Vec::new();
     for (i, field) in schema.fields.iter().enumerate() {
@@ -449,7 +449,7 @@ where
                 Expr::Literal(ref v) => {
                     updates.push((
                         i,
-                        Modification::Set(DataType::try_from(v)?.coerce_to(&field.sql_type)?),
+                        Modification::Set(DfValue::try_from(v)?.coerce_to(&field.sql_type)?),
                     ));
                 }
                 Expr::BinaryOp {
@@ -481,9 +481,9 @@ pub(crate) fn extract_pkey_where<I>(
     where_clause: Expr,
     mut params: Option<I>,
     schema: &CreateTableStatement,
-) -> ReadySetResult<Vec<DataType>>
+) -> ReadySetResult<Vec<DfValue>>
 where
-    I: Iterator<Item = DataType>,
+    I: Iterator<Item = DfValue>,
 {
     let pkey = get_primary_key(schema);
     let mut col_to_val: HashMap<_, _> = HashMap::new();
@@ -499,7 +499,7 @@ where
         .collect()
 }
 
-type ExtractedUpdate = (Vec<DataType>, Vec<(usize, Modification)>);
+type ExtractedUpdate = (Vec<DfValue>, Vec<(usize, Modification)>);
 
 pub(crate) fn extract_update<I>(
     mut q: UpdateStatement,
@@ -507,7 +507,7 @@ pub(crate) fn extract_update<I>(
     schema: &CreateTableStatement,
 ) -> ReadySetResult<ExtractedUpdate>
 where
-    I: Iterator<Item = DataType>,
+    I: Iterator<Item = DfValue>,
 {
     let updates = extract_update_params_and_fields(&mut q, &mut params, schema);
     let where_clause = q
@@ -521,9 +521,9 @@ pub(crate) fn extract_delete<I>(
     q: DeleteStatement,
     params: Option<I>,
     schema: &CreateTableStatement,
-) -> ReadySetResult<Vec<DataType>>
+) -> ReadySetResult<Vec<DfValue>>
 where
-    I: Iterator<Item = DataType>,
+    I: Iterator<Item = DfValue>,
 {
     let where_clause = q
         .where_clause
@@ -533,16 +533,16 @@ where
 
 /// coerce params to correct sql types
 pub(crate) fn coerce_params(
-    params: Option<&[DataType]>,
+    params: Option<&[DfValue]>,
     q: &SqlQuery,
     schema: &CreateTableStatement,
-) -> ReadySetResult<Option<Vec<DataType>>> {
+) -> ReadySetResult<Option<Vec<DfValue>>> {
     if let Some(prms) = params {
         let mut coerced_params = vec![];
         for (i, col) in get_parameter_columns(q).iter().enumerate() {
             for field in &schema.fields {
                 if col.name == field.column.name {
-                    coerced_params.push(DataType::coerce_to(&prms[i], &field.sql_type)?);
+                    coerced_params.push(DfValue::coerce_to(&prms[i], &field.sql_type)?);
                 }
             }
         }
@@ -564,7 +564,7 @@ mod tests {
 
     fn compare_flatten<I>(cond_query: &str, key: Vec<&str>, expected: Option<Vec<Vec<I>>>)
     where
-        I: Into<DataType>,
+        I: Into<DfValue>,
     {
         let cond = match nom_sql::parse_query(Dialect::MySQL, cond_query).unwrap() {
             SqlQuery::Update(u) => u.where_clause.unwrap(),
@@ -582,7 +582,7 @@ mod tests {
 
         let pkey_ref = pkey.iter().collect::<Vec<_>>();
         if let Some(mut actual) = flatten_conditional(&cond, &pkey_ref).unwrap() {
-            let mut expected: Vec<Vec<DataType>> = expected
+            let mut expected: Vec<Vec<DfValue>> = expected
                 .unwrap()
                 .into_iter()
                 .map(|v| v.into_iter().map(|c| c.into()).collect())
@@ -673,12 +673,12 @@ mod tests {
 
         // We can't really handle these at the moment, but in the future we might want to
         // delete/update all rows:
-        compare_flatten::<DataType>("DELETE FROM T WHERE 1 = 1", vec!["a"], Some(vec![]));
-        compare_flatten::<DataType>("UPDATE T SET T.b = 2 WHERE 1 = 1", vec!["a"], Some(vec![]));
+        compare_flatten::<DfValue>("DELETE FROM T WHERE 1 = 1", vec!["a"], Some(vec![]));
+        compare_flatten::<DfValue>("UPDATE T SET T.b = 2 WHERE 1 = 1", vec!["a"], Some(vec![]));
 
         // Invalid ANDs:
-        compare_flatten::<DataType>("DELETE FROM T WHERE T.a = 1 AND T.a = 2", vec!["a"], None);
-        compare_flatten::<DataType>(
+        compare_flatten::<DfValue>("DELETE FROM T WHERE T.a = 1 AND T.a = 2", vec!["a"], None);
+        compare_flatten::<DfValue>(
             "UPDATE T SET T.b = 2 WHERE T.a = 1 AND T.a = 2",
             vec!["a"],
             None,
@@ -744,12 +744,12 @@ mod tests {
         );
 
         // Invalid ANDs:
-        compare_flatten::<DataType>(
+        compare_flatten::<DfValue>(
             "DELETE FROM T WHERE T.a = 1 AND T.b = 2 AND T.a = 3",
             vec!["a", "b"],
             None,
         );
-        compare_flatten::<DataType>(
+        compare_flatten::<DfValue>(
             "UPDATE T SET T.b = 2 WHERE T.a = 1 AND T.b = 2 AND T.a = 3",
             vec!["a", "b"],
             None,

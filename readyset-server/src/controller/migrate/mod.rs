@@ -371,7 +371,7 @@ fn topo_order(dataflow_state: &DfState, nodes: &HashSet<NodeIndex>) -> Vec<NodeI
 
 #[derive(Clone)]
 pub(super) enum ColumnChange {
-    Add(Column, DataType),
+    Add(Column, DfValue),
     Drop(usize),
 }
 
@@ -546,7 +546,7 @@ impl<'df> Migration<'df> {
         &mut self,
         node: NodeIndex,
         column: Column,
-        default: DataType,
+        default: DfValue,
     ) -> ReadySetResult<usize> {
         // not allowed to add columns to new nodes
         invariant!(!self.changes.contains_new(&node));

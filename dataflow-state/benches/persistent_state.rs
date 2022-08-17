@@ -4,7 +4,7 @@ use common::{Index, IndexType, KeyType, RangeKey};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use dataflow_state::{PersistenceParameters, PersistentState, State};
 use itertools::Itertools;
-use readyset_data::DataType;
+use readyset_data::DfValue;
 
 const UNIQUE_ENTIRES: usize = 100000;
 
@@ -23,7 +23,7 @@ lazy_static::lazy_static! {
         let animals = ["Cat", "Dog", "Bat"];
 
         for i in 0..UNIQUE_ENTIRES {
-            let rec: Vec<DataType> = vec![
+            let rec: Vec<DfValue> = vec![
                 i.into(),
                 animals[i % 3].into(),
                 (i % 99).into(),
@@ -53,7 +53,7 @@ lazy_static::lazy_static! {
         state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
 
         for i in 0..UNIQUE_ENTIRES {
-            let rec: Vec<DataType> = vec![
+            let rec: Vec<DfValue> = vec![
                 i.into(),
                 LARGE_STRINGS[i % 3].clone().into(),
                 (i % 99).into(),
@@ -192,7 +192,7 @@ pub fn rocksdb_get_secondary_unique_key(c: &mut Criterion) {
 
 pub fn rocksdb_range_lookup_large_strings(c: &mut Criterion) {
     let state = &*STATE_LARGE_STRINGS;
-    let key = DataType::from(LARGE_STRINGS[0].clone());
+    let key = DfValue::from(LARGE_STRINGS[0].clone());
 
     let mut group = c.benchmark_group("RocksDB with large strings");
     group.bench_function("lookup_range", |b| {

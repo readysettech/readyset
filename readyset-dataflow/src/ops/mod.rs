@@ -252,7 +252,7 @@ pub mod test {
             &mut self,
             name: &str,
             fields: &[&str],
-            defaults: Vec<DataType>,
+            defaults: Vec<DfValue>,
         ) -> IndexPair {
             use crate::node::special::Base;
             let i = Base::new().with_default_values(defaults);
@@ -365,7 +365,7 @@ pub mod test {
                 .collect();
         }
 
-        pub fn seed(&mut self, base: IndexPair, data: Vec<DataType>) {
+        pub fn seed(&mut self, base: IndexPair, data: Vec<DfValue>) {
             assert!(self.nut.is_some(), "seed must happen after set_op");
 
             // base here is some identifier that was returned by Self::add_base.

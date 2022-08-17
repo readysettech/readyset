@@ -25,7 +25,7 @@ use petgraph::graph::NodeIndex;
 use proptest::arbitrary::{any, Arbitrary};
 use proptest::strategy::Strategy;
 use readyset::ViewPlaceholder;
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use readyset_errors::{
     internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError,
 };
@@ -85,7 +85,7 @@ fn value_columns_needed_for_predicates(
         .collect()
 }
 
-fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DataType>> {
+fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DfValue>> {
     // If this is an aggregated query AND it does not contain a GROUP BY clause,
     // set default values based on the aggregation (or lack thereof) on each
     // individual field
@@ -100,16 +100,16 @@ fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DataType>> {
                     expr: Expr::Call(func),
                     ..
                 } => match func {
-                    FunctionExpr::Avg { .. } => DataType::None,
-                    FunctionExpr::Count { .. } => DataType::Int(0),
-                    FunctionExpr::CountStar => DataType::Int(0),
-                    FunctionExpr::Sum { .. } => DataType::None,
-                    FunctionExpr::Max(..) => DataType::None,
-                    FunctionExpr::Min(..) => DataType::None,
-                    FunctionExpr::GroupConcat { .. } => DataType::None,
-                    FunctionExpr::Call { .. } => DataType::None,
+                    FunctionExpr::Avg { .. } => DfValue::None,
+                    FunctionExpr::Count { .. } => DfValue::Int(0),
+                    FunctionExpr::CountStar => DfValue::Int(0),
+                    FunctionExpr::Sum { .. } => DfValue::None,
+                    FunctionExpr::Max(..) => DfValue::None,
+                    FunctionExpr::Min(..) => DfValue::None,
+                    FunctionExpr::GroupConcat { .. } => DfValue::None,
+                    FunctionExpr::Call { .. } => DfValue::None,
                 },
-                _ => DataType::None,
+                _ => DfValue::None,
             })
             .collect(),
     )
@@ -1258,7 +1258,7 @@ impl SqlToMirConverter {
             parent,
             fn_cols,
             vec![],
-            vec![("grp".into(), DataType::from(0i32))],
+            vec![("grp".into(), DfValue::from(0i32))],
         )
     }
 
@@ -1268,7 +1268,7 @@ impl SqlToMirConverter {
         parent_node: MirNodeRef,
         emit: Vec<Column>,
         expressions: Vec<(SqlIdentifier, Expr)>,
-        literals: Vec<(SqlIdentifier, DataType)>,
+        literals: Vec<(SqlIdentifier, DfValue)>,
     ) -> MirNodeRef {
         MirNode::new(
             name.clone(),
@@ -1481,8 +1481,8 @@ impl SqlToMirConverter {
                     vec![],
                     vec![],
                     vec![
-                        ("__count_val".into(), DataType::from(0u32)),
-                        ("__count_grp".into(), DataType::from(0u32)),
+                        ("__count_val".into(), DfValue::from(0u32)),
+                        ("__count_grp".into(), DfValue::from(0u32)),
                     ],
                 );
                 pred_nodes.push(group_proj.clone());
@@ -1519,7 +1519,7 @@ impl SqlToMirConverter {
                     parent,
                     parent_columns,
                     vec![],
-                    vec![("__exists_join_key".into(), DataType::from(0u32))],
+                    vec![("__exists_join_key".into(), DfValue::from(0u32))],
                 );
                 pred_nodes.push(left_literal_join_key_proj.clone());
 
@@ -1608,14 +1608,14 @@ impl SqlToMirConverter {
                     OutputColumn::Literal(_) => None,
                 })
                 .collect();
-            let projected_literals: Vec<(SqlIdentifier, DataType)> = arith_and_lit_columns_needed
+            let projected_literals: Vec<(SqlIdentifier, DfValue)> = arith_and_lit_columns_needed
                 .iter()
                 .map(|&(_, ref oc)| -> ReadySetResult<_> {
                     match oc {
                         OutputColumn::Expr(_) => Ok(None),
                         OutputColumn::Data { .. } => Ok(None),
                         OutputColumn::Literal(ref lc) => {
-                            Ok(Some((lc.name.clone(), DataType::try_from(&lc.value)?)))
+                            Ok(Some((lc.name.clone(), DfValue::try_from(&lc.value)?)))
                         }
                     }
                 })
@@ -1961,7 +1961,7 @@ impl SqlToMirConverter {
                         final_node.clone(),
                         cols,
                         vec![],
-                        vec![("bogokey".into(), DataType::from(0i32))],
+                        vec![("bogokey".into(), DfValue::from(0i32))],
                     );
                     new_node_count += 1;
                     nodes_added.push(bogo_project.clone());
@@ -2041,7 +2041,7 @@ impl SqlToMirConverter {
                     OutputColumn::Literal(_) => None,
                 })
                 .collect();
-            let mut projected_literals: Vec<(SqlIdentifier, DataType)> = qg
+            let mut projected_literals: Vec<(SqlIdentifier, DfValue)> = qg
                 .columns
                 .iter()
                 .map(|oc| -> ReadySetResult<_> {
@@ -2050,7 +2050,7 @@ impl SqlToMirConverter {
                         OutputColumn::Data { .. } => Ok(None),
                         OutputColumn::Literal(ref lc) => {
                             if !already_computed.contains(oc) {
-                                Ok(Some((lc.name.clone(), DataType::try_from(&lc.value)?)))
+                                Ok(Some((lc.name.clone(), DfValue::try_from(&lc.value)?)))
                             } else {
                                 projected_columns.push(Column::named(&lc.name));
                                 Ok(None)
@@ -2073,7 +2073,7 @@ impl SqlToMirConverter {
                     && !create_paginate
                     && !projected_columns.contains(&Column::named("bogokey"))
                 {
-                    projected_literals.push(("bogokey".into(), DataType::from(0i32)));
+                    projected_literals.push(("bogokey".into(), DfValue::from(0i32)));
                 } else {
                     for (column, _) in &view_key.columns {
                         if !projected_columns.contains(column) {

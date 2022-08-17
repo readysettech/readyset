@@ -38,26 +38,26 @@ use paste::paste;
 use proptest::prelude::*;
 use proptest::sample::select;
 use proptest::test_runner::TestCaseResult;
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use test_strategy::proptest;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Operation {
     Query {
-        key: Vec<DataType>,
+        key: Vec<DfValue>,
     },
     Insert {
         table: String,
-        row: Vec<DataType>,
+        row: Vec<DfValue>,
     },
     Update {
         table: String,
-        old_row: Vec<DataType>,
-        new_row: Vec<DataType>,
+        old_row: Vec<DfValue>,
+        new_row: Vec<DfValue>,
     },
     Delete {
         table: String,
-        row: Vec<DataType>,
+        row: Vec<DfValue>,
     },
     /* TODO: coming soon
     Evict {
@@ -66,14 +66,14 @@ enum Operation {
         /// Note that we don't know how many nodes a query will have until after we install it in
         /// noria, so the actual node index will be this modulo the number of non-base-table nodes
         node_seed: usize,
-        key: Vec<DataType>,
+        key: Vec<DfValue>,
     },
     */
 }
 
 #[derive(Debug, Clone)]
 pub enum ColumnStrategy {
-    Value(BoxedStrategy<DataType>),
+    Value(BoxedStrategy<DfValue>),
     ForeignKey {
         table: &'static str,
         foreign_column: usize,
@@ -84,7 +84,7 @@ pub enum ColumnStrategy {
 pub struct RowStrategy(Vec<ColumnStrategy>);
 
 impl RowStrategy {
-    fn no_foreign_keys(self) -> Option<Vec<BoxedStrategy<DataType>>> {
+    fn no_foreign_keys(self) -> Option<Vec<BoxedStrategy<DfValue>>> {
         self.0
             .into_iter()
             .map(|cs| match cs {
@@ -100,13 +100,10 @@ impl RowStrategy {
             .any(|cs| matches!(cs, ColumnStrategy::ForeignKey { .. }))
     }
 
-    fn fill_foreign_keys<F, S>(
-        self,
-        foreign_key_strategy: F,
-    ) -> Option<Vec<BoxedStrategy<DataType>>>
+    fn fill_foreign_keys<F, S>(self, foreign_key_strategy: F) -> Option<Vec<BoxedStrategy<DfValue>>>
     where
         F: Fn(&'static str, usize) -> Option<S>,
-        S: Strategy<Value = DataType> + Sized + 'static,
+        S: Strategy<Value = DfValue> + Sized + 'static,
     {
         self.0
             .into_iter()
@@ -128,7 +125,7 @@ pub struct OperationParameters<'a> {
     key_columns: Vec<(&'a str, usize)>,
 
     /// Added on to the end of every key
-    extra_key_strategies: Vec<BoxedStrategy<DataType>>,
+    extra_key_strategies: Vec<BoxedStrategy<DfValue>>,
 
     row_strategies: HashMap<&'static str, RowStrategy>,
 }
@@ -136,8 +133,8 @@ pub struct OperationParameters<'a> {
 impl<'a> OperationParameters<'a> {
     /// Return an iterator over all the query lookup keys that match rows previously inserted into
     /// the table
-    fn existing_keys(&'a self) -> impl Iterator<Item = Vec<DataType>> + 'a {
-        let mut rows: HashMap<&'a str, Vec<&'a Vec<DataType>>> = HashMap::new();
+    fn existing_keys(&'a self) -> impl Iterator<Item = Vec<DfValue>> + 'a {
+        let mut rows: HashMap<&'a str, Vec<&'a Vec<DfValue>>> = HashMap::new();
         for op in self.already_generated {
             match op {
                 Operation::Insert { table, row } => {
@@ -178,7 +175,7 @@ impl<'a> OperationParameters<'a> {
 
     /// If there are any rows previously inserted into the table, return a proptest [`Strategy`] for
     /// generating one of those keys, otherwise return None
-    fn existing_key_strategy(&'a self) -> Option<impl Strategy<Value = Vec<DataType>> + 'static> {
+    fn existing_key_strategy(&'a self) -> Option<impl Strategy<Value = Vec<DfValue>> + 'static> {
         let keys = self.existing_keys().collect::<Vec<_>>();
         if keys.is_empty() {
             return None;
@@ -193,7 +190,7 @@ impl<'a> OperationParameters<'a> {
         }))
     }
 
-    fn existing_rows(&'a self) -> impl Iterator<Item = (String, Vec<DataType>)> + 'a {
+    fn existing_rows(&'a self) -> impl Iterator<Item = (String, Vec<DfValue>)> + 'a {
         self.already_generated.iter().filter_map(|op| match op {
             Operation::Insert { table, row } => Some((table.clone(), row.clone())),
             _ => None,
@@ -201,7 +198,7 @@ impl<'a> OperationParameters<'a> {
     }
 
     /// Return a proptest [`Strategy`] for generating new keys for the query
-    fn key_strategy(&'a self) -> impl Strategy<Value = Vec<DataType>> + 'static {
+    fn key_strategy(&'a self) -> impl Strategy<Value = Vec<DfValue>> + 'static {
         self.key_columns
             .clone()
             .into_iter()
@@ -223,7 +220,7 @@ impl Operation {
     /// not dependent on previous operations)
     fn first_arbitrary(
         key_columns: Vec<(&str, usize)>,
-        extra_key_strategies: Vec<BoxedStrategy<DataType>>,
+        extra_key_strategies: Vec<BoxedStrategy<DfValue>>,
         row_strategies: HashMap<&'static str, RowStrategy>,
     ) -> impl Strategy<Value = Self> {
         Self::arbitrary(OperationParameters {
@@ -436,12 +433,12 @@ impl Operation {
         query: &str,
         tables: &HashMap<&str, Table>,
     ) -> Result<OperationResult, TestCaseError> {
-        fn to_values(dts: &[DataType]) -> Result<Vec<Value>, TestCaseError> {
+        fn to_values(dts: &[DfValue]) -> Result<Vec<Value>, TestCaseError> {
             dts.iter()
                 .map(|dt| {
                     Value::try_from(dt.clone()).map_err(|e| {
                         TestCaseError::reject(format!(
-                            "DataType conversion to mysql Value failed: {}",
+                            "DfValue conversion to mysql Value failed: {}",
                             e
                         ))
                     })
@@ -526,7 +523,7 @@ impl Operation {
 #[derive(Default)]
 struct TestOptions {
     /// Added on to the end of every key
-    extra_key_strategies: Vec<BoxedStrategy<DataType>>,
+    extra_key_strategies: Vec<BoxedStrategy<DfValue>>,
 }
 
 struct OperationsParams {
@@ -725,17 +722,17 @@ macro_rules! vertical_tests {
 
     (@column_strategy nullable($schema_type: ty)) => {
         ColumnStrategy::Value(any::<Option<$schema_type>>().prop_map(|ov| match ov {
-            Some(v) => DataType::from(v),
-            None => DataType::None,
+            Some(v) => DfValue::from(v),
+            None => DfValue::None,
         }).boxed())
     };
 
     (@column_strategy value($value: expr)) => {
-        ColumnStrategy::Value(Just(DataType::try_from($value).unwrap()).boxed())
+        ColumnStrategy::Value(Just(DfValue::try_from($value).unwrap()).boxed())
     };
 
     (@column_strategy $schema_type: ty) => {
-        ColumnStrategy::Value(any::<$schema_type>().prop_map_into::<DataType>().boxed())
+        ColumnStrategy::Value(any::<$schema_type>().prop_map_into::<DfValue>().boxed())
     };
 
     () => {};
@@ -837,7 +834,7 @@ vertical_tests! {
         "SELECT id FROM posts WHERE author_id = ? ORDER BY score DESC LIMIT 3 OFFSET ?";
         TestOptions {
             extra_key_strategies: vec![
-                (0u32..=15u32).prop_map(|i| DataType::from(i * 3)).boxed()
+                (0u32..=15u32).prop_map(|i| DfValue::from(i * 3)).boxed()
             ]
         };
         "posts" => (

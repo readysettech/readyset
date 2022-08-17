@@ -10,8 +10,8 @@ use crate::prelude::*;
 pub(super) enum Handle {
     Single(
         reader_map::handles::WriteHandle<
-            DataType,
-            Box<[DataType]>,
+            DfValue,
+            Box<[DfValue]>,
             PreInsertion,
             i64,
             Timestamp,
@@ -20,8 +20,8 @@ pub(super) enum Handle {
     ),
     Many(
         reader_map::handles::WriteHandle<
-            Vec<DataType>,
-            Box<[DataType]>,
+            Vec<DfValue>,
+            Box<[DfValue]>,
             PreInsertion,
             i64,
             Timestamp,
@@ -67,7 +67,7 @@ impl Handle {
         }
     }
 
-    pub fn empty_range(&mut self, range: (Bound<Vec<DataType>>, Bound<Vec<DataType>>)) {
+    pub fn empty_range(&mut self, range: (Bound<Vec<DfValue>>, Bound<Vec<DfValue>>)) {
         match self {
             Handle::Single(h) => {
                 h.remove_range((
@@ -93,7 +93,7 @@ impl Handle {
         let mut mem_freed = 0u64;
 
         // Each row's state is composed of: The key, the bytes required to hold the Row
-        // data structure, and the set of Values in the row (DataTypes).
+        // data structure, and the set of Values in the row (DfValues).
         match *self {
             Handle::Single(ref mut h) => {
                 let base_value_size = h.base_value_size() as u64;
@@ -182,7 +182,7 @@ impl Handle {
 
     pub fn insert_range<R>(&mut self, range: R)
     where
-        R: RangeBounds<Vec<DataType>>,
+        R: RangeBounds<Vec<DfValue>>,
     {
         match self {
             Handle::Single(h) => {

@@ -1,19 +1,19 @@
 use std::sync::Arc;
 
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use tokio_postgres::types::Type;
 
 use crate::value::Value;
 
-/// A structure containing a `Vec<DataType>`, representing one row of data, which facilitates
+/// A structure containing a `Vec<DfValue>`, representing one row of data, which facilitates
 /// iteration over the values within this row as `Value` structures.
 pub struct Row {
     /// The values comprising the row, as returned from a Noria interface lookup. Only the indices
     /// within this vector listed in `project_fields` will actually be projected during iteration.
     /// (See documentaion below for `project_fields`).
-    pub values: Vec<DataType>,
+    pub values: Vec<DfValue>,
 
-    /// The fields to project. A `Vec<DataType>` returned from a Noria interface lookup may
+    /// The fields to project. A `Vec<DfValue>` returned from a Noria interface lookup may
     /// contain extraneous fields that should not be projected into the query result output. In
     /// particular, bogokeys and other lookup keys that are not requested for projection by the SQL
     /// query may be present in `values` but should be excluded from query output. This
@@ -84,7 +84,7 @@ mod tests {
     #[test]
     fn iterate_singleton_row() {
         let row = Row {
-            values: vec![DataType::Int(43)],
+            values: vec![DfValue::Int(43)],
             project_fields: Arc::new(vec![0]),
             project_field_types: Arc::new(vec![Type::INT4]),
         };
@@ -95,11 +95,11 @@ mod tests {
     fn iterate_row() {
         let row = Row {
             values: vec![
-                DataType::Int(43),
-                DataType::Text("abcde".into()),
-                DataType::Double(10.000000222),
-                DataType::Float(8.99),
-                DataType::from(Decimal::new(35901234, 4)), // 3590.1234
+                DfValue::Int(43),
+                DfValue::Text("abcde".into()),
+                DfValue::Double(10.000000222),
+                DfValue::Float(8.99),
+                DfValue::from(Decimal::new(35901234, 4)), // 3590.1234
             ],
             project_fields: Arc::new(vec![0, 1, 2, 3, 4]),
             project_field_types: Arc::new(vec![
@@ -126,12 +126,12 @@ mod tests {
     fn iterate_row_with_trailing_unprojected_fields() {
         let row = Row {
             values: vec![
-                DataType::Int(43),
-                DataType::Text("abcde".into()),
-                DataType::Double(10.000000222),
-                DataType::Float(8.99),
-                DataType::from(Decimal::new(35901234, 4)), // 3590.1234
-                DataType::Int(0),
+                DfValue::Int(43),
+                DfValue::Text("abcde".into()),
+                DfValue::Double(10.000000222),
+                DfValue::Float(8.99),
+                DfValue::from(Decimal::new(35901234, 4)), // 3590.1234
+                DfValue::Int(0),
             ],
             // Only the first three fields are specified for projection.
             project_fields: Arc::new(vec![0, 1, 2, 3, 4]),
@@ -159,15 +159,15 @@ mod tests {
     fn iterate_row_with_interleaved_unprojected_fields() {
         let row = Row {
             values: vec![
-                DataType::Int(0),
-                DataType::Int(43),
-                DataType::Text("abcde".into()),
-                DataType::Int(0),
-                DataType::Int(0),
-                DataType::Double(10.000000222),
-                DataType::Float(8.99),
-                DataType::from(Decimal::new(35901234, 4)), // 3590.1234
-                DataType::Int(0),
+                DfValue::Int(0),
+                DfValue::Int(43),
+                DfValue::Text("abcde".into()),
+                DfValue::Int(0),
+                DfValue::Int(0),
+                DfValue::Double(10.000000222),
+                DfValue::Float(8.99),
+                DfValue::from(Decimal::new(35901234, 4)), // 3590.1234
+                DfValue::Int(0),
             ],
             // Only some of the fields are specified for projection.
             project_fields: Arc::new(vec![1, 2, 5, 6, 7]),

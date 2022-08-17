@@ -21,7 +21,7 @@ use readyset::{
     ReadySetResult, SchemaType, Table, TableOperation, View, ViewPlaceholder, ViewQuery,
     ViewSchema,
 };
-use readyset_data::{DataType, DfType};
+use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::PreparedStatementMissing;
 use readyset_errors::{
     internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err,
@@ -438,7 +438,7 @@ async fn short_circuit_empty_resultset(getter: &mut View) -> ReadySetResult<Quer
 pub(crate) enum ExecuteSelectContext<'ctx> {
     Prepared {
         q_id: u32,
-        params: &'ctx [DataType],
+        params: &'ctx [DfValue],
     },
     AdHoc {
         statement: nom_sql::SelectStatement,
@@ -553,9 +553,9 @@ impl NoriaConnector {
             .map(|(n, (mut q, always))| {
                 rewrite::anonymize_literals(&mut q);
                 vec![
-                    DataType::from(n),
-                    DataType::from(q.to_string()),
-                    DataType::from(if always { "yes" } else { "no" }),
+                    DfValue::from(n),
+                    DfValue::from(q.to_string()),
+                    DfValue::from(if always { "yes" } else { "no" }),
                 ]
             })
             .collect::<Vec<_>>();
@@ -604,12 +604,12 @@ impl NoriaConnector {
             }
         };
 
-        let data: Vec<Vec<DataType>> = q
+        let data: Vec<Vec<DfValue>> = q
             .data
             .iter()
             .map(|row| {
                 row.iter()
-                    .map(DataType::try_from)
+                    .map(DfValue::try_from)
                     .collect::<Result<Vec<_>, _>>()
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -681,7 +681,7 @@ impl NoriaConnector {
     pub(crate) async fn execute_prepared_insert(
         &mut self,
         q_id: u32,
-        params: &[DataType],
+        params: &[DfValue],
     ) -> ReadySetResult<QueryResult<'_>> {
         let prep: PreparedStatement = self
             .prepared_statement_cache
@@ -819,7 +819,7 @@ impl NoriaConnector {
     pub(crate) async fn execute_prepared_update(
         &mut self,
         q_id: u32,
-        params: &[DataType],
+        params: &[DfValue],
     ) -> ReadySetResult<QueryResult<'_>> {
         let prep: PreparedStatement = self
             .prepared_statement_cache
@@ -880,7 +880,7 @@ impl NoriaConnector {
     pub(crate) async fn execute_prepared_delete(
         &mut self,
         q_id: u32,
-        params: &[DataType],
+        params: &[DfValue],
     ) -> ReadySetResult<QueryResult<'_>> {
         let prep: PreparedStatement = self
             .prepared_statement_cache
@@ -1044,7 +1044,7 @@ impl NoriaConnector {
     async fn do_insert(
         &mut self,
         q: &InsertStatement,
-        data: Vec<Vec<DataType>>,
+        data: Vec<Vec<DfValue>>,
     ) -> ReadySetResult<QueryResult<'_>> {
         let table = &q.table.name;
 
@@ -1094,7 +1094,7 @@ impl NoriaConnector {
                     .or_insert_with(|| atomic::AtomicUsize::new(0));
             }
         });
-        let mut buf = vec![vec![DataType::None; schema.fields.len()]; data.len()];
+        let mut buf = vec![vec![DfValue::None; schema.fields.len()]; data.len()];
         let mut first_inserted_id = None;
         tokio::task::block_in_place(|| -> ReadySetResult<_> {
             let ai_lock = ai.read().unwrap();
@@ -1135,7 +1135,7 @@ impl NoriaConnector {
                         if first_inserted_id.is_none() {
                             first_inserted_id = Some(id);
                         }
-                        buf[ri][idx] = DataType::from(id);
+                        buf[ri][idx] = DfValue::from(id);
                     }
                 }
 
@@ -1191,7 +1191,7 @@ impl NoriaConnector {
                 };
                 utils::extract_update_params_and_fields(
                     &mut uq,
-                    &mut None::<std::iter::Empty<DataType>>,
+                    &mut None::<std::iter::Empty<DfValue>>,
                     schema,
                 )?
             };
@@ -1217,7 +1217,7 @@ impl NoriaConnector {
     async fn do_update(
         &mut self,
         q: Cow<'_, UpdateStatement>,
-        params: Option<&[DataType]>,
+        params: Option<&[DfValue]>,
     ) -> ReadySetResult<QueryResult<'_>> {
         trace!(table = %q.table.name, "update::access mutator");
         let mutator = self
@@ -1255,7 +1255,7 @@ impl NoriaConnector {
     async fn do_delete<'a>(
         &'a mut self,
         q: Cow<'_, DeleteStatement>,
-        params: Option<&[DataType]>,
+        params: Option<&[DfValue]>,
     ) -> ReadySetResult<QueryResult<'a>> {
         trace!(table = %q.table.name, "delete::access mutator");
         let mutator = self
@@ -1466,7 +1466,7 @@ fn build_view_query(
     getter_schema: &ViewSchema,
     key_map: &[(ViewPlaceholder, KeyColumnIdx)],
     processed_query_params: &ProcessedQueryParams,
-    params: &[DataType],
+    params: &[DfValue],
     q: &nom_sql::SelectStatement,
     ticket: Option<Timestamp>,
     read_behavior: ReadBehavior,
@@ -1483,7 +1483,7 @@ fn build_view_query(
     )?;
 
     trace!("select::lookup");
-    let bogo = vec![vec1![DataType::from(0i32)].into()];
+    let bogo = vec![vec1![DfValue::from(0i32)].into()];
     let mut binops = utils::get_select_statement_binops(q);
     let mut filter_op_idx = None;
     let mut filters = binops
@@ -1549,7 +1549,7 @@ fn build_view_query(
             .into_iter()
             .map(|key| {
                 let mut k = vec![];
-                let mut bounds: Option<(Vec<DataType>, Vec<DataType>)> = if mixed_binops {
+                let mut bounds: Option<(Vec<DfValue>, Vec<DfValue>)> = if mixed_binops {
                     Some((vec![], vec![]))
                 } else {
                     None
@@ -1599,21 +1599,21 @@ fn build_view_query(
                                     BinaryOperator::GreaterOrEqual => {
                                         filters.push(make_op(BinaryOperator::GreaterOrEqual));
                                         lower_bound.push(value);
-                                        upper_bound.push(DataType::Max);
+                                        upper_bound.push(DfValue::Max);
                                     }
                                     BinaryOperator::LessOrEqual => {
                                         filters.push(make_op(BinaryOperator::LessOrEqual));
-                                        lower_bound.push(DataType::None); // NULL is the minimum DataType
+                                        lower_bound.push(DfValue::None); // NULL is the minimum DfValue
                                         upper_bound.push(value);
                                     }
                                     BinaryOperator::Greater => {
                                         filters.push(make_op(BinaryOperator::Greater));
                                         lower_bound.push(value);
-                                        upper_bound.push(DataType::Max);
+                                        upper_bound.push(DfValue::Max);
                                     }
                                     BinaryOperator::Less => {
                                         filters.push(make_op(BinaryOperator::Less));
-                                        lower_bound.push(DataType::None); // NULL is the minimum DataType
+                                        lower_bound.push(DfValue::None); // NULL is the minimum DfValue
                                         upper_bound.push(value);
                                     }
                                     op => unsupported!(
@@ -1695,7 +1695,7 @@ fn build_view_query(
 async fn do_read<'a>(
     getter: &'a mut View,
     processed_query_params: &ProcessedQueryParams,
-    params: &[DataType],
+    params: &[DfValue],
     q: &nom_sql::SelectStatement,
     ticket: Option<Timestamp>,
     read_behavior: ReadBehavior,
@@ -1908,7 +1908,7 @@ mod tests {
         fn make_build_query(
             query: &str,
             key_map: &[(ViewPlaceholder, KeyColumnIdx)],
-            params: &[DataType],
+            params: &[DfValue],
         ) -> ViewQuery {
             let mut q = parse_select_statement(query);
             let pp = rewrite::process_query(&mut q, true).unwrap();
@@ -1929,13 +1929,13 @@ mod tests {
             let query = make_build_query(
                 "SELECT t.x FROM t WHERE t.x = $1",
                 &[(ViewPlaceholder::OneToOne(1), 0)],
-                &[DataType::from(1)],
+                &[DfValue::from(1)],
             );
 
             assert!(query.filter.is_none());
             assert_eq!(
                 query.key_comparisons,
-                vec![KeyComparison::from(vec1![DataType::from(1)])]
+                vec![KeyComparison::from(vec1![DfValue::from(1)])]
             );
         }
 
@@ -1944,14 +1944,14 @@ mod tests {
             let query = make_build_query(
                 "SELECT t.x FROM t WHERE t.x BETWEEN $1 AND $2",
                 &[(ViewPlaceholder::Between(1, 2), 0)],
-                &[DataType::from(1), DataType::from(2)],
+                &[DfValue::from(1), DfValue::from(2)],
             );
 
             assert!(query.filter.is_none());
             assert_eq!(
                 query.key_comparisons,
                 vec![KeyComparison::from_range(
-                    &(vec1![DataType::from(1)]..=vec1![DataType::from(2)])
+                    &(vec1![DfValue::from(1)]..=vec1![DfValue::from(2)])
                 )]
             );
         }
@@ -1964,7 +1964,7 @@ mod tests {
                     (ViewPlaceholder::OneToOne(1), 0),
                     (ViewPlaceholder::OneToOne(2), 1),
                 ],
-                &[DataType::from(1), DataType::from("%a%")],
+                &[DfValue::from(1), DfValue::from("%a%")],
             );
 
             assert_eq!(
@@ -1976,7 +1976,7 @@ mod tests {
                     }),
                     op: BinaryOperator::ILike,
                     right: Box::new(DfExpr::Literal {
-                        val: DataType::from("%a%"),
+                        val: DfValue::from("%a%"),
                         ty: DfType::Sql(SqlType::Text)
                     }),
                     ty: DfType::Sql(SqlType::Bool),
@@ -1992,14 +1992,14 @@ mod tests {
                     (ViewPlaceholder::OneToOne(2), 1),
                     (ViewPlaceholder::OneToOne(1), 0),
                 ],
-                &[DataType::from(1), DataType::from("a")],
+                &[DfValue::from(1), DfValue::from("a")],
             );
 
             assert_eq!(
                 query.key_comparisons,
                 vec![KeyComparison::from_range(
-                    &(vec1![DataType::from("a"), DataType::from(1)]
-                        ..=vec1![DataType::from("a"), DataType::Max])
+                    &(vec1![DfValue::from("a"), DfValue::from(1)]
+                        ..=vec1![DfValue::from("a"), DfValue::Max])
                 )]
             );
         }
@@ -2012,15 +2012,15 @@ mod tests {
                     (ViewPlaceholder::OneToOne(3), 1),
                     (ViewPlaceholder::Between(1, 2), 0),
                 ],
-                &[DataType::from(1), DataType::from(2), DataType::from("a")],
+                &[DfValue::from(1), DfValue::from(2), DfValue::from("a")],
             );
 
             assert!(query.filter.is_none());
             assert_eq!(
                 query.key_comparisons,
                 vec![KeyComparison::from_range(
-                    &(vec1![DataType::from("a"), DataType::from(1)]
-                        ..=vec1![DataType::from("a"), DataType::from(2)])
+                    &(vec1![DfValue::from("a"), DfValue::from(1)]
+                        ..=vec1![DfValue::from("a"), DfValue::from(2)])
                 )]
             );
         }
@@ -2033,7 +2033,7 @@ mod tests {
                     (ViewPlaceholder::OneToOne(2), 1),
                     (ViewPlaceholder::OneToOne(1), 0),
                 ],
-                &[DataType::from(1), DataType::from("a")],
+                &[DfValue::from(1), DfValue::from("a")],
             );
 
             assert_eq!(
@@ -2054,8 +2054,8 @@ mod tests {
             assert_eq!(
                 query.key_comparisons,
                 vec![KeyComparison::from_range(
-                    &(vec1![DataType::from("a"), DataType::from(1)]
-                        ..=vec1![DataType::from("a"), DataType::Max])
+                    &(vec1![DfValue::from("a"), DfValue::from(1)]
+                        ..=vec1![DfValue::from("a"), DfValue::Max])
                 )]
             );
         }
@@ -2068,7 +2068,7 @@ mod tests {
                     (ViewPlaceholder::OneToOne(1), 0),
                     (ViewPlaceholder::OneToOne(2), 1),
                 ],
-                &[DataType::from(1), DataType::from("a")],
+                &[DfValue::from(1), DfValue::from("a")],
             );
 
             assert_eq!(
@@ -2090,7 +2090,7 @@ mod tests {
             assert_eq!(
                 query.key_comparisons,
                 vec![KeyComparison::Range((
-                    Bound::Excluded(vec1![DataType::from(1), DataType::from("a")]),
+                    Bound::Excluded(vec1![DfValue::from(1), DfValue::from("a")]),
                     Bound::Unbounded
                 ))]
             );
@@ -2110,7 +2110,7 @@ mod tests {
                         1,
                     ),
                 ],
-                &[DataType::from(1), DataType::from(3)],
+                &[DfValue::from(1), DfValue::from(3)],
             );
 
             assert_eq!(query.filter, None);
@@ -2118,8 +2118,8 @@ mod tests {
             assert_eq!(
                 query.key_comparisons,
                 vec![vec1![
-                    DataType::from(1),
-                    DataType::from(1) // page 2
+                    DfValue::from(1),
+                    DfValue::from(1) // page 2
                 ]
                 .into()]
             );

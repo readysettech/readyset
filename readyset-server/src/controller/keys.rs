@@ -790,7 +790,7 @@ mod tests {
             ops::NodeOperator::Project(ops::project::Project::new(
                 a,
                 &[0],
-                Some(vec![DataType::try_from(42).unwrap()]),
+                Some(vec![DfValue::try_from(42).unwrap()]),
                 None,
             )),
         ));

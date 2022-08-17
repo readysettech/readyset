@@ -7,7 +7,7 @@ use mysql_async::prelude::Queryable;
 use mysql_time::MysqlTime;
 use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset::{ControllerHandle, ReadySetError, ReadySetResult};
-use readyset_data::{DataType, TinyText};
+use readyset_data::{DfValue, TinyText};
 use readyset_server::Builder;
 use replicators::{Config, NoriaAdapter};
 use tracing::trace;
@@ -32,59 +32,59 @@ const POPULATE_SCHEMA: &str =
     "INSERT INTO `groups` VALUES (1, 'abc', 2), (2, 'bcd', 3), (3, NULL, NULL), (40, 'xyz', 4)";
 
 /// A convenience init to convert 3 character byte slice to TinyText noria type
-const fn tiny<const N: usize>(text: &[u8; N]) -> DataType {
-    DataType::TinyText(TinyText::from_arr(text))
+const fn tiny<const N: usize>(text: &[u8; N]) -> DfValue {
+    DfValue::TinyText(TinyText::from_arr(text))
 }
 
-const SNAPSHOT_RESULT: &[&[DataType]] = &[
-    &[DataType::Int(1), tiny(b"abc"), DataType::Int(2)],
-    &[DataType::Int(2), tiny(b"bcd"), DataType::Int(3)],
-    &[DataType::Int(3), DataType::None, DataType::None],
-    &[DataType::Int(40), tiny(b"xyz"), DataType::Int(4)],
+const SNAPSHOT_RESULT: &[&[DfValue]] = &[
+    &[DfValue::Int(1), tiny(b"abc"), DfValue::Int(2)],
+    &[DfValue::Int(2), tiny(b"bcd"), DfValue::Int(3)],
+    &[DfValue::Int(3), DfValue::None, DfValue::None],
+    &[DfValue::Int(40), tiny(b"xyz"), DfValue::Int(4)],
 ];
 
-const TESTS: &[(&str, &str, &[&[DataType]])] = &[
+const TESTS: &[(&str, &str, &[&[DfValue]])] = &[
     (
         "Test UPDATE key column replication",
         "UPDATE `groups` SET id=id+10",
         &[
-            &[DataType::Int(11), tiny(b"abc"), DataType::Int(2)],
-            &[DataType::Int(12), tiny(b"bcd"), DataType::Int(3)],
-            &[DataType::Int(13), DataType::None, DataType::None],
-            &[DataType::Int(50), tiny(b"xyz"), DataType::Int(4)],
+            &[DfValue::Int(11), tiny(b"abc"), DfValue::Int(2)],
+            &[DfValue::Int(12), tiny(b"bcd"), DfValue::Int(3)],
+            &[DfValue::Int(13), DfValue::None, DfValue::None],
+            &[DfValue::Int(50), tiny(b"xyz"), DfValue::Int(4)],
         ],
     ),
     (
         "Test DELETE replication",
         "DELETE FROM `groups` WHERE string='bcd'",
         &[
-            &[DataType::Int(11), tiny(b"abc"), DataType::Int(2)],
-            &[DataType::Int(13), DataType::None, DataType::None],
-            &[DataType::Int(50), tiny(b"xyz"), DataType::Int(4)],
+            &[DfValue::Int(11), tiny(b"abc"), DfValue::Int(2)],
+            &[DfValue::Int(13), DfValue::None, DfValue::None],
+            &[DfValue::Int(50), tiny(b"xyz"), DfValue::Int(4)],
         ],
     ),
     (
         "Test INSERT replication",
         "INSERT INTO `groups` VALUES (1, 'abc', 2), (2, 'bcd', 3), (40, 'xyz', 4)",
         &[
-            &[DataType::Int(1), tiny(b"abc"), DataType::Int(2)],
-            &[DataType::Int(2), tiny(b"bcd"), DataType::Int(3)],
-            &[DataType::Int(11), tiny(b"abc"), DataType::Int(2)],
-            &[DataType::Int(13), DataType::None, DataType::None],
-            &[DataType::Int(40), tiny(b"xyz"), DataType::Int(4)],
-            &[DataType::Int(50), tiny(b"xyz"), DataType::Int(4)],
+            &[DfValue::Int(1), tiny(b"abc"), DfValue::Int(2)],
+            &[DfValue::Int(2), tiny(b"bcd"), DfValue::Int(3)],
+            &[DfValue::Int(11), tiny(b"abc"), DfValue::Int(2)],
+            &[DfValue::Int(13), DfValue::None, DfValue::None],
+            &[DfValue::Int(40), tiny(b"xyz"), DfValue::Int(4)],
+            &[DfValue::Int(50), tiny(b"xyz"), DfValue::Int(4)],
         ],
     ),
     (
         "Test UPDATE non-key column replication",
         "UPDATE `groups` SET bignum=id+10",
         &[
-            &[DataType::Int(1), tiny(b"abc"), DataType::Int(11)],
-            &[DataType::Int(2), tiny(b"bcd"), DataType::Int(12)],
-            &[DataType::Int(11), tiny(b"abc"), DataType::Int(21)],
-            &[DataType::Int(13), DataType::None, DataType::Int(23)],
-            &[DataType::Int(40), tiny(b"xyz"), DataType::Int(50)],
-            &[DataType::Int(50), tiny(b"xyz"), DataType::Int(60)],
+            &[DfValue::Int(1), tiny(b"abc"), DfValue::Int(11)],
+            &[DfValue::Int(2), tiny(b"bcd"), DfValue::Int(12)],
+            &[DfValue::Int(11), tiny(b"abc"), DfValue::Int(21)],
+            &[DfValue::Int(13), DfValue::None, DfValue::Int(23)],
+            &[DfValue::Int(40), tiny(b"xyz"), DfValue::Int(50)],
+            &[DfValue::Int(50), tiny(b"xyz"), DfValue::Int(60)],
         ],
     ),
 ];
@@ -92,15 +92,15 @@ const TESTS: &[(&str, &str, &[&[DataType]])] = &[
 /// Test query we issue after replicator disconnect
 const DISCONNECT_QUERY: &str = "INSERT INTO `groups` VALUES (3, 'abc', 2), (5, 'xyz', 4)";
 /// Test result after replicator reconnects and catches up
-const RECONNECT_RESULT: &[&[DataType]] = &[
-    &[DataType::Int(1), tiny(b"abc"), DataType::Int(11)],
-    &[DataType::Int(2), tiny(b"bcd"), DataType::Int(12)],
-    &[DataType::Int(3), tiny(b"abc"), DataType::Int(2)],
-    &[DataType::Int(5), tiny(b"xyz"), DataType::Int(4)],
-    &[DataType::Int(11), tiny(b"abc"), DataType::Int(21)],
-    &[DataType::Int(13), DataType::None, DataType::Int(23)],
-    &[DataType::Int(40), tiny(b"xyz"), DataType::Int(50)],
-    &[DataType::Int(50), tiny(b"xyz"), DataType::Int(60)],
+const RECONNECT_RESULT: &[&[DfValue]] = &[
+    &[DfValue::Int(1), tiny(b"abc"), DfValue::Int(11)],
+    &[DfValue::Int(2), tiny(b"bcd"), DfValue::Int(12)],
+    &[DfValue::Int(3), tiny(b"abc"), DfValue::Int(2)],
+    &[DfValue::Int(5), tiny(b"xyz"), DfValue::Int(4)],
+    &[DfValue::Int(11), tiny(b"abc"), DfValue::Int(21)],
+    &[DfValue::Int(13), DfValue::None, DfValue::Int(23)],
+    &[DfValue::Int(40), tiny(b"xyz"), DfValue::Int(50)],
+    &[DfValue::Int(50), tiny(b"xyz"), DfValue::Int(60)],
 ];
 
 struct TestHandle {
@@ -248,7 +248,7 @@ impl TestHandle {
         &mut self,
         view_name: &str,
         test_name: &str,
-        test_results: &[&[DataType]],
+        test_results: &[&[DfValue]],
     ) -> ReadySetResult<()> {
         let mut attempt: usize = 0;
         loop {
@@ -272,7 +272,7 @@ impl TestHandle {
         }
     }
 
-    async fn check_results_inner(&mut self, view_name: &str) -> ReadySetResult<Vec<Vec<DataType>>> {
+    async fn check_results_inner(&mut self, view_name: &str) -> ReadySetResult<Vec<Vec<DfValue>>> {
         let mut getter = self.controller().await.view(view_name).await?;
         let results = getter.lookup(&[0.into()], true).await?;
         let mut results = results.into_vec();
@@ -494,18 +494,18 @@ async fn replication_catch_up_inner(url: &str) -> ReadySetResult<()> {
     ctx.ready_notify.as_ref().unwrap().notified().await;
     let mut client = inserter.await.unwrap()?;
 
-    let rs: Vec<_> = std::iter::repeat([DataType::from(100), DataType::from("I am a teapot")])
+    let rs: Vec<_> = std::iter::repeat([DfValue::from(100), DfValue::from("I am a teapot")])
         .take(TOTAL_INSERTS)
         .collect();
-    let rs: Vec<&[DataType]> = rs.iter().map(|r| r.as_slice()).collect();
+    let rs: Vec<&[DfValue]> = rs.iter().map(|r| r.as_slice()).collect();
     ctx.check_results("catch_up_view", "Catch up", rs.as_slice())
         .await
         .unwrap();
 
     let rs: Vec<_> = (0..TOTAL_INSERTS)
-        .map(|i| [DataType::from(i as i32), DataType::from("I am a teapot")])
+        .map(|i| [DfValue::from(i as i32), DfValue::from("I am a teapot")])
         .collect();
-    let rs: Vec<&[DataType]> = rs.iter().map(|r| r.as_slice()).collect();
+    let rs: Vec<&[DfValue]> = rs.iter().map(|r| r.as_slice()).collect();
     ctx.check_results("catch_up_pk_view", "Catch up with pk", rs.as_slice())
         .await
         .unwrap();
@@ -644,18 +644,18 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
         "Snapshot",
         &[
             &[
-                DataType::Int(0),
-                DataType::None,
-                DataType::None,
-                DataType::None,
-                DataType::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0)),
+                DfValue::Int(0),
+                DfValue::None,
+                DfValue::None,
+                DfValue::None,
+                DfValue::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
             &[
-                DataType::Int(1),
-                DataType::None,
-                DataType::None,
-                DataType::None,
-                DataType::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0)),
+                DfValue::Int(1),
+                DfValue::None,
+                DfValue::None,
+                DfValue::None,
+                DfValue::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
         ],
     )
@@ -675,32 +675,32 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
         "Replication",
         &[
             &[
-                DataType::Int(0),
-                DataType::None,
-                DataType::None,
-                DataType::None,
-                DataType::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0)),
+                DfValue::Int(0),
+                DfValue::None,
+                DfValue::None,
+                DfValue::None,
+                DfValue::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
             &[
-                DataType::Int(1),
-                DataType::None,
-                DataType::None,
-                DataType::None,
-                DataType::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0)),
+                DfValue::Int(1),
+                DfValue::None,
+                DfValue::None,
+                DfValue::None,
+                DfValue::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
             &[
-                DataType::Int(2),
-                DataType::None,
-                DataType::None,
-                DataType::None,
-                DataType::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0)),
+                DfValue::Int(2),
+                DfValue::None,
+                DfValue::None,
+                DfValue::None,
+                DfValue::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
             &[
-                DataType::Int(3),
-                DataType::None,
-                DataType::None,
-                DataType::None,
-                DataType::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0)),
+                DfValue::Int(3),
+                DfValue::None,
+                DfValue::None,
+                DfValue::None,
+                DfValue::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0)),
             ],
         ],
     )
@@ -733,11 +733,7 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
     ctx.check_results(
         "t2_view",
         "skip_unparsable",
-        &[
-            &[DataType::Int(1)],
-            &[DataType::Int(2)],
-            &[DataType::Int(3)],
-        ],
+        &[&[DfValue::Int(1)], &[DfValue::Int(2)], &[DfValue::Int(3)]],
     )
     .await?;
 
@@ -765,12 +761,12 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
         "t2_view",
         "skip_unparsable",
         &[
-            &[DataType::Int(1)],
-            &[DataType::Int(2)],
-            &[DataType::Int(3)],
-            &[DataType::Int(4)],
-            &[DataType::Int(5)],
-            &[DataType::Int(6)],
+            &[DfValue::Int(1)],
+            &[DfValue::Int(2)],
+            &[DfValue::Int(3)],
+            &[DfValue::Int(4)],
+            &[DfValue::Int(5)],
+            &[DfValue::Int(6)],
         ],
     )
     .await?;
@@ -838,11 +834,7 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
         ctx.check_results(
             view,
             "replication_filter",
-            &[
-                &[DataType::Int(1)],
-                &[DataType::Int(2)],
-                &[DataType::Int(3)],
-            ],
+            &[&[DfValue::Int(1)], &[DfValue::Int(2)], &[DfValue::Int(3)]],
         )
         .await?;
     }
@@ -901,9 +893,9 @@ async fn resnapshot_inner(url: &str) -> ReadySetResult<()> {
     ctx.ready_notify.as_ref().unwrap().notified().await;
     // Initial snapshot is done
     let rs: Vec<_> = (0..ROWS)
-        .map(|i| [DataType::from(i as i32), DataType::from("I am a teapot")])
+        .map(|i| [DfValue::from(i as i32), DfValue::from("I am a teapot")])
         .collect();
-    let rs: Vec<&[DataType]> = rs.iter().map(|r| r.as_slice()).collect();
+    let rs: Vec<&[DfValue]> = rs.iter().map(|r| r.as_slice()).collect();
     ctx.check_results("repl1_view", "Resnapshot initial", rs.as_slice())
         .await
         .unwrap();
@@ -931,13 +923,13 @@ async fn resnapshot_inner(url: &str) -> ReadySetResult<()> {
     let rs: Vec<_> = (0..ROWS)
         .map(|i| {
             [
-                [DataType::from(i as i32), DataType::from("I am a teapot")],
-                [DataType::from(i as i32), DataType::from("I am a teapot")],
+                [DfValue::from(i as i32), DfValue::from("I am a teapot")],
+                [DfValue::from(i as i32), DfValue::from("I am a teapot")],
             ]
         })
         .flatten()
         .collect();
-    let rs: Vec<&[DataType]> = rs.iter().map(|r| r.as_slice()).collect();
+    let rs: Vec<&[DfValue]> = rs.iter().map(|r| r.as_slice()).collect();
     ctx.check_results("repl1_view", "Resnapshot repl1", rs.as_slice())
         .await
         .unwrap();
@@ -953,20 +945,20 @@ async fn resnapshot_inner(url: &str) -> ReadySetResult<()> {
         .map(|i| {
             [
                 [
-                    DataType::from(i as i32),
-                    DataType::from("I am a teapot"),
-                    DataType::None,
+                    DfValue::from(i as i32),
+                    DfValue::from("I am a teapot"),
+                    DfValue::None,
                 ],
                 [
-                    DataType::from(i as i32),
-                    DataType::from("I am a teapot"),
-                    DataType::from(i as i32),
+                    DfValue::from(i as i32),
+                    DfValue::from("I am a teapot"),
+                    DfValue::from(i as i32),
                 ],
             ]
         })
         .flatten()
         .collect();
-    let rs: Vec<&[DataType]> = rs.iter().map(|r| r.as_slice()).collect();
+    let rs: Vec<&[DfValue]> = rs.iter().map(|r| r.as_slice()).collect();
     ctx.check_results("repl2_view", "Resnapshot repl2", rs.as_slice())
         .await
         .unwrap();

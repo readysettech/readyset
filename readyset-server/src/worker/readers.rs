@@ -567,7 +567,7 @@ fn get_reader_from_cache<'a>(
 mod readreply {
     use readyset::results::SharedResults;
     use readyset::{LookupResult, ReadReply, ReadReplyStats, ReadySetError, Tagged};
-    use readyset_data::DataType;
+    use readyset_data::DfValue;
 
     use super::*;
 
@@ -642,7 +642,7 @@ mod readreply {
     where
         III: IntoIterator<Item = II>,
         II: IntoIterator<Item = I>,
-        I: IntoIterator<Item = DataType>,
+        I: IntoIterator<Item = DfValue>,
     {
         data.into_iter()
             .map(|rows| {
@@ -657,34 +657,34 @@ mod readreply {
 
     #[test]
     fn rtt_normal_one() {
-        rtt_ok(rows_vec([[[DataType::from(1)]]]));
+        rtt_ok(rows_vec([[[DfValue::from(1)]]]));
     }
 
     #[test]
     fn rtt_normal_multifield() {
-        rtt_ok(rows_vec([[[DataType::from(1), DataType::from(42)]]]));
+        rtt_ok(rows_vec([[[DfValue::from(1), DfValue::from(42)]]]));
     }
 
     #[test]
     fn rtt_normal_multirow() {
-        rtt_ok(rows_vec([[[DataType::from(1)], [DataType::from(42)]]]));
+        rtt_ok(rows_vec([[[DfValue::from(1)], [DfValue::from(42)]]]));
     }
 
     #[test]
     fn rtt_normal_multibatch() {
-        rtt_ok(rows_vec([[[DataType::from(1)]], [[DataType::from(42)]]]));
+        rtt_ok(rows_vec([[[DfValue::from(1)]], [[DfValue::from(42)]]]));
     }
 
     #[test]
     fn rtt_normal_multi() {
         rtt_ok(rows_vec([
             [
-                [DataType::from(1), DataType::from(42)],
-                [DataType::from(43), DataType::from(2)],
+                [DfValue::from(1), DfValue::from(42)],
+                [DfValue::from(43), DfValue::from(2)],
             ],
             [
-                [DataType::from(2), DataType::from(43)],
-                [DataType::from(44), DataType::from(3)],
+                [DfValue::from(2), DfValue::from(43)],
+                [DfValue::from(44), DfValue::from(3)],
             ],
         ]));
     }
@@ -788,12 +788,12 @@ mod readreply {
 
     #[tokio::test]
     async fn async_bincode_rtt_empty() {
-        async_bincode_rtt_ok(rows_vec::<[[[DataType; 0]; 0]; 0], _, _>([])).await;
+        async_bincode_rtt_ok(rows_vec::<[[[DfValue; 0]; 0]; 0], _, _>([])).await;
     }
 
     #[tokio::test]
     async fn async_bincode_rtt_one_empty() {
-        async_bincode_rtt_ok(rows_vec::<[[[DataType; 0]; 0]; 1], _, _>([[]])).await;
+        async_bincode_rtt_ok(rows_vec::<[[[DfValue; 0]; 0]; 1], _, _>([[]])).await;
     }
 
     #[tokio::test]
@@ -805,12 +805,12 @@ mod readreply {
     async fn async_bincode_rtt_multi() {
         async_bincode_rtt_ok(rows_vec([
             vec![
-                vec![DataType::from(1), DataType::from(42)],
-                vec![DataType::from(43), DataType::from(2)],
+                vec![DfValue::from(1), DfValue::from(42)],
+                vec![DfValue::from(43), DfValue::from(2)],
             ],
             vec![
-                vec![DataType::from(2), DataType::from(43)],
-                vec![DataType::from(44), DataType::from(3)],
+                vec![DfValue::from(2), DfValue::from(43)],
+                vec![DfValue::from(44), DfValue::from(3)],
             ],
             vec![vec![]],
             vec![],

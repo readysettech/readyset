@@ -135,7 +135,7 @@ impl Sharder {
     }
 
     #[inline]
-    fn shard(&self, dt: &DataType) -> usize {
+    fn shard(&self, dt: &DfValue) -> usize {
         crate::shard_by(dt, self.txs.len())
     }
 

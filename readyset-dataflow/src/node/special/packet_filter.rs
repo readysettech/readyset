@@ -2,7 +2,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::ops::Bound;
 
-use common::DataType;
+use common::DfValue;
 use readyset::KeyComparison;
 use readyset_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -170,33 +170,29 @@ impl PacketFilter {
     }
 }
 
-fn check_lower_bound(lower_bound: &Bound<Vec1<DataType>>, ci: &[usize], row: &[DataType]) -> bool {
+fn check_lower_bound(lower_bound: &Bound<Vec1<DfValue>>, ci: &[usize], row: &[DfValue]) -> bool {
     match lower_bound {
         Bound::Included(bound) => {
-            check_bound(ci, row, bound, |d1: &DataType, d2: &DataType| d1 >= d2)
+            check_bound(ci, row, bound, |d1: &DfValue, d2: &DfValue| d1 >= d2)
         }
-        Bound::Excluded(bound) => {
-            check_bound(ci, row, bound, |d1: &DataType, d2: &DataType| d1 > d2)
-        }
+        Bound::Excluded(bound) => check_bound(ci, row, bound, |d1: &DfValue, d2: &DfValue| d1 > d2),
         Bound::Unbounded => true,
     }
 }
 
-fn check_upper_bound(upper_bound: &Bound<Vec1<DataType>>, ci: &[usize], row: &[DataType]) -> bool {
+fn check_upper_bound(upper_bound: &Bound<Vec1<DfValue>>, ci: &[usize], row: &[DfValue]) -> bool {
     match upper_bound {
         Bound::Included(bound) => {
-            check_bound(ci, row, bound, |d1: &DataType, d2: &DataType| d1 <= d2)
+            check_bound(ci, row, bound, |d1: &DfValue, d2: &DfValue| d1 <= d2)
         }
-        Bound::Excluded(bound) => {
-            check_bound(ci, row, bound, |d1: &DataType, d2: &DataType| d1 < d2)
-        }
+        Bound::Excluded(bound) => check_bound(ci, row, bound, |d1: &DfValue, d2: &DfValue| d1 < d2),
         Bound::Unbounded => true,
     }
 }
 
-fn check_bound<T>(ci: &[usize], row: &[DataType], keys: &[DataType], check: T) -> bool
+fn check_bound<T>(ci: &[usize], row: &[DfValue], keys: &[DfValue], check: T) -> bool
 where
-    T: Fn(&DataType, &DataType) -> bool,
+    T: Fn(&DfValue, &DfValue) -> bool,
 {
     ci.iter()
         .enumerate()

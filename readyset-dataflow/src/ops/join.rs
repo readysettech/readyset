@@ -152,10 +152,10 @@ impl Join {
 
     fn generate_row(
         &self,
-        left: &[DataType],
-        right: &[DataType],
+        left: &[DfValue],
+        right: &[DfValue],
         reusing: Preprocessed,
-    ) -> Vec<DataType> {
+    ) -> Vec<DfValue> {
         self.emit
             .iter()
             .enumerate()
@@ -180,17 +180,17 @@ impl Join {
 
     fn regenerate_row(
         &self,
-        mut reuse: Vec<DataType>,
-        other: &[DataType],
+        mut reuse: Vec<DfValue>,
+        other: &[DfValue],
         reusing_left: bool,
         other_prepreprocessed: bool,
-    ) -> Vec<DataType> {
+    ) -> Vec<DfValue> {
         let emit = if reusing_left {
             &self.in_place_left_emit
         } else {
             &self.in_place_right_emit
         };
-        reuse.resize(emit.len(), DataType::None);
+        reuse.resize(emit.len(), DfValue::None);
         for (i, &(side, c)) in emit.iter().enumerate() {
             let from_left = side == Side::Left;
             if (from_left == reusing_left) && i != c {
@@ -241,14 +241,14 @@ impl Join {
     }
 
     // TODO: make non-allocating
-    fn generate_null(&self, left: &[DataType]) -> Vec<DataType> {
+    fn generate_null(&self, left: &[DfValue]) -> Vec<DfValue> {
         self.emit
             .iter()
             .map(|&(side, col)| {
                 if side == Side::Left {
                     left[col].clone()
                 } else {
-                    DataType::None
+                    DfValue::None
                 }
             })
             .collect()
@@ -434,7 +434,7 @@ impl Ingredient for Join {
             // impossible to upquery for null keys (since IS and IS NOT can't be parametrized,
             // syntatically), but we *do* have to have an extra case here in the case of join
             // lookups - two NULL join keys should *not* match each other in the semantics of the
-            // join, even though they *would* match normally due to the semantics of the DataType
+            // join, even though they *would* match normally due to the semantics of the DfValue
             // type.
             let nulls = prev_join_key.iter().any(|dt| dt.is_none());
 
@@ -1036,11 +1036,7 @@ mod tests {
         j.one_row(r, r_z2, false);
 
         // forward c3 from left; should produce [c3 + None] since no records in right are 3
-        let null = vec![(
-            vec![3.into(), "c".try_into().unwrap(), DataType::None],
-            true,
-        )]
-        .into();
+        let null = vec![(vec![3.into(), "c".try_into().unwrap(), DfValue::None], true)].into();
         j.seed(l, l_c3.clone());
         let rs = j.one_row(l, l_c3.clone(), false);
         assert_eq!(rs, null);
@@ -1057,7 +1053,7 @@ mod tests {
             rs,
             vec![
                 (
-                    vec![3.into(), "c".try_into().unwrap(), DataType::None],
+                    vec![3.into(), "c".try_into().unwrap(), DfValue::None],
                     false
                 ),
                 (
@@ -1065,7 +1061,7 @@ mod tests {
                     true
                 ),
                 (
-                    vec![3.into(), "c".try_into().unwrap(), DataType::None],
+                    vec![3.into(), "c".try_into().unwrap(), DfValue::None],
                     false
                 ),
                 (
@@ -1153,18 +1149,18 @@ mod tests {
         j.seed(r, r_1x.clone());
         j.one_row(r, r_1x, false);
 
-        let r_nullx = vec![DataType::None, "y".try_into().unwrap()];
+        let r_nullx = vec![DfValue::None, "y".try_into().unwrap()];
         j.seed(r, r_nullx.clone());
         j.one_row(r, r_nullx, false);
 
-        let l_nulla = vec![DataType::None, "a".try_into().unwrap()];
+        let l_nulla = vec![DfValue::None, "a".try_into().unwrap()];
 
         j.seed(l, l_nulla.clone());
         let rs = j.one_row(l, l_nulla, false);
         assert_eq!(
             rs,
             vec![(
-                vec![DataType::None, "a".try_into().unwrap(), DataType::None],
+                vec![DfValue::None, "a".try_into().unwrap(), DfValue::None],
                 true
             )]
             .into()
@@ -1175,11 +1171,11 @@ mod tests {
     fn nulls_from_right() {
         let (mut j, l, r) = setup();
 
-        let l_nulla = vec![DataType::None, "a".try_into().unwrap()];
+        let l_nulla = vec![DfValue::None, "a".try_into().unwrap()];
         j.seed(l, l_nulla.clone());
         j.one_row(l, l_nulla, false);
 
-        let r_nullx = vec![DataType::None, "y".try_into().unwrap()];
+        let r_nullx = vec![DfValue::None, "y".try_into().unwrap()];
         j.seed(r, r_nullx.clone());
         let rs = j.one_row(r, r_nullx, false);
         assert_eq!(rs, Records::default());
@@ -1217,12 +1213,9 @@ mod tests {
                 .handle_upquery(ColumnMiss {
                     node,
                     column_indices: vec1![0, 1, 2],
-                    missed_keys: vec1![vec1![
-                        DataType::from(1),
-                        DataType::from(2),
-                        DataType::from(3)
-                    ]
-                    .into()],
+                    missed_keys: vec1![
+                        vec1![DfValue::from(1), DfValue::from(2), DfValue::from(3)].into()
+                    ],
                 })
                 .unwrap();
 
@@ -1234,11 +1227,11 @@ mod tests {
 
             assert_eq!(
                 left_miss.missed_keys,
-                vec1![vec1![DataType::from(1), DataType::from(2)].into()]
+                vec1![vec1![DfValue::from(1), DfValue::from(2)].into()]
             );
             assert_eq!(
                 right_miss.missed_keys,
-                vec1![vec1![DataType::from(3)].into()]
+                vec1![vec1![DfValue::from(3)].into()]
             );
         }
 
@@ -1252,8 +1245,8 @@ mod tests {
                     node,
                     column_indices: vec1![0, 1, 2],
                     missed_keys: vec1![
-                        vec1![DataType::from(1), DataType::from(2), DataType::from(3)].into(),
-                        vec1![DataType::from(4), DataType::from(5), DataType::from(6)].into()
+                        vec1![DfValue::from(1), DfValue::from(2), DfValue::from(3)].into(),
+                        vec1![DfValue::from(4), DfValue::from(5), DfValue::from(6)].into()
                     ],
                 })
                 .unwrap();
@@ -1267,15 +1260,15 @@ mod tests {
             assert_eq!(
                 left_miss.missed_keys,
                 vec1![
-                    vec1![DataType::from(1), DataType::from(2)].into(),
-                    vec1![DataType::from(4), DataType::from(5)].into()
+                    vec1![DfValue::from(1), DfValue::from(2)].into(),
+                    vec1![DfValue::from(4), DfValue::from(5)].into()
                 ]
             );
             assert_eq!(
                 right_miss.missed_keys,
                 vec1![
-                    vec1![DataType::from(3)].into(),
-                    vec1![DataType::from(6)].into()
+                    vec1![DfValue::from(3)].into(),
+                    vec1![DfValue::from(6)].into()
                 ]
             );
         }
@@ -1291,14 +1284,14 @@ mod tests {
                     column_indices: vec1![0, 1, 2],
                     missed_keys: vec1![KeyComparison::Range((
                         Bound::Included(vec1![
-                            DataType::from(1),
-                            DataType::from(2),
-                            DataType::from(3)
+                            DfValue::from(1),
+                            DfValue::from(2),
+                            DfValue::from(3)
                         ]),
                         Bound::Excluded(vec1![
-                            DataType::from(4),
-                            DataType::from(5),
-                            DataType::from(6)
+                            DfValue::from(4),
+                            DfValue::from(5),
+                            DfValue::from(6)
                         ])
                     ))],
                 })
@@ -1313,15 +1306,15 @@ mod tests {
             assert_eq!(
                 left_miss.missed_keys,
                 vec1![KeyComparison::Range((
-                    Bound::Included(vec1![DataType::from(1), DataType::from(2)]),
-                    Bound::Excluded(vec1![DataType::from(4), DataType::from(5)])
+                    Bound::Included(vec1![DfValue::from(1), DfValue::from(2)]),
+                    Bound::Excluded(vec1![DfValue::from(4), DfValue::from(5)])
                 ))]
             );
             assert_eq!(
                 right_miss.missed_keys,
                 vec1![KeyComparison::Range((
-                    Bound::Included(vec1![DataType::from(3)]),
-                    Bound::Excluded(vec1![DataType::from(6)])
+                    Bound::Included(vec1![DfValue::from(3)]),
+                    Bound::Excluded(vec1![DfValue::from(6)])
                 ))]
             );
         }
@@ -1337,9 +1330,9 @@ mod tests {
                     column_indices: vec1![0, 1, 2],
                     missed_keys: vec1![KeyComparison::Range((
                         Bound::Included(vec1![
-                            DataType::from(1),
-                            DataType::from(2),
-                            DataType::from(3)
+                            DfValue::from(1),
+                            DfValue::from(2),
+                            DfValue::from(3)
                         ]),
                         Bound::Unbounded
                     ))],
@@ -1355,14 +1348,14 @@ mod tests {
             assert_eq!(
                 left_miss.missed_keys,
                 vec1![KeyComparison::Range((
-                    Bound::Included(vec1![DataType::from(1), DataType::from(2)]),
+                    Bound::Included(vec1![DfValue::from(1), DfValue::from(2)]),
                     Bound::Unbounded
                 ))]
             );
             assert_eq!(
                 right_miss.missed_keys,
                 vec1![KeyComparison::Range((
-                    Bound::Included(vec1![DataType::from(3)]),
+                    Bound::Included(vec1![DfValue::from(3)]),
                     Bound::Unbounded
                 ))]
             );
@@ -1399,7 +1392,7 @@ mod tests {
             assert_eq!(
                 rs,
                 vec![(
-                    vec![3.into(), 4.into(), "c".try_into().unwrap(), DataType::None],
+                    vec![3.into(), 4.into(), "c".try_into().unwrap(), DfValue::None],
                     true
                 )]
                 .into()
@@ -1418,7 +1411,7 @@ mod tests {
                 rs,
                 vec![
                     (
-                        vec![3.into(), 4.into(), "c".try_into().unwrap(), DataType::None],
+                        vec![3.into(), 4.into(), "c".try_into().unwrap(), DfValue::None],
                         false
                     ),
                     (

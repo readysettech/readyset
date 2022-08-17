@@ -9,7 +9,7 @@ use mysql_async::{Column, Conn, Opts, OptsBuilder, Row, TxOpts, UrlError};
 use readyset::ColumnSchema;
 use readyset_client::upstream_database::NoriaCompare;
 use readyset_client::{UpstreamDatabase, UpstreamPrepare};
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use readyset_errors::{internal_err, ReadySetError};
 use tracing::{error, info, info_span, Instrument};
 
@@ -18,7 +18,7 @@ use crate::Error;
 
 type StatementID = u32;
 
-fn dt_to_value_params(dt: &[DataType]) -> Result<Vec<mysql_async::Value>, readyset::ReadySetError> {
+fn dt_to_value_params(dt: &[DfValue]) -> Result<Vec<mysql_async::Value>, readyset::ReadySetError> {
     dt.iter().map(|v| v.try_into()).collect()
 }
 
@@ -175,7 +175,7 @@ impl UpstreamDatabase for MySqlUpstream {
         })
     }
 
-    async fn execute(&mut self, id: u32, params: &[DataType]) -> Result<Self::QueryResult, Error> {
+    async fn execute(&mut self, id: u32, params: &[DfValue]) -> Result<Self::QueryResult, Error> {
         let params = dt_to_value_params(params)?;
         let mut result = self
             .conn

@@ -23,7 +23,7 @@ struct CurrentRecord<'op, 'state> {
     ///
     /// For rows loaded from the state, the last column will contain the page number as-is from the
     /// state. For new rows received in the batch, the row will be one column shorter.
-    row: Cow<'state, [DataType]>,
+    row: Cow<'state, [DfValue]>,
     order: &'op Order,
 }
 
@@ -42,8 +42,8 @@ impl<'op, 'state> PartialOrd for CurrentRecord<'op, 'state> {
     }
 }
 
-impl<'op, 'state> PartialOrd<[DataType]> for CurrentRecord<'op, 'state> {
-    fn partial_cmp(&self, other: &[DataType]) -> Option<Ordering> {
+impl<'op, 'state> PartialOrd<[DfValue]> for CurrentRecord<'op, 'state> {
+    fn partial_cmp(&self, other: &[DfValue]) -> Option<Ordering> {
         Some(self.order.cmp(self.row.as_ref(), other))
     }
 }
@@ -54,8 +54,8 @@ impl<'op, 'state> PartialEq for CurrentRecord<'op, 'state> {
     }
 }
 
-impl<'op, 'state> PartialEq<[DataType]> for CurrentRecord<'op, 'state> {
-    fn eq(&self, other: &[DataType]) -> bool {
+impl<'op, 'state> PartialEq<[DfValue]> for CurrentRecord<'op, 'state> {
+    fn eq(&self, other: &[DfValue]) -> bool {
         self.partial_cmp(other).contains(&Ordering::Equal)
     }
 }
@@ -101,9 +101,9 @@ impl Paginate {
     }
 
     /// Project the columns we are grouping by out of the given record
-    fn project_group<'rec, R>(&self, rec: &'rec R) -> ReadySetResult<Vec<&'rec DataType>>
+    fn project_group<'rec, R>(&self, rec: &'rec R) -> ReadySetResult<Vec<&'rec DfValue>>
     where
-        R: Indices<'static, usize, Output = DataType> + ?Sized,
+        R: Indices<'static, usize, Output = DfValue> + ?Sized,
     {
         rec.indices(self.group_by.clone())
             .map_err(|_| ReadySetError::InvalidRecordLength)
@@ -200,7 +200,7 @@ impl Ingredient for Paginate {
             .get(*us)
             .ok_or_else(|| internal_err!("paginate must have its own state materialized"))?;
 
-        let mut current_group_key: Vec<DataType> = vec![];
+        let mut current_group_key: Vec<DfValue> = vec![];
         let mut current_group: BinaryHeap<CurrentRecord> = BinaryHeap::new();
         let mut group_missed = false;
 
@@ -391,7 +391,7 @@ mod tests {
         (g, s)
     }
 
-    fn with_page(row: &[DataType], page_num: u64) -> Vec<DataType> {
+    fn with_page(row: &[DfValue], page_num: u64) -> Vec<DfValue> {
         let mut res = row.to_vec();
         res.push(page_num.into());
         res
@@ -449,7 +449,7 @@ mod tests {
             .handle_upquery(ColumnMiss {
                 node: *g.node_index(),
                 column_indices: vec1![1, 2],
-                missed_keys: vec1![vec1![DataType::from("a"), DataType::from(1)].into()],
+                missed_keys: vec1![vec1![DfValue::from("a"), DfValue::from(1)].into()],
             })
             .unwrap();
 
@@ -459,7 +459,7 @@ mod tests {
             ColumnMiss {
                 node: *g.node_index(),
                 column_indices: vec1![1],
-                missed_keys: vec1![vec1![DataType::from("a")].into()]
+                missed_keys: vec1![vec1![DfValue::from("a")].into()]
             }
         );
     }
@@ -468,8 +468,8 @@ mod tests {
     fn first_row_first_page() {
         let (mut g, _) = setup();
 
-        let r1a: Vec<DataType> = vec![1.into(), "a".into()];
-        let r1a_p0: Vec<DataType> = vec![1.into(), "a".into(), 0.into()];
+        let r1a: Vec<DfValue> = vec![1.into(), "a".into()];
+        let r1a_p0: Vec<DfValue> = vec![1.into(), "a".into(), 0.into()];
 
         let res = g.narrow_one_row(r1a, true);
         assert_eq!(res, vec![r1a_p0].into());

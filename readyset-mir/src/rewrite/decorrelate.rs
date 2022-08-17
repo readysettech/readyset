@@ -332,7 +332,7 @@ impl DependentCondition {
 mod tests {
     use std::rc::Rc;
 
-    use common::{DataType, IndexType};
+    use common::{DfValue, IndexType};
     use dataflow::ops::grouped::aggregate::Aggregation;
     use nom_sql::{BinaryOperator, ColumnSpecification, Expr, Literal, SqlType};
 
@@ -404,8 +404,8 @@ mod tests {
                 emit: vec![],
                 expressions: vec![],
                 literals: vec![
-                    ("__count_val".into(), DataType::from(0u32)),
-                    ("__count_grp".into(), DataType::from(0u32)),
+                    ("__count_val".into(), DfValue::from(0u32)),
+                    ("__count_grp".into(), DfValue::from(0u32)),
                 ],
             },
             vec![Rc::downgrade(&t2_alias_table)],
@@ -472,7 +472,7 @@ mod tests {
             MirNodeInner::Project {
                 emit: vec![Column::new(Some("t1"), "a")],
                 expressions: vec![],
-                literals: vec![("__exists_join_key".into(), DataType::from(0u32))],
+                literals: vec![("__exists_join_key".into(), DfValue::from(0u32))],
             },
             vec![Rc::downgrade(&t1)],
             vec![],
@@ -677,8 +677,8 @@ mod tests {
                 emit: vec![],
                 expressions: vec![],
                 literals: vec![
-                    ("__count_val".into(), DataType::from(0u32)),
-                    ("__count_grp".into(), DataType::from(0u32)),
+                    ("__count_val".into(), DfValue::from(0u32)),
+                    ("__count_grp".into(), DfValue::from(0u32)),
                 ],
             },
             vec![Rc::downgrade(&t2_count_f2)],
@@ -745,7 +745,7 @@ mod tests {
             MirNodeInner::Project {
                 emit: vec![Column::new(Some("t1"), "a")],
                 expressions: vec![],
-                literals: vec![("__exists_join_key".into(), DataType::from(0u32))],
+                literals: vec![("__exists_join_key".into(), DfValue::from(0u32))],
             },
             vec![Rc::downgrade(&t1)],
             vec![],

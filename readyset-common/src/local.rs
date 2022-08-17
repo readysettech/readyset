@@ -4,7 +4,7 @@ use std::ops::{Bound, RangeBounds};
 
 use petgraph::graph::NodeIndex;
 use readyset::internal::LocalNodeIndex;
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use test_strategy::Arbitrary;
 use vec1::Vec1;
@@ -143,18 +143,18 @@ impl From<Tag> for u32 {
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum KeyType<'a> {
-    Single(&'a DataType),
-    Double((DataType, DataType)),
-    Tri((DataType, DataType, DataType)),
-    Quad((DataType, DataType, DataType, DataType)),
-    Quin((DataType, DataType, DataType, DataType, DataType)),
-    Sex((DataType, DataType, DataType, DataType, DataType, DataType)),
-    Multi(Vec<DataType>),
+    Single(&'a DfValue),
+    Double((DfValue, DfValue)),
+    Tri((DfValue, DfValue, DfValue)),
+    Quad((DfValue, DfValue, DfValue, DfValue)),
+    Quin((DfValue, DfValue, DfValue, DfValue, DfValue)),
+    Sex((DfValue, DfValue, DfValue, DfValue, DfValue, DfValue)),
+    Multi(Vec<DfValue>),
 }
 
 #[allow(clippy::len_without_is_empty)]
 impl<'a> KeyType<'a> {
-    pub fn get(&self, idx: usize) -> Option<&DataType> {
+    pub fn get(&self, idx: usize) -> Option<&DfValue> {
         use tuple::TupleElements;
 
         match self {
@@ -171,7 +171,7 @@ impl<'a> KeyType<'a> {
 
     pub fn from<I>(other: I) -> Self
     where
-        I: IntoIterator<Item = &'a DataType>,
+        I: IntoIterator<Item = &'a DfValue>,
         <I as IntoIterator>::IntoIter: ExactSizeIterator,
     {
         let mut other = other.into_iter();
@@ -244,7 +244,7 @@ impl<'a> KeyType<'a> {
                     || e4.is_none()
                     || e5.is_none()
             }
-            KeyType::Multi(k) => k.iter().any(DataType::is_none),
+            KeyType::Multi(k) => k.iter().any(DfValue::is_none),
         }
     }
 }
@@ -254,64 +254,64 @@ impl<'a> KeyType<'a> {
 pub enum RangeKey<'a> {
     /// Key-length-polymorphic double-unbounded range key
     Unbounded,
-    Single((Bound<&'a DataType>, Bound<&'a DataType>)),
+    Single((Bound<&'a DfValue>, Bound<&'a DfValue>)),
     Double(
         (
-            Bound<(&'a DataType, &'a DataType)>,
-            Bound<(&'a DataType, &'a DataType)>,
+            Bound<(&'a DfValue, &'a DfValue)>,
+            Bound<(&'a DfValue, &'a DfValue)>,
         ),
     ),
     Tri(
         (
-            Bound<(&'a DataType, &'a DataType, &'a DataType)>,
-            Bound<(&'a DataType, &'a DataType, &'a DataType)>,
+            Bound<(&'a DfValue, &'a DfValue, &'a DfValue)>,
+            Bound<(&'a DfValue, &'a DfValue, &'a DfValue)>,
         ),
     ),
     Quad(
         (
-            Bound<(&'a DataType, &'a DataType, &'a DataType, &'a DataType)>,
-            Bound<(&'a DataType, &'a DataType, &'a DataType, &'a DataType)>,
+            Bound<(&'a DfValue, &'a DfValue, &'a DfValue, &'a DfValue)>,
+            Bound<(&'a DfValue, &'a DfValue, &'a DfValue, &'a DfValue)>,
         ),
     ),
     Quin(
         (
             Bound<(
-                &'a DataType,
-                &'a DataType,
-                &'a DataType,
-                &'a DataType,
-                &'a DataType,
+                &'a DfValue,
+                &'a DfValue,
+                &'a DfValue,
+                &'a DfValue,
+                &'a DfValue,
             )>,
             Bound<(
-                &'a DataType,
-                &'a DataType,
-                &'a DataType,
-                &'a DataType,
-                &'a DataType,
+                &'a DfValue,
+                &'a DfValue,
+                &'a DfValue,
+                &'a DfValue,
+                &'a DfValue,
             )>,
         ),
     ),
     Sex(
         (
             Bound<(
-                &'a DataType,
-                &'a DataType,
-                &'a DataType,
-                &'a DataType,
-                &'a DataType,
-                &'a DataType,
+                &'a DfValue,
+                &'a DfValue,
+                &'a DfValue,
+                &'a DfValue,
+                &'a DfValue,
+                &'a DfValue,
             )>,
             Bound<(
-                &'a DataType,
-                &'a DataType,
-                &'a DataType,
-                &'a DataType,
-                &'a DataType,
-                &'a DataType,
+                &'a DfValue,
+                &'a DfValue,
+                &'a DfValue,
+                &'a DfValue,
+                &'a DfValue,
+                &'a DfValue,
             )>,
         ),
     ),
-    Multi((Bound<&'a [DataType]>, Bound<&'a [DataType]>)),
+    Multi((Bound<&'a [DfValue]>, Bound<&'a [DfValue]>)),
 }
 
 #[allow(clippy::len_without_is_empty)]
@@ -328,19 +328,19 @@ impl<'a> RangeKey<'a> {
     /// use std::ops::Bound::*;
     ///
     /// use readyset_common::RangeKey;
-    /// use readyset_data::DataType;
+    /// use readyset_data::DfValue;
     /// use vec1::vec1;
     ///
     /// // Can build RangeKeys from regular range expressions
     /// assert_eq!(RangeKey::from(&(..)), RangeKey::Unbounded);
     /// assert_eq!(
-    ///     RangeKey::from(&(vec1![DataType::from(0)]..vec1![DataType::from(1)])),
+    ///     RangeKey::from(&(vec1![DfValue::from(0)]..vec1![DfValue::from(1)])),
     ///     RangeKey::Single((Included(&(0.into())), Excluded(&(1.into()))))
     /// );
     /// ```
     pub fn from<R>(range: &'a R) -> Self
     where
-        R: RangeBounds<Vec1<DataType>>,
+        R: RangeBounds<Vec1<DfValue>>,
     {
         use Bound::*;
         let len = match (range.start_bound(), range.end_bound()) {
@@ -385,7 +385,7 @@ impl<'a> RangeKey<'a> {
     }
 
     /// Returns the upper bound of the range key
-    pub fn upper_bound(&self) -> Bound<Vec<&'a DataType>> {
+    pub fn upper_bound(&self) -> Bound<Vec<&'a DfValue>> {
         use tuple::TupleElements;
 
         match self {

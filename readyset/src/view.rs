@@ -24,7 +24,7 @@ use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
 use rand::prelude::IteratorRandom;
 use rand::thread_rng;
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use readyset_errors::{
     internal_err, rpc_err, unsupported, view_err, ReadySetError, ReadySetResult,
 };
@@ -316,10 +316,10 @@ pub(crate) type ViewRpc = Buffer<
 pub enum KeyComparison {
     /// Look up exactly one key
     /// TODO(eta): this comment is crap
-    Equal(Vec1<DataType>),
+    Equal(Vec1<DfValue>),
 
     /// Look up all keys within a range
-    Range(BoundPair<Vec1<DataType>>),
+    Range(BoundPair<Vec1<DfValue>>),
 }
 
 #[allow(clippy::len_without_is_empty)] // can never be empty
@@ -327,7 +327,7 @@ impl KeyComparison {
     /// Attempt to construct a key comparsion comparing the given key using the given binary
     /// operator
     pub fn from_key_and_operator(
-        key: Vec<DataType>,
+        key: Vec<DfValue>,
         operator: BinaryOperator,
     ) -> ReadySetResult<Self> {
         use BinaryOperator::*;
@@ -346,7 +346,7 @@ impl KeyComparison {
 
     /// Project a KeyComparison into an optional equality predicate, or return None if it's a range
     /// predicate. Handles both [`Equal`] and single-length [`Range`]s
-    pub fn equal(&self) -> Option<&Vec1<DataType>> {
+    pub fn equal(&self) -> Option<&Vec1<DfValue>> {
         match self {
             KeyComparison::Equal(ref key) => Some(key),
             KeyComparison::Range((Bound::Included(ref key), Bound::Included(ref key2)))
@@ -361,7 +361,7 @@ impl KeyComparison {
     /// Convert a KeyComparison into an optional equality predicate, consuming the key comparison,
     /// or return None if it's a range predicate. Handles both [`Equal`] and single-length
     /// [`Range`]s
-    pub fn into_equal(self) -> Option<Vec1<DataType>> {
+    pub fn into_equal(self) -> Option<Vec1<DfValue>> {
         match self {
             KeyComparison::Equal(key) => Some(key),
             KeyComparison::Range((Bound::Included(key), Bound::Included(ref key2)))
@@ -375,7 +375,7 @@ impl KeyComparison {
 
     /// Project a KeyComparison into an optional range predicate, or return None if it's a range
     /// predicate
-    pub fn range(&self) -> Option<&BoundPair<Vec1<DataType>>> {
+    pub fn range(&self) -> Option<&BoundPair<Vec1<DfValue>>> {
         match self {
             KeyComparison::Range(ref range) => Some(range),
             _ => None,
@@ -388,7 +388,7 @@ impl KeyComparison {
     /// [`KeyComparison::Equal`].
     pub fn from_range<R>(range: &R) -> Self
     where
-        R: RangeBounds<Vec1<DataType>>,
+        R: RangeBounds<Vec1<DfValue>>,
     {
         match (range.start_bound(), range.end_bound()) {
             (Bound::Included(key1), Bound::Included(key2)) if key1 == key2 => {
@@ -405,21 +405,20 @@ impl KeyComparison {
     ///
     /// ```
     /// use readyset::KeyComparison;
-    /// use readyset_data::DataType;
+    /// use readyset_data::DfValue;
     /// use vec1::vec1;
     ///
     /// let not_reversed =
-    ///     KeyComparison::from_range(&(vec1![DataType::from(0)]..=vec1![DataType::from(1)]));
+    ///     KeyComparison::from_range(&(vec1![DfValue::from(0)]..=vec1![DfValue::from(1)]));
     /// assert!(!not_reversed.is_reversed_range());
     ///
-    /// let reversed =
-    ///     KeyComparison::from_range(&(vec1![DataType::from(1)]..=vec1![DataType::from(0)]));
+    /// let reversed = KeyComparison::from_range(&(vec1![DfValue::from(1)]..=vec1![DfValue::from(0)]));
     /// assert!(reversed.is_reversed_range());
     /// ```
     pub fn is_reversed_range(&self) -> bool {
         cmp_start_end(
-            <Self as RangeBounds<Vec1<DataType>>>::start_bound(self),
-            <Self as RangeBounds<Vec1<DataType>>>::end_bound(self),
+            <Self as RangeBounds<Vec1<DfValue>>>::start_bound(self),
+            <Self as RangeBounds<Vec1<DfValue>>>::end_bound(self),
         ) == Ordering::Greater
     }
 
@@ -487,7 +486,7 @@ impl KeyComparison {
     ///
     /// ```rust
     /// use readyset::KeyComparison;
-    /// use readyset_data::DataType;
+    /// use readyset_data::DfValue;
     /// use vec1::vec1;
     ///
     /// let key = KeyComparison::Equal(vec1![1.into(), 2.into()]);
@@ -501,7 +500,7 @@ impl KeyComparison {
     /// use std::ops::Bound::*;
     ///
     /// use readyset::KeyComparison;
-    /// use readyset_data::DataType;
+    /// use readyset_data::DfValue;
     /// use vec1::vec1;
     ///
     /// let key = KeyComparison::Range((
@@ -514,7 +513,7 @@ impl KeyComparison {
     /// ```
     pub fn contains<'a, I>(&'a self, key: I) -> bool
     where
-        I: IntoIterator<Item = &'a DataType> + Clone,
+        I: IntoIterator<Item = &'a DfValue> + Clone,
     {
         match self {
             Self::Equal(equal) => key.into_iter().cmp(equal.iter()) == Ordering::Equal,
@@ -549,7 +548,7 @@ impl KeyComparison {
     #[must_use]
     pub fn map_endpoints<F>(self, mut f: F) -> Self
     where
-        F: FnMut(Vec1<DataType>) -> Vec1<DataType>,
+        F: FnMut(Vec1<DfValue>) -> Vec1<DfValue>,
     {
         match self {
             KeyComparison::Equal(k) => KeyComparison::Equal(f(k)),
@@ -585,33 +584,33 @@ impl Hash for KeyComparison {
     }
 }
 
-impl TryFrom<Vec<DataType>> for KeyComparison {
+impl TryFrom<Vec<DfValue>> for KeyComparison {
     type Error = vec1::Size0Error;
 
     /// Converts to a [`KeyComparison::Equal`]. Returns an error if the input vector is empty
-    fn try_from(value: Vec<DataType>) -> Result<Self, Self::Error> {
+    fn try_from(value: Vec<DfValue>) -> Result<Self, Self::Error> {
         Ok(Vec1::try_from(value)?.into())
     }
 }
 
-impl From<Vec1<DataType>> for KeyComparison {
+impl From<Vec1<DfValue>> for KeyComparison {
     /// Converts to a [`KeyComparison::Equal`]
-    fn from(key: Vec1<DataType>) -> Self {
+    fn from(key: Vec1<DfValue>) -> Self {
         KeyComparison::Equal(key)
     }
 }
 
-impl From<Range<Vec1<DataType>>> for KeyComparison {
-    fn from(range: Range<Vec1<DataType>>) -> Self {
+impl From<Range<Vec1<DfValue>>> for KeyComparison {
+    fn from(range: Range<Vec1<DfValue>>) -> Self {
         KeyComparison::Range((Bound::Included(range.start), Bound::Excluded(range.end)))
     }
 }
 
-impl TryFrom<BoundPair<Vec<DataType>>> for KeyComparison {
+impl TryFrom<BoundPair<Vec<DfValue>>> for KeyComparison {
     type Error = vec1::Size0Error;
 
     /// Converts to a [`KeyComparison::Range`]
-    fn try_from((lower, upper): BoundPair<Vec<DataType>>) -> Result<Self, Self::Error> {
+    fn try_from((lower, upper): BoundPair<Vec<DfValue>>) -> Result<Self, Self::Error> {
         let convert_bound = |bound| match bound {
             Bound::Unbounded => Ok(Bound::Unbounded),
             Bound::Included(x) => Ok(Bound::Included(Vec1::try_from(x)?)),
@@ -621,15 +620,15 @@ impl TryFrom<BoundPair<Vec<DataType>>> for KeyComparison {
     }
 }
 
-impl From<BoundPair<Vec1<DataType>>> for KeyComparison {
+impl From<BoundPair<Vec1<DfValue>>> for KeyComparison {
     /// Converts to a [`KeyComparison::Range`]
-    fn from(range: BoundPair<Vec1<DataType>>) -> Self {
+    fn from(range: BoundPair<Vec1<DfValue>>) -> Self {
         KeyComparison::Range(range)
     }
 }
 
-impl RangeBounds<Vec1<DataType>> for KeyComparison {
-    fn start_bound(&self) -> Bound<&Vec1<DataType>> {
+impl RangeBounds<Vec1<DfValue>> for KeyComparison {
+    fn start_bound(&self) -> Bound<&Vec1<DfValue>> {
         use Bound::*;
         use KeyComparison::*;
         match self {
@@ -640,7 +639,7 @@ impl RangeBounds<Vec1<DataType>> for KeyComparison {
         }
     }
 
-    fn end_bound(&self) -> Bound<&Vec1<DataType>> {
+    fn end_bound(&self) -> Bound<&Vec1<DfValue>> {
         use Bound::*;
         use KeyComparison::*;
         match self {
@@ -652,18 +651,18 @@ impl RangeBounds<Vec1<DataType>> for KeyComparison {
     }
 }
 
-impl RangeBounds<Vec<DataType>> for KeyComparison {
-    fn start_bound(&self) -> Bound<&Vec<DataType>> {
+impl RangeBounds<Vec<DfValue>> for KeyComparison {
+    fn start_bound(&self) -> Bound<&Vec<DfValue>> {
         self.start_bound().map(Vec1::as_vec)
     }
 
-    fn end_bound(&self) -> Bound<&Vec<DataType>> {
+    fn end_bound(&self) -> Bound<&Vec<DfValue>> {
         self.end_bound().map(Vec1::as_vec)
     }
 }
 
-impl RangeBounds<Vec1<DataType>> for &KeyComparison {
-    fn start_bound(&self) -> Bound<&Vec1<DataType>> {
+impl RangeBounds<Vec1<DfValue>> for &KeyComparison {
+    fn start_bound(&self) -> Bound<&Vec1<DfValue>> {
         use Bound::*;
         use KeyComparison::*;
         match self {
@@ -674,7 +673,7 @@ impl RangeBounds<Vec1<DataType>> for &KeyComparison {
         }
     }
 
-    fn end_bound(&self) -> Bound<&Vec1<DataType>> {
+    fn end_bound(&self) -> Bound<&Vec1<DfValue>> {
         use Bound::*;
         use KeyComparison::*;
         match self {
@@ -686,12 +685,12 @@ impl RangeBounds<Vec1<DataType>> for &KeyComparison {
     }
 }
 
-impl RangeBounds<Vec<DataType>> for &KeyComparison {
-    fn start_bound(&self) -> Bound<&Vec<DataType>> {
+impl RangeBounds<Vec<DfValue>> for &KeyComparison {
+    fn start_bound(&self) -> Bound<&Vec<DfValue>> {
         (**self).start_bound()
     }
 
-    fn end_bound(&self) -> Bound<&Vec<DataType>> {
+    fn end_bound(&self) -> Bound<&Vec<DfValue>> {
         (**self).end_bound()
     }
 }
@@ -704,7 +703,7 @@ impl Arbitrary for KeyComparison {
         use proptest::strategy::Strategy;
 
         let bound = || {
-            any_with::<Bound<Vec<DataType>>>(((1..100).into(), None)).prop_map(|bound| {
+            any_with::<Bound<Vec<DfValue>>>(((1..100).into(), None)).prop_map(|bound| {
                 #[allow(clippy::unwrap_used)]
                 // This is only used for testing, so we allow calling `unwrap()`, and because we
                 // know we are generating vectors of length 1 and beyond.
@@ -713,7 +712,7 @@ impl Arbitrary for KeyComparison {
         };
 
         prop_oneof![
-            any_with::<Vec<DataType>>(((1..100).into(), None)).prop_map(|k| {
+            any_with::<Vec<DfValue>>(((1..100).into(), None)).prop_map(|k| {
                 #[allow(clippy::unwrap_used)]
                 // This is only used for testing, so we allow calling `unwrap()`, and because we
                 // know we are generating vectors of length 1 and beyond.
@@ -809,7 +808,7 @@ pub enum ReadReply<D = ReadReplyBatch> {
     /// Read size of view
     Size(usize),
     // Read keys of view
-    Keys(Vec<Vec<DataType>>),
+    Keys(Vec<Vec<DfValue>>),
 }
 
 impl<D> ReadReply<D> {
@@ -966,7 +965,7 @@ pub struct ViewQuery {
     /// This expression will be evaluaated on each of the rows returned from the reader, and any
     /// rows for which it evaluates to a non-[truthy][] value will be omitted from the result set.
     ///
-    /// [truthy]: DataType::is_truthy
+    /// [truthy]: DfValue::is_truthy
     pub filter: Option<DfExpr>,
     /// An optional limit to the number of values to return
     pub limit: Option<usize>,
@@ -1248,7 +1247,7 @@ impl View {
 
     /// Get the current keys of this view. For debugging only.
     #[instrument(level = "info", skip(self))]
-    pub async fn keys(&mut self) -> ReadySetResult<Vec<Vec<DataType>>> {
+    pub async fn keys(&mut self) -> ReadySetResult<Vec<Vec<DfValue>>> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
 
         let node = self.node;
@@ -1301,11 +1300,7 @@ impl View {
     /// Retrieve the query results for the given parameter value.
     ///
     /// The method will block if the results are not yet available only when `block` is `true`.
-    pub async fn lookup(
-        &mut self,
-        key: &[DataType],
-        block: bool,
-    ) -> ReadySetResult<ResultIterator> {
+    pub async fn lookup(&mut self, key: &[DfValue], block: bool) -> ReadySetResult<ResultIterator> {
         self.lookup_ryw(key, block, None).await
     }
 
@@ -1330,7 +1325,7 @@ impl View {
     /// missing state will be backfilled (asynchronously if `block` is `false`).
     pub async fn lookup_ryw(
         &mut self,
-        key: &[DataType],
+        key: &[DfValue],
         block: bool,
         ticket: Option<Timestamp>,
     ) -> ReadySetResult<ResultIterator> {
@@ -1361,7 +1356,7 @@ impl View {
 #[derive(Debug, Default)]
 #[doc(hidden)]
 #[repr(transparent)]
-pub struct ReadReplyBatch(pub Vec<Vec<DataType>>);
+pub struct ReadReplyBatch(pub Vec<Vec<DfValue>>);
 
 use serde::de::{self, DeserializeSeed, Deserializer, Visitor};
 impl<'de> Deserialize<'de> for ReadReplyBatch {
@@ -1372,10 +1367,10 @@ impl<'de> Deserialize<'de> for ReadReplyBatch {
         struct Elem;
 
         impl<'de> Visitor<'de> for Elem {
-            type Value = Vec<Vec<DataType>>;
+            type Value = Vec<Vec<DfValue>>;
 
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("Vec<Vec<DataType>>")
+                f.write_str("Vec<Vec<DfValue>>")
             }
 
             fn visit_bytes<E>(self, bytes: &[u8]) -> Result<Self::Value, E>
@@ -1390,7 +1385,7 @@ impl<'de> Deserialize<'de> for ReadReplyBatch {
         }
 
         impl<'de> DeserializeSeed<'de> for Elem {
-            type Value = Vec<Vec<DataType>>;
+            type Value = Vec<Vec<DfValue>>;
 
             fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
             where
@@ -1404,43 +1399,43 @@ impl<'de> Deserialize<'de> for ReadReplyBatch {
     }
 }
 
-impl From<ReadReplyBatch> for Vec<Vec<DataType>> {
-    fn from(val: ReadReplyBatch) -> Vec<Vec<DataType>> {
+impl From<ReadReplyBatch> for Vec<Vec<DfValue>> {
+    fn from(val: ReadReplyBatch) -> Vec<Vec<DfValue>> {
         val.0
     }
 }
 
-impl From<Vec<Vec<DataType>>> for ReadReplyBatch {
-    fn from(v: Vec<Vec<DataType>>) -> Self {
+impl From<Vec<Vec<DfValue>>> for ReadReplyBatch {
+    fn from(v: Vec<Vec<DfValue>>) -> Self {
         Self(v)
     }
 }
 
 impl IntoIterator for ReadReplyBatch {
-    type Item = Vec<DataType>;
+    type Item = Vec<DfValue>;
     type IntoIter = std::vec::IntoIter<Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
     }
 }
 
-impl Extend<Vec<DataType>> for ReadReplyBatch {
+impl Extend<Vec<DfValue>> for ReadReplyBatch {
     fn extend<T>(&mut self, iter: T)
     where
-        T: IntoIterator<Item = Vec<DataType>>,
+        T: IntoIterator<Item = Vec<DfValue>>,
     {
         self.0.extend(iter)
     }
 }
 
-impl AsRef<[Vec<DataType>]> for ReadReplyBatch {
-    fn as_ref(&self) -> &[Vec<DataType>] {
+impl AsRef<[Vec<DfValue>]> for ReadReplyBatch {
+    fn as_ref(&self) -> &[Vec<DfValue>] {
         &self.0[..]
     }
 }
 
 impl std::ops::Deref for ReadReplyBatch {
-    type Target = Vec<Vec<DataType>>;
+    type Target = Vec<Vec<DfValue>>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }

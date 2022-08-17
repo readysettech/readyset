@@ -3,7 +3,7 @@ use std::fmt::Debug;
 
 use async_trait::async_trait;
 use readyset::ColumnSchema;
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
 
 /// Information about a statement that has been prepared in an [`UpstreamDatabase`]
@@ -108,7 +108,7 @@ pub trait UpstreamDatabase: Sized + Send {
     async fn execute(
         &mut self,
         statement_id: u32,
-        params: &[DataType],
+        params: &[DfValue],
     ) -> Result<Self::QueryResult, Self::Error>;
 
     /// Execute a raw, un-prepared query

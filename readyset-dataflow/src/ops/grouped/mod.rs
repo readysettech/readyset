@@ -54,7 +54,7 @@ pub trait GroupedOperation: fmt::Debug + Clone {
     fn group_by(&self) -> &[usize];
 
     /// Extract the aggregation value from a single record.
-    fn to_diff(&self, record: &[DataType], is_positive: bool) -> ReadySetResult<Self::Diff>;
+    fn to_diff(&self, record: &[DfValue], is_positive: bool) -> ReadySetResult<Self::Diff>;
 
     /// Given the given `current` value, and a number of changes for a group (`diffs`), compute the
     /// updated group value.
@@ -64,9 +64,9 @@ pub trait GroupedOperation: fmt::Debug + Clone {
     /// extreme value deleted).
     fn apply(
         &self,
-        current: Option<&DataType>,
+        current: Option<&DfValue>,
         diffs: &mut dyn Iterator<Item = Self::Diff>,
-    ) -> ReadySetResult<Option<DataType>>;
+    ) -> ReadySetResult<Option<DfValue>>;
 
     fn description(&self, detailed: bool) -> String;
 
@@ -81,7 +81,7 @@ pub trait GroupedOperation: fmt::Debug + Clone {
 
     /// Returns the empty value for this aggregate, if any. Groups that have the empty value in
     /// their output column will be omitted from results
-    fn empty_value(&self) -> Option<DataType> {
+    fn empty_value(&self) -> Option<DfValue> {
         None
     }
 
@@ -130,7 +130,7 @@ impl<T: GroupedOperation> GroupedOperator<T> {
 }
 
 /// Extract a copy of all values in the record being targeted by the group
-fn get_group_values(group_by: &[usize], row: &Record) -> Vec<DataType> {
+fn get_group_values(group_by: &[usize], row: &Record) -> Vec<DfValue> {
     // This attribute is only here, because `is_sorted` is unstable. I didn't
     // want to add a `feature` to the crate for a debug assertion thus I guarded
     // both the `feature` and this assertion are with `cfg(debug)` (see also
@@ -344,7 +344,7 @@ where
                             .collect::<ReadySetResult<Vec<_>>>()?;
                         this.inner
                             .apply(None, &mut diffs.into_iter())?
-                            .unwrap_or_else(|| this.inner.empty_value().unwrap_or(DataType::None))
+                            .unwrap_or_else(|| this.inner.empty_value().unwrap_or(DfValue::None))
                     }
                 };
 

@@ -21,7 +21,7 @@ pub use partial_map::PartialMap;
 use readyset::internal::Index;
 use readyset::replication::ReplicationOffset;
 use readyset::{KeyComparison, KeyCount};
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use readyset_errors::ReadySetResult;
 
 pub use self::memory_state::MemoryState;
@@ -34,7 +34,7 @@ pub struct EvictBytesResult<'a> {
     /// The index that was evicted from
     pub index: &'a Index,
     /// The keys that were evicted
-    pub keys_evicted: Vec<Vec<DataType>>,
+    pub keys_evicted: Vec<Vec<DfValue>>,
     /// The rows that were evicted
     pub rows_evicted: Rows,
     /// The number of bytes removed from the state
@@ -197,7 +197,7 @@ pub trait State: SizeOf + Send {
     fn row_count(&self) -> usize;
 
     /// Return a copy of all records. Panics if the state is only partially materialized.
-    fn cloned_records(&self) -> Vec<Vec<DataType>>;
+    fn cloned_records(&self) -> Vec<Vec<DfValue>>;
 
     /// Evict up to `bytes` by randomly selected keys, returning a struct representing the index
     /// chosen to evict from along with the keys evicted and the number of bytes evicted.
@@ -354,7 +354,7 @@ impl State for MaterializedNodeState {
         }
     }
 
-    fn cloned_records(&self) -> Vec<Vec<DataType>> {
+    fn cloned_records(&self) -> Vec<Vec<DfValue>> {
         match self {
             MaterializedNodeState::Memory(ms) => ms.cloned_records(),
             MaterializedNodeState::Persistent(ps) => ps.cloned_records(),
@@ -391,7 +391,7 @@ impl State for MaterializedNodeState {
 }
 
 #[derive(Debug, Hash, PartialEq, Eq)]
-pub struct Row(Rc<Vec<DataType>>);
+pub struct Row(Rc<Vec<DfValue>>);
 
 pub type Rows = HashBag<Row, RandomState>;
 
@@ -407,32 +407,32 @@ impl Row {
     }
 }
 
-impl From<Vec<DataType>> for Row {
-    fn from(r: Vec<DataType>) -> Self {
+impl From<Vec<DfValue>> for Row {
+    fn from(r: Vec<DfValue>) -> Self {
         Self(Rc::new(r))
     }
 }
 
-impl From<Rc<Vec<DataType>>> for Row {
-    fn from(r: Rc<Vec<DataType>>) -> Self {
+impl From<Rc<Vec<DfValue>>> for Row {
+    fn from(r: Rc<Vec<DfValue>>) -> Self {
         Self(r)
     }
 }
 
-impl AsRef<[DataType]> for Row {
-    fn as_ref(&self) -> &[DataType] {
+impl AsRef<[DfValue]> for Row {
+    fn as_ref(&self) -> &[DfValue] {
         &self.0
     }
 }
 
-impl std::borrow::Borrow<[DataType]> for Row {
-    fn borrow(&self) -> &[DataType] {
+impl std::borrow::Borrow<[DfValue]> for Row {
+    fn borrow(&self) -> &[DfValue] {
         &self.0
     }
 }
 
 impl Deref for Row {
-    type Target = Vec<DataType>;
+    type Target = Vec<DfValue>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -457,7 +457,7 @@ pub enum RecordResult<'a> {
     Borrowed(&'a HashBag<Row, RandomState>),
     #[from(ignore)]
     References(Vec<&'a Row>),
-    Owned(Vec<Vec<DataType>>),
+    Owned(Vec<Vec<DfValue>>),
 }
 
 impl<'a> PartialEq for RecordResult<'a> {
@@ -514,7 +514,7 @@ impl<'a> RecordResult<'a> {
 
     pub fn retain<F>(&mut self, func: F)
     where
-        F: Fn(&[DataType]) -> bool,
+        F: Fn(&[DfValue]) -> bool,
     {
         match *self {
             RecordResult::Borrowed(rs) => {
@@ -528,17 +528,17 @@ impl<'a> RecordResult<'a> {
     }
 }
 
-impl<'a> FromIterator<Vec<DataType>> for RecordResult<'a> {
+impl<'a> FromIterator<Vec<DfValue>> for RecordResult<'a> {
     fn from_iter<T>(iter: T) -> Self
     where
-        T: IntoIterator<Item = Vec<DataType>>,
+        T: IntoIterator<Item = Vec<DfValue>>,
     {
         Self::Owned(iter.into_iter().collect())
     }
 }
 
 impl<'a> IntoIterator for RecordResult<'a> {
-    type Item = Cow<'a, [DataType]>;
+    type Item = Cow<'a, [DfValue]>;
     type IntoIter = RecordResultIterator<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -551,13 +551,13 @@ impl<'a> IntoIterator for RecordResult<'a> {
 }
 
 pub enum RecordResultIterator<'a> {
-    Owned(vec::IntoIter<Vec<DataType>>),
+    Owned(vec::IntoIter<Vec<DfValue>>),
     Borrowed(hashbag::Iter<'a, Row>),
     References(vec::IntoIter<&'a Row>),
 }
 
 impl<'a> Iterator for RecordResultIterator<'a> {
-    type Item = Cow<'a, [DataType]>;
+    type Item = Cow<'a, [DfValue]>;
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             RecordResultIterator::Borrowed(iter) => iter.next().map(|r| Cow::from(&r[..])),
@@ -600,7 +600,7 @@ impl<'a> LookupResult<'a> {
     }
 }
 
-pub type Misses = Vec<(Bound<Vec<DataType>>, Bound<Vec<DataType>>)>;
+pub type Misses = Vec<(Bound<Vec<DfValue>>, Bound<Vec<DfValue>>)>;
 
 #[derive(Eq, PartialEq, Debug)]
 pub enum RangeLookupResult<'a> {

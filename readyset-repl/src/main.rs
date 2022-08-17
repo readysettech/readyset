@@ -3,7 +3,7 @@ use clap::Parser;
 use console::style;
 use database_utils::{DatabaseConnection, DatabaseStatement, DatabaseType, DatabaseURL};
 use prettytable::Table;
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use rustyline::error::ReadlineError;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::Editor;
@@ -134,7 +134,7 @@ impl ReplContext {
     }
 }
 
-fn print_result(rows: Vec<Vec<DataType>>) {
+fn print_result(rows: Vec<Vec<DfValue>>) {
     let mut table = Table::new();
     table.set_format(*prettytable::format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
     for row in rows {

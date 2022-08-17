@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::Write;
 
-use common::DataType;
+use common::DfValue;
 use launchpad::Indices;
 use readyset_errors::invariant_eq;
 use serde::{Deserialize, Serialize};
@@ -21,7 +21,7 @@ struct LastState {
     /// The string representation we last emitted for this group.
     string_repr: String,
     /// A vector containing the actual data
-    data: Vec<DataType>,
+    data: Vec<DfValue>,
 }
 
 impl Default for LastState {
@@ -34,7 +34,7 @@ impl Default for LastState {
 }
 
 /// `GroupConcat` partially implements the `GROUP_CONCAT` SQL aggregate function, which
-/// aggregates a set of arbitrary `DataType`s into a string representation separated by
+/// aggregates a set of arbitrary `DfValue`s into a string representation separated by
 /// a user-defined separator.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GroupConcat {
@@ -47,12 +47,12 @@ pub struct GroupConcat {
     /// Cached state for each group (set of data corresponding to the columns of `group_by`).
     // We skip serde since we don't want the state of the node, just the configuration.
     #[serde(skip)]
-    last_state: RefCell<HashMap<Vec<DataType>, LastState>>,
+    last_state: RefCell<HashMap<Vec<DfValue>, LastState>>,
 }
 
-fn concat_fmt<F: Write>(f: &mut F, dt: &DataType) -> ReadySetResult<()> {
+fn concat_fmt<F: Write>(f: &mut F, dt: &DfValue) -> ReadySetResult<()> {
     match dt {
-        DataType::Text(..) | DataType::TinyText(..) => {
+        DfValue::Text(..) | DfValue::TinyText(..) => {
             let text: &str = <&str>::try_from(dt)?;
             write!(f, "{}", text).unwrap();
         }
@@ -83,9 +83,9 @@ impl GroupConcat {
 }
 
 pub struct ConcatDiff {
-    value: DataType,
+    value: DfValue,
     is_positive: bool,
-    group_by: Vec<DataType>,
+    group_by: Vec<DfValue>,
 }
 
 impl GroupedOperation for GroupConcat {
@@ -99,7 +99,7 @@ impl GroupedOperation for GroupConcat {
         &self.group_by
     }
 
-    fn to_diff(&self, record: &[DataType], is_positive: bool) -> ReadySetResult<Self::Diff> {
+    fn to_diff(&self, record: &[DfValue], is_positive: bool) -> ReadySetResult<Self::Diff> {
         let value = record
             .get(self.source_col)
             .ok_or(ReadySetError::InvalidRecordLength)?
@@ -117,11 +117,11 @@ impl GroupedOperation for GroupConcat {
 
     fn apply(
         &self,
-        current: Option<&DataType>,
+        current: Option<&DfValue>,
         diffs: &mut dyn Iterator<Item = Self::Diff>,
-    ) -> ReadySetResult<Option<DataType>> {
+    ) -> ReadySetResult<Option<DfValue>> {
         let current: Option<&str> = current
-            .filter(|dt| matches!(dt, &DataType::Text(..) | &DataType::TinyText(..)))
+            .filter(|dt| matches!(dt, &DfValue::Text(..) | &DfValue::TinyText(..)))
             .and_then(|dt| <&str>::try_from(dt).ok());
 
         let mut diffs = diffs.peekable();
@@ -207,11 +207,11 @@ impl GroupedOperation for GroupConcat {
         Some(nom_sql::SqlType::Text)
     }
 
-    fn empty_value(&self) -> Option<DataType> {
-        // It is safe to convert an empty String into a DataType, so it's
+    fn empty_value(&self) -> Option<DfValue> {
+        // It is safe to convert an empty String into a DfValue, so it's
         // safe to unwrap.
         #[allow(clippy::unwrap_used)]
-        Some(DataType::try_from("").unwrap())
+        Some(DfValue::try_from("").unwrap())
     }
 }
 

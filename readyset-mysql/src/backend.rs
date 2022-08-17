@@ -15,7 +15,7 @@ use readyset_client::backend::noria_connector::MetaVariable;
 use readyset_client::backend::{
     noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare,
 };
-use readyset_data::{DataType, DataTypeKind};
+use readyset_data::{DfValue, DfValueKind};
 use readyset_errors::{internal, internal_err, ReadySetError};
 use streaming_iterator::StreamingIterator;
 use tokio::io::{self, AsyncWrite};
@@ -25,42 +25,42 @@ use upstream::StatementMeta;
 use crate::constants::DEFAULT_CHARACTER_SET;
 use crate::schema::convert_column;
 use crate::upstream::{self, MySqlUpstream};
-use crate::value::mysql_value_to_datatype;
+use crate::value::mysql_value_to_dataflow_value;
 use crate::{Error, MySqlQueryHandler};
 
 async fn write_column<W: AsyncWrite + Unpin>(
     rw: &mut RowWriter<'_, W>,
-    c: &DataType,
+    c: &DfValue,
     cs: &mysql_srv::Column,
 ) -> Result<(), Error> {
-    let conv_error = || ReadySetError::DataTypeConversionError {
-        src_type: format!("{:?}", DataTypeKind::from(c)),
+    let conv_error = || ReadySetError::DfValueConversionError {
+        src_type: format!("{:?}", DfValueKind::from(c)),
         target_type: format!("{:?}", cs.coltype),
         details: "Unhandled type conversion in `write_column`".to_string(),
     };
 
     let written = match *c {
-        DataType::None | DataType::Max => rw.write_col(None::<i32>),
+        DfValue::None | DfValue::Max => rw.write_col(None::<i32>),
         // NOTE(malte): the code repetition here is unfortunate, but it's hard to factor
-        // this out into a helper since i has a different time depending on the DataType
+        // this out into a helper since i has a different time depending on the DfValue
         // variant.
-        DataType::Int(i) => {
+        DfValue::Int(i) => {
             if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
                 rw.write_col(i as usize)
             } else {
                 rw.write_col(i as isize)
             }
         }
-        DataType::UnsignedInt(i) => {
+        DfValue::UnsignedInt(i) => {
             if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
                 rw.write_col(i as usize)
             } else {
                 rw.write_col(i as isize)
             }
         }
-        DataType::Text(ref t) => rw.write_col(t.as_str()),
-        DataType::TinyText(ref t) => rw.write_col(t.as_str()),
-        ref dt @ (DataType::Float(..) | DataType::Double(..)) => match cs.coltype {
+        DfValue::Text(ref t) => rw.write_col(t.as_str()),
+        DfValue::TinyText(ref t) => rw.write_col(t.as_str()),
+        ref dt @ (DfValue::Float(..) | DfValue::Double(..)) => match cs.coltype {
             mysql_srv::ColumnType::MYSQL_TYPE_DECIMAL
             | mysql_srv::ColumnType::MYSQL_TYPE_NEWDECIMAL => {
                 let f = dt.to_string();
@@ -76,7 +76,7 @@ async fn write_column<W: AsyncWrite + Unpin>(
             }
             _ => return Err(conv_error())?,
         },
-        DataType::Numeric(ref v) => match cs.coltype {
+        DfValue::Numeric(ref v) => match cs.coltype {
             mysql_srv::ColumnType::MYSQL_TYPE_DECIMAL
             | mysql_srv::ColumnType::MYSQL_TYPE_NEWDECIMAL => {
                 let f = v.to_string();
@@ -93,7 +93,7 @@ async fn write_column<W: AsyncWrite + Unpin>(
             _ => return Err(conv_error())?,
         },
 
-        DataType::TimestampTz(ts) => match cs.coltype {
+        DfValue::TimestampTz(ts) => match cs.coltype {
             mysql_srv::ColumnType::MYSQL_TYPE_DATETIME
             | mysql_srv::ColumnType::MYSQL_TYPE_DATETIME2
             | mysql_srv::ColumnType::MYSQL_TYPE_TIMESTAMP
@@ -103,16 +103,16 @@ async fn write_column<W: AsyncWrite + Unpin>(
             ColumnType::MYSQL_TYPE_DATE => rw.write_col(ts.to_chrono().naive_local().date()),
             _ => return Err(conv_error())?,
         },
-        DataType::Time(ref t) => rw.write_col(t),
-        DataType::ByteArray(ref bytes) => rw.write_col(bytes.as_ref()),
+        DfValue::Time(ref t) => rw.write_col(t),
+        DfValue::ByteArray(ref bytes) => rw.write_col(bytes.as_ref()),
         // These types are PostgreSQL specific
-        DataType::Array(_) => {
+        DfValue::Array(_) => {
             internal!("Cannot write MySQL column: MySQL does not support arrays")
         }
-        DataType::BitVector(_) => {
+        DfValue::BitVector(_) => {
             internal!("Cannot write MySQL column: MySQL does not support bit vectors")
         }
-        DataType::PassThrough(_) => {
+        DfValue::PassThrough(_) => {
             internal!("Cannot write MySQL column: PassThrough types aren't supported for MySQL")
         }
     };
@@ -348,10 +348,12 @@ where
         // derived directly from ParamParser.
         let params_result = params
             .into_iter()
-            .flat_map(|p| p.map(|pval| mysql_value_to_datatype(pval.value).map_err(Error::from)))
-            .collect::<Result<Vec<DataType>, Error>>();
+            .flat_map(|p| {
+                p.map(|pval| mysql_value_to_dataflow_value(pval.value).map_err(Error::from))
+            })
+            .collect::<Result<Vec<DfValue>, Error>>();
 
-        let datatype_params = match params_result {
+        let value_params = match params_result {
             Ok(r) => r,
             Err(e) => {
                 error!(err = %e, "encountered error parsing execute params");
@@ -364,7 +366,7 @@ where
         // We have to perform this check before self is mutably borrowed by execute
         let is_cached = self.schema_cache.contains_key(&id);
 
-        let res = match self.execute(id, &datatype_params).await {
+        let res = match self.execute(id, &value_params).await {
             Ok(QueryResult::Noria(noria_connector::QueryResult::Select { mut rows, schema })) => {
                 let CachedSchema {
                     mysql_schema,

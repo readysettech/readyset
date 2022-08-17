@@ -9,7 +9,7 @@ use std::fmt;
 use std::fmt::Formatter;
 
 use nom_sql::{BinaryOperator, SqlType};
-use readyset_data::{DataType, DfType};
+use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError;
 use serde::{Deserialize, Serialize};
 
@@ -113,7 +113,7 @@ impl BuiltinFunction {
             "round" => {
                 let expr = next_arg()?;
                 let prec = args.next().unwrap_or(Expr::Literal {
-                    val: DataType::Int(0),
+                    val: DfValue::Int(0),
                     ty: DfType::Sql(SqlType::Int(None)),
                 });
                 let ty = type_for_round(&expr, &prec);
@@ -203,7 +203,7 @@ impl fmt::Display for BuiltinFunction {
 /// represents a desugared version of [`nom_sql::Expr`], with the following transformations
 /// applied during lowering:
 ///
-/// - Literals replaced with their corresponding [`DataType`]
+/// - Literals replaced with their corresponding [`DfValue`]
 /// - [Column references](nom_sql::Column) resolved into column indices in the parent node.
 /// - Function calls resolved, and arities checked
 /// - Desugaring x IN (y, z, ...) to `x = y OR x = z OR ...` and x NOT IN (y, z, ...) to `x != y AND
@@ -216,8 +216,8 @@ pub enum Expr {
     /// A reference to a column, by index, in the parent node
     Column { index: usize, ty: DfType },
 
-    /// A literal DataType value
-    Literal { val: DataType, ty: DfType },
+    /// A literal DfValue value
+    Literal { val: DfValue, ty: DfType },
 
     /// A binary operation
     Op {

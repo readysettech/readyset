@@ -5,7 +5,7 @@ use std::sync::Arc;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use rust_decimal::Decimal;
 
-use crate::{DataType, SqlType};
+use crate::{DfValue, SqlType};
 
 /// A convenience trait that implements casts of i64 and u64 to f32 and f64
 pub(crate) trait IntAsFloat {
@@ -36,7 +36,7 @@ pub(crate) fn coerce_integer<I, S>(
     val: I,
     src_type_name: S,
     sql_type: &SqlType,
-) -> ReadySetResult<DataType>
+) -> ReadySetResult<DfValue>
 where
     i8: TryFrom<I>,
     i16: TryFrom<I>,
@@ -50,7 +50,7 @@ where
     I: std::ops::BitXor<I, Output = I> + std::cmp::Eq + Copy + fmt::Display + IntAsFloat,
     S: ToString,
 {
-    let err = || ReadySetError::DataTypeConversionError {
+    let err = || ReadySetError::DfValueConversionError {
         src_type: src_type_name.to_string(),
         target_type: sql_type.to_string(),
         details: "out of bounds".to_string(),
@@ -60,21 +60,21 @@ where
         SqlType::Bool => {
             #[allow(clippy::eq_op)]
             {
-                Ok(DataType::from(val ^ val != val))
+                Ok(DfValue::from(val ^ val != val))
             }
         }
-        SqlType::TinyInt(_) => i8::try_from(val).map_err(|_| err()).map(DataType::from),
-        SqlType::SmallInt(_) => i16::try_from(val).map_err(|_| err()).map(DataType::from),
+        SqlType::TinyInt(_) => i8::try_from(val).map_err(|_| err()).map(DfValue::from),
+        SqlType::SmallInt(_) => i16::try_from(val).map_err(|_| err()).map(DfValue::from),
         SqlType::Int(_) | SqlType::Serial => {
-            i32::try_from(val).map_err(|_| err()).map(DataType::from)
+            i32::try_from(val).map_err(|_| err()).map(DfValue::from)
         }
         SqlType::BigInt(_) | SqlType::BigSerial => {
-            i64::try_from(val).map_err(|_| err()).map(DataType::from)
+            i64::try_from(val).map_err(|_| err()).map(DfValue::from)
         }
-        SqlType::UnsignedTinyInt(_) => u8::try_from(val).map_err(|_| err()).map(DataType::from),
-        SqlType::UnsignedSmallInt(_) => u16::try_from(val).map_err(|_| err()).map(DataType::from),
-        SqlType::UnsignedInt(_) => u32::try_from(val).map_err(|_| err()).map(DataType::from),
-        SqlType::UnsignedBigInt(_) => u64::try_from(val).map_err(|_| err()).map(DataType::from),
+        SqlType::UnsignedTinyInt(_) => u8::try_from(val).map_err(|_| err()).map(DfValue::from),
+        SqlType::UnsignedSmallInt(_) => u16::try_from(val).map_err(|_| err()).map(DfValue::from),
+        SqlType::UnsignedInt(_) => u32::try_from(val).map_err(|_| err()).map(DfValue::from),
+        SqlType::UnsignedBigInt(_) => u64::try_from(val).map_err(|_| err()).map(DfValue::from),
 
         SqlType::TinyText
         | SqlType::MediumText
@@ -101,7 +101,7 @@ where
         | SqlType::Blob
         | SqlType::LongBlob
         | SqlType::ByteArray
-        | SqlType::Binary(None) => Ok(DataType::ByteArray(val.to_string().into_bytes().into())),
+        | SqlType::Binary(None) => Ok(DfValue::ByteArray(val.to_string().into_bytes().into())),
 
         SqlType::VarBinary(l) => {
             let mut val = val.to_string();
@@ -174,9 +174,9 @@ where
             Ok(mysql_time::MysqlTime::from_hmsus(true, hh as _, mm as _, ss as _, 0).into())
         }
 
-        SqlType::Double => Ok(DataType::Double(val.to_f64())),
-        SqlType::Real | SqlType::Float => Ok(DataType::Float(val.to_f32())),
-        SqlType::Numeric(_) | SqlType::Decimal(_, _) => Ok(DataType::Numeric(Arc::new(val.into()))),
+        SqlType::Double => Ok(DfValue::Double(val.to_f64())),
+        SqlType::Real | SqlType::Float => Ok(DfValue::Float(val.to_f32())),
+        SqlType::Numeric(_) | SqlType::Decimal(_, _) => Ok(DfValue::Numeric(Arc::new(val.into()))),
 
         SqlType::Enum(_)
         | SqlType::MacAddr
@@ -184,7 +184,7 @@ where
         | SqlType::Uuid
         | SqlType::Bit(_)
         | SqlType::VarBit(_)
-        | SqlType::Array(_) => Err(ReadySetError::DataTypeConversionError {
+        | SqlType::Array(_) => Err(ReadySetError::DfValueConversionError {
             src_type: src_type_name.to_string(),
             target_type: sql_type.to_string(),
             details: "Not allowed".to_string(),

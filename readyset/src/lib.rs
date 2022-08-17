@@ -27,7 +27,7 @@
 //! ```no_run
 //! # use readyset::*;
 //! # use readyset::consensus::Authority;
-//! # use readyset_data::DataType;
+//! # use readyset_data::DfValue;
 //!
 //! #[tokio::main]
 //! async fn main() {
@@ -92,7 +92,7 @@
 //!     assert_eq!(
 //!         awvc.lookup(&[aid.into()], true).await.unwrap().into_vec(),
 //!         vec![vec![
-//!             DataType::from(aid),
+//!             DfValue::from(aid),
 //!             title.try_into().unwrap(),
 //!             url.try_into().unwrap(),
 //!             1.into()
@@ -263,7 +263,7 @@ use std::pin::Pin;
 
 #[doc(hidden)]
 pub use nom_sql::{ColumnConstraint, SqlIdentifier};
-use readyset_data::DataType;
+use readyset_data::DfValue;
 pub use readyset_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use tokio::task_local;
@@ -454,11 +454,11 @@ impl AddAssign for KeyCount {
 
 #[doc(hidden)]
 #[inline]
-pub fn shard_by(dt: &DataType, shards: usize) -> usize {
+pub fn shard_by(dt: &DfValue, shards: usize) -> usize {
     match *dt {
-        DataType::Int(n) => n as usize % shards,
-        DataType::UnsignedInt(n) => n as usize % shards,
-        DataType::Text(..) | DataType::TinyText(..) | DataType::TimestampTz(_) => {
+        DfValue::Int(n) => n as usize % shards,
+        DfValue::UnsignedInt(n) => n as usize % shards,
+        DfValue::Text(..) | DfValue::TinyText(..) | DfValue::TimestampTz(_) => {
             use std::hash::Hasher;
             let mut hasher = ahash::AHasher::new_with_keys(0x3306, 0x6033);
             // this unwrap should be safe because there are no error paths with a Text, TinyText,
@@ -472,15 +472,15 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
             hasher.finish() as usize % shards
         }
         // a bit hacky: send all NULL values to the first shard
-        DataType::None | DataType::Max => 0,
-        DataType::Float(_)
-        | DataType::Double(_)
-        | DataType::Time(_)
-        | DataType::ByteArray(_)
-        | DataType::Numeric(_)
-        | DataType::BitVector(_)
-        | DataType::Array(_)
-        | DataType::PassThrough(_) => {
+        DfValue::None | DfValue::Max => 0,
+        DfValue::Float(_)
+        | DfValue::Double(_)
+        | DfValue::Time(_)
+        | DfValue::ByteArray(_)
+        | DfValue::Numeric(_)
+        | DfValue::BitVector(_)
+        | DfValue::Array(_)
+        | DfValue::PassThrough(_) => {
             use std::hash::{Hash, Hasher};
             let mut hasher = ahash::AHasher::new_with_keys(0x3306, 0x6033);
             dt.hash(&mut hasher);

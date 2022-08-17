@@ -8,7 +8,7 @@ use proptest::arbitrary::Arbitrary;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
-use crate::DataType;
+use crate::DfValue;
 
 /// The format for timestamps when parsed as text
 pub const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
@@ -35,7 +35,7 @@ pub const DATE_FORMAT: &str = "%Y-%m-%d";
 /// i.e. date only, timestamp with timezone, timestamp with microsecond precision etc.
 ///
 /// Sadly the way chrono implements DateTime<Tz> occupies at least 16 bytes, and therefore
-/// overflows DataType. So this type internally stores a [`NaiveDateTime`] with a 3 byte
+/// overflows DfValue. So this type internally stores a [`NaiveDateTime`] with a 3 byte
 /// of extra data. Since 3 bytes allow us to store 24 bytes, this is how we use them:
 ///
 /// 17 bits for the timezone offset (0 to 86_400)
@@ -323,42 +323,42 @@ impl TimestampTz {
     }
 
     /// Attempt to coerce this timestamp to a specific SqlType
-    pub(crate) fn coerce_to(&self, sql_type: &SqlType) -> ReadySetResult<DataType> {
+    pub(crate) fn coerce_to(&self, sql_type: &SqlType) -> ReadySetResult<DfValue> {
         match sql_type {
             SqlType::Timestamp => {
                 // Conversion into timestamp without tz
-                Ok(DataType::TimestampTz(self.to_chrono().naive_local().into()))
+                Ok(DfValue::TimestampTz(self.to_chrono().naive_local().into()))
             }
             SqlType::TimestampTz => {
                 // TODO: when converting into a timestamp with tz on postgres should apply
                 // local tz, but what is local for noria?
                 let mut ts_tz = *self;
                 ts_tz.set_offset(0);
-                Ok(DataType::TimestampTz(ts_tz))
+                Ok(DfValue::TimestampTz(ts_tz))
             }
             SqlType::DateTime(precision) => {
                 let mut ts = *self;
                 ts.set_microsecond_precision(precision.unwrap_or(0) as u8);
-                Ok(DataType::TimestampTz(ts))
+                Ok(DfValue::TimestampTz(ts))
             }
-            SqlType::Date => Ok(DataType::TimestampTz(self.to_chrono().date().into())),
+            SqlType::Date => Ok(DfValue::TimestampTz(self.to_chrono().date().into())),
             SqlType::Time => Ok(self.to_chrono().naive_local().time().into()),
 
-            SqlType::BigInt(_) | SqlType::BigSerial => Ok(DataType::Int(self.datetime_as_int())),
-            SqlType::UnsignedBigInt(_) => Ok(DataType::UnsignedInt(self.datetime_as_int() as _)),
+            SqlType::BigInt(_) | SqlType::BigSerial => Ok(DfValue::Int(self.datetime_as_int())),
+            SqlType::UnsignedBigInt(_) => Ok(DfValue::UnsignedInt(self.datetime_as_int() as _)),
             SqlType::Int(_) | SqlType::Serial if self.has_date_only() => {
-                Ok(DataType::Int(self.date_as_int()))
+                Ok(DfValue::Int(self.date_as_int()))
             }
             SqlType::UnsignedInt(_) if self.has_date_only() => {
-                Ok(DataType::UnsignedInt(self.date_as_int() as _))
+                Ok(DfValue::UnsignedInt(self.date_as_int() as _))
             }
 
-            SqlType::Double => Ok(DataType::Double(self.datetime_as_int() as _)),
-            SqlType::Float | SqlType::Real => Ok(DataType::Float(self.datetime_as_int() as _)),
-            SqlType::Decimal(_, _) | SqlType::Numeric(_) => Ok(DataType::Numeric(
+            SqlType::Double => Ok(DfValue::Double(self.datetime_as_int() as _)),
+            SqlType::Float | SqlType::Real => Ok(DfValue::Float(self.datetime_as_int() as _)),
+            SqlType::Decimal(_, _) | SqlType::Numeric(_) => Ok(DfValue::Numeric(
                 std::sync::Arc::new(self.datetime_as_int().into()),
             )),
-            SqlType::Bool => Ok(DataType::from(
+            SqlType::Bool => Ok(DfValue::from(
                 self.to_chrono().naive_local() != NaiveDate::from_ymd(0, 0, 0).and_hms(0, 0, 0),
             )),
 
@@ -367,11 +367,11 @@ impl TimestampTz {
             | SqlType::Text
             | SqlType::LongText
             | SqlType::Char(None)
-            | SqlType::VarChar(None) => Ok(DataType::from(format!("{}", self).as_str())),
+            | SqlType::VarChar(None) => Ok(DfValue::from(format!("{}", self).as_str())),
             SqlType::Char(Some(l)) | SqlType::VarChar(Some(l)) => {
                 let mut string = format!("{}", self);
                 string.truncate(*l as usize);
-                Ok(DataType::from(string.as_str()))
+                Ok(DfValue::from(string.as_str()))
             }
 
             SqlType::TinyBlob
@@ -379,20 +379,20 @@ impl TimestampTz {
             | SqlType::Blob
             | SqlType::LongBlob
             | SqlType::Binary(None)
-            | SqlType::ByteArray => Ok(DataType::ByteArray(std::sync::Arc::new(
+            | SqlType::ByteArray => Ok(DfValue::ByteArray(std::sync::Arc::new(
                 format!("{}", self).as_bytes().into(),
             ))),
 
             SqlType::Json => {
                 let mut ts = *self;
                 ts.set_microsecond_precision(6); // Set max precision before json conversion
-                Ok(DataType::from(format!("\"{}\"", ts).as_str()))
+                Ok(DfValue::from(format!("\"{}\"", ts).as_str()))
             }
 
             SqlType::Binary(Some(l)) | SqlType::VarBinary(l) => {
                 let mut string = format!("{}", self);
                 string.truncate(*l as usize);
-                Ok(DataType::ByteArray(std::sync::Arc::new(
+                Ok(DfValue::ByteArray(std::sync::Arc::new(
                     string.as_bytes().into(),
                 )))
             }
@@ -403,8 +403,8 @@ impl TimestampTz {
             | SqlType::UnsignedTinyInt(_)
             | SqlType::UnsignedSmallInt(_)
             | SqlType::UnsignedInt(_)
-            | SqlType::Serial => Err(ReadySetError::DataTypeConversionError {
-                src_type: "DataType::TimestampTz".to_string(),
+            | SqlType::Serial => Err(ReadySetError::DfValueConversionError {
+                src_type: "DfValue::TimestampTz".to_string(),
                 target_type: format!("{:?}", sql_type),
                 details: "Out of range".to_string(),
             }),
@@ -416,8 +416,8 @@ impl TimestampTz {
             | SqlType::Uuid
             | SqlType::Bit(_)
             | SqlType::VarBit(_)
-            | SqlType::Array(_) => Err(ReadySetError::DataTypeConversionError {
-                src_type: "DataType::TimestampTz".to_string(),
+            | SqlType::Array(_) => Err(ReadySetError::DfValueConversionError {
+                src_type: "DfValue::TimestampTz".to_string(),
                 target_type: format!("{:?}", sql_type),
                 details: "Not allowed".to_string(),
             }),
@@ -482,11 +482,11 @@ mod tests {
     #[test]
     fn timestamp_coercion() {
         let ts =
-            DataType::from(chrono::NaiveDate::from_ymd(2022, 2, 9).and_hms_milli(13, 14, 15, 169));
+            DfValue::from(chrono::NaiveDate::from_ymd(2022, 2, 9).and_hms_milli(13, 14, 15, 169));
 
         assert_eq!(
             ts.coerce_to(&SqlType::BigInt(None)).unwrap(),
-            DataType::from(20220209131415i64)
+            DfValue::from(20220209131415i64)
         );
 
         assert_eq!(
@@ -494,12 +494,12 @@ mod tests {
                 .unwrap()
                 .coerce_to(&SqlType::BigInt(None))
                 .unwrap(),
-            DataType::from(20220209i64)
+            DfValue::from(20220209i64)
         );
 
         assert_eq!(
             ts.coerce_to(&SqlType::Double).unwrap(),
-            DataType::Double(20220209131415.0f64)
+            DfValue::Double(20220209131415.0f64)
         );
 
         assert_eq!(

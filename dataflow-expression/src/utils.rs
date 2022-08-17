@@ -1,5 +1,5 @@
 use nom_sql::SqlType;
-use readyset_data::{DataType, DfType};
+use readyset_data::{DfType, DfValue};
 
 use crate::{BuiltinFunction, Expr};
 
@@ -29,10 +29,10 @@ pub fn column_with_type(index: usize, ty: DfType) -> Expr {
     Expr::Column { index, ty }
 }
 
-/// Create `Expr::Literal` from `DataType`. Type is inferred from `DataType`.
+/// Create `Expr::Literal` from `DfValue`. Type is inferred from `DfValue`.
 ///
 /// Not intended for use outside of tests
-pub fn make_literal(val: DataType) -> Expr {
+pub fn make_literal(val: DfValue) -> Expr {
     Expr::Literal {
         val: val.clone(),
         ty: val.sql_type().into(),

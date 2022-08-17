@@ -795,7 +795,7 @@ impl Ingredient for Union {
                     keys.iter()
                         .filter_map(|key| {
                             let rs = rs_by_key
-                                .range_mut::<Vec1<DataType>, _>(key)
+                                .range_mut::<Vec1<DfValue>, _>(key)
                                 .flat_map(|(_, rs)| mem::take(rs))
                                 .collect();
 
@@ -1160,7 +1160,7 @@ mod tests {
             // point-key replay on the left
             let res = g.input_raw(
                 left,
-                vec![vec![DataType::from(1), DataType::try_from("a").unwrap()]],
+                vec![vec![DfValue::from(1), DfValue::try_from("a").unwrap()]],
                 replay_ctx(),
                 false,
             );
@@ -1177,9 +1177,9 @@ mod tests {
             let res = g.input_raw(
                 right,
                 vec![vec![
-                    DataType::from(1),
-                    DataType::try_from("skipped").unwrap(),
-                    DataType::try_from("b").unwrap(),
+                    DfValue::from(1),
+                    DfValue::try_from("skipped").unwrap(),
+                    DfValue::try_from("b").unwrap(),
                 ]],
                 replay_ctx(),
                 false,
@@ -1227,8 +1227,8 @@ mod tests {
             let res = g.input_raw(
                 left,
                 vec![
-                    vec![DataType::from(1), DataType::try_from("a").unwrap()],
-                    vec![DataType::from(1), DataType::try_from("c").unwrap()],
+                    vec![DfValue::from(1), DfValue::try_from("a").unwrap()],
+                    vec![DfValue::from(1), DfValue::try_from("c").unwrap()],
                 ],
                 replay_ctx(),
                 false,
@@ -1247,11 +1247,11 @@ mod tests {
                 left,
                 vec![
                     (
-                        vec![DataType::from(1), DataType::try_from("d").unwrap()],
+                        vec![DfValue::from(1), DfValue::try_from("d").unwrap()],
                         true,
                     ),
                     (
-                        vec![DataType::from(1), DataType::try_from("c").unwrap()],
+                        vec![DfValue::from(1), DfValue::try_from("c").unwrap()],
                         false,
                     ),
                 ],
@@ -1264,9 +1264,9 @@ mod tests {
             let res = g.input_raw(
                 right,
                 vec![vec![
-                    DataType::from(1),
-                    DataType::try_from("skipped").unwrap(),
-                    DataType::try_from("b").unwrap(),
+                    DfValue::from(1),
+                    DfValue::try_from("skipped").unwrap(),
+                    DfValue::try_from("b").unwrap(),
                 ]],
                 replay_ctx(),
                 false,
@@ -1330,7 +1330,7 @@ mod tests {
                         Input::NegRight => (l, r - 1),
                     });
             let expected = max(total_lefts, total_rights);
-            let row = vec![DataType::from(1i32)];
+            let row = vec![DfValue::from(1i32)];
             let mut bag_union_state = BagUnionState::default();
 
             let state_size = inputs

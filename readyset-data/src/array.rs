@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
 use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql};
 
-use crate::{DataType, DataTypeKind};
+use crate::{DfValue, DfValueKind};
 
 /// Internal representation of PostgreSQL arrays
 ///
@@ -34,7 +34,7 @@ pub struct Array {
 
     /// The actual contents of the array, represented as a dynamically-dimensioned array (including
     /// shape)
-    contents: ArrayD<DataType>,
+    contents: ArrayD<DfValue>,
 }
 
 impl Array {
@@ -45,7 +45,7 @@ impl Array {
     #[inline]
     pub fn from_lower_bounds_and_contents<L>(
         lower_bounds: L,
-        contents: ArrayD<DataType>,
+        contents: ArrayD<DfValue>,
     ) -> ReadySetResult<Self>
     where
         L: Into<SmallVec<[i32; 2]>>,
@@ -78,7 +78,7 @@ impl Array {
     /// [`self.num_dimensions()`][Array::num_dimensions] or if any of the indices are out-of-bounds,
     /// returns `None`
     #[inline]
-    pub fn get(&self, ixs: &[isize]) -> Option<&DataType> {
+    pub fn get(&self, ixs: &[isize]) -> Option<&DfValue> {
         let ixs = ixs
             .iter()
             .zip(&*self.lower_bounds)
@@ -90,13 +90,13 @@ impl Array {
 
     /// Returns an iterator over references to all the values in the array, iterating the innermost
     /// dimension first.
-    pub fn values(&self) -> impl Iterator<Item = &DataType> + '_ {
+    pub fn values(&self) -> impl Iterator<Item = &DfValue> + '_ {
         self.contents.iter()
     }
 
     /// Returns an iterator over mutable references to all the values in the array, iterating the
     /// innermost dimension first
-    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut DataType> + '_ {
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut DfValue> + '_ {
         self.contents.iter_mut()
     }
 
@@ -155,7 +155,7 @@ impl Display for Array {
 
         fn print_array<V>(f: &mut fmt::Formatter, arr: ArrayBase<V, IxDyn>) -> fmt::Result
         where
-            V: RawData<Elem = DataType> + Data,
+            V: RawData<Elem = DfValue> + Data,
         {
             write!(f, "{{")?;
             if arr.ndim() == 1 {
@@ -222,7 +222,7 @@ impl Arbitrary for Array {
 
         (
             (1_usize..=3_usize),
-            any::<DataTypeKind>().prop_filter("Nested Array", |dtk| *dtk != DataTypeKind::Array),
+            any::<DfValueKind>().prop_filter("Nested Array", |dtk| *dtk != DfValueKind::Array),
         )
             .prop_flat_map(|(ndims, kind)| {
                 (
@@ -231,7 +231,7 @@ impl Arbitrary for Array {
                 )
                     .prop_flat_map(move |(lbs, lens)| {
                         let total_elems: usize = lens.iter().copied().product();
-                        vec(any_with::<DataType>(Some(kind)), total_elems).prop_map(move |vals| {
+                        vec(any_with::<DfValue>(Some(kind)), total_elems).prop_map(move |vals| {
                             Self {
                                 lower_bounds: lbs.clone().into(),
                                 contents: ArrayD::from_shape_vec(IxDyn(&lens), vals).unwrap(),
@@ -243,8 +243,8 @@ impl Arbitrary for Array {
     }
 }
 
-impl From<Vec<DataType>> for Array {
-    fn from(vs: Vec<DataType>) -> Self {
+impl From<Vec<DfValue>> for Array {
+    fn from(vs: Vec<DfValue>) -> Self {
         Self {
             lower_bounds: smallvec![1], // postgres arrays start at 1
             contents: ArrayD::from_shape_vec(IxDyn(&[vs.len()]), vs).unwrap(),
@@ -252,8 +252,8 @@ impl From<Vec<DataType>> for Array {
     }
 }
 
-impl From<ArrayD<DataType>> for Array {
-    fn from(contents: ArrayD<DataType>) -> Self {
+impl From<ArrayD<DfValue>> for Array {
+    fn from(contents: ArrayD<DfValue>) -> Self {
         Self {
             lower_bounds: smallvec![1; contents.ndim()], // postgres arrays start at 1
             contents,
@@ -282,7 +282,7 @@ impl<'a> FromSql<'a> for Array {
 
         let values = arr
             .values()
-            .map(|v| DataType::from_sql_nullable(member_type, v))
+            .map(|v| DfValue::from_sql_nullable(member_type, v))
             .collect::<Vec<_>>()?;
 
         if values.is_empty() && lengths.is_empty() {
@@ -298,7 +298,7 @@ impl<'a> FromSql<'a> for Array {
 
     fn accepts(ty: &tokio_postgres::types::Type) -> bool {
         match ty.kind() {
-            Kind::Array(member) => <DataType as FromSql>::accepts(member),
+            Kind::Array(member) => <DfValue as FromSql>::accepts(member),
             _ => false,
         }
     }
@@ -343,7 +343,7 @@ impl ToSql for Array {
         Self: Sized,
     {
         match ty.kind() {
-            Kind::Array(member) => <DataType as ToSql>::accepts(member),
+            Kind::Array(member) => <DfValue as ToSql>::accepts(member),
             _ => false,
         }
     }
@@ -366,10 +366,10 @@ mod parse {
     use nom_sql::{embedded_literal, Dialect, QuotingStyle};
 
     use super::Array;
-    use crate::DataType;
+    use crate::DfValue;
 
     enum ArrayOrNested {
-        Array(Vec<DataType>),
+        Array(Vec<DfValue>),
         Nested(Vec<ArrayOrNested>),
     }
 
@@ -400,9 +400,9 @@ mod parse {
             }
         }
 
-        fn flatten(self) -> Vec<DataType> {
+        fn flatten(self) -> Vec<DfValue> {
             let mut out = vec![];
-            fn flatten_inner(aon: ArrayOrNested, out: &mut Vec<DataType>) {
+            fn flatten_inner(aon: ArrayOrNested, out: &mut Vec<DfValue>) {
                 match aon {
                     ArrayOrNested::Array(vs) => out.extend(vs),
                     ArrayOrNested::Nested(ns) => {
@@ -508,7 +508,7 @@ mod parse {
         Ok((i, res))
     }
 
-    fn literal(i: &[u8]) -> IResult<&[u8], DataType> {
+    fn literal(i: &[u8]) -> IResult<&[u8], DfValue> {
         alt((
             map(
                 terminated(
@@ -516,17 +516,17 @@ mod parse {
                     peek(pair(multispace0, alt((tag(","), tag("}"))))),
                 ),
                 |lit| {
-                    DataType::try_from(lit)
-                        .expect("Only parsing literals that can be converted to DataType")
+                    DfValue::try_from(lit)
+                        .expect("Only parsing literals that can be converted to DfValue")
                 },
             ),
             unquoted_string_literal,
         ))(i)
     }
 
-    fn unquoted_string_literal(i: &[u8]) -> IResult<&[u8], DataType> {
+    fn unquoted_string_literal(i: &[u8]) -> IResult<&[u8], DfValue> {
         let (i, _) = not(peek(tag("\"")))(i)?;
-        map(is_not("{},\"\\"), DataType::from)(i)
+        map(is_not("{},\"\\"), DfValue::from)(i)
     }
 }
 
@@ -541,7 +541,7 @@ mod tests {
 
     fn non_numeric_array() -> impl Strategy<Value = Array> {
         any::<Array>().prop_filter("Numeric Array", |arr| {
-            !arr.values().any(|dt| matches!(dt, DataType::Numeric(_)))
+            !arr.values().any(|dt| matches!(dt, DfValue::Numeric(_)))
         })
     }
 
@@ -553,7 +553,7 @@ mod tests {
 
     #[test]
     fn from_vec() {
-        let vals = vec![DataType::from(1), DataType::from(2), DataType::from(3)];
+        let vals = vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)];
         let arr = Array::from(vals.clone());
         assert_eq!(arr.num_dimensions(), 1);
         assert_eq!(arr.contents.into_raw_vec(), vals)
@@ -567,27 +567,27 @@ mod tests {
                 IxDyn(&[2, 3]),
                 vec![
                     // row 1
-                    DataType::from(1),
-                    DataType::from(2),
-                    DataType::from(3),
+                    DfValue::from(1),
+                    DfValue::from(2),
+                    DfValue::from(3),
                     // row 2
-                    DataType::from(4),
-                    DataType::from(5),
-                    DataType::from(6),
+                    DfValue::from(4),
+                    DfValue::from(5),
+                    DfValue::from(6),
                 ],
             )
             .unwrap(),
         };
 
-        assert_eq!(arr.get(&[-4, 5]), Some(&DataType::from(5)));
+        assert_eq!(arr.get(&[-4, 5]), Some(&DfValue::from(5)));
     }
 
     #[test]
     fn print_1d_array() {
         let arr = Array::from(vec![
-            DataType::from("a"),
-            DataType::from("b"),
-            DataType::from("c"),
+            DfValue::from("a"),
+            DfValue::from("b"),
+            DfValue::from("c"),
         ]);
         assert_eq!(arr.to_string(), r#"{"a","b","c"}"#);
     }
@@ -599,11 +599,11 @@ mod tests {
                 IxDyn(&[2, 2]),
                 vec![
                     // row 1
-                    DataType::from(1),
-                    DataType::from(2),
+                    DfValue::from(1),
+                    DfValue::from(2),
                     // row 2
-                    DataType::from(3),
-                    DataType::from(4),
+                    DfValue::from(3),
+                    DfValue::from(4),
                 ],
             )
             .unwrap(),
@@ -617,10 +617,10 @@ mod tests {
             ArrayD::from_shape_vec(
                 IxDyn(&[2, 2, 1]),
                 vec![
-                    DataType::from(1),
-                    DataType::from(2),
-                    DataType::from(3),
-                    DataType::from(4),
+                    DfValue::from(1),
+                    DfValue::from(2),
+                    DfValue::from(3),
+                    DfValue::from(4),
                 ],
             )
             .unwrap(),
@@ -636,13 +636,13 @@ mod tests {
                 IxDyn(&[2, 3]),
                 vec![
                     // row 1
-                    DataType::from(1),
-                    DataType::from(2),
-                    DataType::from(3),
+                    DfValue::from(1),
+                    DfValue::from(2),
+                    DfValue::from(3),
                     // row 2
-                    DataType::from(4),
-                    DataType::from(5),
-                    DataType::from(6),
+                    DfValue::from(4),
+                    DfValue::from(5),
+                    DfValue::from(6),
                 ],
             )
             .unwrap(),
@@ -656,11 +656,7 @@ mod tests {
         let arr = Array::from_str("{1,2 , 3} ").unwrap();
         assert_eq!(
             arr,
-            Array::from(vec![
-                DataType::from(1),
-                DataType::from(2),
-                DataType::from(3)
-            ])
+            Array::from(vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)])
         );
     }
 
@@ -670,7 +666,7 @@ mod tests {
         let arr = Array::from_str("{9223372036854775808}").unwrap();
         assert_eq!(
             arr,
-            Array::from(vec![DataType::from(9223372036854775808_u64)])
+            Array::from(vec![DfValue::from(9223372036854775808_u64)])
         );
     }
 
@@ -683,10 +679,10 @@ mod tests {
                 ArrayD::from_shape_vec(
                     IxDyn(&[2, 2]),
                     vec![
-                        DataType::from(1),
-                        DataType::from(2),
-                        DataType::from(3),
-                        DataType::from(4),
+                        DfValue::from(1),
+                        DfValue::from(2),
+                        DfValue::from(3),
+                        DfValue::from(4),
                     ]
                 )
                 .unwrap()
@@ -703,10 +699,10 @@ mod tests {
                 ArrayD::from_shape_vec(
                     IxDyn(&[2, 2]),
                     vec![
-                        DataType::from("a"),
-                        DataType::from("b"),
-                        DataType::from("c"),
-                        DataType::from("d"),
+                        DfValue::from("a"),
+                        DfValue::from("b"),
+                        DfValue::from("c"),
+                        DfValue::from("d"),
                     ]
                 )
                 .unwrap()
@@ -724,10 +720,10 @@ mod tests {
                 ArrayD::from_shape_vec(
                     IxDyn(&[2, 2]),
                     vec![
-                        DataType::from(1),
-                        DataType::from(2),
-                        DataType::from(3),
-                        DataType::from(4),
+                        DfValue::from(1),
+                        DfValue::from(2),
+                        DfValue::from(3),
+                        DfValue::from(4),
                     ]
                 )
                 .unwrap()
@@ -737,7 +733,7 @@ mod tests {
     }
 
     #[proptest]
-    #[ignore = "DataType <-> Literal doesn't round trip (ENG-1416)"]
+    #[ignore = "DfValue <-> Literal doesn't round trip (ENG-1416)"]
     fn display_parse_round_trip(arr: Array) {
         let s = arr.to_string();
         let res = Array::from_str(&s).unwrap();
@@ -749,9 +745,9 @@ mod tests {
         assert_eq!(
             "{a,b,c}".parse::<Array>().unwrap(),
             Array::from(vec![
-                DataType::from("a"),
-                DataType::from("b"),
-                DataType::from("c")
+                DfValue::from("a"),
+                DfValue::from("b"),
+                DfValue::from("c")
             ])
         );
     }
@@ -760,7 +756,7 @@ mod tests {
     fn parse_unquoted_numeric_string() {
         assert_eq!(
             Array::from_str("{2a, 3b}").unwrap(),
-            Array::from(vec![DataType::from("2a"), DataType::from("3b"),])
+            Array::from(vec![DfValue::from("2a"), DfValue::from("3b"),])
         );
     }
 }

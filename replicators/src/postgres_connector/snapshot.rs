@@ -8,7 +8,7 @@ use futures::{pin_mut, StreamExt, TryFutureExt};
 use nom_sql::{parse_key_specification_string, Dialect, TableKey};
 use postgres_types::{accepts, FromSql, Type};
 use readyset::{ReadySetError, ReadySetResult};
-use readyset_data::DataType;
+use readyset_data::DfValue;
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, info_span, trace, Instrument};
 
@@ -278,7 +278,7 @@ impl TableDescription {
         info!(rows = %nrows, "Replication started");
         while let Some(Ok(row)) = binary_rows.next().await {
             let noria_row = (0..type_map.len())
-                .map(|i| row.try_get::<DataType>(i))
+                .map(|i| row.try_get::<DfValue>(i))
                 .collect::<Result<Vec<_>, _>>()?;
 
             noria_rows.push(noria_row);

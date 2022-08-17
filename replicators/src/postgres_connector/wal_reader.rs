@@ -7,7 +7,7 @@ use mysql_time::MysqlTime;
 use nom_sql::SqlType;
 use postgres_types::Kind;
 use readyset::{ReadySetError, ReadySetResult};
-use readyset_data::{Array, DataType};
+use readyset_data::{Array, DfValue};
 use readyset_errors::unsupported;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
@@ -37,28 +37,28 @@ pub(crate) enum WalEvent {
     Insert {
         namespace: String,
         table: String,
-        tuple: Vec<DataType>,
+        tuple: Vec<DfValue>,
     },
     DeleteRow {
         namespace: String,
         table: String,
-        tuple: Vec<DataType>,
+        tuple: Vec<DfValue>,
     },
     DeleteByKey {
         namespace: String,
         table: String,
-        key: Vec<DataType>,
+        key: Vec<DfValue>,
     },
     UpdateRow {
         namespace: String,
         table: String,
-        old_tuple: Vec<DataType>,
-        new_tuple: Vec<DataType>,
+        old_tuple: Vec<DfValue>,
+        new_tuple: Vec<DfValue>,
     },
     UpdateByKey {
         namespace: String,
         table: String,
-        key: Vec<DataType>,
+        key: Vec<DfValue>,
         set: Vec<readyset::Modification>,
     },
     DdlEvent {
@@ -293,7 +293,7 @@ impl wal::TupleData {
         self,
         relation: &RelationMapping,
         is_key: bool,
-    ) -> Result<Vec<DataType>, WalError> {
+    ) -> Result<Vec<DfValue>, WalError> {
         use postgres_types::Type as PGType;
 
         if self.n_cols != relation.n_cols {
@@ -312,7 +312,7 @@ impl wal::TupleData {
             }
 
             match data {
-                wal::TupleEntry::Null => ret.push(DataType::None),
+                wal::TupleEntry::Null => ret.push(DfValue::None),
                 wal::TupleEntry::Unchanged => return Err(WalError::ToastNotSupported),
                 wal::TupleEntry::Text(text) => {
                     // WAL delivers all entries as text, and it is up to us to parse to the proper
@@ -347,23 +347,23 @@ impl wal::TupleData {
                                 _ => unsupported!("unsupported type {}", spec.data_type),
                             }));
 
-                            DataType::from(str.parse::<Array>()?).coerce_to(&target_sql_type)?
+                            DfValue::from(str.parse::<Array>()?).coerce_to(&target_sql_type)?
                         }
                         _ => match spec.data_type {
-                            PGType::BOOL => DataType::UnsignedInt(match str.as_ref() {
+                            PGType::BOOL => DfValue::UnsignedInt(match str.as_ref() {
                                 "t" => true as _,
                                 "f" => false as _,
                                 _ => return Err(WalError::BoolParseError),
                             }),
                             PGType::INT2 | PGType::INT4 | PGType::INT8 => {
-                                DataType::Int(str.parse()?)
+                                DfValue::Int(str.parse()?)
                             }
-                            PGType::OID => DataType::UnsignedInt(str.parse()?),
+                            PGType::OID => DfValue::UnsignedInt(str.parse()?),
                             PGType::FLOAT4 => str.parse::<f32>()?.try_into()?,
                             PGType::FLOAT8 => str.parse::<f64>()?.try_into()?,
                             PGType::NUMERIC => Decimal::from_str(str.as_ref())
                                 .map_err(|_| WalError::NumericParseError)
-                                .map(|d| DataType::Numeric(Arc::new(d)))?,
+                                .map(|d| DfValue::Numeric(Arc::new(d)))?,
                             PGType::TEXT
                             | PGType::JSON
                             | PGType::VARCHAR
@@ -371,7 +371,7 @@ impl wal::TupleData {
                             | PGType::MACADDR
                             | PGType::INET
                             | PGType::UUID
-                            | PGType::NAME => DataType::from(str.as_ref()),
+                            | PGType::NAME => DfValue::from(str.as_ref()),
                             // JSONB might rearrange the json value (like the order of the keys in
                             // an object for example), vs JSON that
                             // keeps the text as-is. So, in order to get
@@ -381,21 +381,21 @@ impl wal::TupleData {
                             PGType::JSONB => {
                                 serde_json::from_str::<serde_json::Value>(str.as_ref())
                                     .map_err(|e| WalError::JsonParseError(e.to_string()))
-                                    .map(|v| DataType::from(v.to_string()))?
+                                    .map(|v| DfValue::from(v.to_string()))?
                             }
-                            PGType::TIMESTAMP => DataType::TimestampTz(
+                            PGType::TIMESTAMP => DfValue::TimestampTz(
                                 str.parse().map_err(|_| WalError::TimestampParseError)?,
                             ),
-                            PGType::TIMESTAMPTZ => DataType::TimestampTz(
+                            PGType::TIMESTAMPTZ => DfValue::TimestampTz(
                                 str.parse().map_err(|_| WalError::TimestampTzParseError)?,
                             ),
                             PGType::BYTEA => hex::decode(str.strip_prefix("\\x").unwrap_or(&str))
                                 .map_err(|_| WalError::ByteArrayHexParseError)
-                                .map(|bytes| DataType::ByteArray(Arc::new(bytes)))?,
-                            PGType::DATE => DataType::TimestampTz(
+                                .map(|bytes| DfValue::ByteArray(Arc::new(bytes)))?,
+                            PGType::DATE => DfValue::TimestampTz(
                                 str.parse().map_err(|_| WalError::DateParseError)?,
                             ),
-                            PGType::TIME => DataType::Time(MysqlTime::from_str(&str)?),
+                            PGType::TIME => DfValue::Time(MysqlTime::from_str(&str)?),
                             PGType::BIT | PGType::VARBIT => {
                                 let mut bits = BitVec::with_capacity(str.len());
                                 for c in str.chars() {
@@ -410,7 +410,7 @@ impl wal::TupleData {
                                         }
                                     }
                                 }
-                                DataType::from(bits)
+                                DfValue::from(bits)
                             }
                             ref t => {
                                 unsupported!("Conversion not implemented for type {:?}", t);
