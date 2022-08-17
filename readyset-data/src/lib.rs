@@ -419,14 +419,7 @@ impl DataType {
             DataType::Float(f) => float::coerce_f64(*f as f64, ty),
             DataType::Double(f) => float::coerce_f64(*f, ty),
             DataType::Numeric(d) => float::coerce_decimal(d.as_ref(), ty),
-            DataType::Time(ts)
-                if matches!(
-                    ty,
-                    SqlType::Text | SqlType::TinyText | SqlType::MediumText | SqlType::VarChar(_)
-                ) =>
-            {
-                Ok(ts.to_string().into())
-            }
+            DataType::Time(ts) if ty.is_any_text() => Ok(ts.to_string().into()),
             DataType::BitVector(vec) => match ty {
                 SqlType::VarBit(None) => Ok(self.clone()),
                 SqlType::VarBit(max_size_opt) => match max_size_opt {
