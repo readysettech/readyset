@@ -2,10 +2,10 @@
 
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
+use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 use std::ops::{Add, Div, Mul, Sub};
-use std::{fmt, mem};
 
 use bytes::BytesMut;
 use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
@@ -505,18 +505,6 @@ impl DfValue {
 
 impl PartialEq for DfValue {
     fn eq(&self, other: &DfValue) -> bool {
-        unsafe {
-            use std::slice;
-            // if the two values are byte-for-byte identical, they're the same.
-            let a: &[u8] =
-                slice::from_raw_parts(self as *const _ as *const u8, mem::size_of::<Self>());
-            let b: &[u8] =
-                slice::from_raw_parts(other as *const _ as *const u8, mem::size_of::<Self>());
-            if a == b {
-                return true;
-            }
-        }
-
         match (self, other) {
             (&DfValue::Text(ref a), &DfValue::Text(ref b)) => a == b,
             (&DfValue::TinyText(ref a), &DfValue::TinyText(ref b)) => a == b,
