@@ -403,7 +403,9 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
 fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
     use std::fmt::Write;
 
-    if val == Value::Null {
+    // A void type (OID 2278) indicates that the called function returns no value. This is handled
+    // as a special case since we don't support PassThrough values in the Text protocol
+    if val == Value::Null || matches!(val, Value::PassThrough(ref p) if p.ty.oid() == 2278) {
         put_i32(LENGTH_NULL_SENTINEL, dst);
         return Ok(());
     }
