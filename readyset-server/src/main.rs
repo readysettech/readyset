@@ -45,7 +45,7 @@ pub async fn get_aws_private_ip() -> anyhow::Result<IpAddr> {
 }
 
 #[derive(Parser, Debug)]
-#[clap(name = "noria-server", version)]
+#[clap(name = "readyset-server", version)]
 struct Options {
     /// IP address to listen on
     #[clap(
@@ -122,7 +122,7 @@ fn main() -> anyhow::Result<()> {
         .build()?;
 
     rt.block_on(async {
-        if let Err(error) = opts.tracing.init("noria") {
+        if let Err(error) = opts.tracing.init("readyset") {
             error!(%error, "Error initializing tracing");
             process::exit(1)
         }

@@ -57,7 +57,7 @@ impl ConnectionHandler for MysqlHandler {
 }
 
 #[derive(Parser)]
-#[clap(name = "noria-mysql", version)]
+#[clap(name = "readyset-mysql", version)]
 struct Options {
     #[clap(flatten)]
     adapter_options: readyset_client_adapter::Options,
@@ -67,7 +67,7 @@ fn main() -> anyhow::Result<()> {
     let options = Options::parse();
 
     let mut adapter = NoriaAdapter {
-        description: "MySQL adapter for Noria.",
+        description: "MySQL adapter for ReadySet.",
         default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3306),
         connection_handler: MysqlHandler,
         database_type: DatabaseType::Mysql,
