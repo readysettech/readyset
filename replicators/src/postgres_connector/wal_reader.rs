@@ -369,6 +369,7 @@ impl wal::TupleData {
                             | PGType::JSON
                             | PGType::VARCHAR
                             | PGType::CHAR
+                            | PGType::BPCHAR
                             | PGType::MACADDR
                             | PGType::INET
                             | PGType::UUID
