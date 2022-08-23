@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::convert::TryInto;
 use std::ops::RangeBounds;
 
@@ -103,10 +104,16 @@ impl Handle {
         handle: &HandleSingle,
         keys: &'a [KeyComparison],
     ) -> Result<SharedResults, LookupError<'a>> {
+        let mut prev_keys = HashSet::new();
         let mut hits = SharedResults::with_capacity(keys.len());
         let mut misses = Vec::new();
         let map = handle.enter()?;
         for key in keys {
+            // Skip if this value is in our set of lookups. 'WHERE foo IN (1,2,1)' is equivalent to
+            // 'WHERE foo IN (1,2)'
+            if !prev_keys.insert(key) {
+                continue;
+            }
             match key {
                 KeyComparison::Equal(k) => match map.get(&k[0]) {
                     Some(v) => hits.push(v.as_ref().clone()),
@@ -145,10 +152,16 @@ impl Handle {
         handle: &HandleMany,
         keys: &'a [KeyComparison],
     ) -> Result<SharedResults, LookupError<'a>> {
+        let mut prev_keys = HashSet::new();
         let mut hits = SharedResults::with_capacity(keys.len());
         let mut misses = Vec::new();
         let map = handle.enter()?;
         for key in keys {
+            // Skip if this value is in our set of lookups. 'WHERE foo IN (1,2,1)' is equivalent to
+            // 'WHERE foo IN (1,2)'
+            if !prev_keys.insert(key) {
+                continue;
+            }
             match key {
                 KeyComparison::Equal(k) => match map.get(k.as_slice()) {
                     Some(v) => hits.push(v.as_ref().clone()),
@@ -394,6 +407,74 @@ mod tests {
                 .collect::<Vec<_>>(),
             (2i32..=3)
                 .map(|n: i32| vec![DfValue::from(n), DfValue::from(n)].into_boxed_slice())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn deduplicate_single_range() {
+        let (mut w, handle) = make_single();
+
+        (0i32..10)
+            .map(|n| ((n.into()), vec![n.into(), n.into()].into_boxed_slice()))
+            .for_each(|(k, v)| {
+                w.insert(k, v);
+            });
+
+        w.insert_range((DfValue::from(0i32))..(DfValue::from(10i32)));
+        w.publish();
+
+        let keys = vec![
+            KeyComparison::Equal(vec![1i32.into()].try_into().unwrap()),
+            KeyComparison::Equal(vec![2i32.into()].try_into().unwrap()),
+            KeyComparison::Equal(vec![1i32.into()].try_into().unwrap()),
+        ];
+
+        // Ensure that get_multi() deduplicates equal keys
+        let res = handle.get_multi(&keys).unwrap();
+        assert_eq!(
+            res.iter()
+                .flat_map(|rs| rs.iter())
+                .cloned()
+                .collect::<Vec<_>>(),
+            (1i32..=2)
+                .map(|n| vec![DfValue::from(n), DfValue::from(n)].into_boxed_slice())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn deduplicate_many_range() {
+        let (mut w, handle) = make_many();
+
+        (0i32..10)
+            .map(|n| {
+                (
+                    vec![n.into(), n.into()],
+                    vec![n.into(), n.into()].into_boxed_slice(),
+                )
+            })
+            .for_each(|(k, v)| {
+                w.insert(k, v);
+            });
+
+        w.publish();
+
+        let keys = vec![
+            KeyComparison::Equal(vec![1i32.into(), 1i32.into()].try_into().unwrap()),
+            KeyComparison::Equal(vec![2i32.into(), 2i32.into()].try_into().unwrap()),
+            KeyComparison::Equal(vec![1i32.into(), 1i32.into()].try_into().unwrap()),
+        ];
+
+        // Ensure that get_multi() deduplicates equal keys
+        let res = handle.get_multi(&keys).unwrap();
+        assert_eq!(
+            res.iter()
+                .flat_map(|rs| rs.iter())
+                .cloned()
+                .collect::<Vec<_>>(),
+            (1i32..=2)
+                .map(|n| vec![DfValue::from(n), DfValue::from(n)].into_boxed_slice())
                 .collect::<Vec<_>>()
         );
     }
