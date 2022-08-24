@@ -545,6 +545,7 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
                 )),
                 |_| SqlType::TimestampTz,
             ),
+            map(tag_no_case("timestamptz"), |_| SqlType::TimestampTz),
             map(
                 tuple((
                     tag_no_case("timestamp"),
@@ -1412,6 +1413,12 @@ mod tests {
                 b"timestamp with time zone"
             );
             assert_eq!(res, SqlType::TimestampTz);
+        }
+
+        #[test]
+        fn timestamptz_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"timestamptz");
+            assert_eq!(res, SqlType::TimestampTz)
         }
 
         #[test]
