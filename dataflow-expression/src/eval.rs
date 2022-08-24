@@ -30,7 +30,7 @@ macro_rules! get_time_or_default {
     ($df_value:expr, $from_sqltype:expr) => {
         $df_value
             .coerce_to(&SqlType::Timestamp, $from_sqltype)
-            .or($df_value.coerce_to(&SqlType::Time, $from_sqltype))
+            .or_else(|_| $df_value.coerce_to(&SqlType::Time, $from_sqltype))
             .unwrap_or(DfValue::None)
     };
 }
