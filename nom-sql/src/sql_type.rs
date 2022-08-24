@@ -102,7 +102,10 @@ impl SqlType {
     #[inline]
     pub fn is_any_text(&self) -> bool {
         use SqlType::*;
-        matches!(self, Text | TinyText | MediumText | LongText | VarChar(_))
+        matches!(
+            self,
+            Text | TinyText | MediumText | LongText | Char(_) | VarChar(_)
+        )
     }
 }
 
