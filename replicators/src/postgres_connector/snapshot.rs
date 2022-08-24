@@ -344,7 +344,10 @@ impl<'a> PostgresReplicator<'a> {
         let mut table_list = self.get_table_list(TableKind::RegularTable).await?;
         let mut view_list = self.get_table_list(TableKind::View).await?;
 
-        table_list.retain(|tbl| self.table_filter.contains(&tbl.schema, &tbl.name));
+        table_list.retain(|tbl| {
+            self.table_filter
+                .contains(tbl.schema.as_str(), tbl.name.as_str())
+        });
         view_list.retain(|view| self.table_filter.contains_namespace(&view.schema));
 
         trace!(?table_list, "Loaded table list");

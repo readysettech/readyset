@@ -361,8 +361,16 @@ impl NoriaAdapter {
             Some("public"),
         )?;
 
-        let mut connector =
-            Box::new(PostgresWalConnector::connect(pgsql_opts.clone(), dbname, config, pos).await?);
+        let mut connector = Box::new(
+            PostgresWalConnector::connect(
+                pgsql_opts.clone(),
+                dbname,
+                config,
+                pos,
+                table_filter.clone(),
+            )
+            .await?,
+        );
 
         info!("Connected to PostgreSQL");
 
@@ -491,8 +499,12 @@ impl NoriaAdapter {
 
         // Remove DDL changes outside the filtered scope
         changelist.changes.retain(|change| match change {
-            Change::CreateTable(stmt) => self.table_filter.contains(&namespace, &stmt.table.name),
-            Change::AlterTable(stmt) => self.table_filter.contains(&namespace, &stmt.table.name),
+            Change::CreateTable(stmt) => self
+                .table_filter
+                .contains(namespace.as_str(), stmt.table.name.as_str()),
+            Change::AlterTable(stmt) => self
+                .table_filter
+                .contains(namespace.as_str(), stmt.table.name.as_str()),
             _ => true,
         });
 
@@ -642,7 +654,10 @@ impl NoriaAdapter {
                     _ => {}
                 }
 
-                if !self.table_filter.contains(namespace, table) {
+                if !self
+                    .table_filter
+                    .contains(namespace.as_str(), table.as_str())
+                {
                     return Ok(());
                 }
             }

@@ -6,9 +6,8 @@ use bit_vec::BitVec;
 use mysql_time::MysqlTime;
 use nom_sql::SqlType;
 use postgres_types::Kind;
-use readyset::{ReadySetError, ReadySetResult};
+use readyset::ReadySetError;
 use readyset_data::{Array, DfType, DfValue};
-use readyset_errors::unsupported;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use tokio_postgres as pgsql;
@@ -74,16 +73,20 @@ impl WalReader {
         }
     }
 
-    pub(crate) async fn next_event(&mut self) -> ReadySetResult<(WalEvent, i64)> {
+    pub(crate) async fn next_event(&mut self) -> Result<(WalEvent, i64), WalError> {
         let WalReader { wal, relations } = self;
 
         loop {
-            let data: WalData = match wal.next().await? {
+            let data: WalData = match wal
+                .next()
+                .await
+                .map_err(|e| WalError::ReadySetError(e.into()))?
+            {
                 pgsql::Message::CopyData(body) => body.into_bytes().try_into()?,
                 _ => {
-                    return Err(ReadySetError::ReplicationFailed(
+                    return Err(WalError::ReadySetError(ReadySetError::ReplicationFailed(
                         "Unexpected message during WAL replication".to_string(),
-                    ))
+                    )))
                 }
             };
 
@@ -344,7 +347,13 @@ impl wal::TupleData {
                                 PGType::UUID => SqlType::Uuid,
                                 PGType::BIT => SqlType::Bit(None),
                                 PGType::VARBIT => SqlType::VarBit(None),
-                                _ => unsupported!("unsupported type {}", spec.data_type),
+                                _ => {
+                                    return Err(WalError::UnsupportedTypeConversion {
+                                        ty: spec.data_type.clone(),
+                                        namespace: relation.namespace.clone(),
+                                        table: relation.name.clone(),
+                                    })
+                                }
                             }));
 
                             DfValue::from(str.parse::<Array>()?)
@@ -415,7 +424,11 @@ impl wal::TupleData {
                                 DfValue::from(bits)
                             }
                             ref t => {
-                                unsupported!("Conversion not implemented for type {:?}", t);
+                                return Err(WalError::UnsupportedTypeConversion {
+                                    ty: t.clone(),
+                                    namespace: relation.namespace.clone(),
+                                    table: relation.name.clone(),
+                                });
                             }
                         },
                     };

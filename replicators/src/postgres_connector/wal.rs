@@ -7,6 +7,7 @@
 use std::convert::{TryFrom, TryInto};
 
 use bytes::Bytes;
+use postgres_types::Type;
 
 /// An parse error
 #[derive(Debug)]
@@ -41,6 +42,11 @@ pub enum WalError {
     InvalidMapping(String),
     ToastNotSupported,
     ReadySetError(readyset::ReadySetError),
+    UnsupportedTypeConversion {
+        ty: Type,
+        namespace: Bytes,
+        table: Bytes,
+    },
 }
 
 impl From<std::array::TryFromSliceError> for WalError {

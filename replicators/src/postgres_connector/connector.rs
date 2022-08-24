@@ -10,6 +10,8 @@ use super::ddl_replication::setup_ddl_replication;
 use super::wal_reader::{WalEvent, WalReader};
 use super::{PostgresPosition, PUBLICATION_NAME, REPLICATION_SLOT};
 use crate::noria_adapter::{Connector, ReplicationAction};
+use crate::postgres_connector::wal::WalError;
+use crate::table_filter::TableFilter;
 use crate::Config;
 
 /// A connector that connects to a PostgreSQL server and starts reading WAL from the "noria"
@@ -37,6 +39,8 @@ pub struct PostgresWalConnector {
     next_position: Option<PostgresPosition>,
     /// The replication slot if was created for this connector
     pub(crate) replication_slot: Option<CreatedSlot>,
+    /// Table filter to ignore rows for filtered tables
+    table_filter: TableFilter,
 }
 
 /// The decoded response to `IDENTIFY_SYSTEM`
@@ -81,6 +85,7 @@ impl PostgresWalConnector {
         dbname: S,
         config: Config,
         next_position: Option<PostgresPosition>,
+        table_filter: TableFilter,
     ) -> ReadySetResult<Self> {
         let connector = {
             let mut builder = native_tls::TlsConnector::builder();
@@ -105,6 +110,7 @@ impl PostgresWalConnector {
             peek: None,
             next_position,
             replication_slot: None,
+            table_filter,
         };
 
         if next_position.is_none() {
@@ -154,7 +160,7 @@ impl PostgresWalConnector {
 
     /// Waits and returns the next WAL event, while monotoring the connection
     /// handle for errors.
-    async fn next_event(&mut self) -> ReadySetResult<(WalEvent, i64)> {
+    async fn next_event(&mut self) -> Result<(WalEvent, i64), WalError> {
         let PostgresWalConnector {
             reader,
             connection_handle,
@@ -166,11 +172,13 @@ impl PostgresWalConnector {
                 ev = reader.next_event().fuse() => ev,
                 err = connection_handle.fuse() => match err.unwrap() { // This unwrap is ok, because it is on the handle
                     Ok(_) => unreachable!(), // Unrechable because it runs in infinite loop unless errors
-                    Err(err) => Err(err.into()),
+                    Err(err) => Err(WalError::ReadySetError(err.into())),
                 }
             }
         } else {
-            Err(ReadySetError::ReplicationFailed("Not started".to_string()))
+            Err(WalError::ReadySetError(ReadySetError::ReplicationFailed(
+                "Not started".to_string(),
+            )))
         }
     }
 
@@ -439,7 +447,17 @@ impl Connector for PostgresWalConnector {
 
             let (event, lsn) = match self.peek.take() {
                 Some(event) => event,
-                None => self.next_event().await?,
+                None => match self.next_event().await {
+                    Ok(ev) => ev,
+                    Err(WalError::UnsupportedTypeConversion {
+                        namespace, table, ..
+                    }) if !self.table_filter.contains(&namespace[..], &table[..]) => {
+                        // Skip events that failed to parse for tables that we ignore, since we
+                        // don't really care
+                        continue;
+                    }
+                    Err(err) => return Err(err.into()),
+                },
             };
 
             trace!(?event);

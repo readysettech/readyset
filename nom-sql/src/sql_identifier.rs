@@ -263,6 +263,12 @@ impl std::borrow::Borrow<str> for SqlIdentifier {
     }
 }
 
+impl std::borrow::Borrow<[u8]> for SqlIdentifier {
+    fn borrow(&self) -> &[u8] {
+        self.as_ref()
+    }
+}
+
 impl PartialOrd for SqlIdentifier {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {

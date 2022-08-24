@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::collections::btree_map::IterMut;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -126,7 +127,12 @@ impl TableFilter {
     }
 
     /// Check if a given table should be processed
-    pub(crate) fn contains(&self, namespace: &str, table: &str) -> bool {
+    pub(crate) fn contains<Q1, Q2>(&self, namespace: &Q1, table: &Q2) -> bool
+    where
+        Q1: Ord + ?Sized,
+        Q2: Ord + ?Sized,
+        SqlIdentifier: Borrow<Q1> + Borrow<Q2>,
+    {
         if let Some(ns) = self.tables.get(namespace) {
             match ns {
                 ReplicateTableSpec::AllTablesInNamespace => true,
