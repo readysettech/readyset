@@ -755,7 +755,7 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
             ),
             map(
                 tuple((
-                    tag_no_case("char"),
+                    alt((tag_no_case("character"), tag_no_case("char"))),
                     opt(delim_u16),
                     whitespace0,
                     opt(tag_no_case("binary")),
@@ -1632,6 +1632,14 @@ mod tests {
                 b"character varying(20)"
             );
             assert_eq!(res, SqlType::VarChar(Some(20)));
+        }
+
+        #[test]
+        fn character_with_length() {
+            let qs = b"character(16)";
+            let res = type_identifier(Dialect::PostgreSQL)(qs);
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap().1, SqlType::Char(Some(16)));
         }
 
         #[test]
