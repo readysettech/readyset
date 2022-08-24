@@ -5998,7 +5998,7 @@ async fn simple_enum() {
 
     let sql = "
         CREATE TABLE t1 (id INT, color ENUM('red', 'yellow', 'green'));
-        CREATE CACHE c1 FROM SELECT color FROM t1 WHERE id = ?;
+        CREATE CACHE c1 FROM SELECT color FROM t1 WHERE id = ? ORDER BY color;
     ";
 
     g.extend_recipe(sql.parse().unwrap()).await.unwrap();
@@ -6039,7 +6039,7 @@ async fn simple_enum() {
         result[0][0]
             .coerce_to(result_type, &DfType::Unknown)
             .unwrap(),
-        DfValue::from("green")
+        DfValue::from("purple")
             .coerce_to(result_type, &DfType::Unknown)
             .unwrap()
     );
@@ -6055,7 +6055,7 @@ async fn simple_enum() {
         result[2][0]
             .coerce_to(result_type, &DfType::Unknown)
             .unwrap(),
-        DfValue::from("purple")
+        DfValue::from("green")
             .coerce_to(result_type, &DfType::Unknown)
             .unwrap()
     );
