@@ -388,6 +388,37 @@ async fn prep_then_always_select_in_tx() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
+async fn always_should_bypass_tx() {
+    let (opts, _handle) = setup_with(
+        BackendBuilder::new()
+            .require_authentication(false)
+            .unsupported_set_mode(UnsupportedSetMode::Proxy),
+    )
+    .await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
+    conn.query_drop("INSERT INTO t (x) values (1)")
+        .await
+        .unwrap();
+    conn.query_drop("CREATE CACHE ALWAYS test_always FROM SELECT x FROM t;")
+        .await
+        .unwrap();
+    let mut tx = conn
+        .start_transaction(mysql_async::TxOpts::new())
+        .await
+        .unwrap();
+
+    tx.query_drop("SELECT x FROM t").await.unwrap();
+
+    assert_eq!(
+        last_query_info(&mut tx).await.destination,
+        QueryDestination::Readyset
+    );
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn prep_select() {
     let (opts, _handle) = setup_with(
         BackendBuilder::new()

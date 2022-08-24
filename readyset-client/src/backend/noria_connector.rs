@@ -531,7 +531,7 @@ impl NoriaConnector {
                 ColumnSchema {
                     spec: nom_sql::ColumnSpecification {
                         column: nom_sql::Column {
-                            name: "bypass_autocommit".into(),
+                            name: "always".into(),
                             table: None,
                         },
                         sql_type: nom_sql::SqlType::Text,
@@ -542,11 +542,7 @@ impl NoriaConnector {
                 },
             ]),
 
-            columns: Cow::Owned(vec![
-                "name".into(),
-                "query".into(),
-                "bypass_autocommit".into(),
-            ]),
+            columns: Cow::Owned(vec!["name".into(), "query".into(), "always".into()]),
         };
         let data = outputs
             .into_iter()

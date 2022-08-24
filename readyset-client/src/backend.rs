@@ -197,19 +197,13 @@ enum ProxyState {
 
 impl ProxyState {
     /// Returns true if a query should be proxied upstream in most cases per this [`ProxyState`].
-    /// The case in which we should not proxy a query upstream, is if our state is
-    /// Self::AutocommitOff, and the query in question has been manually migrated with the optional
-    /// `ALWAYS` flag, such as `CREATE CACHE ALWAYS`.
+    /// The case in which we should not proxy a query upstream, is if the query in question has
+    /// been manually migrated with the optional `ALWAYS` flag, such as `CREATE CACHE ALWAYS`.
     fn should_proxy(&self) -> bool {
         matches!(
             self,
             Self::AutocommitOff | Self::InTransaction | Self::ProxyAlways
         )
-    }
-
-    /// Returns true if a query should be unconditionally proxied upstream per this [`ProxyState`]
-    fn should_always_proxy(&self) -> bool {
-        matches!(self, Self::InTransaction | Self::ProxyAlways)
     }
 
     /// Perform the appropriate state transition for this proxy state to begin a new transaction.
@@ -874,9 +868,7 @@ where
         match self.rewrite_select_and_check_noria(&stmt) {
             Some((rewritten, should_do_noria)) => {
                 let status = self.query_status_cache.query_status(&rewritten);
-                if self.proxy_state == ProxyState::ProxyAlways
-                    && !(status.migration_state == MigrationState::Successful && status.always)
-                {
+                if self.proxy_state == ProxyState::ProxyAlways && !status.always {
                     PrepareMeta::Proxy
                 } else {
                     PrepareMeta::Select(PrepareSelectMeta {
@@ -1241,10 +1233,7 @@ where
             let always_readyset = cached_statement
                 .rewritten
                 .as_ref()
-                .map(|stmt| {
-                    self.query_status_cache.query_status(stmt).always
-                        && cached_statement.migration_state == MigrationState::Successful
-                })
+                .map(|stmt| self.query_status_cache.query_status(stmt).always)
                 .unwrap_or(false);
 
             if cached_statement.is_unsupported_execute() {
@@ -1689,7 +1678,7 @@ where
         {
             let s = self.query_status_cache.query_status(q);
             let should_try = if self.proxy_state.should_proxy() {
-                s.always && s.migration_state == MigrationState::Successful
+                s.always
             } else {
                 true
             };
@@ -1743,7 +1732,6 @@ where
             Ok(SqlQuery::Set(s)) if let Some(true) = Handler::autocommit_state(&s) => {
                 self.query_adhoc_non_select(query, &mut event, SqlQuery::Set(s)).await
             }
-            Ok(_) if self.proxy_state.should_always_proxy() => self.query_fallback(query, &mut event).await,
             Ok(ref parsed_query) if Handler::requires_fallback(parsed_query) => {
                 if self.has_fallback() {
                     // Query requires a fallback and we can send it to fallback
