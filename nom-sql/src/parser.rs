@@ -28,6 +28,7 @@ use crate::transaction::{
 };
 use crate::update::{updating, UpdateStatement};
 use crate::use_statement::{use_statement, UseStatement};
+use crate::whitespace::whitespace0;
 use crate::{Dialect, DropAllCachesStatement, TableKey};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -128,6 +129,8 @@ impl SqlQuery {
 
 pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery> {
     move |i| {
+        // Ignore preceeding whitespace or comments
+        let (i, _) = whitespace0(i)?;
         alt((
             map(create_table(dialect), SqlQuery::CreateTable),
             map(insertion(dialect), SqlQuery::Insert),
@@ -493,6 +496,12 @@ mod tests {
             let qstring = "   INSERT INTO users VALUES (42, 'test');     ";
             let res = parse_query(Dialect::PostgreSQL, qstring);
             res.unwrap();
+        }
+
+        #[test]
+        fn trim_comment() {
+            let qstring = "-- comment \n INSERT INTO users VALUES (42, 'test');  ";
+            parse_query(Dialect::PostgreSQL, qstring).unwrap();
         }
 
         #[test]
