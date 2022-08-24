@@ -307,8 +307,7 @@ impl Leader {
                 }
                 (&Method::POST, "/table_builder") => {
                     // NOTE(eta): there is DELIBERATELY no `?` after the `table_builder` call,
-                    // because            the receiving end expects a
-                    // `ReadySetResult` to be serialized.
+                    // because the receiving end expects a `ReadySetResult` to be serialized.
                     let body = bincode::deserialize(&body)?;
                     let ds = futures::executor::block_on(self.dataflow_state_handle.read());
                     check_quorum!(ds);

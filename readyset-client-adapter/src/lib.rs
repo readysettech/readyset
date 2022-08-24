@@ -43,7 +43,13 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, debug_span, error, info, info_span, span, warn, Level};
 use tracing_futures::Instrument;
 
+// How frequently to try to establish an http registration for the first time or if the last tick
+// failed and we need to establish a new one
+const REGISTER_HTTP_INIT_INTERVAL: Duration = Duration::from_secs(2);
+
+// How frequently to try to establish an http registration if we have one already
 const REGISTER_HTTP_INTERVAL: Duration = Duration::from_secs(20);
+
 const AWS_PRIVATE_IP_ENDPOINT: &str = "http://169.254.169.254/latest/meta-data/local-ipv4";
 const AWS_METADATA_TOKEN_ENDPOINT: &str = "http://169.254.169.254/latest/api/token";
 
@@ -364,12 +370,8 @@ where
         let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
         let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
 
-        let rs_connect = span!(
-            Level::INFO,
-            "Connecting to ReadySet server",
-            %options.authority_address,
-            %options.deployment
-        );
+        let rs_connect = span!(Level::INFO, "Connecting to RS server");
+        rs_connect.in_scope(|| info!(%options.authority_address, %options.deployment));
 
         let authority = options.authority.clone();
         let authority_address = options.authority_address.clone();
@@ -391,7 +393,8 @@ where
                 .await,
             )
         })?;
-        rs_connect.in_scope(|| info!("Connected"));
+
+        rs_connect.in_scope(|| info!("ControllerHandle created"));
 
         let ctrlc = tokio::signal::ctrl_c();
         let mut sigterm = {
@@ -415,6 +418,7 @@ where
                     .map(|_| Err(io::Error::new(io::ErrorKind::Interrupted, "got SIGTERM"))),
             ),
         ));
+        rs_connect.in_scope(|| info!("Now capturing ctrl-c and SIGTERM events"));
 
         let prometheus_handle = if options.prometheus_metrics {
             let _guard = rt.enter();
@@ -431,6 +435,7 @@ where
         } else {
             None
         };
+        rs_connect.in_scope(|| info!("PrometheusHandle created"));
 
         metrics::counter!(
             recorded::NORIA_STARTUP_TIMESTAMP,
@@ -444,16 +449,20 @@ where
 
         // Gate query log code path on the log flag existing.
         let qlog_sender = if options.query_log {
+            rs_connect.in_scope(|| info!("Query logs are enabled. Spawning query logger"));
             let (qlog_sender, qlog_receiver) = tokio::sync::mpsc::unbounded_channel();
             rt.spawn(query_logger(qlog_receiver, shutdown_recv));
             Some(qlog_sender)
         } else {
+            rs_connect.in_scope(|| info!("Query logs are disabled"));
             None
         };
 
         let noria_read_behavior = if options.non_blocking_reads {
+            rs_connect.in_scope(|| info!("Will perform NonBlocking Reads"));
             ReadBehavior::NonBlocking
         } else {
+            rs_connect.in_scope(|| info!("Will perform Blocking Reads"));
             ReadBehavior::Blocking
         };
 
@@ -464,10 +473,19 @@ where
         } else {
             MigrationStyle::InRequestPath
         };
+        rs_connect.in_scope(|| info!(?migration_style));
+
         let query_status_cache: &'static _ =
             Box::leak(Box::new(QueryStatusCache::with_style(migration_style)));
 
-        if options.async_migrations || options.explicit_migrations {
+        let migration_mode = if options.async_migrations || options.explicit_migrations {
+            MigrationMode::OutOfBand
+        } else {
+            MigrationMode::InRequestPath
+        };
+        rs_connect.in_scope(|| info!(?migration_mode));
+
+        if let MigrationMode::OutOfBand = migration_mode {
             let upstream_db_url = options.upstream_db_url.as_ref().map(|u| u.0.clone());
             let upstream_config = self.upstream_config.clone();
             let ch = ch.clone();
@@ -478,6 +496,7 @@ where
             let validate_queries = options.validate_queries;
             let dry_run = options.explicit_migrations;
 
+            rs_connect.in_scope(|| info!("Spawning migration handler task"));
             let fut = async move {
                 let connection = span!(Level::INFO, "migration task upstream database connection");
                 let upstream =
@@ -525,6 +544,7 @@ where
         }
 
         if options.explicit_migrations {
+            rs_connect.in_scope(|| info!("Spawning explicit migrations task"));
             let ch = ch.clone();
             let loop_interval = options.outputs_polling_interval;
             let shutdown_recv = shutdown_sender.subscribe();
@@ -540,43 +560,20 @@ where
             rt.handle().spawn(fut);
         }
 
-        // Spawn a thread for handling this adapter's HTTP request server.
-        let router_handle = {
-            let (handle, valve) = Valve::new();
-            let http_server = NoriaAdapterHttpRouter {
-                listen_addr: options.metrics_address,
-                query_cache: query_status_cache,
-                valve,
-                prometheus_handle,
-            };
-
-            let fut = async move {
-                let http_listener = http_server.create_listener().await.unwrap();
-                NoriaAdapterHttpRouter::route_requests(http_server, http_listener).await
-            };
-
-            rt.handle().spawn(fut);
-
-            handle
-        };
-
-        let migration_mode = if options.async_migrations || options.explicit_migrations {
-            MigrationMode::OutOfBand
-        } else {
-            MigrationMode::InRequestPath
-        };
-
-        // Spin up async thread that is in charge of creating a session with the authority,
+        // Spin up async task that is in charge of creating a session with the authority,
         // regularly updating the heartbeat to keep the session live, and registering the adapters
         // http endpoint.
         // For now we only support registering adapters over consul.
         if let AuthorityType::Consul = options.authority {
+            rs_connect.in_scope(|| info!("Spawning Consul session task"));
+            let connection = span!(Level::DEBUG, "consul_session", addr = ?authority_address);
             let fut = reconcile_endpoint_registration(
                 authority_address,
                 deployment,
                 options.metrics_address.port(),
                 options.use_aws_external_address,
-            );
+            )
+            .instrument(connection);
             rt.handle().spawn(fut);
         }
 
@@ -627,6 +624,29 @@ where
             None
         };
 
+        // Spawn a task for handling this adapter's HTTP request server.
+        // This step is done as the last thing before accepting connections because it is used as
+        // the health check for the service.
+        let router_handle = {
+            rs_connect.in_scope(|| info!("Spawning HTTP request server task"));
+            let (handle, valve) = Valve::new();
+            let http_server = NoriaAdapterHttpRouter {
+                listen_addr: options.metrics_address,
+                query_cache: query_status_cache,
+                valve,
+                prometheus_handle,
+            };
+
+            let fut = async move {
+                let http_listener = http_server.create_listener().await.unwrap();
+                NoriaAdapterHttpRouter::route_requests(http_server, http_listener).await
+            };
+
+            rt.handle().spawn(fut);
+
+            handle
+        };
+
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             let connection = span!(Level::DEBUG, "connection", addr = ?s.peer_addr().unwrap());
             connection.in_scope(|| info!("Accepted new connection"));
@@ -655,7 +675,7 @@ where
 
             // Initialize the reader layer for the adapter.
             let r = (options.standalone || options.embedded_readers).then(|| {
-                // Create a thread that repeatedly polls BlockingRead's every `RETRY_TIMEOUT`.
+                // Create a task that repeatedly polls BlockingRead's every `RETRY_TIMEOUT`.
                 // When the `BlockingRead` completes, tell the future to resolve with ack.
                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
                 rt.handle().spawn(retry_misses(rx));
@@ -713,17 +733,22 @@ where
             rt.handle().spawn(fut);
         }
 
+        let rs_shutdown = span!(Level::INFO, "RS server Shutting down");
         // Dropping the sender acts as a shutdown signal.
         drop(shutdown_sender);
 
-        // Shut down all tcp streams started by the adapters http router.
+        rs_shutdown.in_scope(|| {
+            info!("Shutting down all tcp streams started by the adapters http router")
+        });
         drop(router_handle);
 
+        rs_shutdown.in_scope(|| info!("Dropping controller handle"));
         drop(ch);
         // We use `shutdown_timeout` instead of `shutdown_background` in case any
         // blocking IO is ongoing.
-        info!("Waiting up to 20s for tasks to complete shutdown");
+        rs_shutdown.in_scope(|| info!("Waiting up to 20s for tasks to complete shutdown"));
         rt.shutdown_timeout(std::time::Duration::from_secs(20));
+        rs_shutdown.in_scope(|| info!("Shutdown completed successfully"));
 
         Ok(())
     }
@@ -780,10 +805,12 @@ async fn reconcile_endpoint_registration(
     port: u16,
     use_aws_external: bool,
 ) {
-    let authority =
-        ConsulAuthority::new(&format!("http://{}/{}", &authority_address, &deployment)).unwrap();
+    let connect_string = format!("http://{}/{}", &authority_address, &deployment);
+    debug!("{}", connect_string);
+    let authority = ConsulAuthority::new(&connect_string).unwrap();
 
-    let mut interval = tokio::time::interval(REGISTER_HTTP_INTERVAL);
+    let mut initializing = true;
+    let mut interval = tokio::time::interval(REGISTER_HTTP_INIT_INTERVAL);
     let mut session_id = None;
 
     async fn needs_refresh(id: &Option<String>, consul: &ConsulAuthority) -> bool {
@@ -796,12 +823,15 @@ async fn reconcile_endpoint_registration(
 
     loop {
         interval.tick().await;
+        debug!("Checking authority registry");
 
         if needs_refresh(&session_id, &authority).await {
             // If we fail this heartbeat, we assume we need to create a new session.
             if let Err(e) = authority.init().await {
                 error!(%e, "encountered error while trying to initialize authority in readyset-adapter");
-                // Try again on next tick.
+                // Try again on next tick, and reduce the polling interval until a new session is
+                // established.
+                initializing = true;
                 continue;
             }
         }
@@ -811,14 +841,23 @@ async fn reconcile_endpoint_registration(
         let ip = match my_ip(&authority_address, use_aws_external).await {
             Some(ip) => ip,
             None => {
-                // Failed to retrieve our IP. We'll try again on next tick iteration.
+                info!("Failed to retrieve IP. Will try again on next tick");
                 continue;
             }
         };
         let http_endpoint = SocketAddr::new(ip, port);
 
         match authority.register_adapter(http_endpoint).await {
-            Ok(id) => session_id = id,
+            Ok(id) => {
+                if initializing {
+                    info!("Extablished authority connection, reducing polling interval");
+                    // Switch to a longer polling interval after the first registration is made
+                    interval = tokio::time::interval(REGISTER_HTTP_INTERVAL);
+                    initializing = false;
+                }
+
+                session_id = id;
+            }
             Err(e) => {
                 error!(%e, "encountered error while trying to register adapter endpoint in authority")
             }
@@ -908,11 +947,11 @@ async fn query_logger(
                         }
                     }
                 } else {
-                    info!("Metrics thread shutting down after request handle dropped.");
+                    info!("Metrics task shutting down after request handle dropped.");
                 }
             }
             _ = shutdown_recv.recv() => {
-                info!("Metrics thread shutting down after signal received.");
+                info!("Metrics task shutting down after signal received.");
                 break;
             }
         }
