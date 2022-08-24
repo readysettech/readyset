@@ -188,7 +188,10 @@ fn default(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
             map(tag_no_case("true"), |_| Literal::Boolean(true)),
             map(tag_no_case("false"), |_| Literal::Boolean(false)),
             map(
-                terminated(tag_no_case("current_timestamp"), opt(tag("()"))),
+                alt((
+                    terminated(tag_no_case("current_timestamp"), opt(tag("()"))),
+                    terminated(tag_no_case("now"), opt(tag("()"))),
+                )),
                 |_| Literal::CurrentTimestamp,
             ),
         )),
@@ -379,6 +382,34 @@ mod tests {
                 ColumnSpecification {
                     column: Column {
                         name: "created_at".into(),
+                        table: None,
+                    },
+                    sql_type: SqlType::Timestamp,
+                    comment: None,
+                    constraints: vec![
+                        ColumnConstraint::NotNull,
+                        ColumnConstraint::DefaultValue(Literal::CurrentTimestamp),
+                    ]
+                }
+            );
+        }
+
+        #[test]
+        fn default_now() {
+            let (_, res1) =
+                column_specification(Dialect::PostgreSQL)(b"c timestamp NOT NULL DEFAULT NOW()")
+                    .unwrap();
+
+            let (_, res2) =
+                column_specification(Dialect::PostgreSQL)(b"c timestamp NOT NULL DEFAULT NOW")
+                    .unwrap();
+
+            assert_eq!(res1, res2);
+            assert_eq!(
+                res1,
+                ColumnSpecification {
+                    column: Column {
+                        name: "c".into(),
                         table: None,
                     },
                     sql_type: SqlType::Timestamp,
