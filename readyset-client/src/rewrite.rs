@@ -13,7 +13,7 @@ use tracing::trace;
 
 /// Struct storing information about parameters processed from a raw user supplied query, which
 /// provides support for converting a user-supplied parameter list into a set of lookup keys to pass
-/// to Noria.
+/// to ReadySet.
 ///
 /// Construct a [`ProcessedQueryParams`] by calling [`process_query`], then pass the list of
 /// user-provided parameters to [`ProcessedQueryParams::make_keys`] to make a list of lookup keys to

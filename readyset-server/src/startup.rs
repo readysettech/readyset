@@ -1,6 +1,6 @@
-//! # The Noria server
+//! # The ReadySet server
 //!
-//! A Noria server instance consists of three main components: the `NoriaServer` HTTP server
+//! A ReadySet server instance consists of three main components: the `NoriaServer` HTTP server
 //! (which listens externally for RPC calls), the `Controller` controller wrapper (which may
 //! contain a `Leader` if this instance is elected leader), and the `Worker` (which
 //! contains many `Domain` objects).
@@ -15,7 +15,7 @@
 //!
 //! # Control plane and data plane
 //!
-//! Communications amongst and within Noria servers are divided into 2 categories:
+//! Communications amongst and within ReadySet servers are divided into 2 categories:
 //!
 //! - the **control plane**, communications between workers and controllers used to perform
 //!   migrations and alter the structure of the system

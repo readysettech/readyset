@@ -1,4 +1,4 @@
-//! A wrapper around TCP channels that Noria uses to communicate between clients and servers, and
+//! A wrapper around TCP channels that ReadySet uses to communicate between clients and servers, and
 //! inside the data-flow graph. At this point, this is mostly a thin wrapper around
 //! [`async-bincode`](https://docs.rs/async-bincode/), and it might go away in the long run.
 

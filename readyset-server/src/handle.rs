@@ -52,7 +52,7 @@ impl Handle {
         }
     }
 
-    /// Returns the address of this Noria server.
+    /// Returns the address of this ReadySet server.
     pub fn get_address(&self) -> &Url {
         &self.descriptor.controller_uri
     }

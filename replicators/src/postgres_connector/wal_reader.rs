@@ -316,7 +316,7 @@ impl wal::TupleData {
                 wal::TupleEntry::Unchanged => return Err(WalError::ToastNotSupported),
                 wal::TupleEntry::Text(text) => {
                     // WAL delivers all entries as text, and it is up to us to parse to the proper
-                    // Noria type
+                    // ReadySet type
                     let str = String::from_utf8_lossy(&text);
 
                     let val = match spec.data_type.kind() {

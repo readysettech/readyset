@@ -33,7 +33,7 @@
 //!   anyway.
 //! * Since the information available to an event trigger for an `ALTER TABLE` event is insufficient
 //!   to construct a full `ALTER TABLE` statement, `ALTER TABLE` events are replicated as a `CREATE
-//!   TABLE` statement - Noria will then know that a `CREATE TABLE` statement for a table that
+//!   TABLE` statement - ReadySet will then know that a `CREATE TABLE` statement for a table that
 //!   already exists should be treated as an alter table.
 //!
 //! [dialect]: nom_sql::Dialect
@@ -98,8 +98,8 @@ where
 }
 
 impl DdlEvent {
-    /// Convert this [`DdlEvent`] into a SQL DDL statement that can be sent to Noria directly (using
-    /// the Noria-native SQL dialect, not the postgresql dialect!)
+    /// Convert this [`DdlEvent`] into a SQL DDL statement that can be sent to ReadySet directly
+    /// (using the ReadySet-native SQL dialect, not the postgresql dialect!)
     pub(crate) fn to_ddl(&self) -> String {
         match self.operation {
             DdlEventOperation::CreateTable

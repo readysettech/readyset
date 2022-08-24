@@ -20,7 +20,7 @@ use tracing_futures::Instrument;
 use super::BinlogPosition;
 use crate::table_filter::TableFilter;
 
-const BATCH_SIZE: usize = 1000; // How many queries to buffer before pushing to Noria
+const BATCH_SIZE: usize = 1000; // How many queries to buffer before pushing to ReadySet
 
 const MAX_SNAPSHOT_BATCH: usize = 8; // How many tables to snapshot at the same time
 
@@ -89,7 +89,7 @@ impl MySqlReplicator {
     /// Load all the `CREATE TABLE` statements for the tables in the MySQL database. Returns the the
     /// transaction that holds the DDL locks for the tables.
     ///
-    /// If `install` is set to `true`, will also install the tables in Noria one-by-one, skipping
+    /// If `install` is set to `true`, will also install the tables in ReadySet one-by-one, skipping
     /// over any tables that fail to install
     async fn load_recipe_with_meta_lock(
         &mut self,
@@ -192,7 +192,7 @@ impl MySqlReplicator {
         Ok(tx)
     }
 
-    /// Call `SELECT * FROM table` and convert all rows into a Noria row
+    /// Call `SELECT * FROM table` and convert all rows into a ReadySet row
     /// it may seem inefficient but apparently that is the correct way to
     /// replicate a table, and `mysqldump` and `debezium` do just that
     pub(crate) async fn dump_table(&self, db: &str, table: &str) -> mysql::Result<TableDumper> {
@@ -247,8 +247,8 @@ impl MySqlReplicator {
         Ok(conn)
     }
 
-    /// Replicate a single table from the provided TableDumper and into Noria by
-    /// converting every MySQL row into Noria row and calling `insert_many` in batches
+    /// Replicate a single table from the provided TableDumper and into ReadySet by
+    /// converting every MySQL row into ReadySet row and calling `insert_many` in batches
     async fn replicate_table(
         mut dumper: TableDumper,
         mut table_mutator: readyset::Table,
@@ -313,7 +313,7 @@ impl MySqlReplicator {
     ///
     /// # Arguments
     ///
-    /// * `noria`: The target Noria deployment
+    /// * `noria`: The target ReadySet deployment
     /// * `replication_offsets`: The set of replication offsets for already-snapshotted tables and
     ///   the schema
     /// * `extend_recipe`: Replicate and install the recipe (`CREATE TABLE` ...; `CREATE VIEW` ...;)
@@ -502,7 +502,7 @@ impl MySqlReplicator {
     }
 }
 
-/// An intermediary struct that can be used to get a stream of Noria rows
+/// An intermediary struct that can be used to get a stream of ReadySet rows
 // This is required because mysql::QueryResult borrows from conn and then
 // we have some hard to solve borrowing issues
 pub(crate) struct TableDumper {
@@ -534,7 +534,7 @@ impl<'a> TableStream<'a> {
     }
 }
 
-/// Convert each entry in a row to a Noria type that can be inserted into the base tables
+/// Convert each entry in a row to a ReadySet type that can be inserted into the base tables
 fn mysql_row_to_noria_row(row: mysql::Row) -> ReadySetResult<Vec<readyset_data::DfValue>> {
     let mut noria_row = Vec::with_capacity(row.len());
     for idx in 0..row.len() {

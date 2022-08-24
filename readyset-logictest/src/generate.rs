@@ -427,7 +427,7 @@ pub struct GenerateOpts {
     /// Whether to include row deletes followed by additional queries in the generated test script.
     ///
     /// If used with a seed script, all tables must have a primary key (due to current limitations
-    /// in Noria).
+    /// in ReadySet).
     #[clap(long)]
     pub include_deletes: bool,
 

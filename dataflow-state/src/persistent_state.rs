@@ -257,7 +257,7 @@ impl PersistenceParameters {
     ) -> Self {
         // NOTE(fran): DO NOT impose a particular format on `db_filename_prefix`. If you need to,
         // modify it before use, but do not make assertions on it. The reason being, we use
-        // Noria's deployment name as db filename prefix (which makes sense), and we don't
+        // ReadySet's deployment name as db filename prefix (which makes sense), and we don't
         // want to impose any restriction on it (since sometimes we automate the deployments
         // and deployment name generation).
         let db_filename_prefix = db_filename_prefix.unwrap_or_else(|| String::from("soup"));

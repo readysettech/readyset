@@ -7,8 +7,8 @@ use readyset_client_test_helpers::mysql_helpers::{last_query_info, query_cache_s
 use readyset_client_test_helpers::sleep;
 use serial_test::serial;
 
-// With in_request_path migration and fallback, an supported query should execute on Noria
-// and be marked allowed on completion, an unsupported query should execute on Noria
+// With in_request_path migration and fallback, an supported query should execute on ReadySet
+// and be marked allowed on completion, an unsupported query should execute on ReadySet
 // and then fallback, and be marked denied.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
@@ -53,8 +53,8 @@ async fn in_request_path_query_with_fallback() {
     );
 }
 
-// With in_request_path query mode without fallback, a supported query should execute on Noria
-// and be marked allowed on completion, an unsupported query should execute on Noria
+// With in_request_path query mode without fallback, a supported query should execute on ReadySet
+// and be marked allowed on completion, an unsupported query should execute on ReadySet
 // and then fallback, and be marked denied.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
@@ -333,8 +333,8 @@ async fn autocommit_prepare_execute() {
     assert_eq!(destination.destination, QueryDestination::Readyset);
 }
 
-// With in_request_path migration and fallback, a supported query should execute on Noria
-// and be marked allowed on completion, an unsupported query should execute on Noria
+// With in_request_path migration and fallback, a supported query should execute on ReadySet
+// and be marked allowed on completion, an unsupported query should execute on ReadySet
 // and then fallback, and be marked denied.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
@@ -411,8 +411,8 @@ async fn in_request_path_prep_exec_with_fallback() {
     );
 }
 
-// With in_request_path query mode without fallback, a supported query should execute on Noria
-// and be marked allowed on completion, an unsupported query should execute on Noria
+// With in_request_path query mode without fallback, a supported query should execute on ReadySet
+// and be marked allowed on completion, an unsupported query should execute on ReadySet
 // and then fallback, and be marked denied.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]

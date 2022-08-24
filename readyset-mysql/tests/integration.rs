@@ -1460,7 +1460,7 @@ async fn reuse_similar_query() {
         .unwrap();
     assert_eq!(rows, vec![(4, 2)]);
 
-    // This query is not identical to the one above, but Noria is expected to rewrite it and then
+    // This query is not identical to the one above, but ReadySet is expected to rewrite it and then
     // reuse the same underlying view.
     let rows: Vec<(i32, i32)> = conn
         .exec("SELECT x, y FROM test WHERE x >= ? AND x <= ?", (4, 5))

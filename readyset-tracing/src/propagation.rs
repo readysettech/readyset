@@ -1,4 +1,4 @@
-//! Utilities to propagate tracing spans, e.g. from an adapter to Noria core
+//! Utilities to propagate tracing spans, e.g. from an adapter to ReadySet core
 use std::collections::HashMap;
 
 use opentelemetry::propagation::text_map_propagator::TextMapPropagator;

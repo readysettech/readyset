@@ -4,7 +4,7 @@
 //! these queries on an interval.
 //!
 //! The migration handler may change a queries state based on the
-//! response from Noria.
+//! response from ReadySet.
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -23,7 +23,7 @@ use crate::upstream_database::{IsFatalError, NoriaCompare};
 use crate::{utils, UpstreamDatabase};
 
 pub struct MigrationHandler<DB> {
-    /// Connection used to issue prepare requests to Noria.
+    /// Connection used to issue prepare requests to ReadySet.
     noria: NoriaConnector,
 
     /// The noria connector used to query if we are configured to run in dry_run mode.

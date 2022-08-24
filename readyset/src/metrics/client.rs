@@ -15,7 +15,7 @@ pub struct TaggedMetricsDump {
 }
 
 /// The MetricsClient handles operations to the metrics collection framework across
-/// a Noria deployment.
+/// a ReadySet deployment.
 pub struct MetricsClient {
     controller: ControllerHandle,
     client: reqwest::Client,

@@ -175,13 +175,13 @@ impl Service<ControllerRequest> for Controller {
     }
 }
 
-/// A handle to a Noria controller.
+/// A handle to a ReadySet controller.
 ///
-/// This handle is the primary mechanism for interacting with a running Noria instance, and lets
+/// This handle is the primary mechanism for interacting with a running ReadySet instance, and lets
 /// you add and remove queries, retrieve handles for inserting or querying the underlying data, and
 /// to perform meta-operations such as fetching the dataflow's GraphViz visualization.
 ///
-/// To establish a new connection to Noria, use `ControllerHandle::new`, and pass in the
+/// To establish a new connection to ReadySet, use `ControllerHandle::new`, and pass in the
 /// appropriate `Authority`.
 ///
 /// Note that whatever Tokio Runtime you use to execute the `Future` that resolves into the
@@ -190,7 +190,7 @@ impl Service<ControllerRequest> for Controller {
 /// none of your operations will ever complete! Furthermore, you *must* use the `Runtime` to
 /// execute any futures returned from `ControllerHandle` (that is, you cannot just call `.wait()`
 /// on them).
-// TODO: this should be renamed to NoriaHandle, or maybe just Connection, since it also provides
+// TODO: this should be renamed to ReadySetHandle, or maybe just Connection, since it also provides
 // reads and writes, which aren't controller actions!
 pub struct ControllerHandle {
     handle: Buffer<Controller, ControllerRequest>,
@@ -273,15 +273,15 @@ impl ControllerHandle {
         future::poll_fn(move |cx| self.poll_ready(cx)).await
     }
 
-    /// Create a [`ControllerHandle`] that bootstraps a connection to Noria via the configuration
+    /// Create a [`ControllerHandle`] that bootstraps a connection to ReadySet via the configuration
     /// stored in the given `authority`. Assigns the authority no timeouts for requests and
     /// migrations.
     pub async fn new<I: Into<Arc<Authority>>>(authority: I) -> Self {
         Self::make(authority.into(), None, None)
     }
 
-    /// Create a [`ControllerHandle`] that bootstraps a connection to Noria via the configuration
-    /// stored in the given `authority`. Assigns a timeout to requests to Noria, `timeout`.
+    /// Create a [`ControllerHandle`] that bootstraps a connection to ReadySet via the configuration
+    /// stored in the given `authority`. Assigns a timeout to requests to ReadySet, `timeout`.
     pub async fn with_timeouts<I: Into<Arc<Authority>>>(
         authority: I,
         request_timeout: Option<Duration>,

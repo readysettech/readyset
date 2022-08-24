@@ -1,6 +1,6 @@
 #![warn(clippy::panic)]
 //! Tool to install a test query view in noria. This tool
-//! creates a table in Noria and creates a view for the SELECT
+//! creates a table in ReadySet and creates a view for the SELECT
 //! * query for that table. It then performs a lookup of the
 //! view.
 use clap::Parser;

@@ -24,7 +24,7 @@ pub struct MemoryState {
     by_tag: HashMap<Tag, usize>,
     mem_size: u64,
     /// The latest replication offset that has been written to the base table backed by this
-    /// [`MemoryState`], it is only used when [`LocalAuthority`] is the Noria authority.
+    /// [`MemoryState`], it is only used when [`LocalAuthority`] is the ReadySet authority.
     replication_offset: Option<ReplicationOffset>,
 }
 

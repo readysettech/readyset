@@ -206,7 +206,7 @@ impl TestScript {
         Ok(())
     }
 
-    /// Run the test script on Noria server
+    /// Run the test script on ReadySet server
     pub async fn run_on_noria(
         &self,
         opts: &RunOptions,
@@ -229,7 +229,7 @@ impl TestScript {
         adapter_task.abort();
         let _ = adapter_task.await;
 
-        // Stop Noria
+        // Stop ReadySet
         noria_handle.shutdown();
         noria_handle.wait_done().await;
 

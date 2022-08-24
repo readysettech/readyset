@@ -1,4 +1,4 @@
-//! This module provides the mechanism to transform the [`String`] queries issued to Noria
+//! This module provides the mechanism to transform the [`String`] queries issued to ReadySet
 //! into a list of changes that need to happen (namely, [`ChangeList`]).
 //!
 //! The [`ChangeList`] structure provides a list of [`Change`]s, which shall be used by
@@ -256,7 +256,7 @@ mod parse {
     use nom_sql::whitespace::whitespace0;
     use nom_sql::{sql_query, Dialect, SqlQuery};
 
-    /// The canonical SQL dialect used for central Noria server recipes. All direct clients of
+    /// The canonical SQL dialect used for central ReadySet server recipes. All direct clients of
     /// noria-server must use this dialect for their SQL recipes, and all adapters and client
     /// libraries must translate into this dialect as part of handling requests from users
     const CANONICAL_DIALECT: Dialect = Dialect::MySQL;

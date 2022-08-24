@@ -10,14 +10,14 @@ use tokio_postgres::types::Type;
 use crate::row::Row;
 use crate::schema::{type_to_pgsql, SelectSchema};
 
-/// A structure that contains a `ResultIterator`, as provided by `QueryResult::NoriaSelect`, and
-/// facilitates iteration over these results as `Row` values.
+/// A structure that contains a `ResultIterator` and facilitates iteration over these results as
+/// `Row` values.
 pub struct Resultset {
-    /// The query result data, comprising nested `Vec`s of rows that may come from separate Noria
-    /// interface lookups performed by the backend.
+    /// The query result data, comprising nested `Vec`s of rows that may come from separate
+    /// ReadySet interface lookups performed by the backend.
     results: ResultIterator,
 
-    /// The fields to project for each row. A `Results` returned by a Noria interface lookup may
+    /// The fields to project for each row. A `Results` returned by a ReadySet interface lookup may
     /// contain extraneous fields that should not be projected into the query result output. In
     /// particular, bogokeys and other lookup keys that are not requested for projection by the SQL
     /// query may be present in `results` but should be excluded from query output. This

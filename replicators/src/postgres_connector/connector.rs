@@ -413,7 +413,7 @@ impl Connector for PostgresWalConnector {
         last_pos: &ReplicationOffset,
         _until: Option<&ReplicationOffset>,
     ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
-        // Calling the Noria API is a bit expensive, therefore we try to queue as many
+        // Calling the ReadySet API is a bit expensive, therefore we try to queue as many
         // actions as possible before calling into the API.
         const MAX_QUEUED_ACTIONS: usize = 100;
         let mut cur_table = CurTable {

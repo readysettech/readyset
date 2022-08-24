@@ -94,7 +94,7 @@ impl RecipeExpr {
     }
 }
 
-/// The set of all [`RecipeExpr`]s installed in a Noria server cluster.
+/// The set of all [`RecipeExpr`]s installed in a ReadySet server cluster.
 #[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub(super) struct ExprRegistry {
     /// A map from [`QueryID`] to the [`RecipeExpr`] associated with it.

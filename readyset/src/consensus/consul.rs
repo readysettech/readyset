@@ -2,7 +2,7 @@
 //! *TL:DR: Consul has a 512 KB limit to values and we hack around it.*
 //!
 //! The values in Consul's KV store cannot exceed 512 KB without throwing an error.
-//! Noria's controller state, however, can greatly exceed 512 KB and its size can be
+//! ReadySet's controller state, however, can greatly exceed 512 KB and its size can be
 //! unbounded. We circumvent this by storing the serialized+compressed dataflow state
 //! across several chunks. We guarantee atomicity of dataflow updates through versioning.
 //!

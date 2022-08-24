@@ -30,7 +30,7 @@ use crate::controller::{ControllerRequest, ControllerState, Worker, WorkerIdenti
 use crate::coordination::DomainDescriptor;
 use crate::worker::WorkerRequestKind;
 
-/// The Noria leader, responsible for making control-plane decisions for the whole of a Noria
+/// The ReadySet leader, responsible for making control-plane decisions for the whole of a ReadySet
 /// cluster.
 ///
 /// This runs inside a `Controller` when it is elected as leader.

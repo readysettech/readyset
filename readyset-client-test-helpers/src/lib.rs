@@ -78,7 +78,7 @@ where
 /// expected prod performance.
 ///
 /// This uses `OutOfBand` migrations and as a result requires `CREATE CACHE` statements to
-/// migrate queries in Noria, using this in tests is usually not preferred.
+/// migrate queries in ReadySet, using this in tests is usually not preferred.
 ///
 /// `setup_like_prod_with_handle` returns a [`ConnectionOpts`] which may be used to connect with
 /// the adapter associated with this setup via parameters for the adapter type `A`'s respective

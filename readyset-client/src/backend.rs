@@ -1,21 +1,21 @@
 //!
 //! [`Backend`] handles the execution of queries and prepared statements. Queries and
-//! statements can be executed either on Noria itself, or on the upstream when applicable.
+//! statements can be executed either on ReadySet itself, or on the upstream when applicable.
 //! In general if an upstream (fallback) connection is available queries and statements
 //! will execute as follows:
 //!
 //! * `INSERT`, `DELETE`, `UPDATE` - on upstream
 //! * Anything inside a transaction - on upstream
-//! * `SELECT` - on Noria
-//! * Anything that failed on Noria, or while a migration is ongoing - on upstream
+//! * `SELECT` - on ReadySet
+//! * Anything that failed on ReadySet, or while a migration is ongoing - on upstream
 //!
 //! # The execution flow
 //!
 //! ## Prepare
 //!
-//! When an upstream is available we will only try to prepare `SELECT` statements on Noria and
+//! When an upstream is available we will only try to prepare `SELECT` statements on ReadySet and
 //! forward all other prepare requests to the upstream. For `SELECT` statements we will attempt
-//! to prepare on both Noria and the upstream. The if Noria select fails we will perform a
+//! to prepare on both ReadySet and the upstream. The if ReadySet select fails we will perform a
 //! fallback execution on the upstream (`execute_cascade`).
 //!
 //! ## Queries
@@ -25,7 +25,7 @@
 //!
 //! ## Migrations
 //!
-//! When a prepared statement is not immediately available for execution on Noria, we will
+//! When a prepared statement is not immediately available for execution on ReadySet, we will
 //! perform a migration, migrations can happen in one of three ways:
 //!
 //! * Explicit migrations: only `CREATE CACHE` and `CREATE VIEW` will cause migrations.
@@ -34,7 +34,7 @@
 //! happened, we will use it.
 //! * Async migration: prepared statements will be put in a [`QueryStatusCache`] and another
 //! thread will perform migrations in the background. Once a statement finished migration it
-//! will execute on Noria, while it is waiting for a migration to happen it will execute on
+//! will execute on ReadySet, while it is waiting for a migration to happen it will execute on
 //! fallback. Enabled with the `--async-migrations` flag.
 //! * In request path: migrations will happen when either `CREATE CACHE` or
 //! `CREATE PREPARED STATEMENT` are called. It is also the only available option when a
@@ -43,14 +43,14 @@
 //! ## Caching
 //!
 //! Since we don't want to pay a penalty every time we execute a prepared statement, either
-//! on Noria or on the upstream fallback, we aggresively cache all the information required
-//! for immediate execution. This way a statement can be immediately forwarded to either Noria
+//! on ReadySet or on the upstream fallback, we aggresively cache all the information required
+//! for immediate execution. This way a statement can be immediately forwarded to either ReadySet
 //! or upstream with no additional overhead.
 //!
 //! ## Handling unsupported queries
 //!
-//! Queries are marked with MigrationState::Unsupported when they fail to prepare on Noria
-//! with an Unsupported ReadySetError. These queries should not be tried again against Noria,
+//! Queries are marked with MigrationState::Unsupported when they fail to prepare on ReadySet
+//! with an Unsupported ReadySetError. These queries should not be tried again against ReadySet,
 //! however, if a fallback database exists, may be executed against the fallback.
 //!
 //! ## Handling component outage
@@ -121,7 +121,7 @@ enum PrepareMeta {
     FailedToParse,
     /// Query could not be rewritten for processing in noria
     FailedToRewrite,
-    /// Noria does not implement this prepared statement. The statement may also be invalid SQL
+    /// ReadySet does not implement this prepared statement. The statement may also be invalid SQL
     Unimplemented,
     /// A write query (Insert, Update, Delete)
     Write { stmt: SqlQuery },
@@ -170,7 +170,7 @@ enum ProxyState {
     Never,
 
     /// Proxy writes upstream, and proxy reads upstream only after they fail when executed against
-    /// Noria.
+    /// ReadySet.
     ///
     /// This is the initial behavior used when an upstream database is configured for a backend
     Fallback,
@@ -415,9 +415,9 @@ struct CachedPreparedStatement<DB>
 where
     DB: UpstreamDatabase,
 {
-    /// Indicates if the statement was prepared for Noria, Fallback, or Both
+    /// Indicates if the statement was prepared for ReadySet, Fallback, or Both
     prep: PrepareResult<DB>,
-    /// The current Noria migration state
+    /// The current ReadySet migration state
     migration_state: MigrationState,
     /// Holds information about if executes have been succeeding, or failing, along with a state
     /// transition timestamp. None if prepared statement has never been executed.
@@ -466,7 +466,7 @@ where
     parsed_query_cache: HashMap<String, SqlQuery>,
     // all queries previously prepared on noria or upstream, mapped by their ID.
     prepared_statements: Vec<CachedPreparedStatement<DB>>,
-    /// Noria connector used for reads, and writes when no upstream DB is present
+    /// ReadySet connector used for reads, and writes when no upstream DB is present
     noria: NoriaConnector,
     /// Optional connector to the upstream DB. Used for fallback reads and all writes if it exists
     upstream: Option<DB>,
@@ -683,7 +683,7 @@ where
 
 /// TODO: The ideal approach for query handling is as follows:
 /// 1. If we know we can't support a query, send it to fallback.
-/// 2. If we think we can support a query, try to send it to Noria. If that hits an error that
+/// 2. If we think we can support a query, try to send it to ReadySet. If that hits an error that
 /// should be retried, retry.    If not, try fallback without dropping the connection inbetween.
 /// 3. If that fails and we got a MySQL error code, send that back to the client and keep the
 /// connection open. This is a real correctness bug. 4. If we got another kind of error that is
@@ -737,7 +737,7 @@ where
         upstream.prepare(query).await
     }
 
-    /// Prepares query against Noria. If an upstream database exists, the prepare is mirrored to
+    /// Prepares query against ReadySet. If an upstream database exists, the prepare is mirrored to
     /// the upstream database.
     ///
     /// This function may perform a migration, and update a queries migration state, if
@@ -1038,7 +1038,7 @@ where
         Ok(&self.prepared_statements.last().unwrap().prep)
     }
 
-    /// Executes a prepared statement on Noria
+    /// Executes a prepared statement on ReadySet
     async fn execute_noria<'a>(
         noria: &'a mut NoriaConnector,
         prep: &noria_connector::PrepareResult,
@@ -1079,7 +1079,7 @@ where
         res
     }
 
-    /// Execute a prepared statement on Noria
+    /// Execute a prepared statement on ReadySet
     async fn execute_upstream<'a>(
         upstream: &'a mut Option<DB>,
         prep: &UpstreamPrepare<DB>,
@@ -1105,7 +1105,7 @@ where
             .map(|r| QueryResult::Upstream(r))
     }
 
-    /// Execute on Noria, and if fails execute on upstream
+    /// Execute on ReadySet, and if fails execute on upstream
     #[allow(clippy::too_many_arguments)] // meh.
     async fn execute_cascade<'a>(
         noria: &'a mut NoriaConnector,
@@ -1248,7 +1248,7 @@ where
             );
 
             if new_migration_state == MigrationState::Successful {
-                // Attempt to prepare on Noria
+                // Attempt to prepare on ReadySet
                 let _ = Self::update_noria_prepare(noria, cached_statement, id).await;
             }
         }
@@ -1299,7 +1299,7 @@ where
             } else if e.caused_by_unsupported() {
                 // On an unsupported execute we update the query migration state to be unsupported.
                 //
-                // Must exist or we would not have executed the query against Noria.
+                // Must exist or we would not have executed the query against ReadySet.
                 #[allow(clippy::unwrap_used)]
                 self.query_status_cache.update_query_migration_state(
                     cached_statement.rewritten.as_ref().unwrap(),
@@ -1632,7 +1632,7 @@ where
         }
         match noria_res {
             Ok(noria_ok) => {
-                // We managed to select on Noria, good for us
+                // We managed to select on ReadySet, good for us
                 status.migration_state = MigrationState::Successful;
                 if let Some(i) = status.execution_info.as_mut() {
                     i.execute_succeeded()
@@ -1736,7 +1736,7 @@ where
             Ok(parsed_query @ (SqlQuery::Commit(_) | SqlQuery::Rollback(_))) => {
                 self.query_adhoc_non_select(query, &mut event, parsed_query).await
             },
-            // Noria extensions should never be proxied.
+            // ReadySet extensions should never be proxied.
             Ok(ref parsed_query) if let Some(noria_extension) = self.query_noria_extensions(parsed_query, &mut event).await => {
                 noria_extension.map(Into::into).map_err(Into::into)
             }
@@ -2014,11 +2014,11 @@ where
                     }
                 }
             } else {
-                // Interacting directly with Noria writer (No RYW support)
+                // Interacting directly with ReadySet writer (No RYW support)
                 //
-                // TODO(andrew, justin): Do we want RYW support with the NoriaConnector? Currently,
-                // no. TODO: Implement event execution metrics for Noria without
-                // upstream.
+                // TODO(andrew, justin): Do we want RYW support with the NoriaConnector?
+                // Currently, no. TODO: Implement event execution metrics for
+                // ReadySet without upstream.
                 event.destination = Some(QueryDestination::Readyset);
                 let start = Instant::now();
 

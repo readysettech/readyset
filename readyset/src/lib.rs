@@ -1,21 +1,21 @@
-//! This create contains client bindings for [Noria](https://github.com/mit-pdos/noria).
+//! This create contains client bindings for [ReadySet](https://github.com/mit-pdos/noria).
 //!
-//! # What is Noria?
+//! # What is ReadySet?
 //!
-//! Noria is a new streaming data-flow system designed to act as a fast storage backend for
+//! ReadySet is a new streaming data-flow system designed to act as a fast storage backend for
 //! read-heavy web applications based on [this paper](https://jon.tsp.io/papers/osdi18-noria.pdf)
 //! from [OSDI'18](https://www.usenix.org/conference/osdi18/presentation/gjengset). It acts like a
 //! databases, but pre-computes and caches relational query results so that reads are blazingly
-//! fast. Noria automatically keeps cached results up-to-date as the underlying data, stored in
-//! persistent _base tables_ change. Noria uses partially-stateful data-flow to reduce memory
+//! fast. ReadySet automatically keeps cached results up-to-date as the underlying data, stored in
+//! persistent _base tables_ change. ReadySet uses partially-stateful data-flow to reduce memory
 //! overhead, and supports dynamic, runtime data-flow and query change.
 //!
 //! # Infrastructure
 //!
-//! Like most databases, Noria follows a server-client model where many clients connect to a
+//! Like most databases, ReadySet follows a server-client model where many clients connect to a
 //! (potentially distributed) server. The server in this case is the `noria-server`
 //! binary, and must be started before clients can connect. See `noria-server --help` for details
-//! and the [Noria repository README](https://github.com/mit-pdos/noria) for details. Noria uses
+//! and the [ReadySet repository README](https://github.com/mit-pdos/noria) for details. ReadySet uses
 //! [Apache ZooKeeper](https://zookeeper.apache.org/) to announce the location of its servers, so
 //! ZooKeeper must also be running.
 //!
@@ -38,7 +38,7 @@
 //!     );
 //!     let mut db = ControllerHandle::new(zk_auth).await;
 //!
-//!     // if this is the first time we interact with Noria, we must give it the schema
+//!     // if this is the first time we interact with ReadySet, we must give it the schema
 //!     db.extend_recipe(
 //!         "
 //!         CREATE TABLE Article (aid int, title varchar(255), url text, PRIMARY KEY(aid));
@@ -103,15 +103,15 @@
 //!
 //! # Client model
 //!
-//! Noria accepts a set of parameterized SQL queries (think [prepared
+//! ReadySet accepts a set of parameterized SQL queries (think [prepared
 //! statements](https://en.wikipedia.org/wiki/Prepared_statement)), and produces a [data-flow
 //! program](https://en.wikipedia.org/wiki/Stream_processing) that maintains [materialized
 //! views](https://en.wikipedia.org/wiki/Materialized_view) for the output of those queries. Reads
 //! now become fast lookups directly into these materialized views, as if the value had been
 //! directly read from a cache (like memcached). The views are automatically kept up-to-date by
-//! Noria through the data-flow.
+//! ReadySet through the data-flow.
 //!
-//! Reads work quite differently in Noria compared to traditional relational databases. In
+//! Reads work quite differently in ReadySet compared to traditional relational databases. In
 //! particular, a query, or _view_, must be _registered_ before it can be executed, much like SQL
 //! prepared statements. Use [`ControllerHandle::extend_recipe`] to register new base tables and
 //! views. Once a view has been registered, you can get a handle that lets you execute the
@@ -127,7 +127,7 @@
 //!
 //! # Alternatives
 //!
-//! Noria provides a [MySQL adapter](https://github.com/mit-pdos/noria-mysql) that implements the
+//! ReadySet provides a [MySQL adapter](https://github.com/mit-pdos/noria-mysql) that implements the
 //! binary MySQL protocol, which provides a compatibility layer for applications that wish to
 //! continue to issue ad-hoc MySQL queries through existing MySQL client libraries.
 #![feature(
@@ -181,7 +181,7 @@ pub(crate) const BUFFER_TO_POOL: usize = 1024;
 
 /// The number of concurrent connections to a given backend table.
 ///
-/// Since Noria connections are multiplexing, having this value > 1 _only_ allows us to do
+/// Since ReadySet connections are multiplexing, having this value > 1 _only_ allows us to do
 /// serialization/deserialization in parallel on multiple threads. Nothing else really.
 ///
 /// The value isn't higher for a couple of reasons:
@@ -195,13 +195,13 @@ pub(crate) const TABLE_POOL_SIZE: usize = 2;
 
 /// The number of concurrent connections to a given backend view.
 ///
-/// Since Noria connections are multiplexing, having this value > 1 _only_ allows us to do
+/// Since ReadySet connections are multiplexing, having this value > 1 _only_ allows us to do
 /// serialization/deserialization in parallel on multiple threads. Nothing else really.
 ///
 /// This value is set higher than the max pool size for tables for a couple of reasons:
 ///
 ///  - View connections are made per _host_. So, if you query multiple views that happen to be
-///    hosted by a single machine (such as if there is only one Noria worker), this is the total
+///    hosted by a single machine (such as if there is only one ReadySet worker), this is the total
 ///    amount of serialization concurrency you will get.
 ///  - Reads are generally bottlenecked on serialization, so devoting more resources to it seems
 ///    reasonable.
@@ -212,8 +212,8 @@ pub(crate) const VIEW_POOL_SIZE: usize = 16;
 /// Number of requests that can be pending to any particular target.
 ///
 /// Keep in mind that this is really the number of requests that can be pending to any given shard
-/// of a domain (for tables) or to any given Noria worker (for views). The value should arguably be
-/// higher for views than for tables, since views are more likely to share a connection than
+/// of a domain (for tables) or to any given ReadySet worker (for views). The value should arguably
+/// be higher for views than for tables, since views are more likely to share a connection than
 /// tables, but since this is really just a measure for "are we falling over", it can sort of be
 /// arbitrarily high. If the system isn't keeping up, then it will fill up regardless, it'll just
 /// take longer.
@@ -280,7 +280,7 @@ pub mod prelude {
     pub use super::{ControllerHandle, Table, View};
 }
 
-/// Wrapper types for Noria query results.
+/// Wrapper types for ReadySet query results.
 pub mod results {
     pub use super::view::results::{Key, ResultIterator, Results, Row, SharedResults, SharedRows};
 }
@@ -293,7 +293,7 @@ fn trace_next_op() -> bool {
     TRACE_NEXT.try_with(|_| true).unwrap_or(false)
 }
 
-/// The next Noria read or write issued from the current thread will be traced using tokio-trace.
+/// The next ReadySet read or write issued from the current thread will be traced using tokio-trace.
 ///
 /// The trace output is visible by setting the environment variable `LOG_LEVEL=trace`.
 pub async fn trace_ops_in<T>(f: impl Future<Output = T>) -> T {
@@ -366,7 +366,7 @@ pub mod builders {
     pub use super::view::ViewBuilder;
 }
 
-/// Types used when debugging Noria.
+/// Types used when debugging ReadySet.
 pub mod debug;
 
 /// Filters that can be used to filter the type of

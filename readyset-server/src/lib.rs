@@ -12,27 +12,27 @@
 
 //! # Note to engineers
 //!
-//! For documentation on how the Noria server code is structured, please see the module-level
+//! For documentation on how the ReadySet server code is structured, please see the module-level
 //! documentation for the [`startup`] module.
 //!
 //! # For everyone else
 //!
-//! Hello! Welcome to Noria.
+//! Hello! Welcome to ReadySet.
 //!
-//! Noria is a database built to provide incrementally maintained materialized views for a known
+//! ReadySet is a database built to provide incrementally maintained materialized views for a known
 //! set of queries. This can improve application performance drastically, as all computation is
 //! performed at write-time, and reads are equivalent to cache reads. This is the server side of
-//! the Noria codebase. If you are looking for the client bindings for Noria, you want the
+//! the ReadySet codebase. If you are looking for the client bindings for ReadySet, you want the
 //! [`noria`](https://crates.io/crates/noria) crate instead.
 //!
-//! This page describes the inner workings of the Noria server at a relatively high level of
-//! abstraction. If you have not done so already, you should go read the [Noria
+//! This page describes the inner workings of the ReadySet server at a relatively high level of
+//! abstraction. If you have not done so already, you should go read the [ReadySet
 //! paper](https://jon.tsp.io/papers/osdi18-noria.pdf) before you continue.
 //!
-//! # Interfacing with Noria
+//! # Interfacing with ReadySet
 //!
-//! In Noria, a user provides only the *base types* that can arrive into the system (i.e., the
-//! possible writes Noria will observe; see `readyset::Input`), and the queries the application
+//! In ReadySet, a user provides only the *base types* that can arrive into the system (i.e., the
+//! possible writes ReadySet will observe; see `readyset::Input`), and the queries the application
 //! cares about over those writes. Each such query is called a *view*. Queries are expressed through
 //! relational SQL statements that operate over base tables and other views.
 //!
@@ -46,10 +46,10 @@
 //!
 //! # Processing client writes
 //!
-//! When Noria receives a write, it initially sends it to its base table node. This node eventually
-//! (see `dataflow/src/group_commit.rs`) injects a batch of these writes as an update into the
-//! data-flow. As the update flows through operators on its way to the leaf views (i.e., the
-//! application's query results), the nodes modify the update by applying their respective
+//! When ReadySet receives a write, it initially sends it to its base table node. This node
+//! eventually (see `dataflow/src/group_commit.rs`) injects a batch of these writes as an update
+//! into the data-flow. As the update flows through operators on its way to the leaf views (i.e.,
+//! the application's query results), the nodes modify the update by applying their respective
 //! operators. We call this *feed-forward propagation*. For example, an aggregation (see
 //! `dataflow::ops::grouped`) queries its current state, updates that state based on the received
 //! record, and then forwards an update that contains the updated state. Operators like joins may
@@ -59,22 +59,22 @@
 //!
 //! # Stateful operators
 //!
-//! Nodes in the data-flow can be *materialized*, which indicates that Noria should keep the
+//! Nodes in the data-flow can be *materialized*, which indicates that ReadySet should keep the
 //! current state of those nodes in memory so that their state can be efficiently queried. The
 //! leaves of the data-flow are always materialized so that the application can efficiently against
 //! them (see `dataflow::backlog`). Nodes that hold operators that must query their own state
 //! (e.g., aggregations) are also materialized, as are any nodes that have children that issue
-//! upqueries (see `dataflow::state`). Noria automatically derives how node state should be indexed
-//! using operator semantics (the group by field for an aggregation is a good candidate for
+//! upqueries (see `dataflow::state`). ReadySet automatically derives how node state should be
+//! indexed using operator semantics (the group by field for an aggregation is a good candidate for
 //! example).
 //!
 //! # Data-flow execution
 //!
 //! The data-flow is logically divided into *thread domains* (see `dataflow::Domain`). Domains are
 //! always processed atomically -- two threads can never operate on the same shard of one domain at
-//! the same time. Specifically, each Noria worker runs a [`tokio`](https://docs.rs/tokio) thread
+//! the same time. Specifically, each ReadySet worker runs a [`tokio`](https://docs.rs/tokio) thread
 //! pool, and each domain is placed in its own "task" (see `Replica` in `src/controller/mod.rs`).
-//! Noria sends updates across domain boundaries using TCP if the source and destination domains
+//! ReadySet sends updates across domain boundaries using TCP if the source and destination domains
 //! are hosted by different workers, and using in-memory channels otherwise (see
 //! `readyset::channel`).
 //!
@@ -102,7 +102,7 @@
 //!
 //! # Core components
 //!
-//! If you're going to hack on Noria, there are some files, modules, and types that you should
+//! If you're going to hack on ReadySet, there are some files, modules, and types that you should
 //! know:
 //!
 //!  - `Leader` in `src/controller/inner.rs`, which is held by a *single* worker, and "owns" the
@@ -119,8 +119,8 @@
 //!    updates; `Packet::Input`, the packet type for client writes to base tables (see also
 //!    `readyset::Input`); and `Packet::ReplayPiece`, the packet type for upquery responses.
 //!  - `Domain` in `dataflow/src/domain/mod.rs`, which contains all the logic used to execute
-//!    cliques of Noria operators that are contained in the same domain. Its primary entry point is
-//!    `Domain::on_event`, which gets called whenever there are new `Packets` for the domain. You
+//!    cliques of ReadySet operators that are contained in the same domain. Its primary entry point
+//!    is `Domain::on_event`, which gets called whenever there are new `Packets` for the domain. You
 //!    may also want to look at `Replica` in `src/controller/mod.rs`, which is responsible for
 //!    managing of all of a domain's inputs and outputs.
 //!  - `Node::process` in `dataflow/src/node/process.rs`, which contains all the logic for how an
@@ -223,8 +223,8 @@
 //! ```
 //!
 //! This may look daunting, but reading through you should quickly recognize the queries from
-//! above. Note that we didn't specify any domains in this migration, so Noria will automatically
-//! put each node in a separate domain. Normally, clients will just provide Noria with the
+//! above. Note that we didn't specify any domains in this migration, so ReadySet will automatically
+//! put each node in a separate domain. Normally, clients will just provide ReadySet with the
 //! equivalent SQL statements, and `mir` will automatically construct the appropriate data-flow
 //! program.
 //!
@@ -256,12 +256,12 @@
 //! # }
 //! ```
 //!
-//! The `.into()` calls here turn the given values into Noria's internal `DfValue`. Noria records
-//! are always represented as vectors of `DfValue` things, where the `n`th element corresponds to
-//! the value of the `n`th column of that record's view. Internally in the data flow graph, they
-//! are also wrapped in the `Record` type to indicate if they are "positive" or "negative" (we'll
-//! get to that later), and again in the `Packet` type to allow meta-data updates to propagate
-//! through the system too.
+//! The `.into()` calls here turn the given values into ReadySet's internal `DfValue`. ReadySet
+//! records are always represented as vectors of `DfValue` things, where the `n`th element
+//! corresponds to the value of the `n`th column of that record's view. Internally in the data flow
+//! graph, they are also wrapped in the `Record` type to indicate if they are "positive" or
+//! "negative" (we'll get to that later), and again in the `Packet` type to allow meta-data updates
+//! to propagate through the system too.
 //!
 //! Our write (now a `Packet`) next arrives at the `article` base table in the data-flow. Or, more
 //! specifically, it is received by the domain that contains `article`. `Domain::on_event` checks
@@ -270,7 +270,7 @@
 //! `dataflow::node::special::Base::on_input`. This does pretty much nothing since we don't have
 //! any altered columns in this base table.
 //!
-//! Once `article` has returned the update, Noria must then forward the update to all of its
+//! Once `article` has returned the update, ReadySet must then forward the update to all of its
 //! children. In this case, the only child is the join. Since joins require their inputs to be
 //! materialized so that they can be efficiently queried when a record arrives from the other side
 //! of the join, `article`'s data-flow node is materialized, so the update is also added to that
@@ -285,9 +285,10 @@
 //!  - look for anything that matches the join column(s) on the current record.
 //!  - emit the carthesian product of those records with the one we received.
 //!
-//! It also sorts the batch of updates, like most Noria operators do, so that it only performs one
-//! lookup per key. In this particular case, the join finds no records in `vc`, and so no records
-//! are emitted. If this were a `LEFT JOIN`, we would instead get a row where the vote count is 0.
+//! It also sorts the batch of updates, like most ReadySet operators do, so that it only performs
+//! one lookup per key. In this particular case, the join finds no records in `vc`, and so no
+//! records are emitted. If this were a `LEFT JOIN`, we would instead get a row where the vote count
+//! is 0.
 //!
 //! Since we asked `Migration` to "maintain" the output of `awvc`, `awvc` has a single child node
 //! which is a `Reader`. `Reader` keeps materialized state that can be accessed by applications by
@@ -330,9 +331,9 @@
 //! grouped operator then, as expected, emits a record with the new count. However, it also does
 //! looks to do something slightly weird --- it first emits a *negative* record. Why..?
 //!
-//! Negative records are Noria's way of signaling that already materialized state has changed. They
-//! indicate to descendant views that a past record is no longer valid, and should be discarded. In
-//! the case of our vote, we would get the output:
+//! Negative records are ReadySet's way of signaling that already materialized state has changed.
+//! They indicate to descendant views that a past record is no longer valid, and should be
+//! discarded. In the case of our vote, we would get the output:
 //!
 //! ```diff
 //! - [id=1, votes=0]

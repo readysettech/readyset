@@ -317,7 +317,7 @@ impl MySqlBinlogConnector {
                     let mut inserted_rows = Vec::new();
 
                     for row in ev.rows(tme) {
-                        // For each row in the event we produce a vector of Noria types that
+                        // For each row in the event we produce a vector of ReadySet types that
                         // represent that row
                         inserted_rows.push(readyset::TableOperation::Insert(
                             binlog_row_to_noria_row(
@@ -350,8 +350,9 @@ impl MySqlBinlogConnector {
                     let mut updated_rows = Vec::new();
 
                     for row in ev.rows(tme) {
-                        // For each row in the event we produce a pair of Noria table operations to
-                        // delete the previous entry and insert the new one
+                        // For each row in the event we produce a pair of ReadySet table operations
+                        // to delete the previous entry and insert the new
+                        // one
                         let row = &row?;
                         updated_rows.push(readyset::TableOperation::DeleteRow {
                             row: binlog_row_to_noria_row(
@@ -397,7 +398,7 @@ impl MySqlBinlogConnector {
                     let mut deleted_rows = Vec::new();
 
                     for row in ev.rows(tme) {
-                        // For each row in the event we produce a vector of Noria types that
+                        // For each row in the event we produce a vector of ReadySet types that
                         // represent that row
                         deleted_rows.push(readyset::TableOperation::DeleteRow {
                             row: binlog_row_to_noria_row(
@@ -506,7 +507,7 @@ fn binlog_val_to_noria_val(
     col_kind: mysql_common::constants::ColumnType,
     meta: &[u8],
 ) -> mysql::Result<DfValue> {
-    // Not all values are coereced to the value expected by Noria directly
+    // Not all values are coereced to the value expected by ReadySet directly
 
     use mysql_common::constants::ColumnType;
 

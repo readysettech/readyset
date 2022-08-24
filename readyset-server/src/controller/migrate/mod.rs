@@ -1,4 +1,4 @@
-//! Logic for incorporating changes to a Noria graph into an already running graph.
+//! Logic for incorporating changes to a ReadySet graph into an already running graph.
 //!
 //! Performing a migration involves a number of steps:
 //!

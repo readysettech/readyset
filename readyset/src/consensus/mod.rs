@@ -1,5 +1,5 @@
 //! Trait for interacting with an conensus system (Zookeeper, Consul, etcd) to determine
-//! which Noria worker acts as the controller, which Noria workers exist, detecting failed
+//! which ReadySet worker acts as the controller, which ReadySet workers exist, detecting failed
 //! workers which necessitate changes, and storing cluster wide global state.
 
 use std::collections::{HashMap, HashSet};
@@ -25,8 +25,8 @@ pub use self::zk::ZookeeperAuthority;
 use crate::ControllerDescriptor;
 
 // This should be an associated type on Authority but since Authority will only have one possible
-// type inside of Noria, we are using a type alias here instead.
-// If Authority ever moves out of Noria, it should become an associated type.
+// type inside of ReadySet, we are using a type alias here instead.
+// If Authority ever moves out of ReadySet, it should become an associated type.
 // LeaderPayload must be Serialize + DeserializeOwned + PartialEq
 type LeaderPayload = ControllerDescriptor;
 

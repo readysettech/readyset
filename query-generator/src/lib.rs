@@ -1619,7 +1619,7 @@ impl<'gen> Query<'gen> {
         Self { state, statement }
     }
 
-    /// Converts the DDL for this query into a Noria recipe
+    /// Converts the DDL for this query into a ReadySet recipe
     pub fn ddl_recipe(&self) -> String {
         self.state
             .tables
@@ -1631,8 +1631,8 @@ impl<'gen> Query<'gen> {
             .join("\n")
     }
 
-    /// Converts this query into a Noria recipe, including both the DDL and the query itself, using
-    /// the given name for the query
+    /// Converts this query into a ReadySet recipe, including both the DDL and the query itself,
+    /// using the given name for the query
     pub fn to_recipe(&self, query_name: &str) -> String {
         format!(
             "{}\nQUERY {}: {};",
@@ -1851,8 +1851,8 @@ pub struct QueryOperationArgs {
 /// randomly via the proptest [`Arbitrary`] implementation. See [this design doc][0] for more
 /// information
 ///
-/// Note that not every operation that Noria supports is currently included in this enum - planned
-/// for the future are:
+/// Note that not every operation that ReadySet supports is currently included in this enum -
+/// planned for the future are:
 ///
 /// - arithmetic projections
 /// - union

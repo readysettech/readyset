@@ -1,21 +1,21 @@
 //! This module holds all the structures necessary to represent the node changes that have to be
-//! made to the Noria state (addition, removal, modification) during a migration.
+//! made to the ReadySet state (addition, removal, modification) during a migration.
 
 use std::collections::HashSet;
 use std::vec::IntoIter;
 
 use petgraph::graph::NodeIndex;
 
-/// Represents a set of node changes that need to be made to the Noria state.
+/// Represents a set of node changes that need to be made to the ReadySet state.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(in crate::controller) enum NodeChanges {
-    /// The nodes that have to be added to the Noria state.
+    /// The nodes that have to be added to the ReadySet state.
     Add(HashSet<NodeIndex>),
-    /// The nodes that have to be removed from the Noria state.
+    /// The nodes that have to be removed from the ReadySet state.
     Drop(HashSet<NodeIndex>),
 }
 
-/// Represent the list of changes that need to be made to the Noria state, in the context of a
+/// Represent the list of changes that need to be made to the ReadySet state, in the context of a
 /// [`Migration`].
 /// This structure is a simple wrapper of a `Vec<NodeChanges>`, and the primary intention of that is
 /// to maintain "groups" of changes, by clustering as many changes of the same kind as possible

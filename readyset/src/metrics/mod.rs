@@ -1,4 +1,4 @@
-//! Data types representing metrics dumped from a running Noria instance
+//! Data types representing metrics dumped from a running ReadySet instance
 
 use std::borrow::Borrow;
 use std::collections::HashMap;
@@ -14,7 +14,7 @@ pub mod client;
 /// Documents the set of metrics that are currently being recorded within
 /// a ReadySet instance.
 pub mod recorded {
-    /// Counter: Set at startup of a Noria service to the current unix
+    /// Counter: Set at startup of a ReadySet service to the current unix
     /// timestamp in milliseconds, this metric can be used to detect service
     /// restarts. When available, prefer the metrics scraped by whatever
     /// manages orchestration (such as kube-state-metrics's

@@ -10,7 +10,7 @@ pub trait QueryHandler: Sized + Send {
     fn requires_fallback(query: &SqlQuery) -> bool;
 
     /// Provides a default response for the given query.
-    /// This should only be used in cases where the query can't be executed by Noria
+    /// This should only be used in cases where the query can't be executed by ReadySet
     /// and there is no fallback mechanism enabled.
     fn default_response(query: &SqlQuery) -> ReadySetResult<noria_connector::QueryResult<'static>>;
 

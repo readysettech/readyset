@@ -9,7 +9,7 @@
 //! All hope abandon, ye who enter here.
 //!    - The Divine Comedy, Dante Alighieri
 //!
-//! This module provides the structures to store the state of the Noria dataflow graph, and
+//! This module provides the structures to store the state of the ReadySet dataflow graph, and
 //! to manipulate it in a thread-safe way.
 
 use std::borrow::Cow;
@@ -1280,7 +1280,7 @@ impl DfState {
 }
 
 /// This structure acts as a wrapper for a [`DfStateReader`] in order to guarantee
-/// thread-safe access (read and writes) to Noria's dataflow state.
+/// thread-safe access (read and writes) to ReadySet's dataflow state.
 ///
 /// # Overview
 /// Two operations can be performed by this structure.

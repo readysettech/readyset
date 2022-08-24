@@ -101,9 +101,9 @@ where
 
 /// Where the expected result should come from in `query_until_expected_inner`.
 pub enum ResultSource<'a> {
-    /// Results must be retrieved from Noria, verified via the use of the MetricsClient.
+    /// Results must be retrieved from ReadySet, verified via the use of the MetricsClient.
     FromNoria(&'a mut MetricsClient),
-    /// Results can come from either Noria or MySQL.
+    /// Results can come from either ReadySet or MySQL.
     FromAnywhere,
 }
 
@@ -122,7 +122,7 @@ where
 }
 
 /// Like [`query_until_expected`], except requires that the expected result was
-/// queried from Noria. The intermediate results, and the expected result may be
+/// queried from ReadySet. The intermediate results, and the expected result may be
 /// returned via fallback without failing.
 pub async fn query_until_expected_from_noria<S, T, P>(
     conn: &mut Conn,
@@ -237,7 +237,7 @@ async fn get_num_view_queries(metrics: &mut MetricsClient) -> u32 {
             )
             .sum(),
         // If we cannot reach the metrics client we return 0 view queries, this will always fail a
-        // check that we executed the query against Noria.
+        // check that we executed the query against ReadySet.
         Err(_) => 0,
     }
 }

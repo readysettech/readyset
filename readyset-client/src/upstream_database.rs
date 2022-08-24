@@ -42,7 +42,7 @@ pub trait IsFatalError {
 /// and fallback read queries.
 ///
 /// An implementation of this trait can optionally be used to back a [`Reader`][] for fallback in
-/// addition to Noria, or a [`Writer`][] for passthrough writes instead of Noria.
+/// addition to ReadySet, or a [`Writer`][] for passthrough writes instead of ReadySet.
 ///
 /// [`Reader`]: crate::backend::Reader
 /// [`Writer`]: crate::backend::Writer

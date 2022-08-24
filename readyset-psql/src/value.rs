@@ -10,7 +10,7 @@ use tokio_postgres::types::Type;
 use tracing::{error, trace};
 use uuid::Uuid;
 
-/// An encapsulation of a Noria `DfValue` value that facilitates conversion of this `DfValue`
+/// An encapsulation of a ReadySet `DfValue` value that facilitates conversion of this `DfValue`
 /// into a `psql_srv::Value`.
 pub struct Value {
     /// A type attribute used to determine which variant of `psql_srv::Value` the `value` attribute

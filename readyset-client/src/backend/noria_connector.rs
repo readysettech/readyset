@@ -366,7 +366,7 @@ pub struct NoriaConnector {
     /// but on subsequent requests, do not use a failed view.
     failed_views: HashSet<String>,
 
-    /// How to handle issuing reads against Noria. See [`ReadBehavior`].
+    /// How to handle issuing reads against ReadySet. See [`ReadBehavior`].
     read_behavior: ReadBehavior,
 
     /// A read request handler that may be used to service reads from readers
@@ -402,13 +402,13 @@ mod request_handler {
     unsafe impl Sync for LocalReadHandler {}
 }
 
-/// The read behavior used when executing a read against Noria.
+/// The read behavior used when executing a read against ReadySet.
 #[derive(Clone, Copy)]
 pub enum ReadBehavior {
-    /// If Noria is unable to immediately service the read due to a cache miss, block on the
+    /// If ReadySet is unable to immediately service the read due to a cache miss, block on the
     /// response.
     Blocking,
-    /// If Noria is unable to immediately service the read, return an error.
+    /// If ReadySet is unable to immediately service the read, return an error.
     NonBlocking,
 }
 
@@ -573,7 +573,7 @@ impl NoriaConnector {
             .unwrap_or(false)
     }
 
-    // TODO(andrew): Allow client to map table names to NodeIndexes without having to query Noria
+    // TODO(andrew): Allow client to map table names to NodeIndexes without having to query ReadySet
     // repeatedly. Eventually, this will be responsibility of the TimestampService.
     pub async fn node_index_of(&mut self, table_name: &str) -> ReadySetResult<LocalNodeIndex> {
         let table_handle = self.inner.get_mut().await?.noria.table(table_name).await?;
@@ -895,7 +895,7 @@ impl NoriaConnector {
         }
     }
 
-    /// Calls the `extend_recipe` endpoint on Noria with the given
+    /// Calls the `extend_recipe` endpoint on ReadySet with the given
     /// query.
     // TODO(fran): Instead of serialize using `Display`, we should implement `Serialize`
     //   and `Deserialize` for each table operation struct, and send that instead; otherwise
@@ -911,7 +911,7 @@ impl NoriaConnector {
         C: Into<ChangeList>,
     {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
-        // doing a migration on Noria ever time. On the other hand, CREATE TABLE is rare...
+        // doing a migration on ReadySet ever time. On the other hand, CREATE TABLE is rare...
         noria_await!(
             self.inner.get_mut().await?,
             self.inner
@@ -982,7 +982,7 @@ impl NoriaConnector {
             None => {
                 let qname = utils::generate_query_name(q);
 
-                // add the query to Noria
+                // add the query to ReadySet
                 if create_if_not_exist {
                     if prepared {
                         info!(query = %Sensitive(q), name = %qname, "adding parameterized query");
@@ -1016,7 +1016,7 @@ impl NoriaConnector {
         }
     }
 
-    /// Make a request to Noria to drop the query with the given name, and remove it from all
+    /// Make a request to ReadySet to drop the query with the given name, and remove it from all
     /// internal state.
     pub async fn drop_view(&mut self, name: &str) -> ReadySetResult<()> {
         noria_await!(
@@ -1027,7 +1027,7 @@ impl NoriaConnector {
         Ok(())
     }
 
-    /// Make a request to Noria to drop all cached queries, and empty all internal state
+    /// Make a request to ReadySet to drop all cached queries, and empty all internal state
     pub async fn drop_all_caches(&mut self) -> ReadySetResult<()> {
         noria_await!(
             self.inner.get_mut().await?,
@@ -1444,7 +1444,7 @@ impl NoriaConnector {
         q: &nom_sql::CreateViewStatement,
     ) -> ReadySetResult<QueryResult<'a>> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
-        // doing a migration on Noria every time. On the other hand, CREATE VIEW is rare...
+        // doing a migration on ReadySet every time. On the other hand, CREATE VIEW is rare...
 
         info!(view = %Sensitive(&q.definition), name = %q.name, "view::create");
 

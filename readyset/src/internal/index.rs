@@ -6,7 +6,7 @@ use test_strategy::Arbitrary;
 
 use crate::KeyComparison;
 
-/// Types of (key-value) data structures we can use as indices in Noria.
+/// Types of (key-value) data structures we can use as indices in ReadySet.
 ///
 /// See [the design doc][0] for more information
 ///

@@ -1,5 +1,5 @@
 //! This module holds the Recipe logic that needs to be shared
-//! among Noria components.
+//! among ReadySet components.
 pub mod changelist;
 
 use std::borrow::Cow;

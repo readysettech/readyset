@@ -8,8 +8,8 @@
 //! Other than configuration, the functionality provided by this crate is primarily useful for two
 //! specific cases:
 //! * Traces that need to cross a network or thread boundary, such as the adapter making a query to
-//! Noria
-//! * Performance-critical codepaths, such as the hotpath for queries in Noria and the adapter
+//! ReadySet
+//! * Performance-critical codepaths, such as the hotpath for queries in ReadySet and the adapter
 //!
 //! # Context propagation
 //! For traces that cross a network/thread boundary, [propagation] provides a set of primitives to

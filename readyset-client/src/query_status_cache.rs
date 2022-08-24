@@ -1,6 +1,6 @@
 //! The query status cache provides a thread-safe window into an adapter's
 //! knowledge about queries, currently the migration status of a query in
-//! Noria.
+//! ReadySet.
 use std::borrow::Borrow;
 use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
@@ -193,7 +193,7 @@ pub enum MigrationState {
     Pending,
     /// This query has been migrated and a view exists.
     Successful,
-    /// This query is not supported and should not be tried against Noria.
+    /// This query is not supported and should not be tried against ReadySet.
     Unsupported,
     /// Indicates that a dry run of the query has succeeded. It's very likely but not guaranteed
     /// that migration of the query will succeed if it's attempted.
@@ -653,7 +653,7 @@ impl QueryStatusCache {
     }
 
     /// Returns a list of queries that currently need the be processed to determine
-    /// if they should be allowed (are supported by Noria).
+    /// if they should be allowed (are supported by ReadySet).
     pub fn pending_migration(&self) -> QueryList {
         self.statuses
             .iter()

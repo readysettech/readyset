@@ -94,7 +94,7 @@ impl Adapter for MySQLAdapter {
     }
 }
 
-// Initializes a Noria worker and starts processing MySQL queries against it.
+// Initializes a ReadySet worker and starts processing MySQL queries against it.
 // If `partial` is `false`, disables partial queries.
 pub async fn setup(partial: bool) -> (mysql_async::Opts, Handle) {
     crate::setup::<MySQLAdapter>(

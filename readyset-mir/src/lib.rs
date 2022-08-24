@@ -1,7 +1,7 @@
 //! The **M**id-level **I**ntermediate **R**epresentation
 //!
 //! This crate contains the data structure definitions for `MIR`, the Mid-level Intermediate
-//! Representation for the compiler from SQL to Noria. MIR is structured as a directed acyclic
+//! Representation for the compiler from SQL to ReadySet. MIR is structured as a directed acyclic
 //! graph, where (similarly to dataflow) nodes in the graph each represent some abstract computation
 //! on rows produced by their parents. MIR sits in between the SQL [AST] and the final dataflow
 //! graph in the compilation process. When converting from MIR to dataflow, each [node] in the MIR

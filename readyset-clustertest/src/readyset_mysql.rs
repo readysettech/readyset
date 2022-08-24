@@ -442,7 +442,7 @@ async fn dry_run_evaluates_support() {
         .await
     );
 
-    // After executing the query, the query will be dry run against Noria
+    // After executing the query, the query will be dry run against ReadySet
     // in the background. Until the dry run is complete, the query has a
     // "pending" status in the proxied query table. Once the dry run
     // is complete, it will have a "yes" status.
@@ -485,7 +485,7 @@ async fn dry_run_evaluates_support() {
 
 /// Creates a two servers deployment and performs a failure and recovery on one
 /// of the servers. After the failure, we verify that we can still perform the
-/// query on Noria and we return the correct results.
+/// query on ReadySet and we return the correct results.
 #[clustertest]
 async fn correct_data_after_restart() {
     let mut deployment = readyset_mysql("ct_correct_data_after_restart")
@@ -538,7 +538,7 @@ async fn correct_data_after_restart() {
         .await
         .unwrap();
 
-    // Query until we are able to get the results from Noria.
+    // Query until we are able to get the results from ReadySet.
     assert!(
         query_until_expected_from_noria(
             &mut adapter,
@@ -1145,7 +1145,7 @@ async fn writes_survive_restarts() {
     deployment.teardown().await.unwrap();
 }
 
-// Perform an operation on the upstream MySQL DB that Noria can't yet handle
+// Perform an operation on the upstream MySQL DB that ReadySet can't yet handle
 // replication for, and validate that the relevant metric records the failure
 #[clustertest]
 async fn replication_failure_metrics() {
@@ -1157,7 +1157,7 @@ async fn replication_failure_metrics() {
     .await;
 }
 
-// Perform an operation on the upstream MySQL DB that Noria should be able to
+// Perform an operation on the upstream MySQL DB that ReadySet should be able to
 // successfully handle the replication for, and validate that the relevant
 // metric records the success
 #[clustertest]

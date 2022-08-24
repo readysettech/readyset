@@ -1,5 +1,5 @@
-//! This internal Noria module provides types that are shared between Noria client and server, but
-//! that we do not want to expose publicly through the `noria` crate.
+//! This internal ReadySet module provides types that are shared between ReadySet client and server,
+//! but that we do not want to expose publicly through the `noria` crate.
 
 mod addressing;
 mod external;

@@ -29,7 +29,7 @@ impl FromIterator<QueryWithLatencies> for AllowList {
 /// clean way to display the aggregated allow-list to an end consumer as json.
 #[derive(Serialize, Debug, PartialEq, Eq, Default)]
 pub struct ComparativeQueryLatencies {
-    /// Noria latency metrics for the allowed query.
+    /// ReadySet latency metrics for the allowed query.
     pub noria_latencies: Option<QueryLatencies>,
     /// Upstream (mysql/postgres) latency metrics for the allowed query.
     pub upstream_latencies: Option<QueryLatencies>,
@@ -40,7 +40,7 @@ pub struct ComparativeQueryLatencies {
 pub struct QueryWithLatencies {
     /// The anonymized query that we are allowing.
     pub anonymized_query: String,
-    /// Query latencies for the given query from both Noria and upstream.
+    /// Query latencies for the given query from both ReadySet and upstream.
     pub comparative_latencies: ComparativeQueryLatencies,
 }
 

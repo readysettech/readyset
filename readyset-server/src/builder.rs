@@ -218,7 +218,7 @@ impl Builder {
         self.config.replication_strategy = replication_strategy
     }
 
-    /// Configures this Noria server to accept only domains that contain reader nodes.
+    /// Configures this ReadySet server to accept only domains that contain reader nodes.
     ///
     /// Overwrites any previous call to [`no_readers`]
     pub fn as_reader_only(&mut self) {
@@ -226,7 +226,7 @@ impl Builder {
             NodeTypeSchedulingRestriction::OnlyWithNodeType;
     }
 
-    /// Configures this Noria server to never run domains that contain reader nodes
+    /// Configures this ReadySet server to never run domains that contain reader nodes
     ///
     /// Overwrites any previous call to [`as_reader_only`]
     pub fn no_readers(&mut self) {
@@ -234,7 +234,7 @@ impl Builder {
             NodeTypeSchedulingRestriction::NeverWithNodeType;
     }
 
-    /// Configures this Noria server to be unable to become the leader
+    /// Configures this ReadySet server to be unable to become the leader
     pub fn cannot_become_leader(&mut self) {
         self.leader_eligible = false;
     }

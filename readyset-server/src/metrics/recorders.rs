@@ -5,7 +5,7 @@ use crate::metrics::{Clear, Render};
 
 /// The name for the Recorder as stored in CompositeMetricsRecorder.
 pub enum MetricsRecorder {
-    /// A recorder for Noria-style metrics.
+    /// A recorder for ReadySet-style metrics.
     Noria(NoriaMetricsRecorder),
     /// A recorder for Prometheus.
     Prometheus(PrometheusRecorder),

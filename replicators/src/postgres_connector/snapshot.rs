@@ -16,7 +16,7 @@ use super::connector::CreatedSlot;
 use super::PostgresPosition;
 use crate::table_filter::TableFilter;
 
-const BATCH_SIZE: usize = 1024; // How many queries to buffer before pushing to Noria
+const BATCH_SIZE: usize = 1024; // How many queries to buffer before pushing to ReadySet
 
 pub struct PostgresReplicator<'a> {
     /// This is the underlying (regular) PostgreSQL transaction
@@ -241,7 +241,7 @@ impl Display for TableDescription {
 }
 
 impl TableDescription {
-    /// Copy a table's contents from PostgreSQL to Noria
+    /// Copy a table's contents from PostgreSQL to ReadySet
     async fn dump<'a>(
         &self,
         transaction: &'a pgsql::Transaction<'a>,
@@ -375,7 +375,7 @@ impl<'a> PostgresReplicator<'a> {
 
         for view in view_list {
             let create_view = view.get_create_view(&self.transaction).await?;
-            // Postgres returns a postgres style CREATE statement, but Noria only accepts MySQL
+            // Postgres returns a postgres style CREATE statement, but ReadySet only accepts MySQL
             // style
             let view = match nom_sql::parse_query(Dialect::PostgreSQL, &create_view) {
                 Ok(v) => v.to_string(),

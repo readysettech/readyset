@@ -1,5 +1,5 @@
 //! Primitives and structs related to maintaining different consistency
-//! models within the Noria dataflow graph.
+//! models within the ReadySet dataflow graph.
 use std::collections::HashMap;
 
 use proptest::arbitrary::Arbitrary;

@@ -9,7 +9,7 @@ use readyset::metrics::{Key, MetricsDump};
 
 use crate::metrics::{Clear, Render};
 
-/// A simplistic metrics recorder for Noria, which just stores the different metrics.
+/// A simplistic metrics recorder for ReadySet, which just stores the different metrics.
 #[derive(Default)]
 pub struct NoriaMetricsRecorder {
     counters: Mutex<HashMap<Key, Arc<AtomicU64>>>,

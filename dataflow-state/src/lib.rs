@@ -211,7 +211,7 @@ pub trait State: SizeOf + Send {
     fn clear(&mut self);
 
     /// Tear down the state, freeing any resources.
-    /// For those states that are backed by resources outside Noria, the implementation of this
+    /// For those states that are backed by resources outside ReadySet, the implementation of this
     /// method should guarantee that those resources are freed.
     fn tear_down(self) -> ReadySetResult<()>;
 }

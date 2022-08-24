@@ -8,12 +8,12 @@ use crate::value::Value;
 /// A structure containing a `Vec<DfValue>`, representing one row of data, which facilitates
 /// iteration over the values within this row as `Value` structures.
 pub struct Row {
-    /// The values comprising the row, as returned from a Noria interface lookup. Only the indices
-    /// within this vector listed in `project_fields` will actually be projected during iteration.
-    /// (See documentaion below for `project_fields`).
+    /// The values comprising the row, as returned from a ReadySet interface lookup. Only the
+    /// indices within this vector listed in `project_fields` will actually be projected during
+    /// iteration. (See documentaion below for `project_fields`).
     pub values: Vec<DfValue>,
 
-    /// The fields to project. A `Vec<DfValue>` returned from a Noria interface lookup may
+    /// The fields to project. A `Vec<DfValue>` returned from a ReadySet interface lookup may
     /// contain extraneous fields that should not be projected into the query result output. In
     /// particular, bogokeys and other lookup keys that are not requested for projection by the SQL
     /// query may be present in `values` but should be excluded from query output. This

@@ -609,7 +609,7 @@ async fn select_collapse_where_in() {
         .unwrap();
     sleep().await;
 
-    // NOTE: It seems that Noria may require WHERE IN prepared statements to contain at least one
+    // NOTE: It seems that ReadySet may require WHERE IN prepared statements to contain at least one
     // parameter. For that reason, simple_query is used instead.
     let names: Vec<String> = conn
         .simple_query("SELECT Cats.name FROM Cats WHERE Cats.id IN (1, 2)")

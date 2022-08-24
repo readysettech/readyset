@@ -63,7 +63,7 @@ struct Options {
     #[clap(long, env = "EXTERNAL_ADDRESS", parse(try_from_str=resolve_addr))]
     external_address: Option<IpAddr>,
 
-    /// Port to advertise to other Noria instances running in the same deployment.
+    /// Port to advertise to other ReadySet instances running in the same deployment.
     #[clap(long, short = 'p', default_value = "6033", parse(try_from_str))]
     external_port: u16,
 
@@ -73,7 +73,7 @@ struct Options {
     #[clap(long)]
     use_aws_external_address: bool,
 
-    /// Noria deployment ID.
+    /// ReadySet deployment ID.
     #[clap(long, env = "NORIA_DEPLOYMENT", forbid_empty_values = true)]
     deployment: String,
 

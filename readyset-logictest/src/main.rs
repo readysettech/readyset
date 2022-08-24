@@ -230,8 +230,8 @@ impl Parse {
     }
 }
 
-/// Run a test script, or all test scripts in a directory, against either Noria or a reference MySQL
-/// database
+/// Run a test script, or all test scripts in a directory, against either ReadySet or a reference
+/// MySQL database
 #[derive(Parser)]
 struct Verify {
     #[clap(flatten)]
@@ -250,8 +250,8 @@ struct Verify {
     #[clap(long, conflicts_with = "database-url")]
     postgresql: bool,
 
-    /// Enable an upstream database backend for the client, with replication to Noria.  All writes
-    /// will pass through to the given database and be replicated to Noria.
+    /// Enable an upstream database backend for the client, with replication to ReadySet.  All
+    /// writes will pass through to the given database and be replicated to ReadySet.
     ///
     /// The value should be a database URL starting with either postgresql:// or mysql://
     #[clap(long)]
@@ -562,13 +562,13 @@ impl FromStr for Seed {
     }
 }
 
-/// Fuzz-test noria by randomly generating queries and seed data, and ensuring that both Noria and a
-/// reference database return the same results
+/// Fuzz-test noria by randomly generating queries and seed data, and ensuring that both ReadySet
+/// and a reference database return the same results
 #[derive(Parser, Debug, Clone)]
 pub struct Fuzz {
     /// Number of test cases to generate
     ///
-    /// Each test case consists of a list of queries that will be run against both Noria and the
+    /// Each test case consists of a list of queries that will be run against both ReadySet and the
     /// reference database
     #[clap(long, short = 'n', default_value = "100")]
     num_tests: u32,

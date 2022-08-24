@@ -19,7 +19,7 @@ pub struct CompositeMetricsRecorder {
 /// The name for the Recorder as stored in CompositeMetricsRecorder.
 #[derive(Eq, PartialEq, Hash, Clone, Copy)]
 pub enum RecorderType {
-    /// A Noria recorder.
+    /// A ReadySet recorder.
     Noria = 0,
     /// A Prometheus recorder.
     Prometheus = 1,

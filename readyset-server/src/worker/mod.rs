@@ -41,7 +41,7 @@ mod replica;
 
 type ChannelCoordinator = channel::ChannelCoordinator<ReplicaAddress, Box<Packet>>;
 
-/// Some kind of request for a running Noria worker.
+/// Some kind of request for a running ReadySet worker.
 ///
 /// Most of these requests return `()`, apart from `DomainRequest`.
 #[derive(Clone, Serialize, Deserialize)]
@@ -79,7 +79,7 @@ pub enum WorkerRequestKind {
     Ping,
 }
 
-/// A request to a running Noria worker, containing a request kind and a completion channel.
+/// A request to a running ReadySet worker, containing a request kind and a completion channel.
 pub struct WorkerRequest {
     /// The kind of request.
     pub kind: WorkerRequestKind,
@@ -167,7 +167,7 @@ fn handle_domain_future_completion(
     }
 }
 
-/// A Noria worker, responsible for executing some domains.
+/// A ReadySet worker, responsible for executing some domains.
 pub struct Worker {
     /// The current election state, if it exists (see the `WorkerElectionState` docs).
     pub(crate) election_state: Option<WorkerElectionState>,

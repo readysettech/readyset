@@ -351,7 +351,7 @@ pub struct DeploymentBuilder {
     /// Are async migrations enabled on the adapter.
     async_migration_interval: Option<u64>,
     /// Enables explicit migrations, and passes in an interval for running dry run migrations that
-    /// determine whether queries that weren't explicitly migrated would be supported by Noria.
+    /// determine whether queries that weren't explicitly migrated would be supported by ReadySet.
     /// Exposed via the `SHOW PROXIED QUERIES` command.
     dry_run_migration_interval: Option<u64>,
     /// The max time in seconds that a query may continuously fail until we enter a recovery

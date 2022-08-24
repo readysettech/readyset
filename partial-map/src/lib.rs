@@ -165,7 +165,7 @@ where
     /// returned.
     ///
     /// The above behavior (returrning the Default in the case of a miss) is perhaps more intuitive
-    /// if you think of the specific *use case* of a PartialMap in Noria - specifically, as a map
+    /// if you think of the specific *use case* of a PartialMap in ReadySet - specifically, as a map
     /// from keys to all the rows matching that key. In that instance, if we *know* we have all the
     /// rows whose keys are in a range, then it makes sense to return an empty vec (the Default
     /// value, in the case of this method) from a lookup on a key in that range, since that means

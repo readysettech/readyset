@@ -65,7 +65,7 @@ pub trait ConnectionHandler {
     async fn immediate_error(self, stream: net::TcpStream, error_message: String);
 }
 
-/// Represents which database interface is being adapted to communicate with Noria.
+/// Represents which database interface is being adapted to communicate with ReadySet.
 #[derive(Copy, Clone)]
 pub enum DatabaseType {
     /// MySQL database.

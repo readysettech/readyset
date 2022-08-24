@@ -129,9 +129,9 @@ pub(crate) trait Connector {
     ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)>;
 }
 
-/// An adapter that converts database events into Noria API calls
+/// An adapter that converts database events into ReadySet API calls
 pub struct NoriaAdapter {
-    /// The Noria API handle
+    /// The ReadySet API handle
     noria: ControllerHandle,
     /// The binlog reader
     connector: Box<dyn Connector + Send + Sync>,
@@ -195,14 +195,14 @@ impl NoriaAdapter {
 
     /// Finish the build and begin monitoring the binlog for changes
     /// If noria has no replication offset information, it will replicate the target database in its
-    /// entirety to Noria before listening on the binlog
+    /// entirety to ReadySet before listening on the binlog
     /// The replication happens in stages:
     /// * READ LOCK is acquired on the database
     /// * Next binlog position is read
-    /// * The recipe (schema) DDL is replicated and installed in Noria (replacing current recipe)
-    /// * Each table is individually replicated into Noria
+    /// * The recipe (schema) DDL is replicated and installed in ReadySet (replacing current recipe)
+    /// * Each table is individually replicated into ReadySet
     /// * READ LOCK is released
-    /// * Adapter keeps reading binlog from the next position keeping Noria up to date
+    /// * Adapter keeps reading binlog from the next position keeping ReadySet up to date
     async fn start_inner_mysql(
         mysql_options: mysql::Opts,
         mut noria: ControllerHandle,
@@ -211,7 +211,7 @@ impl NoriaAdapter {
         resnapshot: bool,
     ) -> ReadySetResult<!> {
         use crate::mysql_connector::BinlogPosition;
-        // Load the replication offset for all tables and the schema from Noria
+        // Load the replication offset for all tables and the schema from ReadySet
         let mut replication_offsets = noria.replication_offsets().await?;
 
         let table_filter = TableFilter::try_new(
@@ -606,7 +606,7 @@ impl NoriaAdapter {
         Ok(())
     }
 
-    /// Handle a single BinlogAction by calling the proper Noria RPC. If `catchup` is set,
+    /// Handle a single BinlogAction by calling the proper ReadySet RPC. If `catchup` is set,
     /// we will not log warnings for skipping entries, as we may iterate over many entries tables
     /// have already seen when catching each table up to the current binlog offset.
     async fn handle_action(

@@ -111,7 +111,7 @@ pub enum ReadySetError {
         source: Box<ReadySetError>,
     },
 
-    /// Failures during recipe creation which may indicate Noria is in an invalid state.
+    /// Failures during recipe creation which may indicate ReadySet is in an invalid state.
     #[error("Unable to create recipe from received DDL: {}", Sensitive(.0))]
     RecipeInvariantViolated(String),
 

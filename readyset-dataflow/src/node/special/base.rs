@@ -53,7 +53,7 @@ impl From<Records> for BaseWrite {
     }
 }
 
-/// Base is used to represent the root nodes of the Noria data flow graph.
+/// Base is used to represent the root nodes of the ReadySet data flow graph.
 ///
 /// These nodes perform no computation, and their job is merely to persist all received updates and
 /// forward them to interested downstream operators. A base node should only be sent updates of the
