@@ -166,7 +166,13 @@ impl Dialect {
     /// Parse the raw (byte) content of a string literal using this Dialect
     pub fn string_literal(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], Vec<u8>> {
         move |i| match self {
-            Dialect::PostgreSQL => raw_string_literal(self.quoting_style())(i),
+            // Currently we allow escape sequences in all string constants. If we support postgres'
+            // standard_conforming_strings setting, then the below should be changed to check for
+            // the presence of a preceding 'E' instead of matching and discarding the match result.
+            Dialect::PostgreSQL => preceded(
+                opt(tag_no_case("E")),
+                raw_string_literal(self.quoting_style()),
+            )(i),
             Dialect::MySQL => preceded(
                 opt(alt((tag("_utf8mb4"), tag("_utf8"), tag("_binary")))),
                 raw_string_literal(self.quoting_style()),
@@ -336,6 +342,15 @@ mod tests {
             let res = Dialect::PostgreSQL.string_literal()(quoted);
             let expected = "\0\'\"\x7F\n\r\t\x1a\\%_".as_bytes().to_vec();
             assert_eq!(res, Ok((&b""[..], expected)));
+        }
+
+        #[test]
+        fn literal_string_with_escape_character() {
+            let lit = b"E'string'";
+            assert_eq!(
+                Dialect::PostgreSQL.string_literal()(lit).unwrap().1,
+                b"string"
+            );
         }
 
         #[test]
