@@ -3,7 +3,7 @@ use std::str::FromStr;
 use std::{fmt, str};
 
 use nom::branch::alt;
-use nom::bytes::complete::{tag, tag_no_case, take_until};
+use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::digit1;
 use nom::combinator::{map, map_res, opt};
 use nom::multi::many0;
@@ -163,42 +163,42 @@ fn fixed_point(i: &[u8]) -> IResult<&[u8], Literal> {
     ))
 }
 
-fn default(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
-    let (remaining_input, (_, _, _, def, _)) = tuple((
-        whitespace0,
-        tag_no_case("default"),
-        whitespace1,
-        // TODO(grfn): This really should just be a generic expression parser T.T
-        // https://app.clubhouse.io/readysettech/story/101/unify-the-expression-ast
-        alt((
-            map(
-                map_res(
-                    delimited(tag("'"), take_until("'"), tag("'")),
-                    str::from_utf8,
+fn default(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ColumnConstraint> {
+    move |i| {
+        let (remaining_input, (_, _, _, def, _)) = tuple((
+            whitespace0,
+            tag_no_case("default"),
+            whitespace1,
+            // TODO(grfn): This really should just be a generic expression parser T.T
+            // https://app.clubhouse.io/readysettech/story/101/unify-the-expression-ast
+            alt((
+                map(dialect.string_literal(), |bytes| {
+                    match String::from_utf8(bytes) {
+                        Ok(s) => Literal::String(s),
+                        Err(err) => Literal::Blob(err.into_bytes()),
+                    }
+                }),
+                fixed_point,
+                map(
+                    map_res(map_res(digit1, str::from_utf8), i64::from_str),
+                    Literal::Integer,
                 ),
-                |s: &str| Literal::String(String::from(s)),
-            ),
-            fixed_point,
-            map(
-                map_res(map_res(digit1, str::from_utf8), i64::from_str),
-                Literal::Integer,
-            ),
-            map(tag("''"), |_| Literal::String(String::from(""))),
-            map(tag_no_case("null"), |_| Literal::Null),
-            map(tag_no_case("true"), |_| Literal::Boolean(true)),
-            map(tag_no_case("false"), |_| Literal::Boolean(false)),
-            map(
-                alt((
-                    terminated(tag_no_case("current_timestamp"), opt(tag("()"))),
-                    terminated(tag_no_case("now"), opt(tag("()"))),
-                )),
-                |_| Literal::CurrentTimestamp,
-            ),
-        )),
-        whitespace0,
-    ))(i)?;
+                map(tag_no_case("null"), |_| Literal::Null),
+                map(tag_no_case("true"), |_| Literal::Boolean(true)),
+                map(tag_no_case("false"), |_| Literal::Boolean(false)),
+                map(
+                    alt((
+                        terminated(tag_no_case("current_timestamp"), opt(tag("()"))),
+                        terminated(tag_no_case("now"), opt(tag("()"))),
+                    )),
+                    |_| Literal::CurrentTimestamp,
+                ),
+            )),
+            whitespace0,
+        ))(i)?;
 
-    Ok((remaining_input, ColumnConstraint::DefaultValue(def)))
+        Ok((remaining_input, ColumnConstraint::DefaultValue(def)))
+    }
 }
 
 pub fn on_update_current_timestamp(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
@@ -267,7 +267,7 @@ pub fn column_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], C
             not_null,
             null,
             auto_increment,
-            default,
+            default(dialect),
             primary_key,
             unique,
             character_set,
