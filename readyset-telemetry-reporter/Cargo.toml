@@ -1,0 +1,18 @@
+[package]
+name = "readyset-telemetry-reporter"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+backoff = { version = "0.4.0", features = ["tokio"] }
+base64 = "0.13"
+derive_builder = "0.11.2"
+lazy_static = "1.4"
+reqwest = { version = "0.11.7", features = ["json"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_with_macros = "2.0.0"
+thiserror = "1.0"
+tokio = { version = "1.18", features = ["macros", "time"] }
+uuid = { version = "0.8", features = [ "v4" ] }
