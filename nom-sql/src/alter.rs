@@ -111,6 +111,7 @@ impl fmt::Display for AlterTableDefinition {
 pub struct AlterTableStatement {
     pub table: Table,
     pub definitions: Vec<AlterTableDefinition>,
+    pub only: bool,
 }
 
 impl fmt::Display for AlterTableStatement {
@@ -284,13 +285,29 @@ pub fn alter_table_statement(
         let (i, _) = tag_no_case("table")(i)?;
         let (i, _) = whitespace1(i)?;
 
+        // The ONLY keyword is reserved in MySQL, but we match anyways.
+        let (i, only) = if matches!(dialect, Dialect::PostgreSQL) {
+            let (i, only) = opt(tag_no_case("only"))(i)?;
+            let (i, _) = opt(whitespace1)(i)?;
+            (i, only.is_some())
+        } else {
+            (i, false)
+        };
+
         let (i, table) = table_reference(dialect)(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, definitions) = separated_list0(ws_sep_comma, alter_table_definition(dialect))(i)?;
         let (i, _) = whitespace0(i)?;
         let (i, _) = statement_terminator(i)?;
 
-        Ok((i, AlterTableStatement { table, definitions }))
+        Ok((
+            i,
+            AlterTableStatement {
+                table,
+                definitions,
+                only,
+            },
+        ))
     }
 }
 
@@ -312,6 +329,7 @@ mod tests {
                 comment: None,
                 constraints: vec![],
             })],
+            only: false,
         };
 
         let result = format!("{}", stmt);
@@ -346,6 +364,7 @@ mod tests {
                     comment: None,
                 }),
             ],
+            only: false,
         };
         let result = alter_table_statement(Dialect::MySQL)(qstring);
         assert_eq!(result.unwrap().1, expected);
@@ -373,6 +392,7 @@ mod tests {
                     constraints: vec![],
                     comment: None,
                 })],
+                only: false,
             };
             let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(result.unwrap().1, expected);
@@ -406,6 +426,7 @@ mod tests {
                         comment: None,
                     }),
                 ],
+                only: false,
             };
             let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(result.unwrap().1, expected);
@@ -423,6 +444,7 @@ mod tests {
                     name: "c".into(),
                     behavior: None,
                 }],
+                only: false,
             };
             let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(result.unwrap().1, expected);
@@ -440,6 +462,7 @@ mod tests {
                     name: "c".into(),
                     behavior: Some(DropBehavior::Cascade),
                 }],
+                only: false,
             };
             let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(result.unwrap().1, expected);
@@ -459,6 +482,7 @@ mod tests {
                         "foo".into(),
                     )),
                 }],
+                only: false,
             };
             let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(result.unwrap().1, expected);
@@ -476,6 +500,7 @@ mod tests {
                     name: "c".into(),
                     operation: AlterColumnOperation::DropColumnDefault,
                 }],
+                only: false,
             };
             let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(result.unwrap().1, expected);
@@ -497,7 +522,8 @@ mod tests {
                             constraints: vec![ColumnConstraint::NotNull],
                             comment: None,
                         }
-                    }]
+                    }],
+                    only: false,
                 }
             );
         }
@@ -521,7 +547,8 @@ mod tests {
                             ],
                             comment: None,
                         }
-                    }]
+                    }],
+                    only: false,
                 }
             );
         }
@@ -542,7 +569,8 @@ mod tests {
                             constraints: vec![],
                             comment: None,
                         }
-                    }]
+                    }],
+                    only: false,
                 }
             );
             assert_eq!(
@@ -562,7 +590,8 @@ mod tests {
                     definitions: vec![AlterTableDefinition::AddKey(TableKey::PrimaryKey {
                         name: Some("posts_likes_post_id_user_id_primary".into()),
                         columns: vec![Column::from("post_id"), Column::from("user_id"),],
-                    })]
+                    })],
+                    only: false,
                 }
             );
         }
@@ -579,7 +608,8 @@ mod tests {
                         name: "flags_created_at_index".into(),
                         columns: vec![Column::from("created_at")],
                         index_type: None,
-                    })]
+                    })],
+                    only: false,
                 }
             );
         }
@@ -600,7 +630,8 @@ mod tests {
                         target_columns: vec![Column::from("id")],
                         on_delete: Some(ReferentialAction::Cascade),
                         on_update: None
-                    })]
+                    })],
+                    only: false,
                 }
             );
         }
@@ -623,12 +654,20 @@ mod tests {
                         constraints: vec![ColumnConstraint::Null],
                         comment: None,
                     })],
+                    only: false,
                 }
             );
             assert_eq!(
                 res.to_string(),
                 "ALTER TABLE `discussion_user` ADD COLUMN `subscription` ENUM('follow', 'ignore') NULL"
             );
+        }
+
+        #[test]
+        fn error_on_only() {
+            let qstring = "ALTER TABLE ONLY \"t\" DROP COLUMN c";
+            let res = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
+            assert!(res.is_err());
         }
     }
 
@@ -653,6 +692,7 @@ mod tests {
                     constraints: vec![],
                     comment: None,
                 })],
+                only: false,
             };
             let result = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
             assert_eq!(result.unwrap().1, expected);
@@ -686,6 +726,7 @@ mod tests {
                         comment: None,
                     }),
                 ],
+                only: false,
             };
             let result = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
             assert_eq!(result.unwrap().1, expected);
@@ -703,6 +744,7 @@ mod tests {
                     name: "c".into(),
                     behavior: None,
                 }],
+                only: false,
             };
             let result = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
             assert_eq!(result.unwrap().1, expected);
@@ -720,6 +762,7 @@ mod tests {
                     name: "c".into(),
                     behavior: Some(DropBehavior::Cascade),
                 }],
+                only: false,
             };
             let result = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
             assert_eq!(result.unwrap().1, expected);
@@ -739,6 +782,7 @@ mod tests {
                         "foo".into(),
                     )),
                 }],
+                only: false,
             };
             let result = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
             assert_eq!(result.unwrap().1, expected);
@@ -756,9 +800,28 @@ mod tests {
                     name: "c".into(),
                     operation: AlterColumnOperation::DropColumnDefault,
                 }],
+                only: false,
             };
             let result = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
             assert_eq!(result.unwrap().1, expected);
+        }
+
+        #[test]
+        fn parse_alter_table_only() {
+            let qstring = "ALTER TABLE ONLY \"t\" DROP COLUMN c";
+            let expected = AlterTableStatement {
+                table: Table {
+                    name: "t".into(),
+                    schema: None,
+                },
+                definitions: vec![AlterTableDefinition::DropColumn {
+                    name: "c".into(),
+                    behavior: None,
+                }],
+                only: true,
+            };
+            let res = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
+            assert_eq!(res.unwrap().1, expected);
         }
     }
 }
