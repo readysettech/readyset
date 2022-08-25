@@ -1,0 +1,7 @@
+{{/*
+Create the Consul agent configmap if it's enabled.
+Otherwise, the chart will enter "bring your own configmap" mode, with regards to Consul agent configuration.
+*/}}
+{{- if .Values.readyset.consulAgent.configMaps.config.create -}}
+{{- include "readyset.consul.agent.cm" $ -}}
+{{- end -}}

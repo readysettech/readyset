@@ -1,0 +1,577 @@
+  # -- Specifies prefix for named resources, e.g. ${name}-server, ${name}-adapter, etc.
+global:
+  name: ""
+
+  # -- Names resources as ${release_name}-${component_name}.
+  nameOverride: ""
+
+  # -- Allows for complete control over naming prefix.
+  # Component names are suffixed to end of provided string.
+  fullnameOverride: ""
+
+  # -- Image pull secret to apply to all resources.
+  imagePullSecret: ""
+
+  # -- Pull policy to apply to all resources.
+  imagePullPolicy: "Always"
+
+  # -- Toggles debug mode logging and more verbose install/upgrade output.
+  # Disables parameter checks (<fail "xxxxxxxx" errors)
+  debugModeEnabled: false
+
+# -- Consul Helm chart values using official HashiCorp chart.
+# Ref: https://www.consul.io/docs/k8s/helm
+# @default -- Truncated due to length.
+consul:
+
+  # -- Toggles provisioning of the official HashiCorp Consul Helm chart.
+  enabled: true
+
+  # -- Storage size for Consul Server state storage devices.
+  storage: 200Gi # production
+
+  # -- Storage class for Consul Server state storage devices.
+  # Ref: https://kubernetes.io/docs/concepts/storage/storage-classes/
+  storageClass: gp2
+
+  # -- Consul container image and tag.
+  image: "consul:1.11.4"
+
+  # -- Affinities to be applied to Consul server pods.
+  affinity: {}
+    # Example affinity:
+    # nodeAffinity:
+    #   requiredDuringSchedulingIgnoredDuringExecution:
+    #     nodeSelectorTerms:
+    #     - matchExpressions:
+    #       - key: company.io/worker
+    #         operator: In
+    #         values:
+    #         - statefulsets
+
+  # -- Consul chart's daemonset client. Disabled since ReadySet uses the sidecar pattern.
+  # Ref: https://www.consul.io/docs/k8s/helm#client
+  client:
+
+    # -- Disable Consul Agent daemonset since we're using sidecars instead.
+    enabled: false
+
+  # -- Consul chart's server configuration block.
+  # Ref: https://www.consul.io/docs/k8s/helm#server
+  # @default -- Truncated due to length.
+  server:
+
+    # -- Toggles provisioning of Consul Server.
+    # Ref: https://www.consul.io/docs/k8s/helm#server
+    enabled: true
+
+    storageClass: gp2
+
+    # -- Resource requests and limits for Consul Server pods.
+    resources:
+      requests:
+        memory: '256Mi'
+        cpu: '250m'
+      limits:
+        memory: '512Mi'
+        cpu: '250m'
+
+    # -- Number of Consul Server replicas.
+    replicas: 1
+
+    # -- Number of Consul servers to expect before considering the cluster ready.
+    bootstrapExpect: 1
+
+  # -- Consul Connect sidecar injection configuration settings.
+  # Ref: https://www.consul.io/docs/k8s/helm#connectinject
+  connectInject:
+    # -- Toggles Consul Connect sidecar injection. Not currently used by ReadySet.
+    enabled: false
+
+readyset:
+
+  common:
+    # -- Shared/common configuration block for ReadySet applications.
+    # @default -- Truncated due to length.
+    config:
+
+      # -- Name of the ReadySet deployment. Should be unique within the context
+      # of the chosen Consul cluster to avoid key collisions.
+      deploymentName: "readyset-helm-test"
+
+      # -- Number of ReadySet server nodes in the cluster. Should match number
+      # of server replicas in deploymentConfig.replicas
+      quorum: 1
+
+      # -- Number of data shards in the cluster. Not advised to be changed
+      # unless you know what you are doing.
+      shards: 0
+
+      # -- Maximum memory (in bytes) each ReadySet server can consume. Unlimited
+      # by default, as indicated by a value of 0.
+      memoryLimitBytes: 0
+
+      # -- Format for ReadySet logs to be emitted to STDOUT/STDERR.
+      logFormat: compact
+
+      # -- Flag to instruct entrypoint script which adapter binary to use.
+      # Supported values: mysql, psql
+      engine: "mysql"
+
+      # -- Consul authority address override.
+      # Empty value uses chart generated value.
+      authorityAddressOverride: ""
+
+      # -- Authority type. Currently only supports Consul.
+      authorityType: "consul"
+
+    # -- Secrets shared amongst ReadySet containers deployed in this chart.
+    # @default -- Truncated due to length.
+    secrets:
+
+      # -- Kubernetes secret containing the original DB connection string to
+      # -- your RDS instance.
+      replicationUrl:
+
+        # -- Name of k8s secret to retrieve DB connection values from.
+        secretName: "readyset-db-url"
+
+        # -- Key in the k8s secret for the DB url value.
+        urlSecretKey: "url"
+
+        # -- Key in the k8s secret for the DB username.
+        userSecretKey: "username"
+
+        # -- Key in the k8s secret for the DB password.
+        pwdSecretKey: "password"
+
+  # -- Consul agent sidecar configurations for ReadySet.
+  # @default -- Truncated due to length.
+  consulAgent:
+
+    # -- Container image repository used for Consul agent sidecars.
+    image: hashicorp/consul
+
+    # -- Container image tag used for Consul agent sidecars.
+    tag: "1.11.4"
+
+    # -- Extra labels applied to Consul agent sidecars.
+    labels: {}
+
+    # -- Consul agent entrypoint.
+    entrypoint: "/bin/sh"
+
+    # -- Consul agent entrypoint arguments.
+    args:
+      - /usr/src/app/entrypoint.sh
+
+    # -- Allows connectivity to Consul server existing in another namespace.
+    # -- Blank value causes chart behavior to default to current namespace.
+    serverNamespaceOverride: ""
+
+    # -- Container ports to be exposed for the Consul agent container.
+    # @default -- Truncated due to length.
+    containerPorts:
+      - containerPort: 8500
+        name: http
+        protocol: TCP
+      - containerPort: 8301
+        name: serflan-tcp
+        protocol: TCP
+      - containerPort: 8301
+        name: serflan-udp
+        protocol: UDP
+      - containerPort: 8600
+        name: dns-tcp
+        protocol: TCP
+      - containerPort: 8600
+        name: dns-udp
+        protocol: UDP
+
+    configMaps:
+      config:
+        nameOverride:
+        create: true
+
+  # -- ReadySet server configuration specifications.
+  # -- It's worth noting that business applications do not connect to server
+  # -- nodes directly. Applications connect to the adapter service.
+  # @default -- Truncated due to length.
+  server:
+
+    # -- Toggles creation of ReadySet server components.
+    enabled: true
+
+    # -- Component name of ReadySet server. Used for logging and metrics.
+    componentName: "readyset-server"
+
+    # -- TCP port the ReadySet Prometheus scrape endpoint is listening on.
+    prometheusScrapePort: 6033
+
+    # -- Container image settings for ReadySet server.
+    # @default -- Truncated due to length.
+    image:
+
+      # -- Container image repository to use for ReadySet server.
+      repository: public.ecr.aws/z3o1l5n4/readyset-server # TODO: s/z3o1l5n4/readyset when name is approved
+
+      # -- Container image tag to use for ReadySet server.
+      #tag: "release-bcbe5d9ca1a15a35fc317a14ca5e8fe958570b9d"
+      tag: "latest"
+
+    # -- RBAC configurations for ReadySet server.
+    # @default -- Truncated due to length.
+    rbac:
+
+      # -- Service account configurations for ReadySet server.
+      # @default -- Truncated due to length.
+      serviceAccount:
+
+        # -- Name of service account for ReadySet server.
+        #  Allows for bringing your own service account if .create is false.
+        name: ""
+
+        # -- Toggles creation of ReadySet server service account.
+        create: true
+
+      # -- Role and role binding configurations for ReadySet server.
+      # @default -- Truncated due to length.
+      role:
+
+        # -- Name of role to create or reference (if create is false).
+        # -- If create enabled, uses either the value below or a chart generated name.
+        name: ""
+
+        # -- Name of role binding to create (if create is true).
+        # -- If create enabled, uses either the value below or a chart generated name.
+        bindingName: ""
+
+        # -- Toggles creation of role and role binding for ReadySet server.
+        create: true
+
+        # -- Defaults to namespace ReadySet is deployed in.
+        # Useful if Consul is running in another namespace
+        namespace: ""
+
+    # -- Container ports exposed for ReadySet server.
+    # @default -- Truncated due to length.
+    containerPorts:
+      - containerPort: 6033
+        name: api
+        protocol: TCP
+      - containerPort: 5432
+        name: pg
+        protocol: TCP
+
+    # -- Deployment configuration options for ReadySet server.
+    # @default -- Truncated due to length.
+    deploymentConfig:
+
+      # -- Number of replicas of ReadySet server to be run. Under normal conditions this should match common.config.quorum.
+      # Should be: 1, 3, 5, 7
+      replicas: 1
+
+      # -- Partition size when performing an update.
+      updatePartition: 0
+
+      # -- Pod management policy to be used.
+      podManagementPolicy: Parallel
+
+    # -- Extra annotations applied to ReadySet server pods.
+    annotations: {}
+
+    # -- Extra labels applied to ReadySet server pods.
+    extraLabels:
+      app: readyset
+      component: server
+
+    # -- Priority class to be applied to ReadySet server pods.
+    priorityClassName: ""
+
+    # -- Seconds to wait before terminating ReadySet server pods.
+    # Ref: https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/
+    termGracePeriodSec: 15
+
+    # -- Topology spread constraints to apply to the ReadySet server pods.
+    # Ref: https://kubernetes.io/docs/concepts/workloads/pods/pod-topology-spread-constraints/
+    topologySpreadConstraints: {}
+
+    # -- Entrypoint for ReadySet server containers.
+    entrypoint: "/usr/local/bin/readyset-server"
+
+    # -- Args for ReadySet server container entrypoint.
+    args: []
+
+    # -- Static environment variables to be applied to ReadySet server containers.
+    # @default -- Truncated due to length.
+    extraEnvironmentVars:
+
+      # -- Directory to read and write ReadySet datastore to.
+      # This path should be on a persistent storage device, e.g. ebs
+      DB_DIR: "/state"
+
+      # -- Toggles Prometheus metric endpoint. Required for Grafana dashboards and metrics.
+      # Also used as the server health check
+      PROMETHEUS_METRICS: true
+
+      # -- Address ranges permitted to connect to ReadySet server.
+      LISTEN_ADDRESS: "0.0.0.0"
+
+      # -- Seconds between state size memory limit checks.
+      MEMORY_CHECK_EVERY: "1"
+
+      # -- Controls materialization.
+      FORBID_FULL_MATERIALIZATION: false
+
+    # -- Affinities to be applied to ReadySet server pods.
+    # Ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/
+    affinity: {}
+      # Example affinity:
+      # podAntiAffinity:
+      #   requiredDuringSchedulingIgnoredDuringExecution:
+      #   - labelSelector:
+      #       matchLabels:
+      #         app: consul
+      #         component: server
+      #         release: consul
+      #     topologyKey: kubernetes.io/hostname
+      # nodeAffinity:
+      #   requiredDuringSchedulingIgnoredDuringExecution:
+      #     nodeSelectorTerms:
+      #     - matchExpressions:
+      #       - key: company.io/worker
+      #         operator: In
+      #         values:
+      #         - statefulsets
+
+    # -- Tolerations to be applied to ReadySet server pods.
+    # Ref: https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/
+    tolerations: []
+
+    # -- Security context to be applied to ReadySet server pods.
+    # Ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
+    securityContext: {}
+
+    # -- Storage spec for ReadySet server's persistent state.
+    # @default -- Truncated due to length.
+    storageSpec:
+
+      # -- Toggles usage of persistent storage. ReadySet is a database, so persistence is required for production.
+      persistentStorageEnabled: true
+
+      # -- Name of volume for ReadySet server state storage.
+      volumeName: "state"
+
+      # -- Volume mounts for ReadySet server.
+      volumeMounts:
+        - name: state
+          mountPath: /state
+
+      # -- Volume claim template for ReadySet server.
+      # @default -- Truncated due to length.
+      volumeClaimTemplates:
+      - metadata:
+          name: state
+        spec:
+          storageClassName: gp2
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 250Gi
+
+    # -- Resource requests and limits for ReadySet server pods.
+    # -- Defaults to development settings.
+    resources:
+      requests:
+        memory: "4096Mi"
+        cpu: "2000m"
+      limits: {}
+      ## For production:
+      # requests:
+      #   memory: "24576Mi"
+      #   cpu: "3750m"
+
+  # -- ReadySet adapter configurations.
+  # -- Applications connect to it instead of the RDS instance directly.
+  # @default -- Truncated due to length.
+  adapter:
+
+    # -- Toggles deployment of ReadySet adapter deployment.
+    enabled: true
+
+    # -- Component name of adapter. Used to name logs and metrics.
+    componentName: "readyset-adapter"
+
+    # -- TCP port the ReadySet Prometheus scrape endpoint is listening on.
+    prometheusScrapePort: 6034
+
+    # -- Container image settings for ReadySet adapter containers.
+    # @default -- Truncated due to length.
+    image:
+
+      # -- Image repository to use for ReadySet adapter containers.
+      repository: public.ecr.aws/z3o1l5n4/readyset-adapter # TODO: s/z301l5n4/readyset when name is approved
+
+      # -- Image tag to use for ReadySet adapter containers.
+      tag: "latest"
+
+      # -- Image pull policy to be applied to ReadySet adapter pods.
+      pullPolicy: "Always"
+
+    # -- Number of replicas for ReadySet adapter deployments.
+    replicas: 1
+
+    # -- Pod labels for ReadySet adapter pods.
+    labels:
+      app: readyset
+      component: adapter
+
+    # -- Security context to be applied to ReadySet adapter containers.
+    # Defaults to uid 1000 and gid 1000. Ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
+    securityContext:
+      runAsGroup: 1000
+      runAsUser: 1000
+
+    # -- Tolerations to be applied to ReadySet adapter pods.
+    # Ref: https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/
+    tolerations: []
+
+    # -- Affinities to be applied to ReadySet adapter pods.
+    # Ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/
+    affinity: {}
+      # Example affinity:
+      # podAntiAffinity:
+      #   requiredDuringSchedulingIgnoredDuringExecution:
+      #   - labelSelector:
+      #       matchLabels:
+      #         app: consul
+      #         component: server
+      #         release: consul
+      #     topologyKey: kubernetes.io/hostname
+      #   - labelSelector:
+      #       matchLabels:
+      #         app: readyset
+      #         component: server
+      #     topologyKey: kubernetes.io/hostname
+
+    # -- Topology spread constraints to apply to the ReadySet adapter pods.
+    # Ref: https://kubernetes.io/docs/concepts/workloads/pods/pod-topology-spread-constraints/
+    topologySpreadConstraints: {}
+
+    # -- RBAC configurations for ReadySet adapter.
+    # @default -- Truncated due to length.
+    rbac:
+
+      # -- Service account configurations for ReadySet adapter.
+      serviceAccount:
+
+        # -- Name of service account. Allows for bringing your own service account if .create is false.
+        name: ""
+
+        # -- Toggles creation of ReadySet adapter service account.
+        create: true
+
+      # -- Role and role binding configurations for ReadySet adapter.
+      role:
+
+        # -- Name of chart created role for ReadySet adapter.
+        name: ""
+
+        # -- Name of chart created role binding.
+        # Only used if .create is true.
+        bindingName: ""
+
+        # -- Toggles creation of ReadySet adapter role.
+        create: true
+
+        # -- Namespace override for ReadySet adapter role.
+        # Defaults to the namespace ReadySet is deployed in.
+        namespace: ""
+
+    # -- Container ports exposed for ReadySet adapter.
+    # @default -- Truncated due to length.
+    containerPorts:
+      - name: health
+        containerPort: 6034
+        protocol: TCP
+      - name: mysql
+        containerPort: 3306
+        protocol: TCP
+      - name: postgres
+        containerPort: 5432
+        protocol: TCP
+
+    # -- Entrypoint for ReadySet adapter containers.
+    entrypoint: "/usr/local/bin/docker-entrypoint.sh"
+
+    # -- Entrypoint arguments for ReadySet adapter containers.
+    args: ["--prometheus-metrics"]
+
+    # -- Static environment variables applied to ReadySet adapter containers.
+    # @default -- Truncated due to length.
+    extraEnvironmentVars:
+
+      # -- Toggles prometheus metrics for ReadySet adapter containers.
+      PROMETHEUS_METRICS: true
+
+      # -- Listening address and port for health check and metric endpoints.
+      METRICS_ADDRESS: "0.0.0.0:6034"
+
+      # -- Polling interval in seconds for requesting outputs from the Leader.
+      OUTPUTS_POLLING_INTERVAL: 180
+
+      # -- Toggles running of migrations exclusively through CREATE CACHE
+      # -- statements. Set to 0 (off) or 1 (on). Conflicts with ASYNC_MIGRATIONS.
+      EXPLICIT_MIGRATIONS: true
+
+      # -- Toggles query logging. Set to 0 (off) or 1 (on).
+      QUERY_LOG: 1
+
+    resources:
+      # -- Resource requests and limits for ReadySet adapters.
+      requests:
+        memory: "4096Mi"
+        cpu: "2000m"
+
+    # -- ReadySet adapter k8s service configurations.
+    # @default -- Truncated due to length.
+    service:
+
+      # -- Name of service to create or use (if create is false).
+      nameOverride: ""
+
+      # -- Toggles provisioning of ReadySet adapter k8s service.
+      create: true
+
+      # -- Service type applied to ReadySet adapter k8s service.
+      # type: ClusterIP - If internal k8s access is all that's needed
+      # @default -- LoadBalancer
+      type: LoadBalancer
+
+      # -- Labels applied to ReadySet adapter k8s service.
+      labels:
+        app: readyset
+        component: adapter
+
+      # -- Annotations applied to Readyset adapter k8s service.
+      annotations:
+      ##
+      # For internal AWS NLB (recommended if access needed outside k8s):
+      # Ref: https://kubernetes-sigs.github.io/aws-load-balancer-controller/v2.1/guide/service/nlb_ip_mode/
+        service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+        service.beta.kubernetes.io/aws-load-balancer-type: "nlb-ip"
+        service.beta.kubernetes.io/aws-load-balancer-ip-address-type: "ipv4"
+        service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+
+      # -- Listener to be created on ReadySet adapter k8s service
+      # @default -- Truncated due to length.
+      listeners:
+        - name: mysql
+          port: 3306
+          targetPort: 3306
+          protocol: TCP
+        - name: psql
+          port: 5432
+          targetPort: 5432
+          protocol: TCP

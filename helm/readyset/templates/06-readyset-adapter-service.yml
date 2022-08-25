@@ -1,0 +1,1 @@
+{{ include "readyset.adapter.service" (dict "Values" .Values "Chart" .Chart "Release" .Release "adapter" .Values.readyset.adapter "config" .Values.readyset.common.config "service" .Values.readyset.adapter.service) }}
