@@ -23,7 +23,7 @@ use nom::multi::{count, many0, many1, many_till};
 use nom::sequence::{pair, preceded, terminated, tuple};
 use nom::IResult;
 use nom_sql::whitespace::whitespace1;
-use readyset_data::TIMESTAMP_FORMAT;
+use readyset_data::TIMESTAMP_PARSE_FORMAT;
 
 use crate::ast::*;
 
@@ -190,7 +190,7 @@ fn value(i: &[u8]) -> IResult<&[u8], Value> {
                 Some(Value::Date(
                     NaiveDateTime::parse_from_str(
                         String::from_utf8_lossy(s).as_ref(),
-                        TIMESTAMP_FORMAT,
+                        TIMESTAMP_PARSE_FORMAT,
                     )
                     .ok()?,
                 ))

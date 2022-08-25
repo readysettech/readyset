@@ -31,7 +31,7 @@ mod r#type;
 pub use crate::array::Array;
 pub use crate::r#type::DfType;
 pub use crate::text::{Text, TinyText};
-pub use crate::timestamp::{TimestampTz, TIMESTAMP_FORMAT};
+pub use crate::timestamp::{TimestampTz, TIMESTAMP_FORMAT, TIMESTAMP_PARSE_FORMAT};
 
 /// DateTime offsets must be bigger than -86_000 seconds and smaller than 86_000 (not inclusive in
 /// either case), and we don't care about seconds, so our maximum offset is gonna be

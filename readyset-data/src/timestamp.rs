@@ -2,7 +2,7 @@ use std::fmt;
 use std::hash::Hash;
 use std::str::FromStr;
 
-use chrono::{Date, DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime, Timelike};
+use chrono::{Date, DateTime, Datelike, FixedOffset, NaiveDate, NaiveDateTime, Timelike};
 use nom_sql::SqlType;
 use proptest::arbitrary::Arbitrary;
 use readyset_errors::{ReadySetError, ReadySetResult};
@@ -11,10 +11,13 @@ use serde::{Deserialize, Serialize};
 use crate::DfValue;
 
 /// The format for timestamps when parsed as text
+pub const TIMESTAMP_PARSE_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
+
+/// The format for timestamps when presented as text
 pub const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
 /// The format for timestamps with time zone when parsed as text
-pub const TIMESTAMP_TZ_PARSE_FORMAT: &str = "%Y-%m-%d %H:%M:%S%#z";
+pub const TIMESTAMP_TZ_PARSE_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f%#z";
 
 /// The format for timestamps with time zone when presented as text
 pub const TIMESTAMP_TZ_FORMAT: &str = "%Y-%m-%d %H:%M:%S%:z";
@@ -307,19 +310,15 @@ impl TimestampTz {
     fn from_str_no_bc(ts: &str) -> anyhow::Result<TimestampTz> {
         let ts = ts.trim();
         // If there is a dot, there is a microseconds field attached
-        Ok(if let Some((time, micro)) = &ts.split_once('.') {
-            (NaiveDateTime::parse_from_str(time, TIMESTAMP_FORMAT)?
-                + Duration::microseconds(micro.parse::<i64>()? * 10i64.pow(6 - micro.len() as u32)))
-            .into()
-        } else if let Ok(dt) = NaiveDateTime::parse_from_str(ts, TIMESTAMP_FORMAT) {
-            dt.into()
-        } else if let Ok(dt) =
-            DateTime::<FixedOffset>::parse_from_str(ts, TIMESTAMP_TZ_PARSE_FORMAT)
-        {
-            dt.into()
-        } else {
-            NaiveDate::parse_from_str(ts, DATE_FORMAT)?.into()
-        })
+        Ok(
+            if let Ok(dt) = DateTime::<FixedOffset>::parse_from_str(ts, TIMESTAMP_TZ_PARSE_FORMAT) {
+                dt.into()
+            } else if let Ok(dt) = NaiveDateTime::parse_from_str(ts, TIMESTAMP_PARSE_FORMAT) {
+                dt.into()
+            } else {
+                NaiveDate::parse_from_str(ts, DATE_FORMAT)?.into()
+            },
+        )
     }
 
     /// Attempt to coerce this timestamp to a specific SqlType
@@ -368,6 +367,7 @@ impl TimestampTz {
             | SqlType::LongText
             | SqlType::Char(None)
             | SqlType::VarChar(None) => Ok(DfValue::from(format!("{}", self).as_str())),
+
             SqlType::Char(Some(l)) | SqlType::VarChar(Some(l)) => {
                 let mut string = format!("{}", self);
                 string.truncate(*l as usize);
@@ -618,6 +618,15 @@ mod tests {
             chrono::FixedOffset::east(2 * 60 * 60)
                 .ymd(2004, 10, 19)
                 .and_hms(10, 23, 54)
+        );
+
+        assert_eq!(
+            TimestampTz::from_str("2004-10-19 10:23:54.1234+02")
+                .unwrap()
+                .to_chrono(),
+            chrono::FixedOffset::east(2 * 60 * 60)
+                .ymd(2004, 10, 19)
+                .and_hms_micro(10, 23, 54, 123400)
         );
 
         assert_eq!(
