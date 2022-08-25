@@ -72,10 +72,14 @@ pub enum AlterTableDefinition {
         name: SqlIdentifier,
         new_name: SqlIdentifier,
     },
-    // TODO(grfn): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#add%20table%20constraint%20definition
-    // AddTableConstraint(..),
-    // TODO(grfn): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#drop%20table%20constraint%20definition
-    // DropTableConstraint(..),
+    DropConstraint {
+        name: SqlIdentifier,
+        drop_behavior: Option<DropBehavior>,
+    },
+    /* TODO(grfn): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#add%20table%20constraint%20definition
+     * AddTableConstraint(..),
+     * TODO(grfn): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#drop%20table%20constraint%20definition
+     * DropTableConstraint(..), */
 }
 
 impl fmt::Display for AlterTableDefinition {
@@ -103,6 +107,13 @@ impl fmt::Display for AlterTableDefinition {
             AlterTableDefinition::RenameColumn { name, new_name } => {
                 write!(f, "RENAME COLUMN `{}` `{}`", name, new_name)
             }
+            AlterTableDefinition::DropConstraint {
+                name,
+                drop_behavior,
+            } => match drop_behavior {
+                None => write!(f, "DROP CONSTRAINT {}", name),
+                Some(d) => write!(f, "DROP CONSTRAINT {} {}", name, d),
+            },
         }
     }
 }
@@ -260,6 +271,28 @@ fn rename_column(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTabl
     }
 }
 
+fn drop_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
+    move |i| {
+        let (i, _) = tag_no_case("drop")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("constraint")(i)?;
+        let (i, _) = whitespace1(i)?;
+
+        let (i, name) = dialect.identifier()(i)?;
+
+        let (i, _) = opt(whitespace1)(i)?;
+        let (i, drop_behavior) = opt(drop_behavior)(i)?;
+
+        Ok((
+            i,
+            AlterTableDefinition::DropConstraint {
+                name,
+                drop_behavior,
+            },
+        ))
+    }
+}
+
 fn alter_table_definition(
     dialect: Dialect,
 ) -> impl Fn(&[u8]) -> IResult<&[u8], AlterTableDefinition> {
@@ -272,6 +305,7 @@ fn alter_table_definition(
             change_column(dialect),
             modify_column(dialect),
             rename_column(dialect),
+            drop_constraint(dialect),
         ))(i)
     }
 }
@@ -285,7 +319,7 @@ pub fn alter_table_statement(
         let (i, _) = tag_no_case("table")(i)?;
         let (i, _) = whitespace1(i)?;
 
-        // The ONLY keyword is reserved in MySQL, but we match anyways.
+        // The ONLY keyword is not used in MySQL ALTER. It *is* reserved, but we match anyways.
         let (i, only) = if matches!(dialect, Dialect::PostgreSQL) {
             let (i, only) = opt(tag_no_case("only"))(i)?;
             let (i, _) = opt(whitespace1)(i)?;
@@ -822,6 +856,38 @@ mod tests {
             };
             let res = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
             assert_eq!(res.unwrap().1, expected);
+        }
+
+        #[test]
+        fn parse_alter_drop_constraint() {
+            let qstring1 = "ALTER TABLE \"t\" DROP CONSTRAINT c CASCADE";
+            let qstring2 = "ALTER TABLE \"t\" DROP CONSTRAINT c RESTRICT";
+            let qstring3 = "ALTER TABLE \"t\" DROP CONSTRAINT c";
+            let mut expected = AlterTableStatement {
+                table: Relation {
+                    name: "t".into(),
+                    schema: None,
+                },
+                definitions: vec![AlterTableDefinition::DropConstraint {
+                    name: "c".into(),
+                    drop_behavior: Some(DropBehavior::Cascade),
+                }],
+                only: false,
+            };
+            let res1 = alter_table_statement(Dialect::PostgreSQL)(qstring1.as_bytes());
+            let res2 = alter_table_statement(Dialect::PostgreSQL)(qstring2.as_bytes());
+            let res3 = alter_table_statement(Dialect::PostgreSQL)(qstring3.as_bytes());
+            assert_eq!(res1.unwrap().1, expected);
+            expected.definitions[0] = AlterTableDefinition::DropConstraint {
+                name: "c".into(),
+                drop_behavior: Some(DropBehavior::Restrict),
+            };
+            assert_eq!(res2.unwrap().1, expected);
+            expected.definitions[0] = AlterTableDefinition::DropConstraint {
+                name: "c".into(),
+                drop_behavior: None,
+            };
+            assert_eq!(res3.unwrap().1, expected);
         }
     }
 }

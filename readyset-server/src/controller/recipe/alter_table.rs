@@ -2,7 +2,7 @@ use nom_sql::{
     AlterColumnOperation, AlterTableDefinition, AlterTableStatement, ColumnConstraint,
     CreateTableStatement, TableKey,
 };
-use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
 
 /// Creates a new [`CreateTableStatement`] from the one given, and applies all the
 /// alterations specified in the [`AlterTableStatement`].
@@ -108,6 +108,9 @@ pub(super) fn rewrite_table_definition(
                         col.column.name = new_name.clone();
                     }
                 };
+            }
+            AlterTableDefinition::DropConstraint { .. } => {
+                unsupported!("ALTER TABLE <table> DROP CONSTRAINT is not yet supported")
             }
         }
     }

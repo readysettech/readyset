@@ -784,6 +784,10 @@ pub fn walk_alter_table_definition<'a, V: Visitor<'a>>(
         | AlterTableDefinition::RenameColumn {
             name: _,
             new_name: _,
+        }
+        | AlterTableDefinition::DropConstraint {
+            name: _,
+            drop_behavior: _,
         } => Ok(()),
     }
 }

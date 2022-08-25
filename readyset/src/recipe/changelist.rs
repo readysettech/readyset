@@ -291,7 +291,8 @@ impl Change {
             | nom_sql::AlterTableDefinition::AlterColumn { .. }
             | nom_sql::AlterTableDefinition::DropColumn { .. }
             | nom_sql::AlterTableDefinition::ChangeColumn { .. }
-            | nom_sql::AlterTableDefinition::RenameColumn { .. } => true,
+            | nom_sql::AlterTableDefinition::RenameColumn { .. }
+            | nom_sql::AlterTableDefinition::DropConstraint { .. } => true,
             nom_sql::AlterTableDefinition::AddKey(_) => false,
         })
     }
