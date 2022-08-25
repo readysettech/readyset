@@ -874,7 +874,7 @@ where
         match self.rewrite_select_and_check_noria(&stmt) {
             Some((rewritten, should_do_noria)) => {
                 let status = self.query_status_cache.query_status(&rewritten);
-                if self.proxy_state.should_proxy()
+                if self.proxy_state == ProxyState::ProxyAlways
                     && !(status.migration_state == MigrationState::Successful && status.always)
                 {
                     PrepareMeta::Proxy
@@ -919,50 +919,29 @@ where
 
     /// Provides metadata required to prepare a query
     async fn plan_prepare(&mut self, query: &str) -> PrepareMeta {
-        if self.proxy_state.should_always_proxy() {
-            return PrepareMeta::Proxy;
-        }
-        let parsed_query = match self.parse_query(query) {
-            Ok(pq) => pq,
-            Err(_) => {
-                if self.proxy_state.should_proxy() {
-                    return PrepareMeta::Proxy;
-                } else {
-                    warn!(query = %Sensitive(&query), "ReadySet failed to parse query");
-                    return PrepareMeta::FailedToParse;
-                }
-            }
-        };
-
-        if self.proxy_state.should_proxy() && !parsed_query.is_select() {
+        if self.proxy_state == ProxyState::ProxyAlways {
             return PrepareMeta::Proxy;
         }
 
-        match parsed_query {
-            SqlQuery::Select(stmt) => self.plan_prepare_select(stmt),
-            SqlQuery::Insert(_) | SqlQuery::Update(_) | SqlQuery::Delete(_) => {
-                PrepareMeta::Write { stmt: parsed_query }
-            }
-            // Invalid prepare statement
-            SqlQuery::CreateTable(..)
-            | SqlQuery::CreateView(..)
-            | SqlQuery::Set(..)
-            | SqlQuery::StartTransaction(..)
-            | SqlQuery::Commit(..)
-            | SqlQuery::Rollback(..)
-            | SqlQuery::Use(..)
-            | SqlQuery::Show(..)
-            | SqlQuery::CompoundSelect(..)
-            | SqlQuery::DropTable(..)
-            | SqlQuery::DropView(..)
-            | SqlQuery::AlterTable(..)
-            | SqlQuery::RenameTable(..)
-            | SqlQuery::CreateCache(..)
-            | SqlQuery::DropCache(..)
-            | SqlQuery::DropAllCaches(..)
-            | SqlQuery::Explain(_) => {
-                warn!(statement = %Sensitive(&parsed_query), "Statement cannot be prepared by ReadySet");
+        match self.parse_query(query) {
+            Ok(SqlQuery::Select(stmt)) => self.plan_prepare_select(stmt),
+            Ok(
+                query @ SqlQuery::Insert(_)
+                | query @ SqlQuery::Update(_)
+                | query @ SqlQuery::Delete(_),
+            ) => PrepareMeta::Write { stmt: query },
+            Ok(pq) => {
+                warn!(statement = %Sensitive(&pq), "Statement cannot be prepared by ReadySet");
                 PrepareMeta::Unimplemented
+            }
+            Err(_) => {
+                let mode = if self.proxy_state == ProxyState::Never {
+                    PrepareMeta::FailedToParse
+                } else {
+                    PrepareMeta::Proxy
+                };
+                warn!(query = %Sensitive(&query), plan = ?mode, "ReadySet failed to parse query");
+                mode
             }
         }
     }
@@ -1253,10 +1232,29 @@ where
             }
         }
 
-        let should_fallback = cached_statement.in_fallback_recovery(
-            self.query_max_failure_duration,
-            self.fallback_recovery_duration,
-        ) || cached_statement.is_unsupported_execute();
+        let should_fallback = {
+            let is_recovering = cached_statement.in_fallback_recovery(
+                self.query_max_failure_duration,
+                self.fallback_recovery_duration,
+            );
+
+            let always_readyset = cached_statement
+                .rewritten
+                .as_ref()
+                .map(|stmt| {
+                    self.query_status_cache.query_status(stmt).always
+                        && cached_statement.migration_state == MigrationState::Successful
+                })
+                .unwrap_or(false);
+
+            if cached_statement.is_unsupported_execute() {
+                true
+            } else if always_readyset {
+                false
+            } else {
+                is_recovering || self.proxy_state.should_proxy()
+            }
+        };
 
         let result = match &cached_statement.prep {
             PrepareResult::Noria(prep) => {

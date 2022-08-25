@@ -3,7 +3,6 @@ use std::fmt::Display;
 
 use async_trait::async_trait;
 use mysql_async::prelude::Queryable;
-use mysql_async::Conn;
 use mysql_srv::MysqlIntermediary;
 use readyset_client::backend::noria_connector::ReadBehavior;
 use readyset_client::backend::{BackendBuilder, MigrationMode, QueryInfo, UnsupportedSetMode};
@@ -16,7 +15,7 @@ use crate::Adapter;
 
 /// Retrieves where the query executed by parsing the row returned by
 /// EXPLAIN LAST STATEMENT.
-pub async fn last_query_info(conn: &mut Conn) -> QueryInfo {
+pub async fn last_query_info(conn: &mut impl Queryable) -> QueryInfo {
     conn.query_first::<'_, QueryInfo, _>("EXPLAIN LAST STATEMENT")
         .await
         .unwrap()

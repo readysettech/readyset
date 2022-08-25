@@ -274,6 +274,188 @@ async fn proxy_unsupported_sets_prep_exec() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
+async fn prepare_in_tx_select_out() {
+    let (opts, _handle) = setup_with(
+        BackendBuilder::new()
+            .require_authentication(false)
+            .unsupported_set_mode(UnsupportedSetMode::Proxy),
+    )
+    .await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
+    conn.query_drop("INSERT INTO t (x) values (1)")
+        .await
+        .unwrap();
+    let mut tx = conn
+        .start_transaction(mysql_async::TxOpts::new())
+        .await
+        .unwrap();
+    let prepared = tx.prep("SELECT * FROM t").await.unwrap();
+    tx.commit().await.unwrap();
+    let _: Option<i64> = conn.exec_first(prepared, ()).await.unwrap();
+    assert_eq!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::Readyset
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn prep_and_select_in_tx() {
+    let (opts, _handle) = setup_with(
+        BackendBuilder::new()
+            .require_authentication(false)
+            .unsupported_set_mode(UnsupportedSetMode::Proxy),
+    )
+    .await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
+    conn.query_drop("INSERT INTO t (x) values (1)")
+        .await
+        .unwrap();
+    let mut tx = conn
+        .start_transaction(mysql_async::TxOpts::new())
+        .await
+        .unwrap();
+
+    let prepared = tx.prep("SELECT * FROM t").await.unwrap();
+    let _: Option<i64> = tx.exec_first(prepared, ()).await.unwrap();
+    assert_eq!(
+        last_query_info(&mut tx).await.destination,
+        QueryDestination::Upstream
+    );
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn prep_then_select_in_tx() {
+    let (opts, _handle) = setup_with(
+        BackendBuilder::new()
+            .require_authentication(false)
+            .unsupported_set_mode(UnsupportedSetMode::Proxy),
+    )
+    .await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
+    conn.query_drop("INSERT INTO t (x) values (1)")
+        .await
+        .unwrap();
+    let prepared = conn.prep("SELECT * FROM t").await.unwrap();
+    let mut tx = conn
+        .start_transaction(mysql_async::TxOpts::new())
+        .await
+        .unwrap();
+
+    let _: Option<i64> = tx.exec_first(prepared, ()).await.unwrap();
+    assert_eq!(
+        last_query_info(&mut tx).await.destination,
+        QueryDestination::Upstream
+    );
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn prep_then_always_select_in_tx() {
+    let (opts, _handle) = setup_with(
+        BackendBuilder::new()
+            .require_authentication(false)
+            .unsupported_set_mode(UnsupportedSetMode::Proxy),
+    )
+    .await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
+    conn.query_drop("INSERT INTO t (x) values (1)")
+        .await
+        .unwrap();
+    let prepared = conn.prep("SELECT x FROM t").await.unwrap();
+    conn.query_drop("CREATE CACHE ALWAYS test_always FROM SELECT x FROM t;")
+        .await
+        .unwrap();
+    let mut tx = conn
+        .start_transaction(mysql_async::TxOpts::new())
+        .await
+        .unwrap();
+
+    let _: Option<i64> = tx.exec_first(prepared, ()).await.unwrap();
+    assert_eq!(
+        last_query_info(&mut tx).await.destination,
+        QueryDestination::Readyset
+    );
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn prep_select() {
+    let (opts, _handle) = setup_with(
+        BackendBuilder::new()
+            .require_authentication(false)
+            .unsupported_set_mode(UnsupportedSetMode::Proxy),
+    )
+    .await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
+    conn.query_drop("INSERT INTO t (x) values (1)")
+        .await
+        .unwrap();
+    let prepared = conn.prep("SELECT * FROM t").await.unwrap();
+    let _: Option<i64> = conn.exec_first(prepared, ()).await.unwrap();
+    assert_eq!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::Readyset
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn set_then_prep_and_select() {
+    let (opts, _handle) = setup_with(
+        BackendBuilder::new()
+            .require_authentication(false)
+            .unsupported_set_mode(UnsupportedSetMode::Proxy),
+    )
+    .await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
+    conn.query_drop("INSERT INTO t (x) values (1)")
+        .await
+        .unwrap();
+    conn.query_drop("set @foo = 5").await.unwrap();
+    let prepared = conn.prep("SELECT * FROM t").await.unwrap();
+    let _: Option<i64> = conn.exec_first(prepared, ()).await.unwrap();
+    assert_eq!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::Upstream
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn prep_then_set_then_select_proxy() {
+    let (opts, _handle) = setup_with(
+        BackendBuilder::new()
+            .require_authentication(false)
+            .unsupported_set_mode(UnsupportedSetMode::Proxy),
+    )
+    .await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TABLE t (x int)").await.unwrap();
+    conn.query_drop("INSERT INTO t (x) values (1)")
+        .await
+        .unwrap();
+    conn.query_drop("set @foo = 5").await.unwrap();
+    let prepared = conn.prep("SELECT * FROM t").await.unwrap();
+    let _: Option<i64> = conn.exec_first(prepared, ()).await.unwrap();
+    assert_eq!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::Upstream
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn proxy_mode_should_allow_commands() {
     let (opts, _handle) = setup_with(
         BackendBuilder::new()
