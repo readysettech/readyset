@@ -8880,7 +8880,7 @@ async fn double_create_table_with_multiple_modifications() {
         .await
         .unwrap();
 
-    sleep();
+    sleep().await;
     let results = view.lookup(&[0.into()], true).await.unwrap().into_vec();
     assert!(!results.is_empty());
     assert_eq!(results[0][0], "11".into());
