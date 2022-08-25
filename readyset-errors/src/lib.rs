@@ -372,7 +372,7 @@ pub enum ReadySetError {
     #[error("Worker cannot find its controller")]
     LostController,
 
-    /// An RPC request was made to a noria-server instance that isn't the leader.
+    /// An RPC request was made to a readyset-server instance that isn't the leader.
     #[error("This instance is not the leader")]
     NotLeader,
 

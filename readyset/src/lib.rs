@@ -1,4 +1,4 @@
-//! This create contains client bindings for [ReadySet](https://github.com/mit-pdos/noria).
+//! This create contains client bindings for [ReadySet](https://github.com/readysettech/readyset).
 //!
 //! # What is ReadySet?
 //!
@@ -13,11 +13,11 @@
 //! # Infrastructure
 //!
 //! Like most databases, ReadySet follows a server-client model where many clients connect to a
-//! (potentially distributed) server. The server in this case is the `noria-server`
-//! binary, and must be started before clients can connect. See `noria-server --help` for details
-//! and the [ReadySet repository README](https://github.com/mit-pdos/noria) for details. ReadySet uses
-//! [Apache ZooKeeper](https://zookeeper.apache.org/) to announce the location of its servers, so
-//! ZooKeeper must also be running.
+//! (potentially distributed) server. The server in this case is the `readyset-server`
+//! binary, and must be started before clients can connect. See `readyset-server --help` for details
+//! and the [ReadySet repository README](https://github.com/readysettech/readyset/) for details.
+//! ReadySet uses [Apache ZooKeeper](https://zookeeper.apache.org/) to announce the location of its
+//! servers, so ZooKeeper must also be running.
 //!
 //! # Quickstart example
 //!
@@ -127,9 +127,10 @@
 //!
 //! # Alternatives
 //!
-//! ReadySet provides a [MySQL adapter](https://github.com/mit-pdos/noria-mysql) that implements the
-//! binary MySQL protocol, which provides a compatibility layer for applications that wish to
-//! continue to issue ad-hoc MySQL queries through existing MySQL client libraries.
+//! ReadySet provides a [MySQL adapter](https://github.com/readysettech/readyset/tree/main/readyset-mysql)
+//! that implements the binary MySQL protocol, which provides a compatibility layer for
+//! applications that wish to continue to issue ad-hoc MySQL queries through existing MySQL client
+//! libraries.
 #![feature(
     type_alias_impl_trait,
     stmt_expr_attributes,

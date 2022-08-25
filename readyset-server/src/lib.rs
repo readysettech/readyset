@@ -1,5 +1,5 @@
 /*
- * Left commented while noria-server error handling refactor is still in progress
+ * Left commented while readyset-server error handling refactor is still in progress
 #![warn(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -171,7 +171,7 @@
 //!
 //! ```no_run
 //! # fn main() {
-//! # // we don't have access to any internal noria-server types :'(
+//! # // we don't have access to any internal readyset-server types :'(
 //! # struct Leader;
 //! # impl Leader { fn migrate<F>(&self, _: F) where F: FnOnce(M) { } }
 //! # struct M;
@@ -538,7 +538,7 @@ pub fn resolve_addr(addr: &str) -> anyhow::Result<IpAddr> {
         .ip())
 }
 
-/// Command-line options for running a `noria-server` worker.
+/// Command-line options for running a `readyset-server` worker.
 ///
 /// This option struct is intended to be embedded inside of a larger option struct using
 /// `#[clap(flatten)]`.

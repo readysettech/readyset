@@ -8,7 +8,7 @@ pub use metrics::Key;
 use metrics_util::Histogram;
 use serde::{Deserialize, Serialize};
 
-/// A client for accessing noria metrics for a deployment.
+/// A client for accessing readyset metrics for a deployment.
 pub mod client;
 
 /// Documents the set of metrics that are currently being recorded within
@@ -297,14 +297,14 @@ pub mod recorded {
     /// | shard | The shard identifier of the domain. |
     pub const DOMAIN_TOTAL_NODE_STATE_SIZE_BYTES: &str = "domain.total_node_state_size_bytes";
 
-    /// Counter: The number of HTTP requests received at the noria-server, for either the controller
-    /// or worker.
+    /// Counter: The number of HTTP requests received at the readyset-server, for either the
+    /// controller or worker.
     pub const SERVER_EXTERNAL_REQUESTS: &str = "server.external_requests";
 
-    /// Counter: The number of worker HTTP requests received by the noria-server.
+    /// Counter: The number of worker HTTP requests received by the readyset-server.
     pub const SERVER_WORKER_REQUESTS: &str = "server.worker_requests";
 
-    /// Counter: The number of controller HTTP requests received by the noria-server.
+    /// Counter: The number of controller HTTP requests received by the readyset-server.
     pub const SERVER_CONTROLLER_REQUESTS: &str = "server.controller_requests";
 
     /// Counter: The number of lookup requests to a base table nodes state.

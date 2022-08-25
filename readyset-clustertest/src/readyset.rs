@@ -206,14 +206,14 @@ async fn ensure_startup_timestamp_metric() {
         let found_timestamp = match get_metric(&mut deployment, address.clone(), recorded::NORIA_STARTUP_TIMESTAMP).await {
             Some(DumpedMetricValue::Counter(v)) => v,
             err => panic!(
-                "For noria-server {}, expected a Some(DumpedMetricValue::Counter), but instead received {:?}",
+                "For readyset-server {}, expected a Some(DumpedMetricValue::Counter), but instead received {:?}",
                 address, err
             ),
         };
 
         assert!(
             test_start_timetsamp <= found_timestamp,
-            "noria-server {} has too early of a timestamp ({} but should be after {})",
+            "readyset-server {} has too early of a timestamp ({} but should be after {})",
             address,
             found_timestamp,
             test_start_timetsamp

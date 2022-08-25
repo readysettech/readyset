@@ -257,7 +257,7 @@ mod parse {
     use nom_sql::{sql_query, Dialect, SqlQuery};
 
     /// The canonical SQL dialect used for central ReadySet server recipes. All direct clients of
-    /// noria-server must use this dialect for their SQL recipes, and all adapters and client
+    /// readyset-server must use this dialect for their SQL recipes, and all adapters and client
     /// libraries must translate into this dialect as part of handling requests from users
     const CANONICAL_DIALECT: Dialect = Dialect::MySQL;
 

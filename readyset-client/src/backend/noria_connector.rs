@@ -1168,7 +1168,7 @@ impl NoriaConnector {
                         .get(ci)
                         .ok_or_else(|| {
                             internal_err!(
-                                "Row returned from noria-server had the wrong number of columns",
+                                "Row returned from readyset-server had the wrong number of columns",
                             )
                         })?
                         .coerce_to(&field.sql_type, &DfType::Unknown)?; // No from_ty, we're inserting literals

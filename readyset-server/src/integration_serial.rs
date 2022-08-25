@@ -1,5 +1,5 @@
 //! Integration tests for ReadySet that create an in-process instance
-//! of the controller and noria-server component. Tests in this file
+//! of the controller and readyset-server component. Tests in this file
 //! should all use #[serial] to ensure that they are run serially.
 //! These tests typically modify on process-level global objects, such
 //! as the metrics recorder, and may exhibit flaky behavior if run

@@ -512,8 +512,8 @@ impl From<nom_sql::Column> for ColumnName {
 /// Try to find the [`ColumnSpecification`] for the primary key of the given create table statement
 ///
 /// TODO(grfn): Ideally, this would reuse the `key_def_coalescing` rewrite pass, but that's buried
-/// deep inside noria-server - if we ever get a chance to extract rewrite passes to their own crate,
-/// this should be updated to use that
+/// deep inside readyset-server - if we ever get a chance to extract rewrite passes to their own
+/// crate, this should be updated to use that
 pub fn find_primary_keys(stmt: &CreateTableStatement) -> Option<&ColumnSpecification> {
     stmt.fields
         .iter()

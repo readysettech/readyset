@@ -5,7 +5,7 @@ publish = false
 authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
-description = "Internal noria-server crate"
+description = "Artifacts commonly shared among other ReadySet crates"
 
 [dependencies]
 chrono = { version = "0.4.0", features = ["serde"] }

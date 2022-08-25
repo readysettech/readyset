@@ -335,7 +335,7 @@ impl Controller {
     /// this controller wrapper, but don't bother waiting for the response.
     ///
     /// Not waiting for the response avoids deadlocking when the controller and worker are in the
-    /// same noria-server instance.
+    /// same readyset-server instance.
     async fn send_worker_request(&self, kind: WorkerRequestKind) -> ReadySetResult<()> {
         let (tx, _rx) = tokio::sync::oneshot::channel();
         self.worker_tx

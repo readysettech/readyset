@@ -55,13 +55,13 @@
 //!
 //! ## Handling component outage
 //!
-//! In a distributed deployment, a component (such as a noria-server instance) may go down, causing
-//! some queries that rely on that server instance to fail. To help direct all affected queries
-//! immediately to fallback when this happens, you can configure the --query-max-failure-seconds
-//! flag to provide a maximum time in seconds that any given query may continuously fail for before
-//! entering into a fallback only recovery period. You can configure the
-//! --fallback-recovery-seconds flag to configure how long you would like this recovery period to
-//! be enabled for, before allowing affected queries to be retried against noria.
+//! In a distributed deployment, a component (such as a readyset-server instance) may go down,
+//! causing some queries that rely on that server instance to fail. To help direct all affected
+//! queries immediately to fallback when this happens, you can configure the
+//! --query-max-failure-seconds flag to provide a maximum time in seconds that any given query may
+//! continuously fail for before entering into a fallback only recovery period. You can configure
+//! the --fallback-recovery-seconds flag to configure how long you would like this recovery period
+//! to be enabled for, before allowing affected queries to be retried against noria.
 //!
 //! The metadata for this feature is tracked in the QueryStatusCache for each query. We currently
 //! only trigger on networking related errors specifically to try to prevent this feature from

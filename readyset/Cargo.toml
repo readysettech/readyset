@@ -6,7 +6,7 @@ authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
 readme = "README.md"
-description = "Client bindings for Noria"
+description = "Client bindings for ReadySet"
 
 keywords = ["database", "dataflow", "backend", "storage", "sql"]
 categories = ["api-bindings", "database"]

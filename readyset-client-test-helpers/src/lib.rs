@@ -47,8 +47,8 @@ pub trait Adapter: Send {
     async fn run_backend(backend: Backend<Self::Upstream, Self::Handler>, s: TcpStream);
 }
 
-/// Runs noria-server and noria-mysql within the process. If `fallback` is true, both will use the
-/// `A::url()` as the connection string. This behavior is typically used for tests.
+/// Runs readyset-server and noria-mysql within the process. If `fallback` is true, both will use
+/// the `A::url()` as the connection string. This behavior is typically used for tests.
 pub async fn setup<A>(
     backend_builder: BackendBuilder,
     fallback: bool,
@@ -73,7 +73,7 @@ where
     .await
 }
 
-/// Runs noria-server and noria-mysql within the process. The configuration used is meant to most
+/// Runs readyset-server and noria-mysql within the process. The configuration used is meant to most
 /// similarly match production. Useful for use in tools like benchmarks to get a better picture of
 /// expected prod performance.
 ///
@@ -115,7 +115,7 @@ where
     .await
 }
 
-/// Run noria-server and noria-mysql within the process. If using a out of process fallback
+/// Run readyset-server and noria-mysql within the process. If using a out of process fallback
 /// database, `fallback` should be passed the connection string.
 #[allow(clippy::too_many_arguments)]
 pub async fn setup_inner<A>(

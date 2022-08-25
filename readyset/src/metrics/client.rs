@@ -7,7 +7,7 @@ use crate::ControllerHandle;
 /// A metrics dump tagged with the address it was received from.
 #[derive(Debug)]
 pub struct TaggedMetricsDump {
-    /// The URI of the noria-server the metrics dump was received
+    /// The URI of the readyset-server the metrics dump was received
     /// from.
     pub addr: Url,
     /// The set of dumped metrics.
@@ -31,12 +31,12 @@ impl MetricsClient {
         })
     }
 
-    /// Retrieves the RPC URI for each noria-server in the deployment.
+    /// Retrieves the RPC URI for each readyset-server in the deployment.
     pub async fn get_workers(&mut self) -> ReadySetResult<Vec<Url>> {
         self.controller.healthy_workers().await
     }
 
-    /// Retrieves metrics for a single noria-server in a deployment.
+    /// Retrieves metrics for a single readyset-server in a deployment.
     pub async fn get_metrics_for_server(&mut self, url: Url) -> ReadySetResult<TaggedMetricsDump> {
         let metrics_endpoint = url.join("metrics_dump")?;
         let res = self
@@ -57,7 +57,7 @@ impl MetricsClient {
         })
     }
 
-    /// Retrieves metrics from each noria-server in a deployment and aggregates the results
+    /// Retrieves metrics from each readyset-server in a deployment and aggregates the results
     /// into a single json string.
     pub async fn get_metrics(&mut self) -> ReadySetResult<Vec<TaggedMetricsDump>> {
         let noria_servers = self.get_workers().await?;
@@ -71,7 +71,7 @@ impl MetricsClient {
         Ok(metrics_dumps)
     }
 
-    /// Resets the metrics on each noria-server in the deployment.
+    /// Resets the metrics on each readyset-server in the deployment.
     pub async fn reset_metrics(&mut self) -> ReadySetResult<()> {
         let noria_servers = self.get_workers().await?;
 

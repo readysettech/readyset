@@ -1,4 +1,4 @@
-//! Configures a failpoint for a running noria-server. This can be used to
+//! Configures a failpoint for a running readyset-server. This can be used to
 //! dynamically trigger failure behavior at pre-defined failpoints in the
 //! code.
 //!
@@ -9,7 +9,7 @@
 //! ```
 //!
 //! We can use this binary to trigger a panic when this failpoint is reached
-//! in a local noria-server, 50% of the time.
+//! in a local readyset-server, 50% of the time.
 //!
 //! ```bash
 //! cargo run --bin failpoint -- --controller-address http://127.0.0.1:6033 critical-code-failure 50%panic
@@ -20,7 +20,7 @@ use hyper::Client;
 #[derive(Parser)]
 #[clap(name = "failpoint")]
 struct Failpoint {
-    /// The noria-server's controller address.
+    /// The readyset-server's controller address.
     #[clap(
         short,
         long,

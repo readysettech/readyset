@@ -1,5 +1,5 @@
 //! Integration tests for ReadySet that create an in-process instance
-//! of the controller and noria-server component. These tests may be
+//! of the controller and readyset-server component. These tests may be
 //! run in parallel. For tests that modify process-level global objects
 //! consider using integration_serial and having the tests run serially
 //! to prevent flaky behavior.

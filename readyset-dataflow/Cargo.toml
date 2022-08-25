@@ -5,7 +5,7 @@ publish = false
 authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
-description = "Internal noria-server crate"
+description = "ReadySet dataflow crate"
 
 [dependencies]
 anyhow = "1.0"

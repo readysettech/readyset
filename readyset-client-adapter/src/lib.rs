@@ -315,8 +315,8 @@ pub struct Options {
     #[clap(long, env = "NON_BLOCKING_READS")]
     non_blocking_reads: bool,
 
-    /// Run ReadySet in standalone mode, running a noria-server and noria-mysql instance within
-    /// this adapter.
+    /// Run ReadySet in standalone mode, running a readyset-server and readyset-mysql instance
+    /// within this adapter.
     #[clap(long, env = "STANDALONE", conflicts_with = "embedded-readers")]
     standalone: bool,
 
@@ -581,7 +581,7 @@ where
         // from readers on the adapter rather than across a network hop.
         let readers: Readers = Arc::new(Mutex::new(Default::default()));
 
-        // Run a noria-server instance within this adapter.
+        // Run a readyset-server instance within this adapter.
         let _handle = if options.standalone || options.embedded_readers {
             let (handle, valve) = Valve::new();
             let authority = options.authority.clone();
@@ -775,7 +775,7 @@ async fn my_ip(destination: &str, use_aws_external: bool) -> Option<IpAddr> {
     }
 }
 
-// TODO(peter): Pull this out to a shared util between noria-server and noria-adapter
+// TODO(peter): Pull this out to a shared util between readyset-server and readyset-adapter
 async fn my_aws_ip() -> anyhow::Result<IpAddr> {
     let client = reqwest::Client::builder().build()?;
     let token: String = client
