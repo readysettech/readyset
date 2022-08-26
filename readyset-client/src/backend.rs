@@ -136,6 +136,7 @@ struct PrepareSelectMeta {
     rewritten: nom_sql::SelectStatement,
     must_migrate: bool,
     should_do_noria: bool,
+    always: bool,
 }
 
 /// How to behave when receiving unsupported `SET` statements
@@ -414,6 +415,11 @@ where
     prep: PrepareResult<DB>,
     /// The current ReadySet migration state
     migration_state: MigrationState,
+    /// Indicates whether the prepared statement was already migrated manually with the optional
+    /// ALWAYS flag, such as a CREATE CACHE ALWAYS FROM command.
+    /// This is imperfect, but leans on performance over correctness. It requires a user to
+    /// re-prepare queries if they decide to change between ALWAYS and not ALWAYS.
+    always: bool,
     /// Holds information about if executes have been succeeding, or failing, along with a state
     /// transition timestamp. None if prepared statement has never been executed.
     execution_info: Option<ExecutionInfo>,
@@ -880,6 +886,7 @@ where
                         // synchronously, or if no upstream is present.
                         must_migrate: self.migration_mode == MigrationMode::InRequestPath
                             || !self.has_fallback(),
+                        always: status.always,
                     })
                 }
             }
@@ -985,16 +992,25 @@ where
         let meta = self.plan_prepare(query).await;
         let res = self.do_prepare(&meta, query, &mut query_event).await?;
 
-        let (parsed_query, migration_state, rewritten) = match meta {
-            PrepareMeta::Write { stmt } => (Some(Arc::new(stmt)), MigrationState::Successful, None),
+        let (parsed_query, migration_state, rewritten, always) = match meta {
+            PrepareMeta::Write { stmt } => (
+                Some(Arc::new(stmt)),
+                MigrationState::Successful,
+                None,
+                false,
+            ),
             PrepareMeta::Select(PrepareSelectMeta {
-                stmt, rewritten, ..
+                stmt,
+                rewritten,
+                always,
+                ..
             }) => (
                 Some(Arc::new(SqlQuery::Select(stmt))),
                 self.query_status_cache.query_migration_state(&rewritten),
                 Some(rewritten),
+                always,
             ),
-            _ => (None, MigrationState::Successful, None),
+            _ => (None, MigrationState::Successful, None, false),
         };
 
         let cache_entry = CachedPreparedStatement {
@@ -1003,6 +1019,7 @@ where
             execution_info: None,
             parsed_query,
             rewritten,
+            always,
         };
 
         self.prepared_statements.push(cache_entry);
@@ -1226,23 +1243,27 @@ where
         }
 
         let should_fallback = {
-            let is_recovering = cached_statement.in_fallback_recovery(
-                self.query_max_failure_duration,
-                self.fallback_recovery_duration,
-            );
-
-            let always_readyset = cached_statement
-                .rewritten
-                .as_ref()
-                .map(|stmt| self.query_status_cache.query_status(stmt).always)
-                .unwrap_or(false);
-
-            if cached_statement.is_unsupported_execute() {
-                true
-            } else if always_readyset {
+            if cached_statement.always {
                 false
             } else {
-                is_recovering || self.proxy_state.should_proxy()
+                let is_recovering = cached_statement.in_fallback_recovery(
+                    self.query_max_failure_duration,
+                    self.fallback_recovery_duration,
+                );
+
+                let always_readyset = cached_statement
+                    .rewritten
+                    .as_ref()
+                    .map(|stmt| self.query_status_cache.query_status(stmt).always)
+                    .unwrap_or(false);
+
+                if cached_statement.is_unsupported_execute() {
+                    true
+                } else if always_readyset {
+                    false
+                } else {
+                    is_recovering || self.proxy_state.should_proxy()
+                }
             }
         };
 
@@ -1576,16 +1597,19 @@ where
             false
         };
 
-        if self.has_fallback()
-            && (self.migration_mode != MigrationMode::InRequestPath
-                && status.migration_state != MigrationState::Successful)
-            || (status.migration_state == MigrationState::Unsupported)
-            || (self.has_fallback()
-                && status
-                    .execution_info
-                    .as_mut()
-                    .map(|i| i.execute_network_failure_exceeded(self.query_max_failure_duration))
-                    .unwrap_or(false))
+        if !status.always
+            && (self.has_fallback()
+                && (self.migration_mode != MigrationMode::InRequestPath
+                    && status.migration_state != MigrationState::Successful)
+                || (status.migration_state == MigrationState::Unsupported)
+                || (self.has_fallback()
+                    && status
+                        .execution_info
+                        .as_mut()
+                        .map(|i| {
+                            i.execute_network_failure_exceeded(self.query_max_failure_duration)
+                        })
+                        .unwrap_or(false)))
         {
             if did_work {
                 #[allow(clippy::unwrap_used)] // Validated by did_work.
@@ -1648,21 +1672,25 @@ where
                     status.migration_state = MigrationState::Unsupported;
                 };
 
+                let always = status.always;
+
                 if status != original_status {
                     self.query_status_cache
                         .update_query_status(rewritten, status);
                 }
 
-                // Try to execute on fallback if present
-                if let Some(fallback) = self.upstream.as_mut() {
-                    event.destination = Some(QueryDestination::ReadysetThenUpstream);
-                    let _t = event.start_upstream_timer();
-                    fallback
-                        .query(&original_query)
-                        .await
-                        .map(QueryResult::Upstream)
-                } else {
-                    Err(noria_err.into())
+                // Try to execute on fallback if present, as long as query is not an `always`
+                // query.
+                match (always, self.upstream.as_mut()) {
+                    (true, _) | (_, None) => Err(noria_err.into()),
+                    (false, Some(fallback)) => {
+                        event.destination = Some(QueryDestination::ReadysetThenUpstream);
+                        let _t = event.start_upstream_timer();
+                        fallback
+                            .query(&original_query)
+                            .await
+                            .map(QueryResult::Upstream)
+                    }
                 }
             }
         }
