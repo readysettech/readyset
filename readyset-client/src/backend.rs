@@ -416,9 +416,9 @@ where
     /// Holds information about if executes have been succeeding, or failing, along with a state
     /// transition timestamp. None if prepared statement has never been executed.
     execution_info: Option<ExecutionInfo>,
-    /// If query was succesfully parsed, will store the parsed query
+    /// If query was successfully parsed, will store the parsed query
     parsed_query: Option<Arc<SqlQuery>>,
-    /// If statement was succesfully rewritten, will store the rewritten statement
+    /// If statement was successfully rewritten, will store the rewritten statement
     rewritten: Option<SelectStatement>,
 }
 
