@@ -402,7 +402,6 @@ impl TryFrom<DfValue> for Value {
             DfValue::ByteArray(t) => Ok(Value::ByteArray(t.as_ref().clone())),
             DfValue::Numeric(ref d) => Ok(Value::Numeric(*d.as_ref())),
             DfValue::BitVector(ref b) => Ok(Value::BitVector(b.as_ref().clone())),
-            DfValue::Enum(_) => bail!("Enums not supported"),
             DfValue::Array(_) => bail!("Arrays not supported"),
             DfValue::PassThrough(_) => unimplemented!(),
         }

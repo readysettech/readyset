@@ -5,7 +5,7 @@ use readyset_errors::{ReadySetError, ReadySetResult};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 
-use crate::DfValue;
+use crate::{DfType, DfValue};
 
 fn coerce_f64_to_int<I>(val: f64) -> Option<I>
 where
@@ -37,7 +37,11 @@ where
     (val.round() as u64).try_into().ok()
 }
 
-pub(crate) fn coerce_f64(val: f64, sql_type: &SqlType) -> ReadySetResult<DfValue> {
+pub(crate) fn coerce_f64(
+    val: f64,
+    sql_type: &SqlType,
+    from_type: &DfType,
+) -> ReadySetResult<DfValue> {
     let err = |deets: &str| ReadySetError::DfValueConversionError {
         src_type: "Double".to_string(),
         target_type: sql_type.to_string(),
@@ -156,6 +160,7 @@ pub(crate) fn coerce_f64(val: f64, sql_type: &SqlType) -> ReadySetResult<DfValue
                 coerce_f64_to_int::<i64>(val).ok_or_else(bounds_err)?,
                 "Double",
                 sql_type,
+                from_type,
             )
         }
 
@@ -169,7 +174,11 @@ pub(crate) fn coerce_f64(val: f64, sql_type: &SqlType) -> ReadySetResult<DfValue
     }
 }
 
-pub(crate) fn coerce_decimal(val: &Decimal, sql_type: &SqlType) -> ReadySetResult<DfValue> {
+pub(crate) fn coerce_decimal(
+    val: &Decimal,
+    sql_type: &SqlType,
+    from_type: &DfType,
+) -> ReadySetResult<DfValue> {
     let err = || ReadySetError::DfValueConversionError {
         src_type: "Decimal".to_string(),
         target_type: sql_type.to_string(),
@@ -248,9 +257,12 @@ pub(crate) fn coerce_decimal(val: &Decimal, sql_type: &SqlType) -> ReadySetResul
         | SqlType::DateTime(_)
         | SqlType::Time
         | SqlType::Timestamp
-        | SqlType::TimestampTz => {
-            crate::integer::coerce_integer(val.to_i64().ok_or_else(err)?, "Decimal", sql_type)
-        }
+        | SqlType::TimestampTz => crate::integer::coerce_integer(
+            val.to_i64().ok_or_else(err)?,
+            "Decimal",
+            sql_type,
+            from_type,
+        ),
 
         SqlType::Enum(_)
         | SqlType::MacAddr

@@ -313,7 +313,6 @@ async fn check_query(
                             s.to_string()
                         }
                         d @ DfValue::ByteArray(_) => format!("{}", d),
-                        DfValue::Enum(i) => i.to_string(),
                         DfValue::TimestampTz(_)
                         | DfValue::Time(_)
                         // These types are PostgreSQL specific

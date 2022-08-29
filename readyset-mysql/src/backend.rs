@@ -105,7 +105,6 @@ async fn write_column<W: AsyncWrite + Unpin>(
         },
         DfValue::Time(ref t) => rw.write_col(t),
         DfValue::ByteArray(ref bytes) => rw.write_col(bytes.as_ref()),
-        DfValue::Enum(_) => todo!(),
         // These types are PostgreSQL specific
         DfValue::Array(_) => {
             internal!("Cannot write MySQL column: MySQL does not support arrays")

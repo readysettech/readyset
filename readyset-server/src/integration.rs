@@ -6026,7 +6026,7 @@ async fn simple_enum() {
         mutator
             .insert(vec![
                 i.into(),
-                DfValue::Enum(*color_idxs.get(color).unwrap_or(&0)),
+                DfValue::UnsignedInt(*color_idxs.get(color).unwrap_or(&0)),
             ])
             .await
             .unwrap();
@@ -6050,25 +6050,19 @@ async fn simple_enum() {
     assert_eq!(result.len(), 3);
 
     assert_eq!(
-        result[0][0]
-            .coerce_to(result_type, &DfType::Unknown)
-            .unwrap(),
+        result[0][0],
         DfValue::from("purple")
             .coerce_to(result_type, &DfType::Unknown)
             .unwrap()
     );
     assert_eq!(
-        result[1][0]
-            .coerce_to(result_type, &DfType::Unknown)
-            .unwrap(),
+        result[1][0],
         DfValue::from("red")
             .coerce_to(result_type, &DfType::Unknown)
             .unwrap()
     );
     assert_eq!(
-        result[2][0]
-            .coerce_to(result_type, &DfType::Unknown)
-            .unwrap(),
+        result[2][0],
         DfValue::from("green")
             .coerce_to(result_type, &DfType::Unknown)
             .unwrap()

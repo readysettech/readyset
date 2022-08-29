@@ -424,10 +424,13 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                     .position(|e| matches!(e, Literal::String(s) if s == str))
                 {
                     // MySQL enums use 1-based indexing since a value of 0 is reserved for string
-                    // values that do not correspond to valid enum elements:
-                    Ok(DfValue::Enum(i as u32 + 1))
+                    // values that do not correspond to valid enum elements. Also, no need to check
+                    // for overflow here since enum values can only be 16 bits wide (or maybe 32
+                    // bits in Postgres, but that's still TBD depending on how we end up
+                    // implementing PG enums).
+                    Ok(DfValue::UnsignedInt(i as u64 + 1))
                 } else {
-                    Ok(DfValue::Enum(0))
+                    Ok(DfValue::UnsignedInt(0))
                 }
             }
 
@@ -666,13 +669,13 @@ mod tests {
             DfValue::from("green")
                 .coerce_to(&enum_type, &DfType::Unknown)
                 .unwrap(),
-            DfValue::Enum(3)
+            DfValue::UnsignedInt(3)
         );
         assert_eq!(
             DfValue::from("ultraviolet")
                 .coerce_to(&enum_type, &DfType::Unknown)
                 .unwrap(),
-            DfValue::Enum(0)
+            DfValue::UnsignedInt(0)
         );
     }
 }

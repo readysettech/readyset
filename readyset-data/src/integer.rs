@@ -5,7 +5,7 @@ use std::sync::Arc;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use rust_decimal::Decimal;
 
-use crate::{DfValue, SqlType};
+use crate::{DfType, DfValue, SqlType};
 
 /// A convenience trait that implements casts of i64 and u64 to f32 and f64
 pub(crate) trait IntAsFloat {
@@ -40,11 +40,16 @@ impl IntAsFloat for u32 {
     }
 }
 
-/// Coerce an integer value according to MySQL rules to the best of our abilities
+/// Coerce an integer value according to MySQL rules to the best of our abilities.
+///
+/// Note that this only handles converting *integer types*, not other types with values represented
+/// as integers (for example, enums). The conversion logic for other such types is implemented
+/// elsewhere.
 pub(crate) fn coerce_integer<I, S>(
     val: I,
     src_type_name: S,
     sql_type: &SqlType,
+    _from_sql_type: &DfType,
 ) -> ReadySetResult<DfValue>
 where
     i8: TryFrom<I>,
@@ -85,6 +90,9 @@ where
         SqlType::UnsignedSmallInt(_) => u16::try_from(val).map_err(|_| err()).map(DfValue::from),
         SqlType::UnsignedInt(_) => u32::try_from(val).map_err(|_| err()).map(DfValue::from),
         SqlType::UnsignedBigInt(_) => u64::try_from(val).map_err(|_| err()).map(DfValue::from),
+        // Any enum index should fit within a u32 (technically a u16 for MySQL but we'll leave it
+        // open to four-byte values to maybe allow for future Postgres support):
+        SqlType::Enum(_) => u32::try_from(val).map_err(|_| err()).map(DfValue::from),
 
         SqlType::TinyText
         | SqlType::MediumText
@@ -187,19 +195,6 @@ where
         SqlType::Double => Ok(DfValue::Double(val.to_f64())),
         SqlType::Real | SqlType::Float => Ok(DfValue::Float(val.to_f32())),
         SqlType::Numeric(_) | SqlType::Decimal(_, _) => Ok(DfValue::Numeric(Arc::new(val.into()))),
-
-        SqlType::Enum(v) => {
-            // If it can't be converted to u32 it's definitely out of bounds, and MySQL coerces
-            // out-of-bounds enum indices to 0
-            let idx = u32::try_from(val).unwrap_or(0);
-            // Note that indexes into the vector of enum values start at 1, so it is actually
-            // correct to check if idx is greater than v.len() here:
-            if idx as usize > v.len() {
-                Ok(DfValue::Enum(0))
-            } else {
-                Ok(DfValue::Enum(idx))
-            }
-        }
 
         SqlType::MacAddr
         | SqlType::Inet

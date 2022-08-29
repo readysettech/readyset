@@ -82,7 +82,6 @@ impl serde::ser::Serialize for DfValue {
                 serialize_variant(serializer, Variant::TimestampTz, &(ts, extra))
             }
             DfValue::Array(vs) => serialize_variant(serializer, Variant::Array, &vs),
-            DfValue::Enum(i) => serialize_variant(serializer, Variant::Int, &(*i as i128)),
             DfValue::PassThrough(_) => Err(serde::ser::Error::custom(
                 "PassThrough not supported in dataflow graph",
             )),
