@@ -766,6 +766,7 @@ impl Ord for DfValue {
                 bits_a.cmp(bits_b)
             }
             (&DfValue::Array(ref vs_a), &DfValue::Array(ref vs_b)) => vs_a.cmp(vs_b),
+            (&DfValue::Enum(ref i_a), &DfValue::Enum(ref i_b)) => i_a.cmp(i_b),
 
             // for all other kinds of data types, just compare the variants in order
             (_, _) => DfValueKind::from(self).cmp(&DfValueKind::from(other)),
