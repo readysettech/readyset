@@ -70,16 +70,35 @@ pub fn start_transaction(
 }
 
 // Parse rule for a COMMIT query.
-// TODO(peter): Handle dialect differences.
-pub fn commit(_: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CommitStatement> {
+// TODO:
+// There are optional CHAIN and RELEASE controls for transactions that would require work beyond
+// simply parsing but should be supported eventually.
+//
+// [MySQL](https://dev.mysql.com/doc/refman/5.7/en/commit.html) allows this at the end of COMMIT:
+// [AND [NO] CHAIN] [[NO] RELEASE]
+// [PostgreSQL](https://www.postgresql.org/docs/current/sql-commit.html) allows:
+// [ AND [ NO ] CHAIN ]
+pub fn commit(d: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CommitStatement> {
     move |i| {
-        let (remaining_input, (_, _)) = tuple((
-            whitespace0,
-            tuple((
-                tag_no_case("commit"),
-                opt(tuple((whitespace1, tag_no_case("work")))),
-            )),
-        ))(i)?;
+        let (remaining_input, (_, _)) = match d {
+            Dialect::MySQL => tuple((
+                whitespace0,
+                tuple((
+                    tag_no_case("commit"),
+                    opt(tuple((whitespace1, tag_no_case("work")))),
+                )),
+            ))(i)?,
+            Dialect::PostgreSQL => tuple((
+                whitespace0,
+                tuple((
+                    alt((tag_no_case("commit"), tag_no_case("end"))),
+                    opt(tuple((
+                        whitespace1,
+                        alt((tag_no_case("work"), tag_no_case("transaction"))),
+                    ))),
+                )),
+            ))(i)?,
+        };
 
         Ok((remaining_input, CommitStatement))
     }
@@ -140,6 +159,39 @@ mod tests {
         let qstring = "    COMMIT       WORK   ";
 
         let res = commit(Dialect::MySQL)(qstring.as_bytes());
+        assert_eq!(res.unwrap().1, CommitStatement,);
+    }
+
+    #[test]
+    fn commit_postgres() {
+        let qstring = "    COMMIT";
+
+        let res = commit(Dialect::PostgreSQL)(qstring.as_bytes());
+        assert_eq!(res.unwrap().1, CommitStatement,);
+
+        let qstring = "    COMMIT       WORK   ";
+
+        let res = commit(Dialect::PostgreSQL)(qstring.as_bytes());
+        assert_eq!(res.unwrap().1, CommitStatement,);
+
+        let qstring = "    COMMIT       TRANSACTION   ";
+
+        let res = commit(Dialect::PostgreSQL)(qstring.as_bytes());
+        assert_eq!(res.unwrap().1, CommitStatement,);
+
+        let qstring = "    END";
+
+        let res = commit(Dialect::PostgreSQL)(qstring.as_bytes());
+        assert_eq!(res.unwrap().1, CommitStatement,);
+
+        let qstring = "    END       WORK   ";
+
+        let res = commit(Dialect::PostgreSQL)(qstring.as_bytes());
+        assert_eq!(res.unwrap().1, CommitStatement,);
+
+        let qstring = "    END       TRANSACTION   ";
+
+        let res = commit(Dialect::PostgreSQL)(qstring.as_bytes());
         assert_eq!(res.unwrap().1, CommitStatement,);
     }
 
