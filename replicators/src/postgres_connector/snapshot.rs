@@ -348,7 +348,7 @@ impl<'a> PostgresReplicator<'a> {
             self.table_filter
                 .contains(tbl.schema.as_str(), tbl.name.as_str())
         });
-        view_list.retain(|view| self.table_filter.contains_namespace(&view.schema));
+        view_list.retain(|view| self.table_filter.contains_schema(&view.schema));
 
         trace!(?table_list, "Loaded table list");
         trace!(?view_list, "Loaded view list");
@@ -461,7 +461,7 @@ impl<'a> PostgresReplicator<'a> {
         Ok(())
     }
 
-    /// Retreieve a list of tables of the specified kind in the specified namespace
+    /// Retreieve a list of tables of the specified kind in the specified schema
     async fn get_table_list(&mut self, kind: TableKind) -> Result<Vec<TableEntry>, pgsql::Error> {
         let kind_code = match kind {
             TableKind::RegularTable => 'r',

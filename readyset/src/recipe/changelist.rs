@@ -46,6 +46,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ChangeList {
     /// The list of changes to be made.
+    ///
     /// The changes are stored in the order they were issued.
     pub changes: Vec<Change>,
 }

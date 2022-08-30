@@ -93,7 +93,7 @@ impl Default for Config {
 #[derive(Debug)]
 pub(crate) enum ReplicationAction {
     TableAction {
-        namespace: String,
+        schema: String,
         table: String,
         actions: Vec<TableOperation>,
         /// The transaction id of a table write operation. Each
@@ -102,8 +102,8 @@ pub(crate) enum ReplicationAction {
         /// increasing across transactions.
         txid: Option<u64>,
     },
-    SchemaChange {
-        namespace: String,
+    DdlChange {
+        schema: String,
         ddl: String,
     },
     LogPosition,
@@ -484,7 +484,7 @@ impl NoriaAdapter {
     /// Apply a DDL string to noria with the current log position
     async fn handle_ddl_change(
         &mut self,
-        namespace: String,
+        schema: String,
         ddl: String,
         pos: ReplicationOffset,
     ) -> ReadySetResult<()> {
@@ -501,10 +501,10 @@ impl NoriaAdapter {
         changelist.changes.retain(|change| match change {
             Change::CreateTable(stmt) => self
                 .table_filter
-                .contains(namespace.as_str(), stmt.table.name.as_str()),
+                .contains(schema.as_str(), stmt.table.name.as_str()),
             Change::AlterTable(stmt) => self
                 .table_filter
-                .contains(namespace.as_str(), stmt.table.name.as_str()),
+                .contains(schema.as_str(), stmt.table.name.as_str()),
             _ => true,
         });
 
@@ -570,13 +570,13 @@ impl NoriaAdapter {
     /// Send table actions to noria tables, and update the binlog position for the table
     async fn handle_table_actions(
         &mut self,
-        _namespace: String,
+        _schema: String,
         table: String,
         mut actions: Vec<TableOperation>,
         txid: Option<u64>,
         pos: ReplicationOffset,
     ) -> ReadySetResult<()> {
-        // TODO(vlad): have to handle namespace when mutators support it
+        // TODO(vlad): have to handle schema when mutators support it
 
         // Send the rows as are
         let table_mutator = if let Some(table) = self.mutator_for_table(&table).await? {
@@ -630,7 +630,7 @@ impl NoriaAdapter {
         // First check if we should skip this action due to insufficient log position or lack of
         // interest
         match &action {
-            ReplicationAction::SchemaChange { .. } | ReplicationAction::LogPosition => {
+            ReplicationAction::DdlChange { .. } | ReplicationAction::LogPosition => {
                 match &self.replication_offsets.schema {
                     Some(cur) if pos <= *cur => {
                         if !catchup {
@@ -641,9 +641,7 @@ impl NoriaAdapter {
                     _ => {}
                 }
             }
-            ReplicationAction::TableAction {
-                namespace, table, ..
-            } => {
+            ReplicationAction::TableAction { schema, table, .. } => {
                 match self.replication_offsets.tables.get(table.as_str()) {
                     Some(Some(cur)) if pos <= *cur => {
                         if !catchup {
@@ -654,26 +652,23 @@ impl NoriaAdapter {
                     _ => {}
                 }
 
-                if !self
-                    .table_filter
-                    .contains(namespace.as_str(), table.as_str())
-                {
+                if !self.table_filter.contains(schema.as_str(), table.as_str()) {
                     return Ok(());
                 }
             }
         }
 
         match action {
-            ReplicationAction::SchemaChange { namespace, ddl } => {
-                self.handle_ddl_change(namespace, ddl, pos).await
+            ReplicationAction::DdlChange { schema, ddl } => {
+                self.handle_ddl_change(schema, ddl, pos).await
             }
             ReplicationAction::TableAction {
-                namespace,
+                schema,
                 table,
                 actions,
                 txid,
             } => {
-                self.handle_table_actions(namespace, table, actions, txid, pos)
+                self.handle_table_actions(schema, table, actions, txid, pos)
                     .await
             }
             ReplicationAction::LogPosition => self.handle_log_position(pos).await,

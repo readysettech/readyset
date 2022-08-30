@@ -102,9 +102,9 @@ impl MySqlReplicator {
             .await
             .map_err(log_err);
 
-        for (db, table_list) in self.table_filter.namespaces() {
+        for (db, table_list) in self.table_filter.schemas() {
             if table_list.is_for_all_tables() {
-                // If filter for this namespace subscribes for all tables, we need to load actual
+                // If filter for this schema subscribes for all tables, we need to load actual
                 // table names
                 table_list.set(load_table_list(&mut tx, TableKind::BaseTable, db).await?);
             }
@@ -162,7 +162,7 @@ impl MySqlReplicator {
             .for_each(|(db, table)| self.table_filter.remove(&db, &table));
 
         // Process `CREATE VIEW` statements
-        for (db, _) in self.table_filter.namespaces() {
+        for (db, _) in self.table_filter.schemas() {
             for view in load_table_list(&mut tx, TableKind::View, db).await? {
                 let create_view = create_for_table(&mut tx, db, &view, TableKind::View).await?;
                 debug!(%create_view, "Extending recipe");

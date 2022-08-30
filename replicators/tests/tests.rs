@@ -806,7 +806,7 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
     ctx.assert_table_missing("t2").await;
     ctx.assert_table_exists("t3").await;
     // TODO(vlad): Currently we can't differentiate between schemas, so table names are all in the
-    // same namespace
+    // same schema
     // https://readysettech.atlassian.net/browse/ENG-1447
     ctx.assert_table_exists("t4").await;
 
@@ -823,7 +823,7 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
         )
         .await?;
 
-    // TODO(vlad): eventually t4 will have a different namespace
+    // TODO(vlad): eventually t4 will have a different schema
     // https://readysettech.atlassian.net/browse/ENG-1447
     ctx.noria
         .extend_recipe("CREATE VIEW t4_view AS SELECT * FROM t4;".parse().unwrap())

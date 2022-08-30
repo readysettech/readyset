@@ -17,7 +17,7 @@ use super::ddl_replication::DdlEvent;
 use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
 
 struct Relation {
-    namespace: String,
+    schema: String,
     table: String,
     mapping: RelationMapping,
 }
@@ -34,28 +34,28 @@ pub(crate) enum WalEvent {
     WantsKeepaliveResponse,
     Commit,
     Insert {
-        namespace: String,
+        schema: String,
         table: String,
         tuple: Vec<DfValue>,
     },
     DeleteRow {
-        namespace: String,
+        schema: String,
         table: String,
         tuple: Vec<DfValue>,
     },
     DeleteByKey {
-        namespace: String,
+        schema: String,
         table: String,
         key: Vec<DfValue>,
     },
     UpdateRow {
-        namespace: String,
+        schema: String,
         table: String,
         old_tuple: Vec<DfValue>,
         new_tuple: Vec<DfValue>,
     },
     UpdateByKey {
-        namespace: String,
+        schema: String,
         table: String,
         key: Vec<DfValue>,
         set: Vec<readyset::Modification>,
@@ -109,7 +109,7 @@ impl WalReader {
                 WalRecord::Relation(mapping) => {
                     // Store the relation in the hash map for future use
                     let id = mapping.id;
-                    let namespace = String::from_utf8(mapping.namespace.to_vec()).map_err(|v| {
+                    let schema = String::from_utf8(mapping.schema.to_vec()).map_err(|v| {
                         ReadySetError::ReplicationFailed(format!(
                             "Non UTF8 name {:?}",
                             v.as_bytes()
@@ -124,7 +124,7 @@ impl WalReader {
                     relations.insert(
                         id,
                         Relation {
-                            namespace,
+                            schema,
                             table,
                             mapping,
                         },
@@ -135,14 +135,14 @@ impl WalReader {
                     new_tuple,
                 } => {
                     if let Some(Relation {
-                        namespace,
+                        schema,
                         table,
                         mapping,
                     }) = relations.get(&relation_id)
                     {
                         return Ok((
                             WalEvent::Insert {
-                                namespace: namespace.clone(),
+                                schema: schema.clone(),
                                 table: table.clone(),
                                 tuple: new_tuple.into_noria_vec(mapping, false)?,
                             },
@@ -162,7 +162,7 @@ impl WalReader {
                     new_tuple,
                 } => {
                     if let Some(Relation {
-                        namespace,
+                        schema,
                         table,
                         mapping,
                     }) = relations.get(&relation_id)
@@ -173,7 +173,7 @@ impl WalReader {
                             // IDENTITY` is set to `FULL`
                             return Ok((
                                 WalEvent::UpdateRow {
-                                    namespace: namespace.clone(),
+                                    schema: schema.clone(),
                                     table: table.clone(),
                                     old_tuple: old_tuple.into_noria_vec(mapping, false)?,
                                     new_tuple: new_tuple.into_noria_vec(mapping, false)?,
@@ -184,7 +184,7 @@ impl WalReader {
                             // This happens when the update is modifying the key column
                             return Ok((
                                 WalEvent::UpdateByKey {
-                                    namespace: namespace.clone(),
+                                    schema: schema.clone(),
                                     table: table.clone(),
                                     key: key_tuple.into_noria_vec(mapping, true)?,
                                     set: new_tuple
@@ -201,7 +201,7 @@ impl WalReader {
                             // key value from the tuple as is
                             return Ok((
                                 WalEvent::UpdateByKey {
-                                    namespace: namespace.clone(),
+                                    schema: schema.clone(),
                                     table: table.clone(),
                                     key: new_tuple.clone().into_noria_vec(mapping, true)?,
                                     set: new_tuple
@@ -221,7 +221,7 @@ impl WalReader {
                     old_tuple,
                 } => {
                     if let Some(Relation {
-                        namespace,
+                        schema,
                         table,
                         mapping,
                     }) = relations.get(&relation_id)
@@ -232,7 +232,7 @@ impl WalReader {
                             // IDENTITY` is set to `FULL`
                             return Ok((
                                 WalEvent::DeleteRow {
-                                    namespace: namespace.clone(),
+                                    schema: schema.clone(),
                                     table: table.clone(),
                                     tuple: old_tuple.into_noria_vec(mapping, false)?,
                                 },
@@ -241,7 +241,7 @@ impl WalReader {
                         } else if let Some(key_tuple) = key_tuple {
                             return Ok((
                                 WalEvent::DeleteByKey {
-                                    namespace: namespace.clone(),
+                                    schema: schema.clone(),
                                     table: table.clone(),
                                     key: key_tuple.into_noria_vec(mapping, true)?,
                                 },
@@ -350,7 +350,7 @@ impl wal::TupleData {
                                 _ => {
                                     return Err(WalError::UnsupportedTypeConversion {
                                         ty: spec.data_type.clone(),
-                                        namespace: relation.namespace.clone(),
+                                        schema: relation.schema.clone(),
                                         table: relation.name.clone(),
                                     })
                                 }
@@ -426,7 +426,7 @@ impl wal::TupleData {
                             ref t => {
                                 return Err(WalError::UnsupportedTypeConversion {
                                     ty: t.clone(),
-                                    namespace: relation.namespace.clone(),
+                                    schema: relation.schema.clone(),
                                     table: relation.name.clone(),
                                 });
                             }

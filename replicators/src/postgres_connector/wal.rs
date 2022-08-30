@@ -44,7 +44,7 @@ pub enum WalError {
     ReadySetError(readyset::ReadySetError),
     UnsupportedTypeConversion {
         ty: Type,
-        namespace: Bytes,
+        schema: Bytes,
         table: Bytes,
     },
 }
@@ -172,8 +172,8 @@ pub enum WalData {
 pub struct RelationMapping {
     /// ID of the relation.
     pub(crate) id: i32,
-    /// Namespace (empty string for pg_catalog).
-    pub(crate) namespace: Bytes,
+    /// Schema (aka namespace). This is an empty string for pg_catalog.
+    pub(crate) schema: Bytes,
     /// Relation name.
     pub(crate) name: Bytes,
     /// Replica identity setting for the relation (same as relreplident in pg_class).
@@ -229,8 +229,8 @@ pub enum WalRecord {
     Type {
         /// ID of the data type.
         id: i32,
-        /// Namespace (empty string for pg_catalog).
-        namespace: Bytes,
+        /// Schema (aka namespace). This is an empty string for pg_catalog.
+        schema: Bytes,
         /// Name of the data type.
         name: Bytes,
     },
@@ -537,7 +537,7 @@ impl WalRecord {
         let id = i32::from_be_bytes(b[1..5].try_into()?);
         let _ = b.split_to(5);
 
-        let namespace = Self::consume_string(&mut b)?;
+        let schema = Self::consume_string(&mut b)?;
         let name = Self::consume_string(&mut b)?;
 
         if b.len() < 3 {
@@ -588,7 +588,7 @@ impl WalRecord {
 
         Ok(WalRecord::Relation(RelationMapping {
             id,
-            namespace,
+            schema,
             name,
             relreplident,
             n_cols,
@@ -785,7 +785,7 @@ mod tests {
                 time: 676472897894731,
                 data: WalRecord::Relation(RelationMapping {
                     id: 16431,
-                    namespace: Bytes::copy_from_slice(b"public"),
+                    schema: Bytes::copy_from_slice(b"public"),
                     name: Bytes::copy_from_slice(b"employees"),
                     relreplident: 100,
                     n_cols: 4,

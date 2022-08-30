@@ -7,11 +7,11 @@ use nom_sql::{replicator_table_list, Dialect, SqlIdentifier};
 use readyset::{ReadySetError, ReadySetResult};
 
 /// A [`TableFilter`] keep a list of all the tables readyset-server is interested in as a mapping
-/// from namespace to a list of tables for that schema. When a replication event happens, the event
+/// from schema to a list of tables for that schema. When a replication event happens, the event
 /// is filtered based on its schema/table before being sent to readyset-server.
 #[derive(Debug, Clone)]
 pub(crate) struct TableFilter {
-    /// A mapping between namespace to the list of tables to replicate from that namespace.
+    /// A mapping between schema to the list of tables to replicate from that schema.
     /// A `BTreeMap` is used here, because the assumption is that the number of schemas in a
     /// database is usually small, and their names are short, so a small `BTreeMap` with inlined
     /// `SqlIdentifiers` would perform better than a `HashMap` where a hash is performed on every
@@ -21,7 +21,7 @@ pub(crate) struct TableFilter {
 
 #[derive(Debug, Clone)]
 pub(crate) enum ReplicateTableSpec {
-    AllTablesInNamespace,
+    AllTablesInSchema,
     /// Similarly to [`TableFilter`] a `BTreeMap` is used here, because the assumption is that
     /// table names are usually short and not that numerous that a `HashMap` would be slower.
     Tables(BTreeSet<SqlIdentifier>),
@@ -30,7 +30,7 @@ pub(crate) enum ReplicateTableSpec {
 impl ReplicateTableSpec {
     /// Check if spec is for all tables (i.e. created with *)
     pub(crate) fn is_for_all_tables(&self) -> bool {
-        matches!(self, ReplicateTableSpec::AllTablesInNamespace)
+        matches!(self, ReplicateTableSpec::AllTablesInSchema)
     }
 
     /// Replace the current spec with named tables
@@ -44,18 +44,18 @@ impl TableFilter {
     pub(crate) fn try_new(
         dialect: Dialect,
         table_list: Option<RedactedString>,
-        default_namespace: Option<&str>,
+        default_schema: Option<&str>,
     ) -> ReadySetResult<TableFilter> {
-        let default_namespace = default_namespace.map(SqlIdentifier::from);
+        let default_schema = default_schema.map(SqlIdentifier::from);
 
         let mut tables = BTreeMap::new();
 
         let replicated = match table_list {
             None => {
-                return match default_namespace {
+                return match default_schema {
                     Some(default) => {
-                        // Will load all tables for the default namespace
-                        tables.insert(default, ReplicateTableSpec::AllTablesInNamespace);
+                        // Will load all tables for the default schema
+                        tables.insert(default, ReplicateTableSpec::AllTablesInSchema);
                         return Ok(TableFilter { tables });
                     }
                     None => Err(ReadySetError::ReplicationFailed(
@@ -77,24 +77,25 @@ impl TableFilter {
 
         for table in replicate_list {
             let table_name = table.name;
-            let table_namespace = table
-                .schema
-                .or_else(|| default_namespace.clone())
-                .ok_or_else(|| {
-                    ReadySetError::ReplicationFailed(format!(
-                        "No database and no default database for table {table_name}"
-                    ))
-                })?;
+            let table_schema =
+                table
+                    .schema
+                    .or_else(|| default_schema.clone())
+                    .ok_or_else(|| {
+                        ReadySetError::ReplicationFailed(format!(
+                            "No database and no default database for table {table_name}"
+                        ))
+                    })?;
 
             if table_name == "*" {
-                tables.insert(table_namespace, ReplicateTableSpec::AllTablesInNamespace);
+                tables.insert(table_schema, ReplicateTableSpec::AllTablesInSchema);
             } else {
                 match tables
-                    .entry(table_namespace)
+                    .entry(table_schema)
                     .or_insert_with(|| ReplicateTableSpec::Tables(BTreeSet::new()))
                 {
-                    // Replicating all tables for namespace, nothing to do */
-                    ReplicateTableSpec::AllTablesInNamespace => true,
+                    // Replicating all tables for schema, nothing to do */
+                    ReplicateTableSpec::AllTablesInSchema => true,
                     ReplicateTableSpec::Tables(tables) => tables.insert(table_name),
                 };
             }
@@ -103,39 +104,39 @@ impl TableFilter {
         Ok(TableFilter { tables })
     }
 
-    /// Iterator over all namespaces in this filter
-    pub(crate) fn namespaces(&mut self) -> IterMut<'_, SqlIdentifier, ReplicateTableSpec> {
+    /// Iterator over all schemas in this filter
+    pub(crate) fn schemas(&mut self) -> IterMut<'_, SqlIdentifier, ReplicateTableSpec> {
         self.tables.iter_mut()
     }
 
-    /// Iterator over all the named tables in the filter along with their namespace
+    /// Iterator over all the named tables in the filter along with their schema
     pub(crate) fn tables(&self) -> impl Iterator<Item = (&SqlIdentifier, &SqlIdentifier)> {
         self.tables
             .iter()
             .filter_map(|(db, spec)| match spec {
-                ReplicateTableSpec::AllTablesInNamespace => None,
+                ReplicateTableSpec::AllTablesInSchema => None,
                 ReplicateTableSpec::Tables(tables) => Some(tables.iter().map(move |t| (db, t))),
             })
             .flatten()
     }
 
     /// Remove the given table from the list of tables
-    pub(crate) fn remove(&mut self, namespace: &str, table: &str) {
-        if let Some(ReplicateTableSpec::Tables(tables)) = self.tables.get_mut(namespace) {
+    pub(crate) fn remove(&mut self, schema: &str, table: &str) {
+        if let Some(ReplicateTableSpec::Tables(tables)) = self.tables.get_mut(schema) {
             tables.remove(table);
         }
     }
 
     /// Check if a given table should be processed
-    pub(crate) fn contains<Q1, Q2>(&self, namespace: &Q1, table: &Q2) -> bool
+    pub(crate) fn contains<Q1, Q2>(&self, schema: &Q1, table: &Q2) -> bool
     where
         Q1: Ord + ?Sized,
         Q2: Ord + ?Sized,
         SqlIdentifier: Borrow<Q1> + Borrow<Q2>,
     {
-        if let Some(ns) = self.tables.get(namespace) {
+        if let Some(ns) = self.tables.get(schema) {
             match ns {
-                ReplicateTableSpec::AllTablesInNamespace => true,
+                ReplicateTableSpec::AllTablesInSchema => true,
                 ReplicateTableSpec::Tables(tables) => tables.contains(table),
             }
         } else {
@@ -143,9 +144,9 @@ impl TableFilter {
         }
     }
 
-    /// Check if the given namespace is mentioned at all in the filter
-    pub(crate) fn contains_namespace(&self, namespace: &str) -> bool {
-        self.tables.contains_key(namespace)
+    /// Check if the given schema is mentioned at all in the filter
+    pub(crate) fn contains_schema(&self, schema: &str) -> bool {
+        self.tables.contains_key(schema)
     }
 }
 
@@ -156,7 +157,7 @@ mod tests {
     #[test]
     fn empty_list() {
         let filter = TableFilter::try_new(nom_sql::Dialect::MySQL, None, Some("noria")).unwrap();
-        // By default should only allow all tables from the default namespace
+        // By default should only allow all tables from the default schema
         assert!(filter.contains("noria", "table"));
         assert!(!filter.contains("readyset", "table"));
     }
@@ -169,7 +170,7 @@ mod tests {
             Some("noria"),
         )
         .unwrap();
-        // Tables with no namespace belong to the default namespace
+        // Tables with no schema belong to the default schema
         assert!(filter.contains("noria", "t1"));
         assert!(filter.contains("noria", "t2"));
         assert!(filter.contains("noria", "t3"));

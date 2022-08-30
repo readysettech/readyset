@@ -263,7 +263,7 @@ impl MySqlBinlogConnector {
                     // Written when an updating statement is done.
                     let ev: events::QueryEvent = binlog_event.read_event()?;
 
-                    let namespace = match ev
+                    let schema = match ev
                         .status_vars()
                         .get_status_var(binlog::consts::StatusVarKey::UpdatedDbNames)
                         .as_ref()
@@ -272,7 +272,7 @@ impl MySqlBinlogConnector {
                         Some(StatusVarVal::UpdatedDbNames(names)) if !names.is_empty() => {
                             // IMPORTANTE: For some statements there can be more than one update db,
                             // for example `DROP TABLE db1.tbl, db2.table;` Will have `db1` and
-                            // `db2` listed, however we only need the namespace to filter out
+                            // `db2` listed, however we only need the schema to filter out
                             // `CREATE TABLE` and `ALTER TABLE` and those always change only one DB.
                             names.first().unwrap().as_str().to_string()
                         }
@@ -283,8 +283,8 @@ impl MySqlBinlogConnector {
                     };
 
                     return Ok((
-                        ReplicationAction::SchemaChange {
-                            namespace,
+                        ReplicationAction::DdlChange {
+                            schema,
                             ddl: ev.query().to_string(),
                         },
                         &self.next_position,
@@ -329,7 +329,7 @@ impl MySqlBinlogConnector {
 
                     return Ok((
                         ReplicationAction::TableAction {
-                            namespace: tme.database_name().to_string(),
+                            schema: tme.database_name().to_string(),
                             table: tme.table_name().to_string(),
                             actions: inserted_rows,
                             txid: self.current_gtid,
@@ -377,7 +377,7 @@ impl MySqlBinlogConnector {
 
                     return Ok((
                         ReplicationAction::TableAction {
-                            namespace: tme.database_name().to_string(),
+                            schema: tme.database_name().to_string(),
                             table: tme.table_name().to_string(),
                             actions: updated_rows,
                             txid: self.current_gtid,
@@ -410,7 +410,7 @@ impl MySqlBinlogConnector {
 
                     return Ok((
                         ReplicationAction::TableAction {
-                            namespace: tme.database_name().to_string(),
+                            schema: tme.database_name().to_string(),
                             table: tme.table_name().to_string(),
                             actions: deleted_rows,
                             txid: self.current_gtid,
