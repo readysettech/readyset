@@ -254,8 +254,6 @@ impl Ingredient for Project {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::TryFrom;
-
     use dataflow_expression::utils::{make_int_column, make_literal};
     use dataflow_state::MaterializedNodeState;
     use nom_sql::{BinaryOperator, SqlType};
@@ -271,7 +269,7 @@ mod tests {
 
         let permutation = if all { vec![0, 1, 2] } else { vec![2, 0] };
         let additional = if add {
-            Some(vec![DfValue::try_from("hello").unwrap(), DfValue::Int(42)])
+            Some(vec![DfValue::from("hello"), DfValue::Int(42)])
         } else {
             None
         };

@@ -398,7 +398,7 @@ impl DfValue {
     /// use nom_sql::SqlType;
     /// use readyset_data::{DfType, DfValue};
     ///
-    /// let text = DfValue::try_from("2021-01-26 10:20:37").unwrap();
+    /// let text = DfValue::from("2021-01-26 10:20:37");
     /// let timestamp = text
     ///     .coerce_to(&SqlType::Timestamp, &DfType::Unknown)
     ///     .unwrap();
@@ -2367,10 +2367,7 @@ mod tests {
         assert_arithmetic!(+, Decimal::new(15, 1), 2.5_f64, Decimal::new(40, 1));
         assert_eq!((&DfValue::Int(1) + &DfValue::Int(2)).unwrap(), 3.into());
         assert_eq!((&DfValue::from(1) + &DfValue::Int(2)).unwrap(), 3.into());
-        assert_eq!(
-            (&DfValue::Int(2) + &DfValue::try_from(1).unwrap()).unwrap(),
-            3.into()
-        );
+        assert_eq!((&DfValue::Int(2) + &DfValue::from(1)).unwrap(), 3.into());
     }
 
     #[test]
@@ -3244,9 +3241,7 @@ mod tests {
         #[proptest]
         fn parse_timestamps(#[strategy(arbitrary_naive_date_time())] ndt: NaiveDateTime) {
             let expected = DfValue::from(ndt);
-            let input =
-                DfValue::try_from(ndt.format(crate::timestamp::TIMESTAMP_FORMAT).to_string())
-                    .unwrap();
+            let input = DfValue::from(ndt.format(crate::timestamp::TIMESTAMP_FORMAT).to_string());
             let result = input.coerce_to(&Timestamp, &DfType::Unknown).unwrap();
             assert_eq!(result, expected);
         }
@@ -3254,7 +3249,7 @@ mod tests {
         #[proptest]
         fn parse_times(#[strategy(arbitrary_naive_time())] nt: NaiveTime) {
             let expected = DfValue::from(nt);
-            let input = DfValue::try_from(nt.format(TIME_FORMAT).to_string()).unwrap();
+            let input = DfValue::from(nt.format(TIME_FORMAT).to_string());
             let result = input.coerce_to(&Time, &DfType::Unknown).unwrap();
             assert_eq!(result, expected);
         }
@@ -3263,9 +3258,7 @@ mod tests {
         fn parse_datetimes(#[strategy(arbitrary_naive_date())] nd: NaiveDate) {
             let dt = NaiveDateTime::new(nd, NaiveTime::from_hms(12, 0, 0));
             let expected = DfValue::from(dt);
-            let input =
-                DfValue::try_from(dt.format(crate::timestamp::TIMESTAMP_FORMAT).to_string())
-                    .unwrap();
+            let input = DfValue::from(dt.format(crate::timestamp::TIMESTAMP_FORMAT).to_string());
             let result = input
                 .coerce_to(&SqlType::DateTime(None), &DfType::Unknown)
                 .unwrap();
@@ -3275,8 +3268,7 @@ mod tests {
         #[proptest]
         fn parse_dates(#[strategy(arbitrary_naive_date())] nd: NaiveDate) {
             let expected = DfValue::from(NaiveDateTime::new(nd, NaiveTime::from_hms(0, 0, 0)));
-            let input =
-                DfValue::try_from(nd.format(crate::timestamp::DATE_FORMAT).to_string()).unwrap();
+            let input = DfValue::from(nd.format(crate::timestamp::DATE_FORMAT).to_string());
             let result = input.coerce_to(&Date, &DfType::Unknown).unwrap();
             assert_eq!(result, expected);
         }
@@ -3372,7 +3364,7 @@ mod tests {
         #[proptest]
         fn char_equal_length(#[strategy("a{1,30}")] text: String) {
             use SqlType::*;
-            let input = DfValue::try_from(text.as_str()).unwrap();
+            let input = DfValue::from(text.as_str());
             let intermediate = Char(Some(u16::try_from(text.len()).unwrap()));
             let result = input.coerce_to(&intermediate, &DfType::Unknown).unwrap();
             assert_eq!(String::try_from(&result).unwrap().as_str(), text.as_str());

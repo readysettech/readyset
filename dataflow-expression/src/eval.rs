@@ -1144,14 +1144,11 @@ mod tests {
             ty: DfType::Unknown,
         };
 
-        assert_eq!(
-            expr.eval::<DfValue>(&[1.into()]).unwrap(),
-            DfValue::try_from("yes").unwrap()
-        );
+        assert_eq!(expr.eval::<DfValue>(&[1.into()]), Ok(DfValue::from("yes")));
 
         assert_eq!(
-            expr.eval::<DfValue>(&[DfValue::from(8)]).unwrap(),
-            DfValue::try_from("no").unwrap()
+            expr.eval::<DfValue>(&[DfValue::from(8)]),
+            Ok(DfValue::from("no"))
         );
     }
 

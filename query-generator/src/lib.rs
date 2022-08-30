@@ -124,11 +124,7 @@ fn value_of_type(typ: &SqlType) -> DfValue {
         | SqlType::LongText
         | SqlType::Text
         | SqlType::Binary(_)
-        | SqlType::VarBinary(_) => {
-            // It is safe to transform an "a" String into a DfValue.
-            #[allow(clippy::unwrap_used)]
-            DfValue::try_from("a").unwrap()
-        }
+        | SqlType::VarBinary(_) => "a".into(),
         SqlType::ByteArray => {
             // Zero is an interesting value, because it can only occur for
             // byte arrays, since character strings don't allow zero
@@ -184,16 +180,12 @@ fn random_value_of_type(typ: &SqlType) -> DfValue {
     match typ {
         SqlType::Char(Some(x)) | SqlType::VarChar(Some(x)) => {
             let length: usize = rng.gen_range(1..=*x).into();
-            // It is safe to transform an String of consecutive a's into a DfValue.
-            #[allow(clippy::unwrap_used)]
-            DfValue::try_from("a".repeat(length)).unwrap()
+            "a".repeat(length).into()
         }
         SqlType::TinyBlob | SqlType::TinyText => {
             // 2^8 bytes
             let length: usize = rng.gen_range(1..256);
-            // It is safe to transform an String of consecutive a's into a DfValue.
-            #[allow(clippy::unwrap_used)]
-            DfValue::try_from("a".repeat(length)).unwrap()
+            "a".repeat(length).into()
         }
         SqlType::Blob
         | SqlType::Text
@@ -202,32 +194,24 @@ fn random_value_of_type(typ: &SqlType) -> DfValue {
         | SqlType::Binary(None) => {
             // 2^16 bytes
             let length: usize = rng.gen_range(1..65536);
-            // It is safe to transform an String of consecutive a's into a DfValue.
-            #[allow(clippy::unwrap_used)]
-            DfValue::try_from("a".repeat(length)).unwrap()
+            "a".repeat(length).into()
         }
         SqlType::MediumBlob | SqlType::MediumText => {
             // 2^24 bytes
             // Currently capped at 65536 as these are generated in memory.
             let length: usize = rng.gen_range(1..65536);
-            // It is safe to transform an String of consecutive a's into a DfValue.
-            #[allow(clippy::unwrap_used)]
-            DfValue::try_from("a".repeat(length)).unwrap()
+            "a".repeat(length).into()
         }
         SqlType::LongBlob | SqlType::LongText => {
             // 2^32 bytes
             // Currently capped at 65536 as these are generated in memory.
             let length: usize = rng.gen_range(1..65536);
-            // It is safe to transform an String of consecutive a's into a DfValue.
-            #[allow(clippy::unwrap_used)]
-            DfValue::try_from("a".repeat(length)).unwrap()
+            "a".repeat(length).into()
         }
         SqlType::Binary(Some(x)) | SqlType::VarBinary(x) => {
             // Convert to bytes and generate string data to match.
             let length: usize = rng.gen_range(1..*x / 8).into();
-            // It is safe to transform an String of consecutive a's into a DfValue.
-            #[allow(clippy::unwrap_used)]
-            DfValue::try_from("a".repeat(length)).unwrap()
+            "a".repeat(length).into()
         }
         SqlType::ByteArray => {
             let length = rng.gen_range(1..10);
@@ -336,6 +320,7 @@ fn uniform_random_value(min: &DfValue, max: &DfValue) -> DfValue {
 /// - [`SqlType::Bool`]
 fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
     match typ {
+        // FIXME: Take into account length parameters.
         SqlType::Char(_)
         | SqlType::VarChar(_)
         | SqlType::Blob
@@ -347,11 +332,7 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         | SqlType::LongText
         | SqlType::Text
         | SqlType::Binary(_)
-        | SqlType::VarBinary(_) => {
-            // It is safe to transform an u32 String representation into a DfValue.
-            #[allow(clippy::unwrap_used)]
-            DfValue::try_from(format!("{}", idx)).unwrap()
-        }
+        | SqlType::VarBinary(_) => idx.to_string().into(),
         SqlType::Int(_) => (idx as i32).into(),
         SqlType::BigInt(_) => (idx as i64).into(),
         SqlType::UnsignedInt(_) => (idx as u32).into(),

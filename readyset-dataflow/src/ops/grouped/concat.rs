@@ -208,10 +208,7 @@ impl GroupedOperation for GroupConcat {
     }
 
     fn empty_value(&self) -> Option<DfValue> {
-        // It is safe to convert an empty String into a DfValue, so it's
-        // safe to unwrap.
-        #[allow(clippy::unwrap_used)]
-        Some(DfValue::try_from("").unwrap())
+        Some("".into())
     }
 }
 

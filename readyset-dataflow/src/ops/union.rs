@@ -1160,7 +1160,7 @@ mod tests {
             // point-key replay on the left
             let res = g.input_raw(
                 left,
-                vec![vec![DfValue::from(1), DfValue::try_from("a").unwrap()]],
+                vec![vec![DfValue::from(1), DfValue::from("a")]],
                 replay_ctx(),
                 false,
             );
@@ -1178,8 +1178,8 @@ mod tests {
                 right,
                 vec![vec![
                     DfValue::from(1),
-                    DfValue::try_from("skipped").unwrap(),
-                    DfValue::try_from("b").unwrap(),
+                    DfValue::from("skipped"),
+                    DfValue::from("b"),
                 ]],
                 replay_ctx(),
                 false,
@@ -1227,8 +1227,8 @@ mod tests {
             let res = g.input_raw(
                 left,
                 vec![
-                    vec![DfValue::from(1), DfValue::try_from("a").unwrap()],
-                    vec![DfValue::from(1), DfValue::try_from("c").unwrap()],
+                    vec![DfValue::from(1), DfValue::from("a")],
+                    vec![DfValue::from(1), DfValue::from("c")],
                 ],
                 replay_ctx(),
                 false,
@@ -1246,14 +1246,8 @@ mod tests {
             let res = g.input_raw(
                 left,
                 vec![
-                    (
-                        vec![DfValue::from(1), DfValue::try_from("d").unwrap()],
-                        true,
-                    ),
-                    (
-                        vec![DfValue::from(1), DfValue::try_from("c").unwrap()],
-                        false,
-                    ),
+                    (vec![DfValue::from(1), DfValue::from("d")], true),
+                    (vec![DfValue::from(1), DfValue::from("c")], false),
                 ],
                 ReplayContext::None,
                 false,
@@ -1265,8 +1259,8 @@ mod tests {
                 right,
                 vec![vec![
                     DfValue::from(1),
-                    DfValue::try_from("skipped").unwrap(),
-                    DfValue::try_from("b").unwrap(),
+                    DfValue::from("skipped"),
+                    DfValue::from("b"),
                 ]],
                 replay_ctx(),
                 false,

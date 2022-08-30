@@ -780,8 +780,6 @@ mod tests {
 
     #[test]
     fn requires_full_replay() {
-        use std::convert::TryFrom;
-
         let (mut g, a, _) = bases();
 
         let x = g.add_node(node::Node::new(
@@ -790,7 +788,7 @@ mod tests {
             ops::NodeOperator::Project(ops::project::Project::new(
                 a,
                 &[0],
-                Some(vec![DfValue::try_from(42).unwrap()]),
+                Some(vec![DfValue::from(42)]),
                 None,
             )),
         ));

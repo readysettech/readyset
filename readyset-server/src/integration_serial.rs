@@ -72,18 +72,15 @@ async fn it_works_basic() {
     assert_eq!(muta.columns(), &["a", "b"]);
 
     // send a value on a
-    muta.insert(vec![id.clone(), DfValue::try_from(2i32).unwrap()])
+    muta.insert(vec![id.clone(), DfValue::from(2i32)])
         .await
         .unwrap();
 
     // send a value on a that won't be used.
     // We expect the egress node to drop it.
-    muta.insert(vec![
-        DfValue::try_from(2i32).unwrap(),
-        DfValue::try_from(2i32).unwrap(),
-    ])
-    .await
-    .unwrap();
+    muta.insert(vec![DfValue::from(2i32), DfValue::from(2i32)])
+        .await
+        .unwrap();
 
     // Force the table to flush so we get a non zero table size metric
     muta.set_snapshot_mode(false).await.unwrap();
@@ -121,7 +118,7 @@ async fn it_works_basic() {
     );
 
     // update value again
-    mutb.insert(vec![id.clone(), DfValue::try_from(4i32).unwrap()])
+    mutb.insert(vec![id.clone(), DfValue::from(4i32)])
         .await
         .unwrap();
 
@@ -237,7 +234,7 @@ async fn it_works_basic_standalone() {
     assert_eq!(muta.columns(), &["a", "b"]);
 
     // send a value on a
-    muta.insert(vec![id.clone(), DfValue::try_from(2i32).unwrap()])
+    muta.insert(vec![id.clone(), DfValue::from(2i32)])
         .await
         .unwrap();
 
@@ -254,7 +251,7 @@ async fn it_works_basic_standalone() {
     );
 
     // update value again
-    mutb.insert(vec![id.clone(), DfValue::try_from(4i32).unwrap()])
+    mutb.insert(vec![id.clone(), DfValue::from(4i32)])
         .await
         .unwrap();
 

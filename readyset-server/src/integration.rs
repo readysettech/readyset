@@ -2692,12 +2692,12 @@ async fn pkey_then_full_table_with_bogokey() {
     // Looking up post with id 1 should return the correct post.
     assert_eq!(
         by_id.lookup(&[1.into()], true).await.unwrap().into_vec(),
-        vec![vec![DfValue::from(1), DfValue::try_from("post 1").unwrap()]]
+        vec![vec![DfValue::from(1), DfValue::from("post 1")]]
     );
 
     // Looking up all posts using a 0 bogokey should return all posts.
     let rows_with_bogokey: Vec<Vec<DfValue>> = (0..10)
-        .map(|n| vec![n.into(), format!("post {}", n).try_into().unwrap()])
+        .map(|n| vec![n.into(), format!("post {}", n).into()])
         .collect();
     assert_eq!(
         all_posts
@@ -4958,12 +4958,12 @@ async fn post_read_ilike() {
     let mut a = g.table_by_index(a).await.unwrap();
     let mut reader = g.view("a").await.unwrap();
     a.insert_many(vec![
-        vec![DfValue::try_from("foo").unwrap(), DfValue::from(1i32)],
-        vec![DfValue::try_from("bar").unwrap(), DfValue::from(2i32)],
-        vec![DfValue::try_from("baz").unwrap(), DfValue::from(3i32)],
-        vec![DfValue::try_from("BAZ").unwrap(), DfValue::from(4i32)],
+        vec![DfValue::from("foo"), DfValue::from(1i32)],
+        vec![DfValue::from("bar"), DfValue::from(2i32)],
+        vec![DfValue::from("baz"), DfValue::from(3i32)],
+        vec![DfValue::from("BAZ"), DfValue::from(4i32)],
         vec![
-            DfValue::try_from("something else entirely").unwrap(),
+            DfValue::from("something else entirely"),
             DfValue::from(5i32),
         ],
     ])
@@ -4999,9 +4999,9 @@ async fn post_read_ilike() {
     assert_eq!(
         res,
         vec![
-            vec![DfValue::try_from("bar").unwrap(), DfValue::from(2)],
-            vec![DfValue::try_from("baz").unwrap(), DfValue::from(3)],
-            vec![DfValue::try_from("BAZ").unwrap(), DfValue::from(4)],
+            vec![DfValue::from("bar"), DfValue::from(2)],
+            vec![DfValue::from("baz"), DfValue::from(3)],
+            vec![DfValue::from("BAZ"), DfValue::from(4)],
         ]
     )
 }
@@ -5060,12 +5060,9 @@ async fn aggregate_expression() {
     let mut t = g.table("t").await.unwrap();
     let mut q = g.view("q").await.unwrap();
 
-    t.insert_many(vec![
-        vec![DfValue::try_from("100").unwrap()],
-        vec![DfValue::try_from("5").unwrap()],
-    ])
-    .await
-    .unwrap();
+    t.insert_many(vec![vec![DfValue::from("100")], vec![DfValue::from("5")]])
+        .await
+        .unwrap();
 
     sleep().await;
 
@@ -5484,8 +5481,8 @@ async fn join_simple_cte() {
     .unwrap();
 
     t2.insert_many(vec![
-        vec![DfValue::from(2i32), DfValue::try_from("two").unwrap()],
-        vec![DfValue::from(4i32), DfValue::try_from("four").unwrap()],
+        vec![DfValue::from(2i32), DfValue::from("two")],
+        vec![DfValue::from(4i32), DfValue::from("four")],
     ])
     .await
     .unwrap();
@@ -5493,10 +5490,7 @@ async fn join_simple_cte() {
     sleep().await;
 
     let res = view.lookup(&[0i32.into()], true).await.unwrap().into_vec();
-    assert_eq!(
-        get_col!(view, res[0], "name"),
-        &DfValue::try_from("four").unwrap()
-    );
+    assert_eq!(get_col!(view, res[0], "name"), &DfValue::from("four"));
 }
 
 // multiple_aggregate_sum tests multiple aggregators of the same type, in this case sum(),
@@ -6097,9 +6091,7 @@ async fn round_int_to_int() {
     let mut t = g.table("test").await.unwrap();
     let mut q = g.view("roundinttoint").await.unwrap();
 
-    t.insert(vec![DfValue::try_from(888i32).unwrap()])
-        .await
-        .unwrap();
+    t.insert(vec![DfValue::from(888i32)]).await.unwrap();
 
     sleep().await;
 
@@ -6228,9 +6220,7 @@ async fn round_bigint_to_bigint() {
     let mut t = g.table("test").await.unwrap();
     let mut q = g.view("roundbiginttobigint").await.unwrap();
 
-    t.insert(vec![DfValue::try_from(888i32).unwrap()])
-        .await
-        .unwrap();
+    t.insert(vec![DfValue::from(888i32)]).await.unwrap();
 
     sleep().await;
 
@@ -6260,9 +6250,7 @@ async fn round_unsignedint_to_unsignedint() {
     let mut t = g.table("test").await.unwrap();
     let mut q = g.view("roundunsignedtounsigned").await.unwrap();
 
-    t.insert(vec![DfValue::try_from(888i32).unwrap()])
-        .await
-        .unwrap();
+    t.insert(vec![DfValue::from(888i32)]).await.unwrap();
 
     sleep().await;
 
@@ -6291,9 +6279,7 @@ async fn round_unsignedbigint_to_unsignedbitint() {
     let mut t = g.table("test").await.unwrap();
     let mut q = g.view("roundunsignedbiginttounsignedbigint").await.unwrap();
 
-    t.insert(vec![DfValue::try_from(888i32).unwrap()])
-        .await
-        .unwrap();
+    t.insert(vec![DfValue::from(888i32)]).await.unwrap();
 
     sleep().await;
 
