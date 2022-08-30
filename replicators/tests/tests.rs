@@ -10,7 +10,7 @@ use readyset::{ControllerHandle, ReadySetError, ReadySetResult};
 use readyset_data::{DfValue, TinyText};
 use readyset_server::Builder;
 use replicators::{Config, NoriaAdapter};
-use tracing::trace;
+use tracing::{error, trace};
 
 const MAX_ATTEMPTS: usize = 40;
 
@@ -227,14 +227,25 @@ impl TestHandle {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let controller = ControllerHandle::new(Arc::clone(&self.authority)).await;
 
-        let _ = runtime.spawn(NoriaAdapter::start(
-            controller,
-            Config {
-                replication_url: Some(self.url.clone().into()),
-                ..config.unwrap_or_default()
-            },
-            self.ready_notify.clone(),
-        ));
+        let url = self.url.clone().into();
+        let ready_notify = self.ready_notify.clone();
+        let _ = runtime.spawn(async move {
+            if let Err(error) = NoriaAdapter::start(
+                controller,
+                Config {
+                    replication_url: Some(url),
+                    ..config.unwrap_or_default()
+                },
+                ready_notify.clone(),
+            )
+            .await
+            {
+                error!(%error, "Error in replicator");
+                if let Some(notify) = ready_notify {
+                    notify.notify_one();
+                }
+            }
+        });
 
         if let Some(rt) = self.replication_rt.replace(runtime) {
             rt.shutdown_background();
