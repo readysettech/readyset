@@ -555,6 +555,7 @@ async fn correct_data_after_restart() {
 
 /// This test verifies that following a worker failure we can create new views.
 #[clustertest]
+#[ignore = "Flaky test (ENG-1694)"]
 async fn create_view_after_worker_failure() {
     let mut deployment = readyset_mysql("ct_create_view_after_worker_failure")
         .quorum(2)
