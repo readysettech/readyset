@@ -21,6 +21,11 @@ static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 const AWS_PRIVATE_IP_ENDPOINT: &str = "http://169.254.169.254/latest/meta-data/local-ipv4";
 const AWS_METADATA_TOKEN_ENDPOINT: &str = "http://169.254.169.254/latest/api/token";
 
+const COMMIT_ID: &str = match option_env!("BUILDKITE_COMMIT") {
+    Some(x) => x,
+    None => "unknown commit ID",
+};
+
 /// Obtain the private ipv4 address of the AWS instance that the current program is running on using
 /// the AWS metadata service
 pub async fn get_aws_private_ip() -> anyhow::Result<IpAddr> {
@@ -45,7 +50,7 @@ pub async fn get_aws_private_ip() -> anyhow::Result<IpAddr> {
 }
 
 #[derive(Parser, Debug)]
-#[clap(name = "readyset-server", version)]
+#[clap(version = COMMIT_ID)]
 struct Options {
     /// IP address to listen on
     #[clap(
@@ -129,7 +134,7 @@ fn main() -> anyhow::Result<()> {
     });
     info!(?opts, "Starting ReadySet server");
 
-    info!(commit_hash = %env!("CARGO_PKG_VERSION", "version not set"));
+    info!(commit_hash = %COMMIT_ID);
 
     let external_addr = if opts.use_aws_external_address {
         Either::Left(get_aws_private_ip())

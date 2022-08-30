@@ -56,6 +56,11 @@ const AWS_METADATA_TOKEN_ENDPOINT: &str = "http://169.254.169.254/latest/api/tok
 /// Timeout to use when connecting to the upstream database
 const UPSTREAM_CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
 
+const COMMIT_ID: &str = match option_env!("BUILDKITE_COMMIT") {
+    Some(x) => x,
+    None => "unknown commit ID",
+};
+
 #[async_trait]
 pub trait ConnectionHandler {
     type UpstreamDatabase: UpstreamDatabase;
@@ -353,7 +358,7 @@ where
                 HashMap::new()
             },
         ));
-        info!(commit_hash = %env!("CARGO_PKG_VERSION", "version not set"));
+        info!(commit_hash = %COMMIT_ID);
 
         if options.allow_unsupported_set {
             warn!(

@@ -10,6 +10,11 @@ use readyset_psql::{Backend, Config, PostgreSqlQueryHandler, PostgreSqlUpstream}
 use tokio::net;
 use tracing::{error, instrument};
 
+const COMMIT_ID: &str = match option_env!("BUILDKITE_COMMIT") {
+    Some(x) => x,
+    None => "unknown commit ID",
+};
+
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
@@ -45,7 +50,7 @@ impl ConnectionHandler for PsqlHandler {
 }
 
 #[derive(Parser)]
-#[clap(name = "readyset-psql", version)]
+#[clap(version = COMMIT_ID)]
 struct Options {
     #[clap(flatten)]
     adapter_options: readyset_client_adapter::Options,

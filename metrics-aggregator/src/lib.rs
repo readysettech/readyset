@@ -21,8 +21,13 @@ pub mod metrics_reconciler;
 use cache::QueryMetricsCache;
 use metrics_reconciler::MetricsReconciler;
 
+const COMMIT_ID: &str = match option_env!("BUILDKITE_COMMIT") {
+    Some(x) => x,
+    None => "unknown commit ID",
+};
+
 #[derive(Parser)]
-#[clap(name = "metrics-aggregator", version)]
+#[clap(version = COMMIT_ID)]
 pub struct Options {
     /// IP:PORT to listen on.
     #[clap(
@@ -68,7 +73,7 @@ pub struct Options {
 
 pub fn run(options: Options) -> anyhow::Result<()> {
     options.tracing.init("metrics-aggregator")?;
-    info!(commit_hash = %env!("CARGO_PKG_VERSION", "version not set"));
+    info!(commit_hash = %COMMIT_ID);
 
     let prom_address_res: Vec<SocketAddr> = options.prom_address.to_socket_addrs()?.collect();
     if prom_address_res.is_empty() {

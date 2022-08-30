@@ -4,7 +4,6 @@ version = "0.4.0"
 publish = false
 authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
-build = "src/build.rs"
 
 [target.'cfg(not(target_env="msvc"))'.dependencies]
 tikv-jemallocator = "0.4"

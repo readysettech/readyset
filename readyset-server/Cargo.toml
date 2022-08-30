@@ -4,7 +4,6 @@ version = "0.7.0"
 publish = false
 authors = ["ReadySet Technology, Inc. <info@readyset.io>"]
 edition = "2021"
-build = "src/build.rs"
 
 readme = "README.md"
 description = "The ReadySet data-flow database server"
