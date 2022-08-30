@@ -10,12 +10,13 @@ mod normalize_negation;
 mod normalize_topk_with_aggregate;
 mod order_limit_removal;
 mod remove_numeric_field_references;
+mod resolve_schemas;
 mod rewrite_between;
 mod star_expansion;
 mod strip_post_filters;
 mod util;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub use nom_sql::analysis::{contains_aggregate, is_aggregate};
 use nom_sql::{CreateTableStatement, SelectStatement, SqlIdentifier, Table};
@@ -31,6 +32,7 @@ pub use crate::normalize_negation::NormalizeNegation;
 pub use crate::normalize_topk_with_aggregate::NormalizeTopKWithAggregate;
 pub use crate::order_limit_removal::OrderLimitRemoval;
 pub use crate::remove_numeric_field_references::RemoveNumericFieldReferences;
+pub use crate::resolve_schemas::ResolveSchemas;
 pub use crate::rewrite_between::RewriteBetween;
 pub use crate::star_expansion::StarExpansion;
 pub use crate::strip_post_filters::StripPostFilters;
@@ -48,6 +50,9 @@ pub struct RewriteContext<'a> {
     /// Map from names of *tables* in the database, to the [`CreateTableStatement`] that was used
     /// to create that table. Each key in this map should also exist in [`view_schemas`].
     pub base_schemas: &'a HashMap<Table, CreateTableStatement>,
+
+    /// Ordered list of schema names to search in when resolving schema names of tables
+    pub search_path: &'a [SqlIdentifier],
 }
 
 /// Extension trait providing the ability to rewrite a query to normalize, validate and desugar it.
@@ -73,9 +78,20 @@ impl Rewrite for CreateTableStatement {
 
 impl Rewrite for SelectStatement {
     fn rewrite(self, context: RewriteContext) -> ReadySetResult<Self> {
+        let tables = context.view_schemas.keys().fold(
+            HashMap::<&SqlIdentifier, HashSet<&SqlIdentifier>>::new(),
+            |mut acc, tbl| {
+                if let Some(schema) = &tbl.schema {
+                    acc.entry(schema).or_default().insert(&tbl.name);
+                }
+                acc
+            },
+        );
+
         self.rewrite_between()
             .normalize_negation()
             .strip_post_filters()
+            .resolve_schemas(tables, context.search_path)
             .expand_stars(context.view_schemas)?
             .expand_implied_tables(context.view_schemas)?
             .normalize_topk_with_aggregate()?

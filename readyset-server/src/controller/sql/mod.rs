@@ -799,6 +799,7 @@ impl SqlIncorporator {
         stmt.rewrite(RewriteContext {
             view_schemas: &view_schemas,
             base_schemas: &base_schemas,
+            search_path: &[], // TODO: make this configurable
         })
     }
 

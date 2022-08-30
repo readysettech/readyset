@@ -485,7 +485,7 @@ pub fn walk_field_definition_expr<'ast, V: Visitor<'ast>>(
 ) -> Result<(), V::Error> {
     match fde {
         FieldDefinitionExpr::All => Ok(()),
-        FieldDefinitionExpr::AllInTable(_) => Ok(()),
+        FieldDefinitionExpr::AllInTable(t) => visitor.visit_table(t),
         FieldDefinitionExpr::Expr { expr, .. } => visitor.visit_expr(expr),
     }
 }
