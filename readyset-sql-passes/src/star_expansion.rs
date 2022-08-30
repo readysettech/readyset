@@ -34,30 +34,25 @@ impl<'ast, 'schema> Visitor<'ast> for ExpandStarsVisitor<'schema> {
             util::subquery_schemas(&select_statement.ctes, &select_statement.join);
 
         let expand_table = |table: Table| -> ReadySetResult<_> {
-            Ok(self
-                .table_columns
-                .get(&table)
-                .map(|fs| fs.iter().collect())
-                .or_else(|| {
-                    if table.schema.is_none() {
-                        // Can only reference subqueries with tables that don't have a schema
-                        subquery_schemas.get(&table.name).cloned()
-                    } else {
-                        None
-                    }
-                })
-                .ok_or_else(|| ReadySetError::TableNotFound {
-                    name: table.name.clone().into(),
-                    schema: table.schema.clone().map(Into::into),
-                })?
-                .into_iter()
-                .map(move |f| FieldDefinitionExpr::Expr {
-                    expr: Expr::Column(Column {
-                        table: Some(table.clone()),
-                        name: f.clone(),
-                    }),
-                    alias: None,
-                }))
+            Ok(if table.schema.is_none() {
+                // Can only reference subqueries with tables that don't have a schema
+                subquery_schemas.get(&table.name).cloned()
+            } else {
+                None
+            }
+            .or_else(|| self.table_columns.get(&table).map(|fs| fs.iter().collect()))
+            .ok_or_else(|| ReadySetError::TableNotFound {
+                name: table.name.clone().into(),
+                schema: table.schema.clone().map(Into::into),
+            })?
+            .into_iter()
+            .map(move |f| FieldDefinitionExpr::Expr {
+                expr: Expr::Column(Column {
+                    table: Some(table.clone()),
+                    name: f.clone(),
+                }),
+                alias: None,
+            }))
         };
 
         for field in fields {
@@ -184,6 +179,18 @@ mod tests {
                 "Users".into() => vec!["uid".into(), "name".into()]
             }
         );
+    }
+
+    #[test]
+    fn referencing_cte_shadowing_table() {
+        expands_stars!(
+            "WITH t2 AS (SELECT * FROM t1) SELECT * FROM t2",
+            "WITH t2 AS (SELECT t1.a, t1.b FROM t1) SELECT t2.a, t2.b FROM t2",
+            schema: {
+                "t1".into() => vec!["a".into(), "b".into()],
+                "t2".into() => vec!["c".into(), "d".into()],
+            }
+        )
     }
 
     #[test]
