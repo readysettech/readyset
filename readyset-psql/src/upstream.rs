@@ -16,7 +16,7 @@ use readyset_data::DfValue;
 use readyset_errors::{unsupported, ReadySetError};
 use tokio::process::Command;
 use tokio_postgres as pgsql;
-use tracing::{info, info_span};
+use tracing::{debug, info, info_span};
 use tracing_futures::Instrument;
 
 use crate::schema::type_to_pgsql;
@@ -34,6 +34,8 @@ pub struct PostgreSqlUpstream {
     statement_id_counter: u32,
     /// The original URL used to create the connection
     url: String,
+    /// The user used to connect to the upstream, if any
+    user: Option<String>,
     /// Connection-specific configuration
     config: Config,
 }
@@ -106,6 +108,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
 
     async fn connect(url: String, config: Config) -> Result<Self, Error> {
         let pg_config = pgsql::Config::from_str(&url)?;
+        let user = pg_config.get_user().map(|s| s.to_owned());
         let connector = {
             let mut builder = native_tls::TlsConnector::builder();
             if config.disable_upstream_ssl_verification {
@@ -130,6 +133,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             prepared_statements: Default::default(),
             statement_id_counter: 0,
             url,
+            user,
             config,
         })
     }
@@ -288,6 +292,27 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             pg_dump.env("PGPASSWORD", OsStr::from_bytes(password));
         }
         Ok(pg_dump.output().await?.stdout)
+    }
+
+    async fn schema_search_path(&mut self) -> Result<Vec<String>, Self::Error> {
+        let raw_search_path = self
+            .client
+            .query_one("SHOW search_path", &[])
+            .await?
+            .get::<_, String>("search_path");
+        debug!(%raw_search_path, "Loaded search path from upstream");
+
+        Ok(raw_search_path
+            .split(", ")
+            .map(|schema| schema.trim_matches('"'))
+            .filter_map(|schema| {
+                if schema == "$user" {
+                    self.user.clone()
+                } else {
+                    Some(schema.to_owned())
+                }
+            })
+            .collect())
     }
 }
 

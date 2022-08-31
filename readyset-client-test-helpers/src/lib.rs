@@ -174,14 +174,28 @@ where
             let auto_increments = auto_increments.clone();
             let authority = authority.clone();
 
-            let ch = ControllerHandle::new(authority).await;
-            let noria = NoriaConnector::new(ch, auto_increments, query_cache, read_behavior).await;
             // backend either has upstream or noria writer
-            let upstream = if let Some(f) = fallback.as_ref() {
+            let mut upstream = if let Some(f) = fallback.as_ref() {
                 Some(A::make_upstream(f.clone()).await)
             } else {
                 None
             };
+
+            let schema_search_path = if let Some(upstream) = &mut upstream {
+                upstream.schema_search_path().await.unwrap()
+            } else {
+                Default::default()
+            };
+
+            let ch = ControllerHandle::new(authority).await;
+            let noria = NoriaConnector::new(
+                ch,
+                auto_increments,
+                query_cache,
+                read_behavior,
+                schema_search_path,
+            )
+            .await;
 
             let backend = backend_builder
                 .dialect(A::DIALECT)

@@ -304,6 +304,10 @@ impl UpstreamDatabase for MySqlUpstream {
         }
         Ok(dump.into_bytes())
     }
+
+    async fn schema_search_path(&mut self) -> Result<Vec<String>, Self::Error> {
+        Ok(self.database().into_iter().map(|s| s.into()).collect())
+    }
 }
 
 #[cfg(test)]

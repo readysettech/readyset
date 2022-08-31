@@ -372,6 +372,14 @@ pub struct NoriaConnector {
     /// A read request handler that may be used to service reads from readers
     /// on the same server.
     read_request_handler: request_handler::LocalReadHandler,
+
+    /// Currently configured search path for schemas.
+    ///
+    /// Note that the terminology used here is maximally general - while only PostgreSQL truly
+    /// supports a multi-element schema search path, the concept of "currently connected database"
+    /// in MySQL can be thought of as a schema search path that only has one element.
+    #[allow(dead_code)] // TODO(grfn): remove when used
+    schema_search_path: Vec<String>,
 }
 
 mod request_handler {
@@ -452,9 +460,17 @@ impl NoriaConnector {
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         read_behavior: ReadBehavior,
+        schema_search_path: Vec<String>,
     ) -> Self {
-        NoriaConnector::new_with_local_reads(ch, auto_increments, query_cache, read_behavior, None)
-            .await
+        NoriaConnector::new_with_local_reads(
+            ch,
+            auto_increments,
+            query_cache,
+            read_behavior,
+            None,
+            schema_search_path,
+        )
+        .await
     }
 
     pub async fn new_with_local_reads(
@@ -463,6 +479,7 @@ impl NoriaConnector {
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         read_behavior: ReadBehavior,
         read_request_handler: Option<ReadRequestHandler>,
+        schema_search_path: Vec<String>,
     ) -> Self {
         let backend = NoriaBackendInner::new(ch).await;
         if let Err(e) = &backend {
@@ -479,6 +496,7 @@ impl NoriaConnector {
             failed_views: HashSet::new(),
             read_behavior,
             read_request_handler: request_handler::LocalReadHandler::new(read_request_handler),
+            schema_search_path,
         }
     }
 

@@ -518,8 +518,14 @@ impl TestScript {
         let task = tokio::spawn(async move {
             let (s, _) = listener.accept().await.unwrap();
 
-            let noria =
-                NoriaConnector::new(ch, auto_increments, query_cache, ReadBehavior::Blocking).await;
+            let noria = NoriaConnector::new(
+                ch,
+                auto_increments,
+                query_cache,
+                ReadBehavior::Blocking,
+                Default::default(),
+            )
+            .await;
             let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
 
             macro_rules! make_backend {

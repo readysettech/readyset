@@ -504,7 +504,7 @@ where
             rs_connect.in_scope(|| info!("Spawning migration handler task"));
             let fut = async move {
                 let connection = span!(Level::INFO, "migration task upstream database connection");
-                let upstream =
+                let mut upstream =
                     match upstream_db_url {
                         Some(url) if !dry_run => Some(
                             H::UpstreamDatabase::connect(url.clone(), upstream_config)
@@ -517,6 +517,13 @@ where
                         _ => None,
                     };
 
+                let schema_search_path = if let Some(upstream) = &mut upstream {
+                    // TODO(ENG-1710): figure out a better error handling story for this task
+                    upstream.schema_search_path().await.unwrap()
+                } else {
+                    Default::default()
+                };
+
                 //TODO(DAN): allow compatibility with async and explicit migrations
                 let noria =
                     NoriaConnector::new(
@@ -524,6 +531,7 @@ where
                         auto_increments.clone(),
                         query_cache.clone(),
                         noria_read_behavior,
+                        schema_search_path,
                     )
                     .instrument(connection.in_scope(|| {
                         span!(Level::DEBUG, "Building migration task noria connector")
@@ -689,16 +697,6 @@ where
 
             let query_status_cache = query_status_cache;
             let fut = async move {
-                let noria = NoriaConnector::new_with_local_reads(
-                    ch.clone(),
-                    auto_increments.clone(),
-                    query_cache.clone(),
-                    noria_read_behavior,
-                    r,
-                )
-                .instrument(debug_span!("Building noria connector"))
-                .await;
-
                 let upstream_res = if let Some(upstream_db_url) = &upstream_db_url {
                     timeout(
                         UPSTREAM_CONNECTION_TIMEOUT,
@@ -718,12 +716,59 @@ where
                 };
 
                 match upstream_res {
-                    Ok(upstream) => {
-                        let backend =
-                            backend_builder
-                                .clone()
-                                .build(noria, upstream, query_status_cache);
-                        connection_handler.process_connection(s, backend).await;
+                    Ok(mut upstream) => {
+                        // Query the upstream for its currently-configured schema search path
+                        //
+                        // NOTE: when we start tracking all configuration parameters, this should be
+                        // folded into whatever loads those initially
+                        let schema_search_path_res = if let Some(upstream) = &mut upstream {
+                            upstream.schema_search_path().await.map(|ssp| {
+                                debug!(
+                                    schema_search_path = ?ssp,
+                                    "Setting initial schema search path for backend"
+                                );
+                                ssp
+                            })
+                        } else {
+                            Ok(Default::default())
+                        };
+
+                        match schema_search_path_res {
+                            Ok(ssp) => {
+                                let noria = NoriaConnector::new_with_local_reads(
+                                    ch.clone(),
+                                    auto_increments.clone(),
+                                    query_cache.clone(),
+                                    noria_read_behavior,
+                                    r,
+                                    ssp,
+                                )
+                                .instrument(debug_span!("Building noria connector"))
+                                .await;
+
+                                let backend = backend_builder.clone().build(
+                                    noria,
+                                    upstream,
+                                    query_status_cache,
+                                );
+                                connection_handler.process_connection(s, backend).await;
+                            }
+                            Err(error) => {
+                                error!(
+                                    %error,
+                                    "Error loading initial schema search path from upstream"
+                                );
+                                connection_handler
+                                    .immediate_error(
+                                        s,
+                                        format!(
+                                            "Error loading initial schema search path from \
+                                             upstream: {error}"
+                                        ),
+                                    )
+                                    .await;
+                            }
+                        }
                     }
                     Err(error) => {
                         error!(%error, "Error during initial connection establishment");
