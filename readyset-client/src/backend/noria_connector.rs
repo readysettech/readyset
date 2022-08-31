@@ -891,14 +891,7 @@ impl NoriaConnector {
         }
     }
 
-    /// Calls the `extend_recipe` endpoint on ReadySet with the given
-    /// query.
-    // TODO(fran): Instead of serialize using `Display`, we should implement `Serialize`
-    //   and `Deserialize` for each table operation struct, and send that instead; otherwise
-    //   we are always recalculating the same stuff.
-    //   Additionally (optional, open to discussion), we should use custom structs that have
-    //   already purged the data into a structure more useful to use, instead of using nom-sql
-    //   structs directly as domain objects.
+    /// Calls the `extend_recipe` endpoint on ReadySet with the given query.
     pub(crate) async fn handle_table_operation<C>(
         &mut self,
         changelist: C,
