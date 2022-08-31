@@ -378,8 +378,7 @@ pub struct NoriaConnector {
     /// Note that the terminology used here is maximally general - while only PostgreSQL truly
     /// supports a multi-element schema search path, the concept of "currently connected database"
     /// in MySQL can be thought of as a schema search path that only has one element.
-    #[allow(dead_code)] // TODO(grfn): remove when used
-    schema_search_path: Vec<String>,
+    schema_search_path: Vec<SqlIdentifier>,
 }
 
 mod request_handler {
@@ -460,7 +459,7 @@ impl NoriaConnector {
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         read_behavior: ReadBehavior,
-        schema_search_path: Vec<String>,
+        schema_search_path: Vec<SqlIdentifier>,
     ) -> Self {
         NoriaConnector::new_with_local_reads(
             ch,
@@ -479,7 +478,7 @@ impl NoriaConnector {
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         read_behavior: ReadBehavior,
         read_request_handler: Option<ReadRequestHandler>,
-        schema_search_path: Vec<String>,
+        schema_search_path: Vec<SqlIdentifier>,
     ) -> Self {
         let backend = NoriaBackendInner::new(ch).await;
         if let Err(e) = &backend {
@@ -915,17 +914,16 @@ impl NoriaConnector {
         changelist: C,
     ) -> ReadySetResult<QueryResult<'_>>
     where
-        C: Into<ChangeList>,
+        ChangeList: From<C>,
     {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on ReadySet ever time. On the other hand, CREATE TABLE is rare...
         noria_await!(
             self.inner.get_mut().await?,
-            self.inner
-                .get_mut()
-                .await?
-                .noria
-                .extend_recipe(changelist.into())
+            self.inner.get_mut().await?.noria.extend_recipe(
+                ChangeList::from(changelist)
+                    .with_schema_search_path(self.schema_search_path.clone())
+            )
         )?;
         Ok(QueryResult::Empty)
     }
@@ -944,6 +942,11 @@ impl NoriaConnector {
                 .collect(),
         ))
     }
+
+    /// Returns a reference to the currently configured schema search path
+    pub fn schema_search_path(&self) -> &[SqlIdentifier] {
+        self.schema_search_path.as_ref()
+    }
 }
 
 impl NoriaConnector {
@@ -958,13 +961,12 @@ impl NoriaConnector {
         let name: SqlIdentifier = name
             .map(|s| s.into())
             .unwrap_or_else(|| utils::generate_query_name(statement).into());
-        let changelist = ChangeList {
-            changes: vec![Change::create_cache(
-                name.clone(),
-                statement.clone(),
-                always,
-            )],
-        };
+        let changelist = ChangeList::from_change(Change::create_cache(
+            name.clone(),
+            statement.clone(),
+            always,
+        ))
+        .with_schema_search_path(self.schema_search_path.clone());
 
         noria_await!(
             self.inner.get_mut().await?,
@@ -997,9 +999,12 @@ impl NoriaConnector {
                         info!(query = %Sensitive(q), name = %qname, "adding ad-hoc query");
                     }
 
-                    let changelist = ChangeList {
-                        changes: vec![Change::create_cache(qname.clone(), q.clone(), false)],
-                    };
+                    let changelist = ChangeList::from_change(Change::create_cache(
+                        qname.clone(),
+                        q.clone(),
+                        false,
+                    ))
+                    .with_schema_search_path(self.schema_search_path.clone());
 
                     if let Err(e) = noria_await!(
                         self.inner.get_mut().await?,
@@ -1455,9 +1460,8 @@ impl NoriaConnector {
 
         info!(view = %Sensitive(&q.definition), name = %q.name, "view::create");
 
-        let changelist = ChangeList {
-            changes: vec![Change::CreateView(q.clone())],
-        };
+        let changelist = ChangeList::from_change(Change::CreateView(q.clone()))
+            .with_schema_search_path(self.schema_search_path.clone());
 
         noria_await!(
             self.inner.get_mut().await?,

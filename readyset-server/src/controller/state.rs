@@ -1178,12 +1178,10 @@ impl DfState {
             Some(name) => name,
         };
 
-        let changelist = ChangeList {
-            changes: vec![Change::Drop {
-                name: name.clone(),
-                if_exists: false,
-            }],
-        };
+        let changelist = ChangeList::from_change(Change::Drop {
+            name: name.clone(),
+            if_exists: false,
+        });
 
         if let Err(error) = self.apply_recipe(changelist, false).await {
             error!(%error, "Failed to apply recipe");
@@ -1204,7 +1202,8 @@ impl DfState {
             })
             .collect();
 
-        self.apply_recipe(ChangeList { changes }, false).await
+        self.apply_recipe(ChangeList::from_changes(changes), false)
+            .await
     }
 
     /// Runs all the necessary steps to recover the full [`DfState`], when said state only

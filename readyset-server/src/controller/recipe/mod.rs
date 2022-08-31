@@ -174,7 +174,7 @@ impl Recipe {
             named_queries = self.registry.num_aliases(),
         );
 
-        for change in changelist.changes {
+        for change in changelist {
             match change {
                 Change::CreateTable(cts) => {
                     match self.registry.get(&cts.table.name) {

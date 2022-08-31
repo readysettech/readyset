@@ -498,7 +498,7 @@ impl NoriaAdapter {
         };
 
         // Remove DDL changes outside the filtered scope
-        changelist.changes.retain(|change| match change {
+        changelist.changes_mut().retain(|change| match change {
             Change::CreateTable(stmt) => self
                 .table_filter
                 .contains(schema.as_str(), stmt.table.name.as_str()),
@@ -508,7 +508,7 @@ impl NoriaAdapter {
             _ => true,
         });
 
-        if self.supports_resnapshot && changelist.changes.iter().any(Change::requires_resnapshot) {
+        if self.supports_resnapshot && changelist.changes().any(Change::requires_resnapshot) {
             // In case we detect a DDL change that requires a full schema resnapshot exit the loop
             // with the proper status
             if let Some(pos) = self.replication_offsets.max_offset()?.cloned() {

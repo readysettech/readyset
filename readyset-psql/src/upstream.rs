@@ -5,6 +5,7 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use futures::TryStreamExt;
+use nom_sql::SqlIdentifier;
 use pgsql::config::Host;
 use pgsql::types::Type;
 use pgsql::{GenericResult, Row};
@@ -294,7 +295,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         Ok(pg_dump.output().await?.stdout)
     }
 
-    async fn schema_search_path(&mut self) -> Result<Vec<String>, Self::Error> {
+    async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error> {
         let raw_search_path = self
             .client
             .query_one("SHOW search_path", &[])
@@ -307,9 +308,9 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             .map(|schema| schema.trim_matches('"'))
             .filter_map(|schema| {
                 if schema == "$user" {
-                    self.user.clone()
+                    self.user.clone().map(Into::into)
                 } else {
-                    Some(schema.to_owned())
+                    Some(schema.into())
                 }
             })
             .collect())

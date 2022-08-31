@@ -239,9 +239,8 @@ where
             return;
         }
         let qname = utils::generate_query_name(stmt);
-        let changelist = ChangeList {
-            changes: vec![Change::create_cache(qname, stmt.clone(), false)],
-        };
+        let changelist = ChangeList::from_change(Change::create_cache(qname, stmt.clone(), false))
+            .with_schema_search_path(self.noria.schema_search_path().to_owned());
         match controller.dry_run(changelist).await {
             Ok(_) => {
                 self.start_time.remove(stmt);

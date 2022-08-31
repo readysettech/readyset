@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use mysql_async::consts::{CapabilityFlags, StatusFlags};
 use mysql_async::prelude::Queryable;
 use mysql_async::{Column, Conn, Opts, OptsBuilder, Row, TxOpts, UrlError};
+use nom_sql::SqlIdentifier;
 use readyset::ColumnSchema;
 use readyset_client::upstream_database::NoriaCompare;
 use readyset_client::{UpstreamDatabase, UpstreamPrepare};
@@ -305,7 +306,7 @@ impl UpstreamDatabase for MySqlUpstream {
         Ok(dump.into_bytes())
     }
 
-    async fn schema_search_path(&mut self) -> Result<Vec<String>, Self::Error> {
+    async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error> {
         Ok(self.database().into_iter().map(|s| s.into()).collect())
     }
 }

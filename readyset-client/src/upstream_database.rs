@@ -2,6 +2,7 @@ use std::error::Error;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
+use nom_sql::SqlIdentifier;
 use readyset::ColumnSchema;
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
@@ -143,5 +144,5 @@ pub trait UpstreamDatabase: Sized + Send {
     /// Note that the terminology used here is maximally general - while only PostgreSQL truly
     /// supports a multi-element schema search path, the concept of "currently connected database"
     /// in MySQL can be thought of as a schema search path that only has one element
-    async fn schema_search_path(&mut self) -> Result<Vec<String>, Self::Error>;
+    async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error>;
 }

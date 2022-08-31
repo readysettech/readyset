@@ -49,6 +49,9 @@ pub struct ChangeList {
     ///
     /// The changes are stored in the order they were issued.
     pub changes: Vec<Change>,
+
+    /// The schema search path to use to resolve table references within the changelist
+    pub schema_search_path: Vec<SqlIdentifier>,
 }
 
 impl TryFrom<String> for ChangeList {
@@ -136,7 +139,10 @@ impl FromStr for ChangeList {
             },
         )?;
 
-        Ok(ChangeList { changes })
+        Ok(ChangeList {
+            changes,
+            schema_search_path: vec![],
+        })
     }
 }
 
@@ -144,6 +150,7 @@ impl From<CreateTableStatement> for ChangeList {
     fn from(cts: CreateTableStatement) -> Self {
         ChangeList {
             changes: vec![Change::CreateTable(cts)],
+            schema_search_path: vec![],
         }
     }
 }
@@ -159,6 +166,7 @@ impl From<DropTableStatement> for ChangeList {
                     if_exists: dts.if_exists,
                 })
                 .collect(),
+            schema_search_path: vec![],
         }
     }
 }
@@ -174,6 +182,7 @@ impl From<DropViewStatement> for ChangeList {
                     if_exists: dvs.if_exists,
                 })
                 .collect(),
+            schema_search_path: vec![],
         }
     }
 }
@@ -182,7 +191,55 @@ impl From<AlterTableStatement> for ChangeList {
     fn from(ats: AlterTableStatement) -> Self {
         ChangeList {
             changes: vec![Change::AlterTable(ats)],
+            schema_search_path: vec![],
         }
+    }
+}
+
+impl IntoIterator for ChangeList {
+    type Item = Change;
+    type IntoIter = std::vec::IntoIter<Change>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.changes.into_iter()
+    }
+}
+
+impl ChangeList {
+    /// Construct a new `ChangeList` from the given single change
+    pub fn from_change(change: Change) -> Self {
+        Self::from_changes(vec![change])
+    }
+
+    /// Construct a new `ChangeList` with the given list of changes
+    pub fn from_changes(changes: Vec<Change>) -> Self {
+        Self {
+            changes,
+            schema_search_path: vec![],
+        }
+    }
+
+    /// Return a reference to the configured schema search path for this `ChangeList`.
+    pub fn schema_search_path(&self) -> &[SqlIdentifier] {
+        &self.schema_search_path
+    }
+
+    /// Construct a new `ChangeList` from `self`, but with the given schema search path
+    pub fn with_schema_search_path(self, schema_search_path: Vec<SqlIdentifier>) -> Self {
+        Self {
+            schema_search_path,
+            ..self
+        }
+    }
+
+    /// Return a mutable reference to the changes in this `ChangeList`
+    pub fn changes_mut(&mut self) -> &mut Vec<Change> {
+        &mut self.changes
+    }
+
+    /// Construct an iterator over references to the changes in this `ChangeList`
+    pub fn changes(&self) -> impl Iterator<Item = &Change> + '_ {
+        self.changes.iter()
     }
 }
 
@@ -236,15 +293,6 @@ impl Change {
             | nom_sql::AlterTableDefinition::RenameColumn { .. } => true,
             nom_sql::AlterTableDefinition::AddKey(_) => false,
         })
-    }
-}
-
-impl IntoIterator for ChangeList {
-    type Item = Change;
-    type IntoIter = std::vec::IntoIter<Change>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.changes.into_iter()
     }
 }
 
