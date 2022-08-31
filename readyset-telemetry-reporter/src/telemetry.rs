@@ -4,6 +4,7 @@ use serde_with_macros::skip_serializing_none;
 
 /// Segment Track event types
 #[derive(Debug, Serialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
 pub enum TelemetryEvent {
     /// The installer was run. Sent as soon as we have a valid API token
     InstallerRun,
@@ -19,12 +20,24 @@ pub enum TelemetryEvent {
 
     /// A deployment was torn down
     DeploymentTornDown,
+
+    /// The adapter was run
+    AdapterStart,
+
+    /// The adapter exited successfully
+    AdapterStop,
+
+    /// The server was run
+    ServerStart,
+
+    /// The server exited successfully
+    ServerStop,
 }
 
 /// ReadySet-specific telemetry. Provide only the fields you need.
 ///
 /// We need to keep publicly documented exactly what telemetry ReadySet gathers from its users.
-/// TODO link to public docs
+/// See: https://docs.readyset.io/using/telemetry
 ///
 /// Uses the "infallible builder" pattern to make the API simpler, described
 /// [here](https://github.com/colin-kiegel/rust-derive-builder/issues/56#issuecomment-1043671602).
@@ -35,7 +48,6 @@ pub enum TelemetryEvent {
     build_fn(private, name = "fallible_build"),
     setter(into, strip_option)
 )]
-#[serde(rename_all = "camelCase")]
 pub struct Telemetry {
     db_backend: Option<String>,
     adapter_version: Option<String>,
@@ -57,7 +69,6 @@ impl TelemetryBuilder {
 /// Wrapper for merging auto- and user-populated telemetry properties into one object
 #[skip_serializing_none]
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct Properties<'a> {
     /// User-provided properties
     #[serde(flatten)]

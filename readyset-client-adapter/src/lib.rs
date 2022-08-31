@@ -34,6 +34,7 @@ use readyset_client::{Backend, BackendBuilder, QueryHandler, UpstreamDatabase};
 use readyset_client_metrics::QueryExecutionEvent;
 use readyset_dataflow::Readers;
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
+use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryReporter};
 use stream_cancel::Valve;
 use tokio::net::UdpSocket;
 use tokio::sync::broadcast;
@@ -78,7 +79,7 @@ pub trait ConnectionHandler {
 }
 
 /// Represents which database interface is being adapted to communicate with ReadySet.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum DatabaseType {
     /// MySQL database.
     Mysql,
@@ -336,6 +337,10 @@ pub struct Options {
 
     #[clap(flatten)]
     server_worker_options: readyset_server::WorkerOptions,
+
+    /// Whether to disable telemetry reporting. Defaults to false.
+    #[clap(long)]
+    disable_telemetry: bool,
 }
 
 impl<H> NoriaAdapter<H>
@@ -360,6 +365,25 @@ where
             },
         ));
         info!(commit_hash = %COMMIT_ID);
+
+        // Create a telemetry reporter instance and send startup telemetry message
+        let telemetry = if options.disable_telemetry {
+            TelemetryReporter::new_no_op()
+        } else {
+            TelemetryReporter::new(std::env::var("RS_API_KEY").ok()).unwrap_or_else(|e| {
+                warn!("Failed to initialize telemetry reporter: {e}");
+                TelemetryReporter::new_no_op()
+            })
+        };
+        let _ = rt.block_on(
+            telemetry.send_event_with_payload(
+                TelemetryEvent::AdapterStart,
+                &TelemetryBuilder::new()
+                    .adapter_version(option_env!("CARGO_PKG_VERSION").unwrap_or_default())
+                    .db_backend(format!("{:?}", &self.database_type).to_lowercase())
+                    .build(),
+            ),
+        );
 
         if options.allow_unsupported_set {
             warn!(
@@ -622,6 +646,8 @@ where
                 builder.set_replication_url(upstream_db_url.clone().into());
             }
 
+            builder.set_telemetry_reporter(telemetry.clone());
+
             let server_handle = rt.block_on(async move {
                 let authority = Arc::new(authority.to_authority(&auth_address, &deployment).await);
 
@@ -801,6 +827,14 @@ where
 
         rs_shutdown.in_scope(|| info!("Dropping controller handle"));
         drop(ch);
+
+        // Send shutdown telemetry events
+        if _handle.is_some() {
+            let _ = rt.block_on(telemetry.send_event(TelemetryEvent::ServerStop));
+        }
+
+        let _ = rt.block_on(telemetry.send_event(TelemetryEvent::AdapterStop));
+
         // We use `shutdown_timeout` instead of `shutdown_background` in case any
         // blocking IO is ongoing.
         rs_shutdown.in_scope(|| info!("Waiting up to 20s for tasks to complete shutdown"));

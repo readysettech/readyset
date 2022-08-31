@@ -91,6 +91,7 @@ readyset-sql-passes = { path = "../readyset-sql-passes" }
 array2 = { path = "../array2" }
 maths = { path = "../maths" }
 nom-sql = { path = "../nom-sql" }
+readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
 
 [dev-dependencies]
 test-utils = { path = "../test-utils" }

@@ -8,6 +8,7 @@ use readyset::consensus::{
     Authority, LocalAuthority, LocalAuthorityStore, NodeTypeSchedulingRestriction,
     WorkerSchedulingConfig,
 };
+use readyset_telemetry_reporter::TelemetryReporter;
 
 use crate::controller::replication::ReplicationStrategy;
 use crate::handle::Handle;
@@ -23,6 +24,7 @@ pub struct Builder {
     external_addr: SocketAddr,
     leader_eligible: bool,
     domain_scheduling_config: WorkerSchedulingConfig,
+    telemetry: TelemetryReporter,
 }
 
 impl Default for Builder {
@@ -36,6 +38,7 @@ impl Default for Builder {
             memory_check_frequency: None,
             leader_eligible: true,
             domain_scheduling_config: Default::default(),
+            telemetry: TelemetryReporter::new_no_op(),
         }
     }
 }
@@ -280,6 +283,11 @@ impl Builder {
         self.config.domain_config.eviction_kind = value;
     }
 
+    /// Assigns a telemetry reporter to this ReadySet server
+    pub fn set_telemetry_reporter(&mut self, value: TelemetryReporter) {
+        self.telemetry = value;
+    }
+
     /// Start a server instance and return a handle to it.
     pub fn start(
         self,
@@ -293,6 +301,7 @@ impl Builder {
             memory_check_frequency,
             domain_scheduling_config,
             leader_eligible,
+            telemetry,
         } = self;
 
         let config = config.clone();
@@ -306,6 +315,7 @@ impl Builder {
             memory_check_frequency,
             domain_scheduling_config,
             leader_eligible,
+            telemetry,
         )
     }
 
@@ -326,6 +336,7 @@ impl Builder {
             memory_check_frequency,
             domain_scheduling_config,
             leader_eligible,
+            telemetry,
         } = self;
 
         let config = config.clone();
@@ -343,6 +354,7 @@ impl Builder {
             reader_addr,
             valve,
             trigger,
+            telemetry,
         )
     }
 
