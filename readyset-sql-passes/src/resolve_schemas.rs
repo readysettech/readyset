@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 
 use nom_sql::analysis::visit::{self, walk_select_statement, Visitor};
-use nom_sql::{SelectStatement, SqlIdentifier, Table, TableExpr};
+use nom_sql::{CreateTableStatement, SelectStatement, SqlIdentifier, Table, TableExpr};
 
 struct ResolveSchemaVisitor<'schema> {
     /// Map from schema name to the set of table names in that schema
@@ -48,6 +48,20 @@ impl<'ast, 'schema> Visitor<'ast> for ResolveSchemaVisitor<'schema> {
         walk_select_statement(self, select_statement)?;
         self.alias_stack.pop();
         Ok(())
+    }
+
+    fn visit_create_table_statement(
+        &mut self,
+        create_table_statement: &'ast mut CreateTableStatement,
+    ) -> Result<(), Self::Error> {
+        if create_table_statement.table.schema.is_none() {
+            // If the table name in the CREATE TABLE statement has no schema, use the first schema
+            // in the search path (if it isn't empty)
+            if let Some(first_schema) = self.search_path.first() {
+                create_table_statement.table.schema = Some(first_schema.clone());
+            }
+        }
+        visit::walk_create_table_statement(self, create_table_statement)
     }
 
     fn visit_common_table_expr(
@@ -132,15 +146,39 @@ impl ResolveSchemas for SelectStatement {
     }
 }
 
+impl ResolveSchemas for CreateTableStatement {
+    fn resolve_schemas<'schema>(
+        mut self,
+        tables: HashMap<&'schema SqlIdentifier, HashSet<&'schema SqlIdentifier>>,
+        search_path: &'schema [SqlIdentifier],
+    ) -> Self {
+        let Ok(()) = ResolveSchemaVisitor {
+            tables,
+            search_path,
+            alias_stack: Default::default(),
+        }
+        .visit_create_table_statement(&mut self);
+
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::fmt::{Debug, Display};
+
+    use nom_sql::{parse_create_table, Dialect};
+
     use super::*;
     use crate::util::parse_select_statement;
 
     #[track_caller]
-    fn rewrites_to(input: &str, expected: &str) {
-        let input = parse_select_statement(input);
-        let expected = parse_select_statement(expected);
+    fn rewrites_to<S>(input: &str, expected: &str, parser: impl Fn(&str) -> S)
+    where
+        S: Display + Debug + PartialEq + ResolveSchemas,
+    {
+        let input = parser(input);
+        let expected = parser(expected);
         let result = input.resolve_schemas(
             HashMap::from([
                 (&"s1".into(), HashSet::from([&"t1".into(), &"t2".into()])),
@@ -158,29 +196,34 @@ mod tests {
         );
     }
 
+    #[track_caller]
+    fn select_rewrites_to(input: &str, expected: &str) {
+        rewrites_to(input, expected, parse_select_statement)
+    }
+
     #[test]
     fn rewrites_in_star() {
-        rewrites_to("select t1.* from t1", "select s1.t1.* from s1.t1")
+        select_rewrites_to("select t1.* from t1", "select s1.t1.* from s1.t1")
     }
 
     #[test]
     fn resolve_table_in_top_of_search_path() {
-        rewrites_to("select * from t1", "select * from s1.t1");
+        select_rewrites_to("select * from t1", "select * from s1.t1");
     }
 
     #[test]
     fn resolve_table_deeper_in_search_path() {
-        rewrites_to("select * from t3", "select * from s2.t3");
+        select_rewrites_to("select * from t3", "select * from s2.t3");
     }
 
     #[test]
     fn table_not_in_search_path_is_untouched() {
-        rewrites_to("select * from t1, t4", "select * from s1.t1, t4");
+        select_rewrites_to("select * from t1, t4", "select * from s1.t1, t4");
     }
 
     #[test]
     fn ignores_cte_alias_reference() {
-        rewrites_to(
+        select_rewrites_to(
             "with t2 as (select * from t1) select * from t2",
             "with t2 as (select * from s1.t1) select * from t2",
         );
@@ -188,14 +231,45 @@ mod tests {
 
     #[test]
     fn ignores_table_expr_alias_reference() {
-        rewrites_to("select t2.* from t1 as t2", "select t2.* from s1.t1 as t2");
+        select_rewrites_to("select t2.* from t1 as t2", "select t2.* from s1.t1 as t2");
     }
 
     #[test]
     fn subqueries_dont_resolve_down() {
-        rewrites_to(
+        select_rewrites_to(
             "select t1.* from t1 join (select t1.* from t2 as t1) sq",
             "select s1.t1.* from s1.t1 join (select t1.* from s1.t2 as t1) sq",
         )
+    }
+
+    #[track_caller]
+    fn create_table_rewrites_to(input: &str, expected: &str) {
+        rewrites_to(input, expected, |s| {
+            parse_create_table(Dialect::MySQL, s).unwrap()
+        })
+    }
+
+    #[test]
+    fn create_table_unqualified() {
+        create_table_rewrites_to(
+            "create table new_table (id int primary key)",
+            "create table s1.new_table (id int primary key)",
+        );
+    }
+
+    #[test]
+    fn create_table_qualified() {
+        create_table_rewrites_to(
+            "create table s2.new_table (id int primary key)",
+            "create table s2.new_table (id int primary key)",
+        );
+    }
+
+    #[test]
+    fn create_table_foreign_key() {
+        create_table_rewrites_to(
+            "create table new_table (id int primary key, t2_id int, foreign key (t2_id) references t2 (id))",
+            "create table s1.new_table (id int primary key, t2_id int, foreign key (t2_id) references s1.t2 (id))",
+        );
     }
 }

@@ -55,6 +55,20 @@ pub struct RewriteContext<'a> {
     pub search_path: &'a [SqlIdentifier],
 }
 
+impl<'a> RewriteContext<'a> {
+    pub(crate) fn tables(&self) -> HashMap<&'a SqlIdentifier, HashSet<&'a SqlIdentifier>> {
+        self.view_schemas.keys().fold(
+            HashMap::<&SqlIdentifier, HashSet<&SqlIdentifier>>::new(),
+            |mut acc, tbl| {
+                if let Some(schema) = &tbl.schema {
+                    acc.entry(schema).or_default().insert(&tbl.name);
+                }
+                acc
+            },
+        )
+    }
+}
+
 /// Extension trait providing the ability to rewrite a query to normalize, validate and desugar it.
 ///
 /// Rewriting, which should never change the semantics of a query, can happen for any SQL statement,
@@ -69,8 +83,9 @@ pub trait Rewrite: Sized {
 }
 
 impl Rewrite for CreateTableStatement {
-    fn rewrite(self, _context: RewriteContext) -> ReadySetResult<Self> {
+    fn rewrite(self, context: RewriteContext) -> ReadySetResult<Self> {
         Ok(self
+            .resolve_schemas(context.tables(), context.search_path)
             .normalize_create_table_columns()
             .coalesce_key_definitions())
     }
@@ -78,20 +93,10 @@ impl Rewrite for CreateTableStatement {
 
 impl Rewrite for SelectStatement {
     fn rewrite(self, context: RewriteContext) -> ReadySetResult<Self> {
-        let tables = context.view_schemas.keys().fold(
-            HashMap::<&SqlIdentifier, HashSet<&SqlIdentifier>>::new(),
-            |mut acc, tbl| {
-                if let Some(schema) = &tbl.schema {
-                    acc.entry(schema).or_default().insert(&tbl.name);
-                }
-                acc
-            },
-        );
-
         self.rewrite_between()
             .normalize_negation()
             .strip_post_filters()
-            .resolve_schemas(tables, context.search_path)
+            .resolve_schemas(context.tables(), context.search_path)
             .expand_stars(context.view_schemas)?
             .expand_implied_tables(context.view_schemas)?
             .normalize_topk_with_aggregate()?
