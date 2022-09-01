@@ -1716,7 +1716,12 @@ where
                 if !matches!(e, ReadySetError::ReaderMissingKey) {
                     warn!(error = %e, "Error received from noria, sending query to fallback");
                 }
-                self.query_fallback(query, &mut event).await
+                let fallback_res = self.query_fallback(query, &mut event).await;
+                if fallback_res.is_ok() {
+                    warn!(error = %e, "Query failed to parse but was successfuly parsed upon fallback, there is a gap in our parsing");
+                    self.query_status_cache.insert(query);
+                }
+                fallback_res
             }
             // Check for COMMIT+ROLLBACK before we check whether we should proxy, since we need to
             // know when a COMMIT or ROLLBACK happens so we can leave `ProxyState::InTransaction`
@@ -1802,12 +1807,9 @@ where
                 trace!("Parsing query");
                 match nom_sql::parse_query(self.dialect, query) {
                     Ok(parsed_query) => Ok(entry.insert(parsed_query).clone()),
-                    Err(_) => {
-                        self.query_status_cache.insert(query);
-                        Err(ReadySetError::UnparseableQuery {
-                            query: query.to_string(),
-                        })
-                    }
+                    Err(_) => Err(ReadySetError::UnparseableQuery {
+                        query: query.to_string(),
+                    }),
                 }
             }
         }

@@ -414,6 +414,7 @@ impl QueryStatusCache {
     /// that is being inserted. Parsed queries have initial status MigrationState::Pending, while
     /// queries that failed to parse have status MigrationState::Unsupported. Inserts into the
     /// statuses and ids hash maps.
+    /// Only queries that are valid SQL should be inserted.
     /// Returns the MigrationState of the inserted Query
     /// self.statuses.insert() should not be called directly
     pub fn insert<Q>(&self, q: Q) -> MigrationState
@@ -428,6 +429,7 @@ impl QueryStatusCache {
     }
 
     /// Inserts a query into the status cache with the provided QueryStatus
+    /// Only queries that are valid SQL should be inserted.
     pub fn insert_with_status<Q>(&self, q: Q, status: QueryStatus)
     where
         Q: Into<Query>,

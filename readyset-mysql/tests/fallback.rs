@@ -587,7 +587,30 @@ async fn transaction_proxies() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn parsing_failed_shows_proxied() {
+async fn valid_sql_parsing_failed_shows_proxied() {
+    let (opts, _handle) = setup().await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    // This query needs to be valid SQL but fail to parse. The current query is one known to not be
+    // supported by the parser, but if this test is failing, that may no longer be the case and
+    // this the query should be replaced with another one that isn't supported, or a more
+    // complicated way of testing this needs to be devised
+    let q = "CREATE TABLE t1 (id polygon);".to_string();
+    let _ = conn.query_drop(q.clone()).await;
+    let proxied_queries = conn
+        .query::<(String, String, String), _>("SHOW PROXIED QUERIES;")
+        .await
+        .unwrap();
+    let id = hash_to_query_id(hash(&q));
+    assert!(
+        proxied_queries.contains(&(id, q.clone(), "unsupported".to_owned())),
+        "proxied_queries = {:?}",
+        proxied_queries,
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn invalid_sql_parsing_failed_doesnt_show_proxied() {
     let (opts, _handle) = setup().await;
     let mut conn = mysql_async::Conn::new(opts).await.unwrap();
 
@@ -598,14 +621,5 @@ async fn parsing_failed_shows_proxied() {
         .await
         .unwrap();
 
-    let id = hash_to_query_id(hash(&q));
-    assert!(
-        proxied_queries.contains(&(
-            id,
-            "this isn't valid SQL".to_owned(),
-            "unsupported".to_owned()
-        )),
-        "proxied_queries = {:?}",
-        proxied_queries,
-    );
+    assert!(proxied_queries.is_empty());
 }
