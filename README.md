@@ -82,7 +82,9 @@ For more information, check out our full docs site [here](http://docs.readyset.i
 
 ## Join the Community
 
-For questions or support, join us on the [ReadySet Community Discord](https://discord.gg/readyset). You can also post questions on our [Github forum](https://github.com/readysettech/readyset/discussions). Everyone is welcome!
+For questions or support, join us on the [ReadySet Community Discord](https://discord.gg/readyset), post questions on our [Github forum](https://github.com/readysettech/readyset/discussions), or schedule an [office hours chat](https://calendly.com/d/d5n-y44-mbg/office-hours-with-ready-set) with our team.
+
+Everyone is welcome!
 
 ## Development
 
