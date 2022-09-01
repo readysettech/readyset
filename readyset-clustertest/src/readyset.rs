@@ -303,6 +303,7 @@ async fn replicated_readers() {
         view_1_key_1.into_vec()[0],
         vec![DfValue::from(1), DfValue::from(Decimal::from_i32(6))]
     );
+    deployment.teardown().await.unwrap();
 }
 
 #[clustertest]
@@ -362,6 +363,7 @@ async fn replicated_readers_with_unions() {
 
     let view_0_key_2 = view_0.lookup(&[2.into()], true).await.unwrap();
     assert_eq!(view_0_key_2.into_vec()[0], vec![DfValue::from(2)]);
+    deployment.teardown().await.unwrap();
 }
 
 #[clustertest]
@@ -400,4 +402,51 @@ async fn no_readers_worker_doesnt_get_readers() {
         assert_eq!(view.num_shards(), 1);
         assert_eq!(view.shard_addrs(), view_0.shard_addrs());
     }
+    deployment.teardown().await.unwrap();
+}
+
+#[clustertest]
+async fn server_and_adapter_auto_restart() {
+    let mut deployment = DeploymentBuilder::new("ct_adapter_restart")
+        .add_server(ServerParams::default())
+        .deploy_mysql_adapter()
+        .auto_restart(true)
+        .start()
+        .await
+        .unwrap();
+
+    let adapter_handle = deployment
+        .adapter_handle()
+        .expect("adapter handle expected to exist");
+    adapter_handle
+        .process
+        .kill()
+        .await
+        .expect("failed to kill adapter");
+    sleep(Duration::from_secs(ProcessHandle::RESTART_INTERVAL_S * 2)).await;
+    assert!(adapter_handle.process.check_alive().await);
+    deployment.teardown().await.unwrap();
+}
+
+#[clustertest]
+async fn server_auto_restarts() {
+    let mut deployment = DeploymentBuilder::new("ct_server_restart")
+        .add_server(ServerParams::default())
+        .auto_restart(true)
+        .start()
+        .await
+        .unwrap();
+    let r1_addr = deployment.server_addrs()[0].clone();
+    let server_handle = deployment
+        .server_handles()
+        .get_mut(&r1_addr)
+        .expect("server handle expected to exist");
+    server_handle
+        .process
+        .kill()
+        .await
+        .expect("failed to kill server");
+    sleep(Duration::from_secs(ProcessHandle::RESTART_INTERVAL_S * 2)).await;
+    assert!(server_handle.process.check_alive().await);
+    deployment.teardown().await.unwrap();
 }

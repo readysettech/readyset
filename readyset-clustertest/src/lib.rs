@@ -369,6 +369,8 @@ pub struct DeploymentBuilder {
     replicator_restart_timeout: Option<u64>,
     /// Number of times to replicate reader domains
     reader_replicas: Option<usize>,
+    /// If true, will automatically restart the server/adapter processes
+    auto_restart: bool,
 }
 
 impl DeploymentBuilder {
@@ -410,6 +412,7 @@ impl DeploymentBuilder {
             mysql_pass: None,
             replicator_restart_timeout: None,
             reader_replicas: None,
+            auto_restart: false,
         }
     }
 
@@ -509,6 +512,12 @@ impl DeploymentBuilder {
         self
     }
 
+    /// Sets whether or not to restart the adapter/server processes
+    pub fn auto_restart(mut self, auto_restart: bool) -> Self {
+        self.auto_restart = auto_restart;
+        self
+    }
+
     /// Starts the local multi-process deployment after running a set of commands in the
     /// upstream database. This can be useful for checking snapshotting properties. This also
     /// includes the `leader_timeout` parameter, how long to wait for the leader to be ready,
@@ -578,7 +587,9 @@ impl DeploymentBuilder {
                 server_upstream.as_ref(),
                 self.replicator_restart_timeout,
                 self.reader_replicas,
-            )?;
+                self.auto_restart,
+            )
+            .await?;
 
             handles.insert(handle.addr.clone(), handle);
         }
@@ -615,7 +626,9 @@ impl DeploymentBuilder {
                 self.dry_run_migration_interval,
                 self.query_max_failure_seconds,
                 self.fallback_recovery_seconds,
-            )?;
+                self.auto_restart,
+            )
+            .await?;
             // Sleep to give the adapter time to startup.
             sleep(Duration::from_millis(2000)).await;
             Some(AdapterHandle {
@@ -642,6 +655,7 @@ impl DeploymentBuilder {
             mysql_adapter: mysql_adapter_handle,
             replicator_restart_timeout: self.replicator_restart_timeout,
             reader_replicas: self.reader_replicas,
+            auto_restart: self.auto_restart,
         };
 
         handle.wait_for_workers(Duration::from_secs(90)).await?;
@@ -669,12 +683,12 @@ pub struct ServerHandle {
 }
 
 impl ServerHandle {
-    pub fn check_alive(&mut self) -> bool {
-        self.process.check_alive()
+    pub async fn check_alive(&mut self) -> bool {
+        self.process.check_alive().await
     }
 
     pub async fn set_failpoint(&mut self, name: &str, action: &str) {
-        if !self.check_alive() {
+        if !self.check_alive().await {
             return;
         }
 
@@ -738,6 +752,8 @@ pub struct DeploymentHandle {
     replicator_restart_timeout: Option<u64>,
     /// Number of times to replicate reader domains
     reader_replicas: Option<usize>,
+    /// Whether or not to restart the server/adapter if they are not running
+    auto_restart: bool,
 }
 
 impl DeploymentHandle {
@@ -774,10 +790,10 @@ impl DeploymentHandle {
 
     /// Returns the expected number of workers alive within the deployment based
     /// on the liveness of the server processes.
-    pub fn expected_workers(&mut self) -> HashSet<Url> {
+    pub async fn expected_workers(&mut self) -> HashSet<Url> {
         let mut alive = HashSet::new();
         for s in self.server_handles().values_mut() {
-            if s.check_alive() {
+            if s.check_alive().await {
                 alive.insert(s.addr.clone());
             }
         }
@@ -789,7 +805,7 @@ impl DeploymentHandle {
     /// expected number of worker processes that are expected. If a worker is
     /// not found by `max_wait`, an error is returned.
     pub async fn wait_for_workers(&mut self, max_wait: Duration) -> Result<()> {
-        if self.expected_workers().is_empty() {
+        if self.expected_workers().await.is_empty() {
             return Ok(());
         }
 
@@ -800,7 +816,7 @@ impl DeploymentHandle {
                 break;
             }
 
-            let expected_workers = self.expected_workers();
+            let expected_workers = self.expected_workers().await;
 
             // Use a timeout so if the leader died we retry quickly before the `max_wait`
             // duration.
@@ -842,7 +858,9 @@ impl DeploymentHandle {
             self.upstream_mysql_addr.as_ref(),
             self.replicator_restart_timeout,
             self.reader_replicas,
-        )?;
+            self.auto_restart,
+        )
+        .await?;
         let server_addr = handle.addr.clone();
         self.noria_server_handles
             .insert(server_addr.clone(), handle);
@@ -902,7 +920,7 @@ impl DeploymentHandle {
         }
 
         let mut handle = self.noria_server_handles.remove(server_addr).unwrap();
-        handle.process.kill()?;
+        handle.process.kill().await?;
 
         if wait_for_removal {
             self.wait_for_workers(Duration::from_secs(90)).await?;
@@ -954,6 +972,12 @@ impl DeploymentHandle {
     pub fn server_handle(&mut self, url: &Url) -> Option<&mut ServerHandle> {
         self.noria_server_handles.get_mut(url)
     }
+
+    /// Returns a mutable reference to the [`AdapterHandle`] for a readyset-adapter if one exists
+    /// Otherwise, `None` is returned.
+    pub fn adapter_handle(&mut self) -> Option<&mut AdapterHandle> {
+        self.mysql_adapter.as_mut()
+    }
 }
 
 impl Drop for DeploymentHandle {
@@ -968,7 +992,7 @@ impl Drop for DeploymentHandle {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn start_server(
+async fn start_server(
     server_params: &ServerParams,
     noria_server_path: &Path,
     deployment_name: &str,
@@ -980,13 +1004,15 @@ fn start_server(
     mysql: Option<&String>,
     replicator_restart_timeout: Option<u64>,
     reader_replicas: Option<usize>,
+    auto_restart: bool,
 ) -> Result<ServerHandle> {
     let mut builder = ReadysetServerBuilder::new(noria_server_path)
         .deployment(deployment_name)
         .external_port(port)
         .authority_addr(authority_addr)
         .authority(authority)
-        .quorum(quorum);
+        .quorum(quorum)
+        .auto_restart(auto_restart);
 
     if let Some(shard) = shards {
         builder = builder.shards(shard);
@@ -1013,14 +1039,14 @@ fn start_server(
     let addr = Url::parse(&format!("http://127.0.0.1:{}", port)).unwrap();
     Ok(ServerHandle {
         addr,
-        process: builder.start()?,
+        process: builder.start().await?,
         params: server_params.clone(),
     })
 }
 
 // TODO(justin): Wrap these parameters.
 #[allow(clippy::too_many_arguments)]
-fn start_mysql_adapter(
+async fn start_mysql_adapter(
     noria_mysql_path: &Path,
     deployment_name: &str,
     authority_addr: &str,
@@ -1032,13 +1058,15 @@ fn start_mysql_adapter(
     dry_run_migration_interval: Option<u64>,
     query_max_failure_seconds: Option<u64>,
     fallback_recovery_seconds: Option<u64>,
+    auto_restart: bool,
 ) -> Result<ProcessHandle> {
     let mut builder = AdapterBuilder::new(noria_mysql_path)
         .deployment(deployment_name)
         .port(port)
         .metrics_port(metrics_port)
         .authority_addr(authority_addr)
-        .authority(authority);
+        .authority(authority)
+        .auto_restart(auto_restart);
 
     if let Some(interval) = async_migration_interval {
         builder = builder.async_migrations(interval);
@@ -1060,7 +1088,7 @@ fn start_mysql_adapter(
         builder = builder.mysql(mysql);
     }
 
-    builder.start()
+    builder.start().await
 }
 
 /// Finds the next available port after `port` (if supplied).

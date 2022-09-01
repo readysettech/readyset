@@ -1,22 +1,91 @@
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
+use tokio::select;
+use tokio::sync::Mutex;
 
 /// Wrapper for a single process.
 pub struct ProcessHandle {
-    /// Child process handle running the server or mysql instance.
-    process: Child,
+    /// Child process handle running the command. None if not currently running
+    process: Arc<Mutex<Option<Child>>>,
+    /// The name of the process
+    name: String,
 }
 
 impl ProcessHandle {
-    pub fn kill(&mut self) -> Result<()> {
-        self.process.kill()?;
+    pub const RESTART_INTERVAL_S: u64 = 2;
+
+    /// If auto_restart is true, the ProcessHandle will periodically check if the process is alive
+    /// and restart it if not.
+    async fn start_process(
+        binary: PathBuf,
+        args: &Vec<String>,
+        name: String,
+        auto_restart: bool,
+    ) -> anyhow::Result<Self> {
+        let mut cmd = Command::new(binary.clone());
+        cmd.args(args);
+
+        let mut interval = tokio::time::interval(Duration::from_secs(Self::RESTART_INTERVAL_S));
+
+        let process = Self::run_cmd(&mut cmd, &name, &binary)?;
+
+        let process = Arc::new(Mutex::new(Some(process)));
+        let task_process = process.clone();
+        let task_name = name.clone();
+
+        tokio::spawn(async move {
+            if !auto_restart {
+                return;
+            }
+            loop {
+                select!(
+                    _ = interval.tick() => {
+                        if !Self::check_alive_inner(&task_process).await {
+                            println!("Restarting process {} that is no longer alive", task_name);
+                            let process = Self::run_cmd(&mut cmd, &task_name, &binary).expect("Failed to re-run command");
+                            *task_process.lock().await = Some(process);
+                        }
+                    }
+                )
+            }
+        });
+
+        Ok(Self { process, name })
+    }
+
+    fn run_cmd(cmd: &mut Command, name: &String, binary: &Path) -> anyhow::Result<Child> {
+        cmd.spawn().map_err(|e| {
+            anyhow!(
+                "Failed to start {}. Does it exist at `{}`? Err: {e}",
+                &name,
+                binary.display(),
+            )
+        })
+    }
+
+    pub async fn kill(&mut self) -> Result<()> {
+        if let Some(mut process) = self.process.lock().await.take() {
+            process.kill()?
+        } else {
+            println!("Tried to kill process {} that is not alive", self.name);
+        }
         Ok(())
     }
 
-    pub fn check_alive(&mut self) -> bool {
-        self.process.try_wait().unwrap().is_none()
+    pub async fn check_alive(&mut self) -> bool {
+        Self::check_alive_inner(&self.process).await
+    }
+
+    async fn check_alive_inner(process: &Arc<Mutex<Option<Child>>>) -> bool {
+        if let Some(ref mut process) = *process.lock().await {
+            process.try_wait().unwrap().is_none()
+        } else {
+            false
+        }
     }
 }
 
@@ -27,6 +96,9 @@ pub struct ReadysetServerBuilder {
 
     /// The arguments to pass to the readyset-server process on startup.
     args: Vec<String>,
+
+    /// Whether or not to automatically restart the server if it panics
+    auto_restart: bool,
 }
 
 impl ReadysetServerBuilder {
@@ -34,20 +106,18 @@ impl ReadysetServerBuilder {
         Self {
             binary: binary.to_owned(),
             args: vec!["--noria-metrics".into()],
+            auto_restart: false,
         }
     }
 
-    pub fn start(&self) -> anyhow::Result<ProcessHandle> {
-        let process = Command::new(&self.binary)
-            .args(&self.args)
-            .spawn()
-            .map_err(|e| {
-                anyhow!(
-                    "Failed to start readyset-server. Does it exist at `{}`? Err: {e}",
-                    self.binary.display()
-                )
-            })?;
-        Ok(ProcessHandle { process })
+    pub async fn start(&self) -> anyhow::Result<ProcessHandle> {
+        ProcessHandle::start_process(
+            self.binary.clone(),
+            &self.args,
+            "readyset-server".to_string(),
+            self.auto_restart,
+        )
+        .await
     }
 
     fn push_arg(mut self, arg_name: &str) -> Self {
@@ -108,6 +178,11 @@ impl ReadysetServerBuilder {
     pub fn reader_replicas(self, num_replicas: usize) -> Self {
         self.push_arg_kv("--reader-replicas", &num_replicas.to_string())
     }
+
+    pub fn auto_restart(mut self, auto_restart: bool) -> Self {
+        self.auto_restart = auto_restart;
+        self
+    }
 }
 
 /// Manages running a readyset-mysql binary with the correct arguments.
@@ -117,6 +192,9 @@ pub struct AdapterBuilder {
 
     /// The arguments to pass to the readyset-mysql process on startup.
     args: Vec<String>,
+
+    /// Whether or not to automatically restart the adapter if it panics
+    auto_restart: bool,
 }
 
 impl AdapterBuilder {
@@ -128,16 +206,18 @@ impl AdapterBuilder {
                 "--migration-request-timeout-ms".to_string(),
                 "1000".to_string(),
             ],
+            auto_restart: false,
         }
     }
 
-    pub fn start(&self) -> anyhow::Result<ProcessHandle> {
-        Ok(ProcessHandle {
-            process: Command::new(&self.binary)
-                .args(&self.args)
-                .spawn()
-                .map_err(|e| anyhow!(e.to_string()))?,
-        })
+    pub async fn start(&self) -> anyhow::Result<ProcessHandle> {
+        ProcessHandle::start_process(
+            self.binary.clone(),
+            &self.args,
+            "readyset-adapter".to_string(),
+            self.auto_restart,
+        )
+        .await
     }
 
     fn push_arg(mut self, arg_name: &str, arg_value: &str) -> Self {
@@ -192,5 +272,10 @@ impl AdapterBuilder {
 
     pub fn fallback_recovery_seconds(self, secs: u64) -> Self {
         self.push_arg("--fallback-recovery-seconds", &secs.to_string())
+    }
+
+    pub fn auto_restart(mut self, auto_restart: bool) -> Self {
+        self.auto_restart = auto_restart;
+        self
     }
 }
