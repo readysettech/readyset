@@ -1,4 +1,5 @@
 use std::fmt;
+use std::ops::Deref;
 use std::str::FromStr;
 
 use itertools::Itertools;
@@ -6,6 +7,7 @@ use proptest::strategy::Strategy;
 use proptest::{prelude as prop, prop_oneof};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
+use triomphe::ThinArc;
 
 use crate::common::type_identifier;
 use crate::{Dialect, Literal};
@@ -49,7 +51,7 @@ pub enum SqlType {
     #[weight(0)]
     VarBinary(u16),
     #[weight(0)]
-    Enum(Vec<Literal>),
+    Enum(EnumType),
     #[weight(0)]
     Decimal(#[strategy(1..=30u8)] u8, #[strategy(1..=# 0)] u8),
     Json,
@@ -84,6 +86,16 @@ impl SqlType {
             prop::Just(Float),
             prop::Just(Real),
         ]
+    }
+
+    /// Creates a [`SqlType::Enum`] instance from a sequence of variant names.
+    #[inline]
+    pub fn from_enum_variants<I>(variants: I) -> Self
+    where
+        I: IntoIterator<Item = Literal>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        Self::Enum(variants.into())
     }
 
     /// Returns whether `self` is any text-containing type.
@@ -182,5 +194,73 @@ impl FromStr for SqlType {
         type_identifier(Dialect::MySQL)(s.as_bytes())
             .map(|(_, s)| s)
             .map_err(|_| "failed to parse")
+    }
+}
+
+/// [`SqlType::Enum`](crate::SqlType::Enum) abstraction over an array of [`Literal`].
+///
+/// Clones are O(1) and this is always 1 pointer wide for efficient storage in `SqlType`.
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct EnumType {
+    variants: ThinArc<(), Literal>,
+}
+
+impl Deref for EnumType {
+    type Target = [Literal];
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.variants.slice
+    }
+}
+
+// We cannot use `FromIterator` because it does not allow specializing the iterator type.
+//
+// This impl works for `Vec` and `[T; N]`. It will never conflict with `From<EnumType>` because we
+// cannot implement an owned iterator over `triomphe::ThinArc`.
+impl<I: IntoIterator<Item = Literal>> From<I> for EnumType
+where
+    I::IntoIter: ExactSizeIterator,
+{
+    #[inline]
+    fn from(variants: I) -> Self {
+        Self {
+            variants: ThinArc::from_header_and_iter((), variants.into_iter()),
+        }
+    }
+}
+
+impl fmt::Debug for EnumType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
+    }
+}
+
+impl PartialOrd for EnumType {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        <[Literal]>::partial_cmp(self, other)
+    }
+}
+
+impl<'de> Deserialize<'de> for EnumType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Deserialize into a temporary `Vec` since we cannot construct `ThinArc` from an iterator
+        // here.
+        let result = Vec::<Literal>::deserialize(deserializer)?;
+
+        Ok(result.into())
+    }
+}
+
+impl Serialize for EnumType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        <[Literal]>::serialize(self, serializer)
     }
 }

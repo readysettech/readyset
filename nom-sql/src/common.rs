@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use std::fmt::{self, Debug, Display};
 use std::hash::Hash;
 use std::ops::{Range, RangeFrom, RangeTo};
 use std::str;
@@ -511,7 +511,7 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
                     ),
                     whitespace0,
                 ),
-                SqlType::Enum,
+                SqlType::from_enum_variants,
             ),
             map(
                 tuple((

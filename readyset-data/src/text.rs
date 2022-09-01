@@ -660,7 +660,7 @@ mod tests {
         let enum_type = SqlType::Enum(
             ["red", "yellow", "green"]
                 .map(|s| Literal::String(s.to_string()))
-                .to_vec(),
+                .into(),
         );
         assert_eq!(
             DfValue::from("green")

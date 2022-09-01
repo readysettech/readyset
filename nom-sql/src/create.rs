@@ -925,7 +925,7 @@ mod tests {
                     non_null_col("zip", SqlType::VarChar(Some(255))),
                     non_null_col(
                         "type",
-                        SqlType::Enum(vec![
+                        SqlType::from_enum_variants([
                             Literal::String("SHIPPING".into()),
                             Literal::String("BILLING".into()),
                             Literal::String("LIVING".into()),
