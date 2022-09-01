@@ -12,7 +12,7 @@ services:
       - MYSQL_ROOT_PASSWORD=noria
       - MYSQL_DATABASE=noria
   postgres:
-    image: postgres
+    image: postgres:14
     environment:
       - POSTGRES_PASSWORD=noria
       - POSTGRES_DB=noria
