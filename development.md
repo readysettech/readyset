@@ -48,7 +48,7 @@ ReadySet runs alongside a backing MySQL or Postgres database and uses Consul for
 First, compile and run ReadySet server.
 
 ```
-cargo run --bin readyset-server --features display_literals --release -- --replication-url <upstream-url>  --deployment <deployment name>
+cargo run --bin readyset-server --release -- --replication-url <upstream-url>  --deployment <deployment name>
 ```
 
 If using the databases supplied by the docker-compose environment in this repository, replace <upstream-url> with the URL of the database corresponding to your database engine:
@@ -64,13 +64,13 @@ Then, run the adapter binary corresponding to your upstream database (MySQL or P
 
 **MySQL**
 ```
-cargo run --bin readyset-mysql --features display_literals --release -- --upstream-db-url mysql://root:readyset@127.1/readyset  --allow-unauthenticated-connections
+cargo run --bin readyset-mysql --release -- --upstream-db-url mysql://root:readyset@127.1/readyset  --allow-unauthenticated-connections
   --address 0.0.0.0:3307 --deployment <deployment name>  --prometheus-metrics --query-log --query-log-ad-hoc
  ```
 
 **Postgres**
 ```
-cargo run --bin readyset-psql --features display_literals --release -- --upstream-db-url postgresql://postgres:readyset@127.1/readyset  --allow-unauthenticated-connections
+cargo run --bin readyset-psql --release -- --upstream-db-url postgresql://postgres:readyset@127.1/readyset  --allow-unauthenticated-connections
   --address 0.0.0.0:5433 --deployment <deployment name> --prometheus-metrics --query-log --query-log-ad-hoc
 ```
 
