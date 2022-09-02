@@ -536,9 +536,9 @@ pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Se
 mod tests {
     use super::*;
     use crate::column::Column;
-    use crate::common::{FieldDefinitionExpr, SqlType};
+    use crate::common::FieldDefinitionExpr;
     use crate::table::Table;
-    use crate::{BinaryOperator, Expr, FunctionExpr, InValue, ItemPlaceholder};
+    use crate::{BinaryOperator, Expr, FunctionExpr, InValue, ItemPlaceholder, SqlType};
 
     fn columns(cols: &[&str]) -> Vec<FieldDefinitionExpr> {
         cols.iter()
