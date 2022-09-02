@@ -6,6 +6,7 @@ use clap::Parser;
 use nom_sql::Dialect;
 use readyset_client_adapter::{DatabaseType, NoriaAdapter};
 use readyset_mysql::MysqlHandler;
+use readyset_version::COMMIT_ID;
 
 mod backend;
 mod constants;
@@ -16,11 +17,6 @@ mod value;
 
 use error::Error;
 use readyset_mysql::MySqlQueryHandler;
-
-const COMMIT_ID: &str = match option_env!("BUILDKITE_COMMIT") {
-    Some(x) => x,
-    None => "unknown commit ID",
-};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]

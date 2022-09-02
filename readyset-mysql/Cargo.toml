@@ -23,6 +23,7 @@ readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
 readyset-client = { path = "../readyset-client" }
 readyset-client-adapter = { path = "../readyset-client-adapter" }
+readyset-version = { path = "../readyset-version" }
 nom-sql = { path = "../nom-sql" }
 tokio = "1.15"
 tracing = { version = "0.1", features = ["release_max_level_debug"] }

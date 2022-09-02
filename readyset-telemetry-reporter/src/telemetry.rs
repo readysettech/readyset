@@ -67,7 +67,6 @@ impl TelemetryBuilder {
 }
 
 /// Wrapper for merging auto- and user-populated telemetry properties into one object
-#[skip_serializing_none]
 #[derive(Serialize)]
 pub struct Properties<'a> {
     /// User-provided properties
@@ -75,7 +74,7 @@ pub struct Properties<'a> {
     pub telemetry: &'a Telemetry,
 
     // Properties auto-populated by the reporter
-    pub commit_id: Option<&'a str>,
+    pub commit_id: &'a str,
 }
 
 /// Top-level wrapper for ReadySet-specifc Segment Track message

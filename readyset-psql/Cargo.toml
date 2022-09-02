@@ -17,6 +17,7 @@ readyset-errors = { path = "../readyset-errors/" }
 readyset-data = { path = "../readyset-data/" }
 readyset-client = { path = "../readyset-client" }
 readyset-client-adapter = { path = "../readyset-client-adapter" }
+readyset-version = { path = "../readyset-version" }
 nom-sql = { path = "../nom-sql" }
 psql-srv = { path = "../psql-srv" }
 tokio = "1.15"

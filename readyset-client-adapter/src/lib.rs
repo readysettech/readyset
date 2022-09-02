@@ -36,6 +36,7 @@ use readyset_dataflow::Readers;
 use readyset_server::metrics::{CompositeMetricsRecorder, MetricsRecorder};
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryReporter};
+use readyset_version::COMMIT_ID;
 use stream_cancel::Valve;
 use tokio::net::UdpSocket;
 use tokio::sync::broadcast;
@@ -58,11 +59,6 @@ const AWS_METADATA_TOKEN_ENDPOINT: &str = "http://169.254.169.254/latest/api/tok
 
 /// Timeout to use when connecting to the upstream database
 const UPSTREAM_CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
-
-const COMMIT_ID: &str = match option_env!("BUILDKITE_COMMIT") {
-    Some(x) => x,
-    None => "unknown commit ID",
-};
 
 #[async_trait]
 pub trait ConnectionHandler {

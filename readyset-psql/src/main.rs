@@ -7,13 +7,9 @@ use psql_srv::run_backend;
 use readyset_client::backend as cl;
 use readyset_client_adapter::{ConnectionHandler, DatabaseType, NoriaAdapter};
 use readyset_psql::{Backend, Config, PostgreSqlQueryHandler, PostgreSqlUpstream};
+use readyset_version::COMMIT_ID;
 use tokio::net;
 use tracing::{error, instrument};
-
-const COMMIT_ID: &str = match option_env!("BUILDKITE_COMMIT") {
-    Some(x) => x,
-    None => "unknown commit ID",
-};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]

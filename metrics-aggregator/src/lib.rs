@@ -9,6 +9,7 @@ use anyhow::anyhow;
 use clap::Parser;
 use prometheus_http_query::{Client, Scheme};
 use readyset::consensus::ConsulAuthority;
+use readyset_version::COMMIT_ID;
 use stream_cancel::Valve;
 use tokio::sync::Mutex;
 use tracing::info;
@@ -20,11 +21,6 @@ pub mod http_router;
 pub mod metrics_reconciler;
 use cache::QueryMetricsCache;
 use metrics_reconciler::MetricsReconciler;
-
-const COMMIT_ID: &str = match option_env!("BUILDKITE_COMMIT") {
-    Some(x) => x,
-    None => "unknown commit ID",
-};
 
 #[derive(Parser)]
 #[clap(version = COMMIT_ID)]

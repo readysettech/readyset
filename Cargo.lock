@@ -2328,6 +2328,7 @@ dependencies = [
  "prometheus-http-query",
  "readyset",
  "readyset-tracing",
+ "readyset-version",
  "regex",
  "reqwest",
  "rust_decimal",
@@ -3802,6 +3803,7 @@ dependencies = [
  "readyset-server",
  "readyset-telemetry-reporter",
  "readyset-tracing",
+ "readyset-version",
  "reqwest",
  "stream-cancel",
  "tokio",
@@ -4113,6 +4115,7 @@ dependencies = [
  "readyset-errors",
  "readyset-server",
  "readyset-tracing",
+ "readyset-version",
  "serial_test",
  "streaming-iterator",
  "test-strategy",
@@ -4150,6 +4153,7 @@ dependencies = [
  "readyset-errors",
  "readyset-server",
  "readyset-tracing",
+ "readyset-version",
  "rust_decimal",
  "serde_json",
  "serial_test",
@@ -4234,6 +4238,7 @@ dependencies = [
  "readyset-sql-passes",
  "readyset-telemetry-reporter",
  "readyset-tracing",
+ "readyset-version",
  "regex",
  "replicators",
  "reqwest",
@@ -4291,6 +4296,7 @@ dependencies = [
  "base64",
  "derive_builder 0.11.2",
  "lazy_static",
+ "readyset-version",
  "reqwest",
  "serde",
  "serde_json",
@@ -4345,6 +4351,10 @@ dependencies = [
  "syn",
  "tracing",
 ]
+
+[[package]]
+name = "readyset-version"
+version = "0.1.0"
 
 [[package]]
 name = "redox_syscall"

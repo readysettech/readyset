@@ -44,6 +44,7 @@ members = [
     "readyset-tools",
     "readyset-tracing",
     "readyset-tracing/proc-macros",
+    "readyset-version",
     "replicators",
     "test-utils",
     "timestamp-service",

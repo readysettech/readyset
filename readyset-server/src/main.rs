@@ -13,6 +13,7 @@ use readyset_server::metrics::{
 };
 use readyset_server::{resolve_addr, Builder, NoriaMetricsRecorder, WorkerOptions};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryReporter};
+use readyset_version::COMMIT_ID;
 use tracing::{error, info, warn};
 
 #[cfg(not(target_env = "msvc"))]
@@ -21,11 +22,6 @@ static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 const AWS_PRIVATE_IP_ENDPOINT: &str = "http://169.254.169.254/latest/meta-data/local-ipv4";
 const AWS_METADATA_TOKEN_ENDPOINT: &str = "http://169.254.169.254/latest/api/token";
-
-const COMMIT_ID: &str = match option_env!("BUILDKITE_COMMIT") {
-    Some(x) => x,
-    None => "unknown commit ID",
-};
 
 /// Obtain the private ipv4 address of the AWS instance that the current program is running on using
 /// the AWS metadata service

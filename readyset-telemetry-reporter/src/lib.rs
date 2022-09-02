@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use backoff::ExponentialBackoffBuilder;
 use lazy_static::lazy_static;
+use readyset_version::COMMIT_ID;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::{Client, RequestBuilder, Response, StatusCode, Url};
 use uuid::Uuid;
@@ -22,9 +23,6 @@ pub use crate::telemetry::{TelemetryBuilder, TelemetryEvent};
 
 /// User agent to use for all telemetry payload requests
 const APP_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
-
-/// The Git commit being built, if this is a CI build
-const COMMIT_ID: Option<&str> = option_env!("BUILDKITE_COMMIT");
 
 /// URL to report telemetry to
 const TELEMETRY_BASE_URL: &str = "https://api.segment.io/v1/";

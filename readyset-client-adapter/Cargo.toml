@@ -32,3 +32,4 @@ readyset-tracing = { path = "../readyset-tracing" }
 readyset-dataflow = { path = "../readyset-dataflow" }
 readyset-server = { path = "../readyset-server/" }
 readyset-telemetry-reporter = { path = "../readyset-telemetry-reporter" }
+readyset-version = { path = "../readyset-version" }
