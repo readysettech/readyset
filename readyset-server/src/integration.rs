@@ -3492,10 +3492,11 @@ async fn finkelstein1982_queries() {
             let q = parse_query(Dialect::MySQL, q).unwrap();
             match q {
                 SqlQuery::CreateTable(stmt) => {
-                    inc.add_table(stmt, mig).unwrap();
+                    inc.add_table(inc.rewrite(stmt).unwrap(), mig).unwrap();
                 }
                 SqlQuery::Select(stmt) => {
-                    inc.add_query(None, stmt, mig).unwrap();
+                    inc.add_query(None, inc.rewrite(stmt).unwrap(), mig)
+                        .unwrap();
                 }
                 _ => panic!("unexpected query type"),
             }
@@ -8791,7 +8792,7 @@ async fn drop_view() {
         )
         .await;
     let err = select_from_view_res.unwrap_err();
-    assert!(err.to_string().contains("t1_view does not exist"));
+    assert!(err.to_string().contains("t1_view"));
 }
 
 #[tokio::test(flavor = "multi_thread")]

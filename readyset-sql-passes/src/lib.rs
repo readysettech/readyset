@@ -19,7 +19,10 @@ mod util;
 use std::collections::{HashMap, HashSet};
 
 pub use nom_sql::analysis::{contains_aggregate, is_aggregate};
-use nom_sql::{CreateTableStatement, SelectStatement, SqlIdentifier, Table};
+use nom_sql::{
+    CompoundSelectStatement, CreateTableStatement, CreateViewStatement, SelectSpecification,
+    SelectStatement, SqlIdentifier, Table,
+};
 use readyset_errors::ReadySetResult;
 
 pub use crate::alias_removal::AliasRemoval;
@@ -104,5 +107,34 @@ impl Rewrite for SelectStatement {
             .detect_problematic_self_joins()?
             .remove_numeric_field_references()?
             .order_limit_removal(context.base_schemas)
+    }
+}
+
+impl Rewrite for CreateViewStatement {
+    fn rewrite(mut self, context: RewriteContext) -> ReadySetResult<Self> {
+        if self.name.schema.is_none() {
+            if let Some(first_schema) = context.search_path.first() {
+                self.name.schema = Some(first_schema.clone())
+            }
+        }
+
+        Ok(Self {
+            definition: Box::new(match *self.definition {
+                SelectSpecification::Compound(cqs) => {
+                    SelectSpecification::Compound(CompoundSelectStatement {
+                        selects: cqs
+                            .selects
+                            .into_iter()
+                            .map(|(op, sq)| Ok((op, sq.rewrite(context)?)))
+                            .collect::<ReadySetResult<_>>()?,
+                        ..cqs
+                    })
+                }
+                SelectSpecification::Simple(sq) => {
+                    SelectSpecification::Simple(sq.rewrite(context)?)
+                }
+            }),
+            ..self
+        })
     }
 }

@@ -176,7 +176,8 @@ impl Recipe {
 
         for change in changelist {
             match change {
-                Change::CreateTable(cts) => {
+                Change::CreateTable(mut cts) => {
+                    cts = self.inc.rewrite(cts)?;
                     match self.registry.get(&cts.table.name) {
                         Some(RecipeExpr::Table(current_cts)) => {
                             // Table already exists, so check if it has been changed.
@@ -205,7 +206,8 @@ impl Recipe {
                         }
                     }
                 }
-                Change::CreateView(stmt) => {
+                Change::CreateView(mut stmt) => {
+                    stmt = self.inc.rewrite(stmt)?;
                     let expression = RecipeExpr::View(stmt.clone());
                     if !self.registry.add_query(expression)? {
                         // The expression is already present, and we successfully added
@@ -216,9 +218,9 @@ impl Recipe {
                     // add the query
                     self.inc.add_view(stmt, mig)?;
                 }
-                Change::CreateCache(ccqs) => {
+                Change::CreateCache(mut ccqs) => {
                     let statement = match &ccqs.inner {
-                        CacheInner::Statement(box stmt) => stmt.clone(),
+                        CacheInner::Statement(box stmt) => self.inc.rewrite(stmt.clone())?,
                         CacheInner::Id(id) => {
                             error!("attempted to issue CREATE CACHE with an id: {}", id);
                             internal!("CREATE CACHE should've had its ID resolved by the adapter");
@@ -255,7 +257,7 @@ impl Recipe {
                 // statement.
                 // 3. Drop the original table.
                 // 4. Install the new table.
-                Change::AlterTable(ats) => {
+                Change::AlterTable(mut ats) => {
                     let original_expression =
                         self.registry.get(&ats.table.name).ok_or_else(|| {
                             internal_err!(

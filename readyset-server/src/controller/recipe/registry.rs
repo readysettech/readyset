@@ -3,6 +3,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 
+use launchpad::hash::hash;
 use nom_sql::{
     CreateTableStatement, CreateViewStatement, SelectSpecification, SelectStatement, SqlIdentifier,
 };
@@ -75,12 +76,11 @@ impl RecipeExpr {
     pub(super) fn calculate_hash(&self) -> QueryID {
         use sha1::{Digest, Sha1};
         let mut hasher = Sha1::new();
-        let query_string = match self {
-            RecipeExpr::Table(cts) => cts.to_string(),
-            RecipeExpr::View(cvs) => cvs.to_string(),
-            RecipeExpr::Cache { statement, .. } => statement.to_string(),
+        match self {
+            RecipeExpr::Table(cts) => hasher.update(hash(cts).to_le_bytes()),
+            RecipeExpr::View(cvs) => hasher.update(hash(cvs).to_le_bytes()),
+            RecipeExpr::Cache { statement, .. } => hasher.update(hash(statement).to_le_bytes()),
         };
-        hasher.update(query_string.as_bytes());
         // Sha1 digest is 20 byte long, so it is safe to consume only 16 bytes
         u128::from_le_bytes(hasher.finalize()[..16].try_into().unwrap())
     }

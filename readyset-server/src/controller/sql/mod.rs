@@ -116,6 +116,37 @@ impl SqlIncorporator {
         self.config.reuse_type = Some(reuse_type);
     }
 
+    /// Rewrite the given SQL statement to normalize, validate, and desugar it, based on the stored
+    /// relations in `self`
+    // TODO(grfn): This should really be happening as part of the `add_<whatever>` methods (it was,
+    // before this was made pub(crate)) but since the recipe expression registry stores expressions
+    // we need it happening earlier. We should move it back to its rightful place once we can get
+    // rid of that.
+    pub(crate) fn rewrite<S>(&self, stmt: S) -> ReadySetResult<S>
+    where
+        S: Rewrite,
+    {
+        // TODO(grfn): make view_schemas and base_schemas include schema in the keys
+        let view_schemas = self
+            .view_schemas
+            .clone()
+            .into_iter()
+            .map(|(k, v)| (Table::from(k), v))
+            .collect();
+        let base_schemas = self
+            .base_schemas
+            .clone()
+            .into_iter()
+            .map(|(k, v)| (Table::from(k), v))
+            .collect();
+
+        stmt.rewrite(RewriteContext {
+            view_schemas: &view_schemas,
+            base_schemas: &base_schemas,
+            search_path: &[], // TODO: make this configurable
+        })
+    }
+
     /// Add a new table, specified by the given `CREATE TABLE` statement, to the graph, using the
     /// given `mig` to track changes.
     pub(crate) fn add_table(
@@ -123,7 +154,7 @@ impl SqlIncorporator {
         statement: CreateTableStatement,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<()> {
-        let qfp = self.add_base_via_mir(self.rewrite(statement)?, mig)?;
+        let qfp = self.add_base_via_mir(statement, mig)?;
         self.leaf_addresses.insert(qfp.name, qfp.query_leaf);
         Ok(())
     }
@@ -625,7 +656,7 @@ impl SqlIncorporator {
     fn add_select_query(
         &mut self,
         query_name: SqlIdentifier,
-        stmt: SelectStatement,
+        mut stmt: SelectStatement,
         is_name_required: bool,
         is_leaf: bool,
         mig: &mut Migration<'_>,
@@ -635,7 +666,6 @@ impl SqlIncorporator {
             source: Box::new(e),
         };
 
-        let mut stmt = self.rewrite(stmt).map_err(on_err)?;
         self.num_queries += 1;
 
         // Remove all table aliases from the query. Create named views in cases where the alias must
@@ -778,31 +808,6 @@ impl SqlIncorporator {
         }
     }
 
-    fn rewrite<S>(&self, stmt: S) -> ReadySetResult<S>
-    where
-        S: Rewrite,
-    {
-        // TODO(grfn): make view_schemas and base_schemas include schema in the keys
-        let view_schemas = self
-            .view_schemas
-            .clone()
-            .into_iter()
-            .map(|(k, v)| (Table::from(k), v))
-            .collect();
-        let base_schemas = self
-            .base_schemas
-            .clone()
-            .into_iter()
-            .map(|(k, v)| (Table::from(k), v))
-            .collect();
-
-        stmt.rewrite(RewriteContext {
-            view_schemas: &view_schemas,
-            base_schemas: &base_schemas,
-            search_path: &[], // TODO: make this configurable
-        })
-    }
-
     /// Upgrades the schema version for the
     /// internal [`SqlToMirConverter`].
     pub(super) fn upgrade_version(&mut self) {
@@ -888,16 +893,18 @@ mod tests {
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
             // Must have a base node for type inference to work, so make one manually
-            assert!(inc
-                .add_table(
+            inc.add_table(
+                inc.rewrite(
                     parse_create_table(
                         Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                        "CREATE TABLE users (id int, name varchar(40));",
                     )
                     .unwrap(),
-                    mig
                 )
-                .is_ok());
+                .unwrap(),
+                mig,
+            )
+            .unwrap();
 
             // Should have two nodes: source and "users" base table
             let ncount = mig.graph().node_count();
@@ -907,7 +914,11 @@ mod tests {
             assert!(inc
                 .add_query(
                     None,
-                    parse_select_statement(Dialect::MySQL, "SELECT users.id from users;").unwrap(),
+                    inc.rewrite(
+                        parse_select_statement(Dialect::MySQL, "SELECT users.id from users;")
+                            .unwrap()
+                    )
+                    .unwrap(),
                     mig
                 )
                 .is_ok());
@@ -926,9 +937,12 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40), age int);"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40), age int);"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig
@@ -938,9 +952,12 @@ mod tests {
             // Add a new query with a parameter
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT id, name FROM users WHERE users.name = ?;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT id, name FROM users WHERE users.name = ?;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -971,9 +988,12 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40), age int);"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40), age int);"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -983,9 +1003,12 @@ mod tests {
             // Add a new query with a parameter
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT id FROM users WHERE users.name = ?;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT id FROM users WHERE users.name = ?;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -1017,9 +1040,12 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40), age int);"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40), age int);"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -1029,9 +1055,12 @@ mod tests {
             // Add a new query with a parameter
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT id, name FROM users WHERE users.age > 20 AND users.name = ?;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT id, name FROM users WHERE users.age > 20 AND users.name = ?;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -1080,9 +1109,12 @@ mod tests {
             // Establish a base write type for "users"
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -1104,9 +1136,12 @@ mod tests {
             // Establish a base write type for "articles"
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE articles (id int, author int, title varchar(255));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE articles (id int, author int, title varchar(255));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -1131,7 +1166,8 @@ mod tests {
                      WHERE users.id = articles.author;";
             let q = inc.add_query(
                 None,
-                parse_select_statement(Dialect::MySQL, q).unwrap(),
+                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap())
+                    .unwrap(),
                 mig,
             );
             assert!(q.is_ok());
@@ -1175,9 +1211,12 @@ mod tests {
             // Establish a base write type
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -1199,9 +1238,12 @@ mod tests {
             // Try a simple query
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT users.name FROM users WHERE users.id = 42;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT users.name FROM users WHERE users.id = 42;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -1244,8 +1286,14 @@ mod tests {
             // Establish a base write types
             assert!(inc
                 .add_table(
-                    parse_create_table(Dialect::MySQL, "CREATE TABLE votes (aid int, userid int);")
-                        .unwrap(),
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE votes (aid int, userid int);"
+                        )
+                        .unwrap()
+                    )
+                    .unwrap(),
                     mig
                 )
                 .is_ok());
@@ -1320,9 +1368,12 @@ mod tests {
             inc.disable_reuse();
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -1330,9 +1381,12 @@ mod tests {
                 .is_ok());
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT id, name FROM users WHERE users.id = 42;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT id, name FROM users WHERE users.id = 42;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -1343,9 +1397,12 @@ mod tests {
             let ncount = mig.graph().node_count();
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT name, id FROM users WHERE users.id = 42;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT name, id FROM users WHERE users.id = 42;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -1367,9 +1424,12 @@ mod tests {
             // Establish a base write type
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -1391,9 +1451,12 @@ mod tests {
             // Add a new query
             inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT id, name FROM users WHERE users.id = 42;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT id, name FROM users WHERE users.id = 42;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -1403,9 +1466,12 @@ mod tests {
             let ncount = mig.graph().node_count();
             inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT id, name FROM users WHERE users.id = 42;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT id, name FROM users WHERE users.id = 42;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -1417,9 +1483,12 @@ mod tests {
             let ncount = mig.graph().node_count();
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT name, id FROM users WHERE users.id = 42;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT name, id FROM users WHERE users.id = 42;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -1441,9 +1510,12 @@ mod tests {
             // Establish a base write type
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -1465,9 +1537,12 @@ mod tests {
             // Add a new query
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT id, name FROM users WHERE users.id = ?;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT id, name FROM users WHERE users.id = ?;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -1480,9 +1555,12 @@ mod tests {
             let ncount = mig.graph().node_count();
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT id, name FROM users WHERE users.name = ?;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT id, name FROM users WHERE users.name = ?;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -1499,9 +1577,12 @@ mod tests {
             let ncount = mig.graph().node_count();
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT id, name FROM users WHERE users.address = ?;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT id, name FROM users WHERE users.address = ?;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -1527,9 +1608,12 @@ mod tests {
             // Establish a base write type
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -1540,7 +1624,10 @@ mod tests {
             // the special 'bogokey' literal column.
             let res = inc.add_query(
                 None,
-                parse_select_statement(Dialect::MySQL, "SELECT id, name FROM users;").unwrap(),
+                inc.rewrite(
+                    parse_select_statement(Dialect::MySQL, "SELECT id, name FROM users;").unwrap(),
+                )
+                .unwrap(),
                 mig,
             );
             assert!(res.is_ok());
@@ -1565,9 +1652,12 @@ mod tests {
             let ncount = mig.graph().node_count();
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT name, id FROM users WHERE users.name = ?;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT name, id FROM users WHERE users.name = ?;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -1595,9 +1685,12 @@ mod tests {
             let ncount = mig.graph().node_count();
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT id, name FROM users WHERE users.address = ?;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT id, name FROM users WHERE users.address = ?;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -1636,9 +1729,12 @@ mod tests {
             // Establish a base write type
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -1648,9 +1744,12 @@ mod tests {
             // Add a new parameterized query.
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT id, name FROM users WHERE users.id = ?;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT id, name FROM users WHERE users.id = ?;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -1676,7 +1775,10 @@ mod tests {
             // the special 'bogokey' literal column.
             let res = inc.add_query(
                 None,
-                parse_select_statement(Dialect::MySQL, "SELECT id, name FROM users;").unwrap(),
+                inc.rewrite(
+                    parse_select_statement(Dialect::MySQL, "SELECT id, name FROM users;").unwrap(),
+                )
+                .unwrap(),
                 mig,
             );
             assert!(res.is_ok());
@@ -1711,9 +1813,12 @@ mod tests {
             // Establish a base write type
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40), address varchar(40));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -1723,9 +1828,12 @@ mod tests {
             // Add a query with a parameter and a literal projection.
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT id, name, 1 as one FROM users WHERE id = ?;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT id, name, 1 as one FROM users WHERE id = ?;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -1752,9 +1860,12 @@ mod tests {
             let ncount = mig.graph().node_count();
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT id, name, 1 as one FROM users WHERE address = ?;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT id, name, 1 as one FROM users WHERE address = ?;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -1792,8 +1903,14 @@ mod tests {
             // Establish a base write type
             assert!(inc
                 .add_table(
-                    parse_create_table(Dialect::MySQL, "CREATE TABLE votes (aid int, userid int);")
-                        .unwrap(),
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE votes (aid int, userid int);"
+                        )
+                        .unwrap()
+                    )
+                    .unwrap(),
                     mig
                 )
                 .is_ok());
@@ -1812,9 +1929,12 @@ mod tests {
             // Try a simple COUNT function without a GROUP BY clause
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT COUNT(votes.userid) AS count FROM votes;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT COUNT(votes.userid) AS count FROM votes;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -1881,8 +2001,14 @@ mod tests {
             // Establish a base write type
             assert!(inc
                 .add_table(
-                    parse_create_table(Dialect::MySQL, "CREATE TABLE votes (userid int, aid int);")
-                        .unwrap(),
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE votes (userid int, aid int);"
+                        )
+                        .unwrap()
+                    )
+                    .unwrap(),
                     mig
                 )
                 .is_ok());
@@ -1901,9 +2027,12 @@ mod tests {
             // Try a simple COUNT function
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT COUNT(*) AS count FROM votes GROUP BY votes.userid;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT COUNT(*) AS count FROM votes GROUP BY votes.userid;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -1959,8 +2088,14 @@ mod tests {
             // Establish a base write type
             assert!(inc
                 .add_table(
-                    parse_create_table(Dialect::MySQL, "CREATE TABLE votes (userid int, aid int);")
-                        .unwrap(),
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE votes (userid int, aid int);"
+                        )
+                        .unwrap()
+                    )
+                    .unwrap(),
                     mig
                 )
                 .is_ok());
@@ -1979,10 +2114,13 @@ mod tests {
             // Try a simple COUNT function
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS count FROM votes \
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS count FROM votes \
                      GROUP BY votes.userid;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -2038,9 +2176,12 @@ mod tests {
             // Establish a base write type
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE votes (userid int, aid int, sign int);"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE votes (userid int, aid int, sign int);"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -2061,10 +2202,13 @@ mod tests {
             // Try a simple COUNT function
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT SUM(CASE WHEN aid = 5 THEN sign END) AS sum FROM votes \
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT SUM(CASE WHEN aid = 5 THEN sign END) AS sum FROM votes \
                      GROUP BY votes.userid;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -2121,9 +2265,12 @@ mod tests {
             // Establish a base write type
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE votes (userid int, aid int, sign int);"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE votes (userid int, aid int, sign int);"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -2144,10 +2291,13 @@ mod tests {
             // Try a simple COUNT function
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT SUM(CASE WHEN aid = 5 THEN sign ELSE 6 END) AS sum FROM votes \
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT SUM(CASE WHEN aid = 5 THEN sign ELSE 6 END) AS sum FROM votes \
                      GROUP BY votes.userid;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -2202,9 +2352,12 @@ mod tests {
             // Establish a base write type
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE votes (userid int, aid int, sign int);"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE votes (userid int, aid int, sign int);"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -2224,9 +2377,12 @@ mod tests {
             assert!(get_node(&inc, mig, "votes").is_base());
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT SUM(sign) AS sum FROM votes WHERE aid=5 GROUP BY votes.userid;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT SUM(sign) AS sum FROM votes WHERE aid=5 GROUP BY votes.userid;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -2282,9 +2438,12 @@ mod tests {
             // Establish a base write type
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE votes (userid int, aid int, sign int);"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE votes (userid int, aid int, sign int);"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -2304,9 +2463,12 @@ mod tests {
             assert!(get_node(&inc, mig, "votes").is_base());
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT SUM(sign) AS sum FROM votes WHERE sign > 0 GROUP BY votes.userid;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT SUM(sign) AS sum FROM votes WHERE sign > 0 GROUP BY votes.userid;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -2331,9 +2493,12 @@ mod tests {
             // Establish a base write type
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE votes (userid int, aid int, sign int);"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE votes (userid int, aid int, sign int);"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -2353,9 +2518,12 @@ mod tests {
             assert!(get_node(&inc, mig, "votes").is_base());
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT SUM(sign) AS sum FROM votes GROUP BY votes.userid HAVING sum>0 ;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT SUM(sign) AS sum FROM votes GROUP BY votes.userid HAVING sum>0 ;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -2416,9 +2584,12 @@ mod tests {
             // Establish a base write type
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE votes (story_id int, comment_id int, vote int);"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE votes (story_id int, comment_id int, vote int);"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -2500,9 +2671,12 @@ mod tests {
             // Establish base write types for "users" and "articles" and "votes"
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -2510,16 +2684,25 @@ mod tests {
                 .is_ok());
             assert!(inc
                 .add_table(
-                    parse_create_table(Dialect::MySQL, "CREATE TABLE votes (aid int, uid int);")
-                        .unwrap(),
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE votes (aid int, uid int);"
+                        )
+                        .unwrap()
+                    )
+                    .unwrap(),
                     mig
                 )
                 .is_ok());
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE articles (aid int, title varchar(255), author int);"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE articles (aid int, title varchar(255), author int);"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -2534,7 +2717,8 @@ mod tests {
 
             let res = inc.add_query(
                 None,
-                parse_select_statement(Dialect::MySQL, q).unwrap(),
+                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap())
+                    .unwrap(),
                 mig,
             );
             assert!(res.is_ok());
@@ -2579,9 +2763,12 @@ mod tests {
             // Establish base write types for "users" and "articles" and "votes"
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -2589,16 +2776,25 @@ mod tests {
                 .is_ok());
             assert!(inc
                 .add_table(
-                    parse_create_table(Dialect::MySQL, "CREATE TABLE votes (aid int, uid int);")
-                        .unwrap(),
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE votes (aid int, uid int);"
+                        )
+                        .unwrap()
+                    )
+                    .unwrap(),
                     mig
                 )
                 .is_ok());
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE articles (aid int, title varchar(255), author int);"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE articles (aid int, title varchar(255), author int);"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -2613,7 +2809,8 @@ mod tests {
 
             let res = inc.add_query(
                 None,
-                parse_select_statement(Dialect::MySQL, q).unwrap(),
+                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap())
+                    .unwrap(),
                 mig,
             );
             assert!(res.is_ok());
@@ -2680,9 +2877,12 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -2690,9 +2890,12 @@ mod tests {
                 .is_ok());
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE articles (id int, author int, title varchar(255));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE articles (id int, author int, title varchar(255));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -2703,7 +2906,8 @@ mod tests {
                      WHERE users.id = articles.author;";
             let q = inc.add_query(
                 None,
-                parse_select_statement(Dialect::MySQL, q).unwrap(),
+                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap())
+                    .unwrap(),
                 mig,
             );
             assert!(q.is_ok());
@@ -2750,9 +2954,12 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE friends (id int, friend int);"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE friends (id int, friend int);"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig
@@ -2767,7 +2974,8 @@ mod tests {
 
             let res = inc.add_query(
                 None,
-                parse_select_statement(Dialect::MySQL, q).unwrap(),
+                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap())
+                    .unwrap(),
                 mig,
             );
             assert!(res.is_ok(), "{}", res.as_ref().unwrap_err());
@@ -2797,9 +3005,12 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -2808,7 +3019,11 @@ mod tests {
 
             let res = inc.add_query(
                 None,
-                parse_select_statement(Dialect::MySQL, "SELECT users.name, 1 FROM users;").unwrap(),
+                inc.rewrite(
+                    parse_select_statement(Dialect::MySQL, "SELECT users.name, 1 FROM users;")
+                        .unwrap(),
+                )
+                .unwrap(),
                 mig,
             );
             assert!(res.is_ok());
@@ -2834,17 +3049,23 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             assert!(inc
                 .add_table(
-                    parse_create_table(Dialect::MySQL, "CREATE TABLE users (id int, age int);")
-                        .unwrap(),
+                    inc.rewrite(
+                        parse_create_table(Dialect::MySQL, "CREATE TABLE users (id int, age int);")
+                            .unwrap()
+                    )
+                    .unwrap(),
                     mig
                 )
                 .is_ok());
 
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT 2 * users.age, 2 * 10 as twenty FROM users;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT 2 * users.age, 2 * 10 as twenty FROM users;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -2877,9 +3098,12 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, age int, name varchar(40));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, age int, name varchar(40));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -2888,9 +3112,12 @@ mod tests {
 
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT 2 * users.age, 2 * 10 AS twenty FROM users WHERE users.name = ?;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT 2 * users.age, 2 * 10 AS twenty FROM users WHERE users.name = ?;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -2926,9 +3153,12 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -2936,9 +3166,12 @@ mod tests {
                 .is_ok());
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE articles (id int, author int, title varchar(255));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE articles (id int, author int, title varchar(255));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -2952,7 +3185,8 @@ mod tests {
             let name = inc
                 .add_query(
                     None,
-                    parse_select_statement(Dialect::MySQL, q).unwrap(),
+                    inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap())
+                        .unwrap(),
                     mig,
                 )
                 .unwrap();
@@ -3002,9 +3236,12 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -3012,9 +3249,12 @@ mod tests {
                 .is_ok());
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE articles (id int, author int, title varchar(255));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE articles (id int, author int, title varchar(255));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -3025,7 +3265,10 @@ mod tests {
             assert!(inc
                 .add_query(
                     None,
-                    parse_select_statement(Dialect::MySQL, "SELECT * FROM users;").unwrap(),
+                    inc.rewrite(
+                        parse_select_statement(Dialect::MySQL, "SELECT * FROM users;").unwrap()
+                    )
+                    .unwrap(),
                     mig
                 )
                 .is_ok());
@@ -3038,7 +3281,8 @@ mod tests {
                      ON (nested_users.id = articles.author);";
             let q = inc.add_query(
                 None,
-                parse_select_statement(Dialect::MySQL, q).unwrap(),
+                inc.rewrite(parse_select_statement(Dialect::MySQL, q).unwrap())
+                    .unwrap(),
                 mig,
             );
             assert!(q.is_ok());
@@ -3088,9 +3332,12 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -3136,9 +3383,12 @@ mod tests {
             // Establish a base write type
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -3160,9 +3410,12 @@ mod tests {
             // Add a new query
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT id, name FROM users WHERE users.id = 42;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT id, name FROM users WHERE users.id = 42;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -3173,9 +3426,12 @@ mod tests {
             let ncount = mig.graph().node_count();
             let res = inc.add_query(
                 None,
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT id, name FROM users WHERE users.id = 50;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT id, name FROM users WHERE users.id = 50;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -3197,8 +3453,11 @@ mod tests {
                 ..Default::default()
             });
             inc.add_table(
-                parse_create_table(Dialect::MySQL, "CREATE TABLE things (id int primary key);")
-                    .unwrap(),
+                inc.rewrite(
+                    parse_create_table(Dialect::MySQL, "CREATE TABLE things (id int primary key);")
+                        .unwrap(),
+                )
+                .unwrap(),
                 mig,
             )
             .unwrap();
@@ -3207,8 +3466,14 @@ mod tests {
 
             inc.add_query(
                 Some("things_by_id_limit_3".into()),
-                parse_select_statement(Dialect::MySQL, "SELECT * FROM things ORDER BY id LIMIT 3")
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT * FROM things ORDER BY id LIMIT 3",
+                    )
                     .unwrap(),
+                )
+                .unwrap(),
                 mig,
             )
             .unwrap();
@@ -3228,9 +3493,12 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE users (id int, name varchar(40));"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE users (id int, name varchar(40));"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -3239,9 +3507,12 @@ mod tests {
             // Add first copy of new query, called "tq1"
             let res = inc.add_query(
                 Some("tq1".into()),
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT id, name FROM users WHERE users.id = 42;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT id, name FROM users WHERE users.id = 42;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -3252,9 +3523,12 @@ mod tests {
             let ncount = mig.graph().node_count();
             let res = inc.add_query(
                 Some("tq2".into()),
-                parse_select_statement(
-                    Dialect::MySQL,
-                    "SELECT id, name FROM users WHERE users.id = 42;",
+                inc.rewrite(
+                    parse_select_statement(
+                        Dialect::MySQL,
+                        "SELECT id, name FROM users WHERE users.id = 42;",
+                    )
+                    .unwrap(),
                 )
                 .unwrap(),
                 mig,
@@ -3265,26 +3539,14 @@ mod tests {
             // Add a query over tq2, which really is tq1
             let _res = inc.add_query(
                 Some("over_tq2".into()),
-                parse_select_statement(Dialect::MySQL, "SELECT tq2.id FROM tq2;").unwrap(),
+                inc.rewrite(
+                    parse_select_statement(Dialect::MySQL, "SELECT tq2.id FROM tq2;").unwrap(),
+                )
+                .unwrap(),
                 mig,
             );
             // should have added a projection and a reader
             assert_eq!(mig.graph().node_count(), ncount + 2);
-        })
-        .await;
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn count_star_nonexistent_table() {
-        let mut g = integration_utils::start_simple_unsharded("count_star_nonexistent_table").await;
-        g.migrate(|mig| {
-            let mut inc = SqlIncorporator::default();
-            let res = inc.add_query(
-                None,
-                parse_select_statement(Dialect::MySQL, "SELECT count(*) FROM foo;").unwrap(),
-                mig,
-            );
-            assert!(res.is_err());
         })
         .await;
     }
@@ -3302,8 +3564,14 @@ mod tests {
             // Must have a base node for type inference to work, so make one manually
             assert!(inc
                 .add_table(
-                    parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
-                        .unwrap(),
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE t1 (a int, b float, c Text);"
+                        )
+                        .unwrap()
+                    )
+                    .unwrap(),
                     mig
                 )
                 .is_ok());
@@ -3311,7 +3579,11 @@ mod tests {
             let _ = inc
                 .add_query(
                     None,
-                    parse_select_statement(Dialect::MySQL, "SELECT t1.a from t1 LIMIT 3").unwrap(),
+                    inc.rewrite(
+                        parse_select_statement(Dialect::MySQL, "SELECT t1.a from t1 LIMIT 3")
+                            .unwrap(),
+                    )
+                    .unwrap(),
                     mig,
                 )
                 .unwrap();
@@ -3346,8 +3618,14 @@ mod tests {
             // Must have a base node for type inference to work, so make one manually
             assert!(inc
                 .add_table(
-                    parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
-                        .unwrap(),
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE t1 (a int, b float, c Text);"
+                        )
+                        .unwrap()
+                    )
+                    .unwrap(),
                     mig
                 )
                 .is_ok());
@@ -3355,8 +3633,14 @@ mod tests {
             let _ = inc
                 .add_query(
                     None,
-                    parse_select_statement(Dialect::MySQL, "SELECT t1.a from t1 where t1.a = t1.b")
+                    inc.rewrite(
+                        parse_select_statement(
+                            Dialect::MySQL,
+                            "SELECT t1.a from t1 where t1.a = t1.b",
+                        )
                         .unwrap(),
+                    )
+                    .unwrap(),
                     mig,
                 )
                 .unwrap();
@@ -3390,9 +3674,12 @@ mod tests {
             // Must have a base node for type inference to work, so make one manually
             assert!(inc
                 .add_table(
-                    parse_create_table(
-                        Dialect::MySQL,
-                        "CREATE TABLE t1 (a int, b float, c Text, d Text);"
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE t1 (a int, b float, c Text, d Text);"
+                        )
+                        .unwrap()
                     )
                     .unwrap(),
                     mig,
@@ -3402,9 +3689,12 @@ mod tests {
             let _ = inc
                 .add_query(
                     None,
-                    parse_select_statement(
-                        Dialect::MySQL,
-                        "SELECT sum(t1.a), max(t1.b), group_concat(c separator ' ') from t1",
+                    inc.rewrite(
+                        parse_select_statement(
+                            Dialect::MySQL,
+                            "SELECT sum(t1.a), max(t1.b), group_concat(c separator ' ') from t1",
+                        )
+                        .unwrap(),
                     )
                     .unwrap(),
                     mig,
@@ -3453,15 +3743,27 @@ mod tests {
             // Must have a base node for type inference to work, so make one manually
             assert!(inc
                 .add_table(
-                    parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
-                        .unwrap(),
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE t1 (a int, b float, c Text);"
+                        )
+                        .unwrap()
+                    )
+                    .unwrap(),
                     mig
                 )
                 .is_ok());
             assert!(inc
                 .add_table(
-                    parse_create_table(Dialect::MySQL, "CREATE TABLE t2 (a int, b float, c Text);")
-                        .unwrap(),
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE t2 (a int, b float, c Text);"
+                        )
+                        .unwrap()
+                    )
+                    .unwrap(),
                     mig
                 )
                 .is_ok());
@@ -3469,9 +3771,12 @@ mod tests {
             let _ = inc
                 .add_query(
                     None,
-                    parse_select_statement(
-                        Dialect::MySQL,
-                        "SELECT t1.a, t2.a FROM t1 JOIN t2 on t1.c = t2.c where t2.b = ?",
+                    inc.rewrite(
+                        parse_select_statement(
+                            Dialect::MySQL,
+                            "SELECT t1.a, t2.a FROM t1 JOIN t2 on t1.c = t2.c where t2.b = ?",
+                        )
+                        .unwrap(),
                     )
                     .unwrap(),
                     mig,
@@ -3512,15 +3817,27 @@ mod tests {
             // Must have a base node for type inference to work, so make one manually
             assert!(inc
                 .add_table(
-                    parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
-                        .unwrap(),
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE t1 (a int, b float, c Text);"
+                        )
+                        .unwrap()
+                    )
+                    .unwrap(),
                     mig
                 )
                 .is_ok());
             assert!(inc
                 .add_table(
-                    parse_create_table(Dialect::MySQL, "CREATE TABLE t2 (a int, b float, c Text);")
-                        .unwrap(),
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE t2 (a int, b float, c Text);"
+                        )
+                        .unwrap()
+                    )
+                    .unwrap(),
                     mig
                 )
                 .is_ok());
@@ -3528,9 +3845,12 @@ mod tests {
             let _ = inc
                 .add_query(
                     None,
-                    parse_select_statement(
-                        Dialect::MySQL,
-                        "SELECT t1.a FROM t1 union select t2.a from t2",
+                    inc.rewrite(
+                        parse_select_statement(
+                            Dialect::MySQL,
+                            "SELECT t1.a FROM t1 union select t2.a from t2",
+                        )
+                        .unwrap(),
                     )
                     .unwrap(),
                     mig,
@@ -3564,8 +3884,14 @@ mod tests {
             // Must have a base node for type inference to work, so make one manually
             assert!(inc
                 .add_table(
-                    parse_create_table(Dialect::MySQL, "CREATE TABLE t1 (a int, b float, c Text);")
-                        .unwrap(),
+                    inc.rewrite(
+                        parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE t1 (a int, b float, c Text);"
+                        )
+                        .unwrap()
+                    )
+                    .unwrap(),
                     mig
                 )
                 .is_ok());
@@ -3573,9 +3899,12 @@ mod tests {
             let _ = inc
                 .add_query(
                     None,
-                    parse_select_statement(
-                        Dialect::MySQL,
-                        "SELECT cast(t1.b as char), t1.a, t1.a + 1 from t1",
+                    inc.rewrite(
+                        parse_select_statement(
+                            Dialect::MySQL,
+                            "SELECT cast(t1.b as char), t1.a, t1.a + 1 from t1",
+                        )
+                        .unwrap(),
                     )
                     .unwrap(),
                     mig,
