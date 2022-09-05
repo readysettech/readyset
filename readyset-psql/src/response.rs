@@ -210,6 +210,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                 Ok(Insert(num_rows_affected))
             }
             Upstream(upstream::QueryResult::Command) => Ok(Command),
+            Upstream(upstream::QueryResult::SimpleQuery(resp)) => Ok(SimpleQuery(resp)),
         }
     }
 }

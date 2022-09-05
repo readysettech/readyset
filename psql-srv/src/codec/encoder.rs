@@ -170,6 +170,18 @@ where
             set_i16(i16::try_from(n_values)?, dst, start_ofs + 5)?;
         }
 
+        PassThroughDataRow(row) => {
+            put_u8(ID_DATA_ROW, dst);
+            // Put the length of this row in bytes. The length is equal to the length of the data,
+            // plus 4 bytes for the length field itself and two bytes for the number of values in
+            // the row.
+            put_i32(row.body().buffer().len() as i32 + 4 + 2, dst);
+            // Put the number of values in this row
+            put_i16(row.len() as i16, dst);
+            // Put the data
+            put_slice(row.body().buffer(), dst);
+        }
+
         ErrorResponse {
             severity,
             sqlstate,
@@ -239,6 +251,22 @@ where
                 put_format(d.transfer_format, dst);
             }
         }
+
+        PassThroughRowDescription(field_descriptions) => {
+            put_u8(ID_ROW_DESCRIPTION, dst);
+            put_i32(LENGTH_PLACEHOLDER, dst);
+            put_i16(i16::try_from(field_descriptions.len())?, dst);
+            for d in field_descriptions {
+                put_str(d.name(), dst);
+                put_u32(d.table_oid(), dst);
+                put_i16(d.column_id(), dst);
+                put_u32(d.type_oid(), dst);
+                put_i16(d.type_size(), dst);
+                put_i32(d.type_modifier(), dst);
+                put_i16(d.format(), dst);
+            }
+        }
+
         #[allow(clippy::unreachable)]
         SSLResponse { .. } => {
             unreachable!("SSLResponse is handled as a special case above.")
@@ -255,6 +283,10 @@ where
 
 fn put_u8(val: u8, dst: &mut BytesMut) {
     dst.put_u8(val);
+}
+
+fn put_u32(val: u32, dst: &mut BytesMut) {
+    dst.put_u32(val);
 }
 
 fn put_i16(val: i16, dst: &mut BytesMut) {
@@ -285,6 +317,10 @@ fn put_str(val: &str, dst: &mut BytesMut) {
     debug_assert!(!val.contains(NUL_CHAR));
     dst.put_slice(val.as_bytes());
     dst.put_u8(NUL_BYTE);
+}
+
+fn put_slice(val: &[u8], dst: &mut BytesMut) {
+    dst.put_slice(val);
 }
 
 fn put_format(val: TransferFormat, dst: &mut BytesMut) {
@@ -516,7 +552,10 @@ mod tests {
     use bytes::{BufMut, BytesMut};
     use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
     use eui48::MacAddress;
+    use postgres::SimpleQueryRow;
+    use postgres_protocol::message::backend::DataRowBody;
     use rust_decimal::Decimal;
+    use tokio_postgres::OwnedField;
     use uuid::Uuid;
 
     use super::*;
@@ -734,6 +773,36 @@ mod tests {
         exp.put_i32(-1); // null value sentinel
         exp.put_i32(9); // length of value
         exp.extend_from_slice(b"some text");
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_passthrough_data_row() {
+        let mut codec = Codec::<Vec<Value>>::new();
+        let mut buf = BytesMut::new();
+        let mut data = BytesMut::new();
+
+        data.put_i32(21);
+        data.extend_from_slice(b"fake data for testing");
+        codec
+            .encode(
+                PassThroughDataRow(
+                    SimpleQueryRow::new(
+                        vec![OwnedField::new("name".into(), 1, 2, 3, 4, 5, 6)].into(),
+                        DataRowBody::new(data.into(), 1),
+                    )
+                    .unwrap(),
+                ),
+                &mut buf,
+            )
+            .unwrap();
+
+        let mut exp = BytesMut::new();
+        exp.put_u8(b'D'); // message id
+        exp.put_i32(4 + 2 + 4 + 21); // message length
+        exp.put_i16(1); // number of values
+        exp.put_i32(21); // length of value
+        exp.extend_from_slice(b"fake data for testing");
         assert_eq!(buf, exp);
     }
 
@@ -978,6 +1047,40 @@ mod tests {
         exp.put_u8(b'T'); // message id
         exp.put_i32(4 + 2); // message length
         exp.put_i16(0); // number of fields
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_passthrough_row_description() {
+        let mut codec = Codec::<Vec<Value>>::new();
+        let mut buf = BytesMut::new();
+        codec
+            .encode(
+                PassThroughRowDescription(vec![OwnedField::new(
+                    "name".to_string(),
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6,
+                )]),
+                &mut buf,
+            )
+            .unwrap();
+        let mut exp = BytesMut::new();
+
+        exp.put_u8(b'T'); // message id
+        exp.put_i32(4 + 2 + 5 + 18); // message length
+        exp.put_i16(1); // number of fields
+
+        exp.extend_from_slice(b"name\0");
+        exp.put_i32(1);
+        exp.put_i16(2);
+        exp.put_i32(3);
+        exp.put_i16(4);
+        exp.put_i32(5);
+        exp.put_i16(6);
         assert_eq!(buf, exp);
     }
 

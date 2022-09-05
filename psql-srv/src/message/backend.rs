@@ -2,7 +2,9 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 pub use postgres::error::SqlState;
+use postgres::SimpleQueryRow;
 use postgres_types::Type;
+use tokio_postgres::OwnedField;
 
 use crate::error::Error;
 use crate::message::TransferFormat;
@@ -54,6 +56,8 @@ pub enum BackendMessage<R> {
     RowDescription {
         field_descriptions: Vec<FieldDescription>,
     },
+    PassThroughRowDescription(Vec<OwnedField>),
+    PassThroughDataRow(SimpleQueryRow),
     SSLResponse {
         byte: u8,
     },

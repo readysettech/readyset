@@ -12,7 +12,7 @@ use crate::value::Value;
 /// An encapsulation of a complete response produced by a Postgresql backend in response to a
 /// request. The response will be sent to the frontend as a sequence of zero or more
 /// `BackendMessage`s.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Eq, PartialEq)]
 #[warn(variant_size_differences)]
 pub enum Response<R, S> {
     Empty,

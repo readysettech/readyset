@@ -8,7 +8,7 @@ use futures::TryStreamExt;
 use nom_sql::SqlIdentifier;
 use pgsql::config::Host;
 use pgsql::types::Type;
-use pgsql::{GenericResult, Row};
+use pgsql::{GenericResult, Row, SimpleQueryMessage};
 use psql_srv::Column;
 use readyset::ColumnSchema;
 use readyset_client::fallback_cache::FallbackCache;
@@ -45,6 +45,7 @@ pub enum QueryResult {
     Read { data: Vec<Row> },
     Write { num_rows_affected: u64 },
     Command,
+    SimpleQuery(Vec<SimpleQueryMessage>),
 }
 
 #[derive(Debug, Clone)]
@@ -194,24 +195,8 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
-        let results = self.client.generic_query(query.as_ref(), &[]).await?;
-        let mut results = results.into_iter().peekable();
-
-        // If results starts with a command complete then return a write result.
-        // This could happen if a write returns no results, which is fine
-        //
-        // Otherwise return all the rows we get and ignore the command complete at the end
-        if let Some(GenericResult::NumRows(n)) = results.peek() {
-            Ok(QueryResult::Write {
-                num_rows_affected: *n,
-            })
-        } else {
-            let mut data = Vec::new();
-            while let Some(GenericResult::Row(r)) = results.next() {
-                data.push(r);
-            }
-            Ok(QueryResult::Read { data })
-        }
+        let res = self.client.simple_query(query.as_ref()).await?;
+        Ok(QueryResult::SimpleQuery(res))
     }
 
     async fn handle_ryw_write<'a, S>(

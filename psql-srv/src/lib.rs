@@ -28,6 +28,7 @@ mod value;
 use std::convert::TryInto;
 
 use async_trait::async_trait;
+use postgres::SimpleQueryMessage;
 use postgres_types::Type;
 use protocol::Protocol;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -152,6 +153,10 @@ pub enum QueryResponse<S> {
     Delete(u64),
     /// The response to a command statement such as "CREATE TABLE".
     Command,
+    /// The response to a SimpleQuery statement. The statement may contain one or more SQL
+    /// commands (e.g., SELECT, INSERT, DELETE, etc.). The SimpleQuery protocol is distinct from
+    /// the prepare/execute protocol.
+    SimpleQuery(Vec<SimpleQueryMessage>),
 }
 
 /// Run a `Backend` on the provided bytestream until the bytestream is remotely closed.

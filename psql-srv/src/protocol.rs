@@ -2,6 +2,7 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use postgres::SimpleQueryMessage;
 use postgres_protocol::Oid;
 use postgres_types::{Kind, Type};
 use smallvec::smallvec;
@@ -390,6 +391,11 @@ impl Protocol {
                             Select { .. } => {
                                 unreachable!("Select is handled as a special case above.")
                             }
+                            SimpleQuery(_) => {
+                                return Err(Error::InternalError(
+                                    "Received SimpleQuery response for Execute".to_string(),
+                                ));
+                            }
                         };
                         Ok(Response::Message(CommandComplete { tag }))
                     };
@@ -416,6 +422,47 @@ impl Protocol {
                             result_transfer_formats: None,
                             trailer: Some(BackendMessage::ready_for_query_idle()),
                         })
+                    } else if let SimpleQuery(resp) = response {
+                        let mut messages = smallvec![];
+                        let mut processing_select = false;
+                        for msg in resp {
+                            match msg {
+                                SimpleQueryMessage::Row(row) => {
+                                    if !processing_select {
+                                        // Create a message for the RowDescription. We use the
+                                        // PassThrough version since this message comes directly
+                                        // from tokio-postgres.
+                                        messages.push(BackendMessage::PassThroughRowDescription(
+                                            row.fields().to_vec(),
+                                        ));
+                                        processing_select = true;
+                                    }
+                                    // Create a message for each row
+                                    messages.push(BackendMessage::PassThroughDataRow(row))
+                                }
+                                SimpleQueryMessage::CommandComplete(val) => {
+                                    // TODO: client.simple_query() should pass the command tag text
+                                    // back to the user
+                                    if processing_select {
+                                        messages.push(BackendMessage::CommandComplete {
+                                            tag: CommandCompleteTag::Select(val),
+                                        });
+                                    } else {
+                                        messages.push(BackendMessage::CommandComplete {
+                                            tag: CommandCompleteTag::Insert(val),
+                                        });
+                                    }
+                                    processing_select = false;
+                                }
+                                _ => {
+                                    return Err(Error::InternalError(
+                                        "Unexpected SimpleQuery message variant".to_string(),
+                                    ));
+                                }
+                            }
+                        }
+                        messages.push(BackendMessage::ready_for_query_idle());
+                        Ok(Response::Messages(messages))
                     } else {
                         let tag = match response {
                             Insert(n) => CommandCompleteTag::Insert(n),
@@ -425,6 +472,9 @@ impl Protocol {
                             #[allow(clippy::unreachable)]
                             Select { .. } => {
                                 unreachable!("Select is handled as a special case above.")
+                            }
+                            SimpleQuery(_) => {
+                                unreachable!("SimpleQuery is handled as a special case above.")
                             }
                         };
                         Ok(Response::Messages(smallvec![
