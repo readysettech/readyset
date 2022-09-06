@@ -8,11 +8,9 @@
 
 pub mod backend;
 pub mod http_router;
-#[allow(dead_code)]
 pub mod migration_handler;
 pub mod outputs_synchronizer;
 mod query_handler;
-#[allow(dead_code)] // TODO(ENG-685): Remove when utilized in main.
 pub mod query_status_cache;
 pub mod rewrite;
 pub mod upstream_database;
