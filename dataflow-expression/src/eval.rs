@@ -396,6 +396,21 @@ impl Expr {
 
                     Ok(utils::get_json_value_type(&json).into())
                 }
+                BuiltinFunction::Coalesce(arg1, rest_args) => {
+                    let val1 = arg1.eval(record)?;
+                    let rest_vals = rest_args
+                        .iter()
+                        .map(|expr| expr.eval(record))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    if !val1.is_none() {
+                        Ok(val1)
+                    } else {
+                        Ok(rest_vals
+                            .into_iter()
+                            .find(|v| !v.is_none())
+                            .unwrap_or(DfValue::None))
+                    }
+                }
             },
             CaseWhen {
                 condition,
@@ -1199,6 +1214,59 @@ mod tests {
         fn month(#[strategy(arbitrary_timestamp_naive_date_time())] datetime: NaiveDateTime) {
             let expected = datetime.month() as u8;
             assert_eq!(super::month(&datetime.date()), expected);
+        }
+
+        #[test]
+        fn coalesce() {
+            let expr = Expr::Call {
+                func: Box::new(BuiltinFunction::Coalesce(
+                    Expr::Column {
+                        index: 0,
+                        ty: DfType::Unknown,
+                    },
+                    vec![Expr::Literal {
+                        val: 1.into(),
+                        ty: DfType::Sql(SqlType::Int(None)),
+                    }],
+                )),
+                ty: DfType::Unknown,
+            };
+            let call_with = |val: DfValue| expr.eval(&[val]);
+
+            assert_eq!(call_with(DfValue::None).unwrap(), 1.into());
+            assert_eq!(call_with(123.into()).unwrap(), 123.into());
+        }
+
+        #[test]
+        fn coalesce_more_args() {
+            let expr = Expr::Call {
+                func: Box::new(BuiltinFunction::Coalesce(
+                    Expr::Column {
+                        index: 0,
+                        ty: DfType::Unknown,
+                    },
+                    vec![
+                        Expr::Column {
+                            index: 1,
+                            ty: DfType::Unknown,
+                        },
+                        Expr::Literal {
+                            val: 1.into(),
+                            ty: DfType::Sql(SqlType::Int(None)),
+                        },
+                    ],
+                )),
+                ty: DfType::Unknown,
+            };
+            let call_with = |val1: DfValue, val2: DfValue| expr.eval(&[val1, val2]);
+
+            assert_eq!(call_with(DfValue::None, DfValue::None).unwrap(), 1.into());
+            assert_eq!(
+                call_with(DfValue::None, "abc".into()).unwrap(),
+                "abc".into()
+            );
+            assert_eq!(call_with(123.into(), DfValue::None).unwrap(), 123.into());
+            assert_eq!(call_with(123.into(), 456.into()).unwrap(), 123.into());
         }
     }
 }

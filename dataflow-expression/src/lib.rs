@@ -8,6 +8,7 @@ pub mod utils;
 use std::fmt;
 use std::fmt::Formatter;
 
+use itertools::Itertools;
 use launchpad::redacted::Sensitive;
 use nom_sql::{
     BinaryOperator, Column, Expr as AstExpr, FunctionExpr, InValue, SqlType, UnaryOperator,
@@ -41,6 +42,8 @@ pub enum BuiltinFunction {
     JsonTypeof(Expr),
     /// jsonb_typeof(expr)
     JsonbTypeof(Expr),
+    /// coalesce(expr, expr, ...)
+    Coalesce(Expr, Vec<Expr>),
 }
 
 impl BuiltinFunction {
@@ -136,6 +139,11 @@ impl BuiltinFunction {
                     DfType::Sql(SqlType::Text),
                 ))
             }
+            "coalesce" => {
+                let arg1 = next_arg()?;
+                let ty = arg1.ty().clone();
+                Ok((Self::Coalesce(arg1, args.by_ref().collect()), ty))
+            }
             _ => Err(ReadySetError::NoSuchFunction(name.to_owned())),
         };
 
@@ -158,6 +166,7 @@ impl BuiltinFunction {
             Round { .. } => "round",
             JsonTypeof { .. } => "json_typeof",
             JsonbTypeof { .. } => "jsonb_typeof",
+            Coalesce { .. } => "coalesce",
         }
     }
 }
@@ -195,6 +204,9 @@ impl fmt::Display for BuiltinFunction {
             }
             JsonbTypeof(arg) => {
                 write!(f, "({})", arg)
+            }
+            Coalesce(arg1, args) => {
+                write!(f, "({}, {})", arg1, args.iter().join(", "))
             }
         }
     }
@@ -468,6 +480,7 @@ mod tests {
 
     mod lower {
         use super::*;
+
         #[test]
         fn simple_column_reference() {
             let input = AstExpr::Column("t.x".into());
@@ -483,6 +496,40 @@ mod tests {
                 result,
                 Expr::Column {
                     index: 0,
+                    ty: DfType::Sql(SqlType::Int(None))
+                }
+            );
+        }
+
+        #[test]
+        fn call_coalesce() {
+            let input = AstExpr::Call(FunctionExpr::Call {
+                name: "coalesce".into(),
+                arguments: vec![AstExpr::Column("t.x".into()), AstExpr::Literal(2.into())],
+            });
+
+            let result = Expr::lower(input, |c| {
+                if c == "t.x".into() {
+                    Ok((0, DfType::Sql(SqlType::Int(None))))
+                } else {
+                    internal!("what's this column!?")
+                }
+            })
+            .unwrap();
+
+            assert_eq!(
+                result,
+                Expr::Call {
+                    func: Box::new(BuiltinFunction::Coalesce(
+                        Expr::Column {
+                            index: 0,
+                            ty: DfType::Sql(SqlType::Int(None))
+                        },
+                        vec![Expr::Literal {
+                            val: 2.into(),
+                            ty: DfType::Sql(SqlType::BigInt(None))
+                        }]
+                    )),
                     ty: DfType::Sql(SqlType::Int(None))
                 }
             );
