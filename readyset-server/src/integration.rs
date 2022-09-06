@@ -1393,7 +1393,7 @@ async fn mutator_churn() {
             let vc = mig.add_ingredient(
                 "votecount",
                 make_columns(&["id", "votes"]),
-                Aggregation::Count { count_nulls: false }
+                Aggregation::Count
                     .over(vote, 0, &[1], &DfType::Unknown)
                     .unwrap(),
             );
@@ -1841,7 +1841,7 @@ async fn votes() {
             let vc = mig.add_ingredient(
                 "vc",
                 make_columns(&["id", "votes"]),
-                Aggregation::Count { count_nulls: false }
+                Aggregation::Count
                     .over(vote, 0, &[1], &DfType::Unknown)
                     .unwrap(),
             );
@@ -2482,7 +2482,7 @@ async fn cascading_replays_with_sharding() {
             let j = mig.add_ingredient("j", make_columns(&["u", "s", "f2"]), jb);
             // aggregate over the join. this will force a shard merger to be inserted because the
             // group-by column ("f2") isn't the same as the join's output sharding column ("f1"/"u")
-            let a = Aggregation::Count { count_nulls: false }
+            let a = Aggregation::Count
                 .over(j, 0, &[2], &DfType::Unknown)
                 .unwrap();
             let end = mig.add_ingredient("end", make_columns(&["u", "c"]), a);
@@ -2614,7 +2614,7 @@ async fn full_aggregation_with_bogokey() {
             let agg = mig.add_ingredient(
                 "agg",
                 make_columns(&["bogo", "count"]),
-                Aggregation::Count { count_nulls: false }
+                Aggregation::Count
                     .over(bogo, 0, &[1], &DfType::Unknown)
                     .unwrap(),
             );
@@ -2731,7 +2731,7 @@ async fn materialization_frontier() {
             let vc = mig.add_ingredient(
                 "votecount",
                 make_columns(&["id", "votes"]),
-                Aggregation::Count { count_nulls: false }
+                Aggregation::Count
                     .over(vote, 0, &[1], &DfType::Unknown)
                     .unwrap(),
             );
@@ -3041,7 +3041,7 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
             let vc = mig.add_ingredient(
                 "votecount",
                 make_columns(&["id", "votes"]),
-                Aggregation::Count { count_nulls: false }
+                Aggregation::Count
                     .over(vote, 0, &[1], &DfType::Unknown)
                     .unwrap(),
             );
@@ -3190,7 +3190,7 @@ async fn live_writes() {
             let vc = mig.add_ingredient(
                 "votecount",
                 make_columns(&["id", "votes"]),
-                Aggregation::Count { count_nulls: false }
+                Aggregation::Count
                     .over(vote, 0, &[1], &DfType::Unknown)
                     .unwrap(),
             );

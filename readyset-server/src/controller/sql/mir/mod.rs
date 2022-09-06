@@ -1012,17 +1012,12 @@ impl SqlToMirConverter {
             Count {
                 expr: box Expr::Column(col),
                 distinct,
-                count_nulls,
             } => mknode(
                 Column::from(col),
-                GroupedNodeType::Aggregation(Aggregation::Count { count_nulls }),
+                GroupedNodeType::Aggregation(Aggregation::Count),
                 distinct,
             ),
-            Count {
-                ref expr,
-                distinct,
-                count_nulls,
-            } => mknode(
+            Count { ref expr, distinct } => mknode(
                 // TODO(celine): replace with ParentRef
                 Column::named(
                     projected_exprs
@@ -1030,7 +1025,7 @@ impl SqlToMirConverter {
                         .cloned()
                         .ok_or_else(|| mk_error!(expr))?,
                 ),
-                GroupedNodeType::Aggregation(Aggregation::Count { count_nulls }),
+                GroupedNodeType::Aggregation(Aggregation::Count),
                 distinct,
             ),
             Avg {
@@ -1495,7 +1490,7 @@ impl SqlToMirConverter {
                     exists_count_col,
                     (group_proj, Column::named("__count_val")),
                     vec![Column::named("__count_grp")],
-                    GroupedNodeType::Aggregation(Aggregation::Count { count_nulls: true }),
+                    GroupedNodeType::Aggregation(Aggregation::Count),
                 );
                 pred_nodes.push(exists_count_node.clone());
                 // -> [0, <count>] for each row

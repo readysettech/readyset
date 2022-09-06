@@ -1630,7 +1630,6 @@ pub enum AggregateType {
     Count {
         column_type: SqlType,
         distinct: bool,
-        count_nulls: bool,
     },
     Sum {
         #[strategy(SqlType::arbitrary_numeric_type())]
@@ -1935,12 +1934,10 @@ const ALL_AGGREGATE_TYPES: &[AggregateType] = &[
     AggregateType::Count {
         column_type: SqlType::Int(None),
         distinct: true,
-        count_nulls: false,
     },
     AggregateType::Count {
         column_type: SqlType::Int(None),
         distinct: false,
-        count_nulls: false,
     },
     AggregateType::Sum {
         column_type: SqlType::Int(None),
@@ -2119,15 +2116,7 @@ impl QueryOperation {
                 }));
 
                 let func = match *agg {
-                    Count {
-                        distinct,
-                        count_nulls,
-                        ..
-                    } => FunctionExpr::Count {
-                        expr,
-                        distinct,
-                        count_nulls,
-                    },
+                    Count { distinct, .. } => FunctionExpr::Count { expr, distinct },
                     Sum { distinct, .. } => FunctionExpr::Sum { expr, distinct },
                     Avg { distinct, .. } => FunctionExpr::Avg { expr, distinct },
                     GroupConcat => FunctionExpr::GroupConcat {
@@ -2568,13 +2557,11 @@ impl FromStr for Operations {
             "count" => Ok(vec![ColumnAggregate(AggregateType::Count {
                 column_type: SqlType::Int(None),
                 distinct: false,
-                count_nulls: false,
             })]
             .into()),
             "count_distinct" => Ok(vec![ColumnAggregate(AggregateType::Count {
                 column_type: SqlType::Int(None),
                 distinct: true,
-                count_nulls: false,
             })]
             .into()),
             "sum" => Ok(vec![ColumnAggregate(AggregateType::Sum {
@@ -3169,12 +3156,10 @@ mod tests {
                     QueryOperation::ColumnAggregate(AggregateType::Count {
                         column_type: SqlType::Int(None),
                         distinct: true,
-                        count_nulls: false,
                     }),
                     QueryOperation::ColumnAggregate(AggregateType::Count {
                         column_type: SqlType::Int(None),
                         distinct: false,
-                        count_nulls: false,
                     }),
                     QueryOperation::ColumnAggregate(AggregateType::Sum {
                         column_type: SqlType::Int(None),

@@ -102,14 +102,9 @@ fn rewrite_expression(expr: Expr) -> Expr {
                 expr: Box::new(rewrite_expression(*expr)),
                 distinct,
             },
-            FunctionExpr::Count {
-                expr,
-                distinct,
-                count_nulls,
-            } => FunctionExpr::Count {
+            FunctionExpr::Count { expr, distinct } => FunctionExpr::Count {
                 expr: Box::new(rewrite_expression(*expr)),
                 distinct,
-                count_nulls,
             },
             FunctionExpr::CountStar => FunctionExpr::CountStar,
             FunctionExpr::Sum { expr, distinct } => FunctionExpr::Sum {

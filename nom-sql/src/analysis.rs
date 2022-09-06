@@ -560,7 +560,6 @@ mod tests {
                         ]
                     })),
                     distinct: false,
-                    count_nulls: false,
                 })
                 .referred_columns()
                 .collect::<Vec<_>>(),

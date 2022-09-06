@@ -739,7 +739,6 @@ pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Fun
                 |args| FunctionExpr::Count {
                     expr: Box::new(args.0.clone()),
                     distinct: args.1,
-                    count_nulls: false,
                 },
             ),
             map(preceded(tag_no_case("sum"), agg_fx_args(dialect)), |args| {

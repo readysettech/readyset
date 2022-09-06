@@ -53,12 +53,17 @@ impl<'ast, 'schema> Visitor<'ast> for CountStarRewriteVisitor<'schema> {
             let bogo_column = schema_iter.next().unwrap();
 
             *function_expression = FunctionExpr::Count {
-                expr: Box::new(Expr::Column(Column {
-                    name: bogo_column.clone(),
-                    table: Some(bogo_table.table.clone()),
+                expr: Box::new(Expr::Call(FunctionExpr::Call {
+                    name: "coalesce".into(),
+                    arguments: vec![
+                        Expr::Column(Column {
+                            name: bogo_column.clone(),
+                            table: Some(bogo_table.table.clone()),
+                        }),
+                        Expr::Literal(0.into()),
+                    ],
                 })),
                 distinct: false,
-                count_nulls: true,
             };
         }
 
@@ -115,7 +120,7 @@ mod tests {
     fn it_expands_count_star() {
         // SELECT COUNT(*) FROM users;
         // -->
-        // SELECT COUNT(users.id) FROM users;
+        // SELECT COUNT(coalesce(users.id, 0)) FROM users;
         let q = parse_query(Dialect::MySQL, "SELECT COUNT(*) FROM users;").unwrap();
         let mut schema = HashMap::new();
         schema.insert(
@@ -129,9 +134,14 @@ mod tests {
                 assert_eq!(
                     tq.fields,
                     vec![FieldDefinitionExpr::from(Expr::Call(FunctionExpr::Count {
-                        expr: Box::new(Expr::Column(Column::from("users.id"))),
+                        expr: Box::new(Expr::Call(FunctionExpr::Call {
+                            name: "coalesce".into(),
+                            arguments: vec![
+                                Expr::Column(Column::from("users.id")),
+                                Expr::Literal(0.into())
+                            ]
+                        })),
                         distinct: false,
-                        count_nulls: true,
                     }))]
                 );
             }
@@ -144,7 +154,7 @@ mod tests {
     fn it_expands_count_star_with_group_by() {
         // SELECT COUNT(*) FROM users GROUP BY id;
         // -->
-        // SELECT COUNT(users.name) FROM users GROUP BY id;
+        // SELECT COUNT(coalesce(users.id, 0)) FROM users GROUP BY id;
         let q = parse_query(Dialect::MySQL, "SELECT COUNT(*) FROM users GROUP BY id;").unwrap();
         let mut schema = HashMap::new();
         schema.insert(
@@ -158,9 +168,14 @@ mod tests {
                 assert_eq!(
                     tq.fields,
                     vec![FieldDefinitionExpr::from(Expr::Call(FunctionExpr::Count {
-                        expr: Box::new(Expr::Column(Column::from("users.id"))),
+                        expr: Box::new(Expr::Call(FunctionExpr::Call {
+                            name: "coalesce".into(),
+                            arguments: vec![
+                                Expr::Column(Column::from("users.id")),
+                                Expr::Literal(0.into())
+                            ]
+                        })),
                         distinct: false,
-                        count_nulls: true,
                     }))]
                 );
             }
@@ -184,9 +199,14 @@ mod tests {
                     stmt.fields,
                     vec![FieldDefinitionExpr::from(Expr::BinaryOp {
                         lhs: Box::new(Expr::Call(FunctionExpr::Count {
-                            expr: Box::new(Expr::Column("users.id".into())),
+                            expr: Box::new(Expr::Call(FunctionExpr::Call {
+                                name: "coalesce".into(),
+                                arguments: vec![
+                                    Expr::Column(Column::from("users.id")),
+                                    Expr::Literal(0.into())
+                                ]
+                            })),
                             distinct: false,
-                            count_nulls: true,
                         })),
                         op: BinaryOperator::Add,
                         rhs: Box::new(Expr::Literal(Literal::UnsignedInteger(1)))

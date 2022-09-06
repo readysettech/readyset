@@ -14,13 +14,8 @@ use crate::prelude::*;
 /// Supported aggregation operators.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Aggregation {
-    /// Count the number of records for each group. The value for the `over` column is ignored.
-    Count {
-        // count_nulls specifies whether the count operation will count null fields, or ignore
-        // them. As far as we know, this behavior is only true in the case of count(*).
-        // We currently only set this field to true as the result of a count(*) rewrite.
-        count_nulls: bool,
-    },
+    /// Count the number of non-null values.
+    Count,
     /// Sum the value of the `over` column for all records of each group.
     Sum,
     /// Average the value of the `over` column. Maintains count and sum in HashMap
@@ -71,15 +66,6 @@ impl Aggregation {
                 out_ty,
             },
         ))
-    }
-
-    /// Indicate whether the aggregate should count null records or ignore them.
-    ///
-    /// Currently we only ignore nulls in the case of count(*).
-    fn count_nulls(&self) -> bool {
-        // Only ignore nulls in the Count case if we've been instructed to. This is
-        // necessary for supporting count(*) where nulls are not ignored.
-        matches!(self, Aggregation::Count { count_nulls } if *count_nulls)
     }
 }
 
@@ -234,7 +220,7 @@ impl GroupedOperation for Aggregator {
 
         let apply_diff =
             |curr: ReadySetResult<DfValue>, diff: Self::Diff| -> ReadySetResult<DfValue> {
-                if !self.op.count_nulls() && diff.value.is_none() {
+                if diff.value.is_none() {
                     return curr;
                 }
 
@@ -346,7 +332,7 @@ mod tests {
     fn it_describes() {
         let src = 0.into();
 
-        let c = Aggregation::Count { count_nulls: false }
+        let c = Aggregation::Count
             .over(src, 1, &[0, 2], &DfType::Unknown)
             .unwrap();
         assert_eq!(c.description(true), "|*| γ[0, 2]");
@@ -368,7 +354,7 @@ mod tests {
     #[test]
     #[allow(clippy::cognitive_complexity)]
     fn count_forwards() {
-        let mut c = setup(Aggregation::Count { count_nulls: false }, true);
+        let mut c = setup(Aggregation::Count, true);
 
         // Add Group=1, Value=1
         let u: Record = vec![1.into(), 1.into()].into();
@@ -492,7 +478,7 @@ mod tests {
 
     #[test]
     fn count_empty_group() {
-        let mut c = setup(Aggregation::Count { count_nulls: false }, true);
+        let mut c = setup(Aggregation::Count, true);
 
         let u = Record::from(vec![1.into(), 1.into()]);
         let rs = c.narrow_one(u, true);
@@ -993,7 +979,7 @@ mod tests {
     #[test]
     #[allow(clippy::cognitive_complexity)]
     fn count_groups_by_multiple_columns() {
-        let mut c = setup_multicolumn(Aggregation::Count { count_nulls: false }, true);
+        let mut c = setup_multicolumn(Aggregation::Count, true);
 
         // Add Group=(1,2), Value=1
         let u: Record = vec![1.into(), 1.into(), 2.into()].into();

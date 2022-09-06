@@ -1109,15 +1109,8 @@ fn make_distinct_node(
         // deletion, we won't be removing it from our records of distinct rows unless there are no
         // remaining occurances of the set.
         //
-        // We use 0 as a placeholder. The over column is ignored with Count entirely. This should
-        // be refactored so Count doesn't take an over column at all.
-        // Issue: https://readysettech.atlassian.net/browse/ENG-310
-        Aggregation::Count { count_nulls: false }.over(
-            parent_na,
-            0,
-            &group_by_indx,
-            &DfType::Unknown,
-        )?,
+        // We use 0 as a placeholder value
+        Aggregation::Count.over(parent_na, 0, &group_by_indx, &DfType::Unknown)?,
     );
     Ok(FlowNode::New(na))
 }

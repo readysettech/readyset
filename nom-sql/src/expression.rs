@@ -29,13 +29,7 @@ pub enum FunctionExpr {
     Avg { expr: Box<Expr>, distinct: bool },
 
     /// `COUNT` aggregation
-    Count {
-        expr: Box<Expr>,
-        distinct: bool,
-        // count_nulls is not syntatic, and only ever set to true during a rewrite phase from
-        // CountStar -> Count.
-        count_nulls: bool,
-    },
+    Count { expr: Box<Expr>, distinct: bool },
 
     /// `COUNT(*)` aggregation
     CountStar,
@@ -83,7 +77,6 @@ impl Display for FunctionExpr {
             FunctionExpr::Count {
                 expr,
                 distinct: true,
-                ..
             } => write!(f, "count(distinct {})", expr),
             FunctionExpr::Sum {
                 expr,

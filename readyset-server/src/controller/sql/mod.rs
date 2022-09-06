@@ -1909,9 +1909,9 @@ mod tests {
                 mig,
             );
             assert!(res.is_ok());
-            // added the aggregation, a project helper, the edge view, the reorder project and
-            // reader
-            assert_eq!(mig.graph().node_count(), 6);
+            // added a project for the coalesce (in the rewrite), the aggregation, a project helper,
+            // the edge view, the reorder project and reader
+            assert_eq!(mig.graph().node_count(), 7);
             // check aggregation view
             let qid = query_id_hash(
                 &["votes"],
@@ -1921,7 +1921,7 @@ mod tests {
                     table: None,
                 }],
             );
-            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
+            let agg_view = get_node(&inc, mig, &format!("q_{:x}_n1", qid));
             assert_eq!(
                 agg_view
                     .columns()
