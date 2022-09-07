@@ -56,6 +56,13 @@ pub struct Config {
     #[serde(default)]
     pub disable_replication_ssl_verification: bool,
 
+    /// Disable running DDL Streaming Replication Setup for PostgreSQL. If this flag is set
+    /// the DDL Streaming Replication Setup SQL queries will need to be manually run on the
+    /// primary server before streaming replication will start.
+    #[clap(long, env = "DISABLE_SETUP_DDL_REPLICATION")]
+    #[serde(default)]
+    pub disable_setup_ddl_replication: bool,
+
     /// Sets the server id when acquiring a binlog replication slot.
     #[clap(long, hide = true)]
     #[serde(default)]
@@ -84,6 +91,7 @@ impl Default for Config {
         Self {
             replication_url: Default::default(),
             disable_replication_ssl_verification: false,
+            disable_setup_ddl_replication: false,
             replication_server_id: Default::default(),
             replicator_restart_timeout: Duration::from_secs(30),
             replication_tables: Default::default(),

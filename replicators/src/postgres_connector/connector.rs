@@ -97,7 +97,9 @@ impl PostgresWalConnector {
         };
         let connector = postgres_native_tls::MakeTlsConnector::new(connector);
 
-        setup_ddl_replication(pg_config.clone(), connector.clone()).await?;
+        if !config.disable_setup_ddl_replication {
+            setup_ddl_replication(pg_config.clone(), connector.clone()).await?;
+        }
 
         pg_config.dbname(dbname.as_ref()).set_replication_database();
 
