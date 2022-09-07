@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 
+use launchpad::hash::hash;
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, CreateTableStatement, DeleteStatement, Expr,
     InsertStatement, Literal, SelectStatement, SqlQuery, TableKey, UpdateStatement,
@@ -10,15 +11,6 @@ use readyset_data::{DfType, DfValue};
 use readyset_errors::{
     bad_request_err, invariant, invariant_eq, unsupported, unsupported_err, ReadySetResult,
 };
-
-pub(crate) fn hash_select_query(q: &SelectStatement) -> u64 {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut h = DefaultHasher::new();
-    q.hash(&mut h);
-    h.finish()
-}
 
 // Helper for flatten_conditional - returns true if the
 // expression is "valid" (i.e. not something like `a = 1 AND a = 2`.
@@ -561,7 +553,7 @@ pub(crate) fn coerce_params(
 }
 
 pub(crate) fn generate_query_name(statement: &nom_sql::SelectStatement) -> String {
-    format!("q_{:x}", hash_select_query(statement))
+    format!("q_{:x}", hash(statement))
 }
 
 #[cfg(test)]

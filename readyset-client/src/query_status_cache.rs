@@ -15,7 +15,6 @@ use serde::{Serialize, Serializer};
 use tracing::error;
 
 use crate::rewrite::anonymize_literals;
-use crate::utils::hash_select_query;
 
 #[derive(Debug, Clone, Eq)]
 /// A Query that was made against readyset, which could have either been parsed successfully or
@@ -96,8 +95,8 @@ impl Display for Query {
 impl Query {
     fn hash(&self) -> u64 {
         match self {
-            Query::Parsed(stmt) => hash_select_query(stmt),
-            Query::ParseFailed(s) => hash(&s),
+            Query::Parsed(stmt) => hash(stmt),
+            Query::ParseFailed(s) => hash(s),
         }
     }
 
@@ -825,8 +824,8 @@ mod tests {
         cache.query_migration_state(&q1);
         cache.update_query_migration_state(&q2, MigrationState::Successful);
 
-        let h1 = hash_to_query_id(hash_select_query(&q1));
-        let h2 = hash_to_query_id(hash_select_query(&q2));
+        let h1 = hash_to_query_id(hash(&q1));
+        let h2 = hash_to_query_id(hash(&q2));
 
         let r1 = cache.query(&h1).unwrap();
         let r2 = cache.query(&h2).unwrap();
