@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use clap::Parser;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
+use launchpad::futures::abort_on_panic;
 use launchpad::redacted::RedactedString;
 use maplit::hashmap;
 use metrics::SharedString;
@@ -553,7 +554,7 @@ where
                 migration_handler.run().await
             };
 
-            rt.handle().spawn(fut);
+            rt.handle().spawn(abort_on_panic(fut));
         }
 
         if options.explicit_migrations {
@@ -570,7 +571,7 @@ where
                 );
                 outputs_synchronizer.run().await
             };
-            rt.handle().spawn(fut);
+            rt.handle().spawn(abort_on_panic(fut));
         }
 
         // Spin up async task that is in charge of creating a session with the authority,
