@@ -38,6 +38,7 @@ readyset-tracing = { path = "../readyset-tracing" }
 mysql-time = { path = "../mysql-time" }
 readyset-data = { path = "../readyset-data" }
 database-utils = { path = "../database-utils" }
+test-utils = { path = "../test-utils" }
 
 [dev-dependencies]
 readyset-server = { path = "../readyset-server" }

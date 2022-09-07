@@ -11,6 +11,7 @@ use readyset::{ControllerHandle, ReadySetError, ReadySetResult};
 use readyset_data::{DfValue, TinyText};
 use readyset_server::Builder;
 use replicators::{Config, NoriaAdapter};
+use test_utils::slow;
 use tracing::{error, trace};
 
 const MAX_ATTEMPTS: usize = 40;
@@ -404,38 +405,44 @@ async fn mysql_replication() -> ReadySetResult<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn pgsql_replication_catch_up() -> ReadySetResult<()> {
-    replication_catch_up_inner(&pgsql_url()).await
+#[slow]
+async fn pgsql_replication_catch_up() {
+    replication_catch_up_inner(&pgsql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn mysql_replication_catch_up() -> ReadySetResult<()> {
-    replication_catch_up_inner(&mysql_url()).await
+#[slow]
+async fn mysql_replication_catch_up() {
+    replication_catch_up_inner(&mysql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn pgsql_replication_many_tables() -> ReadySetResult<()> {
-    replication_many_tables_inner(&pgsql_url()).await
+#[slow]
+async fn pgsql_replication_many_tables() {
+    replication_many_tables_inner(&pgsql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn mysql_replication_many_tables() -> ReadySetResult<()> {
-    replication_many_tables_inner(&mysql_url()).await
+#[slow]
+async fn mysql_replication_many_tables() {
+    replication_many_tables_inner(&mysql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn pgsql_replication_big_tables() -> ReadySetResult<()> {
-    replication_big_tables_inner(&pgsql_url()).await
+#[slow]
+async fn pgsql_replication_big_tables() {
+    replication_big_tables_inner(&pgsql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
-async fn mysql_replication_big_tables() -> ReadySetResult<()> {
-    replication_big_tables_inner(&mysql_url()).await
+#[slow]
+async fn mysql_replication_big_tables() {
+    replication_big_tables_inner(&mysql_url()).await.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]

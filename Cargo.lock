@@ -4352,6 +4352,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "test-utils",
  "tokio",
  "tokio-postgres",
  "tracing",
