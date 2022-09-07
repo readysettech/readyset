@@ -209,6 +209,7 @@ pub struct Backend {
 }
 
 impl Backend {
+    #[allow(dead_code)]
     pub fn new(noria: readyset_client::Backend<MySqlUpstream, MySqlQueryHandler>) -> Self {
         Backend {
             noria,
