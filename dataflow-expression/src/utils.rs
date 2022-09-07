@@ -1,4 +1,4 @@
-use nom_sql::SqlType;
+use nom_sql::Dialect;
 use readyset_data::{DfType, DfValue};
 
 use crate::{BuiltinFunction, Expr};
@@ -21,7 +21,7 @@ pub fn make_column(index: usize) -> Expr {
 ///
 /// Not intended for use outside of tests
 pub fn make_int_column(index: usize) -> Expr {
-    column_with_type(index, DfType::Sql(SqlType::Int(None)))
+    column_with_type(index, DfType::Int)
 }
 
 /// Create `Expr::Column` with `DfType` ty.
@@ -35,7 +35,7 @@ pub fn column_with_type(index: usize, ty: DfType) -> Expr {
 pub fn make_literal(val: DfValue) -> Expr {
     Expr::Literal {
         val: val.clone(),
-        ty: val.sql_type().into(),
+        ty: val.infer_dataflow_type(Dialect::MySQL),
     }
 }
 

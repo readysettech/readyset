@@ -25,7 +25,7 @@ use dataflow::utils::{dataflow_column, make_columns};
 use dataflow::{DurabilityMode, Expr as DfExpr, PersistenceParameters, ReaderProcessing};
 use futures::StreamExt;
 use itertools::Itertools;
-use nom_sql::{parse_query, BinaryOperator, Dialect, OrderType, Relation, SqlQuery, SqlType};
+use nom_sql::{parse_query, BinaryOperator, Dialect, OrderType, Relation, SqlQuery};
 use readyset::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset::consistency::Timestamp;
 use readyset::internal::LocalNodeIndex;
@@ -4981,14 +4981,14 @@ async fn post_read_ilike() {
             filter: Some(DfExpr::Op {
                 left: Box::new(DfExpr::Column {
                     index: 0,
-                    ty: DfType::Sql(SqlType::Text),
+                    ty: DfType::Text,
                 }),
                 op: BinaryOperator::ILike,
                 right: Box::new(DfExpr::Literal {
                     val: "%a%".into(),
-                    ty: DfType::Sql(SqlType::Text),
+                    ty: DfType::Text,
                 }),
-                ty: DfType::Sql(SqlType::Bool),
+                ty: DfType::Bool,
             }),
             timestamp: None,
             limit: None,

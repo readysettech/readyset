@@ -18,7 +18,7 @@ use itertools::Itertools;
 use launchpad::arbitrary::{arbitrary_decimal, arbitrary_duration};
 use mysql_time::MysqlTime;
 use ndarray::{ArrayD, IxDyn};
-use nom_sql::{Double, Float, Literal, SqlType};
+use nom_sql::{Dialect, Double, Float, Literal, SqlType};
 use proptest::prelude::{prop_oneof, Arbitrary};
 use readyset_errors::{internal, invalid_err, unsupported, ReadySetError, ReadySetResult};
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
@@ -363,6 +363,40 @@ impl DfValue {
         }
     }
 
+    /// Returns a guess for the [`DfType`] that can represent this [`DfValue`].
+    pub fn infer_dataflow_type(&self, dialect: Dialect) -> DfType {
+        use DfType::*;
+
+        match self {
+            Self::None | Self::PassThrough(_) | Self::Max => Unknown,
+            Self::Int(_) => BigInt,
+            Self::UnsignedInt(_) => UnsignedBigInt,
+            Self::Float(_) => Float(dialect),
+            Self::Double(_) => Double,
+            Self::Text(_) | Self::TinyText(_) => Text,
+            Self::TimestampTz(ts) => {
+                let fsp = u16::from(ts.get_microsecond_precision());
+                if ts.has_timezone() {
+                    TimestampTz(fsp)
+                } else {
+                    Timestamp(fsp)
+                }
+            }
+            // TODO(ENG-1833): Make this based off of the time value.
+            Self::Time(_) => Time(dialect.default_datetime_precision()),
+            Self::ByteArray(_) => Blob(dialect),
+            Self::Numeric(_) => DfType::DEFAULT_NUMERIC,
+            Self::BitVector(_) => VarBit(None),
+            Self::Array(array) => Array(Box::new(
+                array
+                    .values()
+                    .map(|v| v.infer_dataflow_type(dialect))
+                    .find(DfType::is_known)
+                    .unwrap_or_default(),
+            )),
+        }
+    }
+
     /// Attempt to coerce the given DfValue to a value of the given `SqlType`.
     ///
     /// Currently, this entails:
@@ -422,7 +456,7 @@ impl DfValue {
         // necessary if we want to support both u64 and i64 for both UnsignedInt and Int.
         macro_rules! handle_enum_or_coerce_int {
             ($v:expr, $to_ty:expr, $from_ty:expr) => {
-                if let DfType::Sql(SqlType::Enum(enum_elements)) = $from_ty {
+                if let DfType::Enum(enum_elements, _) = $from_ty {
                     // This will either be u64 or i64, and if it's i64 then negative values will be
                     // converted to 0 anyway, so unwrap_or_default gets us what we want here:
                     let enum_val = u64::try_from(*$v).unwrap_or_default();
@@ -473,12 +507,15 @@ impl DfValue {
     /// Mutates the given DfType value to match its underlying database representation for the
     /// given column schema.
     pub fn maybe_coerce_for_table_op(&mut self, col_ty: &DfType) {
-        if let DfType::Sql(enum_ty @ SqlType::Enum(_)) = col_ty {
+        if let DfType::Enum(enum_ty, _) = col_ty {
+            // PERF: Cloning enum types is O(1).
+            let enum_ty = SqlType::Enum(enum_ty.clone());
+
             // There shouldn't be any cases where this coerce_to call returns an error, but if
             // it does then a value of 0 is generally a safe bet for enum values that don't
             // trigger the happy path:
             *self = self
-                .coerce_to(enum_ty, &DfType::Unknown)
+                .coerce_to(&enum_ty, &DfType::Unknown)
                 .unwrap_or(DfValue::Int(0));
         }
     }
@@ -3525,7 +3562,7 @@ mod tests {
             let enum_ty = SqlType::from_enum_variants(
                 variants.iter().map(|s| Literal::String(s.to_string())),
             );
-            let from_ty = DfType::Sql(enum_ty.clone());
+            let from_ty = DfType::from_sql_type(&enum_ty, Dialect::MySQL);
 
             // Test conversions from enums to strings
             for dv in [DfValue::Int(2), DfValue::UnsignedInt(2)] {
@@ -3609,19 +3646,18 @@ mod tests {
 
             // Test coercion from enum to text types with length limits
 
-            let enum_df_ty = DfType::Sql(enum_ty);
             let result = DfValue::Int(2)
-                .coerce_to(&SqlType::Char(Some(3)), &enum_df_ty)
+                .coerce_to(&SqlType::Char(Some(3)), &from_ty)
                 .unwrap();
             assert_eq!("yel", result.to_string());
 
             let result = DfValue::Int(2)
-                .coerce_to(&SqlType::VarChar(Some(3)), &enum_df_ty)
+                .coerce_to(&SqlType::VarChar(Some(3)), &from_ty)
                 .unwrap();
             assert_eq!("yel", result.to_string());
 
             let result = DfValue::Int(2)
-                .coerce_to(&SqlType::Char(Some(10)), &enum_df_ty)
+                .coerce_to(&SqlType::Char(Some(10)), &from_ty)
                 .unwrap();
             assert_eq!("yellow    ", result.to_string());
 
@@ -3636,7 +3672,7 @@ mod tests {
             ];
 
             for to_ty in no_change_tys {
-                let result = DfValue::Int(2).coerce_to(&to_ty, &enum_df_ty).unwrap();
+                let result = DfValue::Int(2).coerce_to(&to_ty, &from_ty).unwrap();
                 assert_eq!("yellow", result.to_string());
             }
         }

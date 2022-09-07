@@ -1,6 +1,7 @@
 use dataflow::prelude::*;
-use nom_sql::{Column, ColumnSpecification, SqlType};
+use nom_sql::{Column, ColumnSpecification};
 use readyset::{ColumnBase, ColumnSchema};
+use readyset_data::DfType;
 use tracing::trace;
 
 use super::keys::provenance_of;
@@ -14,8 +15,7 @@ type Path<'a> = &'a [(
 fn type_for_internal_column(
     node: &dataflow::node::Node,
     column_index: usize,
-) -> ReadySetResult<Option<SqlType>> {
-    // TODO: Replace Option<SqlType> with Type
+) -> ReadySetResult<&DfType> {
     Ok(node
         .columns()
         .get(column_index)
@@ -26,12 +26,10 @@ fn type_for_internal_column(
                 column_index
             )
         })?
-        .ty()
-        .clone()
-        .into())
+        .ty())
 }
 
-fn trace_column_type_on_path(path: Path, graph: &Graph) -> ReadySetResult<Option<SqlType>> {
+fn trace_column_type_on_path<'g>(path: Path, graph: &'g Graph) -> ReadySetResult<&'g DfType> {
     // column originates at last element of the path whose second element is not None
     if let Some(pos) = path.iter().rposition(|e| e.1.iter().any(Option::is_some)) {
         let (ni, cols) = &path[pos];
@@ -44,7 +42,7 @@ fn trace_column_type_on_path(path: Path, graph: &Graph) -> ReadySetResult<Option
         let source_column_index = cols[0].unwrap();
         type_for_internal_column(source_node, source_column_index)
     } else {
-        Ok(None)
+        Ok(&DfType::Unknown)
     }
 }
 
@@ -92,32 +90,37 @@ pub(super) fn column_schema(
     let paths = provenance_of(graph, view, &[column_index])?;
     let vn = &graph[view];
 
-    let mut col_type = None;
+    let mut col_type = &DfType::Unknown;
     let mut col_base = None;
     for ref p in paths {
         trace!("considering path {:?}", p);
-        if let t @ Some(_) = trace_column_type_on_path(p, graph)? {
-            col_type = t;
+
+        let ty = trace_column_type_on_path(p, graph)?;
+        if !ty.is_unknown() {
+            col_type = ty;
             col_base = get_base_for_column(p, graph, recipe)?;
         }
     }
 
-    if let Some(col_type) = col_type {
-        // found something, so return a ColumnSpecification
-        let cs = ColumnSpecification::new(
-            Column {
-                name: vn.columns()[column_index].name().into(),
-                table: Some(vn.name().to_owned()),
-            },
-            // ? in case we found no schema for this column
-            col_type,
-        );
+    // XXX: Lossy conversion. This is fine for now since column info is already broken.
+    // TODO(ENG-1836): Make return value use `DfType`.
+    let col_type = match col_type.to_sql_type() {
+        Some(ty) => ty,
+        None => return Ok(None),
+    };
 
-        Ok(Some(ColumnSchema {
-            spec: cs,
-            base: col_base,
-        }))
-    } else {
-        Ok(None)
-    }
+    // found something, so return a ColumnSpecification
+    let cs = ColumnSpecification::new(
+        Column {
+            name: vn.columns()[column_index].name().into(),
+            table: Some(vn.name().clone()),
+        },
+        // ? in case we found no schema for this column
+        col_type,
+    );
+
+    Ok(Some(ColumnSchema {
+        spec: cs,
+        base: col_base,
+    }))
 }

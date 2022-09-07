@@ -52,6 +52,7 @@ pub enum SqlType {
     Text,
     Date,
     DateTime(#[strategy(proptest::option::of(1..=6u16))] Option<u16>),
+    // FIXME(ENG-1832): Parse fractional seconds part (FSP).
     Time,
     Timestamp,
     TimestampTz,
@@ -102,7 +103,7 @@ impl SqlType {
     pub fn from_enum_variants<I>(variants: I) -> Self
     where
         I: IntoIterator<Item = Literal>,
-        I::IntoIter: ExactSizeIterator,
+        I::IntoIter: ExactSizeIterator, // required by `triomphe::ThinArc`
     {
         Self::Enum(variants.into())
     }
@@ -115,6 +116,27 @@ impl SqlType {
             self,
             Text | TinyText | MediumText | LongText | Char(_) | VarChar(_)
         )
+    }
+
+    /// Returns the deepest nested type in [`SqlType::Array`], otherwise returns `self`.
+    #[inline]
+    pub fn innermost_array_type(&self) -> &Self {
+        let mut current = self;
+        while let Self::Array(ty) = current {
+            current = ty;
+        }
+        current
+    }
+}
+
+/// Test helpers.
+impl SqlType {
+    /// Nests this type into an array with the given dimension count.
+    pub fn nest_in_array(mut self, dimen: usize) -> Self {
+        for _ in 0..dimen {
+            self = Self::Array(Box::new(self));
+        }
+        self
     }
 }
 
@@ -710,6 +732,23 @@ mod tests {
             let res = type_identifier(dialect)(b"json");
             assert!(res.is_ok());
             assert_eq!(res.unwrap().1, SqlType::Json);
+        }
+    }
+
+    #[test]
+    fn innermost_array_type() {
+        fn nest_array(mut ty: SqlType, dimen: usize) -> SqlType {
+            for _ in 0..dimen {
+                ty = SqlType::Array(Box::new(ty));
+            }
+            ty
+        }
+
+        for ty in [SqlType::Text, SqlType::Bool, SqlType::Double] {
+            for dimen in 0..=5 {
+                let arr = nest_array(ty.clone(), dimen);
+                assert_eq!(arr.innermost_array_type(), &ty);
+            }
         }
     }
 

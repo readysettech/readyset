@@ -9,8 +9,8 @@ use dataflow_expression::Expr as DfExpr;
 use itertools::Itertools;
 use launchpad::redacted::Sensitive;
 use nom_sql::{
-    self, BinaryOperator, ColumnConstraint, DeleteStatement, Expr, InsertStatement, Relation,
-    SqlIdentifier, SqlQuery, SqlType, UnaryOperator, UpdateStatement,
+    self, BinaryOperator, ColumnConstraint, DeleteStatement, Dialect, Expr, InsertStatement,
+    Relation, SqlIdentifier, SqlQuery, SqlType, UnaryOperator, UpdateStatement,
 };
 use readyset::consistency::Timestamp;
 use readyset::internal::LocalNodeIndex;
@@ -1512,6 +1512,9 @@ fn build_view_query(
     ticket: Option<Timestamp>,
     read_behavior: ReadBehavior,
 ) -> ReadySetResult<ViewQuery> {
+    // TODO(ENG-1418): Propagate dialect info.
+    let dialect = Dialect::MySQL;
+
     let projected_schema = getter_schema.schema(SchemaType::ProjectedSchema);
 
     let (limit, offset) = processed_query_params.limit_offset_params(params)?;
@@ -1555,14 +1558,14 @@ fn build_view_query(
             Ok(DfExpr::Op {
                 left: Box::new(DfExpr::Column {
                     index: column,
-                    ty: key_type.clone().into(),
+                    ty: DfType::from_sql_type(key_type, dialect),
                 }),
                 op: *op,
                 right: Box::new(DfExpr::Literal {
                     val: value,
-                    ty: key_type.clone().into(),
+                    ty: DfType::from_sql_type(key_type, dialect),
                 }),
-                ty: DfType::Sql(SqlType::Bool),
+                ty: DfType::Bool,
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -1580,11 +1583,11 @@ fn build_view_query(
         let binop_to_use = unique_binops.next().unwrap_or(BinaryOperator::Equal);
         let mixed_binops = unique_binops.next().is_some();
 
-        let key_types = key_map
+        let key_types: HashMap<usize, &SqlType> = key_map
             .iter()
             .zip(key_types)
             .map(|((_, key_column_idx), key_type)| (*key_column_idx, key_type))
-            .collect::<HashMap<_, _>>();
+            .collect();
 
         raw_keys
             .into_iter()
@@ -1599,14 +1602,14 @@ fn build_view_query(
                     match view_placeholder {
                         ViewPlaceholder::Generated => continue,
                         ViewPlaceholder::OneToOne(idx) => {
-                            let key_type = if let Some(key_type) = key_types.get(key_column_idx) {
-                                key_type
-                            } else {
-                                // if the key isn't in the list of key types, that means it was
-                                // removed during post-read filter construction (for LIKE/ILIKE)
-                                // above, so just skip it in the lookup key.
-                                continue;
+                            // If the key isn't in the list of key types, that means it was removed
+                            // during post-read filter construction (for LIKE/ILIKE) above, so just
+                            // skip it in the lookup key.
+                            let key_type = match key_types.get(key_column_idx) {
+                                Some(&ty) => ty,
+                                None => continue,
                             };
+
                             // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
                             // also, no from_ty since the key value is a literal
                             let value = key[*idx - 1].coerce_to(key_type, &DfType::Unknown)?;
@@ -1614,14 +1617,14 @@ fn build_view_query(
                             let make_op = |op| DfExpr::Op {
                                 left: Box::new(DfExpr::Column {
                                     index: *key_column_idx,
-                                    ty: (*key_type).clone().into(),
+                                    ty: DfType::from_sql_type(key_type, dialect),
                                 }),
                                 op,
                                 right: Box::new(DfExpr::Literal {
                                     val: value.clone(),
-                                    ty: (*key_type).clone().into(),
+                                    ty: DfType::from_sql_type(key_type, dialect),
                                 }),
-                                ty: DfType::Sql(SqlType::Bool), // TODO: infer type
+                                ty: DfType::Bool, // TODO: infer type
                             };
 
                             if let Some((lower_bound, upper_bound)) = &mut bounds {
@@ -1726,7 +1729,7 @@ fn build_view_query(
             left: Box::new(expr1),
             op: BinaryOperator::And,
             right: Box::new(expr2),
-            ty: DfType::Sql(SqlType::Bool), // AND is a boolean operator
+            ty: DfType::Bool, // AND is a boolean operator
         }),
         limit,
         offset,
@@ -2028,14 +2031,14 @@ mod tests {
                 Some(DfExpr::Op {
                     left: Box::new(DfExpr::Column {
                         index: 1,
-                        ty: DfType::Sql(SqlType::Text)
+                        ty: DfType::Text
                     }),
                     op: BinaryOperator::ILike,
                     right: Box::new(DfExpr::Literal {
                         val: DfValue::from("%a%"),
-                        ty: DfType::Sql(SqlType::Text)
+                        ty: DfType::Text
                     }),
-                    ty: DfType::Sql(SqlType::Bool),
+                    ty: DfType::Bool,
                 })
             );
         }
@@ -2097,14 +2100,14 @@ mod tests {
                 Some(DfExpr::Op {
                     left: Box::new(DfExpr::Column {
                         index: 0,
-                        ty: DfType::Sql(SqlType::Int(None))
+                        ty: DfType::Int
                     }),
                     op: BinaryOperator::Greater,
                     right: Box::new(DfExpr::Literal {
                         val: 1.into(),
-                        ty: DfType::Sql(SqlType::Int(None))
+                        ty: DfType::Int
                     }),
-                    ty: DfType::Sql(SqlType::Bool),
+                    ty: DfType::Bool,
                 })
             );
             assert_eq!(
@@ -2132,14 +2135,14 @@ mod tests {
                 Some(DfExpr::Op {
                     left: Box::new(DfExpr::Column {
                         index: 1,
-                        ty: DfType::Sql(SqlType::Text)
+                        ty: DfType::Text
                     }),
                     op: BinaryOperator::Greater,
                     right: Box::new(DfExpr::Literal {
                         val: "a".into(),
-                        ty: DfType::Sql(SqlType::Text)
+                        ty: DfType::Text
                     }),
-                    ty: DfType::Sql(SqlType::Bool)
+                    ty: DfType::Bool
                 })
             );
 

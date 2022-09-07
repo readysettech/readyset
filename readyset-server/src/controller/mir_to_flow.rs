@@ -22,7 +22,7 @@ use mir::node::{GroupedNodeType, MirNode};
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::{Column, FlowNode, MirNodeRef};
 use nom_sql::{
-    ColumnConstraint, ColumnSpecification, Expr, OrderType, Relation, SqlIdentifier, SqlType,
+    ColumnConstraint, ColumnSpecification, Dialect, Expr, OrderType, Relation, SqlIdentifier,
 };
 use petgraph::graph::NodeIndex;
 use readyset::internal::{Index, IndexType};
@@ -395,6 +395,9 @@ fn adapt_base_node(
     add: &[ColumnSpecification],
     remove: &[ColumnSpecification],
 ) -> ReadySetResult<FlowNode> {
+    // TODO(ENG-1418): Propagate dialect info.
+    let dialect = Dialect::MySQL;
+
     let na = match over_node.borrow().flow_node {
         None => internal!("adapted base node must have a flow node already!"),
         Some(ref flow_node) => flow_node.address(),
@@ -408,7 +411,8 @@ fn adapt_base_node(
                 break;
             }
         }
-        let column_id = mig.add_column(na, DfColumn::from(a.clone()), default_value)?;
+        let column_id =
+            mig.add_column(na, DfColumn::from_spec(a.clone(), dialect), default_value)?;
 
         // store the new column ID in the column specs for this node
         for &mut (ref cs, ref mut cid) in column_specs.iter_mut() {
@@ -453,6 +457,9 @@ fn make_base_node(
     unique_keys: &[Box<[Column]>],
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
+    // TODO(ENG-1418): Propagate dialect info.
+    let dialect = Dialect::MySQL;
+
     // remember the absolute base column ID for potential later removal
     for (i, cs) in column_specs.iter_mut().enumerate() {
         cs.1 = Some(i);
@@ -460,7 +467,7 @@ fn make_base_node(
 
     let columns: Vec<DfColumn> = column_specs
         .iter()
-        .map(|&(ref cs, _)| cs.clone().into())
+        .map(|&(ref cs, _)| DfColumn::from_spec(cs.clone(), dialect))
         .collect();
 
     // note that this defaults to a "None" (= NULL) default value for columns that do not have one
@@ -632,6 +639,9 @@ fn make_grouped_node(
         .ok_or_else(|| internal_err!("Grouped has no projections"))?
         .name;
 
+    let make_agg_col =
+        |ty: DfType| -> DfColumn { DfColumn::new(over_col_name.clone(), ty, Some(name.clone())) };
+
     let na = match kind {
         // This is the product of an incomplete refactor. It simplifies MIR to consider Group_Concat
         // to be an aggregation, however once we are in dataflow land the logic has not been
@@ -639,11 +649,7 @@ fn make_grouped_node(
         // aggregation before we pattern match for a generic aggregation.
         GroupedNodeType::Aggregation(Aggregation::GroupConcat { separator: sep }) => {
             let gc = GroupConcat::new(parent_na, over_col_indx, group_col_indx, sep)?;
-            let agg_col = DfColumn::new(
-                over_col_name.clone(),
-                SqlType::Text.into(),
-                Some(name.clone()),
-            );
+            let agg_col = make_agg_col(DfType::Text);
             cols.push(agg_col);
             set_names(&column_names(columns), &mut cols)?;
             mig.add_ingredient(name, cols, gc)
@@ -655,32 +661,14 @@ fn make_grouped_node(
                 group_col_indx.as_slice(),
                 over_col_ty,
             )?;
-            let agg_col = grouped
-                .output_col_type()
-                .map(|ty| DfColumn::new(over_col_name.clone(), ty.into(), Some(name.clone())))
-                .unwrap_or_else(|| {
-                    DfColumn::new(
-                        over_col_name.clone(),
-                        over_col_ty.clone(),
-                        Some(name.clone()),
-                    )
-                });
+            let agg_col = make_agg_col(grouped.output_col_type().or_ref(over_col_ty).clone());
             cols.push(agg_col);
             set_names(&column_names(columns), &mut cols)?;
             mig.add_ingredient(name, cols, grouped)
         }
         GroupedNodeType::Extremum(extr) => {
             let grouped = extr.over(parent_na, over_col_indx, group_col_indx.as_slice());
-            let agg_col = grouped
-                .output_col_type()
-                .map(|ty| DfColumn::new(over_col_name.clone(), ty.into(), Some(name.clone())))
-                .unwrap_or_else(|| {
-                    DfColumn::new(
-                        over_col_name.clone(),
-                        over_col_ty.clone(),
-                        Some(name.clone()),
-                    )
-                });
+            let agg_col = make_agg_col(grouped.output_col_type().or_ref(over_col_ty).clone());
             cols.push(agg_col);
             set_names(&column_names(columns), &mut cols)?;
             mig.add_ingredient(name, cols, grouped)
@@ -810,7 +798,7 @@ fn make_join_node(
         emit.push(JoinSource::B(left_col_idx, right_col_idx));
         cols.push(DfColumn::new(
             "cross_join_bogokey".into(),
-            SqlType::BigInt(None).into(),
+            DfType::BigInt,
             Some(name.clone()),
         ));
     }
@@ -960,6 +948,9 @@ fn make_project_node(
     literals: &[(SqlIdentifier, DfValue)],
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<FlowNode> {
+    // TODO(ENG-1418): Propagate dialect info.
+    let dialect = Dialect::MySQL;
+
     let parent_na = parent.borrow().flow_node_addr()?;
     #[allow(clippy::indexing_slicing)] // just got the address
     let parent_cols = mig.dataflow_state.ingredients[parent_na].columns();
@@ -1010,7 +1001,7 @@ fn make_project_node(
 
     let literal_types = literal_values
         .iter()
-        .map(|l| l.sql_type().into())
+        .map(|l| l.infer_dataflow_type(dialect))
         .collect::<Vec<_>>();
 
     cols.extend(
@@ -1076,7 +1067,7 @@ fn make_distinct_node(
         .clone();
     cols.push(DfColumn::new(
         distinct_count_name,
-        SqlType::BigInt(None).into(),
+        DfType::BigInt,
         Some(name.clone()),
     ));
     set_names(&column_names(columns), &mut cols)?;
@@ -1130,7 +1121,7 @@ fn make_paginate_or_topk_node(
         #[allow(clippy::unwrap_used)] // column_names must be populated
         parent_cols.push(DfColumn::new(
             column_names.last().unwrap().into(),
-            SqlType::BigInt(None).into(),
+            DfType::BigInt,
             Some(name.clone()),
         ));
     }

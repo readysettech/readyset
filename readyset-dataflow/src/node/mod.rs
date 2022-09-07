@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use nom_sql::{Relation, SqlIdentifier};
+use nom_sql::{ColumnSpecification, Dialect, Relation, SqlIdentifier};
 use readyset::consistency::Timestamp;
 use readyset_data::DfType;
 use serde::{Deserialize, Serialize};
@@ -47,6 +47,16 @@ impl Column {
         Self { name, ty, source }
     }
 
+    /// Creates a dataflow column from the [`nom_sql`] specification.
+    #[inline]
+    pub fn from_spec(spec: ColumnSpecification, dialect: Dialect) -> Self {
+        Self::new(
+            spec.column.name,
+            DfType::from_sql_type(&spec.sql_type, dialect),
+            spec.column.table,
+        )
+    }
+
     /// Column name
     pub fn name(&self) -> &str {
         self.name.as_str()
@@ -65,16 +75,6 @@ impl Column {
     /// Sets this column's name
     pub fn set_name(&mut self, name: SqlIdentifier) {
         self.name = name;
-    }
-}
-
-impl From<nom_sql::ColumnSpecification> for Column {
-    fn from(col: nom_sql::ColumnSpecification) -> Self {
-        Self {
-            name: col.column.name,
-            ty: col.sql_type.into(),
-            source: col.column.table,
-        }
     }
 }
 

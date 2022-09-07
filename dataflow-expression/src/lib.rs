@@ -11,7 +11,7 @@ use std::fmt::Formatter;
 use itertools::Itertools;
 use launchpad::redacted::Sensitive;
 use nom_sql::{
-    BinaryOperator, Column, Expr as AstExpr, FunctionExpr, InValue, SqlType, UnaryOperator,
+    BinaryOperator, Column, Dialect, Expr as AstExpr, FunctionExpr, InValue, SqlType, UnaryOperator,
 };
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
@@ -52,27 +52,24 @@ impl BuiltinFunction {
         A: IntoIterator<Item = Expr>,
     {
         fn type_for_round(expr: &Expr, _precision: &Expr) -> DfType {
-            match expr.ty() {
-                DfType::Sql(ty) => match ty {
-                    // When the first argument is of any integer type, the return type is always
-                    // BIGINT.
-                    SqlType::TinyInt(_)
-                    | SqlType::UnsignedTinyInt(_)
-                    | SqlType::SmallInt(_)
-                    | SqlType::UnsignedSmallInt(_)
-                    | SqlType::Int(_)
-                    | SqlType::UnsignedInt(_)
-                    | SqlType::BigInt(_)
-                    | SqlType::UnsignedBigInt(_) => DfType::Sql(SqlType::BigInt(None)),
-                    // When the first argument is a DECIMAL value, the return type is also DECIMAL.
-                    SqlType::Decimal(_, _) => expr.ty().clone(),
-                    // When the first argument is of any floating-point type or of any non-numeric
-                    // type, the return type is always DOUBLE.
-                    _ => DfType::Sql(SqlType::Double),
-                },
-                DfType::Unknown => DfType::Unknown,
+            use DfType::*;
+            match *expr.ty() {
+                Unknown => Unknown,
+
+                // When the first argument is a DECIMAL value, the return type is also DECIMAL.
+                Numeric { prec, scale } => Numeric { prec, scale },
+
+                // When the first argument is of any integer type, the return type is always BIGINT.
+                ref ty if ty.is_any_int() => BigInt,
+
+                // When the first argument is of any floating-point or non-numeric type, the return
+                // type is always DOUBLE.
+                _ => Double,
             }
         }
+
+        // TODO(ENG-1418): Propagate dialect info.
+        let dialect = Dialect::MySQL;
 
         let arity_error = || ReadySetError::ArityError(name.to_owned());
 
@@ -89,7 +86,7 @@ impl BuiltinFunction {
             "dayofweek" => {
                 Ok((
                     Self::DayOfWeek(next_arg()?),
-                    DfType::Sql(SqlType::Int(None)), // Day of week is always an int
+                    DfType::Int, // Day of week is always an int
                 ))
             }
             "ifnull" => {
@@ -102,13 +99,14 @@ impl BuiltinFunction {
             "month" => {
                 Ok((
                     Self::Month(next_arg()?),
-                    DfType::Sql(SqlType::Int(None)), // Month is always an int
+                    DfType::Int, // Month is always an int
                 ))
             }
             "timediff" => {
                 Ok((
                     Self::Timediff(next_arg()?, next_arg()?),
-                    DfType::Sql(SqlType::Time), // type is always time
+                    // type is always time
+                    DfType::Time(dialect.default_datetime_precision()),
                 ))
             }
             "addtime" => {
@@ -120,7 +118,7 @@ impl BuiltinFunction {
                 let expr = next_arg()?;
                 let prec = args.next().unwrap_or(Expr::Literal {
                     val: DfValue::Int(0),
-                    ty: DfType::Sql(SqlType::Int(None)),
+                    ty: DfType::Int,
                 });
                 let ty = type_for_round(&expr, &prec);
                 Ok((Self::Round(expr, prec), ty))
@@ -129,14 +127,14 @@ impl BuiltinFunction {
                 Ok((
                     Self::JsonTypeof(next_arg()?),
                     // Always returns text containing the JSON type.
-                    DfType::Sql(SqlType::Text),
+                    DfType::Text,
                 ))
             }
             "jsonb_typeof" => {
                 Ok((
                     Self::JsonbTypeof(next_arg()?),
                     // Always returns text containing the JSON type.
-                    DfType::Sql(SqlType::Text),
+                    DfType::Text,
                 ))
             }
             "coalesce" => {
@@ -295,8 +293,8 @@ impl fmt::Display for Expr {
 }
 
 impl Expr {
-    /// Lower the given nom_sql AST expression to a dataflow expression, given a function to lookup
-    /// the index and type of a column by name.
+    /// Lower the given [`nom_sql`] AST expression to a dataflow expression, given a function to
+    /// look up the index and type of a column by name.
     ///
     /// Currently, this involves:
     ///
@@ -313,6 +311,9 @@ impl Expr {
     where
         F: FnMut(Column) -> ReadySetResult<(usize, DfType)> + Copy,
     {
+        // TODO(ENG-1418): Propagate dialect info.
+        let dialect = Dialect::MySQL;
+
         match expr {
             AstExpr::Call(FunctionExpr::Call {
                 name: fname,
@@ -335,7 +336,7 @@ impl Expr {
             AstExpr::Literal(lit) => {
                 let val: DfValue = lit.try_into()?;
                 // TODO: Infer type from SQL
-                let ty = val.sql_type().into();
+                let ty = val.infer_dataflow_type(dialect);
 
                 Ok(Self::Literal { val, ty })
             }
@@ -366,7 +367,7 @@ impl Expr {
                     left,
                     right: Box::new(Self::Literal {
                         val: DfValue::Int(-1),
-                        ty: DfType::Sql(SqlType::Int(None)),
+                        ty: DfType::Int,
                     }),
                     ty,
                 })
@@ -379,14 +380,14 @@ impl Expr {
                 left: Box::new(Self::lower(*rhs, resolve_column)?),
                 right: Box::new(Self::Literal {
                     val: DfValue::Int(1),
-                    ty: DfType::Sql(SqlType::Int(None)),
+                    ty: DfType::Int,
                 }),
-                ty: DfType::Sql(SqlType::Bool), // type of NE is always bool
+                ty: DfType::Bool, // type of NE is always bool
             }),
             AstExpr::Cast { expr, ty, .. } => Ok(Self::Cast {
                 expr: Box::new(Self::lower(*expr, resolve_column)?),
-                to_type: ty.clone(),
-                ty: ty.into(),
+                ty: DfType::from_sql_type(&ty, dialect),
+                to_type: ty,
             }),
             AstExpr::CaseWhen {
                 condition,
@@ -428,7 +429,7 @@ impl Expr {
                             left: Box::new(lhs.clone()),
                             op: comparison_op,
                             right: Box::new(Self::lower(rhs, resolve_column)?),
-                            ty: DfType::Sql(SqlType::Bool), // type of =/!= is always bool
+                            ty: DfType::Bool, // type of =/!= is always bool
                         })
                     };
 
@@ -437,20 +438,20 @@ impl Expr {
                             left: Box::new(acc),
                             op: logical_op,
                             right: Box::new(make_comparison(rhs)?),
-                            ty: DfType::Sql(SqlType::Bool), // type of =/!= is always bool
+                            ty: DfType::Bool, // type of =/!= is always bool
                         })
                     })
                 } else if negated {
                     // x IN () is always false
                     Ok(Self::Literal {
                         val: DfValue::None,
-                        ty: DfType::Sql(SqlType::Bool),
+                        ty: DfType::Bool,
                     })
                 } else {
                     // x NOT IN () is always false
                     Ok(Self::Literal {
                         val: DfValue::from(1),
-                        ty: DfType::Sql(SqlType::Bool),
+                        ty: DfType::Bool,
                     })
                 }
             }
@@ -486,7 +487,7 @@ mod tests {
             let input = AstExpr::Column("t.x".into());
             let result = Expr::lower(input, |c| {
                 if c == "t.x".into() {
-                    Ok((0, DfType::Sql(SqlType::Int(None))))
+                    Ok((0, DfType::Int))
                 } else {
                     internal!("what's this column!?")
                 }
@@ -496,7 +497,7 @@ mod tests {
                 result,
                 Expr::Column {
                     index: 0,
-                    ty: DfType::Sql(SqlType::Int(None))
+                    ty: DfType::Int
                 }
             );
         }
@@ -510,7 +511,7 @@ mod tests {
 
             let result = Expr::lower(input, |c| {
                 if c == "t.x".into() {
-                    Ok((0, DfType::Sql(SqlType::Int(None))))
+                    Ok((0, DfType::Int))
                 } else {
                     internal!("what's this column!?")
                 }
@@ -523,14 +524,14 @@ mod tests {
                     func: Box::new(BuiltinFunction::Coalesce(
                         Expr::Column {
                             index: 0,
-                            ty: DfType::Sql(SqlType::Int(None))
+                            ty: DfType::Int
                         },
                         vec![Expr::Literal {
                             val: 2.into(),
-                            ty: DfType::Sql(SqlType::BigInt(None))
+                            ty: DfType::BigInt
                         }]
                     )),
-                    ty: DfType::Sql(SqlType::Int(None))
+                    ty: DfType::Int
                 }
             );
         }

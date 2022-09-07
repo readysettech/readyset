@@ -521,7 +521,7 @@ mod tests {
         let expr = Cast {
             expr: Box::new(make_column(0)),
             to_type: SqlType::Int(None),
-            ty: DfType::Sql(SqlType::Int(None)),
+            ty: DfType::Int,
         };
         assert_eq!(
             expr.eval::<DfValue>(&["1".try_into().unwrap(), "2".try_into().unwrap()])
@@ -1226,7 +1226,7 @@ mod tests {
                     },
                     vec![Expr::Literal {
                         val: 1.into(),
-                        ty: DfType::Sql(SqlType::Int(None)),
+                        ty: DfType::Int,
                     }],
                 )),
                 ty: DfType::Unknown,
@@ -1252,7 +1252,7 @@ mod tests {
                         },
                         Expr::Literal {
                             val: 1.into(),
-                            ty: DfType::Sql(SqlType::Int(None)),
+                            ty: DfType::Int,
                         },
                     ],
                 )),

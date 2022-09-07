@@ -256,7 +256,7 @@ impl Ingredient for Project {
 mod tests {
     use dataflow_expression::utils::{make_int_column, make_literal};
     use dataflow_state::MaterializedNodeState;
-    use nom_sql::{BinaryOperator, SqlType};
+    use nom_sql::BinaryOperator;
     use readyset_data::DfType;
     use Expr::Op;
 
@@ -306,7 +306,7 @@ mod tests {
             left: Box::new(make_int_column(0)),
             right: Box::new(make_int_column(1)),
             op,
-            ty: DfType::Sql(SqlType::Int(None)),
+            ty: DfType::Int,
         };
 
         setup_arithmetic(expression)
@@ -449,7 +449,7 @@ mod tests {
             left: Box::new(make_int_column(0)),
             right: Box::new(make_literal(number)),
             op: BinaryOperator::Multiply,
-            ty: DfType::Sql(SqlType::Int(None)),
+            ty: DfType::Int,
         };
 
         let mut p = setup_arithmetic(expression);
@@ -468,7 +468,7 @@ mod tests {
             left: Box::new(make_literal(a)),
             right: Box::new(make_literal(b)),
             op: BinaryOperator::Divide,
-            ty: DfType::Sql(SqlType::Int(None)),
+            ty: DfType::Int,
         };
 
         let mut p = setup_arithmetic(expression);
@@ -596,7 +596,7 @@ mod tests {
             left: Box::new(make_int_column(0)),
             right: Box::new(make_int_column(1)),
             op: BinaryOperator::Add,
-            ty: DfType::Sql(SqlType::Int(None)),
+            ty: DfType::Int,
         }]);
 
         let state = MaterializedNodeState::Memory(MemoryState::default());
@@ -612,7 +612,7 @@ mod tests {
             left: Box::new(make_int_column(0)),
             right: Box::new(make_int_column(1)),
             op: BinaryOperator::Add,
-            ty: DfType::Sql(SqlType::Int(None)),
+            ty: DfType::Int,
         }]);
 
         let state = MaterializedNodeState::Persistent(PersistentState::new(
@@ -634,10 +634,10 @@ mod tests {
                 left: Box::new(make_int_column(0)),
                 right: Box::new(make_int_column(1)),
                 op: BinaryOperator::Add,
-                ty: DfType::Sql(SqlType::Int(None)),
+                ty: DfType::Int,
             }),
             right: Box::new(make_literal(DfValue::Int(2))),
-            ty: DfType::Sql(SqlType::Int(None)),
+            ty: DfType::Int,
         };
 
         let state = MaterializedNodeState::Persistent(PersistentState::new(

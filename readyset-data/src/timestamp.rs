@@ -76,7 +76,7 @@ impl TimestampTz {
 
     /// Returns true if timezone should be displayed
     #[inline(always)]
-    fn has_timezone(&self) -> bool {
+    pub fn has_timezone(&self) -> bool {
         self.extra[2] & TimestampTz::TIMEZONE_FLAG != 0
     }
 
@@ -129,7 +129,7 @@ impl TimestampTz {
 
     /// Return the desired precison when displaying sub microseconds
     #[inline(always)]
-    fn get_microsecond_precision(&self) -> u8 {
+    pub fn get_microsecond_precision(&self) -> u8 {
         (self.extra[2] & TimestampTz::MICROSECONDS_BITS)
             >> TimestampTz::MICROSECONDS_BITS.trailing_zeros()
     }
@@ -336,6 +336,7 @@ impl TimestampTz {
                 Ok(DfValue::TimestampTz(ts_tz))
             }
             SqlType::DateTime(precision) => {
+                // TODO(ENG-1834): Use `DfType` so that we use the correct default precision.
                 let mut ts = *self;
                 ts.set_microsecond_precision(precision.unwrap_or(0) as u8);
                 Ok(DfValue::TimestampTz(ts))

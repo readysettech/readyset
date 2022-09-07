@@ -38,21 +38,18 @@ impl Aggregation {
         over_col_ty: &DfType,
     ) -> ReadySetResult<GroupedOperator<Aggregator>> {
         let out_ty = match &self {
-            Aggregation::Count { .. } => Some(SqlType::BigInt(None)),
+            Aggregation::Count { .. } => DfType::BigInt,
             // The SUM() and AVG() functions return a DECIMAL value for exact-value arguments
             // (integer or DECIMAL), and a DOUBLE value for approximate-value arguments (FLOAT or
             // DOUBLE).
             Aggregation::Sum | Aggregation::Avg => {
-                if matches!(
-                    over_col_ty,
-                    DfType::Sql(SqlType::Float) | DfType::Sql(SqlType::Double)
-                ) {
-                    Some(SqlType::Double)
+                if over_col_ty.is_any_float() {
+                    DfType::Double
                 } else {
-                    Some(SqlType::Decimal(64, 64))
+                    DfType::DEFAULT_NUMERIC
                 }
             }
-            Aggregation::GroupConcat { .. } => Some(SqlType::Text),
+            Aggregation::GroupConcat { .. } => DfType::Text,
         };
 
         Ok(GroupedOperator::new(
@@ -92,7 +89,7 @@ pub struct Aggregator {
     count_sum_map: RefCell<HashMap<GroupHash, AverageDataPair>>,
     over_else: Option<Literal>,
     // Output type of this column
-    out_ty: Option<SqlType>,
+    out_ty: DfType,
 }
 
 /// Diff type for numerical aggregations.
@@ -148,10 +145,10 @@ impl Aggregator {
 
     fn new_data(&self) -> ReadySetResult<DfValue> {
         match &self.out_ty {
-            Some(SqlType::BigInt(_)) => Ok(DfValue::Int(0)),
-            Some(SqlType::Double) => Ok(DfValue::Double(0.)),
-            Some(SqlType::Decimal(_, _)) => Ok(DfValue::Numeric(Default::default())),
-            Some(SqlType::Text) => Ok(DfValue::from("")),
+            DfType::BigInt => Ok(DfValue::Int(Default::default())),
+            DfType::Double => Ok(DfValue::Double(Default::default())),
+            DfType::Numeric { .. } => Ok(DfValue::Numeric(Default::default())),
+            DfType::Text => Ok(DfValue::from("")),
             _ => internal!(),
         }
     }
@@ -270,8 +267,8 @@ impl GroupedOperation for Aggregator {
         self.over
     }
 
-    fn output_col_type(&self) -> Option<SqlType> {
-        self.out_ty.clone()
+    fn output_col_type(&self) -> &DfType {
+        &self.out_ty
     }
 
     fn empty_value(&self) -> Option<DfValue> {
@@ -307,7 +304,7 @@ mod tests {
             "identity",
             &["x", "ys"],
             aggregation
-                .over(s.as_global(), 1, &[0], &DfType::Sql(SqlType::Double))
+                .over(s.as_global(), 1, &[0], &DfType::Double)
                 .unwrap(),
             mat,
         );
@@ -321,7 +318,7 @@ mod tests {
             "identity",
             &["x", "z", "ys"],
             aggregation
-                .over(s.as_global(), 1, &[0, 2], &DfType::Sql(SqlType::Double))
+                .over(s.as_global(), 1, &[0, 2], &DfType::Double)
                 .unwrap(),
             mat,
         );

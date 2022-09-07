@@ -10,6 +10,7 @@ use nom::error::ErrorKind;
 use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded};
 use nom::IResult;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::keywords::{sql_keyword, sql_keyword_or_builtin_function, POSTGRES_NOT_RESERVED};
@@ -63,7 +64,7 @@ fn bits(input: &[u8]) -> IResult<&[u8], BitVec> {
 ///
 /// Currently, Dialect controls the escape characters used for identifiers, and the quotes used to
 /// surround string literals, but may be extended to cover more dialect differences in the future
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum Dialect {
     /// The SQL dialect used by PostgreSQL.
     ///
@@ -227,6 +228,24 @@ impl Dialect {
             let (i, limit) = literal(self)(i)?;
 
             Ok((i, (Some(limit), Some(offset))))
+        }
+    }
+
+    /// Returns the default fractional second part (FSP) value for temporal types.
+    ///
+    /// This value can be queried via `datetime_precision` in
+    /// [`information_schema.columns`](https://dev.mysql.com/doc/refman/8.0/en/information-schema-columns-table.html).
+    #[inline]
+    pub fn default_datetime_precision(self) -> u16 {
+        match self {
+            // https://dev.mysql.com/doc/refman/8.0/en/date-and-time-type-syntax.html
+            // "If omitted, the default precision is 0. (This differs from the standard SQL default
+            // of 6, for compatibility with previous MySQL versions.)"
+            Self::MySQL => 0,
+
+            // https://www.postgresql.org/docs/current/datatype-datetime.html
+            // "By default, there is no explicit bound on precision", so the max value is used.
+            Self::PostgreSQL => 6,
         }
     }
 }

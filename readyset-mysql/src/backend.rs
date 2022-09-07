@@ -13,7 +13,7 @@ use mysql_srv::{
     CachedSchema, Column, ColumnFlags, ColumnType, InitWriter, MsqlSrvError, MysqlShim,
     QueryResultWriter, RowWriter, StatementMetaWriter,
 };
-use nom_sql::SqlType;
+use nom_sql::{Dialect, SqlType};
 use readyset_client::backend::noria_connector::MetaVariable;
 use readyset_client::backend::{
     noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare,
@@ -329,8 +329,9 @@ where
                             let ty = schema
                                 .schema
                                 .get(coli)
-                                .map(|cs| cs.spec.sql_type.clone())
-                                .into();
+                                .map(|cs| DfType::from_sql_type(&cs.spec.sql_type, Dialect::MySQL))
+                                .unwrap_or_default();
+
                             if let Err(e) = write_column(&mut rw, &row[coli], c, &ty).await {
                                 return handle_column_write_err(e, rw).await;
                             }
@@ -542,8 +543,9 @@ where
                         let column_types = schema
                             .schema
                             .iter()
-                            .map(|cs| DfType::Sql(cs.spec.sql_type.clone()))
+                            .map(|cs| DfType::from_sql_type(&cs.spec.sql_type, Dialect::MySQL))
                             .collect();
+
                         let preencoded_schema =
                             mysql_srv::prepare_column_definitions(&mysql_schema);
 

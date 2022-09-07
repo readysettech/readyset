@@ -819,7 +819,7 @@ impl SqlIncorporator {
 #[cfg(test)]
 mod tests {
     use dataflow::prelude::*;
-    use nom_sql::{parse_create_table, parse_select_statement, Column, Dialect, Relation, SqlType};
+    use nom_sql::{parse_create_table, parse_select_statement, Column, Dialect, Relation};
     use readyset_data::DfType;
 
     use super::SqlIncorporator;
@@ -3560,10 +3560,10 @@ mod tests {
             g.node_indices().for_each(|idx| {
                 if matches!(g[idx].as_internal(), Some(NodeOperator::TopK(_))) {
                     let truth = vec![
-                        &DfType::Sql(SqlType::Int(None)),    // a
-                        &DfType::Sql(SqlType::Float),        // b
-                        &DfType::Sql(SqlType::Text),         // c
-                        &DfType::Sql(SqlType::BigInt(None)), // bogokey projection
+                        &DfType::Int,                   // a
+                        &DfType::Float(Dialect::MySQL), // b
+                        &DfType::Text,                  // c
+                        &DfType::BigInt,                // bogokey projection
                     ];
                     let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
                     assert_eq!(truth, types);
@@ -3621,9 +3621,9 @@ mod tests {
             g.node_indices().for_each(|idx| {
                 if matches!(g[idx].as_internal(), Some(NodeOperator::Filter(_))) {
                     let truth = vec![
-                        &DfType::Sql(SqlType::Int(None)), // a
-                        &DfType::Sql(SqlType::Float),     // b
-                        &DfType::Sql(SqlType::Text),      // c
+                        &DfType::Int,                   // a
+                        &DfType::Float(Dialect::MySQL), // b
+                        &DfType::Text,                  // c
                     ];
                     let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
                     assert_eq!(truth, types);
@@ -3681,22 +3681,22 @@ mod tests {
             g.node_indices().for_each(|idx| {
                 if matches!(g[idx].as_internal(), Some(NodeOperator::Aggregation(_))) {
                     let truth = vec![
-                        &DfType::Sql(SqlType::BigInt(None)),    // bogokey
-                        &DfType::Sql(SqlType::Decimal(64, 64)), // sum(t1.a)
+                        &DfType::BigInt,          // bogokey
+                        &DfType::DEFAULT_NUMERIC, // sum(t1.a)
                     ];
                     let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
                     assert_eq!(truth, types);
                 } else if matches!(g[idx].as_internal(), Some(NodeOperator::Extremum(_))) {
                     let truth = vec![
-                        &DfType::Sql(SqlType::BigInt(None)), // bogokey
-                        &DfType::Sql(SqlType::Float),        // max(t1.b)
+                        &DfType::BigInt,                // bogokey
+                        &DfType::Float(Dialect::MySQL), // max(t1.b)
                     ];
                     let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
                     assert_eq!(truth, types);
                 } else if matches!(g[idx].as_internal(), Some(NodeOperator::Concat(_))) {
                     let truth = vec![
-                        &DfType::Sql(SqlType::BigInt(None)), // bogokey
-                        &DfType::Sql(SqlType::Text),         // group_concat()
+                        &DfType::BigInt, // bogokey
+                        &DfType::Text,   // group_concat()
                     ];
                     let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
                     assert_eq!(truth, types);
@@ -3769,13 +3769,13 @@ mod tests {
             g.node_indices().for_each(|idx| {
                 if matches!(g[idx].as_internal(), Some(NodeOperator::Join(_))) {
                     let truth = vec![
-                        &DfType::Sql(SqlType::Int(None)), // t1.a
-                        &DfType::Sql(SqlType::Float),     // t1.b
-                        &DfType::Sql(SqlType::Text),      // t1.c
-                        &DfType::Sql(SqlType::Int(None)), // t2.a
-                        &DfType::Sql(SqlType::Float),     /* t2.b
-                                                           * The rhs of the ON clause is
-                                                           * omitted! */
+                        &DfType::Int,                   // t1.a
+                        &DfType::Float(Dialect::MySQL), // t1.b
+                        &DfType::Text,                  // t1.c
+                        &DfType::Int,                   // t2.a
+                        &DfType::Float(Dialect::MySQL), /* t2.b
+                                                         * The rhs of the ON clause is
+                                                         * omitted! */
                     ];
                     let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
                     assert_eq!(truth, types);
@@ -3849,7 +3849,7 @@ mod tests {
             g.node_indices().for_each(|idx| {
                 if matches!(g[idx].as_internal(), Some(NodeOperator::Union(_))) {
                     let truth = vec![
-                        &DfType::Sql(SqlType::Int(None)), // t1.a + t2.a
+                        &DfType::Int, // t1.a + t2.a
                     ];
                     let types = g[idx].columns().iter().map(|c| c.ty()).collect::<Vec<_>>();
                     assert_eq!(truth, types);
@@ -3921,10 +3921,10 @@ mod tests {
             ));
 
             let truth = vec![
-                &DfType::Sql(SqlType::Int(None)),    // t1.a
-                &DfType::Sql(SqlType::Char(None)),   // cast(t1.b as char)
-                &DfType::Sql(SqlType::Int(None)),    // t1.a + 1
-                &DfType::Sql(SqlType::BigInt(None)), // bogokey
+                &DfType::Int,                     // t1.a
+                &DfType::Char(1, Dialect::MySQL), // cast(t1.b as char)
+                &DfType::Int,                     // t1.a + 1
+                &DfType::BigInt,                  // bogokey
             ];
             let types = g[project_leaf_node]
                 .columns()
@@ -3934,10 +3934,10 @@ mod tests {
             assert_eq!(truth, types);
 
             let truth = vec![
-                &DfType::Sql(SqlType::Char(None)),   // cast(t1.b as char)
-                &DfType::Sql(SqlType::Int(None)),    // t1.a
-                &DfType::Sql(SqlType::Int(None)),    // t1.a + 1
-                &DfType::Sql(SqlType::BigInt(None)), // bogokey
+                &DfType::Char(1, Dialect::MySQL), // cast(t1.b as char)
+                &DfType::Int,                     // t1.a
+                &DfType::Int,                     // t1.a + 1
+                &DfType::BigInt,                  // bogokey
             ];
             let types = g[project_reorder_node]
                 .columns()

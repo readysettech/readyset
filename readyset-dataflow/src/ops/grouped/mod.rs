@@ -4,7 +4,7 @@ use std::convert::TryInto;
 use std::fmt;
 
 use maplit::hashmap;
-use nom_sql::SqlType;
+use readyset_data::DfType;
 use readyset_errors::{internal_err, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
@@ -74,10 +74,12 @@ pub trait GroupedOperation: fmt::Debug + Clone {
     fn over_column(&self) -> usize;
 
     /// Defines the output column type for the Grouped Operation if possible.
-    /// Returns None if the type of of the output varies depending on data type of over column
-    /// (e.g. SUM can be either int or float)
+    ///
+    /// Returns [`DfType::Unknown`] if the type of of the output varies depending on data type of
+    /// over column (e.g. SUM can be either int or float).
+    ///
     /// Other operators like Count (int) and Concat (text) always have the same column type.
-    fn output_col_type(&self) -> Option<SqlType>;
+    fn output_col_type(&self) -> &DfType;
 
     /// Returns the empty value for this aggregate, if any. Groups that have the empty value in
     /// their output column will be omitted from results
@@ -124,7 +126,7 @@ impl<T: GroupedOperation> GroupedOperator<T> {
         self.inner.over_column()
     }
 
-    pub fn output_col_type(&self) -> Option<SqlType> {
+    pub fn output_col_type(&self) -> &DfType {
         self.inner.output_col_type()
     }
 }

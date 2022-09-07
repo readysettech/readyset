@@ -115,21 +115,12 @@ impl Array {
         //  [-1:0][3:4]={{1,2},{3,4}}
         // (1 row)
 
-        fn innermost_array_type(ty: &SqlType) -> &SqlType {
-            match ty {
-                SqlType::Array(t) => innermost_array_type(t),
-                t => t,
-            }
-        }
+        let new_member_type = new_member_type.innermost_array_type();
+        let from_member_type = from_member_type.innermost_array_type();
 
         let mut arr = self.clone();
-        let new_member_type = innermost_array_type(new_member_type);
-        let from_member_type = match from_member_type {
-            DfType::Sql(s) => DfType::Sql(innermost_array_type(s).clone()),
-            DfType::Unknown => DfType::Unknown,
-        };
         for v in arr.values_mut() {
-            *v = v.coerce_to(new_member_type, &from_member_type)?;
+            *v = v.coerce_to(new_member_type, from_member_type)?;
         }
         Ok(arr)
     }

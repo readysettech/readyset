@@ -7,11 +7,11 @@ use std::fmt::Write;
 
 use common::DfValue;
 use launchpad::Indices;
+use readyset_data::DfType;
 use readyset_errors::invariant_eq;
 use serde::{Deserialize, Serialize};
 
 use crate::node::Node;
-use crate::ops::grouped::aggregate::SqlType;
 use crate::ops::grouped::{GroupedOperation, GroupedOperator};
 use crate::prelude::*;
 
@@ -203,8 +203,8 @@ impl GroupedOperation for GroupConcat {
         self.source_col
     }
 
-    fn output_col_type(&self) -> Option<SqlType> {
-        Some(nom_sql::SqlType::Text)
+    fn output_col_type(&self) -> &DfType {
+        &DfType::Text
     }
 
     fn empty_value(&self) -> Option<DfValue> {

@@ -1,3 +1,4 @@
+use readyset_data::DfType;
 use readyset_errors::{invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
@@ -160,8 +161,9 @@ impl GroupedOperation for ExtremumOperator {
         self.over
     }
 
-    fn output_col_type(&self) -> Option<nom_sql::SqlType> {
-        None // Type of extremum relies on col type
+    fn output_col_type(&self) -> &DfType {
+        // Type of extremum relies on col type.
+        &DfType::Unknown
     }
 }
 
