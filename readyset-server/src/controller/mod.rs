@@ -834,7 +834,7 @@ impl AuthorityWorkerState {
             self.event_tx
                 .send(AuthorityUpdate::FailedWorkers(failed_descriptors))
                 .await
-                .map_err(|_| format_err!("failed to announce who won leader election"))?;
+                .map_err(|_| format_err!("failed to announce failed workers"))?;
         }
 
         let new_workers = workers
@@ -852,7 +852,7 @@ impl AuthorityWorkerState {
             self.event_tx
                 .send(AuthorityUpdate::NewWorkers(new_descriptors))
                 .await
-                .map_err(|_| format_err!("failed to announce who won leader election"))?;
+                .map_err(|_| format_err!("failed to announce new workers"))?;
         }
 
         Ok(())
