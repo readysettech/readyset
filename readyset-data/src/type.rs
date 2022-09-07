@@ -14,6 +14,12 @@ pub enum DfType {
     Unknown,
 }
 
+impl DfType {
+    pub fn is_enum(&self) -> bool {
+        matches!(self, DfType::Sql(SqlType::Enum(_)))
+    }
+}
+
 impl From<SqlType> for DfType {
     fn from(ty: SqlType) -> Self {
         Self::Sql(ty)

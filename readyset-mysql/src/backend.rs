@@ -4,6 +4,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use itertools::izip;
 use launchpad::redacted::Sensitive;
 use mysql_async::consts::StatusFlags;
 use mysql_common::bigdecimal03::ToPrimitive;
@@ -11,11 +12,12 @@ use mysql_srv::{
     Column, ColumnFlags, ColumnType, InitWriter, MsqlSrvError, MysqlShim, QueryResultWriter,
     RowWriter, StatementMetaWriter,
 };
+use nom_sql::SqlType;
 use readyset_client::backend::noria_connector::MetaVariable;
 use readyset_client::backend::{
     noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare,
 };
-use readyset_data::{DfValue, DfValueKind};
+use readyset_data::{DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, internal_err, ReadySetError};
 use streaming_iterator::StreamingIterator;
 use tokio::io::{self, AsyncWrite};
@@ -32,6 +34,7 @@ async fn write_column<W: AsyncWrite + Unpin>(
     rw: &mut RowWriter<'_, W>,
     c: &DfValue,
     cs: &mysql_srv::Column,
+    ty: &DfType,
 ) -> Result<(), Error> {
     let conv_error = || ReadySetError::DfValueConversionError {
         src_type: format!("{:?}", DfValueKind::from(c)),
@@ -45,14 +48,18 @@ async fn write_column<W: AsyncWrite + Unpin>(
         // this out into a helper since i has a different time depending on the DfValue
         // variant.
         DfValue::Int(i) => {
-            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
+            if ty.is_enum() {
+                rw.write_col(c.coerce_to(&SqlType::Text, ty)?.to_string())
+            } else if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
                 rw.write_col(i as usize)
             } else {
                 rw.write_col(i as isize)
             }
         }
         DfValue::UnsignedInt(i) => {
-            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
+            if ty.is_enum() {
+                rw.write_col(c.coerce_to(&SqlType::Text, ty)?.to_string())
+            } else if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
                 rw.write_col(i as usize)
             } else {
                 rw.write_col(i as isize)
@@ -233,6 +240,7 @@ impl DerefMut for Backend {
 
 struct CachedSchema {
     mysql_schema: Vec<mysql_srv::Column>,
+    column_types: Vec<DfType>,
     column_map: Vec<Option<usize>>,
     preencoded_schema: Arc<[u8]>,
 }
@@ -371,6 +379,7 @@ where
             Ok(QueryResult::Noria(noria_connector::QueryResult::Select { mut rows, schema })) => {
                 let CachedSchema {
                     mysql_schema,
+                    column_types,
                     column_map,
                     preencoded_schema,
                 } = if is_cached {
@@ -378,6 +387,11 @@ where
                     self.schema_cache.get(&id).unwrap()
                 } else {
                     let mysql_schema = convert_columns!(schema.schema, results);
+                    let column_types = schema
+                        .schema
+                        .iter()
+                        .map(|cs| DfType::Sql(cs.spec.sql_type.clone()))
+                        .collect();
                     let preencoded_schema = mysql_srv::prepare_column_definitions(&mysql_schema);
 
                     // Now append the right position too
@@ -386,9 +400,9 @@ where
                         .map(|c| schema.columns.iter().position(|f| f == c.column.as_str()))
                         .collect::<Vec<_>>();
 
-                    drop(schema);
                     self.schema_cache.entry(id).or_insert(CachedSchema {
                         mysql_schema,
+                        column_types,
                         column_map,
                         preencoded_schema: preencoded_schema.into(),
                     })
@@ -398,10 +412,11 @@ where
                     .start_with_cache(mysql_schema, preencoded_schema.clone())
                     .await?;
                 while let Some(row) = rows.next() {
-                    for (c, pos) in mysql_schema.iter().zip(column_map.iter()) {
+                    for (c, ty, pos) in izip!(mysql_schema.iter(), column_types, column_map.iter())
+                    {
                         match pos {
                             Some(coli) => {
-                                if let Err(e) = write_column(&mut rw, &row[*coli], c).await {
+                                if let Err(e) = write_column(&mut rw, &row[*coli], c, ty).await {
                                     return handle_column_write_err(e, rw).await;
                                 };
                             }
@@ -577,7 +592,12 @@ where
                     for c in &mysql_schema {
                         match columns.iter().position(|f| f.as_str() == c.column) {
                             Some(coli) => {
-                                if let Err(e) = write_column(&mut rw, &row[coli], c).await {
+                                let ty = schema
+                                    .schema
+                                    .get(coli)
+                                    .map(|cs| cs.spec.sql_type.clone())
+                                    .into();
+                                if let Err(e) = write_column(&mut rw, &row[coli], c, &ty).await {
                                     return handle_column_write_err(e, rw).await;
                                 }
                             }
